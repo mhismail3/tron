@@ -51,10 +51,14 @@ impl WorkerStore {
         trace_id: &str,
         causal_depth: u32,
         trigger_kind: &str,
+        origin_session_id: Option<&str>,
     ) -> Result<(InvocationRecord, bool), String> {
         validate_runtime_identifier(idempotency_key, "idempotency key", 256)?;
         validate_runtime_identifier(trace_id, "trace id", 256)?;
         validate_runtime_identifier(trigger_kind, "trigger kind", 64)?;
+        if let Some(session_id) = origin_session_id {
+            validate_runtime_identifier(session_id, "origin session id", 256)?;
+        }
         if let Some(existing) = self.invocation_by_key(worker_id, idempotency_key)? {
             self.record_suppressed_delivery(
                 trace_id,
@@ -71,9 +75,27 @@ impl WorkerStore {
         let transaction = connection
             .transaction()
             .map_err(|error| format!("start worker invocation queue transaction: {error}"))?;
+        // INVARIANT: a causal trace keeps the root session that admitted it.
+        // Nested agent workers execute in child sessions, but they must remain
+        // attributable to the user session that began the trace.
+        let inherited_origin = transaction
+            .query_row(
+                "SELECT origin_session_id FROM worker_invocations
+                 WHERE trace_id=?1
+                 ORDER BY causal_depth ASC, created_at ASC
+                 LIMIT 1",
+                [trace_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|error| format!("load worker trace origin session: {error}"))?;
+        let effective_origin = match inherited_origin {
+            Some(origin) => origin,
+            None => origin_session_id.map(ToOwned::to_owned),
+        };
         let insert = transaction.execute(
-                "INSERT INTO worker_invocations(invocation_id,worker_id,worker_version,status,input_json,idempotency_key,trace_id,causal_depth,trigger_kind,created_at)
-                 VALUES (?1,?2,?3,'queued',?4,?5,?6,?7,?8,?9)",
+                "INSERT INTO worker_invocations(invocation_id,worker_id,worker_version,status,input_json,idempotency_key,trace_id,causal_depth,trigger_kind,origin_session_id,created_at)
+                 VALUES (?1,?2,?3,'queued',?4,?5,?6,?7,?8,?9,?10)",
                 params![
                     invocation_id,
                     worker_id,
@@ -83,6 +105,7 @@ impl WorkerStore {
                     trace_id,
                     causal_depth,
                     trigger_kind,
+                    effective_origin,
                     created_at,
                 ],
             );
@@ -357,13 +380,14 @@ impl WorkerStore {
         status: Option<&str>,
         limit: u32,
     ) -> Result<Vec<InvocationRecord>, String> {
-        self.runs_filtered_page(worker_id, status, limit, 0)
+        self.runs_filtered_page(worker_id, status, None, limit, 0)
     }
 
     pub fn runs_filtered_page(
         &self,
         worker_id: Option<&str>,
         status: Option<&str>,
+        origin_session_id: Option<&str>,
         limit: u32,
         offset: u32,
     ) -> Result<Vec<InvocationRecord>, String> {
@@ -372,13 +396,14 @@ impl WorkerStore {
             .prepare(&format!(
                 "{} WHERE (?1 IS NULL OR worker_id=?1)
                     AND (?2 IS NULL OR status=?2)
-                    ORDER BY created_at DESC LIMIT ?3 OFFSET ?4",
+                    AND (?3 IS NULL OR origin_session_id=?3)
+                    ORDER BY created_at DESC LIMIT ?4 OFFSET ?5",
                 invocation_select_base()
             ))
             .map_err(|error| error.to_string())?;
         statement
             .query_map(
-                params![worker_id, status, limit.min(500), offset],
+                params![worker_id, status, origin_session_id, limit.min(500), offset],
                 row_invocation,
             )
             .map_err(|error| error.to_string())?

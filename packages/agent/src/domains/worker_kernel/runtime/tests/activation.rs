@@ -114,6 +114,7 @@ async fn last30days_replay_activates_one_typed_worker_and_survives_restart() {
             trace_id: "trace-last30days-webhook".to_owned(),
             causal_depth: 0,
             trigger_kind: "webhook".to_owned(),
+            origin_session_id: None,
         })
         .await
         .unwrap();

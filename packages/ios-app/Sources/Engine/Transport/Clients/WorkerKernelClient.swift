@@ -29,6 +29,7 @@ final class WorkerKernelClient: EngineDomainClient {
 
     func workerRuns(
         workerId: String?,
+        originSessionId: String? = nil,
         limit: UInt64 = 20,
         offset: UInt64? = nil
     ) async throws -> WorkerRunsResultDTO {
@@ -36,6 +37,7 @@ final class WorkerKernelClient: EngineDomainClient {
             "worker_kernel::runs",
             WorkerRunsRequestDTO(
                 workerId: workerId,
+                originSessionId: originSessionId,
                 limit: limit,
                 offset: offset,
                 detail: "full"

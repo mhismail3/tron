@@ -150,6 +150,7 @@ impl WorkerRuntime {
             &request.trace_id,
             request.causal_depth,
             &request.trigger_kind,
+            request.origin_session_id.as_deref(),
         )?;
         Ok((queued, replayed))
     }

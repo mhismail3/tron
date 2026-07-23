@@ -40,6 +40,7 @@ pub(super) async fn webhook(invocation: &Invocation, deps: &Deps) -> Result<Valu
         trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
         causal_depth: 0,
         trigger_kind: "webhook".to_owned(),
+        origin_session_id: None,
     })?)
     .map_err(|error| error.to_string())
 }

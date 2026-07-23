@@ -206,6 +206,7 @@ struct DelegationViewModelTests {
             traceId: "trace-\(id)",
             causalDepth: 1,
             triggerKind: "manual",
+            originSessionId: "parent-session",
             agentSessionId: "child-session-1",
             attemptCount: 1,
             createdAt: "2026-07-22T13:00:00Z",
@@ -267,6 +268,7 @@ private final class DelegationMockRepository: WorkerKernelRepository {
 
     func workerRuns(
         workerId: String?,
+        originSessionId: String?,
         limit: UInt64,
         offset: UInt64?
     ) async throws -> WorkerRunsResultDTO {
@@ -303,6 +305,7 @@ private final class DelegationMockRepository: WorkerKernelRepository {
             traceId: "trace-enqueued",
             causalDepth: 0,
             triggerKind: "manual",
+            originSessionId: nil,
             agentSessionId: nil,
             attemptCount: 0,
             createdAt: "2026-07-22T14:00:00Z",

@@ -30,6 +30,7 @@ struct ChatSheetContent: View {
 
         case .sessionContext:
             SessionContextSheet(
+                sessionId: sessionId,
                 contextState: viewModel.contextState,
                 currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel),
                 currentModelInfo: viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel),
@@ -39,6 +40,7 @@ struct ChatSheetContent: View {
                 isCompacting: viewModel.isCompacting,
                 isFork: eventStoreManager.sessions.first(where: { $0.id == sessionId })?.isFork == true,
                 modelRepository: dependencies.modelRepository,
+                workerRepository: dependencies.workerKernelRepository,
                 onSelectModel: { model in
                     NotificationCenter.default.post(name: .modelPickerAction, object: model)
                 },

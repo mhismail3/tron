@@ -56,6 +56,7 @@ struct WorkerKernelClientTests {
             case "worker_kernel::runs":
                 #expect((payload as? WorkerRunsRequestDTO)?.limit == 25)
                 #expect((payload as? WorkerRunsRequestDTO)?.offset == 40)
+                #expect((payload as? WorkerRunsRequestDTO)?.originSessionId == "sess_origin")
                 #expect((payload as? WorkerRunsRequestDTO)?.detail == "full")
                 return WorkerRunsResultDTO(runs: [])
             case "worker_kernel::inbox":
@@ -71,7 +72,12 @@ struct WorkerKernelClientTests {
 
         _ = try await client.workers()
         _ = try await client.inspectWorker("research")
-        _ = try await client.workerRuns(workerId: "research", limit: 25, offset: 40)
+        _ = try await client.workerRuns(
+            workerId: "research",
+            originSessionId: "sess_origin",
+            limit: 25,
+            offset: 40
+        )
         _ = try await client.workerInbox(
             workerId: "research",
             limit: 10,
@@ -187,6 +193,7 @@ struct WorkerKernelClientTests {
                     traceId: "trace-1",
                     causalDepth: 0,
                     triggerKind: "manual",
+                    originSessionId: nil,
                     agentSessionId: nil,
                     attemptCount: 1,
                     createdAt: "2026-07-19T12:00:00Z",
@@ -209,6 +216,7 @@ struct WorkerKernelClientTests {
                     traceId: "trace-1",
                     causalDepth: 0,
                     triggerKind: "manual",
+                    originSessionId: nil,
                     agentSessionId: nil,
                     attemptCount: 1,
                     createdAt: "2026-07-19T12:00:00Z",

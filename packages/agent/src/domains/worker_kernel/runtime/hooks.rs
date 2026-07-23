@@ -91,6 +91,7 @@ impl WorkerRuntime {
             trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
             causal_depth: invocation.causal_context.trigger_depth(),
             trigger_kind: format!("engine_hook:{}", hook.as_str()),
+            origin_session_id: invocation.causal_context.session_id.clone(),
         })?;
         let (record, timed_out) = self
             .await_invocation(

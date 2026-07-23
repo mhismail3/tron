@@ -43,6 +43,7 @@ pub(super) async fn invoke_worker(
         trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
         causal_depth: invocation.causal_context.trigger_depth(),
         trigger_kind: "manual".to_owned(),
+        origin_session_id: invocation.causal_context.session_id.clone(),
     };
     let record = match invocation
         .payload

@@ -188,5 +188,6 @@ fn request(worker_id: &str, input: Value, key: &str) -> InvokeRequest {
         trace_id: format!("trace-{key}"),
         causal_depth: 0,
         trigger_kind: "manual".to_owned(),
+        origin_session_id: None,
     }
 }

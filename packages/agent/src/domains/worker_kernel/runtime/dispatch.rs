@@ -63,6 +63,7 @@ impl WorkerRuntime {
                 trace_id: format!("worker-schedule-{}", uuid::Uuid::now_v7()),
                 causal_depth: 0,
                 trigger_kind: "schedule".to_owned(),
+                origin_session_id: None,
             });
             let Ok((queued, _)) = queued else {
                 continue;
@@ -200,6 +201,7 @@ impl WorkerRuntime {
                     trace_id,
                     causal_depth,
                     trigger_kind: "engine_event".to_owned(),
+                    origin_session_id: None,
                 }) {
                     Ok((queued, _)) => durable.push(queued),
                     Err(_) => {

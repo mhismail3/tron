@@ -253,10 +253,16 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
 
     func workerRuns(
         workerId: String?,
+        originSessionId: String?,
         limit: UInt64,
         offset: UInt64? = nil
     ) async throws -> WorkerRunsResultDTO {
-        try await client.workerRuns(workerId: workerId, limit: limit, offset: offset)
+        try await client.workerRuns(
+            workerId: workerId,
+            originSessionId: originSessionId,
+            limit: limit,
+            offset: offset
+        )
     }
 
     func workerInbox(

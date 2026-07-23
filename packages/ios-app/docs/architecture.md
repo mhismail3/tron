@@ -503,8 +503,14 @@ detail.
 
 The composer context ring and minimal Session Context sheet consume only
 existing session truth: current context tokens, selected-model window,
-remaining capacity, accumulated model traffic and cost, automatic-compaction
-status, the existing model catalog/switch operation, and `session::fork`.
+remaining capacity, accumulated model traffic and cost in one compact summary,
+automatic-compaction status, the existing model catalog/switch operation, and
+`session::fork`. The sheet also requests bounded worker runs filtered by the
+durable originating session. Because causal descendants preserve the root
+session id, this includes direct and nested worker activity while keeping each
+agent runner's hidden child-session id available only in the canonical run
+detail. Fork confirmation is a native animated liquid-glass sheet rather than
+an abrupt dialog overlay.
 Session actions are disabled while disconnected, compacting, or running a turn.
 There is no parallel context-control repository, resource/action audit,
 memory editor, or manual compact/clear façade. Those controls may appear only

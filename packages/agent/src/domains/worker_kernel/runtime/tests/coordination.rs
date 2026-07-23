@@ -686,6 +686,7 @@ async fn schedule_event_and_authenticated_webhook_share_the_durable_dispatch_pat
             trace_id: "webhook-trace".to_owned(),
             causal_depth: 0,
             trigger_kind: "webhook".to_owned(),
+            origin_session_id: None,
         })
         .await
         .unwrap();

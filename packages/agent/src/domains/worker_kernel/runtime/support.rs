@@ -80,6 +80,7 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
                 trace_id,
                 causal_depth: depth,
                 trigger_kind: "manual".to_owned(),
+                origin_session_id: invocation.causal_context.session_id.clone(),
             })
             .await
             .map_err(crate::engine::EngineError::HandlerFailed)?;

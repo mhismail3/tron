@@ -281,6 +281,7 @@ protocol WorkerKernelRepository: AnyObject {
     func inspectWorker(_ workerId: String) async throws -> WorkerInspectResultDTO
     func workerRuns(
         workerId: String?,
+        originSessionId: String?,
         limit: UInt64,
         offset: UInt64?
     ) async throws -> WorkerRunsResultDTO
@@ -342,7 +343,25 @@ protocol WorkerKernelRepository: AnyObject {
 
 extension WorkerKernelRepository {
     func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO {
-        try await workerRuns(workerId: workerId, limit: limit, offset: nil)
+        try await workerRuns(
+            workerId: workerId,
+            originSessionId: nil,
+            limit: limit,
+            offset: nil
+        )
+    }
+
+    func workerRuns(
+        workerId: String?,
+        originSessionId: String?,
+        limit: UInt64
+    ) async throws -> WorkerRunsResultDTO {
+        try await workerRuns(
+            workerId: workerId,
+            originSessionId: originSessionId,
+            limit: limit,
+            offset: nil
+        )
     }
 
     func workerInbox(workerId: String?, limit: UInt64) async throws -> WorkerInboxResultDTO {

@@ -234,6 +234,10 @@ pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, 
     let (limit, request_truncated) = history_limit(invocation, detail);
     let offset = history_offset(invocation);
     let worker_id = invocation.payload.get("workerId").and_then(Value::as_str);
+    let origin_session_id = invocation
+        .payload
+        .get("originSessionId")
+        .and_then(Value::as_str);
     let status = optional_enum(
         invocation,
         "status",
@@ -242,6 +246,7 @@ pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, 
     let mut runs = deps.runtime.store().runs_filtered_page(
         worker_id,
         status,
+        origin_session_id,
         limit.saturating_add(1),
         offset,
     )?;

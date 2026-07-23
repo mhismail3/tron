@@ -64,7 +64,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 5)?;
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 6)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
@@ -231,6 +231,7 @@ impl WorkerStore {
                     trace_id TEXT NOT NULL,
                     causal_depth INTEGER NOT NULL,
                     trigger_kind TEXT NOT NULL,
+                    origin_session_id TEXT,
                     agent_session_id TEXT,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
@@ -323,6 +324,21 @@ impl WorkerStore {
                 )
                 .map_err(|error| format!("add agent session linkage: {error}"))?;
         }
+        if !table_has_column(&connection, "worker_invocations", "origin_session_id")? {
+            connection
+                .execute(
+                    "ALTER TABLE worker_invocations ADD COLUMN origin_session_id TEXT",
+                    [],
+                )
+                .map_err(|error| format!("add originating session linkage: {error}"))?;
+        }
+        connection
+            .execute(
+                "CREATE INDEX IF NOT EXISTS worker_invocations_origin_session
+                 ON worker_invocations(origin_session_id, created_at DESC)",
+                [],
+            )
+            .map_err(|error| format!("index originating worker sessions: {error}"))?;
         if !table_has_column(&connection, "worker_inbox", "context_attached")? {
             if !table_has_column(&connection, "worker_inbox", "seen")? {
                 return Err("worker inbox has no context-delivery column".to_owned());
@@ -355,6 +371,13 @@ impl WorkerStore {
                 [],
             )
             .map_err(|error| format!("record worker schema v5: {error}"))?;
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                 VALUES (6, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                [],
+            )
+            .map_err(|error| format!("record worker schema v6: {error}"))?;
         super::rebuild::rebuild_indexes(&self.root, &self.database)?;
         self.recover_interrupted()
     }

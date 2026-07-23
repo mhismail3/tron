@@ -474,9 +474,14 @@ manual results remain explicitly inspectable.
 
 `worker_runs` and `worker_inbox` return compact observations by default: pages
 contain at most 20 records, with inputs, outputs, and results represented by
-512-byte JSON previews and no expanded attempt or trace maps. Runs filter directly by status;
-inbox reads filter directly by context-attachment state and severity, so routine health checks
-do not move irrelevant history into model context. `detail: "full"` is an
+512-byte JSON previews and no expanded attempt or trace maps. Runs filter
+directly by status or `originSessionId`; an invocation inherits the originating
+user session of its causal trace, so this filter includes both workers called
+from that conversation and nested worker work they initiated. The separate
+`agentSessionId` remains child-execution evidence and is never substituted for
+the originating conversation. Inbox reads filter directly by context-attachment
+state and severity, so routine health checks do not move irrelevant history
+into model context. `detail: "full"` is an
 explicit operator path capped at 20 records and 8 KiB per retained value; the
 response reports content truncation and a `nextOffset` when older records remain.
 The Engine Activity UI treats runs as the primary execution ledger. Its
@@ -1515,7 +1520,7 @@ operational evidence:
 | `worker_versions` | rebuildable version index |
 | `worker_routes` | rebuildable direct-tool route and routing metadata |
 | `worker_triggers` | rebuildable trigger configuration and cursors |
-| `worker_invocations` | durable queue, idempotency, pinned version, and results |
+| `worker_invocations` | durable queue, idempotency, pinned version, originating user session, child-agent session, and results |
 | `worker_attempts` | numbered execution/redelivery attempts |
 | `worker_causal_traces` | trace roots, depth, delivery, and suppression counters |
 | `worker_trace_deliveries` | unique worker/trigger/idempotency combinations per trace |
@@ -1622,10 +1627,14 @@ Compaction is a direct durable session boundary. Context clearing is a live
 transport event; the resulting context size is reflected by later session/token
 truth rather than an unwritten `context.cleared` storage row. The iOS composer
 projects that same token truth as a context ring. Its minimal Session Context
-sheet shows used/remaining/window tokens, session usage and cost, current-model
-selection through `model::switch`, automatic-compaction status, and forking
-through `session::fork`. It has no parallel context-control resource client,
-resource/action audit, memory editor, or fabricated manual compact/clear API.
+sheet combines used/remaining/window tokens with session input, output, and cost
+in one compact summary; it also shows current-model selection through
+`model::switch`, automatic-compaction status, and forking through
+`session::fork`. A bounded session-scoped worker section reads
+`worker_runs(originSessionId: ...)`, including nested causal-trace work, and
+opens the canonical run detail rather than inventing another activity store.
+It has no parallel context-control resource client, resource/action audit,
+memory editor, or fabricated manual compact/clear API.
 
 Settings exposes the Logs sheet in every iOS build configuration from its toolbar.
 While connected, Tron automatically ingests deduplicated client logs into the

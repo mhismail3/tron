@@ -138,6 +138,7 @@ final class WorkerConsoleViewModel {
         do {
             let page = try await repository.workerRuns(
                 workerId: nil,
+                originSessionId: nil,
                 limit: 20,
                 offset: offset
             )

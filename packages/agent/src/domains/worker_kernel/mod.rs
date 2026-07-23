@@ -194,9 +194,14 @@
 //! Invocation cancellation is exact: `worker_cancel` terminalizes one queued or
 //! running invocation, cancels its process/request/child agent, and leaves the
 //! worker enabled. Agent invocations persist their child session id as run
-//! evidence. Child sessions remain in the canonical session event store under
-//! a reserved worker classification: ordinary chat lists exclude them, exact
-//! audit reads remain available, and no second delegation database exists.
+//! evidence. Every invocation also retains the originating user session for its
+//! causal trace; descendants inherit the trace root's origin rather than
+//! replacing it with an internal child-agent session. Session-scoped activity
+//! can therefore include direct and nested worker work without conflating the
+//! user conversation with its auditable child execution. Child sessions remain
+//! in the canonical session event store under a reserved worker classification:
+//! ordinary chat lists exclude them, exact audit reads remain available, and no
+//! second delegation database exists.
 //! Presentation metadata is immutable worker-version identity. It binds a
 //! worker to a versioned native/declarative experience and optional suite role;
 //! unsupported or absent bindings remain operable through the generic console.

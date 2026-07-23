@@ -505,6 +505,10 @@ fn worker_history_defaults_to_compact_bounded_observations() {
         runs["properties"]["status"]["enum"],
         json!(["queued", "running", "completed", "failed", "cancelled"])
     );
+    assert_eq!(
+        runs["properties"]["originSessionId"]["type"],
+        json!("string")
+    );
     let inbox = definitions
         .iter()
         .find(|definition| definition.id.as_str() == "worker_kernel::inbox")

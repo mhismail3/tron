@@ -336,6 +336,11 @@ pub struct InvocationRecord {
     pub trace_id: String,
     pub causal_depth: u32,
     pub trigger_kind: String,
+    /// Root chat session that originated this causal worker trace, when the
+    /// trace began inside a session. Descendant worker calls inherit this
+    /// value even when they execute through child agent sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_session_id: Option<String>,
     /// Child session created for an agent-runner invocation, when applicable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_id: Option<String>,
@@ -355,6 +360,7 @@ pub struct InvokeRequest {
     pub trace_id: String,
     pub causal_depth: u32,
     pub trigger_kind: String,
+    pub origin_session_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

@@ -81,6 +81,7 @@ struct WorkerInvocationDTO: Codable, Equatable, Identifiable, Sendable {
     let traceId: String
     let causalDepth: UInt32
     let triggerKind: String
+    let originSessionId: String?
     let agentSessionId: String?
     let attemptCount: UInt32
     let createdAt: String
@@ -152,6 +153,7 @@ struct WorkerInspectRequestDTO: Codable, Equatable, Sendable {
 
 struct WorkerRunsRequestDTO: Codable, Equatable, Sendable {
     let workerId: String?
+    let originSessionId: String?
     let limit: UInt64
     let offset: UInt64?
     let detail: String

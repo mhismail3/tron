@@ -226,6 +226,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
 
     func workerRuns(
         workerId: String?,
+        originSessionId: String?,
         limit: UInt64,
         offset: UInt64?
     ) async throws -> WorkerRunsResultDTO {
@@ -382,6 +383,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
             traceId: "trace-1",
             causalDepth: 0,
             triggerKind: "manual",
+            originSessionId: nil,
             agentSessionId: nil,
             attemptCount: 1,
             createdAt: "2026-07-19T12:00:00Z",

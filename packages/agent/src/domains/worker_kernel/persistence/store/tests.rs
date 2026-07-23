@@ -58,7 +58,7 @@ fn prepare_and_publish_is_atomic_and_versioned() {
 }
 
 #[test]
-fn schema_v5_preserves_and_truthfully_renames_inbox_delivery_state() {
+fn schema_v6_preserves_inbox_state_and_adds_originating_session_evidence() {
     let temp = tempfile::tempdir().unwrap();
     let database_dir = temp.path().join("internal/database");
     std::fs::create_dir_all(&database_dir).unwrap();
@@ -67,7 +67,25 @@ fn schema_v5_preserves_and_truthfully_renames_inbox_delivery_state() {
     connection
         .execute_batch(
             "CREATE TABLE worker_schema(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
-             INSERT INTO worker_schema VALUES(4, 'now');
+             INSERT INTO worker_schema VALUES(5, 'now');
+             CREATE TABLE worker_invocations (
+                invocation_id TEXT PRIMARY KEY,
+                worker_id TEXT NOT NULL,
+                worker_version TEXT NOT NULL,
+                status TEXT NOT NULL,
+                input_json TEXT NOT NULL,
+                output_json TEXT,
+                error TEXT,
+                idempotency_key TEXT NOT NULL,
+                trace_id TEXT NOT NULL,
+                causal_depth INTEGER NOT NULL,
+                trigger_kind TEXT NOT NULL,
+                agent_session_id TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                UNIQUE(worker_id, idempotency_key)
+             );
              CREATE TABLE worker_inbox (
                 inbox_id TEXT PRIMARY KEY,
                 invocation_id TEXT NOT NULL,
@@ -98,6 +116,18 @@ fn schema_v5_preserves_and_truthfully_renames_inbox_delivery_state() {
     };
     assert!(columns.contains(&"context_attached".to_owned()));
     assert!(!columns.contains(&"seen".to_owned()));
+    assert!(
+        store
+            .connection()
+            .unwrap()
+            .prepare("PRAGMA table_info(worker_invocations)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+            .contains(&"origin_session_id".to_owned())
+    );
     let retained = store.inbox_filtered(None, Some(true), None, 10).unwrap();
     assert_eq!(retained.len(), 1);
     assert_eq!(retained[0]["contextAttached"], true);
@@ -109,7 +139,7 @@ fn schema_v5_preserves_and_truthfully_renames_inbox_delivery_state() {
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        5
+        6
     );
 }
 
@@ -569,6 +599,7 @@ fn index_reconstruction_recovers_canonical_bundle_and_interrupted_queue() {
             "trace-recovery",
             0,
             "schedule",
+            None,
         )
         .unwrap();
     assert!(store.claim_running(&queued.invocation_id).unwrap());
@@ -678,6 +709,7 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
                 &format!("trace-{key}"),
                 0,
                 trigger,
+                None,
             )
             .unwrap();
         assert!(store.claim_running(&run.invocation_id).unwrap());
@@ -774,6 +806,7 @@ fn verified_recovery_resolves_invocation_errors_without_erasing_history() {
             "trace-failed-before-update",
             0,
             "manual",
+            None,
         )
         .unwrap();
     assert!(store.claim_running(&failed.invocation_id).unwrap());
@@ -859,6 +892,7 @@ fn verified_recovery_resolves_invocation_errors_without_erasing_history() {
             "trace-failed-before-rollback",
             0,
             "manual",
+            None,
         )
         .unwrap();
     assert!(
@@ -924,6 +958,7 @@ fn inbox_context_candidates_are_bounded_previews_and_claim_atomically() {
             "trace-context-candidate",
             0,
             "manual",
+            None,
         )
         .unwrap();
     assert!(store.claim_running(&run.invocation_id).unwrap());
@@ -958,5 +993,65 @@ fn inbox_context_candidates_are_bounded_previews_and_claim_atomically() {
             .pending_inbox_context_candidates(64)
             .unwrap()
             .is_empty()
+    );
+}
+
+#[test]
+fn invocation_trace_preserves_and_filters_by_its_originating_session() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let outcome = store.publish(prepared).unwrap();
+
+    let (root, _) = store
+        .begin_invocation(
+            &outcome.worker.worker_id,
+            &outcome.version,
+            &json!({"step":"root"}),
+            "origin-root",
+            "trace-origin-session",
+            0,
+            "manual",
+            Some("sess_parent"),
+        )
+        .unwrap();
+    let (descendant, _) = store
+        .begin_invocation(
+            &outcome.worker.worker_id,
+            &outcome.version,
+            &json!({"step":"descendant"}),
+            "origin-descendant",
+            "trace-origin-session",
+            1,
+            "manual",
+            Some("sess_child"),
+        )
+        .unwrap();
+    let (unrelated, _) = store
+        .begin_invocation(
+            &outcome.worker.worker_id,
+            &outcome.version,
+            &json!({"step":"unrelated"}),
+            "origin-unrelated",
+            "trace-unrelated-session",
+            0,
+            "manual",
+            Some("sess_other"),
+        )
+        .unwrap();
+
+    assert_eq!(root.origin_session_id.as_deref(), Some("sess_parent"));
+    assert_eq!(descendant.origin_session_id.as_deref(), Some("sess_parent"));
+    assert_eq!(unrelated.origin_session_id.as_deref(), Some("sess_other"));
+
+    let session_runs = store
+        .runs_filtered_page(None, None, Some("sess_parent"), 20, 0)
+        .unwrap();
+    assert_eq!(session_runs.len(), 2);
+    assert!(
+        session_runs
+            .iter()
+            .all(|run| run.origin_session_id.as_deref() == Some("sess_parent"))
     );
 }
