@@ -72,20 +72,15 @@ struct OllamaProviderSection: View {
             Button {
                 Task { await onRefresh() }
             } label: {
-                if isRefreshing {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(.tronAmber)
-                } else {
-                    Image(systemName: "arrow.clockwise.circle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronAmber)
-                }
+                ProviderCircularActionLabel(
+                    systemName: "arrow.clockwise.circle.fill",
+                    color: .tronAmber,
+                    isBusy: isRefreshing
+                )
             }
             .buttonStyle(.plain)
             .frame(
                 width: ProviderSettingsRowLayout.trailingActionWidth,
-                height: ProviderSettingsRowLayout.circularActionDiameter,
                 alignment: .trailing
             )
             .disabled(isRefreshing)

@@ -123,16 +123,31 @@ enum ProviderSettingsRowLayout {
     static let circularActionDiameter: CGFloat = 30
 }
 
-struct ProviderCredentialClearCircleLabel: View {
+/// Shared optical frame for circular provider actions. The outer row owns the
+/// trailing column; this label keeps every glyph centered inside the same
+/// visible diameter instead of letting intrinsic SF Symbol widths shift it.
+struct ProviderCircularActionLabel: View {
+    let systemName: String
+    let color: Color
+    var isBusy = false
+
     var body: some View {
-        Image(systemName: ProviderCredentialStatusAction.icon)
-            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-            .foregroundStyle(.tronError)
-            .frame(
-                width: ProviderSettingsRowLayout.circularActionDiameter,
-                height: ProviderSettingsRowLayout.circularActionDiameter
-            )
-            .contentShape(Circle())
+        Group {
+            if isBusy {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(color)
+            } else {
+                Image(systemName: systemName)
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+        }
+        .frame(
+            width: ProviderSettingsRowLayout.circularActionDiameter,
+            height: ProviderSettingsRowLayout.circularActionDiameter
+        )
+        .contentShape(Circle())
     }
 }
 

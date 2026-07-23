@@ -522,8 +522,8 @@ Provider cards share one leading-icon and trailing-action column contract.
 Provider names and row labels therefore remain left-aligned across differing
 brand symbols, while add, clear, refresh, disclosure, and endpoint-save controls
 share a stable trailing axis and the same visible edge inset as the leading
-icons. Destructive credential controls are circular like the corresponding add
-controls rather than variable-width pills.
+icons. Add, clear, and refresh symbols share one centered circular action label,
+so differing intrinsic SF Symbol widths cannot move them off that axis.
 
 Ollama uses the same axes: refresh and endpoint-save controls occupy the shared
 trailing slot, reachability and installed count render as one compact status

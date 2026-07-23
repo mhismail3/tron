@@ -35,7 +35,10 @@ struct ProviderCredentialRow: View {
             Button {
                 showDeleteConfirm = true
             } label: {
-                ProviderCredentialClearCircleLabel()
+                ProviderCircularActionLabel(
+                    systemName: ProviderCredentialStatusAction.icon,
+                    color: .tronError
+                )
             }
             .buttonStyle(.plain)
             .frame(

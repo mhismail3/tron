@@ -175,14 +175,10 @@ struct ProviderSectionHeader: View {
                     }
                 }
             } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                    .foregroundStyle(provider.color)
-                    .frame(
-                        width: ProviderSettingsRowLayout.circularActionDiameter,
-                        height: ProviderSettingsRowLayout.circularActionDiameter
-                    )
-                    .contentShape(Circle())
+                ProviderCircularActionLabel(
+                    systemName: "plus.circle.fill",
+                    color: provider.color
+                )
             }
             .frame(
                 width: ProviderSettingsRowLayout.trailingActionWidth,
