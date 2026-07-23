@@ -149,17 +149,21 @@ struct OllamaProviderSection: View {
                 .background(.tronTextMuted.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                 .accessibilityLabel("Ollama endpoint")
 
-            Button("Save") {
+            Button {
                 onSaveEndpoint(endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines))
+            } label: {
+                ProviderCircularActionLabel(
+                    systemName: "checkmark.circle.fill",
+                    color: .tronAmber
+                )
             }
-            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-            .foregroundStyle(.tronAmber)
+            .buttonStyle(.plain)
             .frame(
                 width: ProviderSettingsRowLayout.trailingActionWidth,
-                height: ProviderSettingsRowLayout.circularActionDiameter,
                 alignment: .trailing
             )
             .disabled(!endpointIsValid || endpointDraft == baseUrl)
+            .accessibilityLabel("Save Ollama endpoint")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

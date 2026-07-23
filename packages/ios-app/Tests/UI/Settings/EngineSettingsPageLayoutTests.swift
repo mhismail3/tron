@@ -174,6 +174,9 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         let ollama = try source(pathComponents: [
             "Sources", "UI", "Settings", "Pages", "ModelProviders", "OllamaProviderSection.swift",
         ])
+        let helpers = try source(pathComponents: [
+            "Sources", "UI", "Settings", "Pages", "ModelProviders", "ProviderStatusHelpers.swift",
+        ])
 
         XCTAssertTrue(content.contains("ProviderSectionHeader("))
         XCTAssertTrue(content.contains("Menu {"))
@@ -189,10 +192,14 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(ollama.contains("arrow.clockwise.circle.fill"))
         XCTAssertTrue(ollama.contains("ProviderCircularActionLabel("))
         XCTAssertTrue(ollama.contains("isBusy: isRefreshing"))
+        XCTAssertTrue(ollama.contains("systemName: \"checkmark.circle.fill\""))
+        XCTAssertTrue(ollama.contains("accessibilityLabel(\"Save Ollama endpoint\")"))
+        XCTAssertFalse(ollama.contains("Button(\"Save\")"))
         XCTAssertTrue(ollama.contains("alignment: .trailing"))
         XCTAssertTrue(ollama.contains("Reachable · \\(installedModels.count) model"))
         XCTAssertTrue(ollama.contains("HStack(alignment: .center"))
-        XCTAssertTrue(ollama.contains("height: ProviderSettingsRowLayout.circularActionDiameter"))
+        XCTAssertTrue(helpers.contains("width: ProviderSettingsRowLayout.circularActionDiameter"))
+        XCTAssertTrue(helpers.contains("height: ProviderSettingsRowLayout.circularActionDiameter"))
         XCTAssertFalse(ollama.contains("private var statusDetail"))
         XCTAssertFalse(ollama.contains("Text(\"Endpoint\")"))
     }
