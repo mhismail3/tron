@@ -6,6 +6,14 @@
 
 use serde_json::{Value, json};
 
+const ENGINE_HOOK_AUTHORING_CONTRACT: &str = "\
+Optional semantic engine roles activated atomically with this version. No separate binding or grant is required. \
+The bundle inputSchema and outputSchema are the complete worker-facing contracts below; they are authoritative, so do not inspect Tron databases, auth stores, binaries, runtime files, or private server endpoints to discover hook schemas. \
+session_title input is a closed object requiring userPrompt:string(max 4096) and assistantResponse:string(max 4096); output is a closed object requiring title:string(1..160). It runs after the first successful exchange of an untitled ordinary session. \
+context_summary input is a closed object requiring messages:array(max 256) of closed {role:user|assistant|tool,text:string(max 4096)} and permitting originWorkerId:string; output is a closed object requiring narrative:string(min 1). \
+inbox_context input is a closed object requiring query:string and items:array(max 32) of closed {inboxId,invocationId,workerId,workerName,workerDescription,severity,triggerKind,resultPreview,createdAt} strings; output is a closed object requiring consumedInboxIds:unique string array(max 32) and narrative:string. \
+worker_relevance input is a closed object requiring query:string(max 12000) and candidates:array(max 256) of closed worker summaries with workerId,name,description,intents,examples,provenance,completedRuns,updatedAt, and permitting originWorkerId:string; output is a closed object requiring rankings:array(max 256) of closed {workerId:string(min 1),score:integer(0..1000000000),reason?:string}.";
+
 pub(super) fn worker_bundle_schema() -> Value {
     let command = json!({
         "type":"object",
@@ -182,7 +190,7 @@ pub(super) fn worker_bundle_schema() -> Value {
             "engineHooks":{
                 "type":"array",
                 "uniqueItems":true,
-                "description":"Optional semantic engine roles activated atomically with this version. No separate binding or grant is required. context_summary maps bounded visible messages to {narrative}; inbox_context consumes bounded pending results into transient context; session_title maps the first completed user exchange of an untitled session to {title}; worker_relevance maps a task query and bounded candidate summaries to typed rankings.",
+                "description":ENGINE_HOOK_AUTHORING_CONTRACT,
                 "items":{"type":"string","enum":["context_summary","inbox_context","session_title","worker_relevance"]}
             },
             "provenance":{

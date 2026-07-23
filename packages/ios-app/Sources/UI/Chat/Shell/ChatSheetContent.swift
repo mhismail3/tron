@@ -59,11 +59,12 @@ struct ChatSheetContent: View {
                 summarizedTurns: data.summarizedTurns
             )
 
-        case .thinkingDetail(let content):
+        case .thinkingDetail(let data):
             ThinkingDetailSheet(
                 state: ThinkingDetailState(
                     thinkingState: viewModel.thinkingState,
-                    staticContent: content
+                    staticContent: data.content,
+                    staticKind: data.kind
                 )
             )
 

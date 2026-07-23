@@ -470,6 +470,17 @@ tool names, or invent a second execution state.
 Failure presentation classifies current schema and policy errors from their
 server evidence without inventing authorization state or retry policy.
 
+Reasoning-like content retains its server-declared source contract through
+streaming, persistence, replay, compact chat, and the detail sheet.
+Append-only provider thinking is labeled `Thinking`; provider-authored
+summaries are labeled `Reasoning Summary` and are never represented as hidden
+chain-of-thought. Compact previews preserve separate source paragraphs instead
+of joining status headings onto one line. Reasoning text uses regular-weight
+provider-neutral typography: whole-line Markdown heading/emphasis wrappers are
+treated as transport decoration, while line breaks, list depth, punctuation,
+and literal content remain intact. The detail sheet receives the tapped
+block's kind directly rather than inferring it from the active model.
+
 Transcript geometry has one explicit alignment rule. Content that fits inside
 the available viewport is top-aligned and rejects automatic bottom-positioning
 requests during streaming and restoration. Once content develops real

@@ -150,7 +150,7 @@ final class AssistantMessagePayloadTests: XCTestCase {
 final class ThinkingCompletePayloadTests: XCTestCase {
     func testReasoningSummaryUsesThinkingDisplayTitle() {
         XCTAssertEqual(ThinkingDisplayKind.thinking.title, "Thinking")
-        XCTAssertEqual(ThinkingDisplayKind.reasoningSummary.title, "Thinking")
+        XCTAssertEqual(ThinkingDisplayKind.reasoningSummary.title, "Reasoning Summary")
     }
 
     func testToDictionaryPersistsReasoningSummaryKind() {

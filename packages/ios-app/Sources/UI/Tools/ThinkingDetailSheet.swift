@@ -22,10 +22,14 @@ struct ThinkingDetailSheet: View {
                             .frame(height: 0)
                             .id(topAnchorID)
 
-                        let blocks = MarkdownBlockParser.parse(state.displayContent)
-                        ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                            MarkdownBlockView(block: block, textColor: .tronTextPrimary)
-                        }
+                        Text(ThinkingTextPresentation.displayText(state.displayContent))
+                            .font(TronTypography.sans(
+                                size: TronTypography.sizeBody,
+                                weight: .regular
+                            ))
+                            .foregroundStyle(.tronTextPrimary)
+                            .lineSpacing(5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         // Invisible anchor at the bottom for scroll tracking
                         Color.clear
                             .frame(height: 1)
@@ -89,7 +93,7 @@ struct ThinkingDetailSheet: View {
                         if state.showStreamingIndicator {
                             PulsingIcon(icon: .thinking, size: 12, color: .tronPurple)
                         }
-                        Text("Thinking")
+                        Text(state.displayKind.title)
                             .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
                             .foregroundStyle(.tronPurple)
                     }

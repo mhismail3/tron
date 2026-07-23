@@ -54,8 +54,8 @@ extension ChatView {
 
     func handleBubbleTap(_ action: MessageBubbleTapAction) {
         switch action {
-        case .thinking(let content):
-            sheetCoordinator.showThinkingDetail(content)
+        case .thinking(let content, let kind):
+            sheetCoordinator.showThinkingDetail(content, kind: kind)
         case .compaction(let tokensBefore, let tokensAfter, let reason, let summary, let preservedTurns, let summarizedTurns):
             sheetCoordinator.showCompactionDetail(
                 tokensBefore: tokensBefore,

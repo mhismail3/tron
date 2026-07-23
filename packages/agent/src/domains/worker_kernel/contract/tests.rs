@@ -157,6 +157,22 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
             "worker_relevance"
         ])
     );
+    let hook_description = bundle["properties"]["engineHooks"]["description"]
+        .as_str()
+        .expect("engine hook authoring contract");
+    for required_contract in [
+        "session_title input is a closed object requiring userPrompt:string(max 4096) and assistantResponse:string(max 4096)",
+        "output is a closed object requiring title:string(1..160)",
+        "context_summary input is a closed object",
+        "inbox_context input is a closed object",
+        "worker_relevance input is a closed object",
+        "do not inspect Tron databases, auth stores, binaries, runtime files, or private server endpoints",
+    ] {
+        assert!(
+            hook_description.contains(required_contract),
+            "missing model-visible engine-hook contract: {required_contract}"
+        );
+    }
     assert!(
         bundle["properties"]["dependencies"]["items"]["properties"]["source"]["description"]
             .as_str()

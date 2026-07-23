@@ -77,6 +77,10 @@
 //! fixed typed contract, selects the newest declaring worker when that worker
 //! is healthy and enabled, and uses the ordinary durable dispatcher. An older
 //! implementation never silently replaces a failed or disabled current owner.
+//! Those worker-facing hook schemas are complete in the model-visible
+//! `worker_upsert` bundle contract. Worker authors never need to inspect
+//! internal databases, auth material, server binaries, or private transport
+//! shapes to discover an engine hook.
 //! Inbox policy sees only bounded redacted previews. Its selected ids are
 //! validated against the candidate set and claimed all-or-none before its
 //! narrative enters provider context, so concurrent sessions cannot inject a

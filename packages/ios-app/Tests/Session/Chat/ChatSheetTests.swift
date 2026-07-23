@@ -299,8 +299,9 @@ struct SheetCoordinatorTests {
 
         coordinator.showThinkingDetail("Thinking content here")
 
-        if case .thinkingDetail(let content) = coordinator.activeSheet {
-            #expect(content == "Thinking content here")
+        if case .thinkingDetail(let data) = coordinator.activeSheet {
+            #expect(data.content == "Thinking content here")
+            #expect(data.kind == .thinking)
         } else {
             Issue.record("Expected thinkingDetail sheet")
         }

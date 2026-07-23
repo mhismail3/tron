@@ -95,8 +95,8 @@ final class SheetCoordinator {
     }
 
     /// Show thinking detail sheet
-    func showThinkingDetail(_ content: String) {
-        present(.thinkingDetail(content))
+    func showThinkingDetail(_ content: String, kind: ThinkingDisplayKind = .thinking) {
+        present(.thinkingDetail(ThinkingDetailData(content: content, kind: kind)))
     }
 
     /// Show tool invocation detail sheet

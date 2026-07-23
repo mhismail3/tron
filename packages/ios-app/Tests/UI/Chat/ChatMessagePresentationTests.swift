@@ -96,6 +96,36 @@ final class ChatMessagePresentationTests: XCTestCase {
         XCTAssertFalse(thinkingSource.contains(".frame(width: 2)"))
     }
 
+    func testThinkingPresentationPreservesSeparateSummaryParagraphsWithoutBoldMarkup() {
+        let content = """
+        **Planning schema validation worker**
+
+        **Investigating internal schema test endpoint**
+        """
+
+        XCTAssertEqual(
+            ThinkingTextPresentation.displayText(content),
+            "Planning schema validation worker\n\nInvestigating internal schema test endpoint"
+        )
+        XCTAssertEqual(
+            ThinkingTextPresentation.previewText(content),
+            "Planning schema validation worker\nInvestigating internal schema test endpoint"
+        )
+    }
+
+    func testThinkingPresentationDoesNotFlattenProviderListsOrInlinePunctuation() {
+        let content = """
+        # Review
+        - First item
+          - Nested item with `code` and 2 * 3
+        """
+
+        XCTAssertEqual(
+            ThinkingTextPresentation.displayText(content),
+            "Review\n- First item\n  - Nested item with `code` and 2 * 3"
+        )
+    }
+
     func testMessageBubbleUsesFinalResponsePolicyForItsOnlyMetadataFooter() throws {
         let source = try source("Sources/UI/Chat/Messages/MessageBubble.swift")
 

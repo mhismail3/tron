@@ -48,7 +48,7 @@ struct MessageBubble: View {
                 isStreaming: isStreaming,
                 kind: kind
             ) {
-                onTap?(.thinking(visible))
+                onTap?(.thinking(visible, kind: kind))
             }
 
         case .toolInvocation(let invocation):

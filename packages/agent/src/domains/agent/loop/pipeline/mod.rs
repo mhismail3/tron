@@ -15,5 +15,12 @@
 //!
 //! Depends on: `shared`, `domains::model`, and session event DTOs.
 //! Depended on by: `domains::agent::r#loop::turn_runner`.
+//!
+//! ## Invariants
+//!
+//! Persisted assistant blocks retain the provider-facing semantic distinction
+//! between append-only thinking and provider-authored reasoning summaries.
+//! Replay clients must not have to infer that distinction from model names or
+//! text formatting.
 
 pub mod persistence;

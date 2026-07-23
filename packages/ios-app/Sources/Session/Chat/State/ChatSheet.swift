@@ -69,6 +69,12 @@ struct LocalErrorDetailData: Equatable, Hashable {
     let suggestion: String?
 }
 
+/// Immutable source-aware snapshot for the reasoning detail sheet.
+struct ThinkingDetailData: Equatable {
+    let content: String
+    let kind: ThinkingDisplayKind
+}
+
 /// Identifiable enum representing all possible sheets in ChatView.
 /// Uses single sheet(item:) modifier pattern per SwiftUI best practices.
 /// This avoids Swift compiler type-checking timeout with multiple .sheet() modifiers.
@@ -79,7 +85,7 @@ enum ChatSheet: Identifiable, Equatable {
 
     case compactionDetail(CompactionDetailData)
 
-    case thinkingDetail(String)
+    case thinkingDetail(ThinkingDetailData)
     case providerErrorDetail(ProviderErrorDetailData)
     case localErrorDetail(LocalErrorDetailData)
 
@@ -119,8 +125,8 @@ enum ChatSheet: Identifiable, Equatable {
             return true
         case (.compactionDetail(let data1), .compactionDetail(let data2)):
             return data1 == data2
-        case (.thinkingDetail(let content1), .thinkingDetail(let content2)):
-            return content1 == content2
+        case (.thinkingDetail(let data1), .thinkingDetail(let data2)):
+            return data1 == data2
         case (.toolInvocationDetail(let data1), .toolInvocationDetail(let data2)):
             return data1.id == data2.id
         case (.toolInvocationGroupDetail(let data1), .toolInvocationGroupDetail(let data2)):
@@ -132,5 +138,10 @@ enum ChatSheet: Identifiable, Equatable {
         default:
             return false
         }
+    }
+
+    /// Source-compatible constructor for raw provider thinking.
+    static func thinkingDetail(_ content: String) -> ChatSheet {
+        .thinkingDetail(ThinkingDetailData(content: content, kind: .thinking))
     }
 }

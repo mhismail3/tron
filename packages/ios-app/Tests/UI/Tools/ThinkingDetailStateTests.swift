@@ -154,6 +154,33 @@ struct ThinkingDetailStateTests {
         #expect(state.displayContent == "")
     }
 
+    @Test("Static reasoning summary preserves its source contract")
+    func testStaticReasoningSummaryKind() {
+        let thinking = ThinkingState()
+        let state = ThinkingDetailState(
+            thinkingState: thinking,
+            staticContent: "Summary",
+            staticKind: .reasoningSummary
+        )
+
+        #expect(state.displayKind == .reasoningSummary)
+        #expect(state.displayKind.title == "Reasoning Summary")
+    }
+
+    @Test("Live thinking source supersedes a historical static kind")
+    func testLiveThinkingKindSupersedesStaticKind() {
+        let thinking = ThinkingState()
+        thinking.handleThinkingDelta("Live", kind: .thinking)
+        let state = ThinkingDetailState(
+            thinkingState: thinking,
+            staticContent: "Summary",
+            staticKind: .reasoningSummary
+        )
+
+        #expect(state.displayContent == "Live")
+        #expect(state.displayKind == .thinking)
+    }
+
     @Test("Catch-up seeding: seedCatchUpThinking populates displayContent")
     func testCatchUpSeeding() {
         let thinking = ThinkingState()

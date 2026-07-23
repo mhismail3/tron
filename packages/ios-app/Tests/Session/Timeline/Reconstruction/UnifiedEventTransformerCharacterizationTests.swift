@@ -87,6 +87,35 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
         }
     }
 
+    func testPersistedReasoningSummaryParagraphsRemainSeparate() {
+        let events: [RawEvent] = [
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    [
+                        "type": "thinking",
+                        "kind": "reasoning_summary",
+                        "thinking": "**First summary**\n\n**Second summary**"
+                    ]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 1)
+        if case .thinking(let visible, _, _, let kind) = messages[0].content {
+            XCTAssertEqual(visible, "**First summary**\n\n**Second summary**")
+            XCTAssertEqual(kind, .reasoningSummary)
+            XCTAssertEqual(
+                ThinkingTextPresentation.previewText(visible),
+                "First summary\nSecond summary"
+            )
+        } else {
+            XCTFail("Expected reasoning summary content")
+        }
+    }
+
     func testDuplicateThinkingSnapshotsInOneAssistantMessageAreSkipped() {
         let events: [RawEvent] = [
             rawEvent(type: "tool.invocation.started", payload: [

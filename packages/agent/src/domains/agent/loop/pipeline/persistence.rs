@@ -7,7 +7,7 @@
 use crate::domains::model::tokens::normalization::normalize_tokens;
 use crate::domains::model::tokens::pricing::calculate_pricing;
 use crate::domains::model::tokens::types::{TokenMeta, TokenSource};
-use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::content::{AssistantContent, ThinkingContentKind};
 use crate::shared::protocol::messages::{Provider, TokenUsage};
 use serde_json::{Value, json};
 
@@ -121,10 +121,13 @@ fn content_block_to_json(block: &AssistantContent) -> Value {
         }
         AssistantContent::Thinking {
             thinking,
+            kind,
             signature,
-            ..
         } => {
             let mut obj = json!({ "type": "thinking", "thinking": thinking });
+            if *kind == ThinkingContentKind::ReasoningSummary {
+                obj["kind"] = json!("reasoning_summary");
+            }
             if let Some(sig) = signature {
                 obj["signature"] = json!(sig);
             }
@@ -215,6 +218,19 @@ mod tests {
         let json = build_content_json(&content);
         assert_eq!(json[0]["type"], "thinking");
         assert!(json[0].get("signature").is_none());
+    }
+
+    #[test]
+    fn build_content_json_preserves_reasoning_summary_source_contract() {
+        let content = vec![AssistantContent::Thinking {
+            thinking: "**Inspecting the relevant state**".into(),
+            kind: ThinkingContentKind::ReasoningSummary,
+            signature: None,
+        }];
+        let json = build_content_json(&content);
+        assert_eq!(json[0]["type"], "thinking");
+        assert_eq!(json[0]["kind"], "reasoning_summary");
+        assert_eq!(json[0]["thinking"], "**Inspecting the relevant state**");
     }
 
     #[test]

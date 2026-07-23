@@ -180,6 +180,13 @@ fallback: until a healthy real worker owns this hook, the session remains
 untitled. Hook failure disables the owner and enters ordinary run/inbox
 evidence without changing the completed user turn.
 
+`worker_upsert` exposes every hook's complete worker-facing input and output
+contract in the `engineHooks` bundle schema. That schema is the authoring
+authority: an agent creating a hook worker does not need to inspect Tron's
+internal databases, credential stores, executable strings, runtime files, or
+private transport endpoints. Ordinary temporary source authoring, dependency
+acquisition, and smoke tests remain expected worker-creation work.
+
 All synchronous semantic hooks have a sixty-second lifecycle ceiling. Timeout
 cancels the invocation and disables the hook owner through the same failure
 path as any other post-activation worker error; it cannot hold compaction,
@@ -271,7 +278,10 @@ an optional local `sourceDirectory`. A staged source directory is recursively
 imported as UTF-8 bundle files under reliability ceilings of 1,024 files and 16
 MiB; explicit inline files win. Symlinks and special files are rejected. This
 keeps activation atomic without requiring the model to read source back and
-reproduce it as JSON. The runtime:
+reproduce it as JSON. The request schema also carries the authoritative closed
+contracts for every supported engine hook, so hook creation stays on this
+single direct authoring surface rather than reverse-engineering implementation
+state. The runtime:
 
 1. normalizes a plain direct tool name into the `worker_` namespace, then
    validates identity, schemas, runner configuration, relative paths, trigger
