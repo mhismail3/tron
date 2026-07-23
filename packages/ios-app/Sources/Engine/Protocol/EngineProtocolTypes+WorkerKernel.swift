@@ -112,8 +112,11 @@ struct WorkerInboxItemDTO: Codable, Equatable, Identifiable, Sendable {
     let workerId: String
     let severity: String
     let result: AnyCodable
-    let seen: Bool
+    let contextAttached: Bool
     let createdAt: String
+    let triggerKind: String
+    let hasInvocation: Bool
+    let requiresAttention: Bool
 
     var id: String { inboxId }
 }
@@ -152,6 +155,16 @@ struct WorkerRunsRequestDTO: Codable, Equatable, Sendable {
     let limit: UInt64
     let offset: UInt64?
     let detail: String
+}
+
+struct WorkerInboxRequestDTO: Codable, Equatable, Sendable {
+    let workerId: String?
+    let limit: UInt64
+    let offset: UInt64?
+    let detail: String
+    let contextAttached: Bool?
+    let severity: String?
+    let attentionOnly: Bool
 }
 
 enum WorkerInvocationMode: String, Codable, Equatable, Sendable {

@@ -306,14 +306,17 @@ struct DelegationSheet: View {
     private var activityContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             WorkerConsoleSectionHeader(
-                title: "Durable results",
-                detail: "Notable completions, cancellations, and failures retained by the worker inbox."
+                title: "Attention",
+                detail: "Failures, system events, and pending background outcomes that merit review."
             )
-            if viewModel.inbox.isEmpty {
-                WorkerConsoleInlineEmptyState(symbol: "tray", text: "No Delegation inbox results.")
+            if viewModel.attention.isEmpty {
+                WorkerConsoleInlineEmptyState(
+                    symbol: "checkmark.circle",
+                    text: "Nothing needs attention."
+                )
             } else {
                 LazyVStack(spacing: 9) {
-                    ForEach(viewModel.inbox) { WorkerInboxCard(item: $0) }
+                    ForEach(viewModel.attention) { WorkerInboxCard(item: $0) }
                 }
             }
 

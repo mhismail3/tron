@@ -79,8 +79,11 @@ struct WorkerConsolePresentationTests {
                     "summary": String(repeating: "useful result ", count: 20),
                 ],
             ]),
-            seen: false,
-            createdAt: "2026-07-22T13:06:45Z"
+            contextAttached: false,
+            createdAt: "2026-07-22T13:06:45Z",
+            triggerKind: "manual",
+            hasInvocation: true,
+            requiresAttention: false
         )
         #expect(WorkerConsolePresentation.inboxSummary(item).hasSuffix("…"))
         #expect(WorkerConsolePresentation.inboxSummary(item).count == 80)

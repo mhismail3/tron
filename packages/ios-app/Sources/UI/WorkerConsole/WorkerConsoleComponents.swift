@@ -336,7 +336,7 @@ struct WorkerInboxCard: View {
     var body: some View {
         Button { showDetail = true } label: {
             HStack(alignment: .top, spacing: 9) {
-                Image(systemName: item.seen ? "tray" : "tray.full.fill")
+                Image(systemName: item.contextAttached ? "tray" : "tray.full.fill")
                     .foregroundStyle(color)
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 3) {
@@ -345,13 +345,15 @@ struct WorkerInboxCard: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                             .foregroundStyle(.tronTextPrimary)
                             .lineLimit(1)
-                        if workerName != nil {
+                        if workerName != nil,
+                           WorkerConsolePresentation.normalized(item.severity) != "info" {
                             Text(WorkerConsolePresentation.displayLabel(item.severity))
                                 .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                                 .foregroundStyle(color)
                         }
-                        if !item.seen {
-                            Text("New")
+                        if !item.contextAttached,
+                           item.triggerKind != "manual" {
+                            Text("Context pending")
                                 .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                                 .foregroundStyle(color)
                         }
@@ -375,7 +377,7 @@ struct WorkerInboxCard: View {
         .sectionFill(color, cornerRadius: 10, subtle: true, interactive: true)
         .sheet(isPresented: $showDetail) {
             WorkerJSONDetailSheet(
-                title: workerName ?? "Inbox Result",
+                title: workerName ?? "Delivery Record",
                 value: item.result,
                 accent: color
             )

@@ -145,15 +145,15 @@ output. If no healthy owner exists, or its own agent-runner turn is resolving a
 tool surface, the exact local weighted scorer provides deterministic recovery.
 
 The `inbox_context` hook receives the current task query and a bounded,
-redacted, newest-first set of unseen worker-result previews. It returns the
-observation ids to consume and the transient narrative to place in the next
+redacted, newest-first set of pending worker-result previews. It returns the
+observation ids to attach and the transient narrative to place in the next
 provider turn. The kernel validates that every id is unique and came from the
 supplied candidate set, atomically claims the complete selection so concurrent
 sessions cannot split it, and injects only a bounded narrative. The policy may
-consume irrelevant observations without narrating them. Without a healthy
+attach irrelevant observations without narrating them. Without a healthy
 owner—or while the owner resolves its own agent-runner turn—the exact
 error/relevance selector and JSON projection provide deterministic recovery.
-Candidate reads never mark observations seen, invalid selections disable the
+Candidate reads never mark observations attached, invalid selections disable the
 hook owner, and a lost concurrent claim injects no stale narrative.
 
 ## Worker-First Execution
@@ -466,7 +466,7 @@ secret-isolation contract, Tron disables the worker, its route, and its
 triggers, records the inbox failure, and advances past that terminal event.
 
 Successful and failed results enter the durable inbox and emit
-`worker.invocations`. Notable unseen background results are atomically attached
+`worker.invocations`. Notable pending background results are atomically attached
 to the next relevant model turn once. High-visibility system failures such as
 tool activation, trigger materialization, and resident supervision participate
 in the same one-time attachment path even though they have no invocation row;
@@ -475,12 +475,17 @@ manual results remain explicitly inspectable.
 `worker_runs` and `worker_inbox` return compact observations by default: pages
 contain at most 20 records, with inputs, outputs, and results represented by
 512-byte JSON previews and no expanded attempt or trace maps. Runs filter directly by status;
-inbox reads filter directly by seen state and severity, so routine health checks
+inbox reads filter directly by context-attachment state and severity, so routine health checks
 do not move irrelevant history into model context. `detail: "full"` is an
 explicit operator path capped at 20 records and 8 KiB per retained value; the
 response reports content truncation and a `nextOffset` when older records remain.
-The Engine Activity UI follows those bounded pages on demand, so the complete
-run/inbox ledger remains inspectable without one unbounded transport response.
+The Engine Activity UI treats runs as the primary execution ledger. Its
+Attention projection contains only failures, system-only records, and pending
+non-manual outcomes; it does not repeat routine successful manual runs. The
+complete inbox remains available through an explicit audit sheet, where
+`contextAttached` truthfully describes whether a result was attached to a later
+agent context—not whether a human opened the record. Both ledgers page on
+demand, so they remain inspectable without one unbounded transport response.
 Durable state remains complete in canonical storage—these are bounded read
 projections, not retention limits.
 
@@ -776,7 +781,7 @@ becoming another synthetic authorization model.
 Executable worker bundles retain source revisions and checksums for inspection,
 ranking, recovery, and audit.
 
-Attaching unseen worker inbox results is an engine-owned session projection,
+Attaching pending worker inbox results is an engine-owned session projection,
 not an agent action. It runs under the internal runtime identity while retaining
 the session and parent trace as provenance.
 
@@ -1510,7 +1515,7 @@ operational evidence:
 | `worker_attempts` | numbered execution/redelivery attempts |
 | `worker_causal_traces` | trace roots, depth, delivery, and suppression counters |
 | `worker_trace_deliveries` | unique worker/trigger/idempotency combinations per trace |
-| `worker_inbox` | durable visible results/failures and seen state |
+| `worker_inbox` | durable result delivery records and agent-context attachment state |
 | `worker_audit` | lifecycle and mutation evidence |
 | `worker_health` | versioned activation/lifecycle/execution health history |
 | `worker_runtime_settings` | durable engine stop-all state |

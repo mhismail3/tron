@@ -110,6 +110,7 @@ struct WorkerConsoleSheet: View {
 
     @State private var selectedSection: EngineDashboardSection = .workers
     @State private var selectedCoreTool: EngineSurfaceToolDTO?
+    @State private var showInboxAudit = false
 
     var body: some View {
         NavigationStack {
@@ -187,6 +188,15 @@ struct WorkerConsoleSheet: View {
             .sheet(item: $selectedCoreTool) { tool in
                 EngineCoreToolDetailSheet(tool: tool)
             }
+            .sheet(isPresented: $showInboxAudit) {
+                WorkerInboxAuditSheet(
+                    workerId: nil,
+                    workerNames: Dictionary(
+                        uniqueKeysWithValues: viewModel.workers.map { ($0.workerId, $0.name) }
+                    ),
+                    repository: repository
+                )
+            }
             .task { await refresh() }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
@@ -262,27 +272,22 @@ struct WorkerConsoleSheet: View {
 
     private var activityContent: some View {
         VStack(alignment: .leading, spacing: 16) {
-            WorkerConsoleSectionHeader(
-                title: "Durable inbox",
-                detail: "Results and failures emitted by all persistent workers."
-            )
-            if viewModel.activityInbox.isEmpty {
-                WorkerConsoleInlineEmptyState(
-                    symbol: "tray",
-                    text: "No durable worker results."
+            if !viewModel.activityAttention.isEmpty {
+                WorkerConsoleSectionHeader(
+                    title: "Attention",
+                    detail: "Failures, system events, and pending background outcomes that merit review."
                 )
-            } else {
                 LazyVStack(spacing: 9) {
-                    ForEach(viewModel.activityInbox) { item in
+                    ForEach(viewModel.activityAttention) { item in
                         WorkerInboxCard(
                             item: item,
                             workerName: viewModel.workerName(for: item.workerId)
                         )
                     }
                 }
-                if viewModel.activityInboxNextOffset != nil {
-                    activityLoadMoreButton("Load older results") {
-                        await viewModel.loadOlderActivityInbox(repository: repository)
+                if viewModel.activityAttentionNextOffset != nil {
+                    activityLoadMoreButton("Load older attention records") {
+                        await viewModel.loadOlderActivityAttention(repository: repository)
                     }
                 }
             }
@@ -311,6 +316,33 @@ struct WorkerConsoleSheet: View {
                     }
                 }
             }
+
+            if viewModel.activityAttention.isEmpty {
+                WorkerConsoleInlineEmptyState(
+                    symbol: "checkmark.circle",
+                    text: "Nothing needs attention."
+                )
+            }
+
+            Button { showInboxAudit = true } label: {
+                HStack(spacing: 11) {
+                    Image(systemName: "tray.full")
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Open delivery audit")
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        Text("Inspect the complete delivery ledger, including routine run-result copies.")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.tronInfo)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .sectionFill(.tronInfo, cornerRadius: 11, subtle: true, interactive: true)
+            }
+            .buttonStyle(.plain)
         }
     }
 

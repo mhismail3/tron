@@ -287,7 +287,8 @@ protocol WorkerKernelRepository: AnyObject {
     func workerInbox(
         workerId: String?,
         limit: UInt64,
-        offset: UInt64?
+        offset: UInt64?,
+        attentionOnly: Bool
     ) async throws -> WorkerInboxResultDTO
     func invokeWorker(
         workerId: String,
@@ -345,7 +346,25 @@ extension WorkerKernelRepository {
     }
 
     func workerInbox(workerId: String?, limit: UInt64) async throws -> WorkerInboxResultDTO {
-        try await workerInbox(workerId: workerId, limit: limit, offset: nil)
+        try await workerInbox(
+            workerId: workerId,
+            limit: limit,
+            offset: nil,
+            attentionOnly: false
+        )
+    }
+
+    func workerAttention(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64? = nil
+    ) async throws -> WorkerInboxResultDTO {
+        try await workerInbox(
+            workerId: workerId,
+            limit: limit,
+            offset: offset,
+            attentionOnly: true
+        )
     }
 }
 

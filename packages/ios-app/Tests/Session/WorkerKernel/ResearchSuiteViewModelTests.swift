@@ -52,6 +52,7 @@ struct ResearchSuiteViewModelTests {
             "research-coordinator", "research-search", "research-source-review", "research-citation",
         ])
         #expect(repository.inboxWorkerIds == repository.runWorkerIds)
+        #expect(repository.inboxAttentionFilters == [true, true, true, true])
         #expect(viewModel.reports.map(\.reportId) == ["rr-20260722T130645Z-d480507abb3e"])
         #expect(viewModel.healthyComponentCount == 4)
         #expect(viewModel.lastError == nil)
@@ -199,6 +200,7 @@ private final class ResearchSuiteMockRepository: WorkerKernelRepository {
     let reportOutput: [String: Any]
     var runWorkerIds: [String] = []
     var inboxWorkerIds: [String] = []
+    var inboxAttentionFilters: [Bool] = []
 
     init(reportOutput: [String: Any]) {
         self.reportOutput = reportOutput
@@ -237,10 +239,12 @@ private final class ResearchSuiteMockRepository: WorkerKernelRepository {
     func workerInbox(
         workerId: String?,
         limit: UInt64,
-        offset: UInt64?
+        offset: UInt64?,
+        attentionOnly: Bool
     ) async throws -> WorkerInboxResultDTO {
         guard let workerId else { return WorkerInboxResultDTO(items: []) }
         inboxWorkerIds.append(workerId)
+        inboxAttentionFilters.append(attentionOnly)
         return WorkerInboxResultDTO(items: [])
     }
 

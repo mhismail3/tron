@@ -504,37 +504,50 @@ impl WorkerStore {
     pub fn inbox_filtered(
         &self,
         worker_id: Option<&str>,
-        seen: Option<bool>,
+        context_attached: Option<bool>,
         severity: Option<&str>,
         limit: u32,
     ) -> Result<Vec<Value>, String> {
-        self.inbox_filtered_page(worker_id, seen, severity, limit, 0)
+        self.inbox_filtered_page(worker_id, context_attached, severity, false, limit, 0)
     }
 
     pub fn inbox_filtered_page(
         &self,
         worker_id: Option<&str>,
-        seen: Option<bool>,
+        context_attached: Option<bool>,
         severity: Option<&str>,
+        attention_only: bool,
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Value>, String> {
         let connection = self.connection()?;
         let mut statement = connection
             .prepare(
-                "SELECT inbox_id,invocation_id,worker_id,severity,result_json,seen,created_at
-                 FROM worker_inbox WHERE (?1 IS NULL OR worker_id=?1)
-                    AND (?2 IS NULL OR seen=?2)
-                    AND (?3 IS NULL OR severity=?3)
-                 ORDER BY created_at DESC LIMIT ?4 OFFSET ?5",
+                "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
+                        i.context_attached,i.created_at,COALESCE(r.trigger_kind,'system'),
+                        CASE WHEN r.invocation_id IS NULL THEN 0 ELSE 1 END,
+                        CASE WHEN i.severity='error' OR r.invocation_id IS NULL
+                                  OR (i.context_attached=0
+                                      AND COALESCE(r.trigger_kind,'system')!='manual')
+                             THEN 1 ELSE 0 END
+                 FROM worker_inbox i
+                 LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
+                 WHERE (?1 IS NULL OR i.worker_id=?1)
+                    AND (?2 IS NULL OR i.context_attached=?2)
+                    AND (?3 IS NULL OR i.severity=?3)
+                    AND (?4=0 OR i.severity='error' OR r.invocation_id IS NULL
+                         OR (i.context_attached=0
+                             AND COALESCE(r.trigger_kind,'system')!='manual'))
+                 ORDER BY i.created_at DESC LIMIT ?5 OFFSET ?6",
             )
             .map_err(|error| error.to_string())?;
         statement
             .query_map(
                 params![
                     worker_id,
-                    seen.map(i64::from),
+                    context_attached.map(i64::from),
                     severity,
+                    i64::from(attention_only),
                     limit.min(500),
                     offset
                 ],
@@ -546,8 +559,11 @@ impl WorkerStore {
                         "workerId": row.get::<_, String>(2)?,
                         "severity": row.get::<_, String>(3)?,
                         "result": serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),
-                        "seen": row.get::<_, i64>(5)? != 0,
+                        "contextAttached": row.get::<_, i64>(5)? != 0,
                         "createdAt": row.get::<_, String>(6)?,
+                        "triggerKind": row.get::<_, String>(7)?,
+                        "hasInvocation": row.get::<_, i64>(8)? != 0,
+                        "requiresAttention": row.get::<_, i64>(9)? != 0,
                     }))
                 },
             )
@@ -581,7 +597,7 @@ impl WorkerStore {
 
     /// Return a bounded newest-first projection for worker-owned transient
     /// context policy. Reading candidates never changes delivery state.
-    pub fn unseen_inbox_context_candidates(&self, limit: u32) -> Result<Vec<Value>, String> {
+    pub fn pending_inbox_context_candidates(&self, limit: u32) -> Result<Vec<Value>, String> {
         let connection = self.connection()?;
         let mut statement = connection
             .prepare(
@@ -590,7 +606,7 @@ impl WorkerStore {
                  FROM worker_inbox i
                  LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
                  JOIN workers w ON w.worker_id=i.worker_id
-                 WHERE i.seen=0
+                 WHERE i.context_attached=0
                  ORDER BY i.created_at DESC LIMIT ?1",
             )
             .map_err(|error| error.to_string())?;
@@ -604,9 +620,9 @@ impl WorkerStore {
             .map_err(|error| error.to_string())
     }
 
-    /// Atomically mark still-unseen policy-selected observations and return
+    /// Atomically attach still-pending policy-selected observations and return
     /// only rows this claimant actually won. Input order is preserved.
-    pub fn claim_unseen_inbox_context(&self, inbox_ids: &[String]) -> Result<Vec<Value>, String> {
+    pub fn attach_pending_inbox_context(&self, inbox_ids: &[String]) -> Result<Vec<Value>, String> {
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction()
@@ -620,7 +636,7 @@ impl WorkerStore {
                      FROM worker_inbox i
                      LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
                      JOIN workers w ON w.worker_id=i.worker_id
-                     WHERE i.inbox_id=?1 AND i.seen=0",
+                     WHERE i.inbox_id=?1 AND i.context_attached=0",
                     [inbox_id],
                     inbox_context_candidate,
                 )
@@ -634,7 +650,8 @@ impl WorkerStore {
         for inbox_id in inbox_ids {
             let updated = transaction
                 .execute(
-                    "UPDATE worker_inbox SET seen=1 WHERE inbox_id=?1 AND seen=0",
+                    "UPDATE worker_inbox SET context_attached=1
+                     WHERE inbox_id=?1 AND context_attached=0",
                     [inbox_id],
                 )
                 .map_err(|error| format!("claim worker inbox context: {error}"))?;
@@ -646,10 +663,10 @@ impl WorkerStore {
         Ok(candidates)
     }
 
-    /// Claim notable unseen background results for transient prompt attachment.
+    /// Claim notable pending background results for transient prompt attachment.
     /// Errors are always notable; successful manual calls are already visible
     /// to their caller and are intentionally omitted.
-    pub fn take_notable_unseen(
+    pub fn take_notable_pending(
         &self,
         relevance_query: Option<&str>,
         limit: u32,
@@ -667,7 +684,7 @@ impl WorkerStore {
                      FROM worker_inbox i
                      LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
                      JOIN workers w ON w.worker_id=i.worker_id
-                     WHERE i.seen=0
+                     WHERE i.context_attached=0
                         AND (i.severity!='info' OR COALESCE(r.trigger_kind,'system')!='manual')
                      ORDER BY i.created_at DESC LIMIT 200",
                 )
@@ -718,7 +735,7 @@ impl WorkerStore {
                 "severity":severity,
                 "triggerKind":trigger,
                 "result":serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),
-                "seen":false,
+                "contextAttached":false,
                 "createdAt":created_at,
             }));
             if selected.len() >= limit.min(32) as usize {
@@ -728,10 +745,11 @@ impl WorkerStore {
         for item in &selected {
             transaction
                 .execute(
-                    "UPDATE worker_inbox SET seen=1 WHERE inbox_id=?1 AND seen=0",
+                    "UPDATE worker_inbox SET context_attached=1
+                     WHERE inbox_id=?1 AND context_attached=0",
                     [item["inboxId"].as_str().unwrap_or_default()],
                 )
-                .map_err(|error| format!("mark worker inbox attachment seen: {error}"))?;
+                .map_err(|error| format!("mark worker inbox context attached: {error}"))?;
         }
         transaction.commit().map_err(|error| error.to_string())?;
         Ok(selected)

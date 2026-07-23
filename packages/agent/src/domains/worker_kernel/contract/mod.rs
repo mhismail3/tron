@@ -249,8 +249,8 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         "worker_kernel::inbox",
         EffectClass::PureRead,
         RiskLevel::Low,
-        json!({"type":"object","additionalProperties":false,"properties":{"workerId":{"type":"string"},"seen":{"type":"boolean"},"severity":{"type":"string","enum":["info","error"]},"limit":{"type":"integer","minimum":1,"maximum":20},"offset":{"type":"integer","minimum":0},"detail":{"type":"string","enum":["summary","full"],"default":"summary"}}}),
-        "Read a bounded page of durable worker results and failures, optionally filtered by seen state or severity. Omit workerId to query the entire profile; continue with nextOffset when present. Compact summaries are the default; explicit full detail is bounded to 20 records and 8 KiB per result.",
+        json!({"type":"object","additionalProperties":false,"properties":{"workerId":{"type":"string"},"contextAttached":{"type":"boolean"},"severity":{"type":"string","enum":["info","error"]},"attentionOnly":{"type":"boolean","default":false},"limit":{"type":"integer","minimum":1,"maximum":20},"offset":{"type":"integer","minimum":0},"detail":{"type":"string","enum":["summary","full"],"default":"summary"}}}),
+        "Read a bounded page of durable worker delivery records. Filter by whether a result was attached to later agent context, severity, or the high-signal attention projection. Attention includes failures, system records without invocations, and pending non-manual background outcomes; routine successful manual-result copies remain available only in the unfiltered audit ledger. Omit workerId to query the entire profile; continue with nextOffset when present. Compact summaries are the default; explicit full detail is bounded to 20 records and 8 KiB per result.",
     )?);
     specs.push(spec(
         "worker_kernel::runs",
@@ -454,7 +454,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
             }
         }))
         .idempotency(IdempotencyContract::session())
-        .description("Invoke worker-owned unseen-result context policy, atomically claim its selected observations, and retain deterministic recovery when no hook is active.")
+        .description("Invoke worker-owned pending-result context policy, atomically attach its selected observations, and retain deterministic recovery when no hook is active.")
         .build()?,
     );
     specs.push(

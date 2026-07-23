@@ -180,7 +180,7 @@ final class DelegationViewModel {
     var worker: WorkerSummaryDTO?
     var inspection: WorkerInspectResultDTO?
     var runs: [WorkerInvocationDTO] = []
-    var inbox: [WorkerInboxItemDTO] = []
+    var attention: [WorkerInboxItemDTO] = []
     var resultsByInvocation: [String: DelegationResult] = [:]
     var task = ""
     var deliverableDescription = ""
@@ -200,7 +200,7 @@ final class DelegationViewModel {
     var completedRunCount: Int { runs.count { $0.status == "completed" } }
     var issueCount: Int {
         runs.count { ["failed", "cancelled"].contains($0.status) }
-            + inbox.count { ["error", "critical", "warning"].contains($0.severity.lowercased()) }
+            + attention.count
     }
     var runnerModel: String? { DelegationContract.runnerModel(from: inspection) }
     var canSubmit: Bool {
@@ -220,7 +220,7 @@ final class DelegationViewModel {
             worker = nil
             inspection = nil
             runs = []
-            inbox = []
+            attention = []
             resultsByInvocation = [:]
             hasLoaded = true
             lastError = connectionState.displayText
@@ -230,7 +230,7 @@ final class DelegationViewModel {
             worker = nil
             inspection = nil
             runs = []
-            inbox = []
+            attention = []
             resultsByInvocation = [:]
             hasLoaded = true
             lastError = "No supported General Delegate experience is active on this server."
@@ -258,11 +258,14 @@ final class DelegationViewModel {
             errors.append("Runs: \(error.localizedDescription)")
         }
         do {
-            inbox = try await repository.workerInbox(workerId: selected.workerId, limit: 20).items
+            attention = try await repository.workerAttention(
+                workerId: selected.workerId,
+                limit: 20
+            ).items
                 .sorted { $0.createdAt > $1.createdAt }
         } catch {
-            inbox = []
-            errors.append("Inbox: \(error.localizedDescription)")
+            attention = []
+            errors.append("Attention: \(error.localizedDescription)")
         }
 
         var decoded: [String: DelegationResult] = [:]

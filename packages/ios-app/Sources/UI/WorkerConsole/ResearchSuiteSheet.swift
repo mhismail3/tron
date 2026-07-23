@@ -246,14 +246,17 @@ struct ResearchSuiteSheet: View {
             }
 
             WorkerConsoleSectionHeader(
-                title: "Durable results",
-                detail: "Failures and notable outcomes emitted by every suite component."
+                title: "Attention",
+                detail: "Failures, system events, and pending background outcomes from suite components."
             )
-            if viewModel.inbox.isEmpty {
-                WorkerConsoleInlineEmptyState(symbol: "tray", text: "No Research inbox results.")
+            if viewModel.attention.isEmpty {
+                WorkerConsoleInlineEmptyState(
+                    symbol: "checkmark.circle",
+                    text: "Nothing needs attention."
+                )
             } else {
                 LazyVStack(spacing: 9) {
-                    ForEach(viewModel.inbox) { item in
+                    ForEach(viewModel.attention) { item in
                         WorkerInboxCard(
                             item: item,
                             workerName: viewModel.workerName(for: item.workerId)
@@ -265,11 +268,7 @@ struct ResearchSuiteSheet: View {
     }
 
     private var issueCount: Int {
-        viewModel.attentionCount + viewModel.reportIssues.count + viewModel.inbox.count { item in
-            ["error", "critical", "warning"].contains(
-                WorkerConsolePresentation.normalized(item.severity)
-            )
-        }
+        viewModel.attentionCount + viewModel.reportIssues.count + viewModel.attention.count
     }
 
     private var suiteNeedsAttention: Bool { issueCount > 0 }

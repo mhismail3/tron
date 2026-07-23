@@ -64,7 +64,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 4)?;
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 5)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
@@ -277,11 +277,9 @@ impl WorkerStore {
                     worker_id TEXT NOT NULL,
                     severity TEXT NOT NULL,
                     result_json TEXT NOT NULL,
-                    seen INTEGER NOT NULL DEFAULT 0,
+                    context_attached INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
-                CREATE INDEX IF NOT EXISTS worker_inbox_worker
-                    ON worker_inbox(worker_id, seen, created_at DESC);
                 CREATE TABLE IF NOT EXISTS worker_audit (
                     audit_id TEXT PRIMARY KEY,
                     worker_id TEXT NOT NULL,
@@ -325,6 +323,24 @@ impl WorkerStore {
                 )
                 .map_err(|error| format!("add agent session linkage: {error}"))?;
         }
+        if !table_has_column(&connection, "worker_inbox", "context_attached")? {
+            if !table_has_column(&connection, "worker_inbox", "seen")? {
+                return Err("worker inbox has no context-delivery column".to_owned());
+            }
+            connection
+                .execute_batch(
+                    "DROP INDEX IF EXISTS worker_inbox_worker;
+                     ALTER TABLE worker_inbox RENAME COLUMN seen TO context_attached;",
+                )
+                .map_err(|error| format!("rename worker inbox context delivery state: {error}"))?;
+        }
+        connection
+            .execute_batch(
+                "DROP INDEX IF EXISTS worker_inbox_worker;
+                 CREATE INDEX worker_inbox_worker
+                    ON worker_inbox(worker_id, context_attached, created_at DESC);",
+            )
+            .map_err(|error| format!("index worker inbox context delivery state: {error}"))?;
         connection
             .execute(
                 "INSERT OR IGNORE INTO worker_schema(version, applied_at)
@@ -332,6 +348,13 @@ impl WorkerStore {
                 [],
             )
             .map_err(|error| format!("record worker schema v4: {error}"))?;
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                 VALUES (5, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                [],
+            )
+            .map_err(|error| format!("record worker schema v5: {error}"))?;
         super::rebuild::rebuild_indexes(&self.root, &self.database)?;
         self.recover_interrupted()
     }

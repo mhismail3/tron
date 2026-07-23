@@ -88,7 +88,8 @@ struct WorkerKernelDTOTests {
         let inboxJSON = #"""
         {"items":[{
           "inboxId":"inbox-1","invocationId":"run-1","workerId":"recent-research",
-          "severity":"info","result":{"items":[1,2]},"seen":false,
+          "severity":"info","result":{"items":[1,2]},"contextAttached":false,
+          "triggerKind":"manual","hasInvocation":true,"requiresAttention":false,
           "createdAt":"2026-07-19T12:00:02Z"
         }],"truncated":false,"nextOffset":null}
         """#
@@ -102,7 +103,8 @@ struct WorkerKernelDTOTests {
         #expect(runs.runs.first?.output != nil)
         #expect(runs.truncated == true)
         #expect(runs.nextOffset == 20)
-        #expect(inbox.items.first?.seen == false)
+        #expect(inbox.items.first?.contextAttached == false)
+        #expect(inbox.items.first?.requiresAttention == false)
         #expect(inbox.nextOffset == nil)
         let result = try #require(inbox.items.first?.result.value as? [String: Any])
         #expect((result["items"] as? [Any])?.count == 2)

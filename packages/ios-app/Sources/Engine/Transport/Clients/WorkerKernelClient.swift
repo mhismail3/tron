@@ -46,15 +46,19 @@ final class WorkerKernelClient: EngineDomainClient {
     func workerInbox(
         workerId: String?,
         limit: UInt64 = 20,
-        offset: UInt64? = nil
+        offset: UInt64? = nil,
+        attentionOnly: Bool = false
     ) async throws -> WorkerInboxResultDTO {
         try await invokeRead(
             "worker_kernel::inbox",
-            WorkerRunsRequestDTO(
+            WorkerInboxRequestDTO(
                 workerId: workerId,
                 limit: limit,
                 offset: offset,
-                detail: "full"
+                detail: "full",
+                contextAttached: nil,
+                severity: nil,
+                attentionOnly: attentionOnly
             )
         )
     }

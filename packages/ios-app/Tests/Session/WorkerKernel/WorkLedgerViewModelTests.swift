@@ -203,7 +203,8 @@ private final class WorkLedgerMockRepository: WorkerKernelRepository {
     func workerInbox(
         workerId: String?,
         limit: UInt64,
-        offset: UInt64?
+        offset: UInt64?,
+        attentionOnly: Bool
     ) async throws -> WorkerInboxResultDTO {
         WorkerInboxResultDTO(items: [])
     }

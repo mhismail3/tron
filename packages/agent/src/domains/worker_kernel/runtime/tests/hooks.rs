@@ -194,7 +194,7 @@ async fn failed_current_hook_does_not_silently_reactivate_an_older_owner() {
 }
 
 #[tokio::test]
-async fn inbox_context_worker_selects_claims_and_narrates_unseen_results() {
+async fn inbox_context_worker_selects_and_attaches_pending_results() {
     let context = crate::shared::server::test_support::make_test_context();
     let actor = || {
         CausalContext::new(
@@ -327,8 +327,8 @@ async fn inbox_context_worker_selects_claims_and_narrates_unseen_results() {
         .engine_host
         .invoke(Invocation::new_sync(
             FunctionId::new("worker_kernel::inbox").unwrap(),
-            json!({"seen":false,"severity":"error"}),
-            actor().with_idempotency_key("read-unseen-error-inbox-source"),
+            json!({"contextAttached":false,"severity":"error"}),
+            actor().with_idempotency_key("read-pending-error-inbox-source"),
         ))
         .await;
     assert_eq!(filtered_inbox.error, None);
@@ -348,7 +348,7 @@ async fn inbox_context_worker_selects_claims_and_narrates_unseen_results() {
         "schemaVersion":"tron.worker_bundle.v1",
         "workerId":"inbox-narrator",
         "name":"Inbox Narrator",
-        "description":"Selects unseen worker results and creates transient context",
+        "description":"Selects pending worker results and creates transient context",
         "inputSchema":{
             "type":"object","additionalProperties":false,"required":["query","items"],
             "properties":{
@@ -416,7 +416,7 @@ async fn inbox_context_worker_selects_claims_and_narrates_unseen_results() {
             actor().with_idempotency_key("read-claimed-inbox-source"),
         ))
         .await;
-    assert_eq!(inbox.value.unwrap()["items"][0]["seen"], true);
+    assert_eq!(inbox.value.unwrap()["items"][0]["contextAttached"], true);
 
     let invoked = context
         .engine_host

@@ -174,7 +174,8 @@ worker metadata from the client. The server supplies internal causal context.
 - `WorkerInvocationDTO` for queued/running/terminal runs, typed input/output,
   idempotency, trace, causal depth, trigger kind, numbered delivery-attempt
   count, optional child-agent session id, and timestamps;
-- `WorkerInboxItemDTO` for durable visible results and failures;
+- `WorkerInboxItemDTO` for durable delivery records, trigger provenance,
+  attention classification, and truthful agent-context attachment state;
 - request/response DTOs for invocation, exact invocation cancellation,
   per-worker stop, rollback, stop-all, archive-backed purge, and webhook token
   rotation.
@@ -293,9 +294,11 @@ provides:
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
 - compact recent-run rows that open canonical run-detail sheets with toolbar
-  actions, compact inbox and audit summaries whose full payloads open dedicated
-  sheets, and bounded load-more
-  access to the complete profile ledger;
+  actions; Activity uses runs as the primary execution ledger and shows a
+  separate Attention projection only for failures, system-only records, and
+  pending background outcomes, while an explicit Delivery Audit sheet provides
+  bounded access to every delivery record without duplicating routine manual
+  successes in the timeline;
 - a read-only worker-session transcript sheet launched from run-detail toolbar
   actions; audit transcripts use a read-only native bottom anchor plus a
   bounded LazyVStack settling pass so the newest evidence is visible when the
@@ -351,7 +354,7 @@ entrypoint. Its four workers remain independently versioned and independently
 operable; only the coordinator's `primary` presentation binding opens the
 grouped Research experience. `ResearchSuiteViewModel` filters the canonical
 worker inventory by the immutable suite contract, reads bounded full-detail
-runs and inbox rows for every component, and decodes only exact
+runs and attention rows for every component, and decodes only exact
 `research.report.v1` coordinator outputs. It does not read the coordinator's
 state directory or reconstruct reports from client caches. Malformed canonical
 outputs remain visible as compact historical issue rows whose full evidence
@@ -360,7 +363,7 @@ they do not falsely mark a successful worker/catalog refresh as failed.
 Unrelated outputs are not mistaken for reports.
 
 The Research sheet provides aggregate suite health and versions, coordinator
-and specialist run/query history, durable inbox failures, report history,
+and specialist run/query history, actionable delivery attention, report history,
 claim-to-citation inspection, source/freshness cards, contradictions, evidence
 gaps, limitations, specialist outcomes, and exact JSON export. Every component
 links to an independently loaded generic technical console without changing the

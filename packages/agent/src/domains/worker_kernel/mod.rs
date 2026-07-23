@@ -171,7 +171,7 @@
 //! exist raw only in the active provider turn that requested them.
 //! Webhook bodies are ordinary typed input: trigger configuration supplies
 //! defaults, request keys override them, and no engine wrapper is injected.
-//! Unseen inbox attachment uses an internal runtime identity with session/trace
+//! Pending inbox attachment uses an internal runtime identity with session/trace
 //! provenance; it never requires or fabricates an agent grant.
 //! Mutable worker-owned state lives outside immutable versions under
 //! `workspace/worker-state/<worker-id>/`. Command and resident runners receive

@@ -514,7 +514,8 @@ fn worker_history_defaults_to_compact_bounded_observations() {
         inbox["properties"]["severity"]["enum"],
         json!(["info", "error"])
     );
-    assert_eq!(inbox["properties"]["seen"]["type"], "boolean");
+    assert_eq!(inbox["properties"]["contextAttached"]["type"], "boolean");
+    assert_eq!(inbox["properties"]["attentionOnly"]["type"], "boolean");
 }
 
 #[test]

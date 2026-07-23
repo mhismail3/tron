@@ -447,7 +447,7 @@ impl WorkerStore {
             .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
         let inbox = query_json_rows(
             &connection,
-            "SELECT inbox_id,invocation_id,severity,result_json,seen,created_at
+            "SELECT inbox_id,invocation_id,severity,result_json,context_attached,created_at
              FROM worker_inbox WHERE worker_id=?1 ORDER BY created_at",
             worker_id,
             |row| {
@@ -457,7 +457,7 @@ impl WorkerStore {
                     "invocationId":row.get::<_, String>(1)?,
                     "severity":row.get::<_, String>(2)?,
                     "result":serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),
-                    "seen":row.get::<_, i64>(4)? != 0,
+                    "contextAttached":row.get::<_, i64>(4)? != 0,
                     "createdAt":row.get::<_, String>(5)?,
                 }))
             },

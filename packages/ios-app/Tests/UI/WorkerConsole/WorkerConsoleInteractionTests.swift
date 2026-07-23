@@ -151,6 +151,33 @@ struct WorkerConsoleInteractionTests {
         #expect(!content.contains("openWorkerAuditSession"))
     }
 
+    @Test("Activity separates execution history from delivery audit")
+    func activityUsesRunsAttentionAndExplicitAudit() throws {
+        let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
+        let shell = try String(
+            contentsOf: workerRoot.appendingPathComponent("WorkerConsoleViews.swift"),
+            encoding: .utf8
+        )
+        let detail = try String(
+            contentsOf: workerRoot.appendingPathComponent("WorkerDetailSheet.swift"),
+            encoding: .utf8
+        )
+        let audit = try String(
+            contentsOf: workerRoot.appendingPathComponent("WorkerConsoleDetailSheets.swift"),
+            encoding: .utf8
+        )
+
+        #expect(shell.contains("title: \"Worker runs\""))
+        #expect(shell.contains("title: \"Attention\""))
+        #expect(shell.contains("Text(\"Open delivery audit\")"))
+        #expect(detail.contains("private var attention: some View"))
+        #expect(detail.contains("private var inboxAudit: some View"))
+        #expect(!shell.contains("title: \"Durable inbox\""))
+        #expect(!detail.contains("title: \"Durable inbox\""))
+        #expect(audit.contains("struct WorkerInboxAuditSheet"))
+        #expect(audit.contains("attentionOnly: false"))
+    }
+
     private func iosAppRoot(filePath: String = #filePath) -> URL {
         URL(fileURLWithPath: filePath)
             .deletingLastPathComponent()

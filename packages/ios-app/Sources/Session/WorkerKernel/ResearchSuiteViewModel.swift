@@ -283,7 +283,7 @@ enum ResearchSuiteContract {
 final class ResearchSuiteViewModel {
     var workers: [WorkerSummaryDTO] = []
     var runs: [WorkerInvocationDTO] = []
-    var inbox: [WorkerInboxItemDTO] = []
+    var attention: [WorkerInboxItemDTO] = []
     var reports: [ResearchReport] = []
     var reportIssues: [String] = []
     var isLoading = false
@@ -308,7 +308,7 @@ final class ResearchSuiteViewModel {
         guard connectionState.isConnected else {
             workers = []
             runs = []
-            inbox = []
+            attention = []
             reports = []
             reportIssues = []
             hasLoaded = true
@@ -324,7 +324,7 @@ final class ResearchSuiteViewModel {
 
         workers = ResearchSuiteContract.suiteWorkers(from: availableWorkers)
         var loadedRuns: [WorkerInvocationDTO] = []
-        var loadedInbox: [WorkerInboxItemDTO] = []
+        var loadedAttention: [WorkerInboxItemDTO] = []
         var errors: [String] = []
 
         for worker in workers {
@@ -337,17 +337,17 @@ final class ResearchSuiteViewModel {
                 errors.append("\(worker.name) runs: \(error.localizedDescription)")
             }
             do {
-                loadedInbox += try await repository.workerInbox(
+                loadedAttention += try await repository.workerAttention(
                     workerId: worker.workerId,
                     limit: 20
                 ).items
             } catch {
-                errors.append("\(worker.name) inbox: \(error.localizedDescription)")
+                errors.append("\(worker.name) attention: \(error.localizedDescription)")
             }
         }
 
         runs = loadedRuns.sorted { $0.createdAt > $1.createdAt }
-        inbox = loadedInbox.sorted { $0.createdAt > $1.createdAt }
+        attention = loadedAttention.sorted { $0.createdAt > $1.createdAt }
         let decoded = Self.decodeReports(from: runs)
         reports = decoded.reports
         reportIssues = decoded.errors

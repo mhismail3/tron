@@ -6,11 +6,11 @@ final class WorkerConsoleViewModel {
     var engineSnapshot: EngineIntrospectionSnapshotDTO?
     var workers: [WorkerSummaryDTO] = []
     var activityRuns: [WorkerInvocationDTO] = []
-    var activityInbox: [WorkerInboxItemDTO] = []
+    var activityAttention: [WorkerInboxItemDTO] = []
     var selectedWorkerId: String?
     var inspection: WorkerInspectResultDTO?
     var runs: [WorkerInvocationDTO] = []
-    var inbox: [WorkerInboxItemDTO] = []
+    var attention: [WorkerInboxItemDTO] = []
     var invocationInput = "{}"
     var invocationResult: String?
     var webhookCredential: WorkerWebhookCredentialDTO?
@@ -23,7 +23,7 @@ final class WorkerConsoleViewModel {
     var lastError: String?
     var monitoringError: String?
     private(set) var activityRunsNextOffset: UInt64?
-    private(set) var activityInboxNextOffset: UInt64?
+    private(set) var activityAttentionNextOffset: UInt64?
 
     var selectedWorker: WorkerSummaryDTO? {
         workers.first { $0.workerId == selectedWorkerId }
@@ -88,12 +88,12 @@ final class WorkerConsoleViewModel {
             engineSnapshot = nil
             workers = []
             activityRuns = []
-            activityInbox = []
+            activityAttention = []
             activityRunsNextOffset = nil
-            activityInboxNextOffset = nil
+            activityAttentionNextOffset = nil
             inspection = nil
             runs = []
-            inbox = []
+            attention = []
             hasLoaded = true
             return
         }
@@ -108,14 +108,14 @@ final class WorkerConsoleViewModel {
                 relevanceQuery: nil
             )
             let globalRuns = try await repository.workerRuns(workerId: nil, limit: 20)
-            let globalInbox = try await repository.workerInbox(workerId: nil, limit: 20)
+            let globalAttention = try await repository.workerAttention(workerId: nil, limit: 20)
             engineSnapshot = snapshot
             workers = snapshot.workers
             stopAll = snapshot.dispatchStopped
             activityRuns = globalRuns.runs
-            activityInbox = globalInbox.items
+            activityAttention = globalAttention.items
             activityRunsNextOffset = globalRuns.nextOffset
-            activityInboxNextOffset = globalInbox.nextOffset
+            activityAttentionNextOffset = globalAttention.nextOffset
             if let selectedWorkerId,
                workers.contains(where: { $0.workerId == selectedWorkerId }) {
                 try await loadWorker(selectedWorkerId, repository: repository)
@@ -123,7 +123,7 @@ final class WorkerConsoleViewModel {
                 selectedWorkerId = nil
                 inspection = nil
                 runs = []
-                inbox = []
+                attention = []
             }
             lastError = nil
         } catch {
@@ -149,18 +149,18 @@ final class WorkerConsoleViewModel {
         }
     }
 
-    func loadOlderActivityInbox(repository: any WorkerKernelRepository) async {
-        guard let offset = activityInboxNextOffset, !isLoadingMoreActivity else { return }
+    func loadOlderActivityAttention(repository: any WorkerKernelRepository) async {
+        guard let offset = activityAttentionNextOffset, !isLoadingMoreActivity else { return }
         isLoadingMoreActivity = true
         defer { isLoadingMoreActivity = false }
         do {
-            let page = try await repository.workerInbox(
+            let page = try await repository.workerAttention(
                 workerId: nil,
                 limit: 20,
                 offset: offset
             )
-            Self.appendUnique(page.items, to: &activityInbox, id: \.inboxId)
-            activityInboxNextOffset = page.nextOffset
+            Self.appendUnique(page.items, to: &activityAttention, id: \.inboxId)
+            activityAttentionNextOffset = page.nextOffset
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -171,7 +171,7 @@ final class WorkerConsoleViewModel {
         selectedWorkerId = workerId
         inspection = nil
         runs = []
-        inbox = []
+        attention = []
         invocationResult = nil
         webhookCredential = nil
         isLoadingSelection = true
@@ -365,7 +365,7 @@ final class WorkerConsoleViewModel {
     ) async throws {
         inspection = try await repository.inspectWorker(workerId)
         runs = try await repository.workerRuns(workerId: workerId, limit: 20).runs
-        inbox = try await repository.workerInbox(workerId: workerId, limit: 20).items
+        attention = try await repository.workerAttention(workerId: workerId, limit: 20).items
     }
 
     private func mutate(

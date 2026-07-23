@@ -52,6 +52,7 @@ struct DelegationViewModelTests {
         #expect(repository.inspectedWorkerIds == ["general-delegate"])
         #expect(repository.runWorkerIds == ["general-delegate"])
         #expect(repository.inboxWorkerIds == ["general-delegate"])
+        #expect(repository.inboxAttentionFilters == [true])
         #expect(viewModel.runnerModel == "openai/gpt-5.5")
         #expect(viewModel.runs.first?.agentSessionId == "child-session-1")
         #expect(viewModel.resultsByInvocation["run-1"]?.status == "completed")
@@ -208,6 +209,7 @@ private final class DelegationMockRepository: WorkerKernelRepository {
     var inspectedWorkerIds: [String] = []
     var runWorkerIds: [String] = []
     var inboxWorkerIds: [String] = []
+    var inboxAttentionFilters: [Bool] = []
     var enqueuedInputs: [[String: Any]] = []
     var cancelledInvocationIds: [String] = []
     private var storedRuns = [DelegationViewModelTests.run()]
@@ -236,9 +238,11 @@ private final class DelegationMockRepository: WorkerKernelRepository {
     func workerInbox(
         workerId: String?,
         limit: UInt64,
-        offset: UInt64?
+        offset: UInt64?,
+        attentionOnly: Bool
     ) async throws -> WorkerInboxResultDTO {
         inboxWorkerIds.append(workerId ?? "all")
+        inboxAttentionFilters.append(attentionOnly)
         return WorkerInboxResultDTO(items: [])
     }
 

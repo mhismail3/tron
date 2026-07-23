@@ -22,6 +22,7 @@ struct WorkerDetailSheet: View {
     @State private var confirmPurge = false
     @State private var showSchema = false
     @State private var showProvenance = false
+    @State private var showInboxAudit = false
     @State private var selectedSection = WorkerDetailSection.overview
 
     var body: some View {
@@ -111,6 +112,15 @@ struct WorkerDetailSheet: View {
                     )
                 }
             }
+            .sheet(isPresented: $showInboxAudit) {
+                if let worker = viewModel.selectedWorker {
+                    WorkerInboxAuditSheet(
+                        workerId: worker.workerId,
+                        workerNames: [worker.workerId: worker.name],
+                        repository: repository
+                    )
+                }
+            }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
@@ -139,7 +149,8 @@ struct WorkerDetailSheet: View {
             invocation(worker, inspection: inspection, allowsInvocation: true)
         case .activity:
             recentRuns
-            inbox
+            attention
+            inboxAudit
             audit(inspection)
         case .manage:
             versions(worker, inspection: inspection)
@@ -453,22 +464,47 @@ struct WorkerDetailSheet: View {
         }
     }
 
-    private var inbox: some View {
+    private var attention: some View {
         WorkerConsoleSection(
-            title: "Durable inbox",
-            detail: "Worker results and failures retained across reconnects.",
+            title: "Attention",
+            detail: "Failures, system events, and pending background outcomes that merit review.",
             accent: .tronAmber
         ) {
-            if viewModel.inbox.isEmpty {
-                WorkerConsoleInlineEmptyState(symbol: "tray", text: "No durable results are waiting.")
+            if viewModel.attention.isEmpty {
+                WorkerConsoleInlineEmptyState(
+                    symbol: "checkmark.circle",
+                    text: "Nothing needs attention."
+                )
             } else {
                 VStack(spacing: 10) {
-                    ForEach(viewModel.inbox.prefix(20)) { item in
+                    ForEach(viewModel.attention.prefix(20)) { item in
                         WorkerInboxCard(item: item)
                     }
                 }
             }
         }
+    }
+
+    private var inboxAudit: some View {
+        Button { showInboxAudit = true } label: {
+            HStack(spacing: 11) {
+                Image(systemName: "tray.full")
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Open delivery audit")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    Text("Inspect every retained delivery record without duplicating runs here.")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.tronInfo)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .sectionFill(.tronInfo, cornerRadius: 11, subtle: true, interactive: true)
+        }
+        .buttonStyle(.plain)
     }
 
     private func audit(_ inspection: WorkerInspectResultDTO) -> some View {

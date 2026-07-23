@@ -67,6 +67,107 @@ struct WorkerTextDetailSheet: View {
     }
 }
 
+/// Complete delivery ledger retained for audit without duplicating routine
+/// terminal results in the primary Activity timeline.
+struct WorkerInboxAuditSheet: View {
+    let workerId: String?
+    let workerNames: [String: String]
+    let repository: any WorkerKernelRepository
+
+    @State private var items: [WorkerInboxItemDTO] = []
+    @State private var nextOffset: UInt64?
+    @State private var isLoading = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    WorkerConsoleSectionHeader(
+                        title: "Delivery records",
+                        detail: "Complete terminal outcomes and system records. Context status describes later agent-context attachment, not whether you opened this sheet."
+                    )
+                    if let error {
+                        WorkerConsoleErrorBanner(message: error)
+                    }
+                    if items.isEmpty, !isLoading {
+                        WorkerConsoleInlineEmptyState(
+                            symbol: "tray",
+                            text: "No delivery records have been retained."
+                        )
+                    } else {
+                        LazyVStack(spacing: 9) {
+                            ForEach(items) { item in
+                                WorkerInboxCard(
+                                    item: item,
+                                    workerName: workerNames[item.workerId]
+                                )
+                            }
+                        }
+                    }
+                    if isLoading {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .padding(.vertical, 12)
+                    } else if nextOffset != nil {
+                        Button { Task { await load(reset: false) } } label: {
+                            Label("Load older delivery records", systemImage: "clock.arrow.circlepath")
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                        }
+                        .buttonStyle(.plain)
+                        .sectionFill(.tronInfo, cornerRadius: 10, subtle: true, interactive: true)
+                    }
+                }
+                .padding(18)
+            }
+            .scrollContentBackground(.hidden)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: "Delivery Audit", color: .tronInfo)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: .tronInfo)
+                }
+            }
+            .task { await load(reset: true) }
+        }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .tint(.tronInfo)
+    }
+
+    private func load(reset: Bool) async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let page = try await repository.workerInbox(
+                workerId: workerId,
+                limit: 20,
+                offset: reset ? nil : nextOffset,
+                attentionOnly: false
+            )
+            if reset {
+                items = page.items
+            } else {
+                var identifiers = Set(items.map(\.inboxId))
+                items.append(contentsOf: page.items.filter {
+                    identifiers.insert($0.inboxId).inserted
+                })
+            }
+            nextOffset = page.nextOffset
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
 /// Canonical detail destination for a durable worker invocation.
 struct WorkerRunDetailSheet: View {
     let run: WorkerInvocationDTO

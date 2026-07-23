@@ -59,9 +59,10 @@ struct WorkerKernelClientTests {
                 #expect((payload as? WorkerRunsRequestDTO)?.detail == "full")
                 return WorkerRunsResultDTO(runs: [])
             case "worker_kernel::inbox":
-                #expect((payload as? WorkerRunsRequestDTO)?.workerId == "research")
-                #expect((payload as? WorkerRunsRequestDTO)?.offset == 20)
-                #expect((payload as? WorkerRunsRequestDTO)?.detail == "full")
+                #expect((payload as? WorkerInboxRequestDTO)?.workerId == "research")
+                #expect((payload as? WorkerInboxRequestDTO)?.offset == 20)
+                #expect((payload as? WorkerInboxRequestDTO)?.detail == "full")
+                #expect((payload as? WorkerInboxRequestDTO)?.attentionOnly == true)
                 return WorkerInboxResultDTO(items: [])
             default:
                 throw EngineConnectionError.invalidResponse
@@ -71,7 +72,12 @@ struct WorkerKernelClientTests {
         _ = try await client.workers()
         _ = try await client.inspectWorker("research")
         _ = try await client.workerRuns(workerId: "research", limit: 25, offset: 40)
-        _ = try await client.workerInbox(workerId: "research", limit: 10, offset: 20)
+        _ = try await client.workerInbox(
+            workerId: "research",
+            limit: 10,
+            offset: 20,
+            attentionOnly: true
+        )
 
         #expect(functions == [
             "worker_kernel::list",

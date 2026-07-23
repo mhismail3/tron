@@ -77,12 +77,21 @@ pub(super) async fn inbox(invocation: &Invocation, deps: &Deps) -> Result<Value,
     let (limit, request_truncated) = history_limit(invocation, detail);
     let offset = history_offset(invocation);
     let worker_id = invocation.payload.get("workerId").and_then(Value::as_str);
-    let seen = invocation.payload.get("seen").and_then(Value::as_bool);
+    let context_attached = invocation
+        .payload
+        .get("contextAttached")
+        .and_then(Value::as_bool);
+    let attention_only = invocation
+        .payload
+        .get("attentionOnly")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let severity = optional_enum(invocation, "severity", &["info", "error"])?;
     let mut items = deps.runtime.store().inbox_filtered_page(
         worker_id,
-        seen,
+        context_attached,
         severity,
+        attention_only,
         limit.saturating_add(1),
         offset,
     )?;
@@ -121,7 +130,7 @@ pub(super) async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result
         .get("relevanceQuery")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let candidates = deps.runtime.store().unseen_inbox_context_candidates(64)?;
+    let candidates = deps.runtime.store().pending_inbox_context_candidates(64)?;
     if candidates.is_empty() {
         return Ok(json!({"handled":false,"items":[],"narrative":""}));
     }
@@ -145,7 +154,7 @@ pub(super) async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result
         let items = deps
             .runtime
             .store()
-            .take_notable_unseen(Some(query), limit)?;
+            .take_notable_pending(Some(query), limit)?;
         let narrative = deterministic_inbox_context(&items);
         return Ok(json!({"handled":false,"items":items,"narrative":narrative}));
     };
@@ -160,13 +169,13 @@ pub(super) async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result
             .await;
         return Err(reason);
     };
-    let mut seen = BTreeSet::new();
+    let mut selected = BTreeSet::new();
     let mut consumed_ids = Vec::new();
     for inbox_id in consumed {
         let inbox_id = inbox_id.as_str().unwrap_or_default();
         if consumed_ids.len() >= limit as usize
             || !candidate_ids.contains(inbox_id)
-            || !seen.insert(inbox_id)
+            || !selected.insert(inbox_id)
         {
             let reason = deps
                 .runtime
@@ -195,7 +204,7 @@ pub(super) async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result
     let items = deps
         .runtime
         .store()
-        .claim_unseen_inbox_context(&consumed_ids)?;
+        .attach_pending_inbox_context(&consumed_ids)?;
     let narrative = if consumed_ids.is_empty() || items.is_empty() {
         String::new()
     } else {
@@ -216,7 +225,7 @@ fn deterministic_inbox_context(items: &[Value]) -> String {
     }
     let body = serde_json::to_string_pretty(items).unwrap_or_else(|_| "[]".to_owned());
     format!(
-        "Persistent worker inbox updates (durable, previously unseen observations):\n{body}\nUse these results when relevant. Failures are evidence for deliberate improvement, rollback, disablement, or retirement."
+        "Persistent worker inbox updates (durable observations newly attached to this context):\n{body}\nUse these results when relevant. Failures are evidence for deliberate improvement, rollback, disablement, or retirement."
     )
 }
 

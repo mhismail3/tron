@@ -58,6 +58,62 @@ fn prepare_and_publish_is_atomic_and_versioned() {
 }
 
 #[test]
+fn schema_v5_preserves_and_truthfully_renames_inbox_delivery_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let database_dir = temp.path().join("internal/database");
+    std::fs::create_dir_all(&database_dir).unwrap();
+    let database = database_dir.join("workers.sqlite");
+    let connection = Connection::open(&database).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE worker_schema(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+             INSERT INTO worker_schema VALUES(4, 'now');
+             CREATE TABLE worker_inbox (
+                inbox_id TEXT PRIMARY KEY,
+                invocation_id TEXT NOT NULL,
+                worker_id TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                seen INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+             );
+             INSERT INTO worker_inbox VALUES(
+                'inbox-v4','run-v4','worker-v4','info','{}',1,'2026-07-22T00:00:00Z'
+             );",
+        )
+        .unwrap();
+    drop(connection);
+
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let columns = {
+        let connection = store.connection().unwrap();
+        let mut statement = connection
+            .prepare("PRAGMA table_info(worker_inbox)")
+            .unwrap();
+        statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    assert!(columns.contains(&"context_attached".to_owned()));
+    assert!(!columns.contains(&"seen".to_owned()));
+    let retained = store.inbox_filtered(None, Some(true), None, 10).unwrap();
+    assert_eq!(retained.len(), 1);
+    assert_eq!(retained[0]["contextAttached"], true);
+    assert_eq!(
+        store
+            .connection()
+            .unwrap()
+            .query_row("SELECT MAX(version) FROM worker_schema", [], |row| {
+                row.get::<_, u32>(0)
+            })
+            .unwrap(),
+        5
+    );
+}
+
+#[test]
 fn presentation_binding_is_immutable_indexed_and_reconstructed() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
@@ -640,8 +696,27 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
             &json!({"status":"failed","phase":"resident_supervision"}),
         )
         .unwrap();
+    let attention = store
+        .inbox_filtered_page(Some(&outcome.worker.worker_id), None, None, true, 10, 0)
+        .unwrap();
+    assert_eq!(attention.len(), 2);
+    assert!(
+        attention
+            .iter()
+            .all(|item| item["requiresAttention"] == true)
+    );
+    assert!(
+        attention
+            .iter()
+            .any(|item| { item["triggerKind"] == "schedule" && item["hasInvocation"] == true })
+    );
+    assert!(
+        attention
+            .iter()
+            .any(|item| { item["triggerKind"] == "system" && item["hasInvocation"] == false })
+    );
     let first = store
-        .take_notable_unseen(Some("recent research"), 10)
+        .take_notable_pending(Some("recent research"), 10)
         .unwrap();
     assert_eq!(first.len(), 2);
     assert!(first.iter().any(|item| item["triggerKind"] == "schedule"));
@@ -650,7 +725,7 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
     }));
     assert!(
         store
-            .take_notable_unseen(Some("recent research"), 10)
+            .take_notable_pending(Some("recent research"), 10)
             .unwrap()
             .is_empty()
     );
@@ -659,7 +734,7 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
             .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
             .unwrap()
             .iter()
-            .filter(|item| item["seen"] == false)
+            .filter(|item| item["contextAttached"] == false)
             .count(),
         1
     );
@@ -692,27 +767,27 @@ fn inbox_context_candidates_are_bounded_previews_and_claim_atomically() {
         )
         .unwrap();
 
-    let candidates = store.unseen_inbox_context_candidates(64).unwrap();
+    let candidates = store.pending_inbox_context_candidates(64).unwrap();
     assert_eq!(candidates.len(), 1);
     assert!(candidates[0]["resultPreview"].as_str().unwrap().len() <= 4_096);
     let inbox_id = candidates[0]["inboxId"].as_str().unwrap().to_owned();
     assert!(
         store
-            .claim_unseen_inbox_context(&[inbox_id.clone(), "missing".to_owned()])
+            .attach_pending_inbox_context(&[inbox_id.clone(), "missing".to_owned()])
             .unwrap()
             .is_empty()
     );
-    assert_eq!(store.unseen_inbox_context_candidates(64).unwrap().len(), 1);
+    assert_eq!(store.pending_inbox_context_candidates(64).unwrap().len(), 1);
     assert_eq!(
         store
-            .claim_unseen_inbox_context(std::slice::from_ref(&inbox_id))
+            .attach_pending_inbox_context(std::slice::from_ref(&inbox_id))
             .unwrap()
             .len(),
         1
     );
     assert!(
         store
-            .unseen_inbox_context_candidates(64)
+            .pending_inbox_context_candidates(64)
             .unwrap()
             .is_empty()
     );
