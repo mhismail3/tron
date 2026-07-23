@@ -11,6 +11,13 @@
 //! durable session-update projection after the turn's synchronous persistence
 //! calls have committed; it does not rebuild that wire event, retain
 //! session-cache ownership, or duplicate final assistant state.
+//! Successful ordinary user completion also freezes a bounded preview of the
+//! completed exchange, publishes the ready session boundary, and then invokes
+//! the internal worker-owned `session_title` hook while the same prompt task is
+//! still tracked. The hook is skipped for worker-origin sessions, interrupted
+//! or failed turns, and sessions already carrying an explicit title. Its
+//! failure is operational worker evidence and never rewrites a successful
+//! prompt into a failed chat.
 //! Before durable history is reconstructed, prompt admission atomically closes
 //! any terminal prior turn's unmatched tool starts and broadcasts those
 //! row-backed repairs to live clients. A repair failure rejects the prompt

@@ -24,6 +24,7 @@ use response::{open_response, response_schema, worker_id_schema};
 const WORKER: &str = "worker_kernel";
 pub(crate) const ENGINE_SURFACE_SNAPSHOT_FUNCTION: &str = "engine::surface_snapshot";
 pub(crate) const CONTEXT_SUMMARY_FUNCTION: &str = "worker_kernel::context_summary";
+pub(crate) const SESSION_TITLE_FUNCTION: &str = "worker_kernel::session_title";
 pub(crate) const WORKER_RELEVANCE_FUNCTION: &str = "worker_kernel::worker_relevance";
 pub(super) const DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 5;
 pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
@@ -368,6 +369,38 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }))
         .idempotency(IdempotencyContract::session())
         .description("Invoke the active worker-owned context-summary policy, if any. Kernel callers recover with deterministic summarization when no worker handles it.")
+        .build()?,
+    );
+    specs.push(
+        FunctionContract::new(
+            SESSION_TITLE_FUNCTION,
+            WORKER,
+            EffectClass::IdempotentWrite,
+            RiskLevel::Medium)
+        .visibility(FunctionVisibility::Internal)
+        .request_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["userPrompt","assistantResponse"],
+            "properties":{
+                "userPrompt":{"type":"string","maxLength":4096},
+                "assistantResponse":{"type":"string","maxLength":4096}
+            }
+        }))
+        .response_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["handled","updated"],
+            "properties":{
+                "handled":{"type":"boolean"},
+                "updated":{"type":"boolean"},
+                "workerId":{"type":"string"},
+                "workerVersion":{"type":"string"},
+                "title":{"type":"string","minLength":1,"maxLength":160}
+            }
+        }))
+        .idempotency(IdempotencyContract::session())
+        .description("Name an untitled ordinary user session through the active worker-owned title policy after its first successful exchange. Explicit titles and worker audit sessions are never eligible.")
         .build()?,
     );
     specs.push(

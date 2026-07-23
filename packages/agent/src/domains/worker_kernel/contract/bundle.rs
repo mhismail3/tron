@@ -182,8 +182,8 @@ pub(super) fn worker_bundle_schema() -> Value {
             "engineHooks":{
                 "type":"array",
                 "uniqueItems":true,
-                "description":"Optional semantic engine roles activated atomically with this version. No separate binding or grant is required. context_summary maps bounded visible messages to {narrative}; inbox_context consumes bounded pending results into transient context; worker_relevance maps a task query and bounded candidate summaries to typed rankings.",
-                "items":{"type":"string","enum":["context_summary","inbox_context","worker_relevance"]}
+                "description":"Optional semantic engine roles activated atomically with this version. No separate binding or grant is required. context_summary maps bounded visible messages to {narrative}; inbox_context consumes bounded pending results into transient context; session_title maps the first completed user exchange of an untitled session to {title}; worker_relevance maps a task query and bounded candidate summaries to typed rankings.",
+                "items":{"type":"string","enum":["context_summary","inbox_context","session_title","worker_relevance"]}
             },
             "provenance":{
                 "type":"array","minItems":1,

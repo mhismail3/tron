@@ -232,6 +232,30 @@ fn update_session_title() {
 }
 
 #[test]
+fn automatic_session_title_never_overwrites_an_explicit_title() {
+    let store = setup();
+    let cr = store
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
+        .unwrap();
+
+    assert!(
+        store
+            .set_session_title_if_untitled(&cr.session.id, "Generated")
+            .unwrap()
+    );
+    store
+        .update_session_title(&cr.session.id, Some("Manual"))
+        .unwrap();
+    assert!(
+        !store
+            .set_session_title_if_untitled(&cr.session.id, "Stale Generated")
+            .unwrap()
+    );
+    let session = store.get_session(&cr.session.id).unwrap().unwrap();
+    assert_eq!(session.title.as_deref(), Some("Manual"));
+}
+
+#[test]
 fn delete_session_cascade() {
     let store = setup();
     let cr = store

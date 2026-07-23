@@ -90,6 +90,10 @@ pub(super) async fn context_summary(invocation: &Invocation, deps: &Deps) -> Res
         .await
 }
 
+pub(super) async fn session_title(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
+    deps.runtime.apply_session_title_hook(invocation).await
+}
+
 pub(super) async fn worker_relevance(
     invocation: &Invocation,
     deps: &Deps,

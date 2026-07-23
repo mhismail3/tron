@@ -478,6 +478,19 @@ fn update_title() {
 }
 
 #[test]
+fn set_title_if_untitled_is_compare_and_set() {
+    let (conn, ws_id) = setup();
+    let sess = create_default_session(&conn, &ws_id);
+
+    SessionRepo::update_title(&conn, &sess.id, Some(" \t\n\r ")).unwrap();
+    assert!(SessionRepo::set_title_if_untitled(&conn, &sess.id, "Generated").unwrap());
+    assert!(!SessionRepo::set_title_if_untitled(&conn, &sess.id, "Too Late").unwrap());
+
+    let found = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
+    assert_eq!(found.title.as_deref(), Some("Generated"));
+}
+
+#[test]
 fn increment_counters() {
     let (conn, ws_id) = setup();
     let sess = create_default_session(&conn, &ws_id);

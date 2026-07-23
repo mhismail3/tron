@@ -88,6 +88,7 @@ pub struct WorkerPresentation {
 pub enum WorkerEngineHook {
     ContextSummary,
     InboxContext,
+    SessionTitle,
     WorkerRelevance,
 }
 
@@ -96,6 +97,7 @@ impl WorkerEngineHook {
         &[
             Self::ContextSummary,
             Self::InboxContext,
+            Self::SessionTitle,
             Self::WorkerRelevance,
         ]
     }
@@ -104,6 +106,7 @@ impl WorkerEngineHook {
         match self {
             Self::ContextSummary => "context_summary",
             Self::InboxContext => "inbox_context",
+            Self::SessionTitle => "session_title",
             Self::WorkerRelevance => "worker_relevance",
         }
     }

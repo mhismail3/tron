@@ -91,10 +91,19 @@
 //! run and delivery audit history but are excluded from active Attention and
 //! future agent-context candidates.
 //! The Engine Dashboard exposes active hook ownership. `context_summary`,
-//! `inbox_context`, and `worker_relevance` are production hooks. Each retains a
-//! narrow deterministic recovery path in the kernel so compaction, background
+//! `inbox_context`, `session_title`, and `worker_relevance` are production
+//! hooks. Context summary, inbox context, and worker relevance retain narrow
+//! deterministic recovery paths in the kernel so compaction, background
 //! context, and tool projection cannot depend recursively on their own policy
-//! worker.
+//! worker. Session naming instead remains absent until a real worker owns it;
+//! an unavailable title policy leaves the completed session untitled.
+//! Synchronous hook calls have a sixty-second policy ceiling. A timed-out hook
+//! is cancelled and its owner is disabled through the ordinary worker-failure
+//! path rather than holding an engine lifecycle boundary for the general
+//! invocation maximum.
+//! Successful hook results remain in the durable inbox as already-consumed
+//! audit evidence because their engine caller used them synchronously. Hook
+//! failures remain pending Attention and can enter later relevant context.
 //! The authenticated `engine::surface_snapshot` read returns the selected
 //! surface revision/hash/counts, every published worker's projection status,
 //! the complete fixed-tool inventory, and canonical engine worker summaries;
@@ -153,12 +162,17 @@
 //! 20,000 walked entries, skips hidden/heavy child trees unless requested, and
 //! reports every truncation cause. An agent abort or server shutdown therefore
 //! cannot be held indefinitely by a home-directory search.
-//! The fixed `session_set_title` operation owns only durable mutation and live
-//! projection. Its only input is the title; the target is always the current
-//! causal session, so models cannot invent a synthetic "current" identifier or
-//! mutate an unrelated session. Title generation, eligibility,
-//! prompting, and normalization are worker policy and do not run implicitly in
-//! the agent prompt lifecycle.
+//! The fixed `session_set_title` operation owns only explicit durable mutation
+//! and live projection. Its only input is the title; the target is always the
+//! current causal session, so models cannot invent a synthetic "current"
+//! identifier or mutate an unrelated session. After each successful ordinary
+//! user exchange, prompt completion freezes bounded user/assistant text and
+//! invokes the active `session_title` worker only while the session remains
+//! untitled. Worker audit sessions and unsuccessful/interrupted turns are
+//! ineligible. The worker can propose only `{title}`; a storage-level
+//! compare-and-set prevents delayed policy output from overwriting an explicit
+//! concurrent title. Title-policy failure remains visible through normal worker
+//! health/inbox evidence without changing the already-completed chat outcome.
 //! Raw web fetches default to 128 KiB and 30 seconds, expose explicit larger
 //! ceilings, and hash the retained bytes. HTML interpretation, crawling, and
 //! evidence policy remain worker behavior rather than growing the primitive.
@@ -285,7 +299,9 @@ pub(crate) fn restore_profile_snapshot(
     persistence::restore_profile_snapshot(path, &crate::shared::foundation::paths::tron_home())
 }
 
-pub(crate) use contract::{CONTEXT_SUMMARY_FUNCTION, WORKER_RELEVANCE_FUNCTION};
+pub(crate) use contract::{
+    CONTEXT_SUMMARY_FUNCTION, SESSION_TITLE_FUNCTION, WORKER_RELEVANCE_FUNCTION,
+};
 
 pub(crate) use runtime::WorkerRuntime;
 #[cfg(test)]

@@ -790,6 +790,91 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
 }
 
 #[test]
+fn successful_engine_hook_results_are_audited_without_reentering_context() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let outcome = store.publish(prepared).unwrap();
+
+    for (key, trigger, result) in [
+        (
+            "hook-success",
+            "engine_hook:session_title",
+            Ok(json!({"title":"A Durable Session Title"})),
+        ),
+        (
+            "hook-failure",
+            "engine_hook:session_title",
+            Err("title policy failed"),
+        ),
+        (
+            "scheduled-success",
+            "schedule",
+            Ok(json!({"status":"completed"})),
+        ),
+    ] {
+        let (run, _) = store
+            .begin_invocation(
+                &outcome.worker.worker_id,
+                &outcome.version,
+                &json!({}),
+                key,
+                &format!("trace-{key}"),
+                0,
+                trigger,
+                None,
+            )
+            .unwrap();
+        assert!(store.claim_running(&run.invocation_id).unwrap());
+        match result {
+            Ok(output) => {
+                store
+                    .complete_invocation(&run.invocation_id, &outcome.worker.worker_id, Ok(&output))
+                    .unwrap();
+            }
+            Err(error) => {
+                store
+                    .complete_invocation(&run.invocation_id, &outcome.worker.worker_id, Err(error))
+                    .unwrap();
+            }
+        }
+    }
+
+    let inbox = store
+        .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
+        .unwrap();
+    assert_eq!(inbox.len(), 3);
+    let successful_hook = inbox
+        .iter()
+        .find(|item| {
+            item["triggerKind"] == "engine_hook:session_title" && item["severity"] == "info"
+        })
+        .unwrap();
+    assert_eq!(successful_hook["contextAttached"], true);
+    assert_eq!(successful_hook["requiresAttention"], false);
+
+    let failed_hook = inbox
+        .iter()
+        .find(|item| {
+            item["triggerKind"] == "engine_hook:session_title" && item["severity"] == "error"
+        })
+        .unwrap();
+    assert_eq!(failed_hook["contextAttached"], false);
+    assert_eq!(failed_hook["requiresAttention"], true);
+
+    let pending = store.pending_inbox_context_candidates(10).unwrap();
+    assert_eq!(pending.len(), 2);
+    assert!(pending.iter().any(|item| {
+        item["triggerKind"] == "engine_hook:session_title" && item["severity"] == "error"
+    }));
+    assert!(pending.iter().any(|item| item["triggerKind"] == "schedule"));
+    assert!(!pending.iter().any(|item| {
+        item["triggerKind"] == "engine_hook:session_title" && item["severity"] == "info"
+    }));
+}
+
+#[test]
 fn verified_recovery_resolves_invocation_errors_without_erasing_history() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();

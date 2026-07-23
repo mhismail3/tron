@@ -1,6 +1,51 @@
 use super::*;
 use crate::shared::protocol::events::TronEvent;
 
+fn session_title_bundle(worker_id: &str, command_output: Value) -> WorkerBundle {
+    let mut bundle = command_bundle(vec![
+        "printf".to_owned(),
+        serde_json::to_string(&command_output).unwrap(),
+    ]);
+    bundle.worker_id = Some(worker_id.to_owned());
+    bundle.name = "Session Title".to_owned();
+    bundle.description = "Names an untitled ordinary session after its first exchange".to_owned();
+    bundle.tool_name = Some(format!("worker_{worker_id}"));
+    bundle.input_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["userPrompt","assistantResponse"],
+        "properties":{
+            "userPrompt":{"type":"string","maxLength":4096},
+            "assistantResponse":{"type":"string","maxLength":4096}
+        }
+    });
+    bundle.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["title"],
+        "properties":{"title":{"type":"string","minLength":1,"maxLength":160}}
+    });
+    bundle.engine_hooks = vec![WorkerEngineHook::SessionTitle];
+    bundle
+}
+
+fn session_title_invocation(session_id: &str, key: &str) -> Invocation {
+    Invocation::new_sync(
+        FunctionId::new(super::super::super::SESSION_TITLE_FUNCTION).unwrap(),
+        json!({
+            "userPrompt":"Build a reliable work ledger.",
+            "assistantResponse":"I created and verified the worker."
+        }),
+        CausalContext::new(
+            ActorId::new("system:session-title-test").unwrap(),
+            ActorKind::System,
+            TraceId::new(format!("trace-{key}")).unwrap(),
+        )
+        .with_session_id(session_id)
+        .with_idempotency_key(key),
+    )
+}
+
 #[tokio::test]
 async fn session_title_actuator_persists_and_broadcasts_explicit_metadata() {
     let (runtime, _home) = test_runtime(None);
@@ -35,4 +80,195 @@ async fn session_title_actuator_persists_and_broadcasts_explicit_metadata() {
         TronEvent::SessionUpdated { title: Some(title), .. }
             if title == "Durable Worker Title"
     ));
+}
+
+#[tokio::test]
+async fn session_title_hook_names_the_original_untitled_session_once() {
+    let (runtime, _home) = test_runtime(None);
+    let worker = runtime
+        .upsert(
+            session_title_bundle(
+                "session-title-policy",
+                json!({"title":"Build a Reliable Work Ledger"}),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let session = runtime
+        .event_store
+        .create_session("mock", "/tmp", None, None)
+        .unwrap()
+        .session;
+
+    let first = runtime
+        .apply_session_title_hook(&session_title_invocation(&session.id, "title-first"))
+        .await
+        .unwrap();
+    assert_eq!(first["handled"], true);
+    assert_eq!(first["updated"], true);
+    assert_eq!(first["workerId"], worker.worker.worker_id);
+    assert_eq!(first["title"], "Build a Reliable Work Ledger");
+    assert_eq!(
+        runtime
+            .event_store
+            .get_session(&session.id)
+            .unwrap()
+            .unwrap()
+            .title
+            .as_deref(),
+        Some("Build a Reliable Work Ledger")
+    );
+
+    let second = runtime
+        .apply_session_title_hook(&session_title_invocation(&session.id, "title-second"))
+        .await
+        .unwrap();
+    assert_eq!(second, json!({"handled":false,"updated":false}));
+    assert_eq!(
+        runtime
+            .store()
+            .runs_filtered(Some("session-title-policy"), None, 10)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn absent_session_title_policy_leaves_the_session_untitled() {
+    let (runtime, _home) = test_runtime(None);
+    let session = runtime
+        .event_store
+        .create_session("mock", "/tmp", None, None)
+        .unwrap()
+        .session;
+
+    let result = runtime
+        .apply_session_title_hook(&session_title_invocation(&session.id, "title-absent"))
+        .await
+        .unwrap();
+
+    assert_eq!(result, json!({"handled":false,"updated":false}));
+    assert!(
+        runtime
+            .event_store
+            .get_session(&session.id)
+            .unwrap()
+            .unwrap()
+            .title
+            .is_none()
+    );
+    assert!(
+        runtime
+            .store()
+            .runs_filtered(None, None, 10)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn session_title_hook_preserves_explicit_and_worker_session_titles() {
+    let (runtime, _home) = test_runtime(None);
+    runtime
+        .upsert(
+            session_title_bundle(
+                "session-title-policy",
+                json!({"title":"Must Not Be Applied"}),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let explicit = runtime
+        .event_store
+        .create_session("mock", "/tmp", Some("Explicit"), None)
+        .unwrap()
+        .session;
+    let worker_session = runtime
+        .event_store
+        .create_worker_session("mock", "/tmp", None, None)
+        .unwrap()
+        .session;
+
+    for (session_id, key) in [
+        (explicit.id.as_str(), "title-explicit"),
+        (worker_session.id.as_str(), "title-worker"),
+    ] {
+        assert_eq!(
+            runtime
+                .apply_session_title_hook(&session_title_invocation(session_id, key))
+                .await
+                .unwrap(),
+            json!({"handled":false,"updated":false})
+        );
+    }
+    assert_eq!(
+        runtime
+            .event_store
+            .get_session(&explicit.id)
+            .unwrap()
+            .unwrap()
+            .title
+            .as_deref(),
+        Some("Explicit")
+    );
+    assert!(
+        runtime
+            .event_store
+            .get_session(&worker_session.id)
+            .unwrap()
+            .unwrap()
+            .title
+            .is_none()
+    );
+    assert!(
+        runtime
+            .store()
+            .runs_filtered(Some("session-title-policy"), None, 10)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn invalid_session_title_policy_output_is_rejected_without_mutating_the_session() {
+    let (runtime, _home) = test_runtime(None);
+    runtime
+        .upsert(
+            session_title_bundle("session-title-policy", json!({"title":"   "})),
+            None,
+        )
+        .await
+        .unwrap();
+    let session = runtime
+        .event_store
+        .create_session("mock", "/tmp", None, None)
+        .unwrap()
+        .session;
+
+    let error = runtime
+        .apply_session_title_hook(&session_title_invocation(&session.id, "title-invalid"))
+        .await
+        .unwrap_err();
+
+    assert!(error.contains("session_title"));
+    assert!(error.contains("1 to 160 characters"));
+    assert!(
+        runtime
+            .event_store
+            .get_session(&session.id)
+            .unwrap()
+            .unwrap()
+            .title
+            .is_none()
+    );
+    let summary = runtime
+        .store()
+        .summary("session-title-policy")
+        .unwrap()
+        .unwrap();
+    assert!(!summary.enabled);
+    assert_eq!(summary.health, "failed");
 }

@@ -9,7 +9,10 @@ use super::{
     PromptEngineCausality, PromptRunCleanup, load_session_update_event,
     publish_prompt_runtime_stream,
 };
+use crate::domains::agent::r#loop::errors::StopReason;
+use crate::engine::{ActorId, ActorKind, CausalContext, FunctionId, Invocation, TraceId};
 use crate::shared::protocol::events::{BaseEvent, TronEvent, error_event};
+use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::failure::{
     FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_RUN_ERROR,
 };
@@ -25,6 +28,7 @@ pub(super) struct PromptRunCompletion<'a> {
     pub(super) run_id: String,
     pub(super) provider_type: String,
     pub(super) model_for_error: String,
+    pub(super) prompt: String,
     pub(super) sequence_counter: Option<Arc<AtomicI64>>,
 }
 
@@ -40,6 +44,7 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         run_id,
         provider_type,
         model_for_error,
+        prompt,
         sequence_counter,
     } = args;
 
@@ -60,6 +65,16 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
     // error/idle/ready events and matching run release then share one registry
     // boundary, so event-triggered prompt admission cannot observe SessionBusy
     // and no old terminal event can race a replacement run.
+    let title_exchange = load_title_exchange_if_eligible(
+        &result,
+        engine_causality
+            .as_ref()
+            .and_then(|causality| causality.context.origin_worker_id()),
+        event_store.clone(),
+        &session_id,
+        prompt,
+    )
+    .await;
     emit_session_update(
         &event_store,
         &broadcast,
@@ -104,6 +119,143 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         }),
     )
     .await;
+    if let Some((user_prompt, assistant_response)) = title_exchange {
+        invoke_session_title_hook(
+            &engine_host,
+            engine_causality.as_ref(),
+            &session_id,
+            &run_id,
+            user_prompt,
+            assistant_response,
+        )
+        .await;
+    }
+}
+
+fn title_hook_is_eligible(
+    result: &crate::domains::agent::r#loop::types::RunResult,
+    origin_worker_id: Option<&str>,
+) -> bool {
+    result.error.is_none()
+        && !result.interrupted
+        && matches!(
+            result.stop_reason,
+            StopReason::EndTurn | StopReason::NoToolInvocationDrafts
+        )
+        && origin_worker_id.is_none()
+}
+
+async fn load_title_exchange_if_eligible(
+    result: &crate::domains::agent::r#loop::types::RunResult,
+    origin_worker_id: Option<&str>,
+    event_store: Arc<crate::domains::session::event_store::EventStore>,
+    session_id: &str,
+    user_prompt: String,
+) -> Option<(String, String)> {
+    if !title_hook_is_eligible(result, origin_worker_id) {
+        return None;
+    }
+    let preview_session_id = session_id.to_owned();
+    let assistant_response = run_blocking_task("agent.prompt.session_title_preview", move || {
+        let Some(session) = event_store
+            .get_session(&preview_session_id)
+            .map_err(|error| crate::shared::server::errors::ToolError::Internal {
+                message: error.to_string(),
+            })?
+        else {
+            return Ok(None);
+        };
+        if session.is_worker_session()
+            || session
+                .title
+                .as_deref()
+                .is_some_and(|title| !title.trim().is_empty())
+        {
+            return Ok(None);
+        }
+        let session_ids = [preview_session_id.as_str()];
+        event_store
+            .get_session_message_previews(&session_ids)
+            .map(|mut previews| {
+                Some(
+                    previews
+                        .remove(&preview_session_id)
+                        .and_then(|preview| preview.last_assistant_response)
+                        .unwrap_or_default(),
+                )
+            })
+            .map_err(|error| crate::shared::server::errors::ToolError::Internal {
+                message: error.to_string(),
+            })
+    })
+    .await;
+    let assistant_response = match assistant_response {
+        Ok(Some(assistant_response)) => assistant_response,
+        Ok(None) => return None,
+        Err(error) => {
+            warn!(
+                session_id,
+                error = %error,
+                "failed to load assistant preview for automatic session title"
+            );
+            return None;
+        }
+    };
+    Some((
+        truncate_title_context(&user_prompt),
+        truncate_title_context(&assistant_response),
+    ))
+}
+
+async fn invoke_session_title_hook(
+    engine_host: &crate::engine::EngineHostHandle,
+    engine_causality: Option<&PromptEngineCausality>,
+    session_id: &str,
+    run_id: &str,
+    user_prompt: String,
+    assistant_response: String,
+) {
+    let Ok(actor_id) = ActorId::new("system:session-title") else {
+        return;
+    };
+    let trace_id = engine_causality
+        .map(|causality| causality.context.trace_id.clone())
+        .unwrap_or_else(TraceId::generate);
+    let mut causal = CausalContext::new(actor_id, ActorKind::System, trace_id)
+        .with_session_id(session_id.to_owned())
+        .with_trigger_depth(
+            engine_causality.map_or(0, |causality| causality.context.trigger_depth()),
+        )
+        .with_idempotency_key(format!("session-title:{session_id}:{run_id}"));
+    if let Some(parent) = engine_causality.map(|causality| causality.invocation_id.clone()) {
+        causal = causal.with_parent_invocation(parent);
+    }
+    let Ok(function_id) = FunctionId::new(crate::domains::worker_kernel::SESSION_TITLE_FUNCTION)
+    else {
+        return;
+    };
+    let outcome = engine_host
+        .invoke(Invocation::new_sync(
+            function_id,
+            serde_json::json!({
+                "userPrompt":user_prompt,
+                "assistantResponse":assistant_response,
+            }),
+            causal,
+        ))
+        .await;
+    if let Some(error) = outcome.error {
+        warn!(
+            session_id,
+            run_id,
+            error = %error,
+            "automatic session-title worker failed after successful prompt completion"
+        );
+    }
+}
+
+fn truncate_title_context(value: &str) -> String {
+    value.chars().take(4_096).collect()
 }
 
 pub(super) fn publish_terminal_lifecycle(
@@ -242,5 +394,32 @@ mod tests {
             received.iter().map(TronEvent::sequence).collect::<Vec<_>>(),
             vec![Some(11), Some(12), Some(13), Some(14)]
         );
+    }
+
+    #[test]
+    fn session_title_hook_runs_only_after_successful_ordinary_user_completion() {
+        let success = crate::domains::agent::r#loop::types::RunResult::default();
+        assert!(title_hook_is_eligible(&success, None));
+        assert!(!title_hook_is_eligible(&success, Some("worker-a")));
+
+        let mut interrupted = success.clone();
+        interrupted.interrupted = true;
+        assert!(!title_hook_is_eligible(&interrupted, None));
+
+        let mut failed = success.clone();
+        failed.error = Some("provider failed".to_owned());
+        assert!(!title_hook_is_eligible(&failed, None));
+
+        let mut exhausted = success;
+        exhausted.stop_reason = StopReason::MaxTurns;
+        assert!(!title_hook_is_eligible(&exhausted, None));
+    }
+
+    #[test]
+    fn session_title_context_is_unicode_safe_and_bounded() {
+        let input = "🦌".repeat(5_000);
+        let projected = truncate_title_context(&input);
+        assert_eq!(projected.chars().count(), 4_096);
+        assert!(projected.chars().all(|character| character == '🦌'));
     }
 }

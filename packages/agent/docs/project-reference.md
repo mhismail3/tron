@@ -1,6 +1,6 @@
 # Tron Worker-First Technical Reference
 
-> Last verified: 2026-07-21 on the worker-first POC branch.
+> Last verified: 2026-07-23 on the worker-first POC branch.
 
 This document describes the active worker-first implementation.
 
@@ -107,12 +107,12 @@ A fixed model tool is admitted only when it passes one of two tests:
    publication, and closed evidence. `web_fetch` adds URL validation, response
    ceilings, retained-content checksums, and source provenance. Its default is
    intentionally context-safe rather than the maximum supported response.
-   `session_set_title` is the narrow durable session-metadata actuator needed
-   for workers to replace hardcoded title policy; it derives the current target
-   from causal context unless an explicit session is named. These are ergonomic
-   or state-custody primitives, not new semantic product policy.
+   `session_set_title` is the narrow explicit session-metadata actuator needed
+   by workers; it accepts only a title and always derives the target from causal
+   context. These are ergonomic or state-custody primitives, not new semantic
+   product policy.
 
-This admits the current 8/16/4 grouping without pretending the smallest
+This admits the current 8/17/4 grouping without pretending the smallest
 possible tool count is the objective. It rejects fixed web search providers,
 transcription, memory policy, notifications, repository workflows, content
 analysis, and other task semantics: those belong in workers. The deterministic
@@ -166,6 +166,25 @@ owner—or while the owner resolves its own agent-runner turn—the exact
 error/relevance selector and JSON projection provide deterministic recovery.
 Candidate reads never mark observations attached, invalid selections disable the
 hook owner, and a lost concurrent claim injects no stale narrative.
+
+The `session_title` hook receives only the bounded user prompt and assistant
+response from one successfully completed ordinary user exchange and returns
+`{title}`. Prompt completion invokes it automatically after the canonical
+ready/session update boundary, but within the same tracked prompt task. It
+never runs for hidden worker audit sessions, failed or interrupted turns, or a
+session that already has a nonblank title. The kernel trims and bounds the
+proposal and commits it with a SQLite compare-and-set that still requires the
+title to be null or blank, so a delayed worker result cannot overwrite a
+concurrent explicit title. There is intentionally no deterministic generated
+fallback: until a healthy real worker owns this hook, the session remains
+untitled. Hook failure disables the owner and enters ordinary run/inbox
+evidence without changing the completed user turn.
+
+All synchronous semantic hooks have a sixty-second lifecycle ceiling. Timeout
+cancels the invocation and disables the hook owner through the same failure
+path as any other post-activation worker error; it cannot hold compaction,
+provider-surface resolution, inbox attachment, or prompt completion for the
+general two-hour worker maximum.
 
 ## Worker-First Execution
 
@@ -481,7 +500,10 @@ Successful and failed results enter the durable inbox and emit
 to the next relevant model turn once. High-visibility system failures such as
 tool activation, trigger materialization, and resident supervision participate
 in the same one-time attachment path even though they have no invocation row;
-manual results remain explicitly inspectable.
+manual results remain explicitly inspectable. A successful semantic engine hook
+is consumed by the engine boundary that invoked it, so its immutable inbox row
+is created with `contextAttached=true` and cannot later reappear as unrelated
+background context. Hook failures remain unattached Attention until resolved.
 
 `worker_runs` and `worker_inbox` return compact observations by default: pages
 contain at most 20 records, with inputs, outputs, and results represented by
@@ -1379,9 +1401,11 @@ these bullets as one tool apiece.
 
 #### User workflows
 
-- **Session organization:** derive useful session titles and any later grouping,
-  labeling, or archival policy from real conversation context. The kernel
-  retains only the narrow durable `session_set_title` actuator.
+- **Session organization:** the kernel now guarantees automatic invocation of
+  a `session_title` worker after eligible completed exchanges and retains the
+  narrow explicit `session_set_title` actuator plus compare-and-set custody.
+  The actual title policy worker, and later grouping, labeling, or archival
+  policy, must still be authored and improved through real conversation use.
 - **Goals:** create, list, inspect, update, complete, and cancel durable goals;
   connect goal state to real worker runs and session outcomes.
 - **Questions:** create, list, inspect, answer, and resolve durable questions;

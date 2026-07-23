@@ -7,6 +7,8 @@
 
 use super::*;
 
+const MAX_ENGINE_HOOK_SECONDS: u64 = 60;
+
 pub(crate) struct EngineHookExecution {
     pub(crate) worker_id: String,
     pub(crate) worker_version: String,
@@ -96,14 +98,23 @@ impl WorkerRuntime {
         let (record, timed_out) = self
             .await_invocation(
                 &queued.invocation_id,
-                Duration::from_secs(MAX_INVOCATION_SECONDS),
+                Duration::from_secs(MAX_ENGINE_HOOK_SECONDS),
             )
             .await?;
         if timed_out {
-            return Err(format!(
-                "engine hook '{}' exceeded the invocation ceiling",
-                hook.as_str()
-            ));
+            let _ = self.cancel_invocation(&queued.invocation_id).await;
+            let reason = self
+                .handle_worker_runtime_failure(
+                    &worker.summary.worker_id,
+                    &worker.summary.active_version,
+                    "engine_hook",
+                    &format!(
+                        "engine hook '{}' exceeded its {MAX_ENGINE_HOOK_SECONDS}-second policy ceiling",
+                        hook.as_str()
+                    ),
+                )
+                .await;
+            return Err(reason);
         }
         if record.status != "completed" {
             return Err(record

@@ -71,6 +71,9 @@
 //!   sets session-row `ended_at`, message deletion appends `message.deleted`,
 //!   and physical event cleanup happens only when the owning session is
 //!   explicitly deleted.
+//! - Asynchronous worker-owned session naming uses a storage-level
+//!   compare-and-set that updates only a null or blank title, so a delayed
+//!   policy result cannot overwrite an explicit concurrent user/model title.
 //!
 //! ## Test Ownership
 //!

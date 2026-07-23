@@ -22,6 +22,22 @@ const UNRESOLVED_INBOX_ERROR_SQL: &str = "
     )
 ";
 
+// INVARIANT: a successful engine hook is synchronously consumed by the engine
+// boundary that invoked it. Its inbox row remains immutable audit evidence, but
+// it is born attached so the same policy output cannot later surface as
+// unrelated background context. Hook failures remain pending Attention.
+const COMPLETED_ENGINE_HOOK_CONTEXT_ATTACHED_SQL: &str = "
+    CASE
+        WHEN ?4='info'
+         AND COALESCE(
+            (SELECT trigger_kind FROM worker_invocations WHERE invocation_id=?2),
+            ''
+         ) LIKE 'engine_hook:%'
+        THEN 1
+        ELSE 0
+    END
+";
+
 fn inbox_context_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let result_json = row.get::<_, String>(4)?;
     Ok(json!({
@@ -240,8 +256,12 @@ impl WorkerStore {
         )
         .map_err(|error| format!("complete worker delivery attempt: {error}"))?;
         tx.execute(
-            "INSERT INTO worker_inbox(inbox_id,invocation_id,worker_id,severity,result_json,created_at)
-             VALUES (?1,?2,?3,?4,?5,?6)",
+            &format!(
+                "INSERT INTO worker_inbox(
+                    inbox_id,invocation_id,worker_id,severity,result_json,context_attached,created_at
+                 )
+                 VALUES (?1,?2,?3,?4,?5,{COMPLETED_ENGINE_HOOK_CONTEXT_ATTACHED_SQL},?6)"
+            ),
             params![
                 format!("worker_inbox_{}", uuid::Uuid::now_v7()),
                 invocation_id,

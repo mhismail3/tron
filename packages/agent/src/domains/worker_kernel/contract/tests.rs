@@ -150,7 +150,12 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
     assert!(command_description.contains("python3"));
     assert_eq!(
         bundle["properties"]["engineHooks"]["items"]["enum"],
-        json!(["context_summary", "inbox_context", "worker_relevance"])
+        json!([
+            "context_summary",
+            "inbox_context",
+            "session_title",
+            "worker_relevance"
+        ])
     );
     assert!(
         bundle["properties"]["dependencies"]["items"]["properties"]["source"]["description"]
@@ -172,6 +177,25 @@ fn context_summary_is_an_internal_worker_seam_not_a_model_primitive() {
         core_primitives()
             .iter()
             .all(|primitive| primitive.function_id != CONTEXT_SUMMARY_FUNCTION)
+    );
+}
+
+#[test]
+fn session_title_is_an_internal_automatic_hook_not_a_model_primitive() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let hook = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == SESSION_TITLE_FUNCTION)
+        .expect("session title hook contract");
+    assert_eq!(hook.visibility, FunctionVisibility::Internal);
+    assert_eq!(
+        hook.request_schema.as_ref().expect("request schema")["required"],
+        json!(["userPrompt", "assistantResponse"])
+    );
+    assert!(
+        core_primitives()
+            .iter()
+            .all(|primitive| primitive.function_id != SESSION_TITLE_FUNCTION)
     );
 }
 

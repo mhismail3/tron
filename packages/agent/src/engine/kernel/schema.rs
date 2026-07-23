@@ -203,17 +203,28 @@ fn validate_schema_node(
         ));
     }
 
-    if let Some(min_length) = object.get("minLength") {
-        match min_length.as_u64() {
-            Some(_) => {}
-            None => {
-                return Err(invalid_schema(
-                    function_id,
-                    direction,
-                    format!("{path}.minLength must be a non-negative integer"),
-                ));
-            }
+    for keyword in ["minLength", "maxLength"] {
+        if object
+            .get(keyword)
+            .is_some_and(|value| value.as_u64().is_none())
+        {
+            return Err(invalid_schema(
+                function_id,
+                direction,
+                format!("{path}.{keyword} must be a non-negative integer"),
+            ));
         }
+    }
+    if let (Some(min_length), Some(max_length)) = (
+        object.get("minLength").and_then(Value::as_u64),
+        object.get("maxLength").and_then(Value::as_u64),
+    ) && min_length > max_length
+    {
+        return Err(invalid_schema(
+            function_id,
+            direction,
+            format!("{path}.minLength must not exceed maxLength"),
+        ));
     }
 
     if let Some(pattern) = object.get("pattern") {
@@ -419,6 +430,17 @@ fn validate_payload_node(
             direction,
             path,
             format!("string shorter than minLength {min_length}"),
+        ));
+    }
+    if let Some(max_length) = object.get("maxLength").and_then(Value::as_u64)
+        && let Some(text) = payload.as_str()
+        && text.chars().count() > max_length as usize
+    {
+        return Err(schema_violation(
+            function_id,
+            direction,
+            path,
+            format!("string longer than maxLength {max_length}"),
         ));
     }
 
@@ -706,6 +728,32 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("minLength must be a non-negative integer")
+        );
+    }
+
+    #[test]
+    fn max_length_is_definition_validated_and_enforced_by_character_count() {
+        let schema = json!({"type":"string","minLength":1,"maxLength":3});
+
+        validate_payload(&function_id(), "request", &schema, &json!("é日a")).unwrap();
+        let error =
+            validate_payload(&function_id(), "request", &schema, &json!("é日ab")).unwrap_err();
+        assert!(error.to_string().contains("maxLength 3"));
+
+        let invalid = json!({"type":"string","maxLength":"3"});
+        let error = validate_schema_definition(&function_id(), "request", &invalid).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("maxLength must be a non-negative integer")
+        );
+
+        let inverted = json!({"type":"string","minLength":4,"maxLength":3});
+        let error = validate_schema_definition(&function_id(), "request", &inverted).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("minLength must not exceed maxLength")
         );
     }
 

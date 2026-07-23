@@ -71,6 +71,7 @@ operation_bindings! {
         "webhook_rotate" => |invocation, deps| { support::response(invocation, webhook::rotate_webhook(invocation, deps).await) },
         "stop_all" => |invocation, deps| { support::response(invocation, invocation::stop_all(invocation, deps).await) },
         "context_summary" => |invocation, deps| { support::response(invocation, core::context_summary(invocation, deps).await) },
+        "session_title" => |invocation, deps| { support::response(invocation, core::session_title(invocation, deps).await) },
         "worker_relevance" => |invocation, deps| { support::response(invocation, core::worker_relevance(invocation, deps).await) },
         "surface_snapshot" => |invocation, deps| { support::response(invocation, core::engine_surface_snapshot(invocation, deps).await) },
         "webhook_invoke" => |invocation, deps| { support::response(invocation, webhook::webhook(invocation, deps).await) },

@@ -259,6 +259,22 @@ fn validate_engine_hook_contract(
                 json!({"consumedInboxIds":[],"narrative":7}),
             ],
         ),
+        WorkerEngineHook::SessionTitle => (
+            json!({
+                "userPrompt":"Build a durable work ledger for goals and questions.",
+                "assistantResponse":"I created and verified the Work Ledger worker."
+            }),
+            json!({"title":"Build a Durable Work Ledger"}),
+            vec![
+                json!({}),
+                json!({"userPrompt":"missing assistant response"}),
+            ],
+            vec![
+                json!({}),
+                json!({"title":""}),
+                json!({"title":"x".repeat(161)}),
+            ],
+        ),
         WorkerEngineHook::WorkerRelevance => (
             json!({
                 "query":"recent compiler research",

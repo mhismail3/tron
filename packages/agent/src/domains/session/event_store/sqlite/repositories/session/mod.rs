@@ -309,6 +309,24 @@ impl SessionRepo {
         Ok(changed > 0)
     }
 
+    /// Set a title only while the session remains untitled.
+    ///
+    /// This compare-and-set protects an explicit/manual title written after an
+    /// asynchronous naming policy inspected the session.
+    pub fn set_title_if_untitled(conn: &Connection, session_id: &str, title: &str) -> Result<bool> {
+        let changed = conn.execute(
+            "UPDATE sessions
+             SET title = ?1
+             WHERE id = ?2
+               AND (
+                    title IS NULL
+                    OR trim(title, char(9) || char(10) || char(13) || char(32)) = ''
+               )",
+            params![title, session_id],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// Increment denormalized counters atomically.
     pub fn increment_counters(
         conn: &Connection,

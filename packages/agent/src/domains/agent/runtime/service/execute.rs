@@ -326,6 +326,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         run_id,
         provider_type,
         model_for_error,
+        prompt,
         sequence_counter,
     })
     .await;

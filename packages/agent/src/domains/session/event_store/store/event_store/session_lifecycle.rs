@@ -371,6 +371,14 @@ impl EventStore {
         })
     }
 
+    /// Set a title only if no explicit title exists at commit time.
+    pub fn set_session_title_if_untitled(&self, session_id: &str, title: &str) -> Result<bool> {
+        self.with_session_write_lock(session_id, || {
+            let conn = self.conn()?;
+            SessionRepo::set_title_if_untitled(&conn, session_id, title)
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn set_session_last_activity_for_test(
         &self,
