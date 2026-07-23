@@ -55,8 +55,10 @@ struct ResearchSuiteViewModelTests {
         #expect(repository.inboxAttentionFilters == [true, true, true, true])
         #expect(viewModel.reports.map(\.reportId) == ["rr-20260722T130645Z-d480507abb3e"])
         #expect(viewModel.healthyComponentCount == 4)
+        #expect(viewModel.unhealthyComponentCount == 0)
+        #expect(viewModel.currentAttentionCount == 0)
         #expect(viewModel.lastError == nil)
-        #expect(viewModel.reportIssues.isEmpty)
+        #expect(viewModel.reportHistoryWarnings.isEmpty)
     }
 
     @Test("Malformed coordinator outputs are omitted without replacing valid durable history")
@@ -88,15 +90,34 @@ struct ResearchSuiteViewModelTests {
 
         #expect(viewModel.reports.isEmpty)
         #expect(viewModel.lastError == nil)
-        #expect(viewModel.reportIssues.count == 1)
-        #expect(viewModel.reportIssues.first?.contains("Coordinator run run-1") == true)
+        #expect(viewModel.reportHistoryWarnings.count == 1)
+        #expect(viewModel.reportHistoryWarnings.first?.contains("Coordinator run run-1") == true)
+        #expect(viewModel.currentAttentionCount == 0)
+    }
+
+    @Test("Current component health remains actionable")
+    func unhealthyComponentCountsAsCurrentAttention() async {
+        let repository = ResearchSuiteMockRepository(reportOutput: ["schema": "not-a-report"])
+        let viewModel = ResearchSuiteViewModel()
+
+        await viewModel.refresh(
+            availableWorkers: [
+                Self.worker(role: "coordinator", primary: true, health: "failed"),
+            ],
+            repository: repository,
+            connectionState: .connected
+        )
+
+        #expect(viewModel.unhealthyComponentCount == 1)
+        #expect(viewModel.currentAttentionCount == 1)
     }
 
     private static func worker(
         role: String,
         primary: Bool,
         version: UInt32 = 1,
-        experienceId: String = "research-suite"
+        experienceId: String = "research-suite",
+        health: String = "healthy"
     ) -> WorkerSummaryDTO {
         WorkerSummaryDTO(
             workerId: role == "coordinator" ? "research-coordinator" : "research-\(role)",
@@ -107,7 +128,7 @@ struct ResearchSuiteViewModelTests {
             activeVersion: "abcdef123456",
             enabled: true,
             retired: false,
-            health: "healthy",
+            health: health,
             triggerCount: 1,
             updatedAt: "2026-07-22T13:06:45Z",
             presentation: WorkerPresentationDTO(

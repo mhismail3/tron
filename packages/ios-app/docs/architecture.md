@@ -251,7 +251,7 @@ the worker's actual input schema.
 ### Views
 
 The session sidebar contains a compact Engine band showing core, active-worker,
-and issue counts. It opens `WorkerConsoleSheet`, whose visible product
+and current unhealthy-worker counts. It opens `WorkerConsoleSheet`, whose visible product
 identity is Engine. The sidebar owns the monitoring task, so the dashboard
 continues to receive durable lifecycle/invocation changes while its sheet is
 closed. The dashboard uses
@@ -270,7 +270,7 @@ provides:
 
 - Workers, Core, and Activity modes in one compact cockpit, with Workers as the
   initial operator view; the always-visible
-  summary owns profile-wide fixed/worker/issue counts and any active
+  summary owns profile-wide fixed/worker/current-health counts and any active
   worker-owned engine-policy hooks instead of duplicating them in an Overview
   tab;
 - the compiled kernel/product-boundary component map and profile-wide fixed and
@@ -293,8 +293,10 @@ provides:
 - trigger status and webhook rotation;
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
-- compact recent-run rows that open canonical run-detail sheets with toolbar
-  actions; Activity uses runs as the primary execution ledger and shows a
+- compact recent-run rows whose status icon is followed by one consistent
+  leading text edge for name, status, time, identifier, summary, and error;
+  tapping one opens a canonical run-detail sheet with toolbar actions. Activity
+  uses runs as the primary execution ledger and shows a
   separate Attention projection only for unresolved failures and pending
   background outcomes. A later verified activation or rollback removes resolved
   errors from Attention while the explicit Delivery Audit sheet and run ledger
@@ -359,9 +361,9 @@ worker inventory by the immutable suite contract, reads bounded full-detail
 runs and attention rows for every component, and decodes only exact
 `research.report.v1` coordinator outputs. It does not read the coordinator's
 state directory or reconstruct reports from client caches. Malformed canonical
-outputs remain visible as compact historical issue rows whose full evidence
-opens in a detail sheet;
-they do not falsely mark a successful worker/catalog refresh as failed.
+outputs remain visible as neutral unavailable-history rows whose full evidence
+opens in a detail sheet. They do not contribute to current Attention and do not
+falsely mark a successful worker/catalog refresh as failed.
 Unrelated outputs are not mistaken for reports.
 
 The Research sheet provides aggregate suite health and versions, coordinator
@@ -374,6 +376,10 @@ changes to the parent worker/run projection trigger a bounded suite refresh so
 the native view converges on current server truth. Unknown contract versions,
 secondary suite members, and missing bindings retain the generic-console
 fallback.
+The suite summary enters `needs review` only for a currently unhealthy
+component, unresolved server-projected Attention, or a present refresh failure.
+Retained malformed or failed runs remain audit evidence without changing
+current suite status.
 
 The third supported contract is the primary `general-delegate` version 1
 entrypoint. `DelegationViewModel` binds only to the exact `general-delegate`
@@ -400,6 +406,10 @@ trigger, causal depth, trace, timestamps, model/token/cost evidence, and child
 session ID. Technical worker detail
 remains available from the sheet; malformed outputs and unsupported bindings
 remain visible and fall back safely instead of becoming client-owned truth.
+The Delegation summary follows the same current-state rule: worker health,
+unresolved Attention, or a present refresh failure can require review, while
+completed, failed, and cancelled historical runs remain visible without
+changing the current readiness card.
 
 ## Chat Flow
 

@@ -15,7 +15,7 @@ struct ResearchSuiteSheet: View {
     @State private var selectedSection = ResearchSuiteSection.overview
     @State private var selectedReport: ResearchReport?
     @State private var selectedTechnicalWorker: WorkerSummaryDTO?
-    @State private var showReportIssues = false
+    @State private var showReportHistoryWarnings = false
     @State private var technicalViewModel = WorkerConsoleViewModel()
 
     var body: some View {
@@ -68,11 +68,11 @@ struct ResearchSuiteSheet: View {
                     mode: .technical
                 )
             }
-            .sheet(isPresented: $showReportIssues) {
+            .sheet(isPresented: $showReportHistoryWarnings) {
                 WorkerTextDetailSheet(
-                    title: "Report Issues",
-                    values: viewModel.reportIssues,
-                    accent: .tronWarning
+                    title: "Unavailable Report History",
+                    values: viewModel.reportHistoryWarnings,
+                    accent: .tronInfo
                 )
             }
             .task { await refresh() }
@@ -90,12 +90,12 @@ struct ResearchSuiteSheet: View {
     private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 15) {
             HStack(alignment: .top, spacing: 11) {
-                Image(systemName: suiteNeedsAttention ? "exclamationmark.magnifyingglass" : "sparkle.magnifyingglass")
+                Image(systemName: viewModel.currentAttentionCount > 0 ? "exclamationmark.magnifyingglass" : "sparkle.magnifyingglass")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                    .foregroundStyle(suiteNeedsAttention ? .tronWarning : .tronCyan)
+                    .foregroundStyle(viewModel.currentAttentionCount > 0 ? .tronWarning : .tronCyan)
                     .frame(width: 25)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(suiteNeedsAttention ? "Research needs review" : "Research suite ready")
+                    Text(viewModel.currentAttentionCount > 0 ? "Research needs review" : "Research suite ready")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
                     Text("Search, source review, citation validation, and durable synthesis in one experience.")
@@ -111,11 +111,16 @@ struct ResearchSuiteSheet: View {
                 summaryDivider
                 summaryMetric(viewModel.reports.count, "Reports")
                 summaryDivider
-                summaryMetric(issueCount, "Issues")
+                summaryMetric(viewModel.currentAttentionCount, "Attention")
             }
         }
         .padding(14)
-        .sectionFill(suiteNeedsAttention ? .tronWarning : .tronCyan, cornerRadius: 12, subtle: true, interactive: false)
+        .sectionFill(
+            viewModel.currentAttentionCount > 0 ? .tronWarning : .tronCyan,
+            cornerRadius: 12,
+            subtle: true,
+            interactive: false
+        )
     }
 
     @ViewBuilder
@@ -213,22 +218,22 @@ struct ResearchSuiteSheet: View {
 
     private var activityContent: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if !viewModel.reportIssues.isEmpty {
-                Button { showReportIssues = true } label: {
+            if !viewModel.reportHistoryWarnings.isEmpty {
+                Button { showReportHistoryWarnings = true } label: {
                     HStack {
                         Label(
-                            "\(viewModel.reportIssues.count) older report\(viewModel.reportIssues.count == 1 ? "" : "s") need review",
-                            systemImage: "clock.badge.exclamationmark"
+                            "\(viewModel.reportHistoryWarnings.count) retained report\(viewModel.reportHistoryWarnings.count == 1 ? "" : "s") unavailable in this app",
+                            systemImage: "doc.badge.ellipsis"
                         )
                         Spacer()
                     }
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronWarning)
+                    .foregroundStyle(.tronInfo)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .padding(12)
-                .sectionFill(.tronWarning, cornerRadius: 11, subtle: true, interactive: true)
+                .sectionFill(.tronInfo, cornerRadius: 11, subtle: true, interactive: true)
             }
 
             WorkerConsoleSectionHeader(
@@ -266,12 +271,6 @@ struct ResearchSuiteSheet: View {
             }
         }
     }
-
-    private var issueCount: Int {
-        viewModel.attentionCount + viewModel.reportIssues.count + viewModel.attention.count
-    }
-
-    private var suiteNeedsAttention: Bool { issueCount > 0 }
 
     private func summaryMetric(_ value: Int, _ label: String) -> some View {
         VStack(spacing: 2) {

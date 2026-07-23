@@ -57,7 +57,41 @@ struct DelegationViewModelTests {
         #expect(viewModel.runs.first?.agentSessionId == "child-session-1")
         #expect(viewModel.resultsByInvocation["run-1"]?.status == "completed")
         #expect(viewModel.completedRunCount == 1)
+        #expect(viewModel.currentAttentionCount == 0)
         #expect(viewModel.lastError == nil)
+    }
+
+    @Test("Historical failed and cancelled runs do not become current attention")
+    func historicalFailuresStayInAuditHistory() async {
+        let repository = DelegationMockRepository(runs: [
+            Self.run(id: "run-failed", status: "failed", output: nil),
+            Self.run(id: "run-cancelled", status: "cancelled", output: nil),
+        ])
+        let viewModel = DelegationViewModel()
+
+        await viewModel.refresh(
+            availableWorkers: [Self.worker()],
+            repository: repository,
+            connectionState: .connected
+        )
+
+        #expect(Set(viewModel.runs.map(\.status)) == ["failed", "cancelled"])
+        #expect(viewModel.currentAttentionCount == 0)
+        #expect(viewModel.lastError == nil)
+    }
+
+    @Test("Current worker health remains actionable")
+    func unhealthyWorkerCountsAsCurrentAttention() async {
+        let repository = DelegationMockRepository()
+        let viewModel = DelegationViewModel()
+
+        await viewModel.refresh(
+            availableWorkers: [Self.worker(health: "failed")],
+            repository: repository,
+            connectionState: .connected
+        )
+
+        #expect(viewModel.currentAttentionCount == 1)
     }
 
     @Test("Submission builds the public contract and uses durable enqueue")
@@ -126,7 +160,8 @@ struct DelegationViewModelTests {
     static func worker(
         workerId: String = "general-delegate",
         version: UInt32 = 1,
-        primary: Bool = true
+        primary: Bool = true,
+        health: String = "healthy"
     ) -> WorkerSummaryDTO {
         WorkerSummaryDTO(
             workerId: workerId,
@@ -137,7 +172,7 @@ struct DelegationViewModelTests {
             activeVersion: "delegate-version-1",
             enabled: true,
             retired: false,
-            health: "healthy",
+            health: health,
             triggerCount: 1,
             updatedAt: "2026-07-22T13:00:00Z",
             presentation: WorkerPresentationDTO(
@@ -212,7 +247,11 @@ private final class DelegationMockRepository: WorkerKernelRepository {
     var inboxAttentionFilters: [Bool] = []
     var enqueuedInputs: [[String: Any]] = []
     var cancelledInvocationIds: [String] = []
-    private var storedRuns = [DelegationViewModelTests.run()]
+    private var storedRuns: [WorkerInvocationDTO]
+
+    init(runs: [WorkerInvocationDTO] = [DelegationViewModelTests.run()]) {
+        storedRuns = runs
+    }
 
     func inspectWorker(_ workerId: String) async throws -> WorkerInspectResultDTO {
         inspectedWorkerIds.append(workerId)

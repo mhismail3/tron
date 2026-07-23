@@ -241,44 +241,42 @@ struct WorkerRunCard: View {
 
     var body: some View {
         Button { showDetail = true } label: {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .top, spacing: 9) {
-                    Image(systemName: statusSymbol)
-                        .foregroundStyle(color)
-                        .frame(width: 20)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(workerName ?? WorkerConsolePresentation.displayLabel(run.status))
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                            .foregroundStyle(.tronTextPrimary)
-                        Text(runMetadata)
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-                    Spacer()
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: statusSymbol)
+                    .foregroundStyle(color)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(workerName ?? WorkerConsolePresentation.displayLabel(run.status))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(runMetadata)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
                     if let timestamp = WorkerConsolePresentation.timestamp(run.completedAt ?? run.startedAt ?? run.createdAt) {
                         Text(timestamp)
                             .font(TronTypography.sans(size: TronTypography.sizeSM))
                             .foregroundStyle(.tronTextMuted)
                     }
-                }
 
-                Text(WorkerConsolePresentation.compactIdentifier(run.invocationId, length: 16))
-                    .font(TronTypography.code(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextMuted)
+                    Text(WorkerConsolePresentation.compactIdentifier(run.invocationId, length: 16))
+                        .font(TronTypography.code(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
 
-                if let summary = WorkerConsolePresentation.runSummary(run) {
-                    Text(summary)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                        .lineLimit(2)
-                }
+                    if let summary = WorkerConsolePresentation.runSummary(run) {
+                        Text(summary)
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextSecondary)
+                            .lineLimit(2)
+                    }
 
-                if let error = run.error {
-                    Label(error, systemImage: "exclamationmark.circle")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronError)
-                        .lineLimit(2)
+                    if let error = run.error {
+                        Label(error, systemImage: "exclamationmark.circle")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronError)
+                            .lineLimit(2)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(11)
             .frame(maxWidth: .infinity, alignment: .leading)

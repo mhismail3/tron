@@ -114,12 +114,12 @@ struct DelegationSheet: View {
     private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 15) {
             HStack(alignment: .top, spacing: 11) {
-                Image(systemName: viewModel.issueCount > 0 ? "person.crop.circle.badge.exclamationmark" : "person.2.circle.fill")
+                Image(systemName: viewModel.currentAttentionCount > 0 ? "person.crop.circle.badge.exclamationmark" : "person.2.circle.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                    .foregroundStyle(viewModel.issueCount > 0 ? .tronWarning : .tronPurple)
+                    .foregroundStyle(viewModel.currentAttentionCount > 0 ? .tronWarning : .tronPurple)
                     .frame(width: 25)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(viewModel.issueCount > 0 ? "Delegation needs review" : "Delegate ready")
+                    Text(viewModel.currentAttentionCount > 0 ? "Delegation needs review" : "Delegate ready")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
                     Text("One bounded task per durable child session, with typed results and precise cancellation.")
@@ -134,12 +134,12 @@ struct DelegationSheet: View {
                 divider
                 metric(viewModel.completedRunCount, "Completed")
                 divider
-                metric(viewModel.issueCount, "Issues")
+                metric(viewModel.currentAttentionCount, "Attention")
             }
         }
         .padding(14)
         .sectionFill(
-            viewModel.issueCount > 0 ? .tronWarning : .tronPurple,
+            viewModel.currentAttentionCount > 0 ? .tronWarning : .tronPurple,
             cornerRadius: 12,
             subtle: true,
             interactive: false
@@ -468,16 +468,13 @@ private struct DelegationRunRow: View {
                 .foregroundStyle(statusColor)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(DelegationContract.task(from: run))
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(2)
-                    Spacer(minLength: 8)
-                    Text(WorkerConsolePresentation.displayLabel(run.status))
-                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                        .foregroundStyle(statusColor)
-                }
+                Text(DelegationContract.task(from: run))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(2)
+                Text(WorkerConsolePresentation.displayLabel(run.status))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                    .foregroundStyle(statusColor)
                 if let summary = result?.summary {
                     Text(summary)
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -503,6 +500,7 @@ private struct DelegationRunRow: View {
                         .lineLimit(3)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
         .sectionFill(statusColor, cornerRadius: 11, subtle: true, interactive: true)

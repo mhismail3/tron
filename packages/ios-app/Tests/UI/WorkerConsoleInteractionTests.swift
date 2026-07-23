@@ -179,6 +179,64 @@ struct WorkerConsoleInteractionTests {
         #expect(audit.contains("attentionOnly: false"))
     }
 
+    @Test("Run and delegated-task cards keep every text field on one leading edge")
+    func workerActivityCardsUseLeadingTextAlignment() throws {
+        let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
+        let components = try String(
+            contentsOf: workerRoot.appendingPathComponent("WorkerConsoleComponents.swift"),
+            encoding: .utf8
+        )
+        let delegation = try String(
+            contentsOf: workerRoot.appendingPathComponent("DelegationSheet.swift"),
+            encoding: .utf8
+        )
+        let workerRunCard = try sourceSlice(
+            components,
+            from: "struct WorkerRunCard: View",
+            through: "struct WorkerInboxCard: View"
+        )
+        let delegationRunRow = try sourceSlice(
+            delegation,
+            from: "private struct DelegationRunRow: View",
+            through: "func delegationStatusColor"
+        )
+
+        #expect(!workerRunCard.contains("Spacer"))
+        #expect(!delegationRunRow.contains("Spacer"))
+        #expect(workerRunCard.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        #expect(delegationRunRow.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+    }
+
+    @Test("Worker experience summaries separate current attention from retained history")
+    func workerExperienceSummariesUseCurrentAttention() throws {
+        let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
+        let delegation = try String(
+            contentsOf: workerRoot.appendingPathComponent("DelegationSheet.swift"),
+            encoding: .utf8
+        )
+        let research = try String(
+            contentsOf: workerRoot.appendingPathComponent("ResearchSuiteSheet.swift"),
+            encoding: .utf8
+        )
+
+        #expect(delegation.contains("metric(viewModel.currentAttentionCount, \"Attention\")"))
+        #expect(research.contains("summaryMetric(viewModel.currentAttentionCount, \"Attention\")"))
+        #expect(research.contains("Unavailable Report History"))
+        #expect(!research.contains("older report"))
+    }
+
+    private func sourceSlice(
+        _ source: String,
+        from start: String,
+        through end: String
+    ) throws -> Substring {
+        let lowerBound = try #require(source.range(of: start)?.lowerBound)
+        let upperBound = try #require(
+            source.range(of: end, range: lowerBound..<source.endIndex)?.lowerBound
+        )
+        return source[lowerBound..<upperBound]
+    }
+
     private func iosAppRoot(filePath: String = #filePath) -> URL {
         URL(fileURLWithPath: filePath)
             .deletingLastPathComponent()

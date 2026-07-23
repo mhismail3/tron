@@ -198,9 +198,12 @@ final class DelegationViewModel {
 
     var activeRunCount: Int { runs.count { ["queued", "running"].contains($0.status) } }
     var completedRunCount: Int { runs.count { $0.status == "completed" } }
-    var issueCount: Int {
-        runs.count { ["failed", "cancelled"].contains($0.status) }
-            + attention.count
+    var currentAttentionCount: Int {
+        let unhealthyWorker = worker.map {
+            WorkerConsolePresentation.status(for: $0).kind == .needsAttention ? 1 : 0
+        } ?? 0
+        let refreshProblem = lastError == nil ? 0 : 1
+        return unhealthyWorker + attention.count + refreshProblem
     }
     var runnerModel: String? { DelegationContract.runnerModel(from: inspection) }
     var canSubmit: Bool {
@@ -276,7 +279,10 @@ final class DelegationViewModel {
             do {
                 decoded[run.invocationId] = try DelegationContract.decodeResult(run.output)
             } catch {
-                errors.append("Run \(run.invocationId): \(error.localizedDescription)")
+                // Historical output that no longer satisfies the native
+                // presentation contract remains inspectable in the immutable
+                // run detail. It is not current worker health.
+                continue
             }
         }
         resultsByInvocation = decoded

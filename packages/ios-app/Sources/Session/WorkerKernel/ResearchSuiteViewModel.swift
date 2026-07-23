@@ -285,7 +285,7 @@ final class ResearchSuiteViewModel {
     var runs: [WorkerInvocationDTO] = []
     var attention: [WorkerInboxItemDTO] = []
     var reports: [ResearchReport] = []
-    var reportIssues: [String] = []
+    var reportHistoryWarnings: [String] = []
     var isLoading = false
     var hasLoaded = false
     var lastError: String?
@@ -294,8 +294,12 @@ final class ResearchSuiteViewModel {
         workers.count { $0.enabled && !$0.retired && $0.health == "healthy" }
     }
 
-    var attentionCount: Int {
+    var unhealthyComponentCount: Int {
         workers.count - healthyComponentCount
+    }
+
+    var currentAttentionCount: Int {
+        unhealthyComponentCount + attention.count + (lastError == nil ? 0 : 1)
     }
 
     var latestReport: ResearchReport? { reports.first }
@@ -310,7 +314,7 @@ final class ResearchSuiteViewModel {
             runs = []
             attention = []
             reports = []
-            reportIssues = []
+            reportHistoryWarnings = []
             hasLoaded = true
             lastError = connectionState.displayText
             return
@@ -350,7 +354,7 @@ final class ResearchSuiteViewModel {
         attention = loadedAttention.sorted { $0.createdAt > $1.createdAt }
         let decoded = Self.decodeReports(from: runs)
         reports = decoded.reports
-        reportIssues = decoded.errors
+        reportHistoryWarnings = decoded.errors
         lastError = errors.isEmpty ? nil : errors.joined(separator: "\n")
     }
 
