@@ -3,6 +3,16 @@ import Testing
 
 @Suite("Session Context Presentation Tests")
 struct SessionContextPresentationTests {
+    @Test("Section rhythm separates sections while keeping labels attached")
+    func sectionRhythm() {
+        #expect(
+            SessionContextPresentation.sectionSpacing
+                > SessionContextPresentation.headerToContentSpacing
+        )
+        #expect(SessionContextPresentation.headerToContentSpacing == 4)
+        #expect(SessionContextPresentation.headerToSubheaderSpacing == 0)
+    }
+
     @Test("Context progress is bounded before rendering")
     func contextProgressIsBounded() {
         #expect(SessionContextPresentation.boundedPercentage(-4) == 0)

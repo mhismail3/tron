@@ -4,12 +4,13 @@ import SwiftUI
 struct SettingsSectionHeader: View {
     let title: String
     var color: Color = .tronTextSecondary
+    var bottomPadding: CGFloat = 8
 
     var body: some View {
         Text(title)
             .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
             .foregroundStyle(color)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 8)
+            .padding(.bottom, bottomPadding)
     }
 }

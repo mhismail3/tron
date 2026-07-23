@@ -1,4 +1,5 @@
 import XCTest
+@testable import TronMobile
 
 /// Source-level guards for app-wide iPad sheet sizing.
 ///
@@ -6,6 +7,37 @@ import XCTest
 /// sites that previously used raw iPhone detents must preserve their non-iPad
 /// sizing and background behavior.
 final class IPadSheetPresentationTests: XCTestCase {
+
+    func testStandardPhoneSheetsKeepDarkMediumContentReadable() {
+        XCTAssertEqual(
+            AdaptivePhonePresentationPolicy.automaticBackgroundOpacity(
+                isDark: true,
+                isLargeDetent: false
+            ),
+            0.62
+        )
+        XCTAssertEqual(
+            AdaptivePhonePresentationPolicy.automaticBackgroundOpacity(
+                isDark: false,
+                isLargeDetent: false
+            ),
+            0
+        )
+        XCTAssertEqual(
+            AdaptivePhonePresentationPolicy.automaticBackgroundOpacity(
+                isDark: true,
+                isLargeDetent: true
+            ),
+            1
+        )
+        XCTAssertEqual(
+            AdaptivePhonePresentationPolicy.automaticBackgroundOpacity(
+                isDark: false,
+                isLargeDetent: true
+            ),
+            1
+        )
+    }
 
     func testAdaptivePresentationHelperCentralizesIPadSizingAndPhonePreservation() throws {
         let content = try source(pathComponents: ["Sources", "Support", "Foundation", "SwiftUI", "View+Extensions.swift"])
@@ -41,6 +73,10 @@ final class IPadSheetPresentationTests: XCTestCase {
         XCTAssertTrue(
             content.contains("phoneSelectedDetent == .large"),
             "Detented iPhone sheets should use their opaque app surface whenever they reach the large detent"
+        )
+        XCTAssertTrue(
+            content.contains("AdaptivePhonePresentationPolicy.automaticBackgroundOpacity"),
+            "Standard phone sheets should share one dark-medium readability policy"
         )
         XCTAssertFalse(
             content.contains("phoneSelectedDetent == .large && colorScheme == .light"),

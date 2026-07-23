@@ -16,6 +16,12 @@ enum SessionContextPressure: Equatable {
 
 /// Pure presentation and action policy for the Session Context surface.
 enum SessionContextPresentation {
+    /// Completed cards separate clearly from the next section, while each
+    /// heading remains visually attached to the content it introduces.
+    static let sectionSpacing: CGFloat = 20
+    static let headerToContentSpacing: CGFloat = 4
+    static let headerToSubheaderSpacing: CGFloat = 0
+
     static func boundedPercentage(_ percentage: Int) -> Int {
         min(max(percentage, 0), 100)
     }
@@ -114,7 +120,7 @@ struct SessionContextSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 14) {
+                VStack(spacing: SessionContextPresentation.sectionSpacing) {
                     sessionSummary
                     modelSection
                     workerActivitySection
@@ -256,7 +262,10 @@ struct SessionContextSheet: View {
 
     private var modelSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Model")
+            SettingsSectionHeader(
+                title: "Model",
+                bottomPadding: SessionContextPresentation.headerToContentSpacing
+            )
 
             Button {
                 showModelPicker = true
@@ -322,27 +331,29 @@ struct SessionContextSheet: View {
     }
 
     private var workerActivitySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Workers in this session")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-                Spacer()
-                if isLoadingWorkerRuns, sessionWorkerRuns.isEmpty {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(.tronCyan)
-                } else if !sessionWorkerRuns.isEmpty {
-                    Text("\(sessionWorkerRuns.count)")
-                        .font(TronTypography.pillValue)
-                        .foregroundStyle(.tronCyan)
+        VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
+            VStack(alignment: .leading, spacing: SessionContextPresentation.headerToSubheaderSpacing) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Workers in this session")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                        .foregroundStyle(.tronTextSecondary)
+                    Spacer()
+                    if isLoadingWorkerRuns, sessionWorkerRuns.isEmpty {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.tronCyan)
+                    } else if !sessionWorkerRuns.isEmpty {
+                        Text("\(sessionWorkerRuns.count)")
+                            .font(TronTypography.pillValue)
+                            .foregroundStyle(.tronCyan)
+                    }
                 }
-            }
 
-            Text("Runs started here, including nested work from the same causal trace.")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("Runs started here, including nested work from the same causal trace.")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let workerLoadError {
                 Text(workerLoadError)
@@ -389,7 +400,10 @@ struct SessionContextSheet: View {
 
     private var sessionActionsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Session")
+            SettingsSectionHeader(
+                title: "Session",
+                bottomPadding: SessionContextPresentation.headerToContentSpacing
+            )
 
             Button {
                 showForkConfirmation = true

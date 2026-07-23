@@ -7,14 +7,6 @@ enum ModelPickerReasoningVisibility {
 }
 
 enum ModelPickerPresentation {
-    static func readabilityBackdropOpacity(
-        isDark: Bool,
-        isPhone: Bool,
-        isMediumDetent: Bool
-    ) -> Double {
-        isDark && isPhone && isMediumDetent ? 0.62 : 0
-    }
-
     static func usesHighContrastNeutral(providerId: String, isDark: Bool) -> Bool {
         isDark && providerId == "openai-codex"
     }

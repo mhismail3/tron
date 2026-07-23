@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 // MARK: - Model Picker Sheet
 
@@ -20,7 +19,6 @@ struct ModelPickerSheet: View {
     @State private var showReasoningPopover = false
     @State private var pendingModelId: String = ""
     @State private var hasCommitted = false
-    @State private var selectedDetent: PresentationDetent = .medium
 
     private var providerGroups: [ProviderGroup] {
         ModelFilteringService.organizeByProviderFamily(models)
@@ -113,20 +111,7 @@ struct ModelPickerSheet: View {
                 }
             }
         }
-        .background {
-            Color.tronBackground
-                .opacity(ModelPickerPresentation.readabilityBackdropOpacity(
-                    isDark: colorScheme == .dark,
-                    isPhone: UIDevice.current.userInterfaceIdiom == .phone,
-                    isMediumDetent: selectedDetent == .medium
-                ))
-                .ignoresSafeArea()
-        }
-        .adaptivePresentationDetents(
-            [.medium, .large],
-            selection: $selectedDetent,
-            ipadSizing: .largeForm
-        )
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .onDisappear {
             commitSelection()
         }

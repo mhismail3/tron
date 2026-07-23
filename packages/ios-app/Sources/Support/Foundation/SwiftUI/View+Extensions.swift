@@ -235,6 +235,24 @@ enum AdaptivePhonePresentationBackground {
     case unchanged
 }
 
+/// Visual backing for standard phone sheets at each detent.
+///
+/// Light-mode medium sheets remain fully translucent. Dark-mode medium sheets
+/// receive a bounded underlay so content behind liquid glass cannot wash out
+/// foreground text. Large sheets are always opaque because they become the
+/// primary app surface.
+enum AdaptivePhonePresentationPolicy {
+    static func automaticBackgroundOpacity(
+        isDark: Bool,
+        isLargeDetent: Bool
+    ) -> Double {
+        if isLargeDetent {
+            return 1
+        }
+        return isDark ? 0.62 : 0
+    }
+}
+
 enum AdaptiveIPadPresentationBackground {
     case material
     case clear
@@ -291,7 +309,8 @@ extension View {
     /// - iPad: Uses balanced `.balancedLargeForm` or `.compactForm` sizing
     /// - iPad material background keeps floating sheets glassy so session list context remains visible
     /// - Drag indicators are hidden consistently for Tron app sheets
-    /// - iPhone keeps the existing detent sizing and background behavior
+    /// - iPhone light-mode medium sheets remain clear, dark-mode medium sheets
+    ///   receive a readability underlay, and large sheets become opaque
     ///
     /// On iPad, `presentationDetents` is ignored for floating modals.
     func adaptivePresentationDetents(
@@ -329,6 +348,7 @@ private struct AdaptivePresentationModifier: ViewModifier {
     let phoneSizing: AdaptivePhonePresentationSizing
     let phoneBackground: AdaptivePhonePresentationBackground
     let dragIndicator: Visibility
+    @Environment(\.colorScheme) private var colorScheme
     @State private var selectedDetent: PresentationDetent
 
     init(
@@ -359,8 +379,13 @@ private struct AdaptivePresentationModifier: ViewModifier {
         UIDevice.current.userInterfaceIdiom == .pad
     }
 
-    private var needsOpaquePhoneBackground: Bool {
-        phoneSelectedDetent == .large
+    private var automaticPhoneBackground: Color {
+        Color.tronBackground.opacity(
+            AdaptivePhonePresentationPolicy.automaticBackgroundOpacity(
+                isDark: colorScheme == .dark,
+                isLargeDetent: phoneSelectedDetent == .large
+            )
+        )
     }
 
     private var phoneSelectedDetent: PresentationDetent {
@@ -445,7 +470,7 @@ private struct AdaptivePresentationModifier: ViewModifier {
     private func phoneBackgroundBody<PhoneContent: View>(content: PhoneContent) -> some View {
         switch phoneBackground {
         case .automaticLargeDetent:
-            content.presentationBackground(needsOpaquePhoneBackground ? Color.tronBackground : .clear)
+            content.presentationBackground(automaticPhoneBackground)
         case .clear:
             content.presentationBackground(.clear)
         case .unchanged:
