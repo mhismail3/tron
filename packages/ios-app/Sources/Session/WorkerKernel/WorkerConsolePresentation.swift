@@ -86,6 +86,11 @@ enum WorkerConsolePresentation {
         return String(value.prefix(length))
     }
 
+    static func compactRunIdentifier(_ value: String, length: Int = 8) -> String {
+        guard value.count > length else { return value }
+        return "…\(value.suffix(length))"
+    }
+
     static func compactText(_ value: String, maxLength: Int = 80) -> String {
         let collapsed = value
             .split(whereSeparator: \.isWhitespace)

@@ -293,8 +293,9 @@ provides:
 - trigger status and webhook rotation;
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
-- compact recent-run rows whose status icon is followed by one consistent
-  leading text edge for name, status, time, identifier, summary, and error;
+- compact recent-run rows whose semantic name, summary, and error share one
+  leading edge while bounded status, trigger, timestamp, attempt, and
+  distinguishing run suffix form a deliberate trailing metadata column;
   tapping one opens a canonical run-detail sheet with toolbar actions. Activity
   uses runs as the primary execution ledger and shows a
   separate Attention projection only for unresolved failures and pending

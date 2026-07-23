@@ -245,22 +245,10 @@ struct WorkerRunCard: View {
                 Image(systemName: statusSymbol)
                     .foregroundStyle(color)
                     .frame(width: 20)
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(workerName ?? WorkerConsolePresentation.displayLabel(run.status))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(workerName ?? "Worker run")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
-                    Text(runMetadata)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                    if let timestamp = WorkerConsolePresentation.timestamp(run.completedAt ?? run.startedAt ?? run.createdAt) {
-                        Text(timestamp)
-                            .font(TronTypography.sans(size: TronTypography.sizeSM))
-                            .foregroundStyle(.tronTextMuted)
-                    }
-
-                    Text(WorkerConsolePresentation.compactIdentifier(run.invocationId, length: 16))
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
 
                     if let summary = WorkerConsolePresentation.runSummary(run) {
                         Text(summary)
@@ -277,6 +265,28 @@ struct WorkerRunCard: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+
+                VStack(alignment: .trailing, spacing: 5) {
+                    Text(runStateMetadata)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(color)
+                    if let timestamp = WorkerConsolePresentation.timestamp(run.completedAt ?? run.startedAt ?? run.createdAt) {
+                        Text(timestamp)
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextMuted)
+                    }
+                    Text(attemptMetadata)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
+                    Text(WorkerConsolePresentation.compactRunIdentifier(run.invocationId))
+                        .font(TronTypography.code(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                }
+                .multilineTextAlignment(.trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .frame(minWidth: 112, idealWidth: 138, maxWidth: 152, alignment: .trailing)
             }
             .padding(11)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -297,13 +307,14 @@ struct WorkerRunCard: View {
         run.status == "queued" || run.status == "running"
     }
 
-    private var runMetadata: String {
+    private var runStateMetadata: String {
         let status = WorkerConsolePresentation.displayLabel(run.status)
         let trigger = WorkerConsolePresentation.displayLabel(run.triggerKind)
-        let attempt = "\(run.attemptCount) attempt\(run.attemptCount == 1 ? "" : "s")"
-        return workerName == nil
-            ? "\(trigger) · \(attempt)"
-            : "\(status) · \(trigger) · \(attempt)"
+        return "\(status) · \(trigger)"
+    }
+
+    private var attemptMetadata: String {
+        "\(run.attemptCount) attempt\(run.attemptCount == 1 ? "" : "s")"
     }
 
     private var statusSymbol: String {

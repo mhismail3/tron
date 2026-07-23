@@ -43,6 +43,8 @@ struct WorkerConsolePresentationTests {
     @Test("Hashes, timestamps, labels, and provenance stay compact")
     func compactMetadataProjection() {
         #expect(WorkerConsolePresentation.compactIdentifier("1234567890abcdef") == "1234567890")
+        #expect(WorkerConsolePresentation.compactRunIdentifier("worker_run_019f897f") == "…019f897f")
+        #expect(WorkerConsolePresentation.compactRunIdentifier("run-123") == "run-123")
         #expect(
             WorkerConsolePresentation.timestamp("2026-07-20T16:18:00.781070+00:00")
                 == "2026-07-20 · 16:18"

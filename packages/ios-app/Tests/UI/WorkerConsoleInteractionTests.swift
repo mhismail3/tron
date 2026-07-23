@@ -179,8 +179,8 @@ struct WorkerConsoleInteractionTests {
         #expect(audit.contains("attentionOnly: false"))
     }
 
-    @Test("Run and delegated-task cards keep every text field on one leading edge")
-    func workerActivityCardsUseLeadingTextAlignment() throws {
+    @Test("Run cards use compact trailing metadata while delegated tasks retain one leading edge")
+    func workerActivityCardsUseDeliberateTextAlignment() throws {
         let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
         let components = try String(
             contentsOf: workerRoot.appendingPathComponent("WorkerConsoleComponents.swift"),
@@ -201,9 +201,11 @@ struct WorkerConsoleInteractionTests {
             through: "func delegationStatusColor"
         )
 
-        #expect(!workerRunCard.contains("Spacer"))
         #expect(!delegationRunRow.contains("Spacer"))
         #expect(workerRunCard.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        #expect(workerRunCard.contains("VStack(alignment: .trailing"))
+        #expect(workerRunCard.contains(".multilineTextAlignment(.trailing)"))
+        #expect(workerRunCard.contains("WorkerConsolePresentation.compactRunIdentifier"))
         #expect(delegationRunRow.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
     }
 
