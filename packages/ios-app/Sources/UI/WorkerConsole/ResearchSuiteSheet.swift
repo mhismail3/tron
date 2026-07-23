@@ -393,6 +393,12 @@ private struct ResearchReportRow: View {
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
                 .foregroundStyle(.tronTextMuted)
+                if let searchLimitation = report.searchLimitation {
+                    Label(searchLimitation, systemImage: "key.slash")
+                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
+                        .foregroundStyle(.tronWarning)
+                        .lineLimit(2)
+                }
                 if let timestamp = WorkerConsolePresentation.timestamp(report.generatedAt) {
                     Text(timestamp)
                         .font(TronTypography.sans(size: TronTypography.sizeSM))

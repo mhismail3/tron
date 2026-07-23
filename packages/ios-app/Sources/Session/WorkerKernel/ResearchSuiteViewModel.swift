@@ -59,6 +59,16 @@ struct ResearchSpecialistOutcome: Identifiable, Equatable, Sendable {
     let missingSecretBindings: [String]
 
     var id: String { role }
+
+    var missingProviderNames: [String] {
+        missingSecretBindings.map { binding in
+            switch binding {
+            case "provider-brave": "Brave Search"
+            case "provider-exa": "Exa"
+            default: WorkerConsolePresentation.displayLabel(binding)
+            }
+        }
+    }
 }
 
 struct ResearchReport: Identifiable, Equatable, Sendable {
@@ -79,6 +89,24 @@ struct ResearchReport: Identifiable, Equatable, Sendable {
 
     var id: String { reportId }
     var supportedClaimCount: Int { claims.count { $0.classification == "supported" } }
+
+    /// Historical execution evidence, not a projection of the profile's
+    /// current credential state.
+    var searchLimitation: String? {
+        guard let search = outcomes.first(where: { $0.role == "search" }),
+              search.status == "unavailable" else {
+            return nil
+        }
+        let providers = search.missingProviderNames
+        guard !providers.isEmpty else {
+            return "Live search was unavailable for this run."
+        }
+        let providerList = providers.count == 2
+            ? providers.joined(separator: " and ")
+            : providers.joined(separator: ", ")
+        let noun = providers.count == 1 ? "API key was" : "API keys were"
+        return "Live search unavailable: \(providerList) \(noun) not configured for this run."
+    }
 }
 
 enum ResearchSuiteContractError: Error, LocalizedError, Equatable {

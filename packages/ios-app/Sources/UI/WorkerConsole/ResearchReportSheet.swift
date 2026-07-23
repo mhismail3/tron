@@ -59,6 +59,12 @@ struct ResearchReportSheet: View {
                 badge("\(report.sources.count) sources", color: .tronCyan)
                 badge("\(report.supportedClaimCount)/\(report.claims.count) supported", color: .tronPurple)
             }
+            if let searchLimitation = report.searchLimitation {
+                Label(searchLimitation, systemImage: "key.slash")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(.tronWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let timestamp = WorkerConsolePresentation.timestamp(report.generatedAt) {
                 Text(timestamp)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -451,7 +457,7 @@ private struct ResearchOutcomeRow: View {
                     .foregroundStyle(.tronTextMuted)
             }
             if !outcome.missingSecretBindings.isEmpty {
-                Text("Missing: \(outcome.missingSecretBindings.joined(separator: ", "))")
+                Text("Missing API keys: \(outcome.missingProviderNames.joined(separator: ", "))")
                     .font(TronTypography.sans(size: TronTypography.sizeSM))
                     .foregroundStyle(.tronWarning)
             }

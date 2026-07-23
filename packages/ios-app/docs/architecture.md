@@ -377,6 +377,11 @@ changes to the parent worker/run projection trigger a bounded suite refresh so
 the native view converges on current server truth. Unknown contract versions,
 secondary suite members, and missing bindings retain the generic-console
 fallback.
+Report rows and report summaries translate missing Brave Search or Exa
+bindings into explicit historical run-time limitations. This explains a
+`Partial` report without claiming that the profile remains unconfigured after
+credentials are later added; exact binding evidence remains available under
+specialist outcomes.
 The suite summary enters `needs review` only for a currently unhealthy
 component, unresolved server-projected Attention, or a present refresh failure.
 Retained malformed or failed runs remain audit evidence without changing

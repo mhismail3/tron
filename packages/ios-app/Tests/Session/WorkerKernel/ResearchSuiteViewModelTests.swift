@@ -25,6 +25,28 @@ struct ResearchSuiteViewModelTests {
         #expect(report.limitations == ["Two sources only"])
         #expect(report.outcomes.map(\.role) == ["search", "sourceReview", "citation", "storage"])
         #expect(report.outcomes.first?.missingSecretBindings == ["provider-brave"])
+        #expect(report.outcomes.first?.missingProviderNames == ["Brave Search"])
+        #expect(
+            report.searchLimitation
+                == "Live search unavailable: Brave Search API key was not configured for this run."
+        )
+    }
+
+    @Test("Report search limitation distinguishes historical missing provider credentials")
+    func reportSearchLimitation() throws {
+        var output = Self.reportOutput
+        var outcomes = try #require(output["specialistOutcomes"] as? [String: Any])
+        var search = try #require(outcomes["search"] as? [String: Any])
+        search["missingSecretBindings"] = ["provider-brave", "provider-exa"]
+        outcomes["search"] = search
+        output["specialistOutcomes"] = outcomes
+
+        let report = try ResearchSuiteContract.decodeReport(AnyCodable(output))
+
+        #expect(
+            report.searchLimitation
+                == "Live search unavailable: Brave Search and Exa API keys were not configured for this run."
+        )
     }
 
     @Test("Suite refresh reads each component and derives canonical reports from coordinator runs")
