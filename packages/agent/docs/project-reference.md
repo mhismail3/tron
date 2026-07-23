@@ -655,6 +655,15 @@ Every enabled worker is also registered as a stable direct typed tool using the
 bundle's `toolName`, input schema, output schema, description, routing metadata,
 provenance, version, and recent success evidence.
 
+Tool lifecycle events copy immutable presentation evidence from the exact
+advertised function contract. Fixed operations identify their core primitive
+group; direct workers identify their worker id, name, version, and runner kind.
+This metadata is observational rather than authoritative: it cannot change
+routing or execution, but it lets clients present core execution and worker
+progress differently without parsing model-facing names or maintaining a
+second tool catalog. Result-owned presentation hints may add visual detail
+without erasing the pinned fixed/worker identity.
+
 The provider-visible function description contains only version-stable purpose,
 active version, and provenance. Success evidence lives in a durable, rebuildable
 observation overlay. Completing a run updates that overlay rather than

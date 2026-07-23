@@ -28,6 +28,7 @@ async fn invocation_rejects_a_function_surface_that_changed_after_advertisement(
             worker_id: "alpha".to_owned(),
             worker_name: "Alpha".to_owned(),
             worker_version: "worker-v1".to_owned(),
+            runner_kind: "command".to_owned(),
             updated_at: String::new(),
             intents: Vec::new(),
             examples: Vec::new(),

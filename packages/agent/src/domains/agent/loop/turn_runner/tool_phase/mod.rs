@@ -73,11 +73,18 @@ struct ExecutedToolInvocation {
 fn tool_event_context_json(
     trace_id: Option<&crate::engine::TraceId>,
     parent_invocation_id: Option<&crate::engine::InvocationId>,
+    presentation_hints: Option<Value>,
 ) -> Value {
-    json!({
+    let mut identity = json!({
         "traceId": trace_id.map(|id| id.as_str()),
         "rootInvocationId": parent_invocation_id.map(|id| id.as_str()),
-    })
+    });
+    if let (Some(identity), Some(presentation_hints)) =
+        (identity.as_object_mut(), presentation_hints)
+    {
+        identity.insert("presentationHints".to_owned(), presentation_hints);
+    }
+    identity
 }
 
 fn result_event_context_json(
@@ -93,6 +100,9 @@ fn result_event_context_json(
         }
         if let Some(value) = details.get("themeColor") {
             identity.insert("themeColor".to_owned(), value.clone());
+        }
+        if let Some(value) = details.get("presentationHints") {
+            identity.insert("presentationHints".to_owned(), value.clone());
         }
         if let Some(value) = details
             .get("presentationHints")
@@ -159,9 +169,15 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         });
         if let (Some(payload), Some(identity)) = (
             payload.as_object_mut(),
-            tool_event_context_json(params.trace_id, params.parent_invocation_id)
-                .as_object()
-                .cloned(),
+            tool_event_context_json(
+                params.trace_id,
+                params.parent_invocation_id,
+                params
+                    .primitive_surface
+                    .presentation_hints(&tool_invocation.name),
+            )
+            .as_object()
+            .cloned(),
         ) {
             payload.extend(identity);
         }
@@ -314,6 +330,9 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                             params.run_id,
                             params.trace_id,
                             params.parent_invocation_id,
+                            params
+                                .primitive_surface
+                                .presentation_hints(&tool_invocation.name),
                         )
                     });
 
@@ -366,12 +385,13 @@ fn executed_completion_payload(
     run_id: Option<&str>,
     trace_id: Option<&crate::engine::TraceId>,
     parent_invocation_id: Option<&crate::engine::InvocationId>,
+    presentation_hints: Option<Value>,
 ) -> Value {
     let result_text = extract_result_text(result);
     let durable_result_text = redact_sensitive_content(&result_text);
     let durable_provider_text = redact_sensitive_content(provider_text);
     let is_error = result.result.is_error.unwrap_or(false);
-    let base_identity = tool_event_context_json(trace_id, parent_invocation_id);
+    let base_identity = tool_event_context_json(trace_id, parent_invocation_id, presentation_hints);
     let mut payload = json!({
         "invocationId": invocation.id,
         "toolName": invocation.name,
@@ -433,9 +453,15 @@ fn record_skipped_invocations(
         });
         if let (Some(payload), Some(identity)) = (
             payload.as_object_mut(),
-            tool_event_context_json(params.trace_id, params.parent_invocation_id)
-                .as_object()
-                .cloned(),
+            tool_event_context_json(
+                params.trace_id,
+                params.parent_invocation_id,
+                params
+                    .primitive_surface
+                    .presentation_hints(&invocation.name),
+            )
+            .as_object()
+            .cloned(),
         ) {
             payload.extend(identity);
         }
@@ -496,7 +522,13 @@ fn persist_failed_completion_batch(
             });
             if let (Some(payload), Some(identity)) = (
                 payload.as_object_mut(),
-                tool_event_context_json(params.trace_id, params.parent_invocation_id)
+                tool_event_context_json(
+                    params.trace_id,
+                    params.parent_invocation_id,
+                    params
+                        .primitive_surface
+                        .presentation_hints(&invocation.name),
+                )
                 .as_object()
                 .cloned(),
             ) {

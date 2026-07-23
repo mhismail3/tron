@@ -45,21 +45,34 @@ fn make_exec_result_with_details(
 fn tool_event_context_contains_only_causal_fields() {
     let args = Map::from_iter([("operation".to_owned(), json!("worker_owned_field"))]);
 
-    let identity = tool_event_context_json(None, None);
+    let identity = tool_event_context_json(None, None, None);
 
     assert!(identity.get("toolName").is_none());
+    assert!(identity.get("presentationHints").is_none());
     assert_eq!(args["operation"], "worker_owned_field");
 }
 
 #[test]
 fn result_identity_keeps_trace_and_presentation_evidence_without_operation_routing() {
-    let base_identity = tool_event_context_json(None, None);
+    let base_identity = tool_event_context_json(
+        None,
+        None,
+        Some(json!({
+            "surfaceKind": "worker",
+            "workerId": "research"
+        })),
+    );
     let result = make_exec_result_with_details(
         ToolResultBody::Text("complete".into()),
         Some(json!({
             "operation": "worker_owned_field",
             "traceId": "trace_1",
-            "presentationHints": {"themeColor": "#10B981"}
+            "presentationHints": {
+                "surfaceKind": "worker",
+                "workerId": "research",
+                "runnerKind": "agent",
+                "themeColor": "#10B981"
+            }
         })),
     );
 
@@ -68,6 +81,8 @@ fn result_identity_keeps_trace_and_presentation_evidence_without_operation_routi
     assert!(identity.get("toolName").is_none());
     assert_eq!(identity["traceId"], "trace_1");
     assert_eq!(identity["themeColor"], "#10B981");
+    assert_eq!(identity["presentationHints"]["surfaceKind"], "worker");
+    assert_eq!(identity["presentationHints"]["runnerKind"], "agent");
 }
 
 #[test]
@@ -98,6 +113,7 @@ fn durable_completion_redacts_one_time_credentials_but_leaves_live_result_intact
         &result,
         &provider_result_text(&result.result),
         Some("run-secret"),
+        None,
         None,
         None,
     );

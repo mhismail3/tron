@@ -57,6 +57,10 @@
 //! version; catalog preparation rejects drift and lets the next internal turn
 //! resolve a fresh surface. Session discovery promotions live in durable scoped
 //! engine state, are recency ordered and version bound, and survive restart.
+//! The pinned direct-worker contract also carries runner identity into tool
+//! lifecycle presentation evidence. This is immutable observation metadata,
+//! never a routing or permission input, and lets clients distinguish worker
+//! progress from fixed-core execution without guessing from function names.
 //! Worker identity, storage, ranking, and availability are profile-global;
 //! workspace is invocation context only and cannot hide or reveal tools.
 //! Fixed worker creation, invocation, cancellation, lifecycle, webhook, and

@@ -174,6 +174,8 @@ pub struct DirectWorkerToolContract {
     pub worker_name: String,
     /// Immutable active content version.
     pub worker_version: String,
+    /// Runner implementation used by the active worker version.
+    pub runner_kind: String,
     /// Canonical worker update timestamp.
     pub updated_at: String,
     /// Declared routing intents.

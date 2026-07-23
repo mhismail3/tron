@@ -286,6 +286,7 @@ impl WorkerRuntime {
                 worker_id: active.summary.worker_id,
                 worker_name: active.summary.name,
                 worker_version: active.summary.active_version,
+                runner_kind: active.summary.runner_kind,
                 updated_at: active.summary.updated_at,
                 intents: active.bundle.routing.intents,
                 examples: active.bundle.routing.examples,

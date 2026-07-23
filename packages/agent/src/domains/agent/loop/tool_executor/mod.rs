@@ -86,14 +86,17 @@ fn direct_tool_idempotency_key(
 }
 
 fn primitive_tool_identity(
-    _tool_name: &str,
-    _arguments: &Value,
+    engine_target: &crate::domains::agent::r#loop::primitive_surface::PrimitiveExecutionTarget,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) -> ToolEventIdentity {
     ToolEventIdentity {
         trace_id: trace_id.map(|id| id.as_str().to_owned()),
         root_invocation_id: parent_invocation_id.map(|id| id.as_str().to_owned()),
+        presentation_hints:
+            crate::domains::agent::r#loop::primitive_surface::presentation_hints_for_target(
+                engine_target,
+            ),
         ..ToolEventIdentity::default()
     }
 }
@@ -277,12 +280,8 @@ pub async fn execute_tool(
     };
 
     let effective_args = Value::Object(tool_invocation.arguments.clone());
-    let primitive_identity = primitive_tool_identity(
-        &tool_name,
-        &effective_args,
-        ctx.trace_id,
-        ctx.parent_invocation_id,
-    );
+    let primitive_identity =
+        primitive_tool_identity(engine_target, ctx.trace_id, ctx.parent_invocation_id);
 
     if ctx.emit_lifecycle_events {
         let redacted_arguments = redact_sensitive_json(&effective_args).as_object().cloned();

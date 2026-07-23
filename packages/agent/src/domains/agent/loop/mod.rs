@@ -24,6 +24,11 @@
 //! through the same engine. The kernel resolver records the exact catalog
 //! revision and surface hash; the prompt receives a compact revision/count
 //! primer rather than another catalog-inspection workflow.
+//! Tool lifecycle events carry the exact function contract's immutable
+//! fixed-core or dynamic-worker classification (including worker runner
+//! identity) as presentation evidence. Clients can therefore render useful
+//! live execution experiences without inferring architecture from tool names
+//! or owning a second catalog.
 //! Turn starts, ends, and failures are persisted before their matching live
 //! broadcast, and each surface shares the durable row sequence. User
 //! cancellation is terminalized by the active turn runner, which owns the

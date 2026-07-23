@@ -140,6 +140,35 @@ pub struct ResolvedPrimitiveSurface {
     pub snapshot: crate::domains::worker_kernel::EngineSurfaceSnapshot,
 }
 
+impl ResolvedPrimitiveSurface {
+    /// Immutable presentation classification for one exact advertised tool.
+    ///
+    /// This is observation metadata, not a routing or authorization input.
+    /// Lifecycle events carry it so clients do not infer fixed-vs-worker
+    /// semantics from model-facing names.
+    pub(crate) fn presentation_hints(&self, model_tool_id: &str) -> Option<Value> {
+        let target = self.targets_by_name.get(model_tool_id)?;
+        presentation_hints_for_target(target)
+    }
+}
+
+pub(crate) fn presentation_hints_for_target(target: &PrimitiveExecutionTarget) -> Option<Value> {
+    let model_tool = target.function.model_tool.as_ref()?;
+    if let Some(worker) = model_tool.worker.as_ref() {
+        return Some(serde_json::json!({
+            "surfaceKind": "worker",
+            "workerId": worker.worker_id,
+            "workerName": worker.worker_name,
+            "workerVersion": worker.worker_version,
+            "runnerKind": worker.runner_kind,
+        }));
+    }
+    Some(serde_json::json!({
+        "surfaceKind": "core",
+        "primitiveGroup": model_tool.group,
+    }))
+}
+
 #[cfg(test)]
 pub(crate) async fn resolve_provider_primitive_surface(
     host: &EngineHostHandle,
@@ -262,6 +291,7 @@ mod tests {
                 worker_id: worker_id.to_owned(),
                 worker_name: tool_name.to_owned(),
                 worker_version: "v1".to_owned(),
+                runner_kind: "command".to_owned(),
                 updated_at: String::new(),
                 intents: routing
                     .get("intents")
@@ -414,6 +444,23 @@ mod tests {
             "relevance"
         );
         assert_eq!(surface.snapshot.surface_hash.len(), 64);
+        assert_eq!(
+            surface.presentation_hints("worker_upsert"),
+            Some(serde_json::json!({
+                "surfaceKind": "core",
+                "primitiveGroup": null,
+            }))
+        );
+        assert_eq!(
+            surface.presentation_hints("recent_research"),
+            Some(serde_json::json!({
+                "surfaceKind": "worker",
+                "workerId": "recent-research",
+                "workerName": "recent_research",
+                "workerVersion": "v1",
+                "runnerKind": "command",
+            }))
+        );
         let schema = surface
             .tools
             .iter()
