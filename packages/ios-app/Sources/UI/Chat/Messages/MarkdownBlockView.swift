@@ -1,17 +1,19 @@
 import SwiftUI
 
 enum MarkdownListLayout {
-    static let markerWidth: CGFloat = 22
-    static let markerSpacing: CGFloat = 8
-    /// Every nested marker begins where its parent item's text begins.
-    static let depthIndent: CGFloat = markerWidth + markerSpacing
+    /// A bullet only reserves enough room for its glyph. Ordered markers can
+    /// grow beyond this minimum when their number needs more horizontal space.
+    static let minimumMarkerWidth: CGFloat = 8
+    static let markerSpacing: CGFloat = 5
+    /// Every nested bullet begins at the preceding level's minimum text origin.
+    static let depthIndent: CGFloat = minimumMarkerWidth + markerSpacing
 
     static func leadingIndent(forDepth depth: Int) -> CGFloat {
         CGFloat(max(depth, 0)) * depthIndent
     }
 
-    static func contentLeadingIndent(forDepth depth: Int) -> CGFloat {
-        leadingIndent(forDepth: depth) + markerWidth + markerSpacing
+    static func minimumContentLeadingIndent(forDepth depth: Int) -> CGFloat {
+        leadingIndent(forDepth: depth) + minimumMarkerWidth + markerSpacing
     }
 }
 
@@ -169,9 +171,13 @@ struct MarkdownBlockView: View {
                     Text(markerText(for: item.marker))
                         .font(Font(TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .regular)))
                         .foregroundStyle(.tronTextSecondary)
-                        // The marker itself—not merely its invisible column—is
-                        // flush with the current hierarchy level.
-                        .frame(width: MarkdownListLayout.markerWidth, alignment: .leading)
+                        .fixedSize(horizontal: true, vertical: false)
+                        // Keep ordinary bullets compact while allowing ordered
+                        // markers such as "10." to occupy their natural width.
+                        .frame(
+                            minWidth: MarkdownListLayout.minimumMarkerWidth,
+                            alignment: .leading
+                        )
                     Text(inlineMarkdown(from: item.content))
                         .foregroundStyle(textColor)
                         .selectableText(!textSelectionDisabled)

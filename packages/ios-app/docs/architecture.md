@@ -481,10 +481,12 @@ stack between incompatible anchors.
 
 Assistant Markdown lists use the message edge as the marker origin: a root
 bullet or ordered marker is itself flush with neighboring paragraph text, not
-trailing-aligned inside an invisible inset column. Each child marker begins at
-its parent text origin. Two-space, four-space, and tab source indentation are
-normalized into semantic levels so provider formatting differences do not
-change the visible hierarchy.
+trailing-aligned inside an invisible inset column. Ordinary bullets reserve
+only a compact glyph-width column before their content; ordered markers expand
+to their intrinsic width only when their digits require it. Each child bullet
+begins at its parent's minimum text origin. Two-space, four-space, and tab
+source indentation are normalized into semantic levels so provider formatting
+differences do not change the visible hierarchy.
 
 Compact-width session navigation separates the durable selected session ID from
 the transient presentation identity. Every explicit open receives a fresh

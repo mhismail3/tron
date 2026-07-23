@@ -180,8 +180,13 @@ final class MarkdownBlockParserTests: XCTestCase {
     func testListLayoutStartsAtMessageLeadingEdgeAndIndentsOnlyByDepth() {
         XCTAssertEqual(MarkdownListLayout.leadingIndent(forDepth: 0), 0)
         XCTAssertEqual(
-            MarkdownListLayout.contentLeadingIndent(forDepth: 0),
-            MarkdownListLayout.markerWidth + MarkdownListLayout.markerSpacing
+            MarkdownListLayout.minimumContentLeadingIndent(forDepth: 0),
+            MarkdownListLayout.minimumMarkerWidth + MarkdownListLayout.markerSpacing
+        )
+        XCTAssertLessThanOrEqual(
+            MarkdownListLayout.minimumContentLeadingIndent(forDepth: 0),
+            14,
+            "A root bullet should not create a visually large gap before its text"
         )
         XCTAssertEqual(
             MarkdownListLayout.leadingIndent(forDepth: 1),
@@ -189,12 +194,20 @@ final class MarkdownBlockParserTests: XCTestCase {
         )
         XCTAssertEqual(
             MarkdownListLayout.leadingIndent(forDepth: 1),
-            MarkdownListLayout.contentLeadingIndent(forDepth: 0),
-            "A child marker should begin exactly where its parent text begins"
+            MarkdownListLayout.minimumContentLeadingIndent(forDepth: 0),
+            "A child bullet should begin at its parent's minimum text origin"
         )
         XCTAssertEqual(
             MarkdownListLayout.leadingIndent(forDepth: 2),
             MarkdownListLayout.depthIndent * 2
+        )
+        XCTAssertEqual(
+            MarkdownListLayout.minimumContentLeadingIndent(forDepth: 1),
+            MarkdownListLayout.depthIndent * 2
+        )
+        XCTAssertEqual(
+            MarkdownListLayout.minimumContentLeadingIndent(forDepth: 2),
+            MarkdownListLayout.depthIndent * 3
         )
         XCTAssertEqual(MarkdownListLayout.leadingIndent(forDepth: -1), 0)
     }
