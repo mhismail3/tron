@@ -5,9 +5,8 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use super::WorkerRuntime;
-use super::hooks::EngineHookExecution;
 use crate::domains::session::event_store::SessionRow;
-use crate::domains::worker_kernel::types::WorkerEngineHook;
+use crate::domains::worker_kernel::types::{InvocationRecord, WorkerEngineHook};
 use crate::engine::Invocation;
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::server::context::run_blocking_task;
@@ -17,72 +16,7 @@ const MAX_SESSION_TITLE_CHARS: usize = 160;
 const MAX_SESSION_TITLE_CONTEXT_CHARS: usize = 4_096;
 
 impl WorkerRuntime {
-    /// Invoke the active title policy for one still-untitled ordinary session.
-    ///
-    /// The kernel owns eligibility and the final compare-and-set. The worker
-    /// sees bounded durable conversation previews and can only propose a title;
-    /// it cannot select or mutate an arbitrary session.
-    pub(crate) async fn apply_session_title_hook(
-        self: &Arc<Self>,
-        invocation: &Invocation,
-    ) -> Result<Value, String> {
-        let session_id = title_target_session_id(invocation.causal_context.session_id.as_deref())?;
-        let store = self.event_store.clone();
-        let load_session_id = session_id.clone();
-        let session = run_blocking_task("worker_kernel.session_title_context", move || {
-            let Some(session) =
-                store
-                    .get_session(&load_session_id)
-                    .map_err(|error| ToolError::Internal {
-                        message: error.to_string(),
-                    })?
-            else {
-                return Err(ToolError::NotFound {
-                    code: SESSION_NOT_FOUND.to_owned(),
-                    message: format!("session not found: {load_session_id}"),
-                });
-            };
-            Ok(session)
-        })
-        .await
-        .map_err(|error| error.to_string())?;
-
-        if session.is_worker_session() || session_title_is_present(session.title.as_deref()) {
-            return Ok(json!({"handled":false,"updated":false}));
-        }
-
-        let Some(execution) = self
-            .execute_engine_hook(
-                WorkerEngineHook::SessionTitle,
-                json!({
-                    "userPrompt":truncate_title_context(
-                        invocation.payload["userPrompt"].as_str().unwrap_or_default()
-                    ),
-                    "assistantResponse":truncate_title_context(
-                        invocation.payload["assistantResponse"].as_str().unwrap_or_default()
-                    ),
-                }),
-                invocation.causal_context.origin_worker_id(),
-                invocation,
-            )
-            .await?
-        else {
-            return Ok(json!({"handled":false,"updated":false}));
-        };
-        let title = proposed_title(self, &execution).await?;
-        let (updated, current_session) = self
-            .set_session_title_if_untitled(session_id.clone(), title.clone())
-            .await?;
-
-        Ok(json!({
-            "handled":true,
-            "updated":updated,
-            "workerId":execution.worker_id,
-            "workerVersion":execution.worker_version,
-            "title":current_session.title.unwrap_or(title),
-        }))
-    }
-
+    /// Apply an intentional user-authored rename to the current causal session.
     pub(crate) async fn set_session_title(
         &self,
         session_id: String,
@@ -127,6 +61,90 @@ impl WorkerRuntime {
         }
 
         Ok(json!({"sessionId":session_id,"title":title,"updated":updated}))
+    }
+
+    /// Durably enqueue the active title policy for one still-untitled session.
+    ///
+    /// The kernel owns eligibility and the final compare-and-set. The worker
+    /// sees bounded durable conversation previews and can only propose a title;
+    /// it cannot select or mutate an arbitrary session.
+    pub(crate) async fn enqueue_session_title_hook(
+        self: &Arc<Self>,
+        invocation: &Invocation,
+    ) -> Result<Value, String> {
+        let session_id = title_target_session_id(invocation.causal_context.session_id.as_deref())?;
+        let store = self.event_store.clone();
+        let load_session_id = session_id.clone();
+        let session = run_blocking_task("worker_kernel.session_title_context", move || {
+            let Some(session) =
+                store
+                    .get_session(&load_session_id)
+                    .map_err(|error| ToolError::Internal {
+                        message: error.to_string(),
+                    })?
+            else {
+                return Err(ToolError::NotFound {
+                    code: SESSION_NOT_FOUND.to_owned(),
+                    message: format!("session not found: {load_session_id}"),
+                });
+            };
+            Ok(session)
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+
+        if session.is_worker_session() || session_title_is_present(session.title.as_deref()) {
+            return Ok(json!({"handled":false,"updated":false}));
+        }
+
+        let Some((worker, queued)) = self.enqueue_engine_hook(
+            WorkerEngineHook::SessionTitle,
+            json!({
+                "userPrompt":truncate_title_context(
+                    invocation.payload["userPrompt"].as_str().unwrap_or_default()
+                ),
+                "assistantResponse":truncate_title_context(
+                    invocation.payload["assistantResponse"].as_str().unwrap_or_default()
+                ),
+            }),
+            invocation.causal_context.origin_worker_id(),
+            invocation,
+        )?
+        else {
+            return Ok(json!({"handled":false,"updated":false}));
+        };
+
+        Ok(json!({
+            "handled":true,
+            "queued":true,
+            "invocationId":queued.invocation_id,
+            "workerId":worker.summary.worker_id,
+            "workerVersion":worker.summary.active_version,
+        }))
+    }
+
+    /// Validate and apply a completed asynchronous title-policy result before
+    /// the worker invocation commits its terminal row.
+    ///
+    /// A crash before terminal commit requeues the same durable invocation.
+    /// Re-execution is safe because the session store compare-and-set never
+    /// overwrites an explicit or previously applied title.
+    pub(super) async fn apply_session_title_result(
+        &self,
+        invocation: &InvocationRecord,
+        output: &Value,
+    ) -> Result<(), String> {
+        if invocation.trigger_kind != "engine_hook:session_title" {
+            return Ok(());
+        }
+        let session_id = title_target_session_id(invocation.origin_session_id.as_deref())?;
+        let title = proposed_title(output).ok_or_else(|| {
+            "engine hook 'session_title' output is invalid: title must contain 1 to 160 characters"
+                .to_owned()
+        })?;
+        self.set_session_title_if_untitled(session_id, title)
+            .await
+            .map(|_| ())
     }
 
     async fn set_session_title_if_untitled(
@@ -213,25 +231,11 @@ fn truncate_title_context(value: &str) -> String {
         .collect()
 }
 
-async fn proposed_title(
-    runtime: &WorkerRuntime,
-    execution: &EngineHookExecution,
-) -> Result<String, String> {
-    let title = execution
-        .output
+fn proposed_title(output: &Value) -> Option<String> {
+    output
         .get("title")
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|value| !value.is_empty() && value.chars().count() <= MAX_SESSION_TITLE_CHARS);
-    let Some(title) = title else {
-        let reason = runtime
-            .reject_engine_hook_output(
-                execution,
-                WorkerEngineHook::SessionTitle,
-                "title must contain 1 to 160 characters",
-            )
-            .await;
-        return Err(reason);
-    };
-    Ok(title.to_owned())
+        .filter(|value| !value.is_empty() && value.chars().count() <= MAX_SESSION_TITLE_CHARS)
+        .map(ToOwned::to_owned)
 }

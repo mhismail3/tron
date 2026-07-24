@@ -222,16 +222,10 @@ fn relevance_score(
         .iter()
         .map(|value| normalized_text(value))
         .collect::<Vec<_>>();
-    let provenance = document
-        .provenance
-        .iter()
-        .map(|value| normalized_text(value))
-        .collect::<Vec<_>>();
     let name_terms = terms(&name);
     let description_terms = terms(&description);
     let intent_terms = combined_terms(&intents);
     let example_terms = combined_terms(&examples);
-    let provenance_terms = combined_terms(&provenance);
 
     let mut score = 0usize;
     for term in query_terms {
@@ -239,7 +233,6 @@ fn relevance_score(
         score += usize::from(intent_terms.contains(term)) * 6;
         score += usize::from(example_terms.contains(term)) * 4;
         score += usize::from(description_terms.contains(term)) * 2;
-        score += usize::from(provenance_terms.contains(term));
     }
     for phrase in query_phrases {
         score += contains_phrase(&name, phrase, 14);
@@ -497,6 +490,40 @@ mod tests {
             &BTreeSet::new(),
         );
         assert_eq!(ranked[0].worker_id, "purpose-built");
+    }
+
+    #[test]
+    fn current_news_routes_to_search_while_deep_investigation_routes_to_coordinator() {
+        let mut search = document(
+            "research-search",
+            "current events latest headlines quick linked lookup",
+            3,
+        );
+        search.name = "Research Search".to_owned();
+        search.examples = vec!["What is happening in the news today?".to_owned()];
+        let mut coordinator = document(
+            "research-coordinator",
+            "deep multi source investigation contradiction analysis durable report",
+            20,
+        );
+        coordinator.name = "Research Coordinator".to_owned();
+
+        let quick = rank_workers(
+            [search.clone(), coordinator.clone()],
+            Some("What's happening in the news today?"),
+            &BTreeSet::new(),
+        );
+        assert_eq!(quick[0].worker_id, "research-search");
+        assert!(quick[0].relevance_score > 0);
+        assert_eq!(quick[1].relevance_score, 0);
+
+        let deep = rank_workers(
+            [search, coordinator],
+            Some("Perform a deep multi-source investigation with contradiction analysis"),
+            &BTreeSet::new(),
+        );
+        assert_eq!(deep[0].worker_id, "research-coordinator");
+        assert!(deep[0].relevance_score > 0);
     }
 
     #[test]

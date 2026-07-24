@@ -143,6 +143,13 @@ impl WorkerRuntime {
             .map_err(|error| format!("worker output does not match its schema: {error}"))?;
             Ok(output)
         });
+        let execution = match execution {
+            Ok(output) => self
+                .apply_session_title_result(&queued, &output)
+                .await
+                .map(|()| output),
+            Err(error) => Err(error),
+        };
         let completed = match execution {
             Ok(output) => self.store.complete_invocation(
                 &queued.invocation_id,

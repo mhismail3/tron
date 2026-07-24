@@ -431,7 +431,7 @@ fn web_fetch_defaults_protect_context_and_current_session_is_implicit() {
     let title = definitions
         .iter()
         .find(|definition| definition.id.as_str() == "worker_kernel::session_set_title")
-        .expect("session title contract");
+        .expect("explicit session title contract");
     let title_schema = title.request_schema.as_ref().expect("title request schema");
     assert_eq!(title_schema["required"], json!(["title"]));
     assert_eq!(

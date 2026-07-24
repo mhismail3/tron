@@ -16,13 +16,13 @@ pub(super) async fn session_set_title(
 ) -> Result<Value, String> {
     deps.runtime
         .set_session_title(
-            title_target_session_id(invocation.causal_context.session_id.as_deref())?,
+            explicit_title_target_session_id(invocation.causal_context.session_id.as_deref())?,
             required_string(&invocation.payload, "title")?,
         )
         .await
 }
 
-fn title_target_session_id(causal_session_id: Option<&str>) -> Result<String, String> {
+fn explicit_title_target_session_id(causal_session_id: Option<&str>) -> Result<String, String> {
     causal_session_id
         .map(str::trim)
         .filter(|session_id| !session_id.is_empty())
@@ -91,7 +91,7 @@ pub(super) async fn context_summary(invocation: &Invocation, deps: &Deps) -> Res
 }
 
 pub(super) async fn session_title(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    deps.runtime.apply_session_title_hook(invocation).await
+    deps.runtime.enqueue_session_title_hook(invocation).await
 }
 
 pub(super) async fn worker_relevance(
@@ -158,11 +158,11 @@ mod tests {
     #[test]
     fn session_title_targets_the_causal_session_without_a_synthetic_current_id() {
         assert_eq!(
-            title_target_session_id(Some("sess_current")).unwrap(),
+            explicit_title_target_session_id(Some("sess_current")).unwrap(),
             "sess_current"
         );
         assert!(
-            title_target_session_id(None)
+            explicit_title_target_session_id(None)
                 .unwrap_err()
                 .contains("requires a current causal session")
         );

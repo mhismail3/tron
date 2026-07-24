@@ -162,7 +162,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         EffectClass::IdempotentWrite,
         RiskLevel::Medium,
         json!({"type":"object","additionalProperties":false,"required":["title"],"properties":{"title":{"type":"string","minLength":1,"maxLength":160}}}),
-        "Set an explicit durable title for the current causal session and publish the canonical live update. Adaptive title policy belongs in workers.",
+        "Rename the current conversation only when the user explicitly asks to rename, title, or name it. The target is always the current causal session. Do not use this during ordinary conversation; automatic title policy runs independently in a background worker.",
     )?);
     specs.push(spec(
         "worker_kernel::core_proposal_create",

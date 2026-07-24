@@ -22,6 +22,24 @@ impl CorePrimitiveGroup {
     }
 }
 
+const SESSION_RENAME_INTENT_PHRASES: &[&str] = &[
+    "rename this chat",
+    "rename this conversation",
+    "rename this session",
+    "set the chat title",
+    "set the conversation title",
+    "set the session title",
+    "change the chat title",
+    "change the conversation title",
+    "change the session title",
+    "title this chat",
+    "title this conversation",
+    "name this chat",
+    "name this conversation",
+    "call this chat",
+    "call this conversation",
+];
+
 /// One canonical model-facing primitive identity.
 ///
 /// Contracts, handlers, provider projection, dashboard projection, and tests
@@ -33,6 +51,20 @@ pub(crate) struct CorePrimitiveDescriptor {
     pub(crate) model_name: &'static str,
     pub(crate) group: CorePrimitiveGroup,
     pub(crate) order: u16,
+}
+
+impl CorePrimitiveDescriptor {
+    /// Optional latest-user intent phrases required before provider projection.
+    ///
+    /// The surface resolver owns generic phrase matching; semantic phrases stay
+    /// beside the concrete actuator contract.
+    pub(crate) fn latest_user_intent_phrases(self) -> Option<&'static [&'static str]> {
+        if matches!(self.function_id, "worker_kernel::session_set_title") {
+            Some(SESSION_RENAME_INTENT_PHRASES)
+        } else {
+            None
+        }
+    }
 }
 
 const CORE_PRIMITIVES: &[CorePrimitiveDescriptor] = &[

@@ -125,8 +125,10 @@
 //! contracts are not duplicated into the client response. It is not itself
 //! model vocabulary and reports executable runtime facts rather than a
 //! separately maintained description of the source tree.
-//! Fixed inventory is always model-callable. Worker-first operation is the
-//! engine architecture rather than an editable mode or secondary lifecycle.
+//! Fixed inventory is always inspectable, while contract-declared latest-user
+//! intent exposure may keep an actuator out of unrelated provider turns.
+//! Worker-first operation is the engine architecture rather than an editable
+//! mode or secondary lifecycle.
 //! Explicit discovery and automatic projection use one worker-owned relevance
 //! hook when installed. Its bounded candidate contract carries canonical worker
 //! metadata and operational evidence without exposing provider internals. The
@@ -179,15 +181,15 @@
 //! cannot be held indefinitely by a home-directory search.
 //! The fixed `session_set_title` operation owns only explicit durable mutation
 //! and live projection. Its only input is the title; the target is always the
-//! current causal session, so models cannot invent a synthetic "current"
-//! identifier or mutate an unrelated session. After each successful ordinary
-//! user exchange, prompt completion freezes bounded user/assistant text and
-//! invokes the active `session_title` worker only while the session remains
-//! untitled. Worker audit sessions and unsuccessful/interrupted turns are
-//! ineligible. The worker can propose only `{title}`; a storage-level
-//! compare-and-set prevents delayed policy output from overwriting an explicit
-//! concurrent title. Title-policy failure remains visible through normal worker
-//! health/inbox evidence without changing the already-completed chat outcome.
+//! current causal session, and generic latest-user intent exposure keeps it out
+//! of ordinary provider turns. After each successful ordinary user exchange,
+//! prompt completion freezes bounded user/assistant text and durably enqueues
+//! the active `session_title` worker only while the session remains untitled.
+//! It never awaits policy execution. Worker audit sessions and unsuccessful or
+//! interrupted turns are ineligible. The worker can propose only `{title}`;
+//! the kernel validates and compare-and-sets that result before terminal worker
+//! commit, so recovery redelivery cannot overwrite an explicit concurrent
+//! title. Title-policy failure remains normal worker health/inbox evidence.
 //! Raw web fetches default to 128 KiB and 30 seconds, expose explicit larger
 //! ceilings, and hash the retained bytes. HTML interpretation, crawling, and
 //! evidence policy remain worker behavior rather than growing the primitive.

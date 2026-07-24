@@ -96,22 +96,11 @@ impl WorkerRuntime {
         origin_worker_id: Option<&str>,
         invocation: &Invocation,
     ) -> Result<Option<EngineHookExecution>, String> {
-        let Some(worker) = self.active_engine_hook(hook, origin_worker_id)? else {
+        let Some((worker, queued)) =
+            self.enqueue_engine_hook(hook, input, origin_worker_id, invocation)?
+        else {
             return Ok(None);
         };
-        let queued = self.enqueue_and_dispatch(InvokeRequest {
-            worker_id: worker.summary.worker_id.clone(),
-            input,
-            idempotency_key: invocation
-                .causal_context
-                .idempotency_key
-                .clone()
-                .unwrap_or_else(|| format!("engine-hook:{}:{}", hook.as_str(), invocation.id)),
-            trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
-            causal_depth: invocation.causal_context.trigger_depth(),
-            trigger_kind: format!("engine_hook:{}", hook.as_str()),
-            origin_session_id: invocation.causal_context.session_id.clone(),
-        })?;
         let (record, timed_out) = self
             .await_invocation(
                 &queued.invocation_id,
@@ -146,6 +135,37 @@ impl WorkerRuntime {
             worker_version: worker.summary.active_version,
             output,
         }))
+    }
+
+    /// Durably admit a semantic hook without waiting for its terminal result.
+    ///
+    /// Hooks that guard an interactive boundary may still call
+    /// `execute_engine_hook`; fire-and-observe hooks such as session naming use
+    /// this admission path and consume their result inside worker completion.
+    pub(crate) fn enqueue_engine_hook(
+        self: &Arc<Self>,
+        hook: WorkerEngineHook,
+        input: Value,
+        origin_worker_id: Option<&str>,
+        invocation: &Invocation,
+    ) -> Result<Option<(ActiveWorker, InvocationRecord)>, String> {
+        let Some(worker) = self.active_engine_hook(hook, origin_worker_id)? else {
+            return Ok(None);
+        };
+        let queued = self.enqueue_and_dispatch(InvokeRequest {
+            worker_id: worker.summary.worker_id.clone(),
+            input,
+            idempotency_key: invocation
+                .causal_context
+                .idempotency_key
+                .clone()
+                .unwrap_or_else(|| format!("engine-hook:{}:{}", hook.as_str(), invocation.id)),
+            trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
+            causal_depth: invocation.causal_context.trigger_depth(),
+            trigger_kind: format!("engine_hook:{}", hook.as_str()),
+            origin_session_id: invocation.causal_context.session_id.clone(),
+        })?;
+        Ok(Some((worker, queued)))
     }
 
     pub(crate) async fn reject_engine_hook_output(

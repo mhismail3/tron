@@ -270,6 +270,11 @@ pub(crate) async fn resolve_tool_surface(
     )
     .await;
     let query_is_empty = super::retrieval::query_is_empty(relevance_query);
+    let worker_rank = ranked
+        .iter()
+        .enumerate()
+        .map(|(index, rank)| (rank.worker_id.clone(), index))
+        .collect::<BTreeMap<_, _>>();
     let mut selected_dynamic = BTreeMap::new();
     for promotion in &promotion_entries {
         if selected_dynamic.len() >= MAX_RELEVANT_WORKERS {
@@ -349,6 +354,9 @@ pub(crate) async fn resolve_tool_surface(
         {
             continue;
         }
+        if !model_tool_exposure_allows(&function, relevance_query) {
+            continue;
+        }
         if !seen_names.insert(model_name.clone()) {
             return Err(format!(
                 "duplicate model tool name {model_name} in live catalog"
@@ -385,6 +393,51 @@ pub(crate) async fn resolve_tool_surface(
             definition: function,
         });
     }
+    resolved.sort_by_key(|resolved| {
+        direct_worker_contract(&resolved.definition).map_or_else(
+            || {
+                (
+                    0usize,
+                    resolved
+                        .definition
+                        .model_tool
+                        .as_ref()
+                        .and_then(|tool| tool.order)
+                        .map_or(usize::MAX, usize::from),
+                    resolved.definition.id.as_str().to_owned(),
+                )
+            },
+            |worker| {
+                (
+                    1usize,
+                    worker_rank
+                        .get(&worker.worker_id)
+                        .copied()
+                        .unwrap_or(usize::MAX),
+                    resolved.definition.id.as_str().to_owned(),
+                )
+            },
+        )
+    });
+    snapshot_tools.sort_by_key(|tool| {
+        tool.worker_id.as_ref().map_or_else(
+            || {
+                (
+                    0usize,
+                    super::contract::core_primitive_for_function(&tool.function_id)
+                        .map_or(usize::MAX, |descriptor| usize::from(descriptor.order)),
+                    tool.function_id.clone(),
+                )
+            },
+            |worker_id| {
+                (
+                    1usize,
+                    worker_rank.get(worker_id).copied().unwrap_or(usize::MAX),
+                    tool.function_id.clone(),
+                )
+            },
+        )
+    });
 
     let fixed_tool_count = snapshot_tools
         .iter()
@@ -485,6 +538,35 @@ fn is_provider_primitive(function: &FunctionDefinition) -> bool {
     function.model_tool.is_some()
 }
 
+fn model_tool_exposure_allows(
+    function: &FunctionDefinition,
+    latest_user_query: Option<&str>,
+) -> bool {
+    if function.model_tool.is_none() {
+        return false;
+    }
+    let Some(phrases) = super::contract::core_primitive_for_function(function.id.as_str())
+        .and_then(|descriptor| descriptor.latest_user_intent_phrases())
+    else {
+        return true;
+    };
+    let query = normalized_intent_text(latest_user_query.unwrap_or_default());
+    !query.is_empty()
+        && phrases.iter().any(|phrase| {
+            let phrase = normalized_intent_text(phrase);
+            !phrase.is_empty() && query.contains(&phrase)
+        })
+}
+
+fn normalized_intent_text(value: &str) -> String {
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn model_tool_name(function: &FunctionDefinition) -> Option<String> {
     function.model_tool.as_ref().map(|tool| tool.name.clone())
 }
@@ -496,6 +578,37 @@ fn direct_worker_contract(function: &FunctionDefinition) -> Option<&DirectWorker
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn conditional_definition() -> FunctionDefinition {
+        let mut definition = FunctionDefinition::new(
+            crate::engine::FunctionId::new("worker_kernel::session_set_title").unwrap(),
+            crate::engine::WorkerId::new("worker_kernel").unwrap(),
+            "Explicit conversation rename",
+            crate::engine::FunctionVisibility::Public,
+            crate::engine::EffectClass::IdempotentWrite,
+        );
+        definition.model_tool = Some(crate::engine::ModelToolContract {
+            name: "conditional".to_owned(),
+            callable: true,
+            order: Some(1),
+            group: Some("host".to_owned()),
+            worker: None,
+        });
+        definition
+    }
+
+    #[test]
+    fn latest_user_intent_exposure_hides_normal_chat_and_admits_explicit_requests() {
+        let definition = conditional_definition();
+        assert!(!model_tool_exposure_allows(
+            &definition,
+            Some("What's happening in the news today?")
+        ));
+        assert!(model_tool_exposure_allows(
+            &definition,
+            Some("Please rename this conversation to Daily Briefing")
+        ));
+    }
 
     #[test]
     fn surface_hash_is_stable_and_contract_sensitive() {

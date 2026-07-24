@@ -1,7 +1,9 @@
 //! Provider turn-context construction from the already resolved primitive surface.
 
 use crate::domains::agent::context::context_manager::ContextManager;
-use crate::shared::protocol::content::{AssistantContent, ToolResultContent, UserContent};
+#[cfg(test)]
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::content::{ToolResultContent, UserContent};
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use sha2::{Digest, Sha256};
@@ -9,8 +11,6 @@ use std::sync::Arc;
 use tracing::debug;
 
 const MAX_RELEVANCE_QUERY_CHARS: usize = 12_000;
-const MAX_RELEVANCE_SEGMENT_CHARS: usize = 2_500;
-const MAX_EVOLVING_MESSAGES: usize = 8;
 pub(super) const MAX_PROVIDER_TOOL_RESULT_BYTES: usize = 32 * 1_024;
 
 const PROVIDER_RESULT_PREFIX: &str = "\
@@ -162,63 +162,23 @@ fn utf8_suffix(text: &str, max_bytes: usize) -> &str {
     &text[start..]
 }
 
-/// Build a bounded task-intent query from the current user turn and the model's
-/// subsequent plan/tool observations. Binary content and hidden thinking never
-/// enter worker retrieval.
+/// Build one stable bounded task-intent query from the latest real user turn.
+///
+/// Assistant plans and tool results are deliberately excluded: resolving the
+/// provider surface again within one prompt run must not let a model-selected
+/// tool manufacture relevance for unrelated workers.
 pub(super) fn worker_relevance_query(messages: &[Message]) -> Option<String> {
-    let user_index = messages.iter().rposition(Message::is_real_user_turn)?;
-    let evolving_start = messages
-        .len()
-        .saturating_sub(MAX_EVOLVING_MESSAGES)
-        .max(user_index);
-    let mut selected = Vec::new();
-    if evolving_start > user_index {
-        selected.push(&messages[user_index]);
-    }
-    selected.extend(&messages[evolving_start..]);
-
-    let mut query = String::new();
-    for message in selected {
-        let (role, text) = relevance_segment(message);
-        if text.trim().is_empty() {
-            continue;
-        }
-        let segment = text
-            .chars()
-            .take(MAX_RELEVANCE_SEGMENT_CHARS)
-            .collect::<String>();
-        let remaining = MAX_RELEVANCE_QUERY_CHARS.saturating_sub(query.chars().count());
-        if remaining == 0 {
-            break;
-        }
-        let framed = format!("{role}: {segment}\n");
-        query.extend(framed.chars().take(remaining));
-    }
+    let message = messages
+        .iter()
+        .rfind(|message| message.is_real_user_turn())?;
+    let Message::User { content, .. } = message else {
+        return None;
+    };
+    let query = user_relevance_text(content)
+        .chars()
+        .take(MAX_RELEVANCE_QUERY_CHARS)
+        .collect::<String>();
     (!query.trim().is_empty()).then_some(query)
-}
-
-fn relevance_segment(message: &Message) -> (&'static str, String) {
-    match message {
-        Message::User { content, .. } => ("user", user_relevance_text(content)),
-        Message::Assistant { content, .. } => {
-            let text = content
-                .iter()
-                .filter_map(|part| match part {
-                    AssistantContent::Text { text } => Some(text.clone()),
-                    AssistantContent::ToolInvocation {
-                        name, arguments, ..
-                    } => Some(format!(
-                        "tool {name} {}",
-                        serde_json::to_string(arguments).unwrap_or_default()
-                    )),
-                    AssistantContent::Thinking { .. } => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            ("assistant", text)
-        }
-        Message::ToolResult { content, .. } => ("tool_result", tool_result_relevance_text(content)),
-    }
 }
 
 fn user_relevance_text(content: &UserMessageContent) -> String {
@@ -240,20 +200,6 @@ fn user_relevance_text(content: &UserMessageContent) -> String {
     }
 }
 
-fn tool_result_relevance_text(content: &ToolResultMessageContent) -> String {
-    match content {
-        ToolResultMessageContent::Text(text) => text.clone(),
-        ToolResultMessageContent::Blocks(blocks) => blocks
-            .iter()
-            .filter_map(|block| match block {
-                ToolResultContent::Text { text } => Some(text.clone()),
-                ToolResultContent::Image { .. } => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::{Map, json};
@@ -261,7 +207,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn relevance_query_tracks_evolving_plan_and_tool_results() {
+    fn relevance_query_is_stable_for_the_latest_user_request() {
         let messages = vec![
             Message::user("old unrelated request"),
             Message::assistant("old response"),
@@ -293,8 +239,8 @@ mod tests {
 
         let query = worker_relevance_query(&messages).expect("query");
         assert!(query.contains("research current compiler changes"));
-        assert!(query.contains("recent repository research"));
-        assert!(query.contains("last30days-research"));
+        assert!(!query.contains("recent repository research"));
+        assert!(!query.contains("last30days-research"));
         assert!(!query.contains("old unrelated request"));
     }
 

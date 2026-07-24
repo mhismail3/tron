@@ -6,9 +6,9 @@
 //! model-facing projection for both newly executed and reconstructed results,
 //! so every provider can reason about direct tool evidence without accepting
 //! unbounded local, web, worker, or binary-derived payloads. Every
-//! provider turn resolves its tool surface from a bounded evolving intent query
-//! containing the current user request, visible assistant plan, tool names and
-//! arguments, and text results; binary data and hidden thinking are excluded.
+//! provider turn resolves its tool surface from the same bounded latest-user
+//! intent. Assistant plans and tool results cannot manufacture worker relevance
+//! on later internal turns.
 //!
 //! ## Concern ownership
 //!

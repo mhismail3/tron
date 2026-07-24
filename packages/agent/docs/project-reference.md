@@ -107,10 +107,11 @@ A fixed model tool is admitted only when it passes one of two tests:
    publication, and closed evidence. `web_fetch` adds URL validation, response
    ceilings, retained-content checksums, and source provenance. Its default is
    intentionally context-safe rather than the maximum supported response.
-   `session_set_title` is the narrow explicit session-metadata actuator needed
-   by workers; it accepts only a title and always derives the target from causal
-   context. These are ergonomic or state-custody primitives, not new semantic
-   product policy.
+   `session_set_title` is the narrow explicit session-metadata actuator; it
+   accepts only a title, derives the target from causal context, and is
+   projected only when the latest user request explicitly asks to rename the
+   chat. These are ergonomic or state-custody primitives, not semantic product
+   policy.
 
 This admits the current 8/17/4 grouping without pretending the smallest
 possible tool count is the objective. It rejects fixed web search providers,
@@ -157,7 +158,7 @@ Token-window selection, cancellation, checkpoint restoration, durable
 compact-boundary proof, and provider context mutation remain irreducible
 kernel custody.
 
-The `worker_relevance` hook accepts the evolving task query plus a bounded set
+The `worker_relevance` hook accepts the latest user task query plus a bounded set
 of canonical candidate summaries and returns typed worker ids and scores.
 Automatic provider projection and explicit `worker_discover` call this same
 hook; there is no parallel semantic-discovery policy. The engine validates that
@@ -180,16 +181,16 @@ hook owner, and a lost concurrent claim injects no stale narrative.
 
 The `session_title` hook receives only the bounded user prompt and assistant
 response from one successfully completed ordinary user exchange and returns
-`{title}`. Prompt completion invokes it automatically after the canonical
-ready/session update boundary, but within the same tracked prompt task. It
+`{title}`. After publishing the canonical ready/session boundary, prompt
+completion durably enqueues the hook and does not await worker execution. It
 never runs for hidden worker audit sessions, failed or interrupted turns, or a
-session that already has a nonblank title. The kernel trims and bounds the
-proposal and commits it with a SQLite compare-and-set that still requires the
-title to be null or blank, so a delayed worker result cannot overwrite a
-concurrent explicit title. There is intentionally no deterministic generated
-fallback: until a healthy real worker owns this hook, the session remains
-untitled. Hook failure disables the owner and enters ordinary run/inbox
-evidence without changing the completed user turn.
+session that already has a nonblank title. The kernel validates and
+compare-and-sets the proposal before committing the worker's terminal row. A
+crash therefore redelivers the same idempotent invocation, while a delayed
+result cannot overwrite a concurrent explicit title. There is no deterministic
+generated fallback: without a healthy real worker, the session remains
+untitled. Hook failure enters ordinary run/inbox evidence without changing the
+completed user turn.
 
 `worker_upsert` exposes every hook's complete worker-facing input and output
 contract in the `engineHooks` bundle schema. That schema is the authoring
@@ -666,7 +667,7 @@ client payload.
 | `filesystem_edit` | `worker_kernel::filesystem_edit` | Exact occurrence-checked UTF-8 replacements with optional checksum and atomic publication |
 | `process_run` | `worker_kernel::process_run` | Local process with bounded output/timeout |
 | `web_fetch` | `worker_kernel::web_fetch` | Explicit raw UTF-8 HTTP(S) fetch with a 128 KiB/30-second default, explicit larger ceilings, redirect/status metadata, truncation evidence, and retained-content SHA-256 |
-| `session_set_title` | `worker_kernel::session_set_title` | Durable title update for the current causal session; the model supplies only the title |
+| `session_set_title` | `worker_kernel::session_set_title` | Explicit user-requested title update for the current causal session; absent from unrelated provider turns |
 
 Filesystem reads, listings, searches, writes, and edits execute off the async
 runtime thread. Reads never load the remainder of a truncated file; listing
@@ -746,17 +747,19 @@ the callable catalog has no duplicate synthetic health state.
 
 At each provider request boundary, the worker-kernel-owned resolver captures the
 catalog revision and ranks dynamic workers by explicit session promotion, the
-active `worker_relevance` hook, recent successes, recency, and identity.
+active `worker_relevance` hook, semantic score, recent successes, recency, and
+identity.
 `worker_discover` uses the same hook and local recovery scorer; there is no
 second discovery policy. The entire
 dynamic provider surface selects at most 12 workers: recent explicit
 promotions enter first, then relevant/default candidates fill remaining slots.
 Promotion records are version-bound, recency-ordered, and retained to a bounded
 50 per session, preventing stale worker-id revival and unbounded provider tool
-growth. Each internal provider turn reranks against a bounded evolving intent
-query made from the current user request plus visible assistant plan, direct
-tool call, and text-result hints; it excludes binary content and hidden
-thinking. The resolver records the
+growth. Each internal provider turn reranks against the same bounded latest-user
+intent; assistant plans, direct tool calls, results, provenance, and operational
+evidence cannot manufacture semantic relevance. Recent success and recency
+break ties only after a semantic match. The resolver preserves that rank order
+in the provider surface and records the
 exact fixed functions, selected worker versions, selection reasons, and a stable
 surface hash. The model receives a compact revision/count/projected-worker
 primer in addition to native direct tool schemas. A `worker_discover` result
@@ -845,7 +848,7 @@ worker-owned hooks on every turn instead of being duplicated in a second
 hardcoded instruction set.
 
 Automatic worker projection and `worker_discover` share the active
-`worker_relevance` worker. Its input contains the evolving task query and
+`worker_relevance` worker. Its input contains the latest user task query and
 bounded canonical candidate metadata; its output is a typed ranking. The engine
 retains one exact weighted-term and adjacent-phrase scorer as recovery when no
 hook is active, the hook fails, or the hook's own agent-runner turn resolves its
@@ -1521,9 +1524,10 @@ these bullets as one tool apiece.
 
 #### User workflows
 
-- **Session organization:** the kernel now guarantees automatic invocation of
-  a `session_title` worker after eligible completed exchanges and retains the
-  narrow explicit `session_set_title` actuator plus compare-and-set custody.
+- **Session organization:** the kernel durably enqueues a `session_title`
+  worker after eligible completed exchanges without awaiting it and retains the
+  conditionally projected explicit `session_set_title` actuator plus
+  compare-and-set custody.
   The actual title policy worker, and later grouping, labeling, or archival
   policy, must still be authored and improved through real conversation use.
 - **Goals:** create, list, inspect, update, complete, and cancel durable goals;

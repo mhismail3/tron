@@ -46,8 +46,20 @@ fn session_title_invocation(session_id: &str, key: &str) -> Invocation {
     )
 }
 
+async fn await_queued_title(runtime: &Arc<WorkerRuntime>, result: &Value) -> InvocationRecord {
+    let invocation_id = result["invocationId"]
+        .as_str()
+        .expect("title invocation id");
+    let (record, timed_out) = runtime
+        .await_invocation(invocation_id, Duration::from_secs(2))
+        .await
+        .unwrap();
+    assert!(!timed_out);
+    record
+}
+
 #[tokio::test]
-async fn session_title_actuator_persists_and_broadcasts_explicit_metadata() {
+async fn explicit_session_rename_persists_and_broadcasts() {
     let (runtime, _home) = test_runtime(None);
     let created = runtime
         .event_store
@@ -102,13 +114,16 @@ async fn session_title_hook_names_the_original_untitled_session_once() {
         .session;
 
     let first = runtime
-        .apply_session_title_hook(&session_title_invocation(&session.id, "title-first"))
+        .enqueue_session_title_hook(&session_title_invocation(&session.id, "title-first"))
         .await
         .unwrap();
     assert_eq!(first["handled"], true);
-    assert_eq!(first["updated"], true);
+    assert_eq!(first["queued"], true);
     assert_eq!(first["workerId"], worker.worker.worker_id);
-    assert_eq!(first["title"], "Build a Reliable Work Ledger");
+    assert_eq!(
+        await_queued_title(&runtime, &first).await.status,
+        "completed"
+    );
     assert_eq!(
         runtime
             .event_store
@@ -121,7 +136,7 @@ async fn session_title_hook_names_the_original_untitled_session_once() {
     );
 
     let second = runtime
-        .apply_session_title_hook(&session_title_invocation(&session.id, "title-second"))
+        .enqueue_session_title_hook(&session_title_invocation(&session.id, "title-second"))
         .await
         .unwrap();
     assert_eq!(second, json!({"handled":false,"updated":false}));
@@ -136,6 +151,71 @@ async fn session_title_hook_names_the_original_untitled_session_once() {
 }
 
 #[tokio::test]
+async fn session_title_hook_returns_after_durable_admission_and_cannot_overwrite_rename() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle =
+        session_title_bundle("session-title-policy", json!({"title":"Generated Title"}));
+    bundle.runner = WorkerRunner::Command {
+        command: vec![
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "sleep 0.15; printf '{\"title\":\"Generated Title\"}'".to_owned(),
+        ],
+    };
+    runtime.upsert(bundle, None).await.unwrap();
+    let session = runtime
+        .event_store
+        .create_session("mock", "/tmp", None, None)
+        .unwrap()
+        .session;
+
+    let queued = runtime
+        .enqueue_session_title_hook(&session_title_invocation(&session.id, "title-detached"))
+        .await
+        .unwrap();
+    assert_eq!(queued["handled"], true);
+    let invocation_id = queued["invocationId"].as_str().unwrap();
+    assert!(matches!(
+        runtime
+            .store()
+            .invocation(invocation_id)
+            .unwrap()
+            .unwrap()
+            .status
+            .as_str(),
+        "queued" | "running"
+    ));
+    assert!(
+        runtime
+            .event_store
+            .get_session(&session.id)
+            .unwrap()
+            .unwrap()
+            .title
+            .is_none()
+    );
+
+    runtime
+        .set_session_title(session.id.clone(), "Explicit Rename".to_owned())
+        .await
+        .unwrap();
+    assert_eq!(
+        await_queued_title(&runtime, &queued).await.status,
+        "completed"
+    );
+    assert_eq!(
+        runtime
+            .event_store
+            .get_session(&session.id)
+            .unwrap()
+            .unwrap()
+            .title
+            .as_deref(),
+        Some("Explicit Rename")
+    );
+}
+
+#[tokio::test]
 async fn absent_session_title_policy_leaves_the_session_untitled() {
     let (runtime, _home) = test_runtime(None);
     let session = runtime
@@ -145,7 +225,7 @@ async fn absent_session_title_policy_leaves_the_session_untitled() {
         .session;
 
     let result = runtime
-        .apply_session_title_hook(&session_title_invocation(&session.id, "title-absent"))
+        .enqueue_session_title_hook(&session_title_invocation(&session.id, "title-absent"))
         .await
         .unwrap();
 
@@ -198,7 +278,7 @@ async fn session_title_hook_preserves_explicit_and_worker_session_titles() {
     ] {
         assert_eq!(
             runtime
-                .apply_session_title_hook(&session_title_invocation(session_id, key))
+                .enqueue_session_title_hook(&session_title_invocation(session_id, key))
                 .await
                 .unwrap(),
             json!({"handled":false,"updated":false})
@@ -248,13 +328,19 @@ async fn invalid_session_title_policy_output_is_rejected_without_mutating_the_se
         .unwrap()
         .session;
 
-    let error = runtime
-        .apply_session_title_hook(&session_title_invocation(&session.id, "title-invalid"))
+    let queued = runtime
+        .enqueue_session_title_hook(&session_title_invocation(&session.id, "title-invalid"))
         .await
-        .unwrap_err();
+        .unwrap();
+    let failed = await_queued_title(&runtime, &queued).await;
 
-    assert!(error.contains("session_title"));
-    assert!(error.contains("1 to 160 characters"));
+    assert_eq!(failed.status, "failed");
+    assert!(
+        failed
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("session_title"))
+    );
     assert!(
         runtime
             .event_store
