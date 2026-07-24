@@ -5,6 +5,9 @@
 //! supervision. The concern modules below extend that one coordinator without
 //! duplicating state. `support` owns stateless bounded I/O, artifact integrity,
 //! projection, normalization, and redaction. Scenario tests live in `tests`.
+//! `run_projection` reconstructs bounded causal trees and structured timelines
+//! from durable invocation, attempt, stage, child-session, and model-turn truth;
+//! it never stores client-owned progress.
 //! `admission` owns schema-checked durable enqueue, idempotent replay,
 //! exact-version latency prediction, bounded foreground ownership, atomic
 //! detachment, and observational waits plus the transient bridge to an
@@ -38,7 +41,7 @@ use super::types::{
     ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_ENGINE_CONCURRENCY,
     MAX_INVOCATION_SECONDS, MAX_WORKER_CONCURRENCY, PreparedWorker, PurgeOutcome, UpsertOutcome,
     WorkerBundle, WorkerClientAction, WorkerCommand, WorkerDependency, WorkerEngineHook,
-    WorkerInteractionMode, WorkerRunner, WorkerTrigger,
+    WorkerInteractionMode, WorkerRunEvent, WorkerRunStage, WorkerRunner, WorkerTrigger,
 };
 use support::*;
 
@@ -53,6 +56,8 @@ mod hooks;
 mod invocation;
 mod lifecycle;
 mod resident;
+mod run_projection;
+mod run_projection_format;
 mod secrets;
 mod session;
 mod support;

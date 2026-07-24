@@ -440,6 +440,10 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
         ))
         .await;
     assert_eq!(invoked.error, None);
+    let source_invocation_id = invoked.value.as_ref().unwrap()["invocationId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let inbox = context
         .engine_host
         .invoke(Invocation::new_sync(
@@ -506,6 +510,37 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
     assert_eq!(full_runs["runs"][0]["output"], json!({"report":"ready"}));
     assert!(full_runs["attempts"].as_object().unwrap().len() == 1);
     assert!(full_runs["traces"].as_object().unwrap().len() == 1);
+
+    let graph_runs = context
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::runs").unwrap(),
+            json!({"invocationId":source_invocation_id,"detail":"graph"}),
+            actor().with_idempotency_key("read-graph-runs-source"),
+        ))
+        .await;
+    assert_eq!(graph_runs.error, None);
+    let graph_runs = graph_runs.value.unwrap();
+    assert_eq!(graph_runs["detail"], "graph");
+    assert_eq!(graph_runs["graphs"].as_array().unwrap().len(), 1);
+    let graph = &graph_runs["graphs"][0];
+    assert_eq!(graph["requestedInvocationId"], source_invocation_id);
+    assert_eq!(graph["stage"], "completed");
+    assert_eq!(graph["status"], "completed");
+    assert_eq!(graph["counts"]["completed"], 1);
+    assert!(
+        graph["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|node| node["kind"] == "attempt")
+    );
+    assert!(graph["timeline"].as_array().unwrap().iter().all(|entry| {
+        !entry["summary"]
+            .as_str()
+            .unwrap()
+            .contains("StartedFinished")
+    }));
 
     let filtered_runs = context
         .engine_host

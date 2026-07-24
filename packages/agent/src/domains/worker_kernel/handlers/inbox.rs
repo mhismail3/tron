@@ -12,6 +12,7 @@ use super::Deps;
 const DEFAULT_HISTORY_LIMIT: u32 = 20;
 const MAX_SUMMARY_HISTORY_LIMIT: u32 = 20;
 const MAX_FULL_HISTORY_LIMIT: u32 = 20;
+const MAX_GRAPH_HISTORY_LIMIT: u32 = 10;
 const SUMMARY_VALUE_BYTES: usize = 512;
 const FULL_VALUE_BYTES: usize = 8_192;
 
@@ -19,6 +20,7 @@ const FULL_VALUE_BYTES: usize = 8_192;
 enum HistoryDetail {
     Summary,
     Full,
+    Graph,
 }
 
 impl HistoryDetail {
@@ -31,6 +33,7 @@ impl HistoryDetail {
         {
             "summary" => Ok(Self::Summary),
             "full" => Ok(Self::Full),
+            "graph" => Ok(Self::Graph),
             detail => Err(format!("unsupported worker history detail '{detail}'")),
         }
     }
@@ -39,6 +42,7 @@ impl HistoryDetail {
         match self {
             Self::Summary => "summary",
             Self::Full => "full",
+            Self::Graph => "graph",
         }
     }
 
@@ -46,6 +50,7 @@ impl HistoryDetail {
         match self {
             Self::Summary => MAX_SUMMARY_HISTORY_LIMIT,
             Self::Full => MAX_FULL_HISTORY_LIMIT,
+            Self::Graph => MAX_GRAPH_HISTORY_LIMIT,
         }
     }
 }
@@ -238,18 +243,41 @@ pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, 
         .payload
         .get("originSessionId")
         .and_then(Value::as_str);
+    let invocation_id = invocation
+        .payload
+        .get("invocationId")
+        .and_then(Value::as_str);
+    let model_tool_invocation_id = invocation
+        .payload
+        .get("modelToolInvocationId")
+        .and_then(Value::as_str);
     let status = optional_enum(
         invocation,
         "status",
         &["queued", "running", "completed", "failed", "cancelled"],
     )?;
-    let mut runs = deps.runtime.store().runs_filtered_page(
-        worker_id,
-        status,
-        origin_session_id,
-        limit.saturating_add(1),
-        offset,
-    )?;
+    let mut runs = if detail == HistoryDetail::Graph
+        && invocation_id.is_none()
+        && model_tool_invocation_id.is_none()
+    {
+        deps.runtime.store().run_roots_filtered_page(
+            worker_id,
+            status,
+            origin_session_id,
+            limit.saturating_add(1),
+            offset,
+        )?
+    } else {
+        deps.runtime.store().runs_filtered_page_exact(
+            worker_id,
+            status,
+            origin_session_id,
+            invocation_id,
+            model_tool_invocation_id,
+            limit.saturating_add(1),
+            offset,
+        )?
+    };
     let has_more = runs.len() > limit as usize;
     runs.truncate(limit as usize);
     let mut attempts = serde_json::Map::new();
@@ -267,6 +295,19 @@ pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, 
             }
         }
     }
+    let mut graphs = Vec::new();
+    if detail == HistoryDetail::Graph {
+        let mut projected_roots = BTreeSet::new();
+        for run in &runs {
+            let root_id = deps
+                .runtime
+                .store()
+                .invocation_tree_root(&run.invocation_id)?;
+            if projected_roots.insert(root_id) {
+                graphs.push(deps.runtime.project_run_graph(run)?);
+            }
+        }
+    }
     let (runs, content_truncated): (Vec<_>, Vec<_>) = runs
         .iter()
         .map(|run| project_invocation(run, detail))
@@ -278,6 +319,7 @@ pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, 
         "runs":runs,
         "attempts":attempts,
         "traces":traces,
+        "graphs":graphs,
         "returned":returned,
         "truncated":request_truncated || has_more,
         "nextOffset":next_offset,
@@ -298,7 +340,7 @@ fn project_invocation(record: &InvocationRecord, detail: HistoryDetail) -> (Valu
     if let Some(error) = record.error.as_deref() {
         let maximum = match detail {
             HistoryDetail::Summary => SUMMARY_VALUE_BYTES,
-            HistoryDetail::Full => FULL_VALUE_BYTES,
+            HistoryDetail::Full | HistoryDetail::Graph => FULL_VALUE_BYTES,
         };
         if error.len() > maximum {
             value["error"] = Value::String(crate::shared::foundation::text::truncate_with_suffix(
@@ -314,10 +356,10 @@ fn project_history_value(value: &Value, detail: HistoryDetail) -> (Value, bool) 
     let serialized = serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned());
     let maximum = match detail {
         HistoryDetail::Summary => SUMMARY_VALUE_BYTES,
-        HistoryDetail::Full => FULL_VALUE_BYTES,
+        HistoryDetail::Full | HistoryDetail::Graph => FULL_VALUE_BYTES,
     };
     let truncated = serialized.len() > maximum;
-    if detail == HistoryDetail::Full && !truncated {
+    if detail != HistoryDetail::Summary && !truncated {
         return (value.clone(), false);
     }
     (

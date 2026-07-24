@@ -249,6 +249,22 @@ impl WorkerStore {
                 ],
             )
             .map_err(|error| format!("record worker trace delivery: {error}"))?;
+        insert_run_event(
+            &transaction,
+            &invocation_id,
+            WorkerRunStage::Queued,
+            "Queued for durable worker execution",
+            &created_at,
+        )?;
+        if interaction_mode == WorkerInteractionMode::Background {
+            insert_run_event(
+                &transaction,
+                &invocation_id,
+                WorkerRunStage::Detached,
+                "Conversation released while durable work continues",
+                &created_at,
+            )?;
+        }
         transaction
             .commit()
             .map_err(|error| format!("commit queued worker invocation: {error}"))?;
@@ -291,6 +307,34 @@ impl WorkerStore {
                     ],
                 )
                 .map_err(|error| format!("record worker delivery attempt: {error}"))?;
+            let manifest = transaction
+                .query_row(
+                    "SELECT version.manifest_json
+                     FROM worker_invocations invocation
+                     JOIN worker_versions version
+                       ON version.worker_id=invocation.worker_id
+                      AND version.version=invocation.worker_version
+                     WHERE invocation.invocation_id=?1",
+                    [invocation_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|error| format!("load worker runner for stage evidence: {error}"))?;
+            let bundle = serde_json::from_str::<WorkerBundle>(&manifest)
+                .map_err(|error| format!("decode worker runner for stage evidence: {error}"))?;
+            let (stage, summary) = if attempt_number > 1 {
+                (
+                    WorkerRunStage::RetryRepair,
+                    "Retrying interrupted durable delivery",
+                )
+            } else if matches!(bundle.runner, WorkerRunner::Agent { .. }) {
+                (WorkerRunStage::Planning, "Planning worker execution")
+            } else {
+                (
+                    WorkerRunStage::SpecialistExecution,
+                    "Executing the worker runner",
+                )
+            };
+            insert_run_event(&transaction, invocation_id, stage, summary, &started_at)?;
         }
         transaction
             .commit()
@@ -344,6 +388,26 @@ impl WorkerStore {
             params![invocation_id, status, completed_at, error],
         )
         .map_err(|error| format!("complete worker delivery attempt: {error}"))?;
+        insert_run_event(
+            &tx,
+            invocation_id,
+            WorkerRunStage::Publication,
+            "Publishing the durable worker result",
+            &completed_at,
+        )?;
+        insert_run_event(
+            &tx,
+            invocation_id,
+            match status {
+                "completed" => WorkerRunStage::Completed,
+                _ => WorkerRunStage::Failed,
+            },
+            match status {
+                "completed" => "Worker execution completed",
+                _ => "Worker execution failed",
+            },
+            &completed_at,
+        )?;
         tx.execute(
             &format!(
                 "INSERT INTO worker_inbox(
@@ -446,6 +510,13 @@ impl WorkerStore {
                 "invocation_cancelled",
                 &json!({"invocationId":invocation_id}),
             )?;
+            insert_run_event(
+                &transaction,
+                invocation_id,
+                WorkerRunStage::Cancelled,
+                "Worker invocation cancelled",
+                &completed_at,
+            )?;
         }
         transaction
             .commit()
@@ -480,60 +551,6 @@ impl WorkerStore {
             .map_err(|error| error.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| error.to_string())
-    }
-
-    #[cfg(test)]
-    pub fn runs_filtered(
-        &self,
-        worker_id: Option<&str>,
-        status: Option<&str>,
-        limit: u32,
-    ) -> Result<Vec<InvocationRecord>, String> {
-        self.runs_filtered_page(worker_id, status, None, limit, 0)
-    }
-
-    pub fn runs_filtered_page(
-        &self,
-        worker_id: Option<&str>,
-        status: Option<&str>,
-        origin_session_id: Option<&str>,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Vec<InvocationRecord>, String> {
-        let connection = self.connection()?;
-        let mut statement = connection
-            .prepare(&format!(
-                "{} WHERE (?1 IS NULL OR worker_id=?1)
-                    AND (?2 IS NULL OR status=?2)
-                    AND (?3 IS NULL OR origin_session_id=?3)
-                    ORDER BY created_at DESC LIMIT ?4 OFFSET ?5",
-                invocation_select_base()
-            ))
-            .map_err(|error| error.to_string())?;
-        statement
-            .query_map(
-                params![worker_id, status, origin_session_id, limit.min(500), offset],
-                row_invocation,
-            )
-            .map_err(|error| error.to_string())?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|error| error.to_string())
-    }
-
-    pub fn success_evidence(&self, worker_id: &str) -> Result<Value, String> {
-        self.connection()?
-            .query_row(
-                "SELECT COUNT(*),MAX(completed_at) FROM worker_invocations
-                 WHERE worker_id=?1 AND status='completed'",
-                [worker_id],
-                |row| {
-                    Ok(json!({
-                        "completedRuns": row.get::<_, u64>(0)?,
-                        "lastCompletedAt": row.get::<_, Option<String>>(1)?,
-                    }))
-                },
-            )
-            .map_err(|error| format!("load worker success evidence: {error}"))
     }
 
     pub(super) fn invocation_by_key(
@@ -602,53 +619,6 @@ impl WorkerStore {
         transaction
             .commit()
             .map_err(|error| format!("commit worker loop suppression: {error}"))
-    }
-
-    pub fn attempts(&self, invocation_id: &str) -> Result<Vec<Value>, String> {
-        let connection = self.connection()?;
-        let mut statement = connection
-            .prepare(
-                "SELECT attempt_id,attempt_number,status,started_at,completed_at,error
-                 FROM worker_attempts WHERE invocation_id=?1 ORDER BY attempt_number",
-            )
-            .map_err(|error| error.to_string())?;
-        statement
-            .query_map([invocation_id], |row| {
-                Ok(json!({
-                    "attemptId":row.get::<_, String>(0)?,
-                    "attemptNumber":row.get::<_, u32>(1)?,
-                    "status":row.get::<_, String>(2)?,
-                    "startedAt":row.get::<_, String>(3)?,
-                    "completedAt":row.get::<_, Option<String>>(4)?,
-                    "error":row.get::<_, Option<String>>(5)?,
-                }))
-            })
-            .map_err(|error| error.to_string())?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|error| error.to_string())
-    }
-
-    pub fn trace(&self, trace_id: &str) -> Result<Option<Value>, String> {
-        self.connection()?
-            .query_row(
-                "SELECT trace_id,root_invocation_id,max_causal_depth,invocation_count,
-                        suppressed_count,first_seen_at,last_seen_at
-                 FROM worker_causal_traces WHERE trace_id=?1",
-                [trace_id],
-                |row| {
-                    Ok(json!({
-                        "traceId":row.get::<_, String>(0)?,
-                        "rootInvocationId":row.get::<_, Option<String>>(1)?,
-                        "maxCausalDepth":row.get::<_, u32>(2)?,
-                        "invocationCount":row.get::<_, u32>(3)?,
-                        "suppressedCount":row.get::<_, u32>(4)?,
-                        "firstSeenAt":row.get::<_, String>(5)?,
-                        "lastSeenAt":row.get::<_, String>(6)?,
-                    }))
-                },
-            )
-            .optional()
-            .map_err(|error| format!("load worker causal trace: {error}"))
     }
 
     #[cfg(test)]

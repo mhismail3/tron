@@ -506,9 +506,13 @@ their durable prompt contract, and to resident services as `X-Tron-*` headers.
 Every run records its pinned version, timestamps, input, output or error, and
 inbox result. Schema v7 additionally records foreground/background interaction
 mode, detachment time, the originating provider call, the direct parent worker
-invocation, and terminal retry linkage. Migration backfills a parent only when
-exactly one prior-depth invocation in the trace can own it; ambiguous history
-remains unlinked rather than guessed.
+invocation, and terminal retry linkage. Schema v8 adds append-only generic
+stage evidence for queueing, execution, retry/redelivery, validation,
+publication, detachment, interruption, and terminal transitions. These rows
+describe the existing invocation state machine; they are not jobs or a second
+execution owner. Migration backfills a parent only when exactly one prior-depth
+invocation in the trace can own it; ambiguous history remains unlinked rather
+than guessed.
 
 An agent runner's durable child prompt includes the invocation input and the
 immutable worker output schema verbatim. The child is told that the kernel will
@@ -570,6 +574,18 @@ state and severity, so routine health checks do not move irrelevant history
 into model context. `detail: "full"` is an
 explicit operator path capped at 20 records and 8 KiB per retained value; the
 response reports content truncation and a `nextOffset` when older records remain.
+Run reads also accept exact `invocationId` and `modelToolInvocationId` filters.
+`detail: "graph"` pages at most ten causal roots and reconstructs each bounded
+tree from invocation, attempt, generic stage, child-session, model-turn, and
+inbox evidence. The graph reports foreground/background mode, current generic
+stage, child-state counts, queue/execution/wall/model and critical-path timing,
+tokens, cost, session links, concise result/error previews, a canonical
+parent-linked node list, and separate server-ordered timeline entries. Active
+descendant work takes precedence over stale parent evidence. Historical runs
+without schema-v8 stage rows remain inspectable through conservative
+timestamp/status reconstruction. Domain-specific policy and vocabulary remain
+in immutable worker bundles; the kernel and client do not hard-code research
+or another worker family.
 The Engine Activity UI treats runs as the primary execution ledger. Its
 Attention projection contains only unresolved failures and pending non-manual
 outcomes; it does not repeat routine successful manual runs. A later verified
@@ -1728,6 +1744,7 @@ operational evidence:
 | `worker_triggers` | rebuildable trigger configuration and cursors |
 | `worker_invocations` | durable queue, idempotency, pinned version, originating user session, child-agent session, and results |
 | `worker_attempts` | numbered execution/redelivery attempts |
+| `worker_run_events` | append-only generic stage evidence for authoritative run timelines |
 | `worker_causal_traces` | trace roots, depth, delivery, and suppression counters |
 | `worker_trace_deliveries` | unique worker/trigger/idempotency combinations per trace |
 | `worker_inbox` | durable result delivery records and agent-context attachment state |
@@ -1841,8 +1858,11 @@ sheet combines used/remaining/window tokens with session input, output, and cost
 in one compact summary; it also shows current-model selection through
 `model::switch`, automatic-compaction status, and forking through
 `session::fork`. A bounded session-scoped worker section reads
-`worker_runs(originSessionId: ...)`, including nested causal-trace work, and
-opens the canonical run detail rather than inventing another activity store.
+`worker_runs(originSessionId: ..., detail: "graph")`. The server pages by
+causal root so one coordinator's many descendants cannot crowd later runs out
+of Session Context; exact child and originating model-tool filters reopen the
+same root graph. The client opens this canonical detail rather than inventing
+another activity store.
 It has no parallel context-control resource client, resource/action audit,
 memory editor, or fabricated manual compact/clear API.
 

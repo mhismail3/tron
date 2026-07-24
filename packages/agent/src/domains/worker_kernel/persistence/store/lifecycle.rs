@@ -413,7 +413,7 @@ impl WorkerStore {
         })
     }
 
-    fn purge_operational_export(&self, worker_id: &str) -> Result<Value, String> {
+    pub(super) fn purge_operational_export(&self, worker_id: &str) -> Result<Value, String> {
         let summary = self
             .summary(worker_id)?
             .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
@@ -436,6 +436,13 @@ impl WorkerStore {
             .map(|run| {
                 self.attempts(&run.invocation_id)
                     .map(|attempts| (run.invocation_id.clone(), attempts))
+            })
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        let run_events = runs
+            .iter()
+            .map(|run| {
+                self.run_events(std::slice::from_ref(&run.invocation_id))
+                    .map(|events| (run.invocation_id.clone(), events))
             })
             .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
         let traces = runs
@@ -500,6 +507,7 @@ impl WorkerStore {
             "worker":summary,
             "runs":runs,
             "attempts":attempts,
+            "runEvents":run_events,
             "traces":traces,
             "inbox":inbox,
             "audit":audit,

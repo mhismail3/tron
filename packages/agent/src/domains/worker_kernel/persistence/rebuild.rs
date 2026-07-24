@@ -1,8 +1,9 @@
 //! Reconstruction of disposable worker indexes from canonical bundles.
 //!
 //! Filesystem bundles and active pointers are authoritative. This module only
-//! rebuilds routes, versions, triggers, and health projections; invocation and
-//! inbox ledgers remain durable operational evidence.
+//! rebuilds routes, versions, triggers, and health projections; invocation,
+//! attempt, generic run-stage, and inbox ledgers remain durable operational
+//! evidence.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;

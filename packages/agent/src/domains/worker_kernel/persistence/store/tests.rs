@@ -60,7 +60,7 @@ fn prepare_and_publish_is_atomic_and_versioned() {
 }
 
 #[test]
-fn schema_v7_preserves_inbox_state_and_adds_invocation_relationships() {
+fn schema_v8_preserves_inbox_state_and_adds_run_graph_evidence() {
     let temp = tempfile::tempdir().unwrap();
     let database_dir = temp.path().join("internal/database");
     std::fs::create_dir_all(&database_dir).unwrap();
@@ -137,6 +137,13 @@ fn schema_v7_preserves_inbox_state_and_adds_invocation_relationships() {
     ] {
         assert!(invocation_columns.contains(&column.to_owned()), "{column}");
     }
+    assert!(
+        store
+            .connection()
+            .unwrap()
+            .prepare("SELECT stage,summary FROM worker_run_events")
+            .is_ok()
+    );
     let retained = store.inbox_filtered(None, Some(true), None, 10).unwrap();
     assert_eq!(retained.len(), 1);
     assert_eq!(retained[0]["contextAttached"], true);
@@ -148,8 +155,187 @@ fn schema_v7_preserves_inbox_state_and_adds_invocation_relationships() {
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        7
+        8
     );
+}
+
+#[test]
+fn run_events_and_causal_tree_are_durable_ordered_server_truth() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let worker_id = published.worker.worker_id;
+    let worker_version = published.version;
+
+    let (parent, _) = store
+        .begin_invocation_with_context(
+            &worker_id,
+            &worker_version,
+            &json!({"topic":"durability"}),
+            "parent-key",
+            "trace-graph",
+            0,
+            "manual",
+            Some("session-origin"),
+            WorkerInteractionMode::Background,
+            Some("model-tool-parent"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(store.claim_running(&parent.invocation_id).unwrap());
+    let (child, _) = store
+        .begin_invocation_with_context(
+            &worker_id,
+            &worker_version,
+            &json!({"topic":"child"}),
+            "child-key",
+            "trace-graph",
+            1,
+            "manual",
+            None,
+            WorkerInteractionMode::Foreground,
+            Some("model-tool-child"),
+            Some(&parent.invocation_id),
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(store.claim_running(&child.invocation_id).unwrap());
+    let _ = store
+        .complete_invocation(&child.invocation_id, &worker_id, Ok(&json!({"ok":true})))
+        .unwrap();
+    store
+        .record_run_stage(
+            &parent.invocation_id,
+            WorkerRunStage::Validation,
+            "Validating parent output",
+        )
+        .unwrap();
+    let _ = store
+        .complete_invocation(&parent.invocation_id, &worker_id, Ok(&json!({"ok":true})))
+        .unwrap();
+
+    assert_eq!(
+        store.invocation_tree_root(&child.invocation_id).unwrap(),
+        parent.invocation_id
+    );
+    let tree = store.invocation_tree(&parent.invocation_id, 10).unwrap();
+    assert_eq!(
+        tree.iter()
+            .map(|record| record.invocation_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![parent.invocation_id.as_str(), child.invocation_id.as_str()]
+    );
+    let events = store
+        .run_events(
+            &tree
+                .iter()
+                .map(|record| record.invocation_id.clone())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+    assert!(events.iter().any(|event| {
+        event.invocation_id == parent.invocation_id && event.stage == WorkerRunStage::Detached
+    }));
+    assert!(events.iter().any(|event| {
+        event.invocation_id == parent.invocation_id && event.stage == WorkerRunStage::Validation
+    }));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.invocation_id == child.invocation_id)
+            .next_back()
+            .unwrap()
+            .stage,
+        WorkerRunStage::Completed
+    );
+    let operational_export = store.purge_operational_export(&worker_id).unwrap();
+    assert!(
+        operational_export["runEvents"][parent.invocation_id.as_str()]
+            .as_array()
+            .is_some_and(|events| !events.is_empty())
+    );
+    let exact = store
+        .runs_filtered_page_exact(None, None, None, None, Some("model-tool-child"), 10, 0)
+        .unwrap();
+    assert_eq!(exact.len(), 1);
+    assert_eq!(exact[0].invocation_id, child.invocation_id);
+
+    let (second_root, _) = store
+        .begin_invocation_with_context(
+            &worker_id,
+            &worker_version,
+            &json!({"topic":"second root"}),
+            "second-root-key",
+            "trace-graph-two",
+            0,
+            "manual",
+            Some("session-origin"),
+            WorkerInteractionMode::Background,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let roots = store
+        .run_roots_filtered_page(None, None, Some("session-origin"), 10, 0)
+        .unwrap();
+    assert_eq!(
+        roots
+            .iter()
+            .map(|record| record.invocation_id.as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            parent.invocation_id.as_str(),
+            second_root.invocation_id.as_str()
+        ])
+    );
+}
+
+#[test]
+fn restart_records_interruption_and_retry_without_replacing_the_invocation() {
+    let temp = tempfile::tempdir().unwrap();
+    let invocation_id = {
+        let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        let mut prepared = store.prepare(bundle(), None).unwrap();
+        store.finalize(&mut prepared).unwrap();
+        let published = store.publish(prepared).unwrap();
+        let (invocation, _) = store
+            .begin_invocation(
+                &published.worker.worker_id,
+                &published.version,
+                &json!({"topic":"restart"}),
+                "restart-key",
+                "trace-restart",
+                0,
+                "manual",
+                Some("session-restart"),
+            )
+            .unwrap();
+        assert!(store.claim_running(&invocation.invocation_id).unwrap());
+        invocation.invocation_id
+    };
+
+    let reopened = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let recovered = reopened.invocation(&invocation_id).unwrap().unwrap();
+    assert_eq!(recovered.status, "queued");
+    assert_eq!(recovered.attempt_count, 1);
+    assert!(reopened.claim_running(&invocation_id).unwrap());
+    let retrying = reopened.invocation(&invocation_id).unwrap().unwrap();
+    assert_eq!(retrying.attempt_count, 2);
+    let stages = reopened
+        .run_events(std::slice::from_ref(&invocation_id))
+        .unwrap()
+        .into_iter()
+        .map(|event| event.stage)
+        .collect::<Vec<_>>();
+    assert!(stages.contains(&WorkerRunStage::Interrupted));
+    assert_eq!(stages.last(), Some(&WorkerRunStage::RetryRepair));
 }
 
 #[test]

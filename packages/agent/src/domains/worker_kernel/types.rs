@@ -91,6 +91,59 @@ impl WorkerExecutionLimits {
     }
 }
 
+/// Generic execution stages recorded and projected by the durable kernel.
+///
+/// These values describe lifecycle evidence only. A worker may supply
+/// presentation metadata for domain wording, but task-specific orchestration
+/// policy never enters this enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerRunStage {
+    Queued,
+    Planning,
+    SpecialistExecution,
+    RetryRepair,
+    Synthesis,
+    Validation,
+    Publication,
+    Detached,
+    Completed,
+    Failed,
+    Cancelled,
+    Interrupted,
+}
+
+impl WorkerRunStage {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Planning => "planning",
+            Self::SpecialistExecution => "specialist_execution",
+            Self::RetryRepair => "retry_repair",
+            Self::Synthesis => "synthesis",
+            Self::Validation => "validation",
+            Self::Publication => "publication",
+            Self::Detached => "detached",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Interrupted => "interrupted",
+        }
+    }
+}
+
+/// Append-only durable stage evidence for one worker invocation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerRunEvent {
+    pub event_id: String,
+    pub invocation_id: String,
+    pub sequence: u32,
+    pub stage: WorkerRunStage,
+    pub summary: String,
+    pub occurred_at: String,
+}
+
 /// Minimal immutable worker-experience identity used before the generalized
 /// declarative presentation descriptor exists.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

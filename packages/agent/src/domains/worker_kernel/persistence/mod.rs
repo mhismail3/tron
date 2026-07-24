@@ -12,9 +12,11 @@
 //!   implementation used by publication and reconstruction.
 //! - `rebuild` projects canonical bundles into disposable SQLite indexes.
 //! - `snapshot` creates, verifies, and restores owner-only profile archives.
-//! - `store` owns canonical publication plus durable invocation, inbox,
-//!   trigger, health, and audit ledgers. Its concern modules and scenario tests
-//!   live beside that single state owner.
+//! - `store` owns canonical publication plus durable invocation, attempt,
+//!   generic run-stage evidence, inbox, trigger, health, and audit ledgers.
+//!   Run-stage rows are append-only observations attached to the invocation
+//!   state machine, not a second job or execution owner. Its concern modules
+//!   and scenario tests live beside that single state owner.
 
 mod filesystem;
 mod rebuild;

@@ -259,6 +259,14 @@
 //! and validation phases; agent runners additionally project bounded child-turn
 //! and child-tool stage labels. The bridge is removed at terminal completion
 //! and never changes durable delivery, recovery, routing, or authority.
+//! Generic stage transitions are append-only evidence on that same invocation
+//! ledger. `worker_runs(detail: "graph")` resolves exact invocation or
+//! model-tool identity, groups session activity by causal root, and joins
+//! attempts, child invocations, worker-owned agent sessions, model turns,
+//! timings, tokens, cost, errors, and result previews into one bounded
+//! server-ordered graph. Active descendants outrank stale parent stage evidence.
+//! Historical runs without stage rows are projected conservatively from their
+//! persisted timestamps and statuses. No client progress state is authoritative.
 //! Presentation metadata is immutable worker-version identity. It binds a
 //! worker to a versioned native/declarative experience and optional suite role;
 //! unsupported or absent bindings remain operable through the generic console.

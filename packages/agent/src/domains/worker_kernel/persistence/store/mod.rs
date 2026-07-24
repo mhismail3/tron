@@ -1,10 +1,10 @@
 //! Canonical worker bundles and their durable operational ledger.
 //!
 //! [`WorkerStore`] is the single persistence owner. Publication, lifecycle,
-//! invocation, interaction/causal relationship, trigger, and state concerns
-//! extend that same store without repository wrappers or duplicate caches.
-//! Stateless codecs, validators, and SQL helpers live in `support`; scenario
-//! tests live in `tests`.
+//! invocation, bounded history, interaction/causal relationship, trigger, and
+//! state concerns extend that same store without repository wrappers or
+//! duplicate caches. Stateless codecs, validators, and SQL helpers live in
+//! `support`; scenario tests live in `tests`.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -19,12 +19,13 @@ use sha2::{Digest, Sha256};
 use super::super::types::{
     ActiveWorker, BUNDLE_SCHEMA, InvocationRecord, MAX_INVOCATION_SECONDS, PreparedWorker,
     UpsertOutcome, WebhookCredential, WorkerBundle, WorkerClientAction, WorkerCommand,
-    WorkerEngineHook, WorkerInteractionMode, WorkerRunner, WorkerState, WorkerSummary,
-    WorkerTrigger,
+    WorkerEngineHook, WorkerInteractionMode, WorkerRunEvent, WorkerRunStage, WorkerRunner,
+    WorkerState, WorkerSummary, WorkerTrigger,
 };
 pub(super) use state::validate_bundle;
 use support::*;
 
+mod history;
 mod interaction;
 mod invocations;
 mod lifecycle;
@@ -67,7 +68,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 7)?;
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 8)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
@@ -263,6 +264,18 @@ impl WorkerStore {
                 );
                 CREATE INDEX IF NOT EXISTS worker_attempts_invocation
                     ON worker_attempts(invocation_id, attempt_number);
+                CREATE TABLE IF NOT EXISTS worker_run_events (
+                    event_id TEXT PRIMARY KEY,
+                    invocation_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    stage TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    UNIQUE(invocation_id, sequence),
+                    FOREIGN KEY(invocation_id) REFERENCES worker_invocations(invocation_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS worker_run_events_invocation
+                    ON worker_run_events(invocation_id, sequence);
                 CREATE TABLE IF NOT EXISTS worker_causal_traces (
                     trace_id TEXT PRIMARY KEY,
                     root_invocation_id TEXT,
@@ -444,6 +457,13 @@ impl WorkerStore {
                 [],
             )
             .map_err(|error| format!("record worker schema v7: {error}"))?;
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                 VALUES (8, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                [],
+            )
+            .map_err(|error| format!("record worker schema v8: {error}"))?;
         super::rebuild::rebuild_indexes(&self.root, &self.database)?;
         self.recover_interrupted()
     }
@@ -453,12 +473,26 @@ impl WorkerStore {
         let transaction = connection
             .transaction()
             .map_err(|error| format!("start interrupted worker recovery: {error}"))?;
+        let interrupted_ids = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT invocation_id FROM worker_invocations
+                     WHERE status='running' ORDER BY created_at,invocation_id",
+                )
+                .map_err(|error| format!("prepare interrupted worker recovery: {error}"))?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|error| format!("query interrupted worker recovery: {error}"))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| format!("decode interrupted worker recovery: {error}"))?
+        };
+        let recovered_at = chrono::Utc::now().to_rfc3339();
         transaction
             .execute(
                 "UPDATE worker_attempts SET status='interrupted',completed_at=?1,
                     error='delivery interrupted before a durable terminal result'
                  WHERE status='running'",
-                [chrono::Utc::now().to_rfc3339()],
+                [&recovered_at],
             )
             .map_err(|error| format!("recover interrupted worker attempts: {error}"))?;
         transaction
@@ -469,6 +503,22 @@ impl WorkerStore {
                 [],
             )
             .map_err(|error| format!("recover interrupted worker invocations: {error}"))?;
+        for invocation_id in interrupted_ids {
+            insert_run_event(
+                &transaction,
+                &invocation_id,
+                WorkerRunStage::Interrupted,
+                "Delivery was interrupted before a durable terminal result",
+                &recovered_at,
+            )?;
+            insert_run_event(
+                &transaction,
+                &invocation_id,
+                WorkerRunStage::Queued,
+                "Queued for durable redelivery after interruption",
+                &recovered_at,
+            )?;
+        }
         transaction
             .commit()
             .map_err(|error| format!("commit interrupted worker recovery: {error}"))

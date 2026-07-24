@@ -84,8 +84,8 @@ pub(super) fn response_schema(function: &str) -> Value {
             "properties":{"detail":{"type":"string","enum":["summary","full"]},"items":{"type":"array"},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"nextOffset":{},"contentTruncated":{"type":"boolean"}}
         }),
         "worker_kernel::runs" => json!({
-            "type":"object","additionalProperties":false,"required":["detail","runs","attempts","traces","returned","truncated","nextOffset","contentTruncated"],
-            "properties":{"detail":{"type":"string","enum":["summary","full"]},"runs":{"type":"array","items":invocation_response_schema()},"attempts":{"type":"object"},"traces":{"type":"object"},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"nextOffset":{},"contentTruncated":{"type":"boolean"}}
+            "type":"object","additionalProperties":false,"required":["detail","runs","attempts","traces","graphs","returned","truncated","nextOffset","contentTruncated"],
+            "properties":{"detail":{"type":"string","enum":["summary","full","graph"]},"runs":{"type":"array","items":invocation_response_schema()},"attempts":{"type":"object"},"traces":{"type":"object"},"graphs":{"type":"array","items":worker_run_graph_response_schema()},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"nextOffset":{},"contentTruncated":{"type":"boolean"}}
         }),
         "worker_kernel::webhook_rotate" => webhook_credential_response_schema(),
         "worker_kernel::stop_all" => json!({
@@ -128,6 +128,96 @@ fn invocation_response_schema() -> Value {
         "type":"object","additionalProperties":false,
         "required":["invocationId","workerId","workerVersion","status","input","output","error","idempotencyKey","traceId","causalDepth","triggerKind","interactionMode","attemptCount","createdAt","startedAt","completedAt"],
         "properties":{"invocationId":{"type":"string"},"workerId":{"type":"string"},"workerVersion":{"type":"string"},"status":{"type":"string"},"input":{},"output":{},"error":{},"idempotencyKey":{"type":"string"},"traceId":{"type":"string"},"causalDepth":{"type":"integer"},"triggerKind":{"type":"string"},"originSessionId":{"type":"string"},"agentSessionId":{"type":"string"},"interactionMode":{"type":"string","enum":["foreground","background"]},"detachedAt":{"type":"string"},"modelToolInvocationId":{"type":"string"},"parentWorkerInvocationId":{"type":"string"},"retryOfInvocationId":{"type":"string"},"attemptCount":{"type":"integer"},"createdAt":{"type":"string"},"startedAt":{},"completedAt":{}}
+    })
+}
+
+fn worker_run_graph_response_schema() -> Value {
+    let stage = json!({
+        "type":"string",
+        "enum":[
+            "queued","planning","specialist_execution","retry_repair",
+            "synthesis","validation","publication","detached","completed",
+            "failed","cancelled","interrupted"
+        ]
+    });
+    let counts = json!({
+        "type":"object","additionalProperties":false,
+        "required":["queued","running","completed","failed","cancelled"],
+        "properties":{
+            "queued":{"type":"integer"},"running":{"type":"integer"},
+            "completed":{"type":"integer"},"failed":{"type":"integer"},
+            "cancelled":{"type":"integer"}
+        }
+    });
+    let timing = json!({
+        "type":"object","additionalProperties":false,
+        "required":["queueMs","executionMs","wallMs","modelMs","childCriticalPathMs","criticalPathMs","criticalPathNodeIds"],
+        "properties":{
+            "queueMs":{"type":"integer"},"executionMs":{"type":"integer"},
+            "wallMs":{"type":"integer"},"modelMs":{"type":"integer"},
+            "childCriticalPathMs":{"type":"integer"},"criticalPathMs":{"type":"integer"},
+            "criticalPathNodeIds":{"type":"array","items":{"type":"string"}}
+        }
+    });
+    let usage = json!({
+        "type":"object","additionalProperties":false,
+        "required":["inputTokens","outputTokens","cacheReadTokens","cacheCreationTokens","cost"],
+        "properties":{
+            "inputTokens":{"type":"integer"},"outputTokens":{"type":"integer"},
+            "cacheReadTokens":{"type":"integer"},"cacheCreationTokens":{"type":"integer"},
+            "cost":{"type":"number"}
+        }
+    });
+    let node = json!({
+        "type":"object","additionalProperties":false,
+        "required":["id","kind","parentId","status","elapsedMs"],
+        "properties":{
+            "id":{"type":"string"},
+            "kind":{"type":"string","enum":["invocation","attempt","agent","model"]},
+            "parentId":{},"invocationId":{"type":"string"},"workerId":{"type":"string"},
+            "workerName":{"type":"string"},"workerVersion":{"type":"string"},
+            "runner":{"type":"string"},"status":{"type":"string"},"mode":{"type":"string"},
+            "stage":stage.clone(),"createdAt":{"type":"string"},"startedAt":{},
+            "completedAt":{},"elapsedMs":{"type":"integer"},"queueMs":{"type":"integer"},
+            "executionMs":{"type":"integer"},"attemptCount":{"type":"integer"},
+            "attemptNumber":{"type":"integer"},"sessionId":{},
+            "model":{"type":"string"},"turn":{"type":"integer"},
+            "modelToolInvocationId":{},"retryOfInvocationId":{},
+            "inputTokens":{"type":"integer"},"outputTokens":{"type":"integer"},
+            "cacheReadTokens":{"type":"integer"},"cacheCreationTokens":{"type":"integer"},
+            "cost":{"type":"number"},"resultPreview":{},
+            "errorPreview":{},"presentation":{}
+        }
+    });
+    let timeline = json!({
+        "type":"object","additionalProperties":false,
+        "required":["occurredAt","nodeId","stage","status","summary","technical"],
+        "properties":{
+            "occurredAt":{"type":"string"},"nodeId":{"type":"string"},
+            "stage":stage.clone(),"status":{"type":"string"},"summary":{"type":"string"},
+            "technical":{"type":"boolean"},"invocationId":{"type":"string"}
+        }
+    });
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":[
+            "rootInvocationId","requestedInvocationId","modelToolInvocationId",
+            "originSessionId","workerId","workerName","requestPreview","status",
+            "mode","stage","stageLabel","expectedNextTransition","createdAt",
+            "startedAt","completedAt","elapsedMs","counts","timing","usage",
+            "nodes","timeline","resultPreview","errorPreview","truncated"
+        ],
+        "properties":{
+            "rootInvocationId":{"type":"string"},"requestedInvocationId":{"type":"string"},
+            "modelToolInvocationId":{},"originSessionId":{},"workerId":{"type":"string"},
+            "workerName":{"type":"string"},"requestPreview":{"type":"string"},
+            "status":{"type":"string"},"mode":{"type":"string","enum":["foreground","background"]},
+            "stage":stage,"stageLabel":{"type":"string"},"expectedNextTransition":{},
+            "createdAt":{"type":"string"},"startedAt":{},"completedAt":{},
+            "elapsedMs":{"type":"integer"},"counts":counts,"timing":timing,"usage":usage,
+            "nodes":{"type":"array","items":node},"timeline":{"type":"array","items":timeline},
+            "resultPreview":{},"errorPreview":{},"truncated":{"type":"boolean"}
+        }
     })
 }
 

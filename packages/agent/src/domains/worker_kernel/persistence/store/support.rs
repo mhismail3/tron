@@ -391,6 +391,36 @@ pub(super) fn row_invocation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Invoca
     })
 }
 
+pub(super) fn insert_run_event(
+    transaction: &rusqlite::Transaction<'_>,
+    invocation_id: &str,
+    stage: WorkerRunStage,
+    summary: &str,
+    occurred_at: &str,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            "INSERT INTO worker_run_events(
+                event_id,invocation_id,sequence,stage,summary,occurred_at
+             )
+             VALUES (
+                ?1,?2,
+                (SELECT COALESCE(MAX(sequence),0)+1
+                 FROM worker_run_events WHERE invocation_id=?2),
+                ?3,?4,?5
+             )",
+            params![
+                format!("worker_event_{}", uuid::Uuid::now_v7()),
+                invocation_id,
+                stage.as_str(),
+                summary,
+                occurred_at,
+            ],
+        )
+        .map_err(|error| format!("record worker run stage: {error}"))?;
+    Ok(())
+}
+
 pub(super) fn generate_token() -> String {
     let mut bytes = [0_u8; 32];
     rand::rng().fill_bytes(&mut bytes);

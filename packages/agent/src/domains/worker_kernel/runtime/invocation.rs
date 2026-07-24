@@ -111,6 +111,11 @@ impl WorkerRuntime {
             () = invocation_stop.cancelled() => Err("worker invocation cancelled explicitly".to_owned()),
         };
         if execution.is_ok() {
+            self.store.record_run_stage(
+                &queued.invocation_id,
+                WorkerRunStage::Validation,
+                "Validating the typed worker result",
+            )?;
             self.emit_model_tool_progress(
                 &queued.invocation_id,
                 "Validating the typed worker result",

@@ -557,10 +557,12 @@ fn worker_history_defaults_to_compact_bounded_observations() {
         assert_eq!(request["properties"]["limit"]["maximum"], 20);
         assert_eq!(request["properties"]["offset"]["minimum"], 0);
         assert_eq!(request["properties"]["detail"]["default"], "summary");
-        assert_eq!(
-            request["properties"]["detail"]["enum"],
+        let expected_detail = if function_id == "worker_kernel::runs" {
+            json!(["summary", "full", "graph"])
+        } else {
             json!(["summary", "full"])
-        );
+        };
+        assert_eq!(request["properties"]["detail"]["enum"], expected_detail);
         assert!(definition.description.contains("bounded"));
         assert!(definition.description.contains("filtered"));
         let response = definition
@@ -597,6 +599,11 @@ fn worker_history_defaults_to_compact_bounded_observations() {
     );
     assert_eq!(
         runs["properties"]["originSessionId"]["type"],
+        json!("string")
+    );
+    assert_eq!(runs["properties"]["invocationId"]["type"], json!("string"));
+    assert_eq!(
+        runs["properties"]["modelToolInvocationId"]["type"],
         json!("string")
     );
     let inbox = definitions
