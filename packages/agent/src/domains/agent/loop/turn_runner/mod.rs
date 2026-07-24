@@ -8,7 +8,12 @@
 //! unbounded local, web, worker, or binary-derived payloads. Every
 //! provider turn resolves its tool surface from the same bounded latest-user
 //! intent. Assistant plans and tool results cannot manufacture worker relevance
-//! on later internal turns.
+//! on later internal turns. A bounded `worker_result_read` page is fully
+//! available to the immediately following model turn; later turns retain only
+//! its durable worker-result reference and exact pointer/page coordinates.
+//! This one-turn evidence lease is derived from transcript order, requires no
+//! shadow execution state, and lets a worker re-read evidence when genuinely
+//! needed without paying to replay it on every growing-context turn.
 //!
 //! ## Concern ownership
 //!

@@ -20,6 +20,8 @@ const PROVIDER_RESULT_GUIDANCE: &str = "\
 reference instead of relaying large or binary content through model context.]\n\
 --- retained prefix ---\n";
 const PROVIDER_RESULT_SUFFIX: &str = "\n--- retained suffix ---\n";
+const WORKER_RESULT_CHUNK_KIND: &str = "worker_result_chunk";
+const WORKER_RESULT_HISTORY_KIND: &str = "worker_result_read_history";
 
 pub(super) fn build_turn_context(
     context_manager: &mut ContextManager,
@@ -73,27 +75,45 @@ pub(super) fn project_provider_result_text(text: &str) -> String {
 }
 
 fn project_provider_messages(messages: Arc<[Message]>) -> Arc<[Message]> {
-    if !messages.iter().any(message_requires_projection) {
+    let fresh_result_start = trailing_tool_result_start(&messages);
+    if !messages.iter().enumerate().any(|(index, message)| {
+        message_requires_projection(message)
+            || (index < fresh_result_start && message_has_worker_result_chunk(message))
+    }) {
         return messages;
     }
 
     messages
         .iter()
         .cloned()
-        .map(|message| match message {
+        .enumerate()
+        .map(|(index, message)| match message {
             Message::ToolResult {
                 invocation_id,
                 content,
                 is_error,
             } => Message::ToolResult {
                 invocation_id,
-                content: project_tool_result_content(content),
+                content: project_tool_result_content(content, index < fresh_result_start),
                 is_error,
             },
             other => other,
         })
         .collect::<Vec<_>>()
         .into()
+}
+
+/// The only results that need their full bounded projection are the trailing
+/// batch produced immediately before the provider call being assembled.
+///
+/// A result earlier in the transcript has already been delivered to one model
+/// turn. Worker result chunks remain re-readable through their durable
+/// reference, so replaying those bytes on every later turn only grows context.
+fn trailing_tool_result_start(messages: &[Message]) -> usize {
+    messages
+        .iter()
+        .rposition(|message| !matches!(message, Message::ToolResult { .. }))
+        .map_or(0, |index| index.saturating_add(1))
 }
 
 fn message_requires_projection(message: &Message) -> bool {
@@ -115,12 +135,42 @@ fn message_requires_projection(message: &Message) -> bool {
     }
 }
 
-fn project_tool_result_content(content: ToolResultMessageContent) -> ToolResultMessageContent {
+fn message_has_worker_result_chunk(message: &Message) -> bool {
+    let Message::ToolResult { content, .. } = message else {
+        return false;
+    };
     match content {
-        ToolResultMessageContent::Text(text) => {
-            ToolResultMessageContent::Text(project_provider_result_text(&text))
-        }
+        ToolResultMessageContent::Text(text) => worker_result_history(text).is_some(),
+        ToolResultMessageContent::Blocks(blocks) => blocks.iter().any(|block| match block {
+            ToolResultContent::Text { text } => worker_result_history(text).is_some(),
+            ToolResultContent::Image { .. } => false,
+        }),
+    }
+}
+
+fn project_tool_result_content(
+    content: ToolResultMessageContent,
+    historical: bool,
+) -> ToolResultMessageContent {
+    match content {
+        ToolResultMessageContent::Text(text) => ToolResultMessageContent::Text(
+            historical_worker_result(&text, historical)
+                .unwrap_or_else(|| project_provider_result_text(&text)),
+        ),
         ToolResultMessageContent::Blocks(blocks) => {
+            let blocks = if historical {
+                blocks
+                    .into_iter()
+                    .map(|block| match block {
+                        ToolResultContent::Text { text } => ToolResultContent::Text {
+                            text: historical_worker_result(&text, true).unwrap_or(text),
+                        },
+                        image => image,
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                blocks
+            };
             let joined_text = blocks
                 .iter()
                 .filter_map(|block| match block {
@@ -144,6 +194,56 @@ fn project_tool_result_content(content: ToolResultMessageContent) -> ToolResultM
             ToolResultMessageContent::Blocks(projected)
         }
     }
+}
+
+fn historical_worker_result(text: &str, historical: bool) -> Option<String> {
+    if historical {
+        worker_result_history(text)
+    } else {
+        None
+    }
+}
+
+/// Replace an already-consumed bounded worker read with its durable reference.
+///
+/// This is deliberately schema-agnostic: the projection preserves the generic
+/// result reference plus the exact pointer/page coordinates. A worker that
+/// needs the bytes again can issue the same bounded read.
+fn worker_result_history(text: &str) -> Option<String> {
+    let chunk = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    if chunk.get("kind")?.as_str()? != WORKER_RESULT_CHUNK_KIND {
+        return None;
+    }
+    let reference = chunk.get("reference")?.clone();
+    if reference.get("kind")?.as_str()? != "worker_result_reference"
+        || !reference
+            .get("contentSha256")?
+            .as_str()?
+            .starts_with("sha256:")
+        || !reference
+            .get("outputSchemaSha256")?
+            .as_str()?
+            .starts_with("sha256:")
+        || reference.get("sizeBytes")?.as_u64().is_none()
+    {
+        return None;
+    }
+    let invocation_id = reference.get("invocationId")?.as_str()?;
+    let pointer = chunk.get("pointer").and_then(serde_json::Value::as_str)?;
+    let offset = chunk
+        .get("offset")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    serde_json::to_string(&serde_json::json!({
+        "kind":WORKER_RESULT_HISTORY_KIND,
+        "reference":reference,
+        "pointer":pointer,
+        "offset":offset,
+        "message":format!(
+            "This bounded result page was delivered on the immediately following model turn and is omitted from later context. Call worker_result_read with invocationId '{invocation_id}', pointer '{pointer}', and offset {offset} to read it again."
+        ),
+    }))
+    .ok()
 }
 
 fn utf8_prefix(text: &str, max_bytes: usize) -> &str {
@@ -323,5 +423,108 @@ mod tests {
         assert!(text.contains("prefix-"));
         assert!(text.contains("-suffix"));
         assert!(!text.contains(&oversized));
+    }
+
+    fn worker_result_chunk(evidence: &str) -> String {
+        serde_json::to_string(&serde_json::json!({
+            "kind":"worker_result_chunk",
+            "reference":{
+                "kind":"worker_result_reference",
+                "invocationId":"worker_run_1",
+                "workerId":"specialist",
+                "workerVersion":"version-1",
+                "outputSchemaSha256":"sha256:schema",
+                "contentSha256":"sha256:content",
+                "sizeBytes":24_000,
+                "preview":"Specialist result",
+                "message":"Stored durably"
+            },
+            "pointer":"/evidence",
+            "value":{"evidence":evidence},
+            "children":[],
+            "offset":0,
+            "returned":1,
+            "total":1,
+            "nextOffset":null,
+            "truncated":false
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn fresh_worker_result_chunk_is_available_for_one_model_turn() {
+        let chunk = worker_result_chunk(&"evidence ".repeat(1_000));
+        let messages: Arc<[Message]> = vec![
+            Message::user("inspect the specialist result"),
+            Message::assistant("Reading the relevant result path."),
+            Message::ToolResult {
+                invocation_id: "call-read".to_owned(),
+                content: ToolResultMessageContent::Text(chunk.clone()),
+                is_error: None,
+            },
+        ]
+        .into();
+
+        let projected = project_provider_messages(messages);
+        let Message::ToolResult { content, .. } = &projected[2] else {
+            panic!("expected tool result");
+        };
+        let ToolResultMessageContent::Text(text) = content else {
+            panic!("expected text result");
+        };
+        assert_eq!(text, &chunk);
+    }
+
+    #[test]
+    fn consumed_worker_result_chunk_ages_to_rereadable_reference() {
+        let evidence = "evidence ".repeat(1_000);
+        let chunk = worker_result_chunk(&evidence);
+        let messages: Arc<[Message]> = vec![
+            Message::user("inspect the specialist result"),
+            Message::assistant("Reading the relevant result path."),
+            Message::ToolResult {
+                invocation_id: "call-read".to_owned(),
+                content: ToolResultMessageContent::Text(chunk),
+                is_error: None,
+            },
+            Message::assistant("I used that evidence to request validation."),
+            Message::ToolResult {
+                invocation_id: "call-validation".to_owned(),
+                content: ToolResultMessageContent::Text("validation complete".to_owned()),
+                is_error: None,
+            },
+        ]
+        .into();
+
+        let projected = project_provider_messages(messages);
+        let Message::ToolResult { content, .. } = &projected[2] else {
+            panic!("expected historical tool result");
+        };
+        let ToolResultMessageContent::Text(text) = content else {
+            panic!("expected text result");
+        };
+        let history: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert_eq!(history["kind"], WORKER_RESULT_HISTORY_KIND);
+        assert_eq!(
+            history["reference"]["invocationId"],
+            serde_json::json!("worker_run_1")
+        );
+        assert_eq!(history["pointer"], "/evidence");
+        assert_eq!(history["offset"], 0);
+        assert!(
+            history["message"]
+                .as_str()
+                .unwrap()
+                .contains("worker_result_read")
+        );
+        assert!(!text.contains(&evidence));
+
+        let Message::ToolResult { content, .. } = &projected[4] else {
+            panic!("expected fresh tool result");
+        };
+        assert_eq!(
+            content,
+            &ToolResultMessageContent::Text("validation complete".to_owned())
+        );
     }
 }

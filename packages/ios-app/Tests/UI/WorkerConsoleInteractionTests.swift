@@ -122,16 +122,20 @@ struct WorkerConsoleInteractionTests {
         #expect(components.contains("WorkerRunDetailSheet("))
         #expect(components.contains("WorkerJSONDetailSheet("))
 
-        let detailSheets = try String(
+        let resultInspector = try String(
+            contentsOf: workerRoot.appendingPathComponent("WorkerResultInspectorSheet.swift"),
+            encoding: .utf8
+        )
+        #expect(resultInspector.contains("struct WorkerResultInspectorSheet"))
+        #expect(resultInspector.contains("repository.workerResult("))
+        #expect(resultInspector.contains("chunk.children"))
+        #expect(resultInspector.contains("Technical reference"))
+        #expect(!resultInspector.contains("assembledResult"))
+        let runDetail = try String(
             contentsOf: workerRoot.appendingPathComponent("WorkerConsoleDetailSheets.swift"),
             encoding: .utf8
         )
-        #expect(detailSheets.contains("struct WorkerResultInspectorSheet"))
-        #expect(detailSheets.contains("repository.workerResult("))
-        #expect(detailSheets.contains("chunk.children"))
-        #expect(detailSheets.contains("Technical reference"))
-        #expect(detailSheets.contains("Run result projection"))
-        #expect(!detailSheets.contains("assembledResult"))
+        #expect(runDetail.contains("Run result projection"))
     }
 
     @Test("Worker tabs and execution actions share liquid glass components")

@@ -38,10 +38,6 @@ pub use stats::storage_stats;
 /// Canonical active database filename.
 pub const UNIFIED_DB_FILENAME: &str = "tron.sqlite";
 
-/// Default inline payload threshold. Larger payloads should store compact
-/// previews and blob refs instead of duplicating full JSON in primary rows.
-pub const DEFAULT_MAX_INLINE_PAYLOAD_BYTES: usize = 8 * 1024;
-
 /// Managed retention horizon for verbose diagnostic evidence.
 pub const DIAGNOSTIC_RETENTION_DAYS: u64 = 7;
 
@@ -263,7 +259,8 @@ impl StorePayloadOptions {
             session_id: None,
             workspace_id: None,
             expires_at: None,
-            inline_threshold: DEFAULT_MAX_INLINE_PAYLOAD_BYTES,
+            inline_threshold:
+                crate::shared::protocol::model_tools::DEFAULT_MAX_INLINE_MODEL_TOOL_RESULT_BYTES,
         }
     }
 

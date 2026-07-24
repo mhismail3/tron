@@ -775,8 +775,13 @@ must remain in the originating session or causal trace, while paired operator
 clients and system recovery can inspect profile-local results. A worker may
 accept and forward a result reference in its own input schema so a coordinator
 does not have to copy one specialist's complete output into every later child
-and model turn. Path selection and interpretation remain worker-owned; the
-kernel has no source, claim, citation, or report vocabulary.
+and model turn. The complete bounded page is available to the immediately
+following model turn. On later turns the provider transcript carries only its
+integrity-bound result reference and exact pointer/page coordinates; a worker
+can explicitly re-read that page if it still needs the bytes. This projection
+is derived from durable transcript order rather than client or runtime shadow
+state. Path selection and interpretation remain worker-owned; the kernel has
+no source, claim, citation, or report vocabulary.
 
 `worker_inspect` defaults to `detail=contract`: the active input/output schemas,
 runner contract, routing, provenance, presentation, bindings, triggers, route,
@@ -801,12 +806,13 @@ without erasing the pinned fixed/worker identity.
 
 Exact tool output remains in durable execution evidence. Worker results use the
 typed reference/read contract above once their serialized result crosses 8
-KiB. Other textual tool results larger than 32 KiB are replaced in model
-context by a deterministic prefix/suffix projection carrying the original byte
-count and SHA-256 digest. The same projection is applied to reconstructed
-history, so a previously persisted large process, file, or web result cannot
-repeatedly break a resumed model turn. These provider boundaries do not reduce
-the complete operator/audit record.
+KiB, and consumed `worker_result_read` pages age to re-readable references after
+one model turn. Other textual tool results larger than 32 KiB are replaced in
+model context by a deterministic prefix/suffix projection carrying the
+original byte count and SHA-256 digest. The same projections are applied to
+reconstructed history, so a previously persisted large process, file, web, or
+worker result cannot repeatedly break a resumed model turn. These provider
+boundaries do not reduce the complete operator/audit record.
 
 The provider-visible function description contains only version-stable purpose,
 active version, and provenance. Success evidence lives in a durable, rebuildable

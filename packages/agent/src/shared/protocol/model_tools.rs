@@ -2,13 +2,18 @@
 //!
 //! Providers still use their native "tool/function call" vocabulary at the
 //! provider-protocol boundary, but the shared runtime speaks model tools
-//! and canonical tool invocation results.
+//! and canonical tool invocation results. The shared inline-result boundary is
+//! a protocol concern: storage and domain runtimes may externalize larger
+//! values differently, but provider-facing contracts use one byte threshold.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::shared::protocol::content::ToolResultContent;
 use crate::shared::server::failure::FailureEnvelope;
+
+/// Default maximum serialized model-tool result retained inline.
+pub const DEFAULT_MAX_INLINE_MODEL_TOOL_RESULT_BYTES: usize = 8 * 1024;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ModelTool schema

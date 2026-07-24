@@ -153,7 +153,10 @@
 //! later model turn. `worker_result_read` returns only one bounded RFC 6901
 //! path/page (at most 32 KiB and twenty items), authorized to the same causal
 //! trace or originating session; paired clients and system recovery may inspect
-//! profile-local results. References preserve worker version, output-schema
+//! profile-local results. That page is present in full for the immediately
+//! following provider turn, then the agent context keeps only its reference
+//! and pointer coordinates; a worker explicitly re-reads it if later reasoning
+//! needs the bytes. References preserve worker version, output-schema
 //! digest, content digest, size, and preview. Workers decide which paths or
 //! references their typed orchestration needs; the kernel never interprets
 //! source, claim, citation, or report fields.

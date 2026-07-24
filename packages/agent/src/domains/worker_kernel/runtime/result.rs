@@ -7,7 +7,9 @@
 
 use super::*;
 
-const MAX_RESULT_READ_BYTES: usize = crate::shared::storage::DEFAULT_MAX_INLINE_PAYLOAD_BYTES * 4;
+use crate::shared::protocol::model_tools::DEFAULT_MAX_INLINE_MODEL_TOOL_RESULT_BYTES;
+
+const MAX_RESULT_READ_BYTES: usize = DEFAULT_MAX_INLINE_MODEL_TOOL_RESULT_BYTES * 4;
 const MAX_RESULT_READ_ITEMS: usize = 20;
 
 impl WorkerRuntime {
@@ -23,7 +25,7 @@ impl WorkerRuntime {
             .output
             .as_ref()
             .ok_or_else(|| format!("worker invocation '{}' has no output", record.invocation_id))?;
-        if serialized_size(output)? <= crate::shared::storage::DEFAULT_MAX_INLINE_PAYLOAD_BYTES {
+        if serialized_size(output)? <= DEFAULT_MAX_INLINE_MODEL_TOOL_RESULT_BYTES {
             return Ok(output.clone());
         }
         self.result_reference(record)
@@ -40,9 +42,8 @@ impl WorkerRuntime {
             .output
             .as_ref()
             .filter(|output| {
-                serialized_size(output).is_ok_and(|bytes| {
-                    bytes > crate::shared::storage::DEFAULT_MAX_INLINE_PAYLOAD_BYTES
-                })
+                serialized_size(output)
+                    .is_ok_and(|bytes| bytes > DEFAULT_MAX_INLINE_MODEL_TOOL_RESULT_BYTES)
             })
             .map(|_| self.result_reference(&record))
             .transpose()?;
