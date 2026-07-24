@@ -36,6 +36,7 @@ A fetched dependency <name> is available at ../dependencies/<name>; its optional
 Engine-event input supplies typed defaults; matching top-level event payload keys declared by inputSchema override them. bundle.engineHooks contains the complete authoritative engine-hook contracts.";
 pub(crate) const ENGINE_SURFACE_SNAPSHOT_FUNCTION: &str = "engine::surface_snapshot";
 pub(crate) const CONTEXT_SUMMARY_FUNCTION: &str = "worker_kernel::context_summary";
+pub(crate) const CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES: usize = 4_000;
 pub(crate) const SESSION_TITLE_FUNCTION: &str = "worker_kernel::session_title";
 pub(crate) const WORKER_RELEVANCE_FUNCTION: &str = "worker_kernel::worker_relevance";
 pub(super) const DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 5;
@@ -389,7 +390,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                 "handled":{"type":"boolean"},
                 "workerId":{"type":"string"},
                 "workerVersion":{"type":"string"},
-                "narrative":{"type":"string"}
+                "narrative":{"type":"string","maxLength":4000}
             }
         }))
         .idempotency(IdempotencyContract::session())

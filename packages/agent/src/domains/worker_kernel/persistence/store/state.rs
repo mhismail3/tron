@@ -229,6 +229,7 @@ fn validate_engine_hook_contract(
     let (input, output, invalid_inputs, invalid_outputs) = match hook {
         WorkerEngineHook::ContextSummary => (
             json!({
+                "originWorkerId":"delegated-context",
                 "messages": [
                     {"role":"user","text":"Summarize the durable task context."},
                     {"role":"assistant","text":"I inspected the relevant state."},
@@ -237,7 +238,11 @@ fn validate_engine_hook_contract(
             }),
             json!({"narrative":"The user asked to preserve the durable task context."}),
             vec![json!({})],
-            vec![json!({}), json!({"narrative":""})],
+            vec![
+                json!({}),
+                json!({"narrative":""}),
+                json!({"narrative":"x".repeat(super::super::super::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES + 1)}),
+            ],
         ),
         WorkerEngineHook::InboxContext => (
             json!({

@@ -187,6 +187,8 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
         "session_title input is a closed object requiring userPrompt:string(max 4096) and assistantResponse:string(max 4096)",
         "output is a closed object requiring title:string(1..160)",
         "context_summary input is a closed object",
+        "narrative:string(1..4000 characters)",
+        "authoritative 4000 UTF-8 byte runtime ceiling",
         "inbox_context input is a closed object",
         "worker_relevance input is a closed object",
         "do not inspect Tron databases, auth stores, binaries, runtime files, or private server endpoints",
@@ -212,6 +214,10 @@ fn context_summary_is_an_internal_worker_seam_not_a_model_primitive() {
         .find(|definition| definition.id.as_str() == CONTEXT_SUMMARY_FUNCTION)
         .expect("context summary contract");
     assert_eq!(hook.visibility, FunctionVisibility::Internal);
+    assert_eq!(
+        hook.response_schema.as_ref().expect("response schema")["properties"]["narrative"]["maxLength"],
+        4000
+    );
     assert!(
         core_primitives()
             .iter()

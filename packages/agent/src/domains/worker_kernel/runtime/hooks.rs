@@ -64,6 +64,24 @@ impl WorkerRuntime {
                 .await;
             return Err(reason);
         };
+        if hook == WorkerEngineHook::ContextSummary
+            && narrative.len() > super::super::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES
+        {
+            let reason = self
+                .handle_worker_runtime_failure(
+                    &execution.worker_id,
+                    &execution.worker_version,
+                    "engine_hook",
+                    &format!(
+                        "engine hook '{}' returned a {}-byte narrative above the {}-byte UTF-8 ceiling",
+                        hook.as_str(),
+                        narrative.len(),
+                        super::super::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES
+                    ),
+                )
+                .await;
+            return Err(reason);
+        }
         Ok(json!({
             "handled":true,
             "workerId":execution.worker_id,

@@ -372,7 +372,7 @@ impl CompactionHandler {
                         "compactedTokens": tokens_after,
                         "compressionRatio": compaction_result.compression_ratio,
                         "reason": reason_label,
-                        "summary": bounded_summary(&compaction_result.summary),
+                        "summary": compaction_result.summary.clone(),
                         "estimatedContextTokens": tokens_after,
                         "preservedTurns": compaction_result.preserved_turns,
                         "summarizedTurns": compaction_result.summarized_turns
@@ -453,20 +453,6 @@ fn compaction_reason_label(reason: &CompactionReason) -> String {
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))
         .unwrap_or_else(|| format!("{reason:?}"))
-}
-
-fn bounded_summary(summary: &str) -> String {
-    const MAX_BYTES: usize = 4_000;
-    if summary.len() <= MAX_BYTES {
-        return summary.to_owned();
-    }
-    let end = summary
-        .char_indices()
-        .map(|(index, _)| index)
-        .take_while(|index| *index <= MAX_BYTES)
-        .last()
-        .unwrap_or(0);
-    summary[..end].to_owned()
 }
 
 fn emit_start(

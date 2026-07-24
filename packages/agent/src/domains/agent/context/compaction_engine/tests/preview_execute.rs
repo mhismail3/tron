@@ -34,6 +34,41 @@ async fn execute_uses_edited_summary() {
 }
 
 #[tokio::test]
+async fn execute_accepts_the_exact_durable_summary_byte_ceiling() {
+    let deps = MockDeps::new(default_messages());
+    let engine = CompactionEngine::new(0.70, 2, deps);
+    let narrative = "x".repeat(crate::domains::worker_kernel::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES);
+    let summarizer = MockSummarizer::new(&narrative);
+
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
+
+    assert!(result.success);
+    assert_eq!(result.summary, narrative);
+}
+
+#[tokio::test]
+async fn execute_rejects_multibyte_summary_overflow_before_mutating_context() {
+    let messages = default_messages();
+    let deps = MockDeps::new(messages.clone());
+    let engine = CompactionEngine::new(0.70, 2, deps);
+    let narrative = "é".repeat(
+        crate::domains::worker_kernel::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES.div_ceil("é".len()) + 1,
+    );
+    let summarizer = MockSummarizer::new(&narrative);
+
+    let error = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("UTF-8 bytes"));
+    assert_eq!(engine.deps.get_messages(), messages);
+}
+
+#[tokio::test]
 async fn execute_returns_turn_counts() {
     let deps = MockDeps::new(default_messages()); // 3 turns
     let engine = CompactionEngine::new(0.70, 2, deps);

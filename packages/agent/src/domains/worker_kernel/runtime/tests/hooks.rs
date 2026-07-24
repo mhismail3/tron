@@ -18,15 +18,17 @@ fn context_summary_bundle(worker_id: &str, narrative: &str) -> WorkerBundle {
         "additionalProperties":false,
         "required":["messages"],
         "properties":{
+            "originWorkerId":{"type":"string"},
             "messages":{
                 "type":"array",
+                "maxItems":256,
                 "items":{
                     "type":"object",
                     "additionalProperties":false,
                     "required":["role","text"],
                     "properties":{
-                        "role":{"enum":["user","assistant","tool"]},
-                        "text":{"type":"string"}
+                        "role":{"type":"string","enum":["user","assistant","tool"]},
+                        "text":{"type":"string","maxLength":4096}
                     }
                 }
             }
@@ -36,7 +38,7 @@ fn context_summary_bundle(worker_id: &str, narrative: &str) -> WorkerBundle {
         "type":"object",
         "additionalProperties":false,
         "required":["narrative"],
-        "properties":{"narrative":{"type":"string","minLength":1}}
+        "properties":{"narrative":{"type":"string","minLength":1,"maxLength":4000}}
     });
     bundle.engine_hooks = vec![WorkerEngineHook::ContextSummary];
     bundle
@@ -91,6 +93,71 @@ async fn atomic_upsert_activates_context_summary_hook_without_a_binding_step() {
 }
 
 #[tokio::test]
+async fn context_summary_accepts_the_exact_durable_utf8_byte_ceiling() {
+    let (runtime, _home) = test_runtime(None);
+    let narrative = "x".repeat(super::super::super::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES);
+    runtime
+        .upsert(
+            context_summary_bundle("context-summary-exact-limit", &narrative),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let result = runtime
+        .invoke_engine_hook(
+            WorkerEngineHook::ContextSummary,
+            json!({"messages":[{"role":"user","text":"Preserve this task."}]}),
+            None,
+            &hook_invocation("agent:hook-test", ActorKind::Agent, "hook-exact-limit"),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result["narrative"].as_str().unwrap().len(),
+        super::super::super::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES
+    );
+}
+
+#[tokio::test]
+async fn context_summary_rejects_multibyte_output_above_the_utf8_byte_ceiling() {
+    let (runtime, _home) = test_runtime(None);
+    let narrative = "é"
+        .repeat(super::super::super::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES.div_ceil("é".len()) + 1);
+    let outcome = runtime
+        .upsert(
+            context_summary_bundle("context-summary-multibyte-overflow", &narrative),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let error = runtime
+        .invoke_engine_hook(
+            WorkerEngineHook::ContextSummary,
+            json!({"messages":[{"role":"user","text":"Preserve this task."}]}),
+            None,
+            &hook_invocation(
+                "agent:hook-test",
+                ActorKind::Agent,
+                "hook-multibyte-overflow",
+            ),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(error.contains("UTF-8 ceiling"), "{error}");
+    let worker = runtime
+        .store()
+        .summary(&outcome.worker.worker_id)
+        .unwrap()
+        .unwrap();
+    assert!(!worker.enabled);
+    assert_eq!(worker.health, "failed");
+}
+
+#[tokio::test]
 async fn hook_owner_does_not_recursively_invoke_itself() {
     let (runtime, _home) = test_runtime(None);
     let outcome = runtime
@@ -139,6 +206,26 @@ async fn incompatible_context_summary_schema_is_rejected_before_activation() {
     let error = runtime.upsert(bundle, None).await.unwrap_err();
 
     assert!(error.contains("engine hook 'context_summary' input"));
+    assert!(runtime.store().list(true).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn context_summary_schema_must_reject_character_overflow_before_activation() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = context_summary_bundle("context-summary-unbounded-output", "valid at runtime");
+    bundle.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["narrative"],
+        "properties":{"narrative":{"type":"string","minLength":1}}
+    });
+
+    let error = runtime.upsert(bundle, None).await.unwrap_err();
+
+    assert!(
+        error.contains("engine hook 'context_summary' output"),
+        "{error}"
+    );
     assert!(runtime.store().list(true).unwrap().is_empty());
 }
 

@@ -80,7 +80,7 @@ pub(super) async fn context_summary(invocation: &Invocation, deps: &Deps) -> Res
     deps.runtime
         .invoke_engine_hook(
             WorkerEngineHook::ContextSummary,
-            json!({"messages": invocation.payload["messages"].clone()}),
+            invocation.payload.clone(),
             invocation
                 .payload
                 .get("originWorkerId")

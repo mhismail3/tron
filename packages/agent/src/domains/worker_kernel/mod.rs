@@ -78,9 +78,12 @@
 //! is healthy and enabled, and uses the ordinary durable dispatcher. An older
 //! implementation never silently replaces a failed or disabled current owner.
 //! Those worker-facing hook schemas are complete in the model-visible
-//! `worker_upsert` bundle contract. Worker authors never need to inspect
-//! internal databases, auth material, server binaries, or private transport
-//! shapes to discover an engine hook.
+//! `worker_upsert` bundle contract. Context-summary narratives are accepted
+//! only through 4,000 UTF-8 bytes, and the accepted value is the exact value
+//! persisted at the compact boundary; oversize output fails instead of being
+//! truncated into divergent live and restart context. Worker authors never
+//! need to inspect internal databases, auth material, server binaries, or
+//! private transport shapes to discover an engine hook.
 //! The same provider-neutral tool contract owns the complete worker-authoring
 //! protocol for every runner and trigger. It directs agents through public
 //! discovery, staged source, one atomic upsert, and public verification. A
@@ -311,7 +314,8 @@ pub(crate) fn restore_profile_snapshot(
 }
 
 pub(crate) use contract::{
-    CONTEXT_SUMMARY_FUNCTION, SESSION_TITLE_FUNCTION, WORKER_RELEVANCE_FUNCTION,
+    CONTEXT_SUMMARY_FUNCTION, CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES, SESSION_TITLE_FUNCTION,
+    WORKER_RELEVANCE_FUNCTION,
 };
 
 pub(crate) use runtime::WorkerRuntime;

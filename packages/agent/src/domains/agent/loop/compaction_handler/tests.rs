@@ -196,6 +196,63 @@ async fn execute_uses_injected_summarizer_and_commits_direct_boundary() {
 }
 
 #[tokio::test]
+async fn persisted_boundary_and_live_context_use_the_exact_same_summary() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handler = CompactionHandler::with_summarizer(
+        CompactionTriggerConfig::default(),
+        Arc::new(MarkerSummarizer {
+            calls: Arc::clone(&calls),
+        }),
+    );
+    let store = make_event_store();
+    let session = store
+        .create_session("test-model", "/tmp", Some("compaction parity"), None)
+        .expect("session");
+    handler.set_persister(Arc::new(EventPersister::new(Arc::clone(&store))));
+    handler.set_session_manager(Arc::new(SessionManager::new(Arc::clone(&store))));
+    let mut manager = context_manager_with_three_turns();
+    let emitter = Arc::new(EventEmitter::new());
+
+    let success = handler
+        .execute_compaction(
+            &mut manager,
+            &session.session.id,
+            &emitter,
+            CompactionReason::Manual,
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert!(success);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let live_summary = manager
+        .get_messages()
+        .into_iter()
+        .find_map(|message| match message {
+            Message::User {
+                content: UserMessageContent::Text(text),
+                ..
+            } if message.is_compaction_summary() => text
+                .split_once("\n\n")
+                .map(|(_, summary)| summary.to_owned()),
+            _ => None,
+        })
+        .expect("live compaction summary");
+    let events = store
+        .get_latest_events(&session.session.id, Some(20))
+        .expect("events");
+    let persisted_summary = events
+        .iter()
+        .find(|event| event.event_type == EventType::CompactBoundary.as_str())
+        .and_then(|event| serde_json::from_str::<serde_json::Value>(&event.payload).ok())
+        .and_then(|payload| payload["summary"].as_str().map(str::to_owned))
+        .expect("persisted compaction summary");
+    assert_eq!(live_summary, "marker strategy summary");
+    assert_eq!(persisted_summary, live_summary);
+}
+
+#[tokio::test]
 async fn cancellation_pairs_compaction_events_and_restores_context() {
     let started = Arc::new(tokio::sync::Notify::new());
     let handler = Arc::new(CompactionHandler::with_summarizer(

@@ -214,7 +214,13 @@ impl Summarizer for KeywordSummarizer {
             parts.join(" ")
         };
 
-        Ok(SummaryResult { narrative })
+        Ok(SummaryResult {
+            narrative: crate::shared::foundation::text::truncate_with_suffix(
+                &narrative,
+                crate::domains::worker_kernel::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES,
+                "...",
+            ),
+        })
     }
 }
 
@@ -310,14 +316,20 @@ mod tests {
             "description":"Creates durable semantic context summaries",
             "inputSchema":{
                 "type":"object","additionalProperties":false,"required":["messages"],
-                "properties":{"messages":{"type":"array","items":{
-                    "type":"object","additionalProperties":false,"required":["role","text"],
-                    "properties":{"role":{"enum":["user","assistant","tool"]},"text":{"type":"string"}}
-                }}}
+                "properties":{
+                    "originWorkerId":{"type":"string"},
+                    "messages":{"type":"array","maxItems":256,"items":{
+                        "type":"object","additionalProperties":false,"required":["role","text"],
+                        "properties":{
+                            "role":{"type":"string","enum":["user","assistant","tool"]},
+                            "text":{"type":"string","maxLength":4096}
+                        }
+                    }}
+                }
             },
             "outputSchema":{
                 "type":"object","additionalProperties":false,"required":["narrative"],
-                "properties":{"narrative":{"type":"string","minLength":1}}
+                "properties":{"narrative":{"type":"string","minLength":1,"maxLength":4000}}
             },
             "runner":{"kind":"command","command":["sh","-c",command]},
             "engineHooks":["context_summary"],
@@ -385,6 +397,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn keyword_recovery_never_exceeds_the_durable_summary_ceiling() {
+        let messages = (0..40)
+            .map(|index| Message::user(format!("request {index}: {}", "é".repeat(200))))
+            .collect::<Vec<_>>();
+
+        let result = KeywordSummarizer::new()
+            .summarize(&messages, &SummaryContext::default())
+            .await
+            .unwrap();
+
+        assert!(
+            result.narrative.len()
+                <= crate::domains::worker_kernel::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES
+        );
+        assert!(result.narrative.is_char_boundary(result.narrative.len()));
+    }
+
+    #[tokio::test]
     async fn production_summarizer_uses_an_active_worker_hook() {
         let context = crate::shared::server::test_support::make_test_context();
         install_worker(
@@ -406,6 +436,32 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.narrative, "semantic worker summary");
+    }
+
+    #[tokio::test]
+    async fn production_summarizer_preserves_origin_worker_evidence_in_hook_input() {
+        let context = crate::shared::server::test_support::make_test_context();
+        install_worker(
+            &context.engine_host,
+            worker_bundle(
+                r#"python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps({"narrative": payload.get("originWorkerId", "missing")}))'"#,
+                "origin-aware-summary-policy",
+            ),
+        )
+        .await;
+        let summarizer = WorkerHookSummarizer::new(context.engine_host.clone());
+        let mut summary_context = summary_context();
+        summary_context.origin_worker_id = Some("delegated-context".to_owned());
+
+        let result = summarizer
+            .summarize(
+                &[Message::user("Keep the semantic details")],
+                &summary_context,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.narrative, "delegated-context");
     }
 
     #[tokio::test]

@@ -236,6 +236,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
             let result = summarizer.summarize(to_summarize, summary_context).await?;
             result.narrative
         };
+        validate_summary_for_durable_boundary(&summary)?;
 
         trace!(
             summary_length = summary.len(),
@@ -340,6 +341,28 @@ impl<D: CompactionDeps> CompactionEngine<D> {
 
         summary_tokens + context_message_tokens + ack_message_tokens + preserved_tokens
     }
+}
+
+fn validate_summary_for_durable_boundary(
+    summary: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if summary.trim().is_empty() {
+        return Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "compaction summary must not be empty",
+        )));
+    }
+    if summary.len() > crate::domains::worker_kernel::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES {
+        return Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "compaction summary is {} UTF-8 bytes; the durable ceiling is {} bytes",
+                summary.len(),
+                crate::domains::worker_kernel::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES
+            ),
+        )));
+    }
+    Ok(())
 }
 
 // =============================================================================

@@ -135,16 +135,23 @@ enabled; an older implementation never silently replaces a failed or disabled
 current owner. An update switches new hook work immediately while prior
 invocations retain their version.
 
-The `context_summary` hook accepts a bounded transcript
-of visible user text, assistant text, tool names, and textual tool results and
-returns `{narrative}`. Hidden thinking, tool arguments, binary content, usage,
-and cost never cross the seam. Calls use the normal durable worker dispatcher,
-causal trace, idempotency, validation, failure-disable, and inbox behavior. If
-no hook is installed—or the hook fails—compaction uses a deterministic recovery
-summary. A hook worker is excluded while its own agent-runner session compacts,
-preventing semantic-policy recursion. Token-window selection, cancellation,
-checkpoint restoration, durable compact-boundary proof, and provider context
-mutation remain irreducible kernel custody.
+The `context_summary` hook accepts a bounded transcript of visible user text,
+assistant text, tool names, and textual tool results and returns
+`{narrative}`. Its public schema limits the narrative to 4,000 characters for
+early structural rejection; the authoritative durable limit is 4,000 UTF-8
+bytes. The runtime rejects rather than truncates an oversize result, disables
+the failing worker version through the ordinary failure path, and uses the
+deterministic recovery summary. Every accepted narrative is therefore the
+exact byte-for-byte value used in live context, compact-boundary proof, and
+restart reconstruction. Hidden thinking, tool arguments, binary content,
+usage, and cost never cross the seam. Calls use the normal durable worker
+dispatcher, causal trace, idempotency, validation, failure-disable, and inbox
+behavior. If no hook is installed—or the hook fails—compaction uses the same
+deterministic recovery path. A hook worker is excluded while its own
+agent-runner session compacts, preventing semantic-policy recursion.
+Token-window selection, cancellation, checkpoint restoration, durable
+compact-boundary proof, and provider context mutation remain irreducible
+kernel custody.
 
 The `worker_relevance` hook accepts the evolving task query plus a bounded set
 of canonical candidate summaries and returns typed worker ids and scores.
