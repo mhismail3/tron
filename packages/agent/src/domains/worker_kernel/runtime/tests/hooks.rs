@@ -93,6 +93,23 @@ async fn atomic_upsert_activates_context_summary_hook_without_a_binding_step() {
 }
 
 #[tokio::test]
+async fn context_summary_without_an_owner_uses_the_recovery_path() {
+    let (runtime, _home) = test_runtime(None);
+
+    let result = runtime
+        .invoke_engine_hook(
+            WorkerEngineHook::ContextSummary,
+            json!({"messages":[{"role":"user","text":"Preserve this task."}]}),
+            None,
+            &hook_invocation("agent:hook-test", ActorKind::Agent, "hook-absent"),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result, json!({"handled":false}));
+}
+
+#[tokio::test]
 async fn context_summary_accepts_the_exact_estimated_token_and_byte_ceiling() {
     let (runtime, _home) = test_runtime(None);
     let narrative = "x".repeat(super::super::super::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES);
@@ -158,6 +175,70 @@ async fn context_summary_rejects_output_above_the_estimated_token_and_byte_ceili
 }
 
 #[tokio::test]
+async fn context_summary_rejects_empty_output_and_disables_the_owner() {
+    let (runtime, _home) = test_runtime(None);
+    let outcome = runtime
+        .upsert(context_summary_bundle("context-summary-empty", ""), None)
+        .await
+        .unwrap();
+
+    let error = runtime
+        .invoke_engine_hook(
+            WorkerEngineHook::ContextSummary,
+            json!({"messages":[{"role":"user","text":"Preserve this task."}]}),
+            None,
+            &hook_invocation("agent:hook-test", ActorKind::Agent, "hook-empty"),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(error.contains("does not match its schema"), "{error}");
+    let worker = runtime
+        .store()
+        .summary(&outcome.worker.worker_id)
+        .unwrap()
+        .unwrap();
+    assert!(!worker.enabled);
+    assert_eq!(worker.health, "failed");
+}
+
+#[tokio::test(start_paused = true)]
+async fn context_summary_timeout_cancels_the_run_and_disables_the_owner() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = context_summary_bundle("context-summary-timeout", "unused");
+    bundle.runner = WorkerRunner::Command {
+        command: vec!["sh".to_owned(), "-c".to_owned(), "sleep 120".to_owned()],
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+
+    let error = runtime
+        .invoke_engine_hook(
+            WorkerEngineHook::ContextSummary,
+            json!({"messages":[{"role":"user","text":"Preserve this task."}]}),
+            None,
+            &hook_invocation("agent:hook-test", ActorKind::Agent, "hook-timeout"),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(error.contains("60-second policy ceiling"), "{error}");
+    let worker = runtime
+        .store()
+        .summary(&outcome.worker.worker_id)
+        .unwrap()
+        .unwrap();
+    assert!(!worker.enabled);
+    assert_eq!(worker.health, "failed");
+    let run = runtime
+        .store()
+        .runs_filtered(Some(&outcome.worker.worker_id), None, 1)
+        .unwrap()
+        .pop()
+        .expect("timed-out hook run");
+    assert_eq!(run.status, "cancelled");
+}
+
+#[tokio::test]
 async fn hook_owner_does_not_recursively_invoke_itself() {
     let (runtime, _home) = test_runtime(None);
     let outcome = runtime
@@ -190,6 +271,38 @@ async fn hook_owner_does_not_recursively_invoke_itself() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn context_summary_accepts_a_different_worker_as_the_origin() {
+    let (runtime, _home) = test_runtime(None);
+    runtime
+        .upsert(
+            context_summary_bundle("context-summary-owner", "worker child summary"),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let result = runtime
+        .invoke_engine_hook(
+            WorkerEngineHook::ContextSummary,
+            json!({
+                "originWorkerId":"different-worker",
+                "messages":[{"role":"user","text":"Worker child context."}]
+            }),
+            Some("different-worker"),
+            &hook_invocation(
+                "worker:different-worker",
+                ActorKind::Worker,
+                "hook-other-worker",
+            ),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result["handled"], true);
+    assert_eq!(result["narrative"], "worker child summary");
 }
 
 #[tokio::test]

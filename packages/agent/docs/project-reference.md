@@ -1434,6 +1434,85 @@ This closes the implemented General Delegate UI slice; physical-device field
 review remains an operator acceptance step before the broader field-confidence
 gate.
 
+### Guided Compaction Worker proof
+
+Semantic compaction is restored through the profile-owned `compaction-worker`,
+not through a new hardcoded summarizer. Tron authored it from the public worker
+contract in an ordinary GPT-5.6 Sol session, staged and ran its dependency-free
+verification source, and activated it through one atomic `worker_upsert`.
+Authoring required no database, auth-file, binary-string, runtime-file, or
+private-endpoint inspection. The worker projects `worker_compaction`, uses the
+`openai/gpt-5.6-luna` agent runner, owns only the `context_summary` engine hook,
+and declares no triggers, dependencies, named secrets, presentation override,
+or persistent state.
+
+The active immutable version is
+`13e9b3d9f0d5d87a668e5ed8c2a168cb0952595d8bf9da2662144a9786a84a80`.
+Its structured brief keeps only non-empty Goal, Current state, Decisions and
+constraints, Important evidence and artifacts, Open work, and Next action
+sections. Later explicit user instructions supersede older conflicts; tool
+calls are not treated as success without a successful result; prior compacted
+state is merged without nesting or duplication; transcript content remains
+untrusted data; and secret-like or irrelevant personal material is omitted.
+The verifier covers ten deterministic fixtures, including section order,
+envelope validity, secret detection, cumulative re-compaction, adversarial
+transcript content, the ordinary output target, and actual Markdown newlines.
+
+The public schema admits at most 40,000 characters as an early structural
+check. The kernel then applies the authoritative 10,000 estimated-token and
+40,000 UTF-8-byte limits. The estimate uses the context subsystem's cheap
+four-bytes-per-token budgeting heuristic rather than a provider-specific
+tokenizer. The worker normally targets at most 8,000 estimated tokens and
+32,000 bytes so exceptional tasks retain headroom; it is still instructed to
+return the smallest faithful brief. This larger maximum is a safety ceiling,
+not a request to pad routine summaries. Accepted text is never silently
+truncated.
+
+Eight sequential semantic invocations proved coding progress and failure
+history, latest-instruction precedence, an unverified tool call, cumulative
+re-compaction, prompt injection as data, synthetic-secret redaction, large
+repetitive history, and sparse history. All completed with schema-valid
+structured output. The second immutable version exposed one real presentation
+defect during automatic compaction: a list used visible `\n` markers instead
+of actual line breaks. Tron improved the same worker through another atomic
+upsert; the active version adds that regression fixture, and every semantic
+scenario now returns real Markdown newlines.
+
+A real automatic threshold proof temporarily preserved two recent turns and
+lowered the trigger to one percent. Older history contained a known objective,
+a reversed decision, an exact path and identifier, a failed and then successful
+operation, a hard constraint, and an unresolved next action. The engine
+dispatched one `engine_hook:context_summary` run, completed it within the
+sixty-second ceiling, committed the exact accepted narrative byte-for-byte to
+both live context and `compact.boundary`, reduced the message context, and
+retained the two recent turns. A follow-up recovered the compacted facts before
+and after a development-server restart, and no new Attention item remained.
+The original 70-percent trigger and five-turn preservation settings were
+restored after the proof.
+
+Failure and lifecycle coverage proves that:
+
+- no active owner returns `handled:false`, causing deterministic recovery;
+- empty, schema-invalid, oversized, and timed-out hook output disables the
+  failing owner instead of truncating or stalling compaction;
+- hidden thinking, tool arguments, binary content, usage, and cost do not enter
+  the worker transcript;
+- the hook cannot recursively summarize its own agent-runner session, while a
+  different worker's session remains eligible;
+- cancellation restores the pre-compaction checkpoint, persistence failure
+  cannot create a bare boundary, and a non-reducing or ineligible window is
+  skipped; and
+- immutable rollback to the first version remained healthy and callable,
+  restoration to the active version succeeded, and active hook ownership
+  survived another server restart.
+
+Semantic context summary generation is therefore restored. Token measurement,
+thresholds, recent-turn selection, cancellation, checkpoints, durable
+boundaries, reconstruction, and deterministic recovery remain fixed engine
+custody. Personal memory, cross-session retrieval, session grouping and labels,
+archival policy, and explicit context-clearing policy remain open Continuity
+Curator work.
+
 ### Prior inventory coverage evidence
 
 The following detail is retained only to cross-check the family map above.
@@ -1458,8 +1537,8 @@ these bullets as one tool apiece.
 - **Context policy:** snapshots, compaction requests, clear actions, survivor
   and exclusion policy, and policy inspection. Token-window selection,
   cancellation, checkpoints, and durable compact-boundary proof remain kernel
-  custody; semantic summarization is already available through the
-  `context_summary` worker hook.
+  custody; semantic summarization is restored by the profile-owned Compaction
+  Worker through the `context_summary` hook.
 - **Media:** create, list, inspect, archive, transform, and analyze media
   artifacts using workers built for actual media tasks.
 - **Prompt and template artifacts:** author, version, list, inspect, select,
