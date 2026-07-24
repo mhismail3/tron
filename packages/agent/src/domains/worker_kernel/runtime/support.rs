@@ -287,7 +287,9 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
                     .unwrap_or_else(|| format!("worker '{}' failed", self.worker_id)),
             ));
         }
-        Ok(record.output.unwrap_or_else(|| json!({})))
+        self.runtime
+            .provider_worker_output(&record)
+            .map_err(crate::engine::EngineError::HandlerFailed)
     }
 }
 

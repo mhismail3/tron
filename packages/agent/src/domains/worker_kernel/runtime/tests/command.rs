@@ -1,6 +1,144 @@
 use super::*;
 
 #[tokio::test]
+async fn large_results_stay_exact_and_cross_provider_turns_by_reference() {
+    let home = tempfile::tempdir().unwrap();
+    let runtime = test_runtime_at(home.path(), None);
+    let mut bundle = command_bundle(vec![
+        "python3".to_owned(),
+        "-c".to_owned(),
+        "import json; print(json.dumps({'summary':'large durable result','items':['x'*10000]}))"
+            .to_owned(),
+    ]);
+    bundle.worker_id = Some("large-result".to_owned());
+    bundle.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["summary","items"],
+        "properties":{
+            "summary":{"type":"string"},
+            "items":{"type":"array","items":{"type":"string"}}
+        }
+    });
+    runtime.upsert(bundle, None).await.unwrap();
+
+    let direct = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::dynamic_large-result").unwrap(),
+            json!({}),
+            CausalContext::new(
+                ActorId::new("agent:large-result").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-large-result").unwrap(),
+            )
+            .with_session_id("session-large-result")
+            .with_idempotency_key("large-result-direct"),
+        ))
+        .await;
+    assert!(direct.error.is_none(), "direct error: {:?}", direct.error);
+    let reference = direct.value.unwrap();
+    assert_eq!(reference["kind"], "worker_result_reference");
+    assert_eq!(reference["workerId"], "large-result");
+    assert!(reference["sizeBytes"].as_u64().unwrap() > 8_192);
+    let invocation_id = reference["invocationId"].as_str().unwrap();
+    let durable = runtime.store().invocation(invocation_id).unwrap().unwrap();
+    assert_eq!(
+        durable.output.as_ref().unwrap()["items"][0],
+        "x".repeat(10_000)
+    );
+
+    let read = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::result_read").unwrap(),
+            json!({"invocationId":invocation_id,"pointer":"/items","limit":1}),
+            CausalContext::new(
+                ActorId::new("agent:large-result-reader").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-large-result-reader").unwrap(),
+            )
+            .with_session_id("session-large-result"),
+        ))
+        .await;
+    assert!(read.error.is_none(), "result read error: {:?}", read.error);
+    let chunk = read.value.unwrap();
+    assert_eq!(chunk["kind"], "worker_result_chunk");
+    assert_eq!(chunk["value"][0], "x".repeat(10_000));
+    assert_eq!(chunk["truncated"], false);
+
+    let denied = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::result_read").unwrap(),
+            json!({"invocationId":invocation_id}),
+            CausalContext::new(
+                ActorId::new("agent:unrelated-result-reader").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-unrelated-result-reader").unwrap(),
+            )
+            .with_session_id("session-unrelated"),
+        ))
+        .await;
+    assert!(denied.error.is_some());
+
+    let fixed = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::invoke").unwrap(),
+            json!({
+                "workerId":"large-result",
+                "input":{},
+                "mode":"wait",
+                "idempotencyKey":"large-result-fixed"
+            }),
+            CausalContext::new(
+                ActorId::new("agent:large-result-fixed").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-large-result-fixed").unwrap(),
+            )
+            .with_session_id("session-large-result")
+            .with_idempotency_key("large-result-fixed-outer"),
+        ))
+        .await;
+    assert!(
+        fixed.error.is_none(),
+        "fixed invoke error: {:?}",
+        fixed.error
+    );
+    assert_eq!(
+        fixed.value.as_ref().unwrap()["output"]["kind"],
+        "worker_result_reference"
+    );
+
+    drop(runtime);
+    let restarted = test_runtime_at(home.path(), None);
+    restarted.register_active_tools().await.unwrap();
+    let after_restart = restarted
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::result_read").unwrap(),
+            json!({"invocationId":invocation_id,"pointer":"/summary"}),
+            CausalContext::new(
+                ActorId::new("agent:large-result-restart").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-large-result-restart").unwrap(),
+            )
+            .with_session_id("session-large-result"),
+        ))
+        .await;
+    assert!(
+        after_restart.error.is_none(),
+        "restart result read error: {:?}",
+        after_restart.error
+    );
+    assert_eq!(
+        after_restart.value.unwrap()["value"],
+        "large durable result"
+    );
+}
+
+#[tokio::test]
 async fn selected_worker_input_contract_classifies_schema_violations() {
     let (runtime, _home) = test_runtime(None);
     let mut bundle = command_bundle(vec![

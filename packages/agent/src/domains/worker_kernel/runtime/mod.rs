@@ -14,6 +14,9 @@
 //! originating model-tool chip. `invocation` owns claimed delivery,
 //! concurrency, progress phases, and terminal completion so detachment never
 //! becomes a second execution path.
+//! `result` owns generic artifact-style references for large validated worker
+//! outputs plus bounded, causally authorized JSON reads. Task-specific result
+//! interpretation remains in workers.
 //! Agent child-session activity is projected only as bounded, redacted stage
 //! labels; raw child content remains in its canonical audit session.
 //! `client_actions` selects the current healthy worker for narrow native
@@ -56,6 +59,7 @@ mod hooks;
 mod invocation;
 mod lifecycle;
 mod resident;
+mod result;
 mod run_projection;
 mod run_projection_format;
 mod secrets;

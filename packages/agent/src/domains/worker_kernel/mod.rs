@@ -146,6 +146,17 @@
 //! their parent requires the typed result. `worker_await` is bounded by the
 //! same interaction budget, and `worker_detach` only changes interaction
 //! ownership.
+//! Exact terminal worker output is validated and retained once in the durable
+//! invocation ledger. Provider-facing worker results use the shared 8 KiB
+//! inline-payload boundary: larger values become integrity-bound
+//! `worker_result_reference` objects instead of being copied through every
+//! later model turn. `worker_result_read` returns only one bounded RFC 6901
+//! path/page (at most 32 KiB and twenty items), authorized to the same causal
+//! trace or originating session; paired clients and system recovery may inspect
+//! profile-local results. References preserve worker version, output-schema
+//! digest, content digest, size, and preview. Workers decide which paths or
+//! references their typed orchestration needs; the kernel never interprets
+//! source, claim, citation, or report fields.
 //! The fixed invocation envelope and each selected worker's nested input
 //! schema are both transport admission boundaries. A nested schema or secret
 //! violation is returned as an actionable invalid request before any durable

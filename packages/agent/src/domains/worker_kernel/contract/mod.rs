@@ -19,6 +19,7 @@ mod response;
 #[cfg(test)]
 pub(crate) use manifest::CorePrimitiveGroup;
 pub(crate) use manifest::{core_primitive_for_function, core_primitives};
+pub(crate) use response::worker_result_reference_schema;
 use response::{open_response, response_schema, worker_id_schema};
 
 const WORKER: &str = "worker_kernel";
@@ -254,6 +255,23 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         RiskLevel::Low,
         json!({"type":"object","additionalProperties":false,"required":["invocationId"],"properties":{"invocationId":{"type":"string"},"timeoutSeconds":{"type":"integer","minimum":0,"maximum":10}}}),
         "Observe one durable worker invocation for at most the ten-second interaction budget. A wait timeout returns current state and never cancels the worker.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::result_read",
+        EffectClass::PureRead,
+        RiskLevel::Low,
+        json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["invocationId"],
+            "properties":{
+                "invocationId":{"type":"string"},
+                "pointer":{"type":"string","maxLength":2048,"description":"RFC 6901 JSON pointer. Omit or use an empty string for the result root."},
+                "offset":{"type":"integer","minimum":0},
+                "limit":{"type":"integer","minimum":1,"maximum":20}
+            }
+        }),
+        "Read one bounded JSON path/page from an exact validated durable worker result. Prefer passing a worker_result_reference directly to a downstream worker that accepts it; otherwise read only the path needed and follow nextOffset when present.",
     )?);
     specs.push(spec(
         "worker_kernel::detach",

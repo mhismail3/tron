@@ -546,6 +546,33 @@ fn every_fixed_model_primitive_has_a_closed_top_level_response_contract() {
 }
 
 #[test]
+fn worker_result_read_is_bounded_and_integrity_bound() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let read = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::result_read")
+        .expect("worker result read contract");
+    assert_eq!(read.effect_class, EffectClass::PureRead);
+    let request = read.request_schema.as_ref().expect("result read request");
+    assert_eq!(request["properties"]["limit"]["maximum"], 20);
+    assert_eq!(request["properties"]["pointer"]["maxLength"], 2_048);
+    assert!(read.description.contains("JSON path/page"));
+    let response = read.response_schema.as_ref().expect("result read response");
+    assert_eq!(
+        response["properties"]["reference"]["properties"]["kind"]["const"],
+        "worker_result_reference"
+    );
+    assert_eq!(
+        response["properties"]["reference"]["properties"]["contentSha256"]["pattern"],
+        "^sha256:[0-9a-f]{64}$"
+    );
+    assert_eq!(
+        response["properties"]["reference"]["properties"]["outputSchemaSha256"]["pattern"],
+        "^sha256:[0-9a-f]{64}$"
+    );
+}
+
+#[test]
 fn worker_history_defaults_to_compact_bounded_observations() {
     let definitions = function_definitions().expect("worker-kernel contracts");
     for function_id in ["worker_kernel::runs", "worker_kernel::inbox"] {

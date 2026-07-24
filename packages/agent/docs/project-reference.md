@@ -728,6 +728,7 @@ new file is required, or provide raw/`sha256:`-prefixed 64-digit hex.
 | `worker_inspect` | `worker_kernel::inspect` |
 | `worker_invoke` | `worker_kernel::invoke` |
 | `worker_await` | `worker_kernel::await` |
+| `worker_result_read` | `worker_kernel::result_read` |
 | `worker_detach` | `worker_kernel::detach` |
 | `worker_cancel` | `worker_kernel::cancel` |
 | `worker_stop` | `worker_kernel::stop` |
@@ -759,6 +760,24 @@ server-side. `worker_cancel` targets the selected invocation's durable causal
 subtree while leaving unrelated work running; it remains distinct from
 per-worker `worker_stop` and profile-wide `worker_stop_all`.
 
+Every successful worker result is schema-validated and retained exactly once
+in its durable invocation. Provider-facing direct-worker and fixed
+invoke/await responses keep values at or below the shared 8 KiB inline-payload
+boundary inline. Larger values become a `worker_result_reference` containing
+the invocation, immutable worker version, output-schema digest, content digest,
+byte size, and concise preview. This changes context projection, not execution
+or typed durability.
+
+`worker_result_read` retrieves one RFC 6901 JSON pointer from that exact result.
+Array/object pages are limited to twenty entries and each response is bounded
+to 32 KiB; oversized objects return child pointers before content. Agent reads
+must remain in the originating session or causal trace, while paired operator
+clients and system recovery can inspect profile-local results. A worker may
+accept and forward a result reference in its own input schema so a coordinator
+does not have to copy one specialist's complete output into every later child
+and model turn. Path selection and interpretation remain worker-owned; the
+kernel has no source, claim, citation, or report vocabulary.
+
 `worker_inspect` defaults to `detail=contract`: the active input/output schemas,
 runner contract, routing, provenance, presentation, bindings, triggers, route,
 and immutable version summaries. It omits source-file payloads, smoke/health
@@ -780,12 +799,13 @@ progress differently without parsing model-facing names or maintaining a
 second tool catalog. Result-owned presentation hints may add visual detail
 without erasing the pinned fixed/worker identity.
 
-Exact tool output remains in durable execution evidence. Before any provider
-request, textual tool results larger than 32 KiB are replaced in model context
-by a deterministic prefix/suffix projection carrying the original byte count
-and SHA-256 digest. The same projection is applied to reconstructed history, so
-a previously persisted large process, file, web, or worker result cannot
-repeatedly break a resumed model turn. This provider boundary does not reduce
+Exact tool output remains in durable execution evidence. Worker results use the
+typed reference/read contract above once their serialized result crosses 8
+KiB. Other textual tool results larger than 32 KiB are replaced in model
+context by a deterministic prefix/suffix projection carrying the original byte
+count and SHA-256 digest. The same projection is applied to reconstructed
+history, so a previously persisted large process, file, or web result cannot
+repeatedly break a resumed model turn. These provider boundaries do not reduce
 the complete operator/audit record.
 
 The provider-visible function description contains only version-stable purpose,
@@ -1742,7 +1762,7 @@ operational evidence:
 | `worker_versions` | rebuildable version index |
 | `worker_routes` | rebuildable direct-tool route and routing metadata |
 | `worker_triggers` | rebuildable trigger configuration and cursors |
-| `worker_invocations` | durable queue, idempotency, pinned version, originating user session, child-agent session, and results |
+| `worker_invocations` | durable queue, idempotency, pinned version, originating user session, child-agent session, and exact typed results addressed by public result references |
 | `worker_attempts` | numbered execution/redelivery attempts |
 | `worker_run_events` | append-only generic stage evidence for authoritative run timelines |
 | `worker_causal_traces` | trace roots, depth, delivery, and suppression counters |

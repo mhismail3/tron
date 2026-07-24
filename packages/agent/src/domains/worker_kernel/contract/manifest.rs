@@ -165,6 +165,12 @@ const CORE_PRIMITIVES: &[CorePrimitiveDescriptor] = &[
         order: 147,
     },
     CorePrimitiveDescriptor {
+        function_id: "worker_kernel::result_read",
+        model_name: "worker_result_read",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 148,
+    },
+    CorePrimitiveDescriptor {
         function_id: "worker_kernel::stop",
         model_name: "worker_stop",
         group: CorePrimitiveGroup::WorkerControl,

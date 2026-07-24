@@ -110,9 +110,9 @@ pub(super) async fn invoke_worker(
         }
     };
     let record = record.map_err(|message| ToolError::Internal { message })?;
-    serde_json::to_value(record).map_err(|error| ToolError::Internal {
-        message: error.to_string(),
-    })
+    deps.runtime
+        .provider_invocation_record(record)
+        .map_err(|message| ToolError::Internal { message })
 }
 
 fn worker_input_contract_error(error: WorkerInputContractError) -> ToolError {
@@ -138,19 +138,53 @@ pub(super) async fn await_worker(invocation: &Invocation, deps: &Deps) -> Result
             timeout,
         )
         .await?;
-    Ok(json!({"invocation":record,"timedOut":timed_out}))
+    Ok(json!({
+        "invocation":deps.runtime.provider_invocation_record(record)?,
+        "timedOut":timed_out
+    }))
+}
+
+pub(super) async fn read_worker_result(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, String> {
+    let pointer = invocation
+        .payload
+        .get("pointer")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let offset = invocation
+        .payload
+        .get("offset")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+        .try_into()
+        .map_err(|_| "worker result offset is too large".to_owned())?;
+    let limit = invocation
+        .payload
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(10)
+        .try_into()
+        .map_err(|_| "worker result limit is too large".to_owned())?;
+    deps.runtime.read_worker_result(
+        invocation,
+        &required_string(&invocation.payload, "invocationId")?,
+        pointer,
+        offset,
+        limit,
+    )
 }
 
 pub(super) async fn detach_worker_invocation(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, String> {
-    serde_json::to_value(
+    deps.runtime.provider_invocation_record(
         deps.runtime
             .detach_invocation(&required_string(&invocation.payload, "invocationId")?)
             .await?,
     )
-    .map_err(|error| error.to_string())
 }
 
 pub(super) async fn cancel_worker_invocation(
@@ -161,7 +195,7 @@ pub(super) async fn cancel_worker_invocation(
         .runtime
         .cancel_invocation(&required_string(&invocation.payload, "invocationId")?)
         .await?;
-    serde_json::to_value(record).map_err(|error| error.to_string())
+    deps.runtime.provider_invocation_record(record)
 }
 
 pub(super) async fn set_enabled(

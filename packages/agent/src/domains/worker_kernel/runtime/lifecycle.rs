@@ -313,6 +313,7 @@ impl WorkerRuntime {
         .with_response_schema(json!({
             "anyOf":[
                 active.bundle.output_schema.clone(),
+                super::super::contract::worker_result_reference_schema(),
                 {
                     "type":"object",
                     "additionalProperties":false,

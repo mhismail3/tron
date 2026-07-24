@@ -63,6 +63,29 @@ pub(super) fn response_schema(function: &str) -> Value {
         }),
         "worker_kernel::invoke" => invocation_response_schema(),
         "worker_kernel::cancel" | "worker_kernel::detach" => invocation_response_schema(),
+        "worker_kernel::result_read" => json!({
+            "type":"object","additionalProperties":false,
+            "required":[
+                "kind","reference","pointer","value","children","offset",
+                "returned","total","nextOffset","truncated"
+            ],
+            "properties":{
+                "kind":{"const":"worker_result_chunk"},
+                "reference":worker_result_reference_schema(),
+                "pointer":{"type":"string"},
+                "value":{},
+                "children":{"type":"array","items":{
+                    "type":"object","additionalProperties":false,
+                    "required":["pointer","type","sizeBytes","preview"],
+                    "properties":{
+                        "pointer":{"type":"string"},"type":{"type":"string"},
+                        "sizeBytes":{"type":"integer"},"preview":{"type":"string"}
+                    }
+                }},
+                "offset":{"type":"integer"},"returned":{"type":"integer"},
+                "total":{"type":"integer"},"nextOffset":{},"truncated":{"type":"boolean"}
+            }
+        }),
         "worker_kernel::await" => json!({
             "type":"object","additionalProperties":false,"required":["invocation","timedOut"],
             "properties":{"invocation":invocation_response_schema(),"timedOut":{"type":"boolean"}}
@@ -128,6 +151,27 @@ fn invocation_response_schema() -> Value {
         "type":"object","additionalProperties":false,
         "required":["invocationId","workerId","workerVersion","status","input","output","error","idempotencyKey","traceId","causalDepth","triggerKind","interactionMode","attemptCount","createdAt","startedAt","completedAt"],
         "properties":{"invocationId":{"type":"string"},"workerId":{"type":"string"},"workerVersion":{"type":"string"},"status":{"type":"string"},"input":{},"output":{},"error":{},"idempotencyKey":{"type":"string"},"traceId":{"type":"string"},"causalDepth":{"type":"integer"},"triggerKind":{"type":"string"},"originSessionId":{"type":"string"},"agentSessionId":{"type":"string"},"interactionMode":{"type":"string","enum":["foreground","background"]},"detachedAt":{"type":"string"},"modelToolInvocationId":{"type":"string"},"parentWorkerInvocationId":{"type":"string"},"retryOfInvocationId":{"type":"string"},"attemptCount":{"type":"integer"},"createdAt":{"type":"string"},"startedAt":{},"completedAt":{}}
+    })
+}
+
+pub(crate) fn worker_result_reference_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":[
+            "kind","invocationId","workerId","workerVersion",
+            "outputSchemaSha256","contentSha256","sizeBytes","preview","message"
+        ],
+        "properties":{
+            "kind":{"const":"worker_result_reference"},
+            "invocationId":{"type":"string"},
+            "workerId":{"type":"string"},
+            "workerVersion":{"type":"string"},
+            "outputSchemaSha256":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+            "contentSha256":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+            "sizeBytes":{"type":"integer","minimum":0},
+            "preview":{"type":"string"},
+            "message":{"type":"string"}
+        }
     })
 }
 
