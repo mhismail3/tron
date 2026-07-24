@@ -101,6 +101,102 @@ async fn model_tool_worker_invocation_streams_correlated_live_progress() {
 }
 
 #[tokio::test]
+async fn reconstructed_parent_awaits_the_same_running_child_invocation() {
+    let (runtime, _home) = test_runtime(None);
+    let mut parent_bundle =
+        command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]);
+    parent_bundle.name = "Recovery Parent".to_owned();
+    parent_bundle.worker_id = Some("recovery-parent".to_owned());
+    parent_bundle.tool_name = Some("worker_recovery_parent".to_owned());
+    let parent_worker = runtime.upsert(parent_bundle, None).await.unwrap();
+
+    let mut child_bundle = command_bundle(vec![
+        "sh".to_owned(),
+        "-c".to_owned(),
+        "sleep 0.2; cat".to_owned(),
+    ]);
+    child_bundle.name = "Recovery Child".to_owned();
+    child_bundle.worker_id = Some("recovery-child".to_owned());
+    child_bundle.tool_name = Some("worker_recovery_child".to_owned());
+    let child_worker = runtime.upsert(child_bundle, None).await.unwrap();
+
+    let (parent, replayed) = runtime
+        .store
+        .begin_invocation_with_context(
+            &parent_worker.worker.worker_id,
+            &parent_worker.version,
+            &json!({"value":"parent"}),
+            "recovery-parent-run",
+            "trace-recovery-child",
+            0,
+            "manual",
+            Some("session-before-restart"),
+            WorkerInteractionMode::Background,
+            Some("provider-parent-before-restart"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(!replayed);
+
+    let child_request = InvokeRequest {
+        worker_id: child_worker.worker.worker_id.clone(),
+        input: json!({"value":"one durable child"}),
+        idempotency_key: "stable-nested-child".to_owned(),
+        trace_id: parent.trace_id.clone(),
+        causal_depth: 1,
+        trigger_kind: "manual".to_owned(),
+        origin_session_id: Some("session-before-restart".to_owned()),
+    };
+    let first_runtime = Arc::clone(&runtime);
+    let first_request = child_request.clone();
+    let parent_id = parent.invocation_id.clone();
+    let child_tool_name = child_worker.worker.tool_name.clone();
+    let child_name = child_worker.worker.name.clone();
+    let first = tokio::spawn(async move {
+        first_runtime
+            .invoke_from_model_tool(
+                first_request,
+                ModelToolProgressTarget {
+                    session_id: "session-before-restart".to_owned(),
+                    invocation_id: "provider-child-before-restart".to_owned(),
+                    tool_name: child_tool_name,
+                    worker_name: child_name,
+                    trace_id: "trace-recovery-child".to_owned(),
+                    root_invocation_id: Some("provider-parent-before-restart".to_owned()),
+                },
+                Some(&parent_id),
+            )
+            .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let recovered = runtime
+        .invoke_from_model_tool(
+            child_request,
+            ModelToolProgressTarget {
+                session_id: "session-after-restart".to_owned(),
+                invocation_id: "provider-child-after-restart".to_owned(),
+                tool_name: child_worker.worker.tool_name,
+                worker_name: child_worker.worker.name,
+                trace_id: parent.trace_id,
+                root_invocation_id: Some("provider-parent-after-restart".to_owned()),
+            },
+            Some(&parent.invocation_id),
+        )
+        .await
+        .unwrap();
+    let original = first.await.unwrap().unwrap();
+
+    assert_eq!(original.status, "completed");
+    assert_eq!(recovered.status, "completed");
+    assert_eq!(recovered.invocation_id, original.invocation_id);
+    assert_eq!(recovered.attempt_count, 1);
+}
+
+#[tokio::test]
 async fn slow_top_level_model_tool_returns_a_durable_background_handle() {
     let (runtime, _home) = test_runtime(None);
     let outcome = runtime

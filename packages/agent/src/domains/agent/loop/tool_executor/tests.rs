@@ -17,6 +17,59 @@ use crate::engine::{
 use crate::shared::protocol::messages::ToolInvocationDraft;
 use crate::shared::server::failure::{RUNTIME_CANCELLED, TOOL_PRIMITIVE_NOT_FOUND};
 
+#[test]
+fn nested_tool_idempotency_survives_worker_session_recovery() {
+    let arguments = json!({"query":"same durable child"});
+    let first = direct_tool_idempotency_key(
+        Some("run-before-restart"),
+        "session-before-restart",
+        2,
+        "provider-call-before-restart",
+        "worker_research_search",
+        Some("workspace-1"),
+        Some("worker_run_parent"),
+        &arguments,
+    );
+    let recovered = direct_tool_idempotency_key(
+        Some("run-after-restart"),
+        "session-after-restart",
+        2,
+        "provider-call-after-restart",
+        "worker_research_search",
+        Some("workspace-1"),
+        Some("worker_run_parent"),
+        &arguments,
+    );
+
+    assert_eq!(first, recovered);
+    assert_ne!(
+        first,
+        direct_tool_idempotency_key(
+            Some("run-after-restart"),
+            "session-after-restart",
+            3,
+            "provider-call-after-restart",
+            "worker_research_search",
+            Some("workspace-1"),
+            Some("worker_run_parent"),
+            &arguments,
+        )
+    );
+    assert_ne!(
+        first,
+        direct_tool_idempotency_key(
+            Some("run-after-restart"),
+            "session-after-restart",
+            2,
+            "provider-call-after-restart",
+            "worker_research_search",
+            Some("workspace-1"),
+            Some("worker_run_other_parent"),
+            &arguments,
+        )
+    );
+}
+
 #[derive(Clone)]
 struct CapturingDirectHandler {
     captured: Arc<Mutex<Option<Invocation>>>,

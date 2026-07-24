@@ -237,7 +237,7 @@ impl WorkerRuntime {
         retry_of_invocation_id: Option<&str>,
     ) -> Result<InvocationRecord, String> {
         if parent_worker_invocation_id.is_some() {
-            let (queued, replayed) = self.enqueue_request_with_admission(
+            let (queued, _) = self.enqueue_request_with_admission(
                 request,
                 InvocationAdmission {
                     model_tool_invocation_id,
@@ -247,10 +247,7 @@ impl WorkerRuntime {
                     ..Default::default()
                 },
             )?;
-            if replayed && queued.status != "queued" {
-                return Ok(queued);
-            }
-            return self.execute_queued(queued).await;
+            return self.finish_nested_invocation(queued).await;
         }
 
         let plan = self.interaction_plan_for_version(&request.worker_id, worker_version)?;
@@ -301,7 +298,7 @@ impl WorkerRuntime {
         target: ModelToolProgressTarget,
         parent_worker_invocation_id: Option<&str>,
     ) -> Result<InvocationRecord, String> {
-        let (queued, replayed) = self.enqueue_request_with_admission(
+        let (queued, _) = self.enqueue_request_with_admission(
             request,
             InvocationAdmission {
                 model_tool_invocation_id: Some(&target.invocation_id),
@@ -309,9 +306,6 @@ impl WorkerRuntime {
                 ..Default::default()
             },
         )?;
-        if replayed && queued.status != "queued" {
-            return Ok(queued);
-        }
         let invocation_id = queued.invocation_id.clone();
         self.model_tool_progress
             .insert(invocation_id.clone(), target);
@@ -320,7 +314,40 @@ impl WorkerRuntime {
             worker_invocation_id: invocation_id.clone(),
         };
         self.emit_model_tool_progress(&invocation_id, "Queued for worker execution", Some(0.02));
-        self.execute_queued(queued).await
+        self.finish_nested_invocation(queued).await
+    }
+
+    /// Deliver or observe one nested invocation until its typed terminal state.
+    ///
+    /// A parent retry may reach a child that is already completed, running
+    /// under restart recovery, or queued for the dispatcher. All three states
+    /// retain the original durable child identity; nested callers never create
+    /// a replacement merely because their provider session was reconstructed.
+    async fn finish_nested_invocation(
+        self: &Arc<Self>,
+        queued: InvocationRecord,
+    ) -> Result<InvocationRecord, String> {
+        let invocation_id = queued.invocation_id.clone();
+        let observed = match queued.status.as_str() {
+            "completed" | "failed" | "cancelled" => queued,
+            "queued" => self.execute_queued(queued).await?,
+            _ => queued,
+        };
+        if matches!(
+            observed.status.as_str(),
+            "completed" | "failed" | "cancelled"
+        ) {
+            return Ok(observed);
+        }
+        let (terminal, timed_out) = self
+            .await_invocation(&invocation_id, Duration::from_secs(MAX_INVOCATION_SECONDS))
+            .await?;
+        if timed_out {
+            return Err(format!(
+                "nested worker invocation '{invocation_id}' did not reach a terminal result within its reliability ceiling"
+            ));
+        }
+        Ok(terminal)
     }
 
     /// Admit a top-level direct worker using the generic interaction budget.

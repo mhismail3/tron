@@ -11,9 +11,12 @@
 //! `admission` owns schema-checked durable enqueue, idempotent replay,
 //! exact-version latency prediction, bounded foreground ownership, atomic
 //! detachment, and observational waits plus the transient bridge to an
-//! originating model-tool chip. `invocation` owns claimed delivery,
-//! concurrency, progress phases, and terminal completion so detachment never
-//! becomes a second execution path.
+//! originating model-tool chip. Nested model-tool identity is derived from the
+//! durable parent invocation, logical turn, tool, and typed input, so a
+//! reconstructed parent observes the same child through recovery and waits for
+//! its typed terminal result instead of duplicating it. `invocation` owns
+//! claimed delivery, concurrency, progress phases, and terminal completion so
+//! detachment never becomes a second execution path.
 //! `result` owns generic artifact-style references for large validated worker
 //! outputs plus bounded, causally authorized JSON reads. Task-specific result
 //! interpretation remains in workers.

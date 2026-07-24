@@ -748,7 +748,12 @@ budget atomically detaches the already-admitted invocation—its idempotency key
 attempt, version, and execution continue unchanged. Ten seconds is the model
 tool's conversational handoff budget, not a worker timeout; the independent
 two-hour reliability ceiling still bounds execution. Nested worker calls remain
-synchronous because their parent needs the typed result.
+synchronous because their parent needs the typed result. Their idempotency
+identity derives from the durable parent invocation, logical worker turn,
+selected tool, and typed arguments rather than the transient child session or
+provider call id. If a parent attempt is reconstructed after restart, an
+already completed child is replayed and an active/recovered child is awaited;
+neither state admits a replacement invocation.
 
 `mode: enqueue` returns immediately after durable admission and starts
 best-effort delivery; the ordinary dispatcher remains restart recovery.

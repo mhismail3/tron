@@ -4,6 +4,10 @@
 //! The engine records actor, session, trace, parent, and deterministic
 //! idempotency metadata. Direct kernel functions and active workers own their
 //! request/response schemas and reliability contracts at registration.
+//! Top-level calls bind idempotency to their provider invocation. Worker-owned
+//! calls instead bind it to the durable parent invocation, logical turn, tool,
+//! workspace, and typed arguments so child-session reconstruction cannot
+//! duplicate an already admitted operation.
 //!
 //! Durable model-tool lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the
@@ -70,18 +74,32 @@ fn direct_tool_idempotency_key(
     invocation_id: &str,
     tool_name: &str,
     workspace_id: Option<&str>,
+    origin_worker_invocation_id: Option<&str>,
     arguments: &Value,
 ) -> String {
-    let material = serde_json::to_vec(&json!({
-        "runId": run_id,
-        "sessionId": session_id,
-        "turn": turn,
-        "providerInvocationId": invocation_id,
-        "toolName": tool_name,
-        "workspaceId": workspace_id,
-        "arguments": arguments,
-    }))
-    .unwrap_or_default();
+    let material = origin_worker_invocation_id.map_or_else(
+        || {
+            json!({
+                "runId": run_id,
+                "sessionId": session_id,
+                "turn": turn,
+                "providerInvocationId": invocation_id,
+                "toolName": tool_name,
+                "workspaceId": workspace_id,
+                "arguments": arguments,
+            })
+        },
+        |parent_worker_invocation_id| {
+            json!({
+                "parentWorkerInvocationId":parent_worker_invocation_id,
+                "turn":turn,
+                "toolName":tool_name,
+                "workspaceId":workspace_id,
+                "arguments":arguments,
+            })
+        },
+    );
+    let material = serde_json::to_vec(&material).unwrap_or_default();
     format!("model-tool:{}", hex::encode(Sha256::digest(material)))
 }
 
@@ -438,6 +456,7 @@ async fn execute_tool_via_engine(
         invocation_id,
         tool_name,
         workspace_id,
+        origin_worker_invocation_id,
         &effective_args,
     );
     let (actor_identity, actor_kind) = origin_worker_id.map_or_else(
