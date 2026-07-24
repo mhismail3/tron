@@ -287,6 +287,20 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
+    func workerResult(
+        invocationId: String,
+        pointer: String,
+        offset: UInt64,
+        limit: UInt8
+    ) async throws -> WorkerResultChunkDTO {
+        try await client.workerResult(
+            invocationId: invocationId,
+            pointer: pointer,
+            offset: offset,
+            limit: limit
+        )
+    }
+
     func workerInbox(
         workerId: String?,
         limit: UInt64,

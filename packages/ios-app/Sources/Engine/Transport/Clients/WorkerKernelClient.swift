@@ -80,6 +80,23 @@ final class WorkerKernelClient: EngineDomainClient {
         )
     }
 
+    func workerResult(
+        invocationId: String,
+        pointer: String = "",
+        offset: UInt64 = 0,
+        limit: UInt8 = 20
+    ) async throws -> WorkerResultChunkDTO {
+        try await invokeRead(
+            "worker_kernel::result_read",
+            WorkerResultReadRequestDTO(
+                invocationId: invocationId,
+                pointer: pointer,
+                offset: offset,
+                limit: min(max(limit, 1), 20)
+            )
+        )
+    }
+
     func workerInbox(
         workerId: String?,
         limit: UInt64 = 20,

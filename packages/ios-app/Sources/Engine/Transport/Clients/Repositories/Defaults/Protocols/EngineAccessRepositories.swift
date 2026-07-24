@@ -294,6 +294,12 @@ protocol WorkerKernelRepository: AnyObject {
         limit: UInt64,
         offset: UInt64?
     ) async throws -> WorkerRunsResultDTO
+    func workerResult(
+        invocationId: String,
+        pointer: String,
+        offset: UInt64,
+        limit: UInt8
+    ) async throws -> WorkerResultChunkDTO
     func workerInbox(
         workerId: String?,
         limit: UInt64,
@@ -369,6 +375,15 @@ protocol WorkerKernelRepository: AnyObject {
 }
 
 extension WorkerKernelRepository {
+    func workerResult(
+        invocationId _: String,
+        pointer _: String,
+        offset _: UInt64,
+        limit _: UInt8
+    ) async throws -> WorkerResultChunkDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
     func workerRunGraph(
         invocationId _: String?,
         modelToolInvocationId _: String?

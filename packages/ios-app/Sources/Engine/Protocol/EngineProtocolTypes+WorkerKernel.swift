@@ -291,6 +291,51 @@ struct WorkerRunGraphDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String { rootInvocationId }
 }
 
+/// Integrity-bound pointer to one exact, schema-validated durable worker result.
+///
+/// The invocation ledger owns the value. Clients use this metadata for
+/// presentation and request bounded JSON slices through `worker_result_read`.
+struct WorkerResultReferenceDTO: Codable, Equatable, Sendable {
+    let kind: String
+    let invocationId: String
+    let workerId: String
+    let workerVersion: String
+    let outputSchemaSha256: String
+    let contentSha256: String
+    let sizeBytes: UInt64
+    let preview: String
+    let message: String
+}
+
+struct WorkerResultChildDTO: Codable, Equatable, Identifiable, Sendable {
+    let pointer: String
+    let type: String
+    let sizeBytes: UInt64
+    let preview: String
+
+    var id: String { pointer }
+}
+
+struct WorkerResultReadRequestDTO: Codable, Equatable, Sendable {
+    let invocationId: String
+    let pointer: String
+    let offset: UInt64
+    let limit: UInt8
+}
+
+struct WorkerResultChunkDTO: Codable, Equatable, Sendable {
+    let kind: String
+    let reference: WorkerResultReferenceDTO
+    let pointer: String
+    let value: AnyCodable
+    let children: [WorkerResultChildDTO]
+    let offset: UInt64
+    let returned: UInt64
+    let total: UInt64
+    let nextOffset: UInt64?
+    let truncated: Bool
+}
+
 struct WorkerInboxItemDTO: Codable, Equatable, Identifiable, Sendable {
     let inboxId: String
     let invocationId: String

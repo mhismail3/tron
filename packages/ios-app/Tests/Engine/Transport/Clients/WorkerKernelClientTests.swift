@@ -126,6 +126,53 @@ struct WorkerKernelClientTests {
         #expect(requests[2].offset == 10)
     }
 
+    @Test("Exact worker result reads preserve bounded pointer and paging")
+    func resultReadUsesBoundedKernelOperation() async throws {
+        let transport = connectedTransport()
+        let client = WorkerKernelClient(transport: transport)
+
+        transport.readHandler = { functionId, payload, _ in
+            #expect(functionId.rawValue == "worker_kernel::result_read")
+            let request = try #require(payload as? WorkerResultReadRequestDTO)
+            #expect(request.invocationId == "run-1")
+            #expect(request.pointer == "/claims")
+            #expect(request.offset == 20)
+            #expect(request.limit == 20)
+            return WorkerResultChunkDTO(
+                kind: "worker_result_chunk",
+                reference: WorkerResultReferenceDTO(
+                    kind: "worker_result_reference",
+                    invocationId: "run-1",
+                    workerId: "research",
+                    workerVersion: "v1",
+                    outputSchemaSha256: "sha256:" + String(repeating: "a", count: 64),
+                    contentSha256: "sha256:" + String(repeating: "b", count: 64),
+                    sizeBytes: 12_000,
+                    preview: "Research result",
+                    message: "Stored durably"
+                ),
+                pointer: "/claims",
+                value: AnyCodable([]),
+                children: [],
+                offset: 20,
+                returned: 0,
+                total: 20,
+                nextOffset: nil,
+                truncated: false
+            )
+        }
+
+        let result = try await client.workerResult(
+            invocationId: "run-1",
+            pointer: "/claims",
+            offset: 20,
+            limit: 99
+        )
+
+        #expect(result.reference.invocationId == "run-1")
+        #expect(result.reference.sizeBytes == 12_000)
+    }
+
     @Test("Worker run controls map to generic durable kernel operations")
     func runControlsUseGenericKernelOperations() async throws {
         let transport = connectedTransport()

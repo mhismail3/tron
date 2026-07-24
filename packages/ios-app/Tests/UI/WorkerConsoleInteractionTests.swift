@@ -13,6 +13,8 @@ struct WorkerConsoleInteractionTests {
         #expect(!WorkerRunGraphPresentation.canCancel(status: "completed"))
         #expect(WorkerRunGraphPresentation.canRetry(status: "failed"))
         #expect(!WorkerRunGraphPresentation.canRetry(status: "cancelled"))
+        #expect(WorkerRunGraphPresentation.canInspectResult(status: "completed"))
+        #expect(!WorkerRunGraphPresentation.canInspectResult(status: "running"))
     }
 
     @Test("Worker UI consumes structured graph stages and never joins raw event names")
@@ -44,6 +46,8 @@ struct WorkerConsoleInteractionTests {
         #expect(graph.contains("filter { !$0.technical }"))
         #expect(tool.contains("WorkerToolRunGraphView("))
         #expect(graph.contains(".workerRunProjectionInvalidated"))
+        #expect(graph.contains("Inspect result"))
+        #expect(graph.contains("WorkerResultInspectorSheet("))
         #expect(context.contains(".workerRunProjectionInvalidated"))
         #expect(!graph.contains("Started Filesystem"))
         #expect(!graph.contains("Finished Filesystem"))
@@ -117,6 +121,17 @@ struct WorkerConsoleInteractionTests {
         #expect(detail.contains("WorkerJSONDetailSheet(title: \"Input Schema\""))
         #expect(components.contains("WorkerRunDetailSheet("))
         #expect(components.contains("WorkerJSONDetailSheet("))
+
+        let detailSheets = try String(
+            contentsOf: workerRoot.appendingPathComponent("WorkerConsoleDetailSheets.swift"),
+            encoding: .utf8
+        )
+        #expect(detailSheets.contains("struct WorkerResultInspectorSheet"))
+        #expect(detailSheets.contains("repository.workerResult("))
+        #expect(detailSheets.contains("chunk.children"))
+        #expect(detailSheets.contains("Technical reference"))
+        #expect(detailSheets.contains("Run result projection"))
+        #expect(!detailSheets.contains("assembledResult"))
     }
 
     @Test("Worker tabs and execution actions share liquid glass components")

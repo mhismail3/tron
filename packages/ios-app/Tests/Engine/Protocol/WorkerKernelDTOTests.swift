@@ -185,4 +185,51 @@ struct WorkerKernelDTOTests {
         #expect(graph.timeline.first?.summary == "Research Source Review started")
         #expect(graph.timeline.first?.technical == false)
     }
+
+    @Test("Worker result chunks decode integrity reference and child pointers")
+    func workerResultChunkDecodesBoundedProjection() throws {
+        let digestA = "sha256:" + String(repeating: "a", count: 64)
+        let digestB = "sha256:" + String(repeating: "b", count: 64)
+        let json = """
+        {
+          "kind":"worker_result_chunk",
+          "reference":{
+            "kind":"worker_result_reference",
+            "invocationId":"run-1",
+            "workerId":"research",
+            "workerVersion":"v1",
+            "outputSchemaSha256":"\(digestA)",
+            "contentSha256":"\(digestB)",
+            "sizeBytes":48000,
+            "preview":"Large exact result",
+            "message":"Stored durably"
+          },
+          "pointer":"",
+          "value":null,
+          "children":[{
+            "pointer":"/claims",
+            "type":"array",
+            "sizeBytes":24000,
+            "preview":"8 claims"
+          }],
+          "offset":0,
+          "returned":1,
+          "total":4,
+          "nextOffset":1,
+          "truncated":true
+        }
+        """
+
+        let chunk = try JSONDecoder().decode(
+            WorkerResultChunkDTO.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(chunk.reference.contentSha256 == digestB)
+        #expect(chunk.reference.sizeBytes == 48_000)
+        #expect(chunk.value.isNull)
+        #expect(chunk.children.first?.pointer == "/claims")
+        #expect(chunk.nextOffset == 1)
+        #expect(chunk.truncated)
+    }
 }

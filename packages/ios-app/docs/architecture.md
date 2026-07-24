@@ -178,6 +178,9 @@ worker metadata from the client. The server supplies internal causal context.
   timestamps;
 - `WorkerRunGraphDTO` and its node, timeline, stage, timing, usage, and child
   count DTOs for the bounded server-authored causal projection;
+- `WorkerResultReferenceDTO`, `WorkerResultChunkDTO`, and child descriptors for
+  integrity-bound, on-demand reads of exact durable results without copying a
+  large payload into run history or client state;
 - `WorkerInboxItemDTO` for durable delivery records, trigger provenance,
   attention classification, and truthful agent-context attachment state;
 - request/response DTOs for invocation, exact invocation cancellation,
@@ -211,6 +214,7 @@ invalidation/change-feed contract only.
 
 - list and inspect;
 - bounded run history, exact invocation/model-tool graph lookup, and inbox;
+- bounded RFC 6901 result reads for a completed invocation;
 - typed invocation with an explicit `wait` mode for request/response actions and
   an explicit `enqueue` mode for durable background work;
 - detach, bounded await, retry from immutable input/version, and exact
@@ -476,7 +480,11 @@ collapse into a concatenated “Latest output” blob.
 
 The same generic graph surface offers detach, bounded await, causal-subtree
 cancel, terminal-failure retry, root/child session inspection, and typed-result
-inspection according to server state. Raw input/output, schemas, trace
+inspection according to server state. Exact result inspection calls
+`worker_kernel::result_read` on demand: the sheet renders one server-bounded
+path or page, follows server-authored child pointers, keeps the immutable
+version and content/schema digests visible under technical detail, and never
+assembles an unbounded client-side copy. Raw run projections, schemas, trace
 identifiers, and technical process/filesystem entries live in subordinate
 detail sheets. One-second polling is only a live/reconnect fallback; every
 refresh re-reads server truth. The client never reads worker storage, infers a

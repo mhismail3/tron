@@ -29,6 +29,11 @@ enum WorkerRunGraphPresentation {
         WorkerConsolePresentation.normalized(status) == "failed"
     }
 
+    static func canInspectResult(status: String) -> Bool {
+        let value = WorkerConsolePresentation.normalized(status)
+        return value == "completed" || value == "succeeded"
+    }
+
     static func color(status: String) -> Color {
         switch WorkerConsolePresentation.normalized(status) {
         case "completed", "succeeded": .tronSuccess
@@ -243,6 +248,7 @@ struct WorkerRunActionBar: View {
     let awaitResult: () -> Void
     let cancel: () -> Void
     let retry: () -> Void
+    let inspectResult: () -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -258,6 +264,9 @@ struct WorkerRunActionBar: View {
                 }
                 if WorkerRunGraphPresentation.canRetry(status: graph.status) {
                     action("Retry", symbol: "arrow.clockwise", color: .tronWarning, retry)
+                }
+                if WorkerRunGraphPresentation.canInspectResult(status: graph.status) {
+                    action("Inspect result", symbol: "doc.text.magnifyingglass", color: .tronSuccess, inspectResult)
                 }
             }
         }
@@ -297,6 +306,7 @@ struct WorkerToolRunGraphView: View {
     @State private var error: String?
     @State private var confirmCancel = false
     @State private var refreshRevision = 0
+    @State private var selectedResult: WorkerResultSelection?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -358,7 +368,12 @@ struct WorkerToolRunGraphView: View {
                     detach: { mutate(.detach) },
                     awaitResult: { mutate(.awaitResult) },
                     cancel: { confirmCancel = true },
-                    retry: { mutate(.retry) }
+                    retry: { mutate(.retry) },
+                    inspectResult: {
+                        selectedResult = WorkerResultSelection(
+                            invocationId: graph.requestedInvocationId
+                        )
+                    }
                 )
             } else if let error {
                 WorkerConsoleErrorBanner(message: error)
@@ -384,6 +399,12 @@ struct WorkerToolRunGraphView: View {
             WorkerAuditSessionSheet(
                 sessionId: selection.sessionId,
                 title: "Worker Session"
+            )
+        }
+        .sheet(item: $selectedResult) { selection in
+            WorkerResultInspectorSheet(
+                invocationId: selection.invocationId,
+                repository: dependencies.workerKernelRepository
             )
         }
         .confirmationDialog(
