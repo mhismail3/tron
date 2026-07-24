@@ -36,13 +36,42 @@ A fetched dependency <name> is available at ../dependencies/<name>; its optional
 Engine-event input supplies typed defaults; matching top-level event payload keys declared by inputSchema override them. bundle.engineHooks contains the complete authoritative engine-hook contracts.";
 pub(crate) const ENGINE_SURFACE_SNAPSHOT_FUNCTION: &str = "engine::surface_snapshot";
 pub(crate) const CONTEXT_SUMMARY_FUNCTION: &str = "worker_kernel::context_summary";
-pub(crate) const CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES: usize = 4_000;
+pub(crate) const CONTEXT_SUMMARY_MAX_ESTIMATED_TOKENS: usize = 10_000;
+pub(crate) const CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES: usize = 40_000;
 pub(crate) const SESSION_TITLE_FUNCTION: &str = "worker_kernel::session_title";
 pub(crate) const WORKER_RELEVANCE_FUNCTION: &str = "worker_kernel::worker_relevance";
 pub(super) const DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 5;
 pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
 pub(super) const DEFAULT_TEXT_SEARCH_WALK_ENTRIES: usize = 20_000;
 pub(super) const MAX_TEXT_SEARCH_WALK_ENTRIES: usize = 100_000;
+
+/// Estimate semantic-summary tokens with the same cheap pre-call heuristic
+/// used by the agent context budget. Provider-reported usage remains the
+/// source of truth for completed model calls.
+#[must_use]
+pub(crate) fn estimate_context_summary_tokens(narrative: &str) -> usize {
+    narrative.len().div_ceil(4)
+}
+
+pub(crate) fn validate_context_summary_narrative(narrative: &str) -> Result<(), String> {
+    if narrative.trim().is_empty() {
+        return Err("context-summary narrative must not be empty".to_owned());
+    }
+    let estimated_tokens = estimate_context_summary_tokens(narrative);
+    if estimated_tokens > CONTEXT_SUMMARY_MAX_ESTIMATED_TOKENS {
+        return Err(format!(
+            "context-summary narrative is estimated at {estimated_tokens} tokens; the ceiling is {CONTEXT_SUMMARY_MAX_ESTIMATED_TOKENS} tokens"
+        ));
+    }
+    if narrative.len() > CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES {
+        return Err(format!(
+            "context-summary narrative is {} UTF-8 bytes; the storage ceiling is {} bytes",
+            narrative.len(),
+            CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES
+        ));
+    }
+    Ok(())
+}
 
 pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefinition>> {
     let mut specs = Vec::new();
@@ -390,7 +419,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                 "handled":{"type":"boolean"},
                 "workerId":{"type":"string"},
                 "workerVersion":{"type":"string"},
-                "narrative":{"type":"string","maxLength":4000}
+                "narrative":{"type":"string","maxLength":40000}
             }
         }))
         .idempotency(IdempotencyContract::session())

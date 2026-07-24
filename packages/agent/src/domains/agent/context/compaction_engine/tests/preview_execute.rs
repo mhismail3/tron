@@ -34,7 +34,7 @@ async fn execute_uses_edited_summary() {
 }
 
 #[tokio::test]
-async fn execute_accepts_the_exact_durable_summary_byte_ceiling() {
+async fn execute_accepts_the_exact_durable_summary_token_and_byte_ceiling() {
     let deps = MockDeps::new(default_messages());
     let engine = CompactionEngine::new(0.70, 2, deps);
     let narrative = "x".repeat(crate::domains::worker_kernel::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES);
@@ -50,7 +50,7 @@ async fn execute_accepts_the_exact_durable_summary_byte_ceiling() {
 }
 
 #[tokio::test]
-async fn execute_rejects_multibyte_summary_overflow_before_mutating_context() {
+async fn execute_rejects_summary_token_overflow_before_mutating_context() {
     let messages = default_messages();
     let deps = MockDeps::new(messages.clone());
     let engine = CompactionEngine::new(0.70, 2, deps);
@@ -64,7 +64,7 @@ async fn execute_rejects_multibyte_summary_overflow_before_mutating_context() {
         .await
         .unwrap_err();
 
-    assert!(error.to_string().contains("UTF-8 bytes"));
+    assert!(error.to_string().contains("estimated at 10001 tokens"));
     assert_eq!(engine.deps.get_messages(), messages);
 }
 

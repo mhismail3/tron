@@ -330,7 +330,8 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         preserved_messages: &[Message],
     ) -> u64 {
         #[allow(clippy::cast_possible_truncation)]
-        let summary_tokens = summary.len().div_ceil(4) as u64;
+        let summary_tokens =
+            crate::domains::worker_kernel::estimate_context_summary_tokens(summary) as u64;
         let context_message_tokens: u64 = 50; // Overhead for context wrapper
         let ack_message_tokens: u64 = 50; // Assistant acknowledgment
 
@@ -346,23 +347,12 @@ impl<D: CompactionDeps> CompactionEngine<D> {
 fn validate_summary_for_durable_boundary(
     summary: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if summary.trim().is_empty() {
-        return Err(Box::new(std::io::Error::new(
+    crate::domains::worker_kernel::validate_context_summary_narrative(summary).map_err(|message| {
+        Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "compaction summary must not be empty",
-        )));
-    }
-    if summary.len() > crate::domains::worker_kernel::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES {
-        return Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "compaction summary is {} UTF-8 bytes; the durable ceiling is {} bytes",
-                summary.len(),
-                crate::domains::worker_kernel::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES
-            ),
-        )));
-    }
-    Ok(())
+            message,
+        )) as Box<dyn std::error::Error + Send + Sync>
+    })
 }
 
 // =============================================================================

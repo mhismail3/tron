@@ -137,14 +137,18 @@ invocations retain their version.
 
 The `context_summary` hook accepts a bounded transcript of visible user text,
 assistant text, tool names, and textual tool results and returns
-`{narrative}`. Its public schema limits the narrative to 4,000 characters for
-early structural rejection; the authoritative durable limit is 4,000 UTF-8
-bytes. The runtime rejects rather than truncates an oversize result, disables
-the failing worker version through the ordinary failure path, and uses the
-deterministic recovery summary. Every accepted narrative is therefore the
-exact byte-for-byte value used in live context, compact-boundary proof, and
-restart reconstruction. Hidden thinking, tool arguments, binary content,
-usage, and cost never cross the seam. Calls use the normal durable worker
+`{narrative}`. Its public schema limits the narrative to 40,000 characters for
+early structural rejection. The runtime authoritatively admits at most 10,000
+estimated tokens using the same four-UTF-8-bytes-per-token pre-call heuristic
+as the context budget, with a derived 40,000-byte storage ceiling. This is an
+upper bound rather than a target: policy workers should normally produce the
+smallest brief that faithfully preserves the task. The runtime rejects rather
+than truncates an oversize result, disables the failing worker version through
+the ordinary failure path, and uses the deterministic recovery summary. Every
+accepted narrative is therefore the exact byte-for-byte value used in live
+context, compact-boundary proof, and restart reconstruction. Hidden thinking,
+tool arguments, binary content, usage, and cost never cross the seam. Calls use
+the normal durable worker
 dispatcher, causal trace, idempotency, validation, failure-disable, and inbox
 behavior. If no hook is installed—or the hook fails—compaction uses the same
 deterministic recovery path. A hook worker is excluded while its own

@@ -329,7 +329,7 @@ mod tests {
             },
             "outputSchema":{
                 "type":"object","additionalProperties":false,"required":["narrative"],
-                "properties":{"narrative":{"type":"string","minLength":1,"maxLength":4000}}
+                "properties":{"narrative":{"type":"string","minLength":1,"maxLength":40000}}
             },
             "runner":{"kind":"command","command":["sh","-c",command]},
             "engineHooks":["context_summary"],

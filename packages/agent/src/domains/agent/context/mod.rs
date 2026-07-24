@@ -38,8 +38,9 @@
 //! absence falls back to deterministic keyword recovery. A hook worker never
 //! invokes itself while compacting its own agent-runner session. The strategy
 //! seam is limited to summary meaning. Every accepted narrative fits the
-//! worker contract's 4,000-byte UTF-8 ceiling before context mutation, and the
-//! same value enters live context, durable boundary proof, and restart replay:
+//! worker contract's estimated 10,000-token and 40,000-byte UTF-8 ceilings
+//! before context mutation, and the same value enters live context, durable
+//! boundary proof, and restart replay:
 //! compaction actions, epoch records, audit refs, and provider-safe projections
 //! remain server-owned record-plane custody.
 

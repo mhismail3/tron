@@ -38,7 +38,7 @@ fn context_summary_bundle(worker_id: &str, narrative: &str) -> WorkerBundle {
         "type":"object",
         "additionalProperties":false,
         "required":["narrative"],
-        "properties":{"narrative":{"type":"string","minLength":1,"maxLength":4000}}
+        "properties":{"narrative":{"type":"string","minLength":1,"maxLength":40000}}
     });
     bundle.engine_hooks = vec![WorkerEngineHook::ContextSummary];
     bundle
@@ -93,7 +93,7 @@ async fn atomic_upsert_activates_context_summary_hook_without_a_binding_step() {
 }
 
 #[tokio::test]
-async fn context_summary_accepts_the_exact_durable_utf8_byte_ceiling() {
+async fn context_summary_accepts_the_exact_estimated_token_and_byte_ceiling() {
     let (runtime, _home) = test_runtime(None);
     let narrative = "x".repeat(super::super::super::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES);
     runtime
@@ -121,7 +121,7 @@ async fn context_summary_accepts_the_exact_durable_utf8_byte_ceiling() {
 }
 
 #[tokio::test]
-async fn context_summary_rejects_multibyte_output_above_the_utf8_byte_ceiling() {
+async fn context_summary_rejects_output_above_the_estimated_token_and_byte_ceiling() {
     let (runtime, _home) = test_runtime(None);
     let narrative = "é"
         .repeat(super::super::super::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES.div_ceil("é".len()) + 1);
@@ -147,7 +147,7 @@ async fn context_summary_rejects_multibyte_output_above_the_utf8_byte_ceiling() 
         .await
         .unwrap_err();
 
-    assert!(error.contains("UTF-8 ceiling"), "{error}");
+    assert!(error.contains("estimated at 10001 tokens"), "{error}");
     let worker = runtime
         .store()
         .summary(&outcome.worker.worker_id)

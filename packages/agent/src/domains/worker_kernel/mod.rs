@@ -79,9 +79,10 @@
 //! implementation never silently replaces a failed or disabled current owner.
 //! Those worker-facing hook schemas are complete in the model-visible
 //! `worker_upsert` bundle contract. Context-summary narratives are accepted
-//! only through 4,000 UTF-8 bytes, and the accepted value is the exact value
-//! persisted at the compact boundary; oversize output fails instead of being
-//! truncated into divergent live and restart context. Worker authors never
+//! only through an estimated 10,000 tokens and the derived 40,000 UTF-8-byte
+//! storage ceiling. The accepted value is the exact value persisted at the
+//! compact boundary; oversize output fails instead of being truncated into
+//! divergent live and restart context. Worker authors never
 //! need to inspect internal databases, auth material, server binaries, or
 //! private transport shapes to discover an engine hook.
 //! The same provider-neutral tool contract owns the complete worker-authoring
@@ -315,7 +316,7 @@ pub(crate) fn restore_profile_snapshot(
 
 pub(crate) use contract::{
     CONTEXT_SUMMARY_FUNCTION, CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES, SESSION_TITLE_FUNCTION,
-    WORKER_RELEVANCE_FUNCTION,
+    WORKER_RELEVANCE_FUNCTION, estimate_context_summary_tokens, validate_context_summary_narrative,
 };
 
 pub(crate) use runtime::WorkerRuntime;

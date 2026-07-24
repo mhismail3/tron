@@ -65,7 +65,8 @@ impl WorkerRuntime {
             return Err(reason);
         };
         if hook == WorkerEngineHook::ContextSummary
-            && narrative.len() > super::super::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES
+            && let Err(validation_error) =
+                super::super::validate_context_summary_narrative(&narrative)
         {
             let reason = self
                 .handle_worker_runtime_failure(
@@ -73,10 +74,8 @@ impl WorkerRuntime {
                     &execution.worker_version,
                     "engine_hook",
                     &format!(
-                        "engine hook '{}' returned a {}-byte narrative above the {}-byte UTF-8 ceiling",
+                        "engine hook '{}' returned an invalid narrative: {validation_error}",
                         hook.as_str(),
-                        narrative.len(),
-                        super::super::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES
                     ),
                 )
                 .await;
