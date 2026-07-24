@@ -56,6 +56,7 @@ pub(super) struct ToolPhaseParams<'a> {
     pub parent_invocation_id: Option<&'a crate::engine::InvocationId>,
     pub worker_causal_depth: u32,
     pub origin_worker_id: Option<&'a str>,
+    pub origin_worker_invocation_id: Option<&'a str>,
 }
 
 #[derive(Default)]
@@ -286,6 +287,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     parent_invocation_id: params.parent_invocation_id,
                     worker_causal_depth: params.worker_causal_depth,
                     origin_worker_id: params.origin_worker_id,
+                    origin_worker_invocation_id: params.origin_worker_invocation_id,
                 };
                 let working_dir = working_dir.as_str();
                 async move {

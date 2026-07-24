@@ -312,6 +312,12 @@ fn trusted_agent_internal_child_context(
     if let Some(worker_id) = parent.origin_worker_id() {
         context = context.with_origin_worker_id(worker_id.to_owned());
     }
+    if let Some(invocation_id) = parent.origin_worker_invocation_id() {
+        context = context.with_origin_worker_invocation_id(invocation_id.to_owned());
+    }
+    if let Some(max_turns) = parent.worker_max_agent_turns() {
+        context = context.with_worker_max_agent_turns(max_turns);
+    }
     context
 }
 
@@ -404,7 +410,9 @@ mod tests {
                 ActorKind::Worker,
                 TraceId::new("worker-prompt-parent").expect("trace id"),
             )
-            .with_session_id("worker-child"),
+            .with_session_id("worker-child")
+            .with_origin_worker_invocation_id("worker_run_parent")
+            .with_worker_max_agent_turns(7),
         );
 
         let child = trusted_agent_internal_child_context(&parent, "agent::prompt_apply");
@@ -412,6 +420,11 @@ mod tests {
         assert_eq!(child.actor_id.as_str(), "system:agent-runtime");
         assert_eq!(child.actor_kind, ActorKind::System);
         assert_eq!(child.origin_worker_id(), Some("research-coordinator"));
+        assert_eq!(
+            child.origin_worker_invocation_id(),
+            Some("worker_run_parent")
+        );
+        assert_eq!(child.worker_max_agent_turns(), Some(7));
     }
 
     #[test]

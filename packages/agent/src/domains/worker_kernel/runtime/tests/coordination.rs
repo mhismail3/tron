@@ -1,6 +1,42 @@
 use super::*;
 use crate::shared::protocol::events::TronEvent;
 
+#[test]
+fn interaction_prediction_uses_runner_class_and_exact_version_p95() {
+    let command = WorkerRunner::Command {
+        command: vec!["true".to_owned()],
+    };
+    assert_eq!(
+        super::super::admission::interaction_plan_from_evidence(
+            &WorkerRunner::Agent {
+                instructions: "bounded work".to_owned(),
+                model: None,
+            },
+            Vec::new(),
+            Duration::from_secs(10),
+        ),
+        super::super::admission::InteractionPlan::Background
+    );
+    assert_eq!(
+        super::super::admission::interaction_plan_from_evidence(
+            &command,
+            vec![Duration::from_secs(1); 4],
+            Duration::from_secs(10),
+        ),
+        super::super::admission::InteractionPlan::ForegroundGrace
+    );
+    let mut slow_tail = vec![Duration::from_secs(2); 18];
+    slow_tail.extend([Duration::from_secs(11), Duration::from_secs(12)]);
+    assert_eq!(
+        super::super::admission::interaction_plan_from_evidence(
+            &command,
+            slow_tail,
+            Duration::from_secs(10),
+        ),
+        super::super::admission::InteractionPlan::Background
+    );
+}
+
 #[tokio::test]
 async fn model_tool_worker_invocation_streams_correlated_live_progress() {
     let (runtime, _home) = test_runtime(None);
@@ -27,11 +63,13 @@ async fn model_tool_worker_invocation_streams_correlated_live_progress() {
                 trace_id: "trace-live-progress".to_owned(),
                 root_invocation_id: Some("root-live".to_owned()),
             },
+            None,
         )
         .await
         .unwrap();
 
     assert_eq!(record.status, "completed");
+    assert_eq!(record.interaction_mode, WorkerInteractionMode::Foreground);
     let mut progress: Vec<String> = Vec::new();
     let mut output: Vec<String> = Vec::new();
     while let Ok(event) = events.try_recv() {
@@ -60,6 +98,322 @@ async fn model_tool_worker_invocation_streams_correlated_live_progress() {
     );
     assert!(output.iter().any(|message| message.contains("started")));
     assert!(runtime.model_tool_progress.is_empty());
+}
+
+#[tokio::test]
+async fn slow_top_level_model_tool_returns_a_durable_background_handle() {
+    let (runtime, _home) = test_runtime(None);
+    let outcome = runtime
+        .upsert(
+            command_bundle(vec![
+                "sh".to_owned(),
+                "-c".to_owned(),
+                "sleep 0.2; cat".to_owned(),
+            ]),
+            None,
+        )
+        .await
+        .unwrap();
+    runtime
+        .orchestrator
+        .init_sequence_counter("session-background", 0);
+    let worker_id = outcome.worker.worker_id.clone();
+
+    let result = runtime
+        .invoke_from_model_tool_with_grace(
+            request(&worker_id, json!({"value":"hello"}), "background-progress"),
+            ModelToolProgressTarget {
+                session_id: "session-background".to_owned(),
+                invocation_id: "provider-call-background".to_owned(),
+                tool_name: outcome.worker.tool_name,
+                worker_name: outcome.worker.name,
+                trace_id: "trace-background-progress".to_owned(),
+                root_invocation_id: Some("root-background".to_owned()),
+            },
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap();
+
+    let ModelToolInvocationOutcome::Background(background) = result else {
+        panic!("slow invocation should have left the foreground");
+    };
+    assert!(matches!(background.status.as_str(), "queued" | "running"));
+    assert_eq!(
+        background.interaction_mode,
+        WorkerInteractionMode::Background
+    );
+    assert!(background.detached_at.is_some());
+    assert!(
+        runtime
+            .model_tool_progress
+            .contains_key(&background.invocation_id)
+    );
+    let explicitly_detached = runtime
+        .detach_invocation(&background.invocation_id)
+        .await
+        .unwrap();
+    assert_eq!(explicitly_detached.invocation_id, background.invocation_id);
+    assert!(matches!(
+        explicitly_detached.status.as_str(),
+        "queued" | "running"
+    ));
+
+    let (completed, timed_out) = runtime
+        .await_invocation(&background.invocation_id, Duration::from_secs(2))
+        .await
+        .unwrap();
+    assert!(!timed_out);
+    assert_eq!(completed.status, "completed");
+    tokio::task::yield_now().await;
+    assert!(runtime.model_tool_progress.is_empty());
+}
+
+#[tokio::test]
+async fn worker_declared_child_ceiling_is_transactional_and_causally_linked() {
+    let (runtime, _home) = test_runtime(None);
+    let mut parent_bundle =
+        command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]);
+    parent_bundle.name = "Bounded Parent".to_owned();
+    parent_bundle.worker_id = Some("bounded-parent".to_owned());
+    parent_bundle.tool_name = Some("worker_bounded_parent".to_owned());
+    parent_bundle.execution_limits.max_child_invocations = Some(2);
+    let parent_worker = runtime.upsert(parent_bundle, None).await.unwrap();
+
+    let mut child_bundle = command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]);
+    child_bundle.name = "Bounded Child".to_owned();
+    child_bundle.worker_id = Some("bounded-child".to_owned());
+    child_bundle.tool_name = Some("worker_bounded_child".to_owned());
+    let child_worker = runtime.upsert(child_bundle, None).await.unwrap();
+
+    let (parent, replayed) = runtime
+        .store
+        .begin_invocation_with_context(
+            &parent_worker.worker.worker_id,
+            &parent_worker.version,
+            &json!({"value":"parent"}),
+            "bounded-parent-run",
+            "trace-bounded-children",
+            0,
+            "manual",
+            Some("session-bounded"),
+            WorkerInteractionMode::Background,
+            Some("provider-parent"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(!replayed);
+
+    for ordinal in 0..2 {
+        let record = runtime
+            .invoke_from_model_tool(
+                InvokeRequest {
+                    worker_id: child_worker.worker.worker_id.clone(),
+                    input: json!({"value":ordinal}),
+                    idempotency_key: format!("bounded-child-{ordinal}"),
+                    trace_id: parent.trace_id.clone(),
+                    causal_depth: 1,
+                    trigger_kind: "manual".to_owned(),
+                    origin_session_id: Some("session-bounded".to_owned()),
+                },
+                ModelToolProgressTarget {
+                    session_id: "session-bounded".to_owned(),
+                    invocation_id: format!("provider-child-{ordinal}"),
+                    tool_name: child_worker.worker.tool_name.clone(),
+                    worker_name: child_worker.worker.name.clone(),
+                    trace_id: parent.trace_id.clone(),
+                    root_invocation_id: Some("provider-parent".to_owned()),
+                },
+                Some(&parent.invocation_id),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            record.parent_worker_invocation_id.as_deref(),
+            Some(parent.invocation_id.as_str())
+        );
+    }
+
+    let error = runtime
+        .invoke_from_model_tool(
+            InvokeRequest {
+                worker_id: child_worker.worker.worker_id,
+                input: json!({"value":3}),
+                idempotency_key: "bounded-child-3".to_owned(),
+                trace_id: parent.trace_id.clone(),
+                causal_depth: 1,
+                trigger_kind: "manual".to_owned(),
+                origin_session_id: Some("session-bounded".to_owned()),
+            },
+            ModelToolProgressTarget {
+                session_id: "session-bounded".to_owned(),
+                invocation_id: "provider-child-3".to_owned(),
+                tool_name: child_worker.worker.tool_name,
+                worker_name: child_worker.worker.name,
+                trace_id: parent.trace_id,
+                root_invocation_id: Some("provider-parent".to_owned()),
+            },
+            Some(&parent.invocation_id),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.contains("child invocation ceiling (2)"), "{error}");
+}
+
+#[tokio::test]
+async fn terminal_retry_reuses_immutable_contract_and_is_idempotently_linked() {
+    let (runtime, _home) = test_runtime(None);
+    let worker = runtime
+        .upsert(
+            command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]),
+            None,
+        )
+        .await
+        .unwrap();
+    let original = runtime
+        .invoke(request(
+            &worker.worker.worker_id,
+            json!({"value":"original"}),
+            "retry-original",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(original.status, "completed");
+
+    let retry = runtime
+        .retry_from_provider_tool(
+            &original.invocation_id,
+            "retry-once".to_owned(),
+            "trace-retry-once".to_owned(),
+            0,
+            Some("session-retry".to_owned()),
+            Some("provider-retry"),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_ne!(retry.invocation_id, original.invocation_id);
+    assert_eq!(retry.worker_id, original.worker_id);
+    assert_eq!(retry.worker_version, original.worker_version);
+    assert_eq!(retry.input, original.input);
+    assert_eq!(
+        retry.retry_of_invocation_id.as_deref(),
+        Some(original.invocation_id.as_str())
+    );
+    assert_eq!(
+        retry.model_tool_invocation_id.as_deref(),
+        Some("provider-retry")
+    );
+
+    let replay = runtime
+        .retry_from_provider_tool(
+            &original.invocation_id,
+            "retry-once".to_owned(),
+            "trace-retry-once".to_owned(),
+            0,
+            Some("session-retry".to_owned()),
+            Some("provider-retry"),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay.invocation_id, retry.invocation_id);
+    assert_eq!(replay.attempt_count, retry.attempt_count);
+}
+
+#[tokio::test]
+async fn cancelling_an_invocation_cancels_only_its_durable_causal_subtree() {
+    let (runtime, _home) = test_runtime(None);
+    let worker = runtime
+        .upsert(
+            command_bundle(vec![
+                "sh".to_owned(),
+                "-c".to_owned(),
+                "sleep 30; cat".to_owned(),
+            ]),
+            None,
+        )
+        .await
+        .unwrap();
+    let parent = runtime
+        .enqueue(InvokeRequest {
+            worker_id: worker.worker.worker_id.clone(),
+            input: json!({"value":"parent"}),
+            idempotency_key: "cancel-tree-parent".to_owned(),
+            trace_id: "trace-cancel-tree".to_owned(),
+            causal_depth: 0,
+            trigger_kind: "manual".to_owned(),
+            origin_session_id: Some("session-cancel-tree".to_owned()),
+        })
+        .unwrap();
+    let mut children = Vec::new();
+    for ordinal in 0..2 {
+        children.push(
+            runtime
+                .enqueue_from_provider_tool(
+                    InvokeRequest {
+                        worker_id: worker.worker.worker_id.clone(),
+                        input: json!({"value":ordinal}),
+                        idempotency_key: format!("cancel-tree-child-{ordinal}"),
+                        trace_id: parent.trace_id.clone(),
+                        causal_depth: 1,
+                        trigger_kind: "manual".to_owned(),
+                        origin_session_id: parent.origin_session_id.clone(),
+                    },
+                    Some(&format!("provider-cancel-tree-{ordinal}")),
+                    Some(&parent.invocation_id),
+                )
+                .unwrap(),
+        );
+    }
+    let unrelated = runtime
+        .enqueue_from_provider_tool(
+            InvokeRequest {
+                worker_id: worker.worker.worker_id,
+                input: json!({"value":"unrelated"}),
+                idempotency_key: "cancel-tree-unrelated".to_owned(),
+                trace_id: "trace-cancel-tree-unrelated".to_owned(),
+                causal_depth: 0,
+                trigger_kind: "manual".to_owned(),
+                origin_session_id: Some("session-cancel-tree".to_owned()),
+            },
+            Some("provider-cancel-tree-unrelated"),
+            None,
+        )
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let cancelled = runtime
+        .cancel_invocation(&parent.invocation_id)
+        .await
+        .unwrap();
+    assert_eq!(cancelled.status, "cancelled");
+    for child in children {
+        assert_eq!(
+            runtime
+                .store
+                .invocation(&child.invocation_id)
+                .unwrap()
+                .unwrap()
+                .status,
+            "cancelled"
+        );
+    }
+    let unrelated_state = runtime
+        .store
+        .invocation(&unrelated.invocation_id)
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(unrelated_state.status.as_str(), "queued" | "running"),
+        "{unrelated_state:?}"
+    );
+    runtime
+        .cancel_invocation(&unrelated.invocation_id)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -94,6 +448,7 @@ async fn cancelled_model_tool_wait_drops_its_transient_progress_bridge() {
                         trace_id: "trace-live-progress".to_owned(),
                         root_invocation_id: None,
                     },
+                    None,
                 )
                 .await
         }

@@ -350,6 +350,61 @@ impl ModelResponderFactory for PendingResponderFactory {
 }
 
 #[tokio::test]
+async fn top_level_agent_worker_returns_a_tagged_background_receipt_immediately() {
+    let (runtime, _home) = test_runtime(Some(Arc::new(PendingResponderFactory)));
+    let mut bundle = command_bundle(Vec::new());
+    bundle.worker_id = Some("background-agent".to_owned());
+    bundle.name = "Background Agent".to_owned();
+    bundle.description = "Pending agent runner used to prove immediate durable delivery".to_owned();
+    bundle.tool_name = Some("worker_background_agent".to_owned());
+    bundle.runner = WorkerRunner::Agent {
+        instructions: "Wait for explicit cancellation.".to_owned(),
+        model: None,
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+    runtime
+        .orchestrator
+        .init_sequence_counter("session-background-agent", 0);
+    let result = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new(format!(
+                "worker_kernel::dynamic_{}",
+                outcome.worker.worker_id
+            ))
+            .unwrap(),
+            json!({}),
+            CausalContext::new(
+                ActorId::new("agent:session-background-agent").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-background-agent").unwrap(),
+            )
+            .with_session_id("session-background-agent")
+            .with_model_tool_invocation_id("provider-background-agent")
+            .with_idempotency_key("background-agent-provider-call"),
+        ))
+        .await;
+    assert_eq!(result.error, None, "{:?}", result.error);
+    let receipt = result.value.unwrap();
+    assert_eq!(receipt["kind"], "worker_invocation_receipt");
+    assert_eq!(receipt["mode"], "background");
+    assert_eq!(receipt["workerId"], outcome.worker.worker_id);
+    assert_eq!(receipt["originSessionId"], "session-background-agent");
+    assert!(matches!(
+        receipt["status"].as_str(),
+        Some("queued" | "running")
+    ));
+    let invocation_id = receipt["invocationId"].as_str().unwrap();
+    let durable = runtime.store().invocation(invocation_id).unwrap().unwrap();
+    assert_eq!(durable.interaction_mode, WorkerInteractionMode::Background);
+    assert_eq!(
+        durable.model_tool_invocation_id.as_deref(),
+        Some("provider-background-agent")
+    );
+    runtime.cancel_invocation(invocation_id).await.unwrap();
+}
+
+#[tokio::test]
 async fn disabling_agent_worker_aborts_its_spawned_child_session() {
     let (runtime, _home) = test_runtime(Some(Arc::new(PendingResponderFactory)));
     let mut bundle = command_bundle(Vec::new());

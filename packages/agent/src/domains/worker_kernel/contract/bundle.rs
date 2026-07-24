@@ -206,6 +206,15 @@ pub(super) fn worker_bundle_schema() -> Value {
                 "description":CLIENT_ACTION_AUTHORING_CONTRACT,
                 "items":{"type":"string","enum":["speech_transcription"]}
             },
+            "executionLimits":{
+                "type":"object",
+                "additionalProperties":false,
+                "description":"Optional worker-selected ceilings enforced generically by the kernel. These bound agent turns and direct child worker calls without moving task-specific orchestration policy into the engine.",
+                "properties":{
+                    "maxAgentTurns":{"type":"integer","minimum":1,"maximum":250},
+                    "maxChildInvocations":{"type":"integer","minimum":0,"maximum":256}
+                }
+            },
             "provenance":{
                 "type":"array","minItems":1,
                 "items":{

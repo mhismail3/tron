@@ -33,6 +33,14 @@ pub struct CausalContext {
     /// Persistent worker that owns an agent execution crossing engine-owned
     /// internal transport hops.
     origin_worker_id: Option<String>,
+    /// Durable worker invocation that owns this delegated agent execution.
+    ///
+    /// This is causal identity for run-tree reconstruction and generic
+    /// child-invocation ceilings. It is not authority or routing input.
+    origin_worker_invocation_id: Option<String>,
+    /// Generic agent-turn ceiling selected by the owning immutable worker.
+    /// The agent runtime may only tighten its global ceiling with this value.
+    worker_max_agent_turns: Option<u32>,
     /// Provider/model tool-call id that originated this engine invocation.
     ///
     /// This is transient observation metadata used to correlate live progress
@@ -61,6 +69,8 @@ impl CausalContext {
             idempotency_key: None,
             working_directory: None,
             origin_worker_id: None,
+            origin_worker_invocation_id: None,
+            worker_max_agent_turns: None,
             model_tool_invocation_id: None,
             advertised_function_revision: None,
             advertised_worker_version: None,
@@ -124,6 +134,32 @@ impl CausalContext {
                 .then(|| self.actor_id.as_str().strip_prefix("worker:"))
                 .flatten()
         })
+    }
+
+    /// Preserve the durable invocation that owns a delegated agent execution.
+    #[must_use]
+    pub fn with_origin_worker_invocation_id(mut self, invocation_id: impl Into<String>) -> Self {
+        self.origin_worker_invocation_id = Some(invocation_id.into());
+        self
+    }
+
+    /// Resolve the durable parent worker invocation for a child tool call.
+    #[must_use]
+    pub fn origin_worker_invocation_id(&self) -> Option<&str> {
+        self.origin_worker_invocation_id.as_deref()
+    }
+
+    /// Tighten the delegated agent run to a worker-selected turn ceiling.
+    #[must_use]
+    pub fn with_worker_max_agent_turns(mut self, max_turns: u32) -> Self {
+        self.worker_max_agent_turns = Some(max_turns);
+        self
+    }
+
+    /// Read the worker-selected agent-turn ceiling.
+    #[must_use]
+    pub fn worker_max_agent_turns(&self) -> Option<u32> {
+        self.worker_max_agent_turns
     }
 
     /// Preserve the originating provider/model tool-call id for live

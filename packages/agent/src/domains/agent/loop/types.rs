@@ -107,6 +107,10 @@ pub struct RunContext {
     /// uses this only to avoid recursively invoking a worker as its own policy.
     #[serde(skip)]
     pub origin_worker_id: Option<String>,
+    /// Durable worker invocation that owns this delegated agent run. Child
+    /// worker tools preserve it as their canonical parent.
+    #[serde(skip)]
+    pub origin_worker_invocation_id: Option<String>,
     /// Reasoning level override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<ReasoningLevel>,

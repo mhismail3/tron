@@ -29,10 +29,11 @@
 //! identity) as presentation evidence. Clients can therefore render useful
 //! live execution experiences without inferring architecture from tool names
 //! or owning a second catalog.
-//! The provider's invocation id also travels transiently through causal context
-//! so a durable worker invocation can stream bounded, redacted execution phases
-//! back to the one model-tool chip that requested it. This correlation never
-//! participates in routing, idempotency, persistence, or authorization.
+//! The provider's invocation id travels through trusted causal context so a
+//! worker invocation can persist the exact originating chip and stream bounded,
+//! redacted execution phases to it. Delegated agent workers also preserve their
+//! durable parent invocation for child admission. These correlations never
+//! participate in semantic routing or authorization.
 //! Turn starts, ends, and failures are persisted before their matching live
 //! broadcast, and each surface shares the durable row sequence. User
 //! cancellation is terminalized by the active turn runner, which owns the

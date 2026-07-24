@@ -231,15 +231,36 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         "worker_kernel::invoke",
         EffectClass::ExternalSideEffect,
         RiskLevel::High,
-        json!({"type":"object","additionalProperties":false,"required":["workerId","input"],"properties":{"workerId":{"type":"string"},"input":{},"idempotencyKey":{"type":"string"},"mode":{"type":"string","enum":["wait","enqueue"],"description":"wait returns the terminal record; enqueue returns immediately after durable admission."}}}),
-        "Invoke an enabled persistent worker by id with typed JSON input. Use mode=enqueue for parallel or long-running work, then worker_await when its result is needed.",
+        json!({
+            "type":"object",
+            "additionalProperties":false,
+            "properties":{
+                "workerId":{"type":"string"},
+                "input":{},
+                "idempotencyKey":{"type":"string"},
+                "retryOfInvocationId":{"type":"string","description":"Retry one terminal invocation using its immutable worker version and original typed input."},
+                "mode":{"type":"string","enum":["wait","enqueue"],"description":"wait uses the interaction budget and may return a detached running record; enqueue returns immediately after durable admission."}
+            },
+            "oneOf":[
+                {"required":["workerId","input"],"not":{"required":["retryOfInvocationId"]}},
+                {"required":["retryOfInvocationId"],"not":{"anyOf":[{"required":["workerId"]},{"required":["input"]},{"required":["idempotencyKey"]}]}}
+            ]
+        }),
+        "Invoke an enabled persistent worker by id with typed JSON input, or retry one terminal invocation from its immutable contract. Predicted or unexpectedly slow top-level waits return the same durable invocation in background mode; nested worker calls remain synchronous.",
     )?);
     specs.push(spec(
         "worker_kernel::await",
         EffectClass::PureRead,
         RiskLevel::Low,
-        json!({"type":"object","additionalProperties":false,"required":["invocationId"],"properties":{"invocationId":{"type":"string"},"timeoutSeconds":{"type":"integer","minimum":0,"maximum":7200}}}),
-        "Wait boundedly for one durable worker invocation. A wait timeout returns current state and never cancels the worker.",
+        json!({"type":"object","additionalProperties":false,"required":["invocationId"],"properties":{"invocationId":{"type":"string"},"timeoutSeconds":{"type":"integer","minimum":0,"maximum":10}}}),
+        "Observe one durable worker invocation for at most the ten-second interaction budget. A wait timeout returns current state and never cancels the worker.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::detach",
+        EffectClass::ReversibleSideEffect,
+        RiskLevel::Low,
+        json!({"type":"object","additionalProperties":false,"required":["invocationId"],"properties":{"invocationId":{"type":"string"}}}),
+        "Release foreground ownership of one queued or running durable invocation without cancelling or recreating it.",
     )?);
     specs.push(spec(
         "worker_kernel::cancel",
@@ -602,6 +623,7 @@ fn profile_owned_worker_operation(function: &str) -> bool {
         function,
         "worker_kernel::upsert"
             | "worker_kernel::invoke"
+            | "worker_kernel::detach"
             | "worker_kernel::cancel"
             | "worker_kernel::stop"
             | "worker_kernel::disable"

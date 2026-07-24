@@ -1,6 +1,6 @@
 # Tron Worker-First Technical Reference
 
-> Last verified: 2026-07-23 on the worker-first POC branch.
+> Last verified: 2026-07-24 on the worker-first POC branch.
 
 This document describes the active worker-first implementation.
 
@@ -45,6 +45,15 @@ worker execution, and isolated core-change approval. New product behaviors,
 including speech-to-text, are authored and validated as workers through real
 use.
 
+The execution boundary is intentionally generic. The kernel validates typed
+contracts, admits and recovers durable invocations, enforces global and
+worker-declared ceilings, preserves causal/idempotency identity, cancels causal
+subtrees, delivers inbox results, and projects authoritative run evidence.
+Workers own title wording, routing semantics, source and claim budgets,
+orchestration strategy, model choice, citation policy, repair behavior, and
+presentation vocabulary. iOS renders the server projection and invokes generic
+controls; it does not own an execution state machine.
+
 Provider tool calls have a durable `tool.invocation.*` lifecycle. A started row
 records the invocation id, tool name, and redacted arguments; output and
 completion rows record bounded output, terminal status, error, and duration.
@@ -53,8 +62,8 @@ interrupted-turn recovery, session summaries, and operator diagnostics. It is
 execution evidence for an actual model tool call. It neither grants authority
 nor participates in worker discovery, activation, or permission decisions.
 
-The model-facing fixed surface currently has 29 direct primitives grouped as
-eight host operations, seventeen worker-control operations, and four core-change
+The model-facing fixed surface currently has 30 direct primitives grouped as
+eight host operations, eighteen worker-control operations, and four core-change
 operations. A single typed manifest owns their canonical function IDs, provider
 names, groups, and stable order; registration, provider projection,
 introspection, and exact-set tests do not reconstruct partial identities. Every fixed primitive rejects
@@ -80,16 +89,17 @@ persistence format. Function definitions and setup-only policy types therefore
 do not carry inert serialization contracts; durable idempotency and stream
 records retain their explicit codecs.
 
-The provider's model-tool invocation id is carried transiently in causal
-context when a projected worker is called. The durable worker runtime binds
-that id to the resulting worker invocation only for the life of the call.
+The provider's model-tool invocation id is carried in trusted causal context
+when a projected worker is called and persisted at admission with the resulting
+worker invocation. The client does not invent or own that association.
 Command and resident-service workers report queued, running, and typed-result
 validation phases. Agent workers additionally map bounded child turn and child
 tool stage labels back to the exact originating chip. These progress updates
 are redacted and live-only: child prompts, child output, arguments, secrets,
-and file contents remain in their canonical owners. The bridge is removed at
-terminal completion and does not affect worker routing, idempotency, durable
-recovery, permission, or authority.
+and file contents remain in their canonical owners. The process-local streaming
+bridge is removed at terminal completion; the durable model-tool id, parent
+worker invocation, interaction mode, detachment time, and retry link remain
+authoritative recovery evidence and do not affect permission or routing.
 
 ### Primitive admission rule
 
@@ -494,13 +504,23 @@ invocation id, trace, depth, and trigger kind are
 also passed to command runners as `TRON_WORKER_*` variables, to agent runners in
 their durable prompt contract, and to resident services as `X-Tron-*` headers.
 Every run records its pinned version, timestamps, input, output or error, and
-inbox result.
+inbox result. Schema v7 additionally records foreground/background interaction
+mode, detachment time, the originating provider call, the direct parent worker
+invocation, and terminal retry linkage. Migration backfills a parent only when
+exactly one prior-depth invocation in the trace can own it; ambiguous history
+remains unlinked rather than guessed.
 
 An agent runner's durable child prompt includes the invocation input and the
 immutable worker output schema verbatim. The child is told that the kernel will
 reject nonconforming terminal output, and the ordinary post-run validator still
 enforces that boundary. Typed agent execution therefore does not depend on a
 worker author redundantly paraphrasing a hidden schema inside its instructions.
+An immutable bundle may also declare `executionLimits.maxAgentTurns` and
+`executionLimits.maxChildInvocations`. The kernel only enforces these generic
+ceilings: an agent limit can tighten but never raise the global turn ceiling,
+and direct child admissions are counted transactionally against their durable
+parent. Task-specific source, claim, citation, retry/repair, orchestration, and
+model choices remain in the worker version.
 
 The causal ledger stores trace roots, maximum observed depth, invocation and
 suppression counts, and the unique worker/trigger/idempotency deliveries seen in
@@ -531,7 +551,9 @@ Successful and failed results enter the durable inbox and emit
 to the next relevant model turn once. High-visibility system failures such as
 tool activation, trigger materialization, and resident supervision participate
 in the same one-time attachment path even though they have no invocation row;
-manual results remain explicitly inspectable. A successful semantic engine hook
+foreground manual results remain explicitly inspectable, while a detached or
+predicted-background manual result is notable because no foreground caller
+received its typed output. A successful semantic engine hook
 is consumed by the engine boundary that invoked it, so its immutable inbox row
 is created with `contextAttached=true` and cannot later reappear as unrelated
 background context. Hook failures remain unattached Attention until resolved.
@@ -690,6 +712,7 @@ new file is required, or provide raw/`sha256:`-prefixed 64-digit hex.
 | `worker_inspect` | `worker_kernel::inspect` |
 | `worker_invoke` | `worker_kernel::invoke` |
 | `worker_await` | `worker_kernel::await` |
+| `worker_detach` | `worker_kernel::detach` |
 | `worker_cancel` | `worker_kernel::cancel` |
 | `worker_stop` | `worker_kernel::stop` |
 | `worker_disable` / `worker_enable` | `worker_kernel::disable` / `enable` |
@@ -699,14 +722,26 @@ new file is required, or provide raw/`sha256:`-prefixed 64-digit hex.
 | `worker_webhook_rotate` | `worker_kernel::webhook_rotate` |
 | `worker_stop_all` | `worker_kernel::stop_all` |
 
-`worker_invoke` defaults to `mode: wait`. `mode: enqueue` returns immediately
-after durable admission and starts best-effort delivery; the ordinary durable
-dispatcher remains restart recovery. `worker_await` observes one invocation
-until terminal state or a bounded timeout, and a wait timeout never cancels the
-work. These two operations let a model launch parallel or long work without
-holding one provider call open for the worker's two-hour execution ceiling.
-`worker_cancel` targets one durable invocation id. It is intentionally distinct
-from per-worker `worker_stop` and profile-wide `worker_stop_all`.
+`worker_invoke` defaults to `mode: wait`. Top-level agent runners are admitted
+in background mode immediately. Command/service versions with five completed
+samples use exact-version wall-clock p95: a p95 over ten seconds begins in the
+background; otherwise the call receives at most ten seconds of foreground
+grace. Unknown command/service versions receive the same grace. Crossing that
+budget atomically detaches the already-admitted invocation—its idempotency key,
+attempt, version, and execution continue unchanged. Ten seconds is the model
+tool's conversational handoff budget, not a worker timeout; the independent
+two-hour reliability ceiling still bounds execution. Nested worker calls remain
+synchronous because their parent needs the typed result.
+
+`mode: enqueue` returns immediately after durable admission and starts
+best-effort delivery; the ordinary dispatcher remains restart recovery.
+`worker_await` observes for at most the same ten-second interaction budget and
+never cancels work. `worker_detach` explicitly releases foreground ownership
+without cancellation. `worker_invoke(retryOfInvocationId=...)` accepts only a
+terminal run and derives its immutable version and original typed input
+server-side. `worker_cancel` targets the selected invocation's durable causal
+subtree while leaving unrelated work running; it remains distinct from
+per-worker `worker_stop` and profile-wide `worker_stop_all`.
 
 `worker_inspect` defaults to `detail=contract`: the active input/output schemas,
 runner contract, routing, provenance, presentation, bindings, triggers, route,

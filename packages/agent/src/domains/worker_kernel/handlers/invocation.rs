@@ -16,19 +16,26 @@ pub(super) async fn invoke_worker(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, ToolError> {
-    let worker_id = required_string(&invocation.payload, "workerId")
-        .map_err(|message| ToolError::InvalidParams { message })?;
-    let input =
-        invocation
-            .payload
-            .get("input")
-            .cloned()
-            .ok_or_else(|| ToolError::InvalidParams {
-                message: "worker_invoke requires input".to_owned(),
+    let retry_of_invocation_id = invocation
+        .payload
+        .get("retryOfInvocationId")
+        .and_then(Value::as_str);
+    let normal_request =
+        if retry_of_invocation_id.is_none() {
+            let worker_id = required_string(&invocation.payload, "workerId")
+                .map_err(|message| ToolError::InvalidParams { message })?;
+            let input = invocation.payload.get("input").cloned().ok_or_else(|| {
+                ToolError::InvalidParams {
+                    message: "worker_invoke requires input".to_owned(),
+                }
             })?;
-    deps.runtime
-        .validate_active_input_contract(&worker_id, &input)
-        .map_err(worker_input_contract_error)?;
+            deps.runtime
+                .validate_active_input_contract(&worker_id, &input)
+                .map_err(worker_input_contract_error)?;
+            Some((worker_id, input))
+        } else {
+            None
+        };
     let key = invocation
         .payload
         .get("idempotencyKey")
@@ -36,26 +43,69 @@ pub(super) async fn invoke_worker(
         .map(ToOwned::to_owned)
         .or_else(|| invocation.causal_context.idempotency_key.clone())
         .unwrap_or_else(|| format!("manual:{}", invocation.id));
-    let request = InvokeRequest {
-        worker_id,
-        input,
-        idempotency_key: key,
-        trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
-        causal_depth: invocation.causal_context.trigger_depth(),
-        trigger_kind: "manual".to_owned(),
-        origin_session_id: invocation.causal_context.session_id.clone(),
-    };
-    let record = match invocation
+    let mode = invocation
         .payload
         .get("mode")
         .and_then(Value::as_str)
-        .unwrap_or("wait")
-    {
-        "enqueue" => deps.runtime.enqueue_and_dispatch(request),
-        "wait" => deps.runtime.invoke(request).await,
+        .unwrap_or("wait");
+    let model_tool_invocation_id = invocation.causal_context.model_tool_invocation_id();
+    let parent_worker_invocation_id = invocation.causal_context.origin_worker_invocation_id();
+    let record = match (mode, retry_of_invocation_id, normal_request) {
+        ("enqueue", Some(retry_of), None) => deps.runtime.retry_enqueue_from_provider_tool(
+            retry_of,
+            key,
+            invocation.causal_context.trace_id.as_str().to_owned(),
+            invocation.causal_context.trigger_depth(),
+            invocation.causal_context.session_id.clone(),
+            model_tool_invocation_id,
+            parent_worker_invocation_id,
+        ),
+        ("wait", Some(retry_of), None) => {
+            deps.runtime
+                .retry_from_provider_tool(
+                    retry_of,
+                    key,
+                    invocation.causal_context.trace_id.as_str().to_owned(),
+                    invocation.causal_context.trigger_depth(),
+                    invocation.causal_context.session_id.clone(),
+                    model_tool_invocation_id,
+                    parent_worker_invocation_id,
+                )
+                .await
+        }
+        ("enqueue", None, Some((worker_id, input))) => deps.runtime.enqueue_from_provider_tool(
+            InvokeRequest {
+                worker_id,
+                input,
+                idempotency_key: key,
+                trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
+                causal_depth: invocation.causal_context.trigger_depth(),
+                trigger_kind: "manual".to_owned(),
+                origin_session_id: invocation.causal_context.session_id.clone(),
+            },
+            model_tool_invocation_id,
+            parent_worker_invocation_id,
+        ),
+        ("wait", None, Some((worker_id, input))) => {
+            deps.runtime
+                .invoke_from_provider_tool(
+                    InvokeRequest {
+                        worker_id,
+                        input,
+                        idempotency_key: key,
+                        trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
+                        causal_depth: invocation.causal_context.trigger_depth(),
+                        trigger_kind: "manual".to_owned(),
+                        origin_session_id: invocation.causal_context.session_id.clone(),
+                    },
+                    model_tool_invocation_id,
+                    parent_worker_invocation_id,
+                )
+                .await
+        }
         mode => {
             return Err(ToolError::InvalidParams {
-                message: format!("unsupported worker invocation mode '{mode}'"),
+                message: format!("unsupported worker invocation request '{mode:?}'"),
             });
         }
     };
@@ -78,8 +128,8 @@ pub(super) async fn await_worker(invocation: &Invocation, deps: &Deps) -> Result
             .payload
             .get("timeoutSeconds")
             .and_then(Value::as_u64)
-            .unwrap_or(30)
-            .min(7_200),
+            .unwrap_or(10)
+            .min(10),
     );
     let (record, timed_out) = deps
         .runtime
@@ -89,6 +139,18 @@ pub(super) async fn await_worker(invocation: &Invocation, deps: &Deps) -> Result
         )
         .await?;
     Ok(json!({"invocation":record,"timedOut":timed_out}))
+}
+
+pub(super) async fn detach_worker_invocation(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, String> {
+    serde_json::to_value(
+        deps.runtime
+            .detach_invocation(&required_string(&invocation.payload, "invocationId")?)
+            .await?,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(super) async fn cancel_worker_invocation(

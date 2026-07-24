@@ -448,7 +448,7 @@ impl WorkerRuntime {
             state_dir.display(),
             secret_dir.display(),
         );
-        let context = CausalContext::new(
+        let mut context = CausalContext::new(
             ActorId::new(format!("worker:{}", worker.summary.worker_id))
                 .map_err(|error| error.to_string())?,
             ActorKind::Worker,
@@ -459,7 +459,11 @@ impl WorkerRuntime {
             "worker-agent:{}",
             hex::encode(Sha256::digest(invocation.idempotency_key.as_bytes()))
         ))
+        .with_origin_worker_invocation_id(invocation.invocation_id.clone())
         .with_trigger_depth(invocation.causal_depth.saturating_add(1));
+        if let Some(max_turns) = worker.bundle.execution_limits.max_agent_turns {
+            context = context.with_worker_max_agent_turns(max_turns);
+        }
         let mut agent_run_guard =
             AbortAgentRunOnDrop::new(Arc::clone(&self.orchestrator), session_id.clone());
         // Subscribe before prompt admission. A provider construction failure can

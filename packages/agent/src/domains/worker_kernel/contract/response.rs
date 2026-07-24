@@ -62,7 +62,7 @@ pub(super) fn response_schema(function: &str) -> Value {
             "properties":{"detail":{"type":"string","enum":["contract","full"]},"worker":worker_summary_response_schema(),"bundle":{"type":"object"},"route":{},"versions":{"type":"array"},"triggers":{"type":"array"},"healthHistory":{"type":"array"},"audit":{"type":"array"},"versionDirectory":{"type":"string"}}
         }),
         "worker_kernel::invoke" => invocation_response_schema(),
-        "worker_kernel::cancel" => invocation_response_schema(),
+        "worker_kernel::cancel" | "worker_kernel::detach" => invocation_response_schema(),
         "worker_kernel::await" => json!({
             "type":"object","additionalProperties":false,"required":["invocation","timedOut"],
             "properties":{"invocation":invocation_response_schema(),"timedOut":{"type":"boolean"}}
@@ -126,8 +126,8 @@ fn worker_summary_response_schema() -> Value {
 fn invocation_response_schema() -> Value {
     json!({
         "type":"object","additionalProperties":false,
-        "required":["invocationId","workerId","workerVersion","status","input","output","error","idempotencyKey","traceId","causalDepth","triggerKind","attemptCount","createdAt","startedAt","completedAt"],
-        "properties":{"invocationId":{"type":"string"},"workerId":{"type":"string"},"workerVersion":{"type":"string"},"status":{"type":"string"},"input":{},"output":{},"error":{},"idempotencyKey":{"type":"string"},"traceId":{"type":"string"},"causalDepth":{"type":"integer"},"triggerKind":{"type":"string"},"originSessionId":{"type":"string"},"agentSessionId":{"type":"string"},"attemptCount":{"type":"integer"},"createdAt":{"type":"string"},"startedAt":{},"completedAt":{}}
+        "required":["invocationId","workerId","workerVersion","status","input","output","error","idempotencyKey","traceId","causalDepth","triggerKind","interactionMode","attemptCount","createdAt","startedAt","completedAt"],
+        "properties":{"invocationId":{"type":"string"},"workerId":{"type":"string"},"workerVersion":{"type":"string"},"status":{"type":"string"},"input":{},"output":{},"error":{},"idempotencyKey":{"type":"string"},"traceId":{"type":"string"},"causalDepth":{"type":"integer"},"triggerKind":{"type":"string"},"originSessionId":{"type":"string"},"agentSessionId":{"type":"string"},"interactionMode":{"type":"string","enum":["foreground","background"]},"detachedAt":{"type":"string"},"modelToolInvocationId":{"type":"string"},"parentWorkerInvocationId":{"type":"string"},"retryOfInvocationId":{"type":"string"},"attemptCount":{"type":"integer"},"createdAt":{"type":"string"},"startedAt":{},"completedAt":{}}
     })
 }
 

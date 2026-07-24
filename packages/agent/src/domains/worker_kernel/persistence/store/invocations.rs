@@ -58,6 +58,7 @@ fn inbox_context_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 }
 
 impl WorkerStore {
+    #[cfg(test)]
     pub fn begin_invocation(
         &self,
         worker_id: &str,
@@ -69,11 +70,54 @@ impl WorkerStore {
         trigger_kind: &str,
         origin_session_id: Option<&str>,
     ) -> Result<(InvocationRecord, bool), String> {
+        self.begin_invocation_with_context(
+            worker_id,
+            worker_version,
+            input,
+            idempotency_key,
+            trace_id,
+            causal_depth,
+            trigger_kind,
+            origin_session_id,
+            WorkerInteractionMode::Foreground,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_invocation_with_context(
+        &self,
+        worker_id: &str,
+        worker_version: &str,
+        input: &Value,
+        idempotency_key: &str,
+        trace_id: &str,
+        causal_depth: u32,
+        trigger_kind: &str,
+        origin_session_id: Option<&str>,
+        interaction_mode: WorkerInteractionMode,
+        model_tool_invocation_id: Option<&str>,
+        parent_worker_invocation_id: Option<&str>,
+        retry_of_invocation_id: Option<&str>,
+        max_sibling_invocations: Option<u32>,
+    ) -> Result<(InvocationRecord, bool), String> {
         validate_runtime_identifier(idempotency_key, "idempotency key", 256)?;
         validate_runtime_identifier(trace_id, "trace id", 256)?;
         validate_runtime_identifier(trigger_kind, "trigger kind", 64)?;
         if let Some(session_id) = origin_session_id {
             validate_runtime_identifier(session_id, "origin session id", 256)?;
+        }
+        if let Some(invocation_id) = model_tool_invocation_id {
+            validate_runtime_identifier(invocation_id, "model tool invocation id", 256)?;
+        }
+        if let Some(invocation_id) = parent_worker_invocation_id {
+            validate_runtime_identifier(invocation_id, "parent worker invocation id", 256)?;
+        }
+        if let Some(invocation_id) = retry_of_invocation_id {
+            validate_runtime_identifier(invocation_id, "retry invocation id", 256)?;
         }
         if let Some(existing) = self.invocation_by_key(worker_id, idempotency_key)? {
             self.record_suppressed_delivery(
@@ -109,22 +153,67 @@ impl WorkerStore {
             Some(origin) => origin,
             None => origin_session_id.map(ToOwned::to_owned),
         };
+        if let Some(parent_id) = parent_worker_invocation_id {
+            let parent = transaction
+                .query_row(
+                    "SELECT trace_id,causal_depth FROM worker_invocations
+                     WHERE invocation_id=?1",
+                    [parent_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)),
+                )
+                .optional()
+                .map_err(|error| format!("load parent worker invocation: {error}"))?
+                .ok_or_else(|| format!("parent worker invocation '{parent_id}' was not found"))?;
+            if parent.0 != trace_id || causal_depth != parent.1.saturating_add(1) {
+                return Err(format!(
+                    "parent worker invocation '{parent_id}' does not match this causal trace"
+                ));
+            }
+            if let Some(limit) = max_sibling_invocations {
+                let admitted = transaction
+                    .query_row(
+                        "SELECT COUNT(*) FROM worker_invocations
+                         WHERE parent_worker_invocation_id=?1",
+                        [parent_id],
+                        |row| row.get::<_, u32>(0),
+                    )
+                    .map_err(|error| format!("count child worker invocations: {error}"))?;
+                if admitted >= limit {
+                    return Err(format!(
+                        "worker child invocation ceiling ({limit}) reached for '{parent_id}'"
+                    ));
+                }
+            }
+        }
+        let detached_at =
+            (interaction_mode == WorkerInteractionMode::Background).then(|| created_at.clone());
         let insert = transaction.execute(
-                "INSERT INTO worker_invocations(invocation_id,worker_id,worker_version,status,input_json,idempotency_key,trace_id,causal_depth,trigger_kind,origin_session_id,created_at)
-                 VALUES (?1,?2,?3,'queued',?4,?5,?6,?7,?8,?9,?10)",
-                params![
-                    invocation_id,
-                    worker_id,
-                    worker_version,
-                    serde_json::to_string(input).map_err(|error| error.to_string())?,
-                    idempotency_key,
-                    trace_id,
-                    causal_depth,
-                    trigger_kind,
-                    effective_origin,
-                    created_at,
-                ],
-            );
+            "INSERT INTO worker_invocations(
+                    invocation_id,worker_id,worker_version,status,input_json,
+                    idempotency_key,trace_id,causal_depth,trigger_kind,
+                    origin_session_id,interaction_mode,detached_at,
+                    model_tool_invocation_id,parent_worker_invocation_id,
+                    retry_of_invocation_id,created_at
+                 )
+                 VALUES (?1,?2,?3,'queued',?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+            params![
+                invocation_id,
+                worker_id,
+                worker_version,
+                serde_json::to_string(input).map_err(|error| error.to_string())?,
+                idempotency_key,
+                trace_id,
+                causal_depth,
+                trigger_kind,
+                effective_origin,
+                interaction_mode.as_str(),
+                detached_at,
+                model_tool_invocation_id,
+                parent_worker_invocation_id,
+                retry_of_invocation_id,
+                created_at,
+            ],
+        );
         if let Err(error) = insert {
             drop(transaction);
             if let Some(existing) = self.invocation_by_key(worker_id, idempotency_key)? {
@@ -587,7 +676,10 @@ impl WorkerStore {
             "({UNRESOLVED_INBOX_ERROR_SQL})
              OR (i.severity!='error'
                  AND i.context_attached=0
-                 AND COALESCE(r.trigger_kind,'system')!='manual')"
+                 AND (
+                    COALESCE(r.trigger_kind,'system')!='manual'
+                    OR COALESCE(r.interaction_mode,'foreground')='background'
+                 ))"
         );
         let mut statement = connection
             .prepare(&format!(
@@ -734,8 +826,9 @@ impl WorkerStore {
     /// Claim notable pending background results for transient prompt attachment.
     /// Unresolved errors are always notable; verified recovery removes them
     /// from transient context without deleting their audit evidence. Successful
-    /// manual calls are already visible to their caller and are intentionally
-    /// omitted.
+    /// foreground manual calls are already visible to their caller and are
+    /// intentionally omitted. Detached or predicted-background manual results
+    /// remain notable because no foreground caller received the typed output.
     pub fn take_notable_pending(
         &self,
         relevance_query: Option<&str>,
@@ -755,7 +848,11 @@ impl WorkerStore {
                      LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
                      JOIN workers w ON w.worker_id=i.worker_id
                      WHERE i.context_attached=0
-                        AND (i.severity!='info' OR COALESCE(r.trigger_kind,'system')!='manual')
+                        AND (
+                            i.severity!='info'
+                            OR COALESCE(r.trigger_kind,'system')!='manual'
+                            OR COALESCE(r.interaction_mode,'foreground')='background'
+                        )
                         AND (i.severity!='error' OR ({UNRESOLVED_INBOX_ERROR_SQL}))
                      ORDER BY i.created_at DESC LIMIT 200"
                 ))

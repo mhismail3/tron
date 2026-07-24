@@ -348,6 +348,10 @@ pub(super) fn invocation_select_base() -> &'static str {
             worker_invocations.trace_id,worker_invocations.causal_depth,
             worker_invocations.trigger_kind,worker_invocations.origin_session_id,
             worker_invocations.agent_session_id,
+            worker_invocations.interaction_mode,worker_invocations.detached_at,
+            worker_invocations.model_tool_invocation_id,
+            worker_invocations.parent_worker_invocation_id,
+            worker_invocations.retry_of_invocation_id,
             (SELECT COUNT(*) FROM worker_attempts a
                 WHERE a.invocation_id=worker_invocations.invocation_id),
             worker_invocations.created_at,
@@ -372,10 +376,18 @@ pub(super) fn row_invocation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Invoca
         trigger_kind: row.get(10)?,
         origin_session_id: row.get(11)?,
         agent_session_id: row.get(12)?,
-        attempt_count: row.get(13)?,
-        created_at: row.get(14)?,
-        started_at: row.get(15)?,
-        completed_at: row.get(16)?,
+        interaction_mode: match row.get::<_, String>(13)?.as_str() {
+            "background" => WorkerInteractionMode::Background,
+            _ => WorkerInteractionMode::Foreground,
+        },
+        detached_at: row.get(14)?,
+        model_tool_invocation_id: row.get(15)?,
+        parent_worker_invocation_id: row.get(16)?,
+        retry_of_invocation_id: row.get(17)?,
+        attempt_count: row.get(18)?,
+        created_at: row.get(19)?,
+        started_at: row.get(20)?,
+        completed_at: row.get(21)?,
     })
 }
 

@@ -4,22 +4,56 @@ use super::*;
 use crate::engine::FunctionDefinition;
 
 impl WorkerRuntime {
-    pub async fn cancel_invocation(&self, invocation_id: &str) -> Result<InvocationRecord, String> {
-        self.invocation_stop(invocation_id).cancel();
-        let record = self.store.cancel_invocation(invocation_id)?;
-        let _ = self.invocation_stops.remove(invocation_id);
-        self.publish_event(
-            "worker.invocations",
-            json!({
-                "action":"cancelled",
-                "invocationId":record.invocation_id,
-                "workerId":record.worker_id,
-                "causalDepth":record.causal_depth,
-            }),
-            TraceId::new(record.trace_id.clone()).ok(),
-        )
-        .await;
+    pub async fn detach_invocation(&self, invocation_id: &str) -> Result<InvocationRecord, String> {
+        let record = self.store.detach_invocation(invocation_id)?;
+        if record.interaction_mode == WorkerInteractionMode::Background
+            && matches!(record.status.as_str(), "queued" | "running")
+        {
+            self.publish_event(
+                "worker.invocations",
+                json!({
+                    "action":"detached",
+                    "invocationId":record.invocation_id,
+                    "workerId":record.worker_id,
+                    "status":record.status,
+                    "causalDepth":record.causal_depth,
+                }),
+                TraceId::new(record.trace_id.clone()).ok(),
+            )
+            .await;
+        }
         Ok(record)
+    }
+
+    pub async fn cancel_invocation(&self, invocation_id: &str) -> Result<InvocationRecord, String> {
+        let subtree = self.store.invocation_subtree_ids(invocation_id)?;
+        if subtree.is_empty() {
+            return Err(format!("worker invocation '{invocation_id}' was not found"));
+        }
+        for descendant_id in &subtree {
+            self.invocation_stop(descendant_id).cancel();
+        }
+        let mut root = None;
+        for descendant_id in subtree {
+            let record = self.store.cancel_invocation(&descendant_id)?;
+            let _ = self.invocation_stops.remove(&descendant_id);
+            self.publish_event(
+                "worker.invocations",
+                json!({
+                    "action":"cancelled",
+                    "invocationId":record.invocation_id,
+                    "workerId":record.worker_id,
+                    "causalDepth":record.causal_depth,
+                    "causalRootInvocationId":invocation_id,
+                }),
+                TraceId::new(record.trace_id.clone()).ok(),
+            )
+            .await;
+            if descendant_id == invocation_id {
+                root = Some(record);
+            }
+        }
+        root.ok_or_else(|| format!("worker invocation '{invocation_id}' disappeared"))
     }
 
     pub async fn set_enabled(
@@ -259,7 +293,7 @@ impl WorkerRuntime {
             })
             .collect::<Vec<_>>();
         let model_description = format!(
-            "{}\nPersistent worker: activeVersion={}; provenance={}",
+            "{}\nPersistent worker: activeVersion={}; provenance={}. Agent-runner work begins durably in the background. Command/service work uses exact-version latency evidence and a bounded 10-second interaction budget; crossing the budget detaches the same invocation. Do not poll a background receipt. Nested worker calls still await their typed result.",
             active.summary.description,
             active.summary.active_version,
             provenance.join(", "),
@@ -276,7 +310,29 @@ impl WorkerRuntime {
         .with_risk(RiskLevel::High)
         .with_idempotency(IdempotencyContract::session())
         .with_request_schema(active.bundle.input_schema.clone())
-        .with_response_schema(active.bundle.output_schema.clone());
+        .with_response_schema(json!({
+            "anyOf":[
+                active.bundle.output_schema.clone(),
+                {
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":[
+                        "kind","status","mode","invocationId","workerId",
+                        "workerName","originSessionId","message"
+                    ],
+                    "properties":{
+                        "kind":{"const":"worker_invocation_receipt"},
+                        "status":{"type":"string","enum":["queued","running"]},
+                        "mode":{"const":"background"},
+                        "invocationId":{"type":"string"},
+                        "workerId":{"type":"string"},
+                        "workerName":{"type":"string"},
+                        "originSessionId":{"type":["string","null"]},
+                        "message":{"type":"string"}
+                    }
+                }
+            ]
+        }));
         definition.model_tool = Some(ModelToolContract {
             name: active.summary.tool_name,
             callable: true,

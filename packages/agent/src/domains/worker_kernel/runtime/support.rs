@@ -22,6 +22,7 @@ use super::super::process::{
     MAX_PROCESS_CAPTURE_BYTES, ProcessTree, trusted_local_command_path, wait_with_bounded_output,
 };
 use super::super::types::{ActiveWorker, InvocationRecord, InvokeRequest, WorkerCommand};
+use super::ModelToolInvocationOutcome;
 use super::{ModelToolProgressTarget, WorkerRuntime};
 
 fn readable_activity_label(value: &str) -> String {
@@ -237,11 +238,48 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
                         .map(|id| id.as_str().to_owned()),
                 }
             });
-        let record = match progress_target {
-            Some(target) => self.runtime.invoke_from_model_tool(request, target).await,
-            None => self.runtime.invoke(request).await,
-        }
-        .map_err(crate::engine::EngineError::HandlerFailed)?;
+        let top_level_model_call = invocation.causal_context.origin_worker_id().is_none();
+        let outcome = match (progress_target, top_level_model_call) {
+            (Some(target), true) => self
+                .runtime
+                .invoke_from_model_tool_adaptive(request, target)
+                .await
+                .map_err(crate::engine::EngineError::HandlerFailed)?,
+            (Some(target), false) => ModelToolInvocationOutcome::Terminal(
+                self.runtime
+                    .invoke_from_model_tool(
+                        request,
+                        target,
+                        invocation.causal_context.origin_worker_invocation_id(),
+                    )
+                    .await
+                    .map_err(crate::engine::EngineError::HandlerFailed)?,
+            ),
+            (None, _) => ModelToolInvocationOutcome::Terminal(
+                self.runtime
+                    .invoke(request)
+                    .await
+                    .map_err(crate::engine::EngineError::HandlerFailed)?,
+            ),
+        };
+        let record = match outcome {
+            ModelToolInvocationOutcome::Terminal(record) => record,
+            ModelToolInvocationOutcome::Background(record) => {
+                return Ok(json!({
+                    "kind":"worker_invocation_receipt",
+                    "status":record.status,
+                    "mode":"background",
+                    "invocationId":record.invocation_id,
+                    "workerId":record.worker_id,
+                    "workerName":self.runtime.store.summary(&self.worker_id)
+                        .ok()
+                        .flatten()
+                        .map_or_else(|| self.worker_id.clone(), |worker| worker.name),
+                    "originSessionId":record.origin_session_id,
+                    "message":"The durable worker run is continuing in the background. Do not poll or wait; report that it is running. Its result will appear in Session Context and the worker inbox.",
+                }));
+            }
+        };
         if record.status != "completed" {
             return Err(crate::engine::EngineError::HandlerFailed(
                 record

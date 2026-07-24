@@ -5,10 +5,12 @@
 //! supervision. The concern modules below extend that one coordinator without
 //! duplicating state. `support` owns stateless bounded I/O, artifact integrity,
 //! projection, normalization, and redaction. Scenario tests live in `tests`.
-//! `admission` owns schema-checked durable enqueue, idempotent replay, and
-//! observational waits plus the transient bridge to an originating model-tool
-//! chip; `invocation` owns claimed delivery, concurrency, progress phases, and
-//! terminal completion so admission never becomes an execution side channel.
+//! `admission` owns schema-checked durable enqueue, idempotent replay,
+//! exact-version latency prediction, bounded foreground ownership, atomic
+//! detachment, and observational waits plus the transient bridge to an
+//! originating model-tool chip. `invocation` owns claimed delivery,
+//! concurrency, progress phases, and terminal completion so detachment never
+//! becomes a second execution path.
 //! Agent child-session activity is projected only as bounded, redacted stage
 //! labels; raw child content remains in its canonical audit session.
 //! `client_actions` selects the current healthy worker for narrow native
@@ -36,12 +38,13 @@ use super::types::{
     ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_ENGINE_CONCURRENCY,
     MAX_INVOCATION_SECONDS, MAX_WORKER_CONCURRENCY, PreparedWorker, PurgeOutcome, UpsertOutcome,
     WorkerBundle, WorkerClientAction, WorkerCommand, WorkerDependency, WorkerEngineHook,
-    WorkerRunner, WorkerTrigger,
+    WorkerInteractionMode, WorkerRunner, WorkerTrigger,
 };
 use support::*;
 
 mod activation;
 mod admission;
+pub(super) use admission::ModelToolInvocationOutcome;
 pub(crate) use admission::WorkerInputContractError;
 mod client_actions;
 mod dispatch;

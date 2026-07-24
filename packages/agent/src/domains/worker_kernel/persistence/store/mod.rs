@@ -1,9 +1,10 @@
 //! Canonical worker bundles and their durable operational ledger.
 //!
 //! [`WorkerStore`] is the single persistence owner. Publication, lifecycle,
-//! invocation, trigger, and state concerns extend that same store without
-//! repository wrappers or duplicate caches. Stateless codecs, validators, and
-//! SQL helpers live in `support`; scenario tests live in `tests`.
+//! invocation, interaction/causal relationship, trigger, and state concerns
+//! extend that same store without repository wrappers or duplicate caches.
+//! Stateless codecs, validators, and SQL helpers live in `support`; scenario
+//! tests live in `tests`.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -18,11 +19,13 @@ use sha2::{Digest, Sha256};
 use super::super::types::{
     ActiveWorker, BUNDLE_SCHEMA, InvocationRecord, MAX_INVOCATION_SECONDS, PreparedWorker,
     UpsertOutcome, WebhookCredential, WorkerBundle, WorkerClientAction, WorkerCommand,
-    WorkerEngineHook, WorkerRunner, WorkerState, WorkerSummary, WorkerTrigger,
+    WorkerEngineHook, WorkerInteractionMode, WorkerRunner, WorkerState, WorkerSummary,
+    WorkerTrigger,
 };
 pub(super) use state::validate_bundle;
 use support::*;
 
+mod interaction;
 mod invocations;
 mod lifecycle;
 mod publication;
@@ -64,7 +67,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 6)?;
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 7)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
@@ -233,10 +236,17 @@ impl WorkerStore {
                     trigger_kind TEXT NOT NULL,
                     origin_session_id TEXT,
                     agent_session_id TEXT,
+                    interaction_mode TEXT NOT NULL DEFAULT 'foreground',
+                    detached_at TEXT,
+                    model_tool_invocation_id TEXT,
+                    parent_worker_invocation_id TEXT,
+                    retry_of_invocation_id TEXT,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
                     completed_at TEXT,
-                    UNIQUE(worker_id, idempotency_key)
+                    UNIQUE(worker_id, idempotency_key),
+                    FOREIGN KEY(parent_worker_invocation_id) REFERENCES worker_invocations(invocation_id),
+                    FOREIGN KEY(retry_of_invocation_id) REFERENCES worker_invocations(invocation_id)
                 );
                 CREATE INDEX IF NOT EXISTS worker_invocations_status
                     ON worker_invocations(status, created_at);
@@ -332,13 +342,62 @@ impl WorkerStore {
                 )
                 .map_err(|error| format!("add originating session linkage: {error}"))?;
         }
+        for (column, definition) in [
+            (
+                "interaction_mode",
+                "interaction_mode TEXT NOT NULL DEFAULT 'foreground'",
+            ),
+            ("detached_at", "detached_at TEXT"),
+            ("model_tool_invocation_id", "model_tool_invocation_id TEXT"),
+            (
+                "parent_worker_invocation_id",
+                "parent_worker_invocation_id TEXT",
+            ),
+            ("retry_of_invocation_id", "retry_of_invocation_id TEXT"),
+        ] {
+            if !table_has_column(&connection, "worker_invocations", column)? {
+                connection
+                    .execute(
+                        &format!("ALTER TABLE worker_invocations ADD COLUMN {definition}"),
+                        [],
+                    )
+                    .map_err(|error| format!("add worker invocation {column}: {error}"))?;
+            }
+        }
+        connection
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS worker_invocations_origin_session
+                    ON worker_invocations(origin_session_id, created_at DESC);
+                 CREATE INDEX IF NOT EXISTS worker_invocations_model_tool
+                    ON worker_invocations(model_tool_invocation_id, created_at DESC);
+                 CREATE INDEX IF NOT EXISTS worker_invocations_parent
+                    ON worker_invocations(parent_worker_invocation_id, created_at ASC);
+                 CREATE INDEX IF NOT EXISTS worker_invocations_retry
+                    ON worker_invocations(retry_of_invocation_id, created_at ASC);",
+            )
+            .map_err(|error| format!("index worker invocation relationships: {error}"))?;
         connection
             .execute(
-                "CREATE INDEX IF NOT EXISTS worker_invocations_origin_session
-                 ON worker_invocations(origin_session_id, created_at DESC)",
+                "UPDATE worker_invocations AS child
+                 SET parent_worker_invocation_id=(
+                    SELECT parent.invocation_id
+                    FROM worker_invocations parent
+                    WHERE parent.trace_id=child.trace_id
+                      AND parent.causal_depth=child.causal_depth-1
+                      AND parent.created_at<=child.created_at
+                 )
+                 WHERE child.parent_worker_invocation_id IS NULL
+                   AND child.causal_depth>0
+                   AND (
+                    SELECT COUNT(*)
+                    FROM worker_invocations parent
+                    WHERE parent.trace_id=child.trace_id
+                      AND parent.causal_depth=child.causal_depth-1
+                      AND parent.created_at<=child.created_at
+                   )=1",
                 [],
             )
-            .map_err(|error| format!("index originating worker sessions: {error}"))?;
+            .map_err(|error| format!("backfill unambiguous worker parents: {error}"))?;
         if !table_has_column(&connection, "worker_inbox", "context_attached")? {
             if !table_has_column(&connection, "worker_inbox", "seen")? {
                 return Err("worker inbox has no context-delivery column".to_owned());
@@ -378,6 +437,13 @@ impl WorkerStore {
                 [],
             )
             .map_err(|error| format!("record worker schema v6: {error}"))?;
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                 VALUES (7, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                [],
+            )
+            .map_err(|error| format!("record worker schema v7: {error}"))?;
         super::rebuild::rebuild_indexes(&self.root, &self.database)?;
         self.recover_interrupted()
     }

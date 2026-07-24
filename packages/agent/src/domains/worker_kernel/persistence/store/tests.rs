@@ -30,6 +30,7 @@ fn bundle() -> WorkerBundle {
         engine_hooks: Vec::new(),
         client_actions: Vec::new(),
         routing: Default::default(),
+        execution_limits: Default::default(),
         presentation: None,
     }
 }
@@ -59,7 +60,7 @@ fn prepare_and_publish_is_atomic_and_versioned() {
 }
 
 #[test]
-fn schema_v6_preserves_inbox_state_and_adds_originating_session_evidence() {
+fn schema_v7_preserves_inbox_state_and_adds_invocation_relationships() {
     let temp = tempfile::tempdir().unwrap();
     let database_dir = temp.path().join("internal/database");
     std::fs::create_dir_all(&database_dir).unwrap();
@@ -117,18 +118,25 @@ fn schema_v6_preserves_inbox_state_and_adds_originating_session_evidence() {
     };
     assert!(columns.contains(&"context_attached".to_owned()));
     assert!(!columns.contains(&"seen".to_owned()));
-    assert!(
-        store
-            .connection()
-            .unwrap()
-            .prepare("PRAGMA table_info(worker_invocations)")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(1))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
-            .contains(&"origin_session_id".to_owned())
-    );
+    let invocation_columns = store
+        .connection()
+        .unwrap()
+        .prepare("PRAGMA table_info(worker_invocations)")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    for column in [
+        "origin_session_id",
+        "interaction_mode",
+        "detached_at",
+        "model_tool_invocation_id",
+        "parent_worker_invocation_id",
+        "retry_of_invocation_id",
+    ] {
+        assert!(invocation_columns.contains(&column.to_owned()), "{column}");
+    }
     let retained = store.inbox_filtered(None, Some(true), None, 10).unwrap();
     assert_eq!(retained.len(), 1);
     assert_eq!(retained[0]["contextAttached"], true);
@@ -140,7 +148,7 @@ fn schema_v6_preserves_inbox_state_and_adds_originating_session_evidence() {
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        6
+        7
     );
 }
 
@@ -428,6 +436,34 @@ fn traversal_in_worker_files_is_rejected() {
 }
 
 #[test]
+fn worker_selected_execution_ceilings_are_bounded_before_publication() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut invalid_turns = bundle();
+    invalid_turns.execution_limits.max_agent_turns = Some(0);
+    let error = store.prepare(invalid_turns, None).unwrap_err();
+    assert!(error.contains("maxAgentTurns"), "{error}");
+
+    let mut invalid_children = bundle();
+    invalid_children.execution_limits.max_child_invocations = Some(257);
+    let error = store.prepare(invalid_children, None).unwrap_err();
+    assert!(error.contains("maxChildInvocations"), "{error}");
+
+    let mut bounded = bundle();
+    bounded.execution_limits.max_agent_turns = Some(7);
+    bounded.execution_limits.max_child_invocations = Some(6);
+    let mut prepared = store.prepare(bounded, None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let active = store.load_active(&published.worker.worker_id).unwrap();
+    assert_eq!(active.bundle.execution_limits.max_agent_turns, Some(7));
+    assert_eq!(
+        active.bundle.execution_limits.max_child_invocations,
+        Some(6)
+    );
+}
+
+#[test]
 fn runner_and_check_configuration_is_validated_before_staging() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
@@ -694,6 +730,52 @@ fn index_reconstruction_recovers_canonical_bundle_and_interrupted_queue() {
 }
 
 #[test]
+fn background_invocation_identity_survives_interrupted_delivery_recovery() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let outcome = store.publish(prepared).unwrap();
+    let (queued, replayed) = store
+        .begin_invocation_with_context(
+            &outcome.worker.worker_id,
+            &outcome.version,
+            &json!({"topic":"durable background"}),
+            "background-recovery-key",
+            "trace-background-recovery",
+            0,
+            "manual",
+            Some("session-background-recovery"),
+            WorkerInteractionMode::Background,
+            Some("provider-background-recovery"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(!replayed);
+    assert!(store.claim_running(&queued.invocation_id).unwrap());
+    let detached_at = queued.detached_at.clone();
+    drop(store);
+
+    let reopened = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let recovered = reopened.invocation(&queued.invocation_id).unwrap().unwrap();
+    assert_eq!(recovered.invocation_id, queued.invocation_id);
+    assert_eq!(recovered.status, "queued");
+    assert_eq!(
+        recovered.interaction_mode,
+        WorkerInteractionMode::Background
+    );
+    assert_eq!(recovered.detached_at, detached_at);
+    assert_eq!(
+        recovered.model_tool_invocation_id.as_deref(),
+        Some("provider-background-recovery")
+    );
+    assert_eq!(recovered.retry_of_invocation_id, None);
+    assert_eq!(recovered.attempt_count, 1);
+}
+
+#[test]
 fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
@@ -722,6 +804,31 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
             )
             .unwrap();
     }
+    let (detached_manual, _) = store
+        .begin_invocation_with_context(
+            &outcome.worker.worker_id,
+            &outcome.version,
+            &json!({}),
+            "detached-manual",
+            "trace-detached-manual",
+            0,
+            "manual",
+            Some("session-detached-manual"),
+            WorkerInteractionMode::Background,
+            Some("provider-detached-manual"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(store.claim_running(&detached_manual.invocation_id).unwrap());
+    store
+        .complete_invocation(
+            &detached_manual.invocation_id,
+            &outcome.worker.worker_id,
+            Ok(&json!({"ok":true,"delivery":"detached"})),
+        )
+        .unwrap();
     store
         .record_system_inbox(
             &outcome.worker.worker_id,
@@ -732,7 +839,7 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
     let attention = store
         .inbox_filtered_page(Some(&outcome.worker.worker_id), None, None, true, 10, 0)
         .unwrap();
-    assert_eq!(attention.len(), 2);
+    assert_eq!(attention.len(), 3);
     assert!(
         attention
             .iter()
@@ -743,6 +850,9 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
             .iter()
             .any(|item| { item["triggerKind"] == "schedule" && item["hasInvocation"] == true })
     );
+    assert!(attention.iter().any(|item| {
+        item["invocationId"] == detached_manual.invocation_id && item["triggerKind"] == "manual"
+    }));
     assert!(
         attention
             .iter()
@@ -751,7 +861,7 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
     let first = store
         .take_notable_pending(Some("recent research"), 10)
         .unwrap();
-    assert_eq!(first.len(), 2);
+    assert_eq!(first.len(), 3);
     assert!(first.iter().any(|item| item["triggerKind"] == "schedule"));
     assert!(first.iter().any(|item| {
         item["triggerKind"] == "system" && item["result"]["phase"] == "resident_supervision"
@@ -784,7 +894,7 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
     let retained = store
         .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
         .unwrap();
-    assert_eq!(retained.len(), 3);
+    assert_eq!(retained.len(), 4);
     assert!(retained.iter().any(|item| {
         item["result"]["phase"] == "resident_supervision" && item["requiresAttention"] == false
     }));

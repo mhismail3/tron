@@ -485,6 +485,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         parent_invocation_id: run_context.parent_invocation_id.as_ref(),
         worker_causal_depth: run_context.worker_causal_depth,
         origin_worker_id: run_context.origin_worker_id.as_deref(),
+        origin_worker_invocation_id: run_context.origin_worker_invocation_id.as_deref(),
     })
     .await;
 

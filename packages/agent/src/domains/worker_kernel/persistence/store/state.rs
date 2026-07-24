@@ -64,6 +64,20 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
     }
     validate_object_schema(&bundle.input_schema, "inputSchema")?;
     validate_object_schema(&bundle.output_schema, "outputSchema")?;
+    if bundle
+        .execution_limits
+        .max_agent_turns
+        .is_some_and(|limit| !(1..=250).contains(&limit))
+    {
+        return Err("executionLimits.maxAgentTurns must be between 1 and 250".to_owned());
+    }
+    if bundle
+        .execution_limits
+        .max_child_invocations
+        .is_some_and(|limit| limit > 256)
+    {
+        return Err("executionLimits.maxChildInvocations must be at most 256".to_owned());
+    }
     if let Some(presentation) = &bundle.presentation {
         validate_identifier(&presentation.experience_id, "presentation experienceId")?;
         if presentation.contract_version == 0 {

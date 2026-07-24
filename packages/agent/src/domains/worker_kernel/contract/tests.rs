@@ -37,6 +37,7 @@ fn profile_owned_worker_mutations_do_not_require_a_session() {
     for function_id in [
         "worker_kernel::upsert",
         "worker_kernel::invoke",
+        "worker_kernel::detach",
         "worker_kernel::cancel",
         "worker_kernel::stop",
         "worker_kernel::disable",
@@ -121,6 +122,18 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
             .as_str()
             .unwrap_or_default()
             .contains("report an engine-contract gap instead of probing Tron internals")
+    );
+    assert_eq!(
+        bundle["properties"]["executionLimits"]["additionalProperties"],
+        false
+    );
+    assert_eq!(
+        bundle["properties"]["executionLimits"]["properties"]["maxAgentTurns"]["maximum"],
+        250
+    );
+    assert_eq!(
+        bundle["properties"]["executionLimits"]["properties"]["maxChildInvocations"]["maximum"],
+        256
     );
     assert!(
         bundle["required"]
@@ -314,6 +327,7 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
         engine_hooks: Vec::new(),
         client_actions: Vec::new(),
         routing: Default::default(),
+        execution_limits: Default::default(),
         presentation: None,
     };
     let mut service_bundle = bundle.clone();

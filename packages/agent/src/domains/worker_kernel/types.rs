@@ -62,10 +62,33 @@ pub struct WorkerBundle {
     pub client_actions: Vec<WorkerClientAction>,
     #[serde(default)]
     pub routing: WorkerRouting,
+    /// Generic execution ceilings selected by this immutable worker version.
+    ///
+    /// The kernel enforces these values without interpreting why a worker
+    /// chose them. Research policy, source budgets, retry strategy, and other
+    /// task semantics remain inside the worker contract.
+    #[serde(default, skip_serializing_if = "WorkerExecutionLimits::is_default")]
+    pub execution_limits: WorkerExecutionLimits,
     /// Optional immutable binding to a supported native or declarative worker
     /// experience. Unsupported contracts always use the generic console.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presentation: Option<WorkerPresentation>,
+}
+
+/// Worker-selected ceilings enforced by the generic agent runner.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerExecutionLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_agent_turns: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_child_invocations: Option<u32>,
+}
+
+impl WorkerExecutionLimits {
+    fn is_default(&self) -> bool {
+        self.max_agent_turns.is_none() && self.max_child_invocations.is_none()
+    }
 }
 
 /// Minimal immutable worker-experience identity used before the generalized
@@ -376,12 +399,46 @@ pub struct InvocationRecord {
     /// Child session created for an agent-runner invocation, when applicable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_id: Option<String>,
+    /// Current interaction ownership. Background is durable execution state,
+    /// not a separate job or execution path.
+    #[serde(default)]
+    pub interaction_mode: WorkerInteractionMode,
+    /// Time at which a foreground caller released this same durable
+    /// invocation, or admission time for predicted-background work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detached_at: Option<String>,
+    /// Provider/model tool call that admitted this invocation, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_tool_invocation_id: Option<String>,
+    /// Direct durable parent worker invocation for causal-tree reconstruction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_worker_invocation_id: Option<String>,
+    /// Terminal invocation retried by this run, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_of_invocation_id: Option<String>,
     /// Durable delivery attempts made for this invocation. Values greater than
     /// one are explicit at-least-once redelivery evidence.
     pub attempt_count: u32,
     pub created_at: String,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerInteractionMode {
+    #[default]
+    Foreground,
+    Background,
+}
+
+impl WorkerInteractionMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Foreground => "foreground",
+            Self::Background => "background",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

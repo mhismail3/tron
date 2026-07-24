@@ -137,8 +137,15 @@
 //! relevance when the hook is absent, unhealthy, or executing itself. Mutable
 //! run/health evidence is a rebuildable engine-state overlay, not
 //! function-contract text; successful work therefore cannot churn catalog
-//! revisions. Fixed invocation supports durable enqueue plus bounded await so
-//! parallel workers do not monopolize provider calls.
+//! revisions. Fixed invocation and direct worker tools share one durable
+//! interaction contract. Top-level agent runners begin in the background;
+//! command and service versions use completed exact-version p95 evidence after
+//! five samples. Unknown or predicted-fast work gets at most ten seconds in the
+//! foreground, after which the same invocation is atomically detached rather
+//! than cancelled or recreated. Nested worker calls remain synchronous because
+//! their parent requires the typed result. `worker_await` is bounded by the
+//! same interaction budget, and `worker_detach` only changes interaction
+//! ownership.
 //! The fixed invocation envelope and each selected worker's nested input
 //! schema are both transport admission boundaries. A nested schema or secret
 //! violation is returned as an actionable invalid request before any durable
@@ -164,6 +171,12 @@
 //! no framework envelope is injected. A projected event outside the typed
 //! schema is a terminal worker failure, not an endlessly retried delivery. A
 //! persistence failure retains the cursor for retry.
+//! Immutable bundles may choose generic `maxAgentTurns` and
+//! `maxChildInvocations` ceilings. The agent runtime can only tighten its
+//! global turn limit, while child admission counts canonical parent links in
+//! the same SQLite transaction as insertion so a concurrent tool batch cannot
+//! race beyond its parent's ceiling. Source, claim, citation, model, and repair
+//! policy remain worker-owned.
 //! Lazy resident processes remain supervised between invocations: an exit or three
 //! consecutive health-check failures disables routing and creates a durable
 //! high-visibility inbox result. System inbox failures without invocation rows
@@ -226,9 +239,11 @@
 //! snapshot. Explicit purge creates and verifies a compressed archive of the
 //! worker's bundles, state, and operational evidence before removing them, and
 //! refuses to archive known credential material.
-//! Invocation cancellation is exact: `worker_cancel` terminalizes one queued or
-//! running invocation, cancels its process/request/child agent, and leaves the
-//! worker enabled. Agent invocations persist their child session id as run
+//! Invocation cancellation is causal and isolated: `worker_cancel`
+//! terminalizes the selected queued or running invocation and its durable
+//! descendants, cancels their process/request/child agents, and leaves
+//! unrelated traces plus the worker enabled. Agent invocations persist their
+//! child session id as run
 //! evidence. Every invocation also retains the originating user session for its
 //! causal trace; descendants inherit the trace root's origin rather than
 //! replacing it with an internal child-agent session. Session-scoped activity
@@ -237,8 +252,10 @@
 //! in the canonical session event store under a reserved worker classification:
 //! ordinary chat lists exclude them, exact audit reads remain available, and no
 //! second delegation database exists.
-//! A live model-tool invocation may hold one transient correlation bridge to
-//! its durable worker run. Command and service runners publish queued, running,
+//! A provider/model tool id, direct worker parent, interaction mode, detachment
+//! time, and retry link are persisted on the durable invocation. The live call
+//! may additionally hold one transient correlation bridge. Command and service
+//! runners publish queued, running,
 //! and validation phases; agent runners additionally project bounded child-turn
 //! and child-tool stage labels. The bridge is removed at terminal completion
 //! and never changes durable delivery, recovery, routing, or authority.

@@ -23,8 +23,10 @@
 //! - Invocation IDs and causal context are created before dispatch and copied
 //!   into the durable record.
 //! - Local agent and worker paths carry their concrete actor identity.
-//! - Working directory, advertised surface pins, and causal depth are closed
-//!   typed execution inputs.
+//! - Working directory, advertised surface pins, causal depth, delegated worker
+//!   parent, and a worker-selected agent-turn ceiling are closed typed
+//!   execution inputs. The latter two are causal/reliability evidence, never
+//!   authorization or semantic routing inputs.
 //! - Durable records preserve session/workspace/trace/idempotency references so
 //!   replay manifests can explain why an invocation occurred.
 //! - Model-originated direct calls carry the advertised function revision and,

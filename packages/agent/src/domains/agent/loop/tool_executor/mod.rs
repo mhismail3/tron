@@ -241,6 +241,9 @@ pub struct ToolExecutionContext<'a> {
     /// Worker that owns an agent-runner child session. Tool calls retain that
     /// worker actor identity so semantic hooks can avoid self-recursion.
     pub origin_worker_id: Option<&'a str>,
+    /// Durable parent worker invocation for child-run admission and run-tree
+    /// reconstruction.
+    pub origin_worker_invocation_id: Option<&'a str>,
 }
 
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
@@ -338,6 +341,7 @@ pub async fn execute_tool(
             ctx.parent_invocation_id,
             ctx.worker_causal_depth,
             ctx.origin_worker_id,
+            ctx.origin_worker_invocation_id,
             effective_args,
             &per_invocation_cancel,
         )
@@ -400,6 +404,7 @@ async fn execute_tool_via_engine(
     parent_invocation_id: Option<&InvocationId>,
     worker_causal_depth: u32,
     origin_worker_id: Option<&str>,
+    origin_worker_invocation_id: Option<&str>,
     effective_args: Value,
     cancellation: &CancellationToken,
 ) -> crate::shared::protocol::model_tools::ToolResult {
@@ -472,6 +477,9 @@ async fn execute_tool_via_engine(
         .with_idempotency_key(idempotency_key);
     if let Some(workspace_id) = workspace_id {
         causal_context = causal_context.with_workspace_id(workspace_id.to_owned());
+    }
+    if let Some(invocation_id) = origin_worker_invocation_id {
+        causal_context = causal_context.with_origin_worker_invocation_id(invocation_id.to_owned());
     }
     if let Some(parent) = parent_invocation_id {
         causal_context = causal_context.with_parent_invocation(parent.clone());

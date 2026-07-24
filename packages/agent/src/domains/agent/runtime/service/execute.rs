@@ -240,6 +240,9 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         messages,
         initial_turn_offset,
         resolved_workspace_id.clone(),
+        engine_causality
+            .as_ref()
+            .and_then(|causality| causality.context.worker_max_agent_turns()),
     )
     .await
     {
@@ -293,6 +296,12 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         origin_worker_id: engine_causality
             .as_ref()
             .and_then(|causality| causality.context.origin_worker_id().map(ToOwned::to_owned)),
+        origin_worker_invocation_id: engine_causality.as_ref().and_then(|causality| {
+            causality
+                .context
+                .origin_worker_invocation_id()
+                .map(ToOwned::to_owned)
+        }),
         ..Default::default()
     };
 

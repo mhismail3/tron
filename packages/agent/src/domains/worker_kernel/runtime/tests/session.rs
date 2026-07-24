@@ -175,16 +175,10 @@ async fn session_title_hook_returns_after_durable_admission_and_cannot_overwrite
         .unwrap();
     assert_eq!(queued["handled"], true);
     let invocation_id = queued["invocationId"].as_str().unwrap();
-    assert!(matches!(
-        runtime
-            .store()
-            .invocation(invocation_id)
-            .unwrap()
-            .unwrap()
-            .status
-            .as_str(),
-        "queued" | "running"
-    ));
+    let admitted = runtime.store().invocation(invocation_id).unwrap().unwrap();
+    assert!(matches!(admitted.status.as_str(), "queued" | "running"));
+    assert_eq!(admitted.interaction_mode, WorkerInteractionMode::Background);
+    assert!(admitted.detached_at.is_some());
     assert!(
         runtime
             .event_store

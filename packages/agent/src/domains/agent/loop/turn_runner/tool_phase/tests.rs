@@ -358,6 +358,7 @@ async fn direct_tool_provider_result_is_stable_after_reconstruction() {
         parent_invocation_id: None,
         worker_causal_depth: 0,
         origin_worker_id: None,
+        origin_worker_invocation_id: None,
     })
     .await;
     assert_eq!(outcome.tool_invocations_executed, 1);
@@ -455,6 +456,7 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
         parent_invocation_id: None,
         worker_causal_depth: 0,
         origin_worker_id: None,
+        origin_worker_invocation_id: None,
     })
     .await;
 
@@ -620,6 +622,7 @@ async fn parent_cancellation_during_parallel_tool_batch_marks_active_turn_interr
         parent_invocation_id: None,
         worker_causal_depth: 0,
         origin_worker_id: None,
+        origin_worker_invocation_id: None,
     })
     .await;
     cancel_task.await.unwrap();
@@ -669,6 +672,7 @@ async fn phase_does_not_broadcast_starts_when_start_persistence_fails() {
         parent_invocation_id: None,
         worker_causal_depth: 0,
         origin_worker_id: None,
+        origin_worker_invocation_id: None,
     })
     .await;
 
@@ -730,6 +734,7 @@ async fn completion_batch_failure_atomically_terminalizes_every_durable_start() 
         parent_invocation_id: None,
         worker_causal_depth: 0,
         origin_worker_id: None,
+        origin_worker_invocation_id: None,
     })
     .await;
 

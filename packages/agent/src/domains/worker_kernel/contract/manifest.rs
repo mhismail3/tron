@@ -153,6 +153,12 @@ const CORE_PRIMITIVES: &[CorePrimitiveDescriptor] = &[
         order: 145,
     },
     CorePrimitiveDescriptor {
+        function_id: "worker_kernel::detach",
+        model_name: "worker_detach",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 146,
+    },
+    CorePrimitiveDescriptor {
         function_id: "worker_kernel::cancel",
         model_name: "worker_cancel",
         group: CorePrimitiveGroup::WorkerControl,

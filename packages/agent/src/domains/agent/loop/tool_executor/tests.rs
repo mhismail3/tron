@@ -60,6 +60,7 @@ fn execution_context<'a>(
         parent_invocation_id: None,
         worker_causal_depth: 0,
         origin_worker_id: None,
+        origin_worker_invocation_id: None,
     }
 }
 
@@ -190,6 +191,7 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
     );
 
     context.origin_worker_id = Some("semantic-router");
+    context.origin_worker_invocation_id = Some("worker_run_semantic_router");
     let worker_call = ToolInvocationDraft::new(
         "worker-direct-call",
         "direct_test",
@@ -202,6 +204,10 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
     assert_eq!(
         invocation.causal_context.actor_id.as_str(),
         "worker:semantic-router"
+    );
+    assert_eq!(
+        invocation.causal_context.origin_worker_invocation_id(),
+        Some("worker_run_semantic_router")
     );
 }
 
