@@ -45,6 +45,41 @@ final class WorkerKernelClient: EngineDomainClient {
         )
     }
 
+    func workerRunGraph(
+        invocationId: String? = nil,
+        modelToolInvocationId: String? = nil
+    ) async throws -> WorkerRunsResultDTO {
+        try await invokeRead(
+            "worker_kernel::runs",
+            WorkerRunsRequestDTO(
+                workerId: nil,
+                originSessionId: nil,
+                invocationId: invocationId,
+                modelToolInvocationId: modelToolInvocationId,
+                limit: 1,
+                offset: nil,
+                detail: "graph"
+            )
+        )
+    }
+
+    func workerRunGraphs(
+        originSessionId: String,
+        limit: UInt64 = 20,
+        offset: UInt64? = nil
+    ) async throws -> WorkerRunsResultDTO {
+        try await invokeRead(
+            "worker_kernel::runs",
+            WorkerRunsRequestDTO(
+                workerId: nil,
+                originSessionId: originSessionId,
+                limit: limit,
+                offset: offset,
+                detail: "graph"
+            )
+        )
+    }
+
     func workerInbox(
         workerId: String?,
         limit: UInt64 = 20,
@@ -92,6 +127,44 @@ final class WorkerKernelClient: EngineDomainClient {
         try await invokeWrite(
             "worker_kernel::cancel",
             WorkerCancelRequestDTO(invocationId: invocationId),
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func detachWorkerInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        try await invokeWrite(
+            "worker_kernel::detach",
+            WorkerCancelRequestDTO(invocationId: invocationId),
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func awaitWorkerInvocation(
+        invocationId: String,
+        timeoutSeconds: UInt8 = 10
+    ) async throws -> WorkerAwaitResultDTO {
+        try await invokeRead(
+            "worker_kernel::await",
+            WorkerAwaitRequestDTO(
+                invocationId: invocationId,
+                timeoutSeconds: min(timeoutSeconds, 10)
+            )
+        )
+    }
+
+    func retryWorkerInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        try await invokeWrite(
+            "worker_kernel::invoke",
+            WorkerRetryRequestDTO(
+                retryOfInvocationId: invocationId,
+                mode: .wait
+            ),
             idempotencyKey: idempotencyKey
         )
     }

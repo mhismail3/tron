@@ -3,6 +3,53 @@ import Testing
 @testable import TronMobile
 
 struct WorkerConsoleInteractionTests {
+    @Test("Run actions follow server status and foreground-background mode")
+    func durableRunActionPolicy() {
+        #expect(WorkerRunGraphPresentation.canDetach(status: "running", mode: "foreground"))
+        #expect(!WorkerRunGraphPresentation.canDetach(status: "running", mode: "background"))
+        #expect(WorkerRunGraphPresentation.canAwait(status: "running", mode: "background"))
+        #expect(!WorkerRunGraphPresentation.canAwait(status: "completed", mode: "background"))
+        #expect(WorkerRunGraphPresentation.canCancel(status: "queued"))
+        #expect(!WorkerRunGraphPresentation.canCancel(status: "completed"))
+        #expect(WorkerRunGraphPresentation.canRetry(status: "failed"))
+        #expect(!WorkerRunGraphPresentation.canRetry(status: "cancelled"))
+    }
+
+    @Test("Worker UI consumes structured graph stages and never joins raw event names")
+    func durableRunPresentationUsesStructuredTruth() throws {
+        let root = iosAppRoot()
+        let graph = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/WorkerRunGraphComponents.swift"
+            ),
+            encoding: .utf8
+        )
+        let tool = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/Tools/ToolInvocationViews.swift"
+            ),
+            encoding: .utf8
+        )
+        let context = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/Chat/Sheets/SessionContextSheet.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(graph.contains("WorkerRunGraphSummaryView"))
+        #expect(graph.contains("WorkerRunCausalTreeView"))
+        #expect(graph.contains("WorkerRunTimelineView"))
+        #expect(graph.contains("entry.summary"))
+        #expect(graph.contains("filter { !$0.technical }"))
+        #expect(tool.contains("WorkerToolRunGraphView("))
+        #expect(graph.contains(".workerRunProjectionInvalidated"))
+        #expect(context.contains(".workerRunProjectionInvalidated"))
+        #expect(!graph.contains("Started Filesystem"))
+        #expect(!graph.contains("Finished Filesystem"))
+        #expect(!graph.contains("joined(separator: \"\")"))
+    }
+
     @Test("Worker run transcript exists only for a real child agent session")
     func workerRunTranscriptResolution() {
         #expect(

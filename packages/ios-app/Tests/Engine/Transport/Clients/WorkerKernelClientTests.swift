@@ -93,6 +93,108 @@ struct WorkerKernelClientTests {
         ])
     }
 
+    @Test("Worker graph lookup preserves exact durable association filters")
+    func graphLookupUsesExactFilters() async throws {
+        let transport = connectedTransport()
+        let client = WorkerKernelClient(transport: transport)
+        var requests: [WorkerRunsRequestDTO] = []
+
+        transport.readHandler = { functionId, payload, _ in
+            #expect(functionId.rawValue == "worker_kernel::runs")
+            requests.append(try #require(payload as? WorkerRunsRequestDTO))
+            return WorkerRunsResultDTO(detail: "graph", runs: [], graphs: [])
+        }
+
+        _ = try await client.workerRunGraph(invocationId: "run-1")
+        _ = try await client.workerRunGraph(modelToolInvocationId: "tool-1")
+        _ = try await client.workerRunGraphs(
+            originSessionId: "sess-origin",
+            limit: 10,
+            offset: 10
+        )
+
+        #expect(requests.count == 3)
+        #expect(requests[0].invocationId == "run-1")
+        #expect(requests[0].modelToolInvocationId == nil)
+        #expect(requests[0].detail == "graph")
+        #expect(requests[0].limit == 1)
+        #expect(requests[1].invocationId == nil)
+        #expect(requests[1].modelToolInvocationId == "tool-1")
+        #expect(requests[2].originSessionId == "sess-origin")
+        #expect(requests[2].detail == "graph")
+        #expect(requests[2].limit == 10)
+        #expect(requests[2].offset == 10)
+    }
+
+    @Test("Worker run controls map to generic durable kernel operations")
+    func runControlsUseGenericKernelOperations() async throws {
+        let transport = connectedTransport()
+        let client = WorkerKernelClient(transport: transport)
+        let key = EngineIdempotencyKey.userAction("run-controls")
+        var functions: [String] = []
+
+        func invocation(status: String, mode: String) -> WorkerInvocationDTO {
+            WorkerInvocationDTO(
+                invocationId: "run-1",
+                workerId: "research",
+                workerVersion: "v1",
+                status: status,
+                input: AnyCodable(["query": "Tron"]),
+                output: nil,
+                error: nil,
+                idempotencyKey: key.rawValue,
+                traceId: "trace-1",
+                causalDepth: 0,
+                triggerKind: "manual",
+                originSessionId: "sess-origin",
+                agentSessionId: nil,
+                interactionMode: mode,
+                attemptCount: 1,
+                createdAt: "2026-07-24T12:00:00Z",
+                startedAt: "2026-07-24T12:00:00Z",
+                completedAt: nil
+            )
+        }
+
+        transport.readHandler = { functionId, payload, _ in
+            functions.append(functionId.rawValue)
+            #expect(functionId.rawValue == "worker_kernel::await")
+            let request = try #require(payload as? WorkerAwaitRequestDTO)
+            #expect(request.invocationId == "run-1")
+            #expect(request.timeoutSeconds == 10)
+            return WorkerAwaitResultDTO(
+                invocation: invocation(status: "running", mode: "background"),
+                timedOut: true
+            )
+        }
+        transport.writeHandler = { functionId, payload, receivedKey, _ in
+            functions.append(functionId.rawValue)
+            #expect(receivedKey == key)
+            switch functionId.rawValue {
+            case "worker_kernel::detach":
+                #expect((payload as? WorkerCancelRequestDTO)?.invocationId == "run-1")
+                return invocation(status: "running", mode: "background")
+            case "worker_kernel::invoke":
+                let retry = try #require(payload as? WorkerRetryRequestDTO)
+                #expect(retry.retryOfInvocationId == "run-1")
+                #expect(retry.mode == .wait)
+                return invocation(status: "queued", mode: "background")
+            default:
+                throw EngineConnectionError.invalidResponse
+            }
+        }
+
+        _ = try await client.detachWorkerInvocation(invocationId: "run-1", idempotencyKey: key)
+        _ = try await client.awaitWorkerInvocation(invocationId: "run-1", timeoutSeconds: 20)
+        _ = try await client.retryWorkerInvocation(invocationId: "run-1", idempotencyKey: key)
+
+        #expect(functions == [
+            "worker_kernel::detach",
+            "worker_kernel::await",
+            "worker_kernel::invoke",
+        ])
+    }
+
     @Test("Engine surface introspection is typed and session scoped")
     func engineSurfaceIntrospectionIsTypedAndSessionScoped() async throws {
         let transport = connectedTransport()

@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-23 for the worker-first POC.
+> Last verified: 2026-07-24 for durable worker run graphs.
 
 ## Overview
 
@@ -173,7 +173,11 @@ worker metadata from the client. The server supplies internal causal context.
   canonical version directory;
 - `WorkerInvocationDTO` for queued/running/terminal runs, typed input/output,
   idempotency, trace, causal depth, trigger kind, numbered delivery-attempt
-  count, optional child-agent session id, and timestamps;
+  count, foreground/background mode, detachment time, originating model-tool
+  invocation, parent/retry linkage, optional child-agent session id, and
+  timestamps;
+- `WorkerRunGraphDTO` and its node, timeline, stage, timing, usage, and child
+  count DTOs for the bounded server-authored causal projection;
 - `WorkerInboxItemDTO` for durable delivery records, trigger provenance,
   attention classification, and truthful agent-context attachment state;
 - request/response DTOs for invocation, exact invocation cancellation,
@@ -206,10 +210,11 @@ invalidation/change-feed contract only.
 `WorkerKernelClient` exposes:
 
 - list and inspect;
-- runs and inbox;
+- bounded run history, exact invocation/model-tool graph lookup, and inbox;
 - typed invocation with an explicit `wait` mode for request/response actions and
   an explicit `enqueue` mode for durable background work;
-- cancel one queued or running invocation while preserving the worker route;
+- detach, bounded await, retry from immutable input/version, and exact
+  causal-subtree cancellation;
 - stop current work while preserving enabled routing, plus enable/disable;
 - rollback;
 - retire and purge;
@@ -458,15 +463,24 @@ vectors render as a readable command while the technical detail retains their
 exact JSON evidence. Unbounded raw payloads and technical-reference
 collections never expand inline and displace the summary.
 
-Running calls retain the same sheet identity and update from canonical
-`tool.invocation.progress`, `tool.invocation.output`, and terminal lifecycle
-events. The server correlates each transient update to the exact provider call:
-command and service workers report phases of their durable execution, while
-agent workers additionally expose bounded, redacted child-turn and child-tool
-stage labels. Agent workers receive an explicit progress surface with elapsed time,
-current stage, structured progress, and bounded streamed output when the
-server reports it. The client does not poll worker storage, infer progress from
-tool names, or invent a second execution state.
+Generic non-worker calls retain the same sheet identity and may render bounded
+free-text `tool.invocation.progress`, `tool.invocation.output`, and terminal
+lifecycle events. Direct worker calls do not accumulate those strings into a
+client-owned journey. Their chat chip resolves the persisted
+model-tool/invocation association through `worker_kernel::runs(detail:
+"graph")`, then renders the server's status, mode, meaningful stage, elapsed
+time, child counts, causal node order, structured timeline, critical-path
+timing, result or actionable failure, and child-session links. Active child
+work therefore outranks a stale parent model event, and starts/finishes cannot
+collapse into a concatenated “Latest output” blob.
+
+The same generic graph surface offers detach, bounded await, causal-subtree
+cancel, terminal-failure retry, root/child session inspection, and typed-result
+inspection according to server state. Raw input/output, schemas, trace
+identifiers, and technical process/filesystem entries live in subordinate
+detail sheets. One-second polling is only a live/reconnect fallback; every
+refresh re-reads server truth. The client never reads worker storage, infers a
+worker stage from tool names, or owns a second execution state.
 Failure presentation classifies current schema and policy errors from their
 server evidence without inventing authorization state or retry policy.
 
@@ -553,11 +567,13 @@ The composer context ring and minimal Session Context sheet consume only
 existing session truth: current context tokens, selected-model window,
 remaining capacity, accumulated model traffic and cost in one compact summary,
 automatic-compaction status, the existing model catalog/switch operation, and
-`session::fork`. The sheet also requests bounded worker runs filtered by the
-durable originating session. Because causal descendants preserve the root
-session id, this includes direct and nested worker activity while keeping each
-agent runner's hidden child-session id available only in the canonical run
-detail. Session sections share the same compact header typography and card
+`session::fork`. The sheet also requests bounded `detail: "graph"` worker runs
+filtered by the durable originating session. Because causal descendants
+preserve the root session id, this includes direct and nested worker activity.
+Rows group by causal root and explicitly retain queued, running, detached,
+completed, failed, and cancelled descendants; opening any row resolves the
+same exact server graph, including child-session links and generic controls.
+Session sections share the same compact header typography and card
 geometry; headings remain attached to the content they introduce while wider
 inter-section spacing separates each completed card from the next section.
 The worker heading and explanatory line are one compact label block, and worker
@@ -689,6 +705,8 @@ xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/WorkerKernelDTOTests \
   -only-testing:TronMobileTests/WorkerKernelClientTests \
+  -only-testing:TronMobileTests/SessionContextPresentationTests \
+  -only-testing:TronMobileTests/WorkerConsoleInteractionTests \
   -only-testing:TronMobileTests/WorkerConsolePresentationTests \
   -only-testing:TronMobileTests/WorkerConsoleViewModelTests \
   -only-testing:TronMobileTests/WorkLedgerViewModelTests \

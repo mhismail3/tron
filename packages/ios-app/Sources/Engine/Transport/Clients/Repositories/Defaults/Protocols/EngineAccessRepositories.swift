@@ -285,6 +285,15 @@ protocol WorkerKernelRepository: AnyObject {
         limit: UInt64,
         offset: UInt64?
     ) async throws -> WorkerRunsResultDTO
+    func workerRunGraph(
+        invocationId: String?,
+        modelToolInvocationId: String?
+    ) async throws -> WorkerRunsResultDTO
+    func workerRunGraphs(
+        originSessionId: String,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerRunsResultDTO
     func workerInbox(
         workerId: String?,
         limit: UInt64,
@@ -308,6 +317,18 @@ protocol WorkerKernelRepository: AnyObject {
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerInvocationDTO
     func cancelWorkerInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO
+    func detachWorkerInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO
+    func awaitWorkerInvocation(
+        invocationId: String,
+        timeoutSeconds: UInt8
+    ) async throws -> WorkerAwaitResultDTO
+    func retryWorkerInvocation(
         invocationId: String,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerInvocationDTO
@@ -348,6 +369,47 @@ protocol WorkerKernelRepository: AnyObject {
 }
 
 extension WorkerKernelRepository {
+    func workerRunGraph(
+        invocationId _: String?,
+        modelToolInvocationId _: String?
+    ) async throws -> WorkerRunsResultDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func workerRunGraphs(
+        originSessionId: String,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerRunsResultDTO {
+        try await workerRuns(
+            workerId: nil,
+            originSessionId: originSessionId,
+            limit: limit,
+            offset: offset
+        )
+    }
+
+    func detachWorkerInvocation(
+        invocationId _: String,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func awaitWorkerInvocation(
+        invocationId _: String,
+        timeoutSeconds _: UInt8
+    ) async throws -> WorkerAwaitResultDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func retryWorkerInvocation(
+        invocationId _: String,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
     func invokeWorkerFromSession(
         workerId: String,
         input: AnyCodable,

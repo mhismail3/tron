@@ -66,94 +66,54 @@ struct ToolDetailHeader: View {
 
 struct ToolProgressJourneyView: View {
     let steps: [ToolProgressStep]
+    let activity: [String]
+    let isActive: Bool
     let tint: TintedColors
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(steps) { step in
-                    ToolProgressStepCard(step: step, tint: tint)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(presentedActivity.enumerated()), id: \.offset) { index, item in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: activityIcon(at: index))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(activityColor(at: index))
+                        .frame(width: 16)
+
+                    Text(item)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(index == presentedActivity.count - 1 && isActive
+                            ? tint.heading
+                            : tint.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(.horizontal, 1)
-            .padding(.vertical, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-private struct ToolProgressStepCard: View {
-    let step: ToolProgressStep
-    let tint: TintedColors
-
-    private var color: Color {
-        switch step.state {
-        case .completed:
-            return tint.accent
-        case .current:
-            return .tronBlue
-        case .attention:
-            return .tronError
-        case .pending:
-            return tint.subtle
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: step.iconName)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
-                    .foregroundStyle(color)
-                    .frame(width: 24, height: 24)
-                    .background {
-                        Circle().fill(color.opacity(step.state == .pending ? 0.08 : 0.16))
-                    }
-
-                Text(stateLabel)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
-                    .foregroundStyle(color)
-                    .lineLimit(1)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(step.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
-                    .foregroundStyle(.tronTextPrimary)
-                    .lineLimit(1)
-
-                Text(step.detail)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(tint.secondary)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(width: 174, alignment: .topLeading)
-        .frame(minHeight: 118, alignment: .topLeading)
-        .padding(12)
+        .padding(10)
         .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.tronSurface.opacity(0.50))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(color.opacity(step.state == .current ? 0.32 : 0.16), lineWidth: 1)
-                }
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(tint.accent.opacity(0.07))
         }
     }
 
-    private var stateLabel: String {
-        switch step.state {
-        case .completed:
-            return "Done"
-        case .current:
-            return "Now"
-        case .attention:
-            return "Check"
-        case .pending:
-            return "Next"
+    private var presentedActivity: [String] {
+        let entries = activity
+            .map(\.trimmed)
+            .filter { !$0.isEmpty }
+        if !entries.isEmpty {
+            return Array(entries.suffix(16))
         }
+        return steps.map { "\($0.title): \($0.detail)" }
+    }
+
+    private func activityIcon(at index: Int) -> String {
+        index == presentedActivity.count - 1 && isActive
+            ? "circle.dotted.circle"
+            : "checkmark.circle"
+    }
+
+    private func activityColor(at index: Int) -> Color {
+        index == presentedActivity.count - 1 && isActive ? .tronBlue : tint.accent
     }
 }
 

@@ -1836,6 +1836,12 @@ It exposes:
 - engine-wide Activity plus per-worker runs, durable inbox, and audit history;
   Activity can load every bounded history page, and any agent-runner row opens
   its exact hidden child session for detailed inspection;
+- exact invocation and originating model-tool graph lookup, rendering the
+  server-authored stage, causal tree, structured timeline, timing/usage,
+  terminal result or failure, and child-session links before subordinate raw
+  technical payloads;
+- generic detach, bounded await, causal-subtree cancel, and immutable retry
+  controls whose availability follows the projected durable run state;
 - stop current work without disabling future dispatch, enable/disable, rollback,
   retained-version restoration after retirement, purge, webhook rotation, and
   stop-all;
@@ -1862,7 +1868,11 @@ in one compact summary; it also shows current-model selection through
 causal root so one coordinator's many descendants cannot crowd later runs out
 of Session Context; exact child and originating model-tool filters reopen the
 same root graph. The client opens this canonical detail rather than inventing
-another activity store.
+another activity store. Worker progress/output strings are not accumulated
+into client state or concatenated into a guessed stage; only non-worker tools
+retain the generic free-text lifecycle presentation. Lifecycle invalidation
+and reconnect re-fetch the graph, with one-second polling used only while a
+visible run remains active.
 It has no parallel context-control resource client, resource/action audit,
 memory editor, or fabricated manual compact/clear API.
 

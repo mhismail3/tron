@@ -119,8 +119,8 @@ extension ChatViewModel {
             ?? MessageFinder.lastIndexOfToolInvocation(id: result.invocationId, in: messages) else { return }
 
         if case .toolInvocation(var invocation) = messages[index].content {
-            let accumulated = (invocation.logs.last ?? "") + result.output
-            invocation.logs = [String(accumulated.prefix(24_000))]
+            guard !ToolInvocationSurface(identity: invocation.identity).isWorker else { return }
+            invocation.logs = ToolActivityLog.appending(result.output, to: invocation.logs)
             updateMessage(at: index) { message in
                 message.content = .toolInvocation(invocation)
             }
@@ -132,10 +132,18 @@ extension ChatViewModel {
             ?? MessageFinder.lastIndexOfToolInvocation(id: result.invocationId, in: messages) else { return }
 
         if case .toolInvocation(var invocation) = messages[index].content {
-            if let msg = result.message { invocation.progressMessage = msg }
-            if let pct = result.percent { invocation.progressPercent = pct }
             if !result.identity.isEmpty {
                 invocation.identity = invocation.identity.merging(result.identity)
+            }
+            let isWorker = ToolInvocationSurface(identity: invocation.identity).isWorker
+            if let msg = result.message {
+                if !isWorker {
+                    invocation.progressMessage = msg
+                    invocation.logs = ToolActivityLog.appending(msg, to: invocation.logs)
+                }
+            }
+            if let pct = result.percent, !isWorker {
+                invocation.progressPercent = pct
             }
             updateMessage(at: index) { message in
                 message.content = .toolInvocation(invocation)

@@ -9,6 +9,7 @@ struct ToolInvocationChip: View {
 
     private var display: ToolInvocationDisplayModel { data.display }
     private var evidence: ToolEvidencePresentation { ToolEvidencePresentation(data: data) }
+    private var brief: ToolInvocationBriefPresentation { ToolInvocationBriefPresentation(data: data) }
     private var accent: Color {
         ToolPresentation.statusColor(
             for: data.status,
@@ -63,6 +64,11 @@ struct ToolInvocationChip: View {
                 .controlSize(.small)
                 .tint(textColor.opacity(0.72))
                 .frame(width: 18, height: 18)
+        } else if brief.isBackgroundHandoff {
+            Image(systemName: "arrow.up.forward.circle.fill")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(textColor)
+                .frame(width: 18, height: 18)
         } else {
             Image(systemName: data.status.iconName)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
@@ -86,6 +92,8 @@ struct ToolInvocationChip: View {
                     inlineStatusText(elapsed)
                 }
             }
+        } else if brief.isBackgroundHandoff {
+            inlineStatusText("background")
         } else if let duration = data.formattedDuration {
             inlineStatusText(duration)
         } else if let status = terminalStatusText {
@@ -296,7 +304,7 @@ struct ToolInvocationGroupDetailSheet: View {
     }
 
     private var summarySection: some View {
-        ToolDetailSection(title: "What happened", accent: accent, tint: tint) {
+        ToolDetailSection(title: data.isActive ? "Current state" : "Outcome", accent: accent, tint: tint) {
             VStack(alignment: .leading, spacing: 14) {
                 Text(groupNarrative)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
@@ -424,6 +432,9 @@ struct ToolInvocationDetailSheet: View {
     private var isActive: Bool {
         data.status == .generating || data.status == .running
     }
+    private var showsLiveActivity: Bool {
+        !surface.isWorker && isActive
+    }
     private var accent: Color {
         ToolPresentation.statusColor(
             for: data.status,
@@ -441,25 +452,35 @@ struct ToolInvocationDetailSheet: View {
         ) {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 20) {
-                    if isActive {
+                    if surface.isWorker {
+                        WorkerToolRunGraphView(
+                            invocationId: brief.backgroundInvocationId,
+                            modelToolInvocationId: data.id
+                        )
+                        .sheetSection()
+                    } else if showsLiveActivity {
                         progressSection
                             .sheetSection()
                     }
 
-                    whatHappenedSection
-                        .sheetSection()
+                    if !surface.isWorker {
+                        whatHappenedSection
+                            .sheetSection()
+                    }
 
                     if let issue = brief.issue {
                         issueSection(issue)
                             .sheetSection()
                     }
 
-                    if !brief.resultRows.isEmpty || brief.resultBody != nil || structuredResult != nil {
+                    if !surface.isWorker,
+                       !brief.resultRows.isEmpty || brief.resultBody != nil || structuredResult != nil {
                         resultSection
                             .sheetSection()
                     }
 
-                    if !brief.requestRows.isEmpty || structuredRequest != nil {
+                    if !surface.isWorker,
+                       !brief.requestRows.isEmpty || structuredRequest != nil {
                         requestSection
                             .sheetSection()
                     }
@@ -479,7 +500,7 @@ struct ToolInvocationDetailSheet: View {
     }
 
     private var progressSection: some View {
-        ToolDetailSection(title: surface.progressTitle, accent: accent, tint: tint) {
+        ToolDetailSection(title: "Live activity", accent: accent, tint: tint) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     VStack(alignment: .leading, spacing: 3) {
@@ -515,34 +536,26 @@ struct ToolInvocationDetailSheet: View {
                         .controlSize(.small)
                 }
 
-                ToolProgressJourneyView(steps: display.progressSteps, tint: tint)
-
-                if let liveOutput = data.logs.last?.nilIfEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Latest output")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                            .foregroundStyle(tint.subtle)
-                        ToolReadableResultText(
-                            text: String(liveOutput.suffix(1_600)),
-                            tint: tint
-                        )
-                    }
-                    .padding(10)
-                    .background {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(tint.accent.opacity(0.07))
-                    }
-                }
+                ToolProgressJourneyView(
+                    steps: display.progressSteps,
+                    activity: data.logs,
+                    isActive: isActive || brief.isBackgroundHandoff,
+                    tint: tint
+                )
             }
         }
     }
 
     private var currentProgressMessage: String {
         data.progressMessage?.nilIfEmpty
+            ?? (brief.isBackgroundHandoff ? "Continuing in the background" : nil)
             ?? (surface.isAgentWorker ? "Agent worker is running" : "\(brief.title) is running")
     }
 
     private var progressSupportText: String {
+        if brief.isBackgroundHandoff {
+            return "The foreground turn has been released. Session Context owns current status, nested work, cancellation, and the eventual result."
+        }
         if surface.isAgentWorker {
             return "Current steps and streamed output update here as the child agent reports them."
         }
@@ -559,7 +572,11 @@ struct ToolInvocationDetailSheet: View {
     }
 
     private var whatHappenedSection: some View {
-        ToolDetailSection(title: "What happened", accent: accent, tint: tint) {
+        ToolDetailSection(
+            title: showsLiveActivity ? "Current state" : "Outcome",
+            accent: accent,
+            tint: tint
+        ) {
             VStack(alignment: .leading, spacing: 12) {
                 Text(brief.narrative)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
@@ -618,11 +635,7 @@ struct ToolInvocationDetailSheet: View {
     }
 
     private var requestSection: some View {
-        ToolDetailSection(
-            title: surface.isWorker ? "Worker input" : "Request",
-            accent: accent,
-            tint: tint
-        ) {
+        ToolDetailSection(title: "Request", accent: accent, tint: tint) {
             if surface.isWorker, let structuredRequest {
                 ToolStructuredDocumentView(document: structuredRequest, tint: tint)
             } else if !brief.requestRows.isEmpty {

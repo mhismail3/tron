@@ -265,6 +265,28 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
+    func workerRunGraph(
+        invocationId: String?,
+        modelToolInvocationId: String?
+    ) async throws -> WorkerRunsResultDTO {
+        try await client.workerRunGraph(
+            invocationId: invocationId,
+            modelToolInvocationId: modelToolInvocationId
+        )
+    }
+
+    func workerRunGraphs(
+        originSessionId: String,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerRunsResultDTO {
+        try await client.workerRunGraphs(
+            originSessionId: originSessionId,
+            limit: limit,
+            offset: offset
+        )
+    }
+
     func workerInbox(
         workerId: String?,
         limit: UInt64,
@@ -325,6 +347,36 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerInvocationDTO {
         try await client.cancelWorkerInvocation(
+            invocationId: invocationId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func detachWorkerInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        try await client.detachWorkerInvocation(
+            invocationId: invocationId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func awaitWorkerInvocation(
+        invocationId: String,
+        timeoutSeconds: UInt8
+    ) async throws -> WorkerAwaitResultDTO {
+        try await client.awaitWorkerInvocation(
+            invocationId: invocationId,
+            timeoutSeconds: timeoutSeconds
+        )
+    }
+
+    func retryWorkerInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        try await client.retryWorkerInvocation(
             invocationId: invocationId,
             idempotencyKey: idempotencyKey
         )

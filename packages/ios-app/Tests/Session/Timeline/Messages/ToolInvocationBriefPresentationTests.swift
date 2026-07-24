@@ -214,4 +214,58 @@ final class ToolInvocationBriefPresentationTests: XCTestCase {
         XCTAssertTrue(brief.rawPayload?.contains(#""git""#) == true)
         XCTAssertFalse(brief.factRows.contains { $0.value.contains("/tmp/work") })
     }
+
+    func testBackgroundWorkerHandoffIsNotPresentedAsCompletedWork() {
+        let invocation = testToolInvocation(
+            status: .success,
+            arguments: #"{"question":"What is new today?"}"#,
+            result: #"""
+            {
+              "kind": "worker_invocation_receipt",
+              "status": "running",
+              "mode": "background",
+              "invocationId": "worker_run_019f9505-bd6d-7190-a683-698b1ce06b3b",
+              "workerId": "research-coordinator",
+              "message": "The durable worker run is continuing in the background."
+            }
+            """#,
+            durationMs: 10_000,
+            identity: ToolIdentity(
+                toolName: "worker_research_coordinator",
+                presentationHints: [
+                    "surfaceKind": "worker",
+                    "workerId": "research-coordinator",
+                    "workerName": "Research Coordinator",
+                    "runnerKind": "agent"
+                ]
+            )
+        )
+
+        let brief = ToolInvocationBriefPresentation(data: invocation)
+
+        XCTAssertTrue(brief.isBackgroundHandoff)
+        XCTAssertEqual(
+            brief.backgroundInvocationId,
+            "worker_run_019f9505-bd6d-7190-a683-698b1ce06b3b"
+        )
+        XCTAssertTrue(brief.headline.contains("continuing in the background"))
+        XCTAssertTrue(brief.narrative.contains("Session Context"))
+        XCTAssertTrue(brief.factRows.contains { $0.label == "Status" && $0.value == "Background" })
+        XCTAssertTrue(brief.factRows.contains { $0.label == "Foreground wait" && $0.value == "10.0s" })
+        XCTAssertFalse(brief.narrative.contains("completed"))
+    }
+
+    func testActivityLogSplitsBoundsAndDeduplicatesUpdates() {
+        var log: [String] = []
+        log = ToolActivityLog.appending("Started Search\nFinished Search", to: log)
+        log = ToolActivityLog.appending("Finished Search", to: log)
+
+        XCTAssertEqual(log, ["Started Search", "Finished Search"])
+
+        for index in 0..<80 {
+            log = ToolActivityLog.appending("step \(index)", to: log)
+        }
+        XCTAssertEqual(log.count, 64)
+        XCTAssertEqual(log.last, "step 79")
+    }
 }

@@ -298,6 +298,89 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.messages.count, initialCount)
     }
 
+    func test_toolActivity_keepsDiscreteDeduplicatedProgressHistory() {
+        let invocationId = "toolu_activity"
+        viewModel.handleToolInvocationStarted(makeToolInvocationStartResult(
+            toolName: "process_run",
+            invocationId: invocationId,
+            arguments: nil
+        ))
+
+        viewModel.handleToolInvocationProgress(ToolInvocationProgressPlugin.Result(
+            invocationId: invocationId,
+            message: "Running Research Coordinator",
+            percent: 0.08
+        ))
+        viewModel.handleToolInvocationOutput(.init(
+            invocationId: invocationId,
+            output: "Started Research Search\nFinished Research Search"
+        ))
+        viewModel.handleToolInvocationOutput(.init(
+            invocationId: invocationId,
+            output: "Finished Research Search"
+        ))
+
+        guard let message = viewModel.messages.last(where: {
+            if case .toolInvocation(let invocation) = $0.content {
+                return invocation.id == invocationId
+            }
+            return false
+        }), case .toolInvocation(let invocation) = message.content else {
+            return XCTFail("Tool invocation message not found")
+        }
+
+        XCTAssertEqual(
+            invocation.logs,
+            [
+                "Running Research Coordinator",
+                "Started Research Search",
+                "Finished Research Search"
+            ]
+        )
+    }
+
+    func test_workerProgressUsesDurableGraphInsteadOfClientOwnedActivity() {
+        let invocationId = "toolu_worker_activity"
+        let workerIdentity = ToolIdentity(
+            toolName: "worker_research_coordinator",
+            presentationHints: [
+                "surfaceKind": "worker",
+                "workerId": "research-coordinator",
+                "workerName": "Research Coordinator",
+                "runnerKind": "agent"
+            ]
+        )
+        viewModel.handleToolInvocationStarted(makeToolInvocationStartResult(
+            toolName: "worker_research_coordinator",
+            invocationId: invocationId,
+            arguments: nil,
+            identity: workerIdentity
+        ))
+        viewModel.handleToolInvocationProgress(.init(
+            invocationId: invocationId,
+            message: "Started Filesystem listFinished Filesystem list",
+            percent: 0.25,
+            identity: workerIdentity
+        ))
+        viewModel.handleToolInvocationOutput(.init(
+            invocationId: invocationId,
+            output: "Started Worker research searchFinished Worker research search"
+        ))
+
+        guard let message = viewModel.messages.last(where: {
+            if case .toolInvocation(let invocation) = $0.content {
+                return invocation.id == invocationId
+            }
+            return false
+        }), case .toolInvocation(let invocation) = message.content else {
+            return XCTFail("Tool invocation message not found")
+        }
+
+        XCTAssertTrue(invocation.logs.isEmpty)
+        XCTAssertNil(invocation.progressMessage)
+        XCTAssertNil(invocation.progressPercent)
+    }
+
     func test_toolInvocationCompleted_clearsProgressFields() {
         let invocationId = "toolu_progress_end"
         viewModel.handleToolInvocationStarted(makeToolInvocationStartResult(

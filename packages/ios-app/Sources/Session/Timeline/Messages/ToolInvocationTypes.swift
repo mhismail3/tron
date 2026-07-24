@@ -1,6 +1,25 @@
 import Foundation
 import SwiftUI
 
+enum ToolActivityLog {
+    private static let maximumEntries = 64
+    private static let maximumEntryCharacters = 500
+
+    static func appending(_ update: String, to existing: [String]) -> [String] {
+        var entries = existing
+        let additions = update
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmed }
+            .filter { !$0.isEmpty }
+            .map { $0.truncated(to: maximumEntryCharacters) }
+
+        for addition in additions where entries.last != addition {
+            entries.append(addition)
+        }
+        return Array(entries.suffix(maximumEntries))
+    }
+}
+
 // MARK: - Tool Invocation Data
 
 struct ToolInvocationData: Equatable, Identifiable {

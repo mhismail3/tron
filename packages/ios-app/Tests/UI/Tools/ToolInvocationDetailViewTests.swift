@@ -24,6 +24,9 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         XCTAssertTrue(source.contains("ToolStructuredDocumentView"))
         XCTAssertTrue(source.contains("progressSection"))
         XCTAssertTrue(source.contains("ToolProgressJourneyView"))
+        XCTAssertTrue(source.contains(#""Live activity""#))
+        XCTAssertTrue(source.contains(#""Current state""#))
+        XCTAssertTrue(source.contains(#""Outcome""#))
         XCTAssertTrue(source.contains("ToolRowsDetailLink"))
         XCTAssertTrue(source.contains("ToolRawDetailLink"))
         XCTAssertTrue(source.contains("ToolRowsDetailSheet"))
@@ -36,6 +39,8 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         XCTAssertFalse(source.contains(#"ToolDetailSection(title: "Action""#))
         XCTAssertFalse(source.contains(#"ToolDetailSection(title: "Runtime Details""#))
         XCTAssertFalse(source.contains(#"ToolDetailSection(title: "Advanced""#))
+        XCTAssertFalse(source.contains(#"ToolDetailSection(title: "What happened""#))
+        XCTAssertFalse(source.contains(#"title: surface.isWorker ? "Worker input" : "Request""#))
         XCTAssertFalse(source.contains("Approval state"))
     }
 

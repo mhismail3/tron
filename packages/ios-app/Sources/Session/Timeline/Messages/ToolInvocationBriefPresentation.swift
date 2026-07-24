@@ -22,6 +22,9 @@ struct ToolInvocationBriefPresentation: Equatable {
     let rawRequest: String?
     let rawResult: String?
     let rawPayload: String?
+    let backgroundInvocationId: String?
+
+    var isBackgroundHandoff: Bool { backgroundInvocationId != nil }
 
     init(data: ToolInvocationData) {
         let display = data.display
@@ -33,12 +36,27 @@ struct ToolInvocationBriefPresentation: Equatable {
         let resultRows = Self.resultRows(from: display)
         let evidenceRows = Self.evidenceRows(from: data, display: display)
         let subtitle = Self.subtitle(from: evidence, issue: issue, resultBody: resultBody)
+        let backgroundInvocationId = Self.backgroundInvocationId(from: data.result)
 
         self.title = title
         self.subtitle = subtitle
-        self.headline = Self.headline(for: data.status, title: title, issue: issue)
-        self.narrative = Self.narrative(for: data, title: title, issue: issue)
-        self.factRows = Self.factRows(from: data, display: display)
+        self.headline = Self.headline(
+            for: data.status,
+            title: title,
+            issue: issue,
+            backgroundInvocationId: backgroundInvocationId
+        )
+        self.narrative = Self.narrative(
+            for: data,
+            title: title,
+            issue: issue,
+            backgroundInvocationId: backgroundInvocationId
+        )
+        self.factRows = Self.factRows(
+            from: data,
+            display: display,
+            backgroundInvocationId: backgroundInvocationId
+        )
         self.requestRows = requestRows
         self.resultRows = resultRows
         self.resultBody = resultBody
@@ -51,6 +69,7 @@ struct ToolInvocationBriefPresentation: Equatable {
             .compactMap { $0?.nilIfEmpty }
             .joined(separator: "\n\n")
             .nilIfEmpty
+        self.backgroundInvocationId = backgroundInvocationId
     }
 
     static func redactSensitiveIdentifiers(_ text: String) -> String {
@@ -98,8 +117,12 @@ struct ToolInvocationBriefPresentation: Equatable {
     private static func headline(
         for status: ToolInvocationStatus,
         title: String,
-        issue: Issue?
+        issue: Issue?,
+        backgroundInvocationId: String?
     ) -> String {
+        if backgroundInvocationId != nil {
+            return "\(title) is continuing in the background"
+        }
         switch status {
         case .generating, .running:
             return "\(title) is running"
@@ -113,13 +136,17 @@ struct ToolInvocationBriefPresentation: Equatable {
     private static func narrative(
         for data: ToolInvocationData,
         title: String,
-        issue: Issue?
+        issue: Issue?,
+        backgroundInvocationId: String?
     ) -> String {
         if let issue {
             if let nextStep = issue.nextStep {
                 return "\(issue.title). \(nextStep)"
             }
             return issue.title
+        }
+        if backgroundInvocationId != nil {
+            return "\(title) was durably handed off after the foreground grace period. The conversation can continue now; current status, nested work, cancellation, and the eventual result remain available in Session Context."
         }
         switch data.status {
         case .generating, .running:
@@ -149,19 +176,55 @@ struct ToolInvocationBriefPresentation: Equatable {
 
     private static func factRows(
         from data: ToolInvocationData,
-        display: ToolInvocationDisplayModel
+        display: ToolInvocationDisplayModel,
+        backgroundInvocationId: String?
     ) -> [ToolDisplayRow] {
         var rows = [
-            ToolDisplayRow(label: "Status", value: display.statusText),
+            ToolDisplayRow(
+                label: "Status",
+                value: backgroundInvocationId == nil ? display.statusText : "Background"
+            ),
             ToolDisplayRow(
                 label: "Type",
                 value: ToolInvocationSurface(identity: data.identity).displayKind
             )
         ]
+        if let backgroundInvocationId {
+            rows.append(
+                ToolDisplayRow(
+                    label: "Durable run",
+                    value: abbreviatedIdentifier(backgroundInvocationId)
+                )
+            )
+        }
         if let duration = data.formattedDuration {
-            rows.append(ToolDisplayRow(label: "Duration", value: duration))
+            rows.append(
+                ToolDisplayRow(
+                    label: backgroundInvocationId == nil ? "Duration" : "Foreground wait",
+                    value: duration
+                )
+            )
         }
         return rows
+    }
+
+    private static func backgroundInvocationId(from result: String?) -> String? {
+        guard let result,
+              let data = result.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["kind"] as? String == "worker_invocation_receipt",
+              object["mode"] as? String == "background",
+              let status = object["status"] as? String,
+              status == "queued" || status == "running"
+        else {
+            return nil
+        }
+        return (object["invocationId"] as? String)?.nilIfEmpty
+    }
+
+    private static func abbreviatedIdentifier(_ value: String) -> String {
+        guard value.count > 16 else { return value }
+        return "\(value.prefix(10))…\(value.suffix(4))"
     }
 
     private static func requestRows(
@@ -199,6 +262,12 @@ struct ToolInvocationBriefPresentation: Equatable {
     ) -> String? {
         guard data.status != .error, data.errorClassification == nil else { return nil }
         guard let body = (display.resultPreview ?? data.result)?.nilIfEmpty else { return nil }
+        if backgroundInvocationId(from: data.result) != nil,
+           let data = data.result?.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let message = object["message"] as? String {
+            return safeBodyText(message, limit: 900).nilIfEmpty
+        }
         return safeBodyText(body, limit: 900).nilIfEmpty
     }
 

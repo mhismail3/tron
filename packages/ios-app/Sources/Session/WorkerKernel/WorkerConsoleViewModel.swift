@@ -217,6 +217,10 @@ final class WorkerConsoleViewModel {
             }
             monitoringError = pollingError
             if changed {
+                NotificationCenter.default.post(
+                    name: .workerRunProjectionInvalidated,
+                    object: nil
+                )
                 await refresh(
                     repository: repository,
                     connectionState: connectionState
@@ -412,4 +416,12 @@ final class WorkerConsoleViewModel {
         var identifiers = Set(existing.map { $0[keyPath: id] })
         existing.append(contentsOf: incoming.filter { identifiers.insert($0[keyPath: id]).inserted })
     }
+}
+
+extension Notification.Name {
+    /// Invalidation only: consumers re-read the authoritative durable graph.
+    /// No worker execution state is carried in the notification.
+    static let workerRunProjectionInvalidated = Notification.Name(
+        "tron.worker-run-projection-invalidated"
+    )
 }

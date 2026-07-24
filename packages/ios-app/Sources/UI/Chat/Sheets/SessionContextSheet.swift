@@ -66,6 +66,42 @@ enum SessionContextPresentation {
         guard currentContextWindow > 0 else { return "Window loading" }
         return "\(TokenFormatter.format(tokensRemaining, style: .withSuffix)) left"
     }
+
+    static func causalGroups(_ runs: [WorkerInvocationDTO]) -> [SessionWorkerRunGroup] {
+        let byParent = Dictionary(grouping: runs.compactMap { run -> (String, WorkerInvocationDTO)? in
+            run.parentWorkerInvocationId.map { ($0, run) }
+        }, by: \.0)
+        let known = Set(runs.map(\.invocationId))
+        let roots = runs.filter {
+            $0.parentWorkerInvocationId == nil
+                || !known.contains($0.parentWorkerInvocationId ?? "")
+        }
+
+        func descendants(of invocationId: String) -> [WorkerInvocationDTO] {
+            (byParent[invocationId] ?? []).flatMap { pair in
+                [pair.1] + descendants(of: pair.1.invocationId)
+            }
+        }
+
+        return roots.map {
+            SessionWorkerRunGroup(root: $0, descendants: descendants(of: $0.invocationId))
+        }
+    }
+
+    static func runState(_ run: WorkerInvocationDTO) -> String {
+        if run.detachedAt != nil,
+           run.status == "queued" || run.status == "running" {
+            return "Detached"
+        }
+        return WorkerConsolePresentation.displayLabel(run.status)
+    }
+}
+
+struct SessionWorkerRunGroup: Identifiable, Equatable {
+    let root: WorkerInvocationDTO
+    let descendants: [WorkerInvocationDTO]
+
+    var id: String { root.invocationId }
 }
 
 /// Session-scoped context telemetry, worker activity, and controls backed only
@@ -99,6 +135,7 @@ struct SessionContextSheet: View {
     @State private var workerLoadError: String?
     @State private var selectedWorkerRun: WorkerInvocationDTO?
     @State private var errorMessage: String?
+    @State private var workerRefreshRevision = 0
 
     private var percentage: Int { contextState.contextPercentage }
     private var accent: Color { SessionContextPresentation.pressure(for: percentage).color }
@@ -115,6 +152,9 @@ struct SessionContextSheet: View {
     }
     private var currentModelDisplayName: String {
         currentModelInfo?.formattedModelName ?? currentModelId.shortModelName
+    }
+    private var workerRunGroups: [SessionWorkerRunGroup] {
+        SessionContextPresentation.causalGroups(sessionWorkerRuns)
     }
 
     var body: some View {
@@ -154,8 +194,11 @@ struct SessionContextSheet: View {
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
         .task { await loadModels() }
-        .task(id: "\(sessionId):\(isAgentActive)") {
+        .task(id: "\(sessionId):\(isConnected):\(isAgentActive):\(workerRefreshRevision)") {
             await observeSessionWorkers()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .workerRunProjectionInvalidated)) { _ in
+            workerRefreshRevision += 1
         }
         .sheet(isPresented: $showModelPicker) {
             ModelPickerSheet(
@@ -342,8 +385,8 @@ struct SessionContextSheet: View {
                         ProgressView()
                             .controlSize(.small)
                             .tint(.tronCyan)
-                    } else if !sessionWorkerRuns.isEmpty {
-                        Text("\(sessionWorkerRuns.count)")
+                    } else if !workerRunGroups.isEmpty {
+                        Text("\(workerRunGroups.count) roots · \(sessionWorkerRuns.count) runs")
                             .font(TronTypography.pillValue)
                             .foregroundStyle(.tronCyan)
                     }
@@ -371,13 +414,23 @@ struct SessionContextSheet: View {
                     .sectionFill(.tronCyan, cornerRadius: 10, subtle: true, interactive: false)
             } else {
                 LazyVStack(spacing: 7) {
-                    ForEach(sessionWorkerRuns) { run in
+                    ForEach(workerRunGroups) { group in
                         SessionWorkerRunRow(
-                            run: run,
-                            workerName: workerNames[run.workerId]
-                                ?? WorkerConsolePresentation.displayLabel(run.workerId)
+                            run: group.root,
+                            workerName: workerNames[group.root.workerId]
+                                ?? WorkerConsolePresentation.displayLabel(group.root.workerId)
                         ) {
-                            selectedWorkerRun = run
+                            selectedWorkerRun = group.root
+                        }
+                        ForEach(group.descendants) { child in
+                            SessionWorkerRunRow(
+                                run: child,
+                                workerName: workerNames[child.workerId]
+                                    ?? WorkerConsolePresentation.displayLabel(child.workerId)
+                            ) {
+                                selectedWorkerRun = child
+                            }
+                            .padding(.leading, 18)
                         }
                     }
                 }
@@ -479,10 +532,9 @@ struct SessionContextSheet: View {
                 let workers = try await workerRepository.workers(includeRetired: true).workers
                 workerNames = Dictionary(uniqueKeysWithValues: workers.map { ($0.workerId, $0.name) })
             }
-            let page = try await workerRepository.workerRuns(
-                workerId: nil,
+            let page = try await workerRepository.workerRunGraphs(
                 originSessionId: sessionId,
-                limit: 20,
+                limit: 10,
                 offset: reset ? nil : workerRunsNextOffset
             )
             if reset {
@@ -561,7 +613,7 @@ private struct SessionWorkerRunRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(WorkerConsolePresentation.displayLabel(run.status))
+                    Text(SessionContextPresentation.runState(run))
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                         .foregroundStyle(color)
                     if let timestamp = WorkerConsolePresentation.timestamp(
