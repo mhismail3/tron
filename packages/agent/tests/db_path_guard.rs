@@ -257,7 +257,8 @@ fn project_reference_worker_table_catalog_matches_worker_store() {
     let store_root = repo_root().join("packages/agent/src/domains/worker_kernel/persistence/store");
     let mut store_sources = Vec::new();
     collect_text_files(&store_root, &mut store_sources);
-    let source_tables: BTreeSet<_> = store_sources
+    store_sources.push(repo_root().join("packages/agent/src/shared/storage/schema.rs"));
+    let mut source_tables: BTreeSet<_> = store_sources
         .into_iter()
         .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("rs"))
         .flat_map(|path| {
@@ -266,6 +267,9 @@ fn project_reference_worker_table_catalog_matches_worker_store() {
             sqlite_table_names(&source)
         })
         .collect();
+    // Schema-v10 uses this table only as a restart-safe migration stage and
+    // drops it in the atomic cutover; it is not part of the active catalog.
+    let _ = source_tables.remove("worker_result_migration_v10");
     assert!(!source_tables.is_empty(), "worker store declares no tables");
     assert_eq!(
         project_reference_table_names("Worker database"),

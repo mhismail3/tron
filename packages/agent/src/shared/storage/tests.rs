@@ -126,6 +126,115 @@ fn dangling_payload_blob_refs_fail_storage_integrity_checks() {
 }
 
 #[test]
+fn blob_backed_payload_resolution_verifies_owner_hash_and_size() {
+    let conn = Connection::open_in_memory().unwrap();
+    apply_runtime_pragmas(&conn).unwrap();
+    ensure_storage_schema(&conn).unwrap();
+    let value = serde_json::json!({"large":"verified".repeat(128)});
+    let stored = store_json_value(
+        &conn,
+        &value,
+        &StorePayloadOptions::new("worker_invocation", "run-1", "output", "audit")
+            .with_inline_threshold(1),
+    )
+    .unwrap();
+    assert_eq!(
+        resolve_owned_json_value(&conn, "worker_invocation", "run-1", "output", &stored).unwrap(),
+        value
+    );
+
+    conn.execute(
+        "UPDATE storage_payload_refs SET payload_hash='tampered'
+         WHERE owner_kind='worker_invocation' AND owner_id='run-1'",
+        [],
+    )
+    .unwrap();
+    let error = resolve_owned_json_value(&conn, "worker_invocation", "run-1", "output", &stored)
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("does not match its durable owner"),
+        "{error:#}"
+    );
+}
+
+#[test]
+fn inline_payload_resolution_verifies_requested_owner_hash_and_size() {
+    let conn = Connection::open_in_memory().unwrap();
+    apply_runtime_pragmas(&conn).unwrap();
+    ensure_storage_schema(&conn).unwrap();
+    let value = serde_json::json!({"small":"verified"});
+    let stored = store_json_value(
+        &conn,
+        &value,
+        &StorePayloadOptions::new("worker_invocation", "run-inline", "output", "audit"),
+    )
+    .unwrap();
+    assert!(!stored.contains(PAYLOAD_REF_ENVELOPE_KEY));
+    assert_eq!(
+        resolve_owned_json_value(&conn, "worker_invocation", "run-inline", "output", &stored,)
+            .unwrap(),
+        value
+    );
+
+    let error =
+        resolve_owned_json_value(&conn, "worker_invocation", "another-run", "output", &stored)
+            .unwrap_err();
+    assert!(error.to_string().contains("is missing"), "{error:#}");
+    conn.execute(
+        "UPDATE storage_payload_refs SET payload_size_bytes=payload_size_bytes+1
+         WHERE owner_kind='worker_invocation' AND owner_id='run-inline'",
+        [],
+    )
+    .unwrap();
+    let error =
+        resolve_owned_json_value(&conn, "worker_invocation", "run-inline", "output", &stored)
+            .unwrap_err();
+    assert!(error.to_string().contains("size or SHA-256"), "{error:#}");
+}
+
+#[test]
+fn owned_payload_cleanup_repairs_refcounts_and_prunes_only_unowned_blobs() {
+    let conn = Connection::open_in_memory().unwrap();
+    apply_runtime_pragmas(&conn).unwrap();
+    ensure_storage_schema(&conn).unwrap();
+    let value = serde_json::json!({"same":"content".repeat(128)});
+    for owner in ["run-1", "run-2"] {
+        store_json_value(
+            &conn,
+            &value,
+            &StorePayloadOptions::new("worker_invocation", owner, "output", "audit")
+                .with_inline_threshold(1),
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+
+    assert_eq!(
+        delete_owned_payload_refs(&conn, "worker_invocation", "run-1").unwrap(),
+        1
+    );
+    assert_eq!(delete_unowned_blobs(&conn).unwrap(), 0);
+    assert_eq!(
+        conn.query_row("SELECT ref_count FROM blobs", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+
+    assert_eq!(
+        delete_owned_payload_refs(&conn, "worker_invocation", "run-2").unwrap(),
+        1
+    );
+    assert_eq!(delete_unowned_blobs(&conn).unwrap(), 1);
+}
+
+#[test]
 fn checkpoint_and_export_use_one_active_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(UNIFIED_DB_FILENAME);

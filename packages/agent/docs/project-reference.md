@@ -567,17 +567,20 @@ is created with `contextAttached=true` and cannot later reappear as unrelated
 background context. Hook failures remain unattached Attention until resolved.
 
 `worker_runs` and `worker_inbox` return compact observations by default: pages
-contain at most 20 records, with inputs, outputs, and results represented by
-512-byte JSON previews and no expanded attempt or trace maps. Runs filter
+contain at most 20 records. Inputs use bounded previews; every successful
+output and inbox result retains its complete integrity-bound
+`worker_result_reference` plus concise preview without loading the result body.
+There is no raw-result mode in these history APIs. Runs filter
 directly by status or `originSessionId`; an invocation inherits the originating
 user session of its causal trace, so this filter includes both workers called
 from that conversation and nested worker work they initiated. The separate
 `agentSessionId` remains child-execution evidence and is never substituted for
 the originating conversation. Inbox reads filter directly by context-attachment
 state and severity, so routine health checks do not move irrelevant history
-into model context. `detail: "full"` is an
-explicit operator path capped at 20 records and 8 KiB per retained value; the
-response reports content truncation and a `nextOffset` when older records remain.
+into model context. `detail: "full"` is an explicit operator path capped at 20
+records and 8 KiB per retained input or error; successful results remain
+references. The response reports content truncation and a `nextOffset` when
+older records remain.
 Run reads also accept exact `invocationId` and `modelToolInvocationId` filters.
 `detail: "graph"` pages at most ten causal roots and reconstructs each bounded
 tree from invocation, attempt, generic stage, child-session, model-turn, and
@@ -770,13 +773,17 @@ server-side. `worker_cancel` targets the selected invocation's durable causal
 subtree while leaving unrelated work running; it remains distinct from
 per-worker `worker_stop` and profile-wide `worker_stop_all`.
 
-Every successful worker result is schema-validated and retained exactly once
-in its durable invocation. Provider-facing direct-worker and fixed
-invoke/await responses keep values at or below the shared 8 KiB inline-payload
-boundary inline. Larger values become a `worker_result_reference` containing
-the invocation, immutable worker version, output-schema digest, content digest,
-byte size, and concise preview. This changes context projection, not execution
-or typed durability.
+Every successful worker result is schema-validated and has exactly one logical
+owner: its durable invocation. The generic payload tables live in the same
+`workers.sqlite` transaction. Values at or below the shared 8 KiB boundary
+remain inline in `worker_invocations.output_json`; larger values become
+SHA-256-addressed, zstd-compressed blobs and the invocation column holds only
+an internal payload envelope. Both forms have an ownership row, digest, byte
+size, and preview. Successful inbox rows contain compact
+`{status, reference, preview}` receipts rather than a second output copy.
+Provider-facing direct-worker and fixed invoke/await responses may still
+hydrate a fresh small result for typed delivery; durable history, run graphs,
+Session Context, and inbox reads expose references and previews only.
 
 `worker_result_read` retrieves one RFC 6901 JSON pointer from that exact result.
 Array/object pages are limited to twenty entries and each response is bounded
@@ -1773,7 +1780,9 @@ operational evidence:
 
 | Table | Ownership |
 |---|---|
-| `worker_schema` | worker index schema version |
+| `worker_schema` | worker index schema version; v10 establishes canonical invocation-owned results |
+| `blobs` | generic content-addressed compressed result bodies larger than 8 KiB |
+| `storage_payload_refs` | one generic ownership/integrity row for every successful invocation output |
 | `workers` | rebuildable current catalog |
 | `worker_versions` | rebuildable version index |
 | `worker_routes` | rebuildable direct-tool route and routing metadata |
@@ -1783,7 +1792,7 @@ operational evidence:
 | `worker_run_events` | append-only generic stage evidence for authoritative run timelines |
 | `worker_causal_traces` | trace roots, depth, delivery, and suppression counters |
 | `worker_trace_deliveries` | unique worker/trigger/idempotency combinations per trace |
-| `worker_inbox` | durable result delivery records and agent-context attachment state |
+| `worker_inbox` | durable compact result-reference receipts, failure records, and agent-context attachment state |
 | `worker_audit` | lifecycle and mutation evidence |
 | `worker_health` | versioned activation/lifecycle/execution health history |
 | `worker_runtime_settings` | durable engine stop-all state |
@@ -1791,6 +1800,13 @@ operational evidence:
 The fixed kernel has no device-token registration, notification inbox, or APNs
 delivery plane. A future notification workflow must be authored and exercised
 as a worker rather than restored as a fixed domain.
+
+Schema v10 is preceded by one verified profile snapshot. Its backfill writes
+content ownership in restart-safe bounded staging transactions without changing
+schema-v9 invocation or inbox rows. One final transaction verifies all
+owners/digests/blobs, publishes large-result envelopes and compact inbox
+receipts, and records v10. Interrupted staging therefore leaves the old logical
+view intact and safely resumes; only the verified cutover becomes visible.
 
 ## Events and Transport
 

@@ -336,6 +336,36 @@ pub(super) fn row_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerSum
     })
 }
 
+pub(super) fn inbox_context_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    const MAX_RESULT_PREVIEW_BYTES: usize = 4_096;
+    let result_json = row.get::<_, String>(4)?;
+    let result_preview = serde_json::from_str::<Value>(&result_json)
+        .ok()
+        .and_then(|result| {
+            result
+                .get("preview")
+                .or_else(|| result.get("error"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| result_json.clone());
+    Ok(json!({
+        "inboxId":row.get::<_, String>(0)?,
+        "invocationId":row.get::<_, String>(1)?,
+        "workerId":row.get::<_, String>(2)?,
+        "severity":row.get::<_, String>(3)?,
+        "resultPreview":crate::shared::foundation::text::truncate_with_suffix(
+            &result_preview,
+            MAX_RESULT_PREVIEW_BYTES,
+            "...",
+        ),
+        "createdAt":row.get::<_, String>(5)?,
+        "triggerKind":row.get::<_, String>(6)?,
+        "workerName":row.get::<_, String>(7)?,
+        "workerDescription":row.get::<_, String>(8)?,
+    }))
+}
+
 pub(super) fn invocation_select(condition: &str) -> String {
     format!("{} {condition}", invocation_select_base())
 }
@@ -359,16 +389,53 @@ pub(super) fn invocation_select_base() -> &'static str {
      FROM worker_invocations"
 }
 
-pub(super) fn row_invocation(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvocationRecord> {
+pub(super) fn row_invocation(
+    connection: &Connection,
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<InvocationRecord> {
+    row_invocation_with_output(connection, row, InvocationOutputProjection::Exact)
+}
+
+pub(super) fn row_invocation_reference(
+    connection: &Connection,
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<InvocationRecord> {
+    row_invocation_with_output(connection, row, InvocationOutputProjection::Reference)
+}
+
+#[derive(Clone, Copy)]
+enum InvocationOutputProjection {
+    Exact,
+    Reference,
+}
+
+fn row_invocation_with_output(
+    connection: &Connection,
+    row: &rusqlite::Row<'_>,
+    output_projection: InvocationOutputProjection,
+) -> rusqlite::Result<InvocationRecord> {
     let input: String = row.get(4)?;
     let output: Option<String> = row.get(5)?;
+    let invocation_id = row.get::<_, String>(0)?;
+    let output = output
+        .as_deref()
+        .map(|value| match output_projection {
+            InvocationOutputProjection::Exact => {
+                super::results::resolve_stored_result(connection, &invocation_id, value)
+            }
+            InvocationOutputProjection::Reference => {
+                super::results::result_reference_from_connection(connection, &invocation_id)
+            }
+        })
+        .map(|result| result.map_err(result_projection_error))
+        .transpose()?;
     Ok(InvocationRecord {
-        invocation_id: row.get(0)?,
+        invocation_id,
         worker_id: row.get(1)?,
         worker_version: row.get(2)?,
         status: row.get(3)?,
         input: serde_json::from_str(&input).unwrap_or(Value::Null),
-        output: output.and_then(|value| serde_json::from_str(&value).ok()),
+        output,
         error: row.get(6)?,
         idempotency_key: row.get(7)?,
         trace_id: row.get(8)?,
@@ -389,6 +456,14 @@ pub(super) fn row_invocation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Invoca
         started_at: row.get(20)?,
         completed_at: row.get(21)?,
     })
+}
+
+fn result_projection_error(error: String) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        5,
+        rusqlite::types::Type::Text,
+        Box::new(std::io::Error::other(error)),
+    )
 }
 
 pub(super) fn insert_run_event(

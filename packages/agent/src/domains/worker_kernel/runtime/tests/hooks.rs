@@ -455,8 +455,12 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
     assert_eq!(inbox.error, None);
     assert_eq!(inbox.value.as_ref().unwrap()["detail"], "summary");
     assert_eq!(
-        inbox.value.as_ref().unwrap()["items"][0]["result"]["preview"],
-        "{\"output\":{\"report\":\"ready\"},\"status\":\"completed\"}"
+        inbox.value.as_ref().unwrap()["items"][0]["result"]["status"],
+        "completed"
+    );
+    assert_eq!(
+        inbox.value.as_ref().unwrap()["items"][0]["result"]["reference"]["kind"],
+        "worker_result_reference"
     );
     let inbox_id = inbox.value.unwrap()["items"][0]["inboxId"]
         .as_str()
@@ -474,9 +478,10 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
     let full_inbox = full_inbox.value.unwrap();
     assert_eq!(full_inbox["detail"], "full");
     assert_eq!(
-        full_inbox["items"][0]["result"],
-        json!({"output":{"report":"ready"},"status":"completed"})
+        full_inbox["items"][0]["result"]["reference"]["kind"],
+        "worker_result_reference"
     );
+    assert!(full_inbox["items"][0]["result"].get("output").is_none());
     assert_eq!(full_inbox["returned"], 1);
     assert_eq!(full_inbox["truncated"], false);
     assert_eq!(full_inbox["contentTruncated"], false);
@@ -507,7 +512,11 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
     assert_eq!(full_runs.error, None);
     let full_runs = full_runs.value.unwrap();
     assert_eq!(full_runs["runs"][0]["input"], json!({}));
-    assert_eq!(full_runs["runs"][0]["output"], json!({"report":"ready"}));
+    assert_eq!(
+        full_runs["runs"][0]["output"]["kind"],
+        "worker_result_reference"
+    );
+    assert!(full_runs["runs"][0]["output"].get("report").is_none());
     assert!(full_runs["attempts"].as_object().unwrap().len() == 1);
     assert!(full_runs["traces"].as_object().unwrap().len() == 1);
 

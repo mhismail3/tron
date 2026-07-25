@@ -353,6 +353,13 @@ fn project_invocation(record: &InvocationRecord, detail: HistoryDetail) -> (Valu
 }
 
 fn project_history_value(value: &Value, detail: HistoryDetail) -> (Value, bool) {
+    if is_worker_result_reference(value)
+        || value
+            .get("reference")
+            .is_some_and(is_worker_result_reference)
+    {
+        return (value.clone(), false);
+    }
     let serialized = serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned());
     let maximum = match detail {
         HistoryDetail::Summary => SUMMARY_VALUE_BYTES,
@@ -374,6 +381,10 @@ fn project_history_value(value: &Value, detail: HistoryDetail) -> (Value, bool) 
         }),
         truncated,
     )
+}
+
+fn is_worker_result_reference(value: &Value) -> bool {
+    value.get("kind").and_then(Value::as_str) == Some("worker_result_reference")
 }
 
 fn optional_enum<'a>(
@@ -412,5 +423,25 @@ mod tests {
         assert!(bounded_truncated);
         assert_eq!(bounded["truncated"], true);
         assert!(bounded["preview"].as_str().unwrap().len() <= FULL_VALUE_BYTES);
+
+        let reference = json!({
+            "kind":"worker_result_reference",
+            "invocationId":"run-1",
+            "preview":"ready",
+        });
+        let receipt = json!({
+            "status":"completed",
+            "reference":reference,
+            "preview":"ready",
+        });
+        for detail in [
+            HistoryDetail::Summary,
+            HistoryDetail::Full,
+            HistoryDetail::Graph,
+        ] {
+            let (projected, truncated) = project_history_value(&receipt, detail);
+            assert_eq!(projected, receipt);
+            assert!(!truncated);
+        }
     }
 }

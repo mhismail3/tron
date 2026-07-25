@@ -1,11 +1,12 @@
 //! Unified engine storage runtime.
 //!
-//! Tron stores active server data in one engine-owned SQLite database:
-//! `~/.tron/internal/database/tron.sqlite`. Runtime connections use WAL for
-//! safe concurrent reads/writes; checkpoints and exports create compact
-//! single-file artifacts when the operator needs one. Shared storage schema
-//! setup runs behind a savepoint with drift and payload-reference integrity
-//! checks.
+//! Tron stores active engine data in `tron.sqlite` and durable worker
+//! operations in `workers.sqlite`. Both ledgers reuse this generic
+//! content-addressed payload schema; ownership rows never cross databases.
+//! Runtime connections use WAL for safe concurrent reads/writes; checkpoints
+//! and exports create compact single-file artifacts when the operator needs
+//! one. Shared schema setup runs behind a savepoint with drift and
+//! payload-reference integrity checks.
 //! Startup and manual cleanup share one managed diagnostic horizon and active
 //! database budget. Those bounds prune only low-signal diagnostic data and
 //! unowned blobs; they are not chat, session, or memory retention policy.
@@ -28,7 +29,8 @@ mod tests;
 
 pub use maintenance::{checkpoint_database, export_snapshot};
 pub use payloads::{
-    decode_blob_content, encode_blob_content, register_existing_blob_owner,
+    decode_blob_content, delete_owned_payload_refs, delete_unowned_blobs, encode_blob_content,
+    owned_payload_ref, register_existing_blob_owner, resolve_owned_json_value,
     resolve_stored_json_string, resolve_stored_json_value, store_content_blob, store_json_bytes,
     store_json_value, store_owned_payload_ref,
 };

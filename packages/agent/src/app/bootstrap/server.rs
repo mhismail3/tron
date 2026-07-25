@@ -623,9 +623,33 @@ mod tests {
         .await
         .expect("webhook invocation should be dispatched from its durable queue");
         assert_eq!(completed["attemptCount"], 1);
-        assert_eq!(completed["output"]["configured"], true);
-        assert_eq!(completed["output"]["requestValue"], 7);
-        assert!(completed["output"].get("webhook").is_none());
+        assert_eq!(
+            completed["output"]["kind"], "worker_result_reference",
+            "run history must not hydrate a durable worker result"
+        );
+        let completed_invocation_id = completed["invocationId"]
+            .as_str()
+            .expect("completed run must retain invocation identity")
+            .to_owned();
+        let exact = server
+            .runtime_context()
+            .engine_host
+            .invoke(crate::engine::Invocation::new_sync(
+                crate::engine::FunctionId::new("worker_kernel::result_read").unwrap(),
+                serde_json::json!({"invocationId":completed_invocation_id}),
+                crate::engine::CausalContext::new(
+                    crate::engine::ActorId::new("system:webhook-http-test").unwrap(),
+                    crate::engine::ActorKind::System,
+                    crate::engine::TraceId::new("webhook-http-result").unwrap(),
+                )
+                .with_idempotency_key(format!("webhook-http-result:{}", uuid::Uuid::now_v7())),
+            ))
+            .await;
+        assert!(exact.error.is_none(), "{:?}", exact.error);
+        let exact = exact.value.unwrap();
+        assert_eq!(exact["value"]["configured"], true);
+        assert_eq!(exact["value"]["requestValue"], 7);
+        assert!(exact["value"].get("webhook").is_none());
 
         let mut wrong = Request::builder()
             .method("POST")

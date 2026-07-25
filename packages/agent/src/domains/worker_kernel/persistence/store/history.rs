@@ -71,7 +71,7 @@ impl WorkerStore {
                     limit.min(500),
                     offset
                 ],
-                row_invocation,
+                |row| row_invocation_reference(&connection, row),
             )
             .map_err(|error| error.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>()

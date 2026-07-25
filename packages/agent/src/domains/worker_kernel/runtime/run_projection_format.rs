@@ -16,6 +16,11 @@ pub(super) fn preview_request(value: &Value) -> String {
 }
 
 pub(super) fn preview_result(value: &Value) -> String {
+    if value.get("kind").and_then(Value::as_str) == Some("worker_result_reference")
+        && let Some(preview) = value.get("preview").and_then(Value::as_str)
+    {
+        return preview_text(preview);
+    }
     for key in ["summary", "answer", "report", "result"] {
         if let Some(value) = value.get(key).and_then(Value::as_str) {
             return preview_text(value);

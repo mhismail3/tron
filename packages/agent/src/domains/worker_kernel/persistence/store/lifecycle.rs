@@ -353,6 +353,20 @@ impl WorkerStore {
             }
         }
         let result = (|| -> Result<usize, String> {
+            let invocation_ids = {
+                let mut statement = transaction
+                    .prepare(
+                        "SELECT invocation_id FROM worker_invocations
+                         WHERE worker_id=?1 ORDER BY invocation_id",
+                    )
+                    .map_err(|error| format!("prepare worker result purge: {error}"))?;
+                statement
+                    .query_map([worker_id], |row| row.get::<_, String>(0))
+                    .map_err(|error| format!("query worker result purge: {error}"))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(|error| format!("decode worker result purge: {error}"))?
+            };
+            Self::delete_result_owners(&transaction, &invocation_ids)?;
             transaction
                 .execute("DELETE FROM worker_inbox WHERE worker_id=?1", [worker_id])
                 .map_err(|error| format!("purge worker inbox: {error}"))?;
@@ -426,7 +440,7 @@ impl WorkerStore {
                 ))
                 .map_err(|error| error.to_string())?;
             statement
-                .query_map([worker_id], row_invocation)
+                .query_map([worker_id], |row| row_invocation(&connection, row))
                 .map_err(|error| error.to_string())?
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(|error| error.to_string())?

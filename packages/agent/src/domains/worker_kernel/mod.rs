@@ -150,11 +150,15 @@
 //! instead of admitting duplicate specialist work. `worker_await` is bounded
 //! by the same interaction budget, and `worker_detach` only changes
 //! interaction ownership.
-//! Exact terminal worker output is validated and retained once in the durable
-//! invocation ledger. Provider-facing worker results use the shared 8 KiB
-//! inline-payload boundary: larger values become integrity-bound
-//! `worker_result_reference` objects instead of being copied through every
-//! later model turn. `worker_result_read` returns only one bounded RFC 6901
+//! Exact terminal worker output is validated and owned once by the durable
+//! invocation ledger. Every successful invocation has an integrity row in the
+//! generic payload schema. Values at or below the shared 8 KiB boundary remain
+//! inline in `worker_invocations`; larger values are SHA-256-addressed,
+//! zstd-compressed blobs in `workers.sqlite`. Inbox, history, Session Context,
+//! and run graphs carry compact `worker_result_reference` receipts rather than
+//! copying the typed value. Exact hydration is limited to synchronous/nested
+//! delivery, engine-hook application, explicit bounded result reads, recovery,
+//! and purge export. `worker_result_read` returns only one bounded RFC 6901
 //! path/page (at most 32 KiB and twenty items), authorized to the same causal
 //! trace or originating session; paired clients and system recovery may inspect
 //! profile-local results. That page is present in full for the immediately
@@ -164,6 +168,11 @@
 //! digest, content digest, size, and preview. Workers decide which paths or
 //! references their typed orchestration needs; the kernel never interprets
 //! source, claim, citation, or report fields.
+//! Schema v10 stages historical ownership in restart-safe bounded
+//! transactions while leaving schema-v9 rows readable, then atomically swaps
+//! large outputs to internal envelopes, replaces successful inbox copies with
+//! receipts, verifies every owner/hash/blob, and records the version. The
+//! verified pre-migration profile snapshot remains the rollback boundary.
 //! The fixed invocation envelope and each selected worker's nested input
 //! schema are both transport admission boundaries. A nested schema or secret
 //! violation is returned as an actionable invalid request before any durable

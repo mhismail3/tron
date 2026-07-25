@@ -157,10 +157,9 @@ impl WorkerStore {
             ))
             .map_err(|error| format!("prepare worker invocation tree: {error}"))?;
         statement
-            .query_map(
-                params![root_invocation_id, limit.min(1_000)],
-                row_invocation,
-            )
+            .query_map(params![root_invocation_id, limit.min(1_000)], |row| {
+                row_invocation_reference(&connection, row)
+            })
             .map_err(|error| format!("query worker invocation tree: {error}"))?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| format!("decode worker invocation tree: {error}"))
@@ -272,7 +271,7 @@ impl WorkerStore {
         statement
             .query_map(
                 params![status, origin_session_id, worker_id, limit.min(500), offset],
-                row_invocation,
+                |row| row_invocation_reference(&connection, row),
             )
             .map_err(|error| format!("query worker causal roots: {error}"))?
             .collect::<rusqlite::Result<Vec<_>>>()

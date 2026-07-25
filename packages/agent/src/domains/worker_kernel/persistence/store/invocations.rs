@@ -3,7 +3,6 @@
 use super::*;
 
 const MAX_INBOX_CONTEXT_CANDIDATES: u32 = 200;
-const MAX_INBOX_RESULT_PREVIEW_BYTES: usize = 4_096;
 
 // INVARIANT: attention is a live projection over immutable evidence. A
 // successful activation or rollback is verified recovery; merely toggling an
@@ -37,25 +36,6 @@ const COMPLETED_ENGINE_HOOK_CONTEXT_ATTACHED_SQL: &str = "
         ELSE 0
     END
 ";
-
-fn inbox_context_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    let result_json = row.get::<_, String>(4)?;
-    Ok(json!({
-        "inboxId":row.get::<_, String>(0)?,
-        "invocationId":row.get::<_, String>(1)?,
-        "workerId":row.get::<_, String>(2)?,
-        "severity":row.get::<_, String>(3)?,
-        "resultPreview":crate::shared::foundation::text::truncate_with_suffix(
-            &result_json,
-            MAX_INBOX_RESULT_PREVIEW_BYTES,
-            "...",
-        ),
-        "createdAt":row.get::<_, String>(5)?,
-        "triggerKind":row.get::<_, String>(6)?,
-        "workerName":row.get::<_, String>(7)?,
-        "workerDescription":row.get::<_, String>(8)?,
-    }))
-}
 
 impl WorkerStore {
     #[cfg(test)]
@@ -379,14 +359,29 @@ impl WorkerStore {
         worker_id: &str,
         result: Result<&Value, &str>,
     ) -> Result<InvocationRecord, String> {
+        let mut connection = self.connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let (trace_id, origin_session_id): (String, Option<String>) = tx
+            .query_row(
+                "SELECT trace_id,origin_session_id FROM worker_invocations
+                 WHERE invocation_id=?1 AND worker_id=?2 AND status='running'",
+                params![invocation_id, worker_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|error| format!("load completing worker invocation: {error}"))?;
         let (status, output, error, severity, inbox_result) = match result {
-            Ok(output) => (
-                "completed",
-                Some(serde_json::to_string(output).map_err(|error| error.to_string())?),
-                None,
-                "info",
-                json!({"status":"completed","output":output}),
-            ),
+            Ok(output) => {
+                let stored = Self::store_result_in_transaction(
+                    &tx,
+                    invocation_id,
+                    output,
+                    &trace_id,
+                    origin_session_id.as_deref(),
+                )?;
+                ("completed", Some(stored), None, "info", Value::Null)
+            }
             Err(error) => (
                 "failed",
                 None,
@@ -395,10 +390,6 @@ impl WorkerStore {
                 json!({"status":"failed","error":error}),
             ),
         };
-        let mut connection = self.connection()?;
-        let tx = connection
-            .transaction()
-            .map_err(|error| error.to_string())?;
         let completed_at = chrono::Utc::now().to_rfc3339();
         let changed = tx
             .execute(
@@ -412,6 +403,14 @@ impl WorkerStore {
                 "worker invocation '{invocation_id}' was not in a running state"
             ));
         }
+        let inbox_result = if status == "completed" {
+            results::completed_result_receipt(&results::result_reference_from_connection(
+                &tx,
+                invocation_id,
+            )?)
+        } else {
+            inbox_result
+        };
         tx.execute(
             "UPDATE worker_attempts SET status=?2,completed_at=?3,error=?4
              WHERE attempt_id=(SELECT attempt_id FROM worker_attempts
@@ -557,11 +556,12 @@ impl WorkerStore {
     }
 
     pub fn invocation(&self, invocation_id: &str) -> Result<Option<InvocationRecord>, String> {
-        self.connection()?
+        let connection = self.connection()?;
+        connection
             .query_row(
                 invocation_select("WHERE invocation_id=?1").as_str(),
                 [invocation_id],
-                row_invocation,
+                |row| row_invocation(&connection, row),
             )
             .optional()
             .map_err(|error| format!("load worker invocation: {error}"))
@@ -578,7 +578,7 @@ impl WorkerStore {
             ))
             .map_err(|error| error.to_string())?;
         statement
-            .query_map([limit.min(1_000)], row_invocation)
+            .query_map([limit.min(1_000)], |row| row_invocation(&connection, row))
             .map_err(|error| error.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| error.to_string())
@@ -589,11 +589,12 @@ impl WorkerStore {
         worker_id: &str,
         key: &str,
     ) -> Result<Option<InvocationRecord>, String> {
-        self.connection()?
+        let connection = self.connection()?;
+        connection
             .query_row(
                 invocation_select("WHERE worker_id=?1 AND idempotency_key=?2").as_str(),
                 params![worker_id, key],
-                row_invocation,
+                |row| row_invocation(&connection, row),
             )
             .optional()
             .map_err(|error| format!("load idempotent worker invocation: {error}"))
@@ -605,7 +606,8 @@ impl WorkerStore {
         worker_id: &str,
         ordinal: u32,
     ) -> Result<Option<InvocationRecord>, String> {
-        self.connection()?
+        let connection = self.connection()?;
+        connection
             .query_row(
                 invocation_select(
                     "WHERE parent_worker_invocation_id=?1
@@ -614,7 +616,7 @@ impl WorkerStore {
                 )
                 .as_str(),
                 params![parent_invocation_id, worker_id, ordinal],
-                row_invocation,
+                |row| row_invocation(&connection, row),
             )
             .optional()
             .map_err(|error| format!("load nested worker call slot: {error}"))

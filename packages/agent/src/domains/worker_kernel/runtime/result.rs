@@ -73,9 +73,9 @@ impl WorkerRuntime {
                 "worker invocation '{invocation_id}' is not completed"
             ));
         }
-        let output = record
-            .output
-            .as_ref()
+        let output = self
+            .store
+            .resolve_result(invocation_id)?
             .ok_or_else(|| format!("worker invocation '{invocation_id}' has no output"))?;
         validate_pointer(pointer)?;
         let selected = output.pointer(pointer).ok_or_else(|| {
@@ -105,27 +105,14 @@ impl WorkerRuntime {
     }
 
     fn result_reference(&self, record: &InvocationRecord) -> Result<Value, String> {
-        let output = record
-            .output
-            .as_ref()
-            .ok_or_else(|| format!("worker invocation '{}' has no output", record.invocation_id))?;
-        let output_bytes = serde_json::to_vec(output).map_err(|error| error.to_string())?;
-        let worker = self
-            .store
-            .load_version(&record.worker_id, &record.worker_version)?;
-        let schema_bytes =
-            serde_json::to_vec(&worker.bundle.output_schema).map_err(|error| error.to_string())?;
-        Ok(json!({
-            "kind":"worker_result_reference",
-            "invocationId":record.invocation_id,
-            "workerId":record.worker_id,
-            "workerVersion":record.worker_version,
-            "outputSchemaSha256":format!("sha256:{}", hex::encode(Sha256::digest(schema_bytes))),
-            "contentSha256":format!("sha256:{}", hex::encode(Sha256::digest(&output_bytes))),
-            "sizeBytes":output_bytes.len(),
-            "preview":run_projection_format::preview_result(output),
-            "message":"The exact validated result is stored durably. Pass this reference to workers that accept it, or call worker_result_read for only the JSON path/page needed.",
-        }))
+        self.store
+            .result_reference(&record.invocation_id)?
+            .ok_or_else(|| {
+                format!(
+                    "worker invocation '{}' has no durable result reference",
+                    record.invocation_id
+                )
+            })
     }
 }
 

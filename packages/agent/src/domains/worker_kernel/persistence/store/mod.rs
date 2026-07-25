@@ -3,7 +3,8 @@
 //! [`WorkerStore`] is the single persistence owner. Publication, lifecycle,
 //! invocation, bounded history, interaction/causal relationship, trigger, and
 //! state concerns extend that same store without repository wrappers or
-//! duplicate caches. Stateless codecs, validators, and SQL helpers live in
+//! duplicate caches. `results` owns canonical typed-result payloads and their
+//! schema migration. Stateless codecs, validators, and SQL helpers live in
 //! `support`; scenario tests live in `tests`.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -30,6 +31,7 @@ mod interaction;
 mod invocations;
 mod lifecycle;
 mod publication;
+mod results;
 mod state;
 mod support;
 mod triggers;
@@ -68,7 +70,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 9)?;
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 10)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
@@ -163,7 +165,7 @@ impl WorkerStore {
     }
 
     fn initialize(&self) -> Result<(), String> {
-        let connection = self.connection()?;
+        let mut connection = self.connection()?;
         connection
             .execute_batch(
                 "
@@ -504,6 +506,7 @@ impl WorkerStore {
                 [],
             )
             .map_err(|error| format!("record worker schema v9: {error}"))?;
+        self.migrate_results_v10(&mut connection)?;
         super::rebuild::rebuild_indexes(&self.root, &self.database)?;
         self.recover_interrupted()
     }
