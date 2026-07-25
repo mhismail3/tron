@@ -336,9 +336,6 @@ struct WorkerResultInspectorSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "arrow.up.right.square")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(.tronTextMuted)
             }
             .padding(.vertical, 9)
             .contentShape(Rectangle())

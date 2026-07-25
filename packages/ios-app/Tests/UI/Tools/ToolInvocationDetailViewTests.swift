@@ -38,6 +38,7 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         XCTAssertFalse(source.contains("ToolRowsDetailLink"))
         XCTAssertFalse(source.contains("ToolRowsDetailSheet"))
         XCTAssertFalse(source.contains("DisclosureGroup"))
+        XCTAssertFalse(source.contains(#"Image(systemName: "arrow.up.right.square")"#))
         XCTAssertFalse(source.contains("ForEach(evidence.sections)"))
         XCTAssertFalse(source.contains("ToolInvocationCodeBlock(text: body)"))
         XCTAssertFalse(source.contains(#"ToolDetailSection(title: "Target""#))

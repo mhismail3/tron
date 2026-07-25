@@ -113,6 +113,12 @@ struct WorkerConsoleInteractionTests {
             ),
             encoding: .utf8
         )
+        let resultInspector = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/WorkerResultInspectorSheet.swift"
+            ),
+            encoding: .utf8
+        )
 
         #expect(graph.contains("WorkerRunGraphSummaryView"))
         #expect(graph.contains("WorkerRunCausalTreeView"))
@@ -131,6 +137,8 @@ struct WorkerConsoleInteractionTests {
         #expect(!graph.contains("Started Filesystem"))
         #expect(!graph.contains("Finished Filesystem"))
         #expect(!graph.contains("joined(separator: \"\")"))
+        #expect(!graphComponents.contains(#"Image(systemName: "arrow.up.right.square")"#))
+        #expect(!resultInspector.contains(#"Image(systemName: "arrow.up.right.square")"#))
     }
 
     @Test("Worker run transcript exists only for a real child agent session")

@@ -505,7 +505,10 @@ time, child counts, result or actionable failure, and links to execution
 detail. The primary sheet never embeds an unbounded causal tree or lifecycle
 history. `Work breakdown` and `Activity` open separate large-detail sheets that
 render the server-ordered causal nodes, child-session links, and user-facing
-timeline. Active child work therefore outranks a stale parent model event, and
+timeline. Those disclosure containers remain fully tappable without repeating
+right-aligned open-link symbols; their leading icon, title, and supporting text
+carry the navigation affordance. Active child work therefore outranks a stale
+parent model event, and
 starts/finishes cannot collapse into a concatenated “Latest output” blob.
 
 The same generic graph surface offers detach, bounded await, causal-subtree
