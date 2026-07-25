@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::*;
 use crate::shared::protocol::events::TronEvent;
 
@@ -204,6 +206,26 @@ async fn reconstructed_parent_awaits_the_same_running_child_invocation() {
     assert_eq!(recovered.status, "completed");
     assert_eq!(recovered.invocation_id, original.invocation_id);
     assert_eq!(recovered.attempt_count, 1);
+    let recovered_projection = runtime
+        .store()
+        .provider_result_projections(
+            &["provider-child-after-restart".to_owned()],
+            &[],
+            &HashSet::from(["provider-child-after-restart".to_owned()]),
+            &HashSet::new(),
+            Some("session-before-restart"),
+            Some("trace-recovery-child"),
+        )
+        .unwrap();
+    assert_eq!(recovered_projection.len(), 1);
+    assert_eq!(
+        recovered_projection[0]["invocationId"],
+        original.invocation_id
+    );
+    assert_eq!(
+        recovered_projection[0]["providerValue"],
+        json!({"value":"one durable child"})
+    );
 }
 
 #[tokio::test]

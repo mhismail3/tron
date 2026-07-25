@@ -357,6 +357,40 @@ fn provider_projection_hydrates_only_fresh_authorized_small_results() {
     );
     assert_eq!(projected[1]["reference"]["invocationId"], invocation_ids[1]);
 
+    let (replayed_small, replayed) = store
+        .begin_invocation_with_context(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({"topic":"provider regenerated valid arguments"}),
+            "projection-small",
+            "trace-provider-projection",
+            0,
+            "manual",
+            Some("session-provider-projection"),
+            WorkerInteractionMode::Foreground,
+            Some("call-small-after-recovery"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(replayed);
+    assert_eq!(replayed_small.invocation_id, invocation_ids[0]);
+    let recovered_projection = store
+        .provider_result_projections(
+            &["call-small-after-recovery".to_owned()],
+            &[],
+            &HashSet::from(["call-small-after-recovery".to_owned()]),
+            &HashSet::new(),
+            Some("session-provider-projection"),
+            None,
+        )
+        .unwrap();
+    assert_eq!(recovered_projection.len(), 1);
+    assert_eq!(recovered_projection[0]["invocationId"], invocation_ids[0]);
+    assert_eq!(recovered_projection[0]["providerValue"], small);
+
     let historical = store
         .provider_result_projections(
             &model_ids,
@@ -405,6 +439,65 @@ fn provider_projection_hydrates_only_fresh_authorized_small_results() {
         )
         .unwrap_err();
     assert!(error.contains("storage integrity failure"), "{error}");
+}
+
+#[test]
+fn model_tool_result_associations_backfill_on_reopen() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let (run, _) = store
+        .begin_invocation_with_context(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({"topic":"association backfill"}),
+            "association-backfill",
+            "trace-association-backfill",
+            0,
+            "manual",
+            Some("session-association-backfill"),
+            WorkerInteractionMode::Foreground,
+            Some("call-association-backfill"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(store.claim_running(&run.invocation_id).unwrap());
+    store
+        .complete_invocation(
+            &run.invocation_id,
+            &published.worker.worker_id,
+            Ok(&json!({"answer":"durable"})),
+        )
+        .unwrap();
+    store
+        .connection()
+        .unwrap()
+        .execute("DROP TABLE worker_model_tool_result_associations", [])
+        .unwrap();
+    drop(store);
+
+    let reopened = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let projection = reopened
+        .provider_result_projections(
+            &["call-association-backfill".to_owned()],
+            &[],
+            &HashSet::new(),
+            &HashSet::new(),
+            Some("session-association-backfill"),
+            None,
+        )
+        .unwrap();
+    assert_eq!(projection.len(), 1);
+    assert_eq!(projection[0]["invocationId"], run.invocation_id);
+    assert_eq!(
+        projection[0]["providerValue"]["kind"],
+        "worker_result_reference"
+    );
 }
 
 #[test]

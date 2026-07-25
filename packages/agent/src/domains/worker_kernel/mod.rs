@@ -175,9 +175,13 @@
 //! reads only those paths, verifies the returned reference identity, and keeps
 //! all selection semantics in its immutable bundle.
 //! Direct-worker session completions persist the originating provider-tool
-//! association rather than another output body. An internal, non-model-visible
-//! projection resolves those associations within the current session or causal
-//! trace: a trailing result at or below 8 KiB is integrity-verified and
+//! association rather than another output body. That association is a
+//! many-to-one durable relation: restart redelivery may regenerate a provider
+//! tool-call id while the nested parent/per-tool slot correctly reuses the same
+//! child invocation. Both the original and regenerated ids must therefore
+//! resolve to that one canonical result without rewriting historical evidence.
+//! An internal, non-model-visible projection resolves those associations within
+//! the current session or causal trace: a trailing result at or below 8 KiB is integrity-verified and
 //! hydrated for one accepted provider request, while large, background, and
 //! historical results remain references. Provider admission, restart, token
 //! estimation, and compaction all rebuild this projection from durable

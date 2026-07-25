@@ -106,6 +106,7 @@ impl WorkerStore {
             && let Some(existing) =
                 self.invocation_by_parent_tool_slot(parent_id, worker_id, ordinal)?
         {
+            self.record_result_association(&existing.invocation_id, model_tool_invocation_id)?;
             self.record_suppressed_delivery(
                 trace_id,
                 worker_id,
@@ -116,6 +117,7 @@ impl WorkerStore {
             return Ok((existing, true));
         }
         if let Some(existing) = self.invocation_by_key(worker_id, idempotency_key)? {
+            self.record_result_association(&existing.invocation_id, model_tool_invocation_id)?;
             self.record_suppressed_delivery(
                 trace_id,
                 worker_id,
@@ -218,6 +220,7 @@ impl WorkerStore {
                 && let Some(existing) =
                     self.invocation_by_parent_tool_slot(parent_id, worker_id, ordinal)?
             {
+                self.record_result_association(&existing.invocation_id, model_tool_invocation_id)?;
                 self.record_suppressed_delivery(
                     trace_id,
                     worker_id,
@@ -228,6 +231,7 @@ impl WorkerStore {
                 return Ok((existing, true));
             }
             if let Some(existing) = self.invocation_by_key(worker_id, idempotency_key)? {
+                self.record_result_association(&existing.invocation_id, model_tool_invocation_id)?;
                 self.record_suppressed_delivery(
                     trace_id,
                     worker_id,
@@ -238,6 +242,19 @@ impl WorkerStore {
                 return Ok((existing, true));
             }
             return Err(format!("queue worker invocation: {error}"));
+        }
+        if let Some(model_tool_invocation_id) = model_tool_invocation_id {
+            transaction
+                .execute(
+                    "INSERT INTO worker_model_tool_result_associations(
+                        model_tool_invocation_id,
+                        worker_invocation_id,
+                        created_at
+                     )
+                     VALUES (?1,?2,?3)",
+                    params![model_tool_invocation_id, invocation_id, created_at],
+                )
+                .map_err(|error| format!("record worker result association: {error}"))?;
         }
         upsert_causal_trace(
             &transaction,

@@ -254,6 +254,15 @@ impl WorkerStore {
                 );
                 CREATE INDEX IF NOT EXISTS worker_invocations_status
                     ON worker_invocations(status, created_at);
+                CREATE TABLE IF NOT EXISTS worker_model_tool_result_associations (
+                    model_tool_invocation_id TEXT NOT NULL,
+                    worker_invocation_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(model_tool_invocation_id, worker_invocation_id),
+                    FOREIGN KEY(worker_invocation_id) REFERENCES worker_invocations(invocation_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS worker_model_tool_result_associations_invocation
+                    ON worker_model_tool_result_associations(worker_invocation_id, created_at);
                 CREATE TABLE IF NOT EXISTS worker_attempts (
                     attempt_id TEXT PRIMARY KEY,
                     invocation_id TEXT NOT NULL,
@@ -393,9 +402,24 @@ impl WorkerStore {
                  CREATE INDEX IF NOT EXISTS worker_invocations_parent
                     ON worker_invocations(parent_worker_invocation_id, created_at ASC);
                  CREATE INDEX IF NOT EXISTS worker_invocations_retry
-                    ON worker_invocations(retry_of_invocation_id, created_at ASC);",
+                    ON worker_invocations(retry_of_invocation_id, created_at ASC);
+                 CREATE INDEX IF NOT EXISTS worker_model_tool_result_associations_model_tool
+                    ON worker_model_tool_result_associations(
+                        model_tool_invocation_id,
+                        created_at ASC
+                    );
+                 INSERT OR IGNORE INTO worker_model_tool_result_associations(
+                    model_tool_invocation_id,
+                    worker_invocation_id,
+                    created_at
+                 )
+                 SELECT model_tool_invocation_id,invocation_id,created_at
+                 FROM worker_invocations
+                 WHERE model_tool_invocation_id IS NOT NULL;",
             )
-            .map_err(|error| format!("index worker invocation relationships: {error}"))?;
+            .map_err(|error| {
+                format!("index and backfill worker invocation relationships: {error}")
+            })?;
         connection
             .execute(
                 "UPDATE worker_invocations AS child

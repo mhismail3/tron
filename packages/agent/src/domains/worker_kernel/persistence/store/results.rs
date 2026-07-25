@@ -34,6 +34,51 @@ struct ProviderProjectionRow {
 }
 
 impl WorkerStore {
+    pub(super) fn record_result_association(
+        &self,
+        worker_invocation_id: &str,
+        model_tool_invocation_id: Option<&str>,
+    ) -> Result<(), String> {
+        let Some(model_tool_invocation_id) = model_tool_invocation_id else {
+            return Ok(());
+        };
+        let connection = self.connection()?;
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let changed = connection
+            .execute(
+                "INSERT OR IGNORE INTO worker_model_tool_result_associations(
+                    model_tool_invocation_id,
+                    worker_invocation_id,
+                    created_at
+                 )
+                 SELECT ?1,invocation_id,?3
+                 FROM worker_invocations
+                 WHERE invocation_id=?2",
+                params![model_tool_invocation_id, worker_invocation_id, created_at],
+            )
+            .map_err(|error| format!("record replayed worker result association: {error}"))?;
+        if changed == 0 {
+            let exists = connection
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1
+                        FROM worker_model_tool_result_associations
+                        WHERE model_tool_invocation_id=?1
+                          AND worker_invocation_id=?2
+                     )",
+                    params![model_tool_invocation_id, worker_invocation_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(|error| format!("verify replayed worker result association: {error}"))?;
+            if !exists {
+                return Err(format!(
+                    "worker invocation '{worker_invocation_id}' disappeared while recording its model-tool result association"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn store_result_in_transaction(
         transaction: &rusqlite::Transaction<'_>,
         invocation_id: &str,
@@ -106,7 +151,12 @@ impl WorkerStore {
             validate_runtime_identifier(model_tool_invocation_id, "model tool invocation id", 256)?;
             let rows = provider_projection_rows(
                 &connection,
-                "i.model_tool_invocation_id=?1",
+                "EXISTS (
+                    SELECT 1
+                    FROM worker_model_tool_result_associations association
+                    WHERE association.worker_invocation_id=i.invocation_id
+                      AND association.model_tool_invocation_id=?1
+                 )",
                 model_tool_invocation_id,
                 origin_session_id,
                 trace_id,

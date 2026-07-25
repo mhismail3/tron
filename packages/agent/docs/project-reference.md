@@ -794,7 +794,13 @@ typed body. Once the provider accepts the request, all retained history, run
 graphs, Session Context, and inbox reads expose references and previews only.
 An internal kernel projection resolves associations within the originating
 session or causal trace. It is not model vocabulary, and a missing or corrupt
-fresh association fails the turn before a provider request.
+fresh association fails the turn before a provider request. Provider-call
+identity is a many-to-one relation with the canonical worker invocation:
+restart redelivery may produce a new provider tool-call id while the durable
+nested parent/per-tool slot intentionally reuses its completed or recovering
+child. The kernel records that new association before returning the reused
+child, so both the pre-restart transcript and the reconstructed attempt resolve
+the same result without copying it or rewriting history.
 
 `worker_result_read` retrieves one RFC 6901 JSON pointer from that exact result.
 Array/object pages are limited to twenty entries and each response is bounded
@@ -1817,6 +1823,7 @@ operational evidence:
 | `worker_routes` | rebuildable direct-tool route and routing metadata |
 | `worker_triggers` | rebuildable trigger configuration and cursors |
 | `worker_invocations` | durable queue, idempotency, pinned version, originating user session, child-agent session, nested parent/per-tool call slot, and exact typed results addressed by public result references |
+| `worker_model_tool_result_associations` | many-to-one provider tool-call identities for one canonical invocation result, including regenerated ids from restart redelivery |
 | `worker_attempts` | numbered execution/redelivery attempts |
 | `worker_run_events` | append-only generic stage evidence for authoritative run timelines |
 | `worker_causal_traces` | trace roots, depth, delivery, and suppression counters |
