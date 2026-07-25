@@ -73,8 +73,8 @@ struct WorkerKernelDTOTests {
         #expect(inspection.bundle["provenance"] != nil)
     }
 
-    @Test("Durable runs and inbox preserve typed result values")
-    func runsAndInboxPreserveTypedValues() throws {
+    @Test("Legacy inline runs and inbox remain decode-compatible during migration")
+    func legacyRunsAndInboxRemainDecodeCompatible() throws {
         let runJSON = #"""
         {"runs":[{
           "invocationId":"run-1","workerId":"recent-research","workerVersion":"abc123",
@@ -102,14 +102,78 @@ struct WorkerKernelDTOTests {
         #expect(runs.runs.first?.attemptCount == 2)
         #expect(runs.runs.first?.originSessionId == "sess_origin")
         #expect(runs.runs.first?.agentSessionId == "sess_worker_child")
-        #expect(runs.runs.first?.output != nil)
+        #expect(runs.runs.first?.output?.legacyInline != nil)
+        #expect(runs.runs.first?.output?.reference == nil)
         #expect(runs.truncated == true)
         #expect(runs.nextOffset == 20)
         #expect(inbox.items.first?.contextAttached == false)
         #expect(inbox.items.first?.requiresAttention == false)
         #expect(inbox.nextOffset == nil)
-        let result = try #require(inbox.items.first?.result.value as? [String: Any])
+        let result = try #require(inbox.items.first?.result.legacyInline?.value as? [String: Any])
         #expect((result["items"] as? [Any])?.count == 2)
+    }
+
+    @Test("Successful run and inbox outputs decode as integrity references without raw payloads")
+    func currentRunsAndInboxDecodeReferences() throws {
+        let schema = "sha256:" + String(repeating: "a", count: 64)
+        let content = "sha256:" + String(repeating: "b", count: 64)
+        let reference = """
+        {
+          "kind":"worker_result_reference","invocationId":"run-1",
+          "workerId":"recent-research","workerVersion":"abc123",
+          "outputSchemaSha256":"\(schema)","contentSha256":"\(content)",
+          "sizeBytes":48000,"preview":"Canonical report","message":"Stored durably"
+        }
+        """
+        let runJSON = """
+        {"runs":[{
+          "invocationId":"run-1","workerId":"recent-research","workerVersion":"abc123",
+          "status":"completed","input":{"query":"Tron"},"output":\(reference),
+          "error":null,"idempotencyKey":"test-key","traceId":"trace-1","causalDepth":1,
+          "originSessionId":"sess_origin","agentSessionId":null,"triggerKind":"manual",
+          "attemptCount":1,"createdAt":"2026-07-19T12:00:00Z",
+          "startedAt":"2026-07-19T12:00:01Z","completedAt":"2026-07-19T12:00:02Z"
+        }]}
+        """
+        let inboxJSON = """
+        {"items":[{
+          "inboxId":"inbox-1","invocationId":"run-1","workerId":"recent-research",
+          "severity":"info","result":{"status":"completed","reference":\(reference),
+          "preview":"Canonical report"},"contextAttached":false,"triggerKind":"manual",
+          "hasInvocation":true,"requiresAttention":false,
+          "createdAt":"2026-07-19T12:00:02Z"
+        }]}
+        """
+
+        let runs = try JSONDecoder().decode(WorkerRunsResultDTO.self, from: Data(runJSON.utf8))
+        let inbox = try JSONDecoder().decode(WorkerInboxResultDTO.self, from: Data(inboxJSON.utf8))
+
+        let runReference = try #require(runs.runs.first?.output?.reference)
+        #expect(runReference.sizeBytes == 48_000)
+        #expect(runReference.contentSha256 == content)
+        #expect(runs.runs.first?.output?.legacyInline == nil)
+        let receipt = try #require(inbox.items.first?.result.receipt)
+        #expect(receipt.reference == runReference)
+        #expect(receipt.preview == "Canonical report")
+        #expect(inbox.items.first?.result.legacyInline == nil)
+    }
+
+    @Test("Malformed tagged references fail decoding instead of becoming legacy raw output")
+    func malformedReferenceFailsDecoding() {
+        let json = #"""
+        {"runs":[{
+          "invocationId":"run-1","workerId":"worker","workerVersion":"v1",
+          "status":"completed","input":{},"output":{
+            "kind":"worker_result_reference","invocationId":"run-1"
+          },"error":null,"idempotencyKey":"key","traceId":"trace","causalDepth":0,
+          "triggerKind":"manual","attemptCount":1,"createdAt":"2026-07-19T12:00:00Z",
+          "startedAt":null,"completedAt":"2026-07-19T12:00:01Z"
+        }]}
+        """#
+
+        #expect(throws: (any Error).self) {
+            _ = try JSONDecoder().decode(WorkerRunsResultDTO.self, from: Data(json.utf8))
+        }
     }
 
     @Test("Worker run graph decodes causal stages, timing, usage, and session links")

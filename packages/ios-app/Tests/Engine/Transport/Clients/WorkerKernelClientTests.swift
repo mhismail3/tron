@@ -456,6 +456,6 @@ struct WorkerKernelClientTests {
             originSessionId: "session-voice"
         )
 
-        #expect(invocation.output?.dictionaryValue?["text"] as? String == "hello")
+        #expect(invocation.output?.legacyInline?.dictionaryValue?["text"] as? String == "hello")
     }
 }

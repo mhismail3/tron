@@ -32,12 +32,12 @@ struct ResearchReportSheet: View {
                     SheetTitle(title: "Research Report", color: .tronCyan)
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    ShareLink(item: WorkerConsoleViewModel.prettyJSON(report.rawOutput)) {
+                    ShareLink(item: report.answer) {
                         Image(systemName: "square.and.arrow.up")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                             .foregroundStyle(.tronCyan)
                     }
-                    .accessibilityLabel("Export research report")
+                    .accessibilityLabel("Share research answer")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     SheetDismissButton(color: .tronCyan)

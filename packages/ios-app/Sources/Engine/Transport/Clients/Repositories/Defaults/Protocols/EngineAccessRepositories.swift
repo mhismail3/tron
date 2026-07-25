@@ -375,6 +375,35 @@ protocol WorkerKernelRepository: AnyObject {
 }
 
 extension WorkerKernelRepository {
+    /// Resolve only a just-completed bounded result needed by a native worker
+    /// contract. Historical lists and presentation paths must keep references
+    /// and use the explicit inspector instead.
+    func resolvedWorkerResult(_ invocation: WorkerInvocationDTO) async throws -> AnyCodable {
+        if let legacy = invocation.output?.legacyInline {
+            return legacy
+        }
+        guard let reference = invocation.output?.reference else {
+            throw EngineConnectionError.invalidResponse
+        }
+        guard reference.sizeBytes <= 32_768 else {
+            throw EngineConnectionError.invalidResponse
+        }
+        let chunk = try await workerResult(
+            invocationId: reference.invocationId,
+            pointer: "",
+            offset: 0,
+            limit: 20
+        )
+        guard chunk.reference == reference,
+              chunk.pointer.isEmpty,
+              !chunk.truncated,
+              chunk.nextOffset == nil,
+              chunk.children.isEmpty else {
+            throw EngineConnectionError.invalidResponse
+        }
+        return chunk.value
+    }
+
     func workerResult(
         invocationId _: String,
         pointer _: String,

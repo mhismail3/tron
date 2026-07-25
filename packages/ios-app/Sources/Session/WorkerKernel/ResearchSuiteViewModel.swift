@@ -85,7 +85,6 @@ struct ResearchReport: Identifiable, Equatable, Sendable {
     let evidenceGaps: [String]
     let limitations: [String]
     let outcomes: [ResearchSpecialistOutcome]
-    let rawOutput: AnyCodable
 
     var id: String { reportId }
     var supportedClaimCount: Int { claims.count { $0.classification == "supported" } }
@@ -141,8 +140,6 @@ enum ResearchSuiteContract {
         }
         let answer = try dictionary(root["answer"], field: "answer")
         let outcomesRoot = try dictionary(root["specialistOutcomes"], field: "specialistOutcomes")
-        let rawOutput = try requiredOutput(output)
-
         return ResearchReport(
             reportId: try string(root, "reportId"),
             status: try string(root, "status"),
@@ -159,8 +156,7 @@ enum ResearchSuiteContract {
             outcomes: ["search", "sourceReview", "citation", "storage"].compactMap { role in
                 guard let value = outcomesRoot[role] else { return nil }
                 return try? decodeOutcome(role: role, value: value)
-            },
-            rawOutput: rawOutput
+            }
         )
     }
 
@@ -250,13 +246,6 @@ enum ResearchSuiteContract {
             supportedClaimCount: optionalInt(row["supportedClaimCount"]),
             missingSecretBindings: try optionalStringArray(row["missingSecretBindings"])
         )
-    }
-
-    private static func requiredOutput(_ output: AnyCodable?) throws -> AnyCodable {
-        guard let output else {
-            throw ResearchSuiteContractError.invalidReport("output is missing")
-        }
-        return output
     }
 
     private static func dictionary(_ value: Any?, field: String) throws -> [String: Any] {
@@ -398,11 +387,12 @@ final class ResearchSuiteViewModel {
         var reports: [ResearchReport] = []
         var errors: [String] = []
         for run in runs where run.workerId == "research-coordinator" {
-            guard run.output?.dictionaryValue?["schema"] as? String == "research.report.v1" else {
+            guard let output = run.output?.legacyInline,
+                  output.dictionaryValue?["schema"] as? String == "research.report.v1" else {
                 continue
             }
             do {
-                reports.append(try ResearchSuiteContract.decodeReport(run.output))
+                reports.append(try ResearchSuiteContract.decodeReport(output))
             } catch {
                 errors.append("Coordinator run \(run.invocationId): \(error.localizedDescription)")
             }

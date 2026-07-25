@@ -273,11 +273,12 @@ final class DelegationViewModel {
 
         var decoded: [String: DelegationResult] = [:]
         for run in runs {
-            guard run.output?.dictionaryValue?["schema"] as? String == "delegation.result.v1" else {
+            guard let output = run.output?.legacyInline,
+                  output.dictionaryValue?["schema"] as? String == "delegation.result.v1" else {
                 continue
             }
             do {
-                decoded[run.invocationId] = try DelegationContract.decodeResult(run.output)
+                decoded[run.invocationId] = try DelegationContract.decodeResult(output)
             } catch {
                 // Historical output that no longer satisfies the native
                 // presentation contract remains inspectable in the immutable

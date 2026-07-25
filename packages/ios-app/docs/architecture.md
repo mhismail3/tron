@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-24 for durable worker run graphs.
+> Last verified: 2026-07-24 for reference-owned worker results.
 
 ## Overview
 
@@ -171,7 +171,9 @@ worker metadata from the client. The server supplies internal causal context.
   and update time;
 - `WorkerInspectResultDTO` for the bundle, versions, triggers, audit, and
   canonical version directory;
-- `WorkerInvocationDTO` for queued/running/terminal runs, typed input/output,
+- `WorkerInvocationDTO` for queued/running/terminal runs, typed input and an
+  integrity-bound result reference (with decode-only legacy-inline migration
+  compatibility),
   idempotency, trace, causal depth, trigger kind, numbered delivery-attempt
   count, foreground/background mode, detachment time, originating model-tool
   invocation, parent/retry linkage, optional child-agent session id, and
@@ -181,8 +183,9 @@ worker metadata from the client. The server supplies internal causal context.
 - `WorkerResultReferenceDTO`, `WorkerResultChunkDTO`, and child descriptors for
   integrity-bound, on-demand reads of exact durable results without copying a
   large payload into run history or client state;
-- `WorkerInboxItemDTO` for durable delivery records, trigger provenance,
-  attention classification, and truthful agent-context attachment state;
+- `WorkerInboxItemDTO` for compact durable result-reference receipts or bounded
+  failure evidence, trigger provenance, attention classification, and truthful
+  agent-context attachment state;
 - request/response DTOs for invocation, exact invocation cancellation,
   per-worker stop, rollback, stop-all, archive-backed purge, and webhook token
   rotation.
@@ -349,6 +352,15 @@ versions, and lifecycle controls. The native experience owns its tasks/reports
 and activity, preventing duplicate invocation, run, and inbox entrypoints while
 preserving a single server truth plane.
 
+Run lists, causal graphs, Session Context, and inbox pages never hydrate result
+bodies. Their previews, sizes, schema/version identity, and integrity digests
+come from the server reference. `worker_kernel::result_read` is the only exact
+read path. Native request/response experiences may use the repository's bounded
+resolver only for the just-completed invocation whose typed value is required
+to finish that user action; it rejects a mismatched reference, child
+projection, or truncated root instead of assembling client-owned result state.
+Reconnect and server switching refetch references and pages from server truth.
+
 The first supported contract is `work-ledger` version 1. `WorkLedgerViewModel`
 invokes the worker's single typed `snapshot` action to load goals, questions,
 decisions, aggregate status, and bounded recent history. It never reads the
@@ -368,20 +380,23 @@ entrypoint. Its four workers remain independently versioned and independently
 operable; only the coordinator's `primary` presentation binding opens the
 grouped Research experience. `ResearchSuiteViewModel` filters the canonical
 worker inventory by the immutable suite contract, reads bounded full-detail
-runs and attention rows for every component, and decodes only exact
-`research.report.v1` coordinator outputs. It does not read the coordinator's
-state directory or reconstruct reports from client caches. Malformed canonical
-outputs remain visible as neutral unavailable-history rows whose full evidence
-opens in a detail sheet. They do not contribute to current Attention and do not
-falsely mark a successful worker/catalog refresh as failed.
-Unrelated outputs are not mistaken for reports.
+runs and attention rows for every component, and keeps current reference-owned
+outputs in the generic run/report history rather than hydrating them from the
+list response. Schema-v9 inline `research.report.v1` outputs remain decodeable
+only during migration. The view model never reads the coordinator's state
+directory or reconstructs reports from client caches. Malformed or unrelated
+historical outputs remain neutral operational evidence and do not falsely mark
+a successful worker/catalog refresh as failed.
 
 The Research sheet provides aggregate suite health and versions, coordinator
-and specialist run/query history, actionable delivery attention, report history,
+and specialist run/query history, actionable delivery attention, reference
+previews and bounded typed-result inspection. Legacy inline reports retain
 claim-to-citation inspection, source/freshness cards, contradictions, evidence
-gaps, limitations, specialist outcomes, and exact JSON export. Every component
-links to an independently loaded generic technical console without changing the
-parent coordinator selection. Engine-owned worker events refresh the dashboard;
+gaps, limitations, and specialist outcomes during migration; sharing exports
+the user-facing answer rather than retaining another raw JSON copy. Every
+component links to an independently loaded generic technical console without
+changing the parent coordinator selection. Engine-owned worker events refresh
+the dashboard;
 changes to the parent worker/run projection trigger a bounded suite refresh so
 the native view converges on current server truth. Unknown contract versions,
 secondary suite members, and missing bindings retain the generic-console
@@ -399,11 +414,12 @@ current suite status.
 The third supported contract is the primary `general-delegate` version 1
 entrypoint. `DelegationViewModel` binds only to the exact `general-delegate`
 worker id and immutable `delegation` suite metadata, loads its full inspection,
-bounded run history, and inbox from the server, and decodes only canonical
-`delegation.result.v1` outputs. Task submission uses durable `enqueue` rather
-than holding a client request open for agent execution. Retry creates a new
-invocation with the original typed input; cancellation targets exactly one
-queued or running invocation.
+bounded run history, and inbox from the server. Current reference-owned results
+remain run evidence until the user opens the bounded inspector; legacy inline
+`delegation.result.v1` outputs remain decodeable during migration. Task
+submission uses durable `enqueue` rather than holding a client request open for
+agent execution. Retry creates a new invocation with the original typed input;
+cancellation targets exactly one queued or running invocation.
 
 The Delegation sheet provides active/completed/attention summaries, typed task,
 deliverable, context, file, constraint, deadline, effort, and optional JSON
@@ -461,11 +477,13 @@ worker, version, runner, or primitive-group contract.
 The detail sheet is action-first rather than a generic JSON viewer. It shows a
 plain-language outcome and status first; schema-valid worker request/result
 objects become bounded typed forms; core primitives use concise operation rows;
-and artifacts, evidence, technical references, raw request, and raw result move
-through progressive disclosure into nested sheets. Direct typed command
-vectors render as a readable command while the technical detail retains their
-exact JSON evidence. Unbounded raw payloads and technical-reference
-collections never expand inline and displace the summary.
+and artifacts, evidence, technical references, and raw request move through
+progressive disclosure into nested sheets. Worker results open only through the
+bounded reference inspector; a legacy raw-result sheet exists solely for
+schema-v9 migration compatibility. Direct typed command vectors render as a
+readable command while the technical detail retains their exact JSON evidence.
+Unbounded raw payloads and technical-reference collections never expand inline
+and displace the summary.
 
 Generic non-worker calls retain the same sheet identity and may render bounded
 free-text `tool.invocation.progress`, `tool.invocation.output`, and terminal

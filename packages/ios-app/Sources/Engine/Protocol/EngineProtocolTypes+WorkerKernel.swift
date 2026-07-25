@@ -69,13 +69,69 @@ struct WorkerAuditDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String { auditId }
 }
 
+/// Server projection for a successful invocation output.
+///
+/// Current servers always return an integrity-bound reference. `legacyInline`
+/// is decode-only migration compatibility for profiles served by schema-v9
+/// binaries; new UI paths must not treat it as authoritative server state.
+enum WorkerInvocationOutputDTO: Codable, Equatable, Sendable {
+    case reference(WorkerResultReferenceDTO)
+    case legacyInline(AnyCodable)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        do {
+            let reference = try container.decode(WorkerResultReferenceDTO.self)
+            if reference.kind == "worker_result_reference" {
+                self = .reference(reference)
+                return
+            }
+        } catch {
+            if let raw = try? container.decode(AnyCodable.self),
+               raw.dictionaryValue?["kind"] as? String == "worker_result_reference" {
+                throw error
+            }
+        }
+        self = .legacyInline(try container.decode(AnyCodable.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .reference(let reference):
+            try container.encode(reference)
+        case .legacyInline(let value):
+            try container.encode(value)
+        }
+    }
+
+    var reference: WorkerResultReferenceDTO? {
+        guard case .reference(let reference) = self else { return nil }
+        return reference
+    }
+
+    var legacyInline: AnyCodable? {
+        guard case .legacyInline(let value) = self else { return nil }
+        return value
+    }
+
+    var presentationValue: AnyCodable {
+        switch self {
+        case .reference(let reference):
+            AnyCodable(reference.dictionary)
+        case .legacyInline(let value):
+            value
+        }
+    }
+}
+
 struct WorkerInvocationDTO: Codable, Equatable, Identifiable, Sendable {
     let invocationId: String
     let workerId: String
     let workerVersion: String
     let status: String
     let input: AnyCodable
-    let output: AnyCodable?
+    let output: WorkerInvocationOutputDTO?
     let error: String?
     let idempotencyKey: String
     let traceId: String
@@ -124,7 +180,7 @@ struct WorkerInvocationDTO: Codable, Equatable, Identifiable, Sendable {
         self.workerVersion = workerVersion
         self.status = status
         self.input = input
-        self.output = output
+        self.output = output.map(WorkerInvocationOutputDTO.legacyInline)
         self.error = error
         self.idempotencyKey = idempotencyKey
         self.traceId = traceId
@@ -305,6 +361,20 @@ struct WorkerResultReferenceDTO: Codable, Equatable, Sendable {
     let sizeBytes: UInt64
     let preview: String
     let message: String
+
+    var dictionary: [String: Any] {
+        [
+            "kind": kind,
+            "invocationId": invocationId,
+            "workerId": workerId,
+            "workerVersion": workerVersion,
+            "outputSchemaSha256": outputSchemaSha256,
+            "contentSha256": contentSha256,
+            "sizeBytes": sizeBytes,
+            "preview": preview,
+            "message": message,
+        ]
+    }
 }
 
 struct WorkerResultChildDTO: Codable, Equatable, Identifiable, Sendable {
@@ -336,12 +406,61 @@ struct WorkerResultChunkDTO: Codable, Equatable, Sendable {
     let truncated: Bool
 }
 
+struct WorkerResultReceiptDTO: Codable, Equatable, Sendable {
+    let status: String
+    let reference: WorkerResultReferenceDTO
+    let preview: String
+}
+
+enum WorkerInboxPayloadDTO: Codable, Equatable, Sendable {
+    case referenceReceipt(WorkerResultReceiptDTO)
+    case legacyInline(AnyCodable)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        do {
+            let receipt = try container.decode(WorkerResultReceiptDTO.self)
+            if receipt.reference.kind == "worker_result_reference" {
+                self = .referenceReceipt(receipt)
+                return
+            }
+        } catch {
+            if let raw = try? container.decode(AnyCodable.self),
+               let reference = raw.dictionaryValue?["reference"] as? [String: Any],
+               reference["kind"] as? String == "worker_result_reference" {
+                throw error
+            }
+        }
+        self = .legacyInline(try container.decode(AnyCodable.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .referenceReceipt(let receipt):
+            try container.encode(receipt)
+        case .legacyInline(let value):
+            try container.encode(value)
+        }
+    }
+
+    var receipt: WorkerResultReceiptDTO? {
+        guard case .referenceReceipt(let receipt) = self else { return nil }
+        return receipt
+    }
+
+    var legacyInline: AnyCodable? {
+        guard case .legacyInline(let value) = self else { return nil }
+        return value
+    }
+}
+
 struct WorkerInboxItemDTO: Codable, Equatable, Identifiable, Sendable {
     let inboxId: String
     let invocationId: String
     let workerId: String
     let severity: String
-    let result: AnyCodable
+    let result: WorkerInboxPayloadDTO
     let contextAttached: Bool
     let createdAt: String
     let triggerKind: String
@@ -349,6 +468,30 @@ struct WorkerInboxItemDTO: Codable, Equatable, Identifiable, Sendable {
     let requiresAttention: Bool
 
     var id: String { inboxId }
+
+    init(
+        inboxId: String,
+        invocationId: String,
+        workerId: String,
+        severity: String,
+        result: AnyCodable,
+        contextAttached: Bool,
+        createdAt: String,
+        triggerKind: String,
+        hasInvocation: Bool,
+        requiresAttention: Bool
+    ) {
+        self.inboxId = inboxId
+        self.invocationId = invocationId
+        self.workerId = workerId
+        self.severity = severity
+        self.result = .legacyInline(result)
+        self.contextAttached = contextAttached
+        self.createdAt = createdAt
+        self.triggerKind = triggerKind
+        self.hasInvocation = hasInvocation
+        self.requiresAttention = requiresAttention
+    }
 }
 
 struct WorkerInboxResultDTO: Codable, Equatable, Sendable {

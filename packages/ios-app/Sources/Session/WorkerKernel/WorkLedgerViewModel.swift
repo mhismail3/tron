@@ -250,7 +250,9 @@ final class WorkLedgerViewModel {
                 idempotencyKey: .userAction("work-ledger.snapshot")
             )
             lastInvocationId = result.invocationId
-            snapshot = try WorkLedgerContract.decodeSnapshot(result.output)
+            snapshot = try WorkLedgerContract.decodeSnapshot(
+                try await repository.resolvedWorkerResult(result)
+            )
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -410,7 +412,9 @@ final class WorkLedgerViewModel {
                 idempotencyKey: .userAction("work-ledger.\(action)")
             )
             lastInvocationId = result.invocationId
-            try WorkLedgerContract.validateMutation(result.output)
+            try WorkLedgerContract.validateMutation(
+                try await repository.resolvedWorkerResult(result)
+            )
             lastError = nil
             await refresh(
                 workerId: workerId,

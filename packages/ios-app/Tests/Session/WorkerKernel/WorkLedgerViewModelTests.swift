@@ -72,6 +72,71 @@ struct WorkLedgerViewModelTests {
         #expect(viewModel.lastError == nil)
     }
 
+    @Test("A just-completed reference is read once for each native typed contract")
+    func viewModelExplicitlyResolvesFreshReferences() async {
+        let repository = WorkLedgerMockRepository()
+        repository.returnsReferences = true
+        let viewModel = WorkLedgerViewModel()
+
+        await viewModel.refresh(
+            workerId: "work-ledger",
+            repository: repository,
+            connectionState: .connected
+        )
+
+        #expect(repository.resultReadCount == 1)
+        #expect(viewModel.snapshot.activeGoalCount == 1)
+
+        let succeeded = await viewModel.createGoal(
+            title: "Keep results canonical",
+            description: "",
+            workerId: "work-ledger",
+            repository: repository,
+            connectionState: .connected
+        )
+
+        #expect(succeeded)
+        #expect(repository.inputs.count == 3)
+        #expect(repository.resultReadCount == 3)
+        #expect(viewModel.lastError == nil)
+    }
+
+    @Test("A truncated fresh result fails instead of becoming native shadow state")
+    func viewModelRejectsTruncatedReferenceReads() async {
+        let repository = WorkLedgerMockRepository()
+        repository.returnsReferences = true
+        repository.truncatesResultReads = true
+        let viewModel = WorkLedgerViewModel()
+
+        await viewModel.refresh(
+            workerId: "work-ledger",
+            repository: repository,
+            connectionState: .connected
+        )
+
+        #expect(repository.resultReadCount == 1)
+        #expect(viewModel.snapshot.goals.isEmpty)
+        #expect(viewModel.lastError != nil)
+    }
+
+    @Test("A native contract never auto-hydrates beyond the bounded read ceiling")
+    func viewModelRejectsUnboundedReferenceReads() async {
+        let repository = WorkLedgerMockRepository()
+        repository.returnsReferences = true
+        repository.referenceSizeOverride = 32_769
+        let viewModel = WorkLedgerViewModel()
+
+        await viewModel.refresh(
+            workerId: "work-ledger",
+            repository: repository,
+            connectionState: .connected
+        )
+
+        #expect(repository.resultReadCount == 0)
+        #expect(viewModel.snapshot.goals.isEmpty)
+        #expect(viewModel.lastError != nil)
+    }
+
     private static func worker(
         experienceId: String = "work-ledger",
         contractVersion: UInt32 = 1,
@@ -154,6 +219,12 @@ struct WorkLedgerViewModelTests {
 @MainActor
 private final class WorkLedgerMockRepository: WorkerKernelRepository {
     var inputs: [[String: Any]] = []
+    var returnsReferences = false
+    var truncatesResultReads = false
+    var referenceSizeOverride: UInt64?
+    var resultReadCount = 0
+    private var results: [String: AnyCodable] = [:]
+    private var references: [String: WorkerResultReferenceDTO] = [:]
 
     func invokeWorker(
         workerId: String,
@@ -166,7 +237,7 @@ private final class WorkLedgerMockRepository: WorkerKernelRepository {
         let output: [String: Any] = action == "snapshot"
             ? WorkLedgerViewModelTests.snapshotOutput
             : ["ok": true, "action": action ?? "unknown"]
-        return invocation(output: output)
+        return try invocation(output: output)
     }
 
     func enqueueWorker(
@@ -214,7 +285,7 @@ private final class WorkLedgerMockRepository: WorkerKernelRepository {
         invocationId: String,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerInvocationDTO {
-        invocation(output: ["ok": true])
+        try invocation(output: ["ok": true])
     }
 
     func setWorkerEnabled(
@@ -276,25 +347,88 @@ private final class WorkLedgerMockRepository: WorkerKernelRepository {
         EngineStreamPage(events: [], hasMore: false, nextCursor: cursor.rawValue)
     }
 
-    private func invocation(output: [String: Any]) -> WorkerInvocationDTO {
-        WorkerInvocationDTO(
-            invocationId: "run-\(inputs.count)",
+    func workerResult(
+        invocationId: String,
+        pointer: String,
+        offset: UInt64,
+        limit: UInt8
+    ) async throws -> WorkerResultChunkDTO {
+        resultReadCount += 1
+        let reference = try #require(references[invocationId])
+        let output = try #require(results[invocationId])
+        return WorkerResultChunkDTO(
+            kind: "worker_result_chunk",
+            reference: reference,
+            pointer: pointer,
+            value: output,
+            children: [],
+            offset: offset,
+            returned: 1,
+            total: 1,
+            nextOffset: nil,
+            truncated: truncatesResultReads
+        )
+    }
+
+    private func invocation(output: [String: Any]) throws -> WorkerInvocationDTO {
+        let invocationId = "run-\(inputs.count)"
+        guard returnsReferences else {
+            return WorkerInvocationDTO(
+                invocationId: invocationId,
+                workerId: "work-ledger",
+                workerVersion: "v1",
+                status: "completed",
+                input: AnyCodable(inputs.last ?? [:]),
+                output: AnyCodable(output),
+                error: nil,
+                idempotencyKey: "test",
+                traceId: "trace",
+                causalDepth: 0,
+                triggerKind: "manual",
+                originSessionId: nil,
+                agentSessionId: nil,
+                attemptCount: 1,
+                createdAt: "2026-07-22T09:00:00Z",
+                startedAt: "2026-07-22T09:00:00Z",
+                completedAt: "2026-07-22T09:00:01Z"
+            )
+        }
+
+        let outputValue = AnyCodable(output)
+        let data = try JSONEncoder().encode(outputValue)
+        let reference = WorkerResultReferenceDTO(
+            kind: "worker_result_reference",
+            invocationId: invocationId,
             workerId: "work-ledger",
             workerVersion: "v1",
-            status: "completed",
-            input: AnyCodable(inputs.last ?? [:]),
-            output: AnyCodable(output),
-            error: nil,
-            idempotencyKey: "test",
-            traceId: "trace",
-            causalDepth: 0,
-            triggerKind: "manual",
-            originSessionId: nil,
-            agentSessionId: nil,
-            attemptCount: 1,
-            createdAt: "2026-07-22T09:00:00Z",
-            startedAt: "2026-07-22T09:00:00Z",
-            completedAt: "2026-07-22T09:00:01Z"
+            outputSchemaSha256: "sha256:" + String(repeating: "a", count: 64),
+            contentSha256: "sha256:" + String(repeating: "b", count: 64),
+            sizeBytes: referenceSizeOverride ?? UInt64(data.count),
+            preview: "Work Ledger result",
+            message: "Stored durably"
+        )
+        references[invocationId] = reference
+        results[invocationId] = outputValue
+
+        let encoded: [String: Any] = [
+            "invocationId": invocationId,
+            "workerId": "work-ledger",
+            "workerVersion": "v1",
+            "status": "completed",
+            "input": inputs.last ?? [:],
+            "output": reference.dictionary,
+            "idempotencyKey": "test",
+            "traceId": "trace",
+            "causalDepth": 0,
+            "triggerKind": "manual",
+            "attemptCount": 1,
+            "createdAt": "2026-07-22T09:00:00Z",
+            "startedAt": "2026-07-22T09:00:00Z",
+            "completedAt": "2026-07-22T09:00:01Z",
+        ]
+        return try JSONDecoder().decode(
+            WorkerInvocationDTO.self,
+            from: JSONSerialization.data(withJSONObject: encoded)
         )
     }
 }

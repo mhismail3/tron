@@ -48,7 +48,8 @@ extension ChatViewModel: ChatSpeechTranscriptionContext {
                 result.error ?? "Invocation ended with status \(result.status)."
             )
         }
-        guard let transcript = result.output?.dictionaryValue?["text"] as? String else {
+        let output = try await services.workerKernel.resolvedWorkerResult(result)
+        guard let transcript = output.dictionaryValue?["text"] as? String else {
             throw SpeechTranscriptionAvailabilityError.invalidResult
         }
         return transcript

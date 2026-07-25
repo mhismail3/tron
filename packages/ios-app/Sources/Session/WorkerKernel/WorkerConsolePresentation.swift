@@ -121,10 +121,20 @@ enum WorkerConsolePresentation {
     }
 
     static func inboxSummary(_ item: WorkerInboxItemDTO) -> String {
-        summaryValue(
-            from: item.result,
-            preferredKeys: ["error", "message", "summary", "status", "question", "task"]
-        ) ?? (normalized(item.severity) == "error" ? "Worker execution failed" : "Durable worker result")
+        if let receipt = item.result.receipt {
+            return compactText(
+                receipt.preview.isEmpty ? receipt.reference.preview : receipt.preview,
+                maxLength: 120
+            )
+        }
+        return item.result.legacyInline.flatMap {
+            summaryValue(
+                from: $0,
+                preferredKeys: ["error", "message", "summary", "status", "question", "task"]
+            )
+        } ?? (normalized(item.severity) == "error"
+            ? "Worker execution failed"
+            : "Durable worker result")
     }
 
     static func timestamp(_ value: String?) -> String? {

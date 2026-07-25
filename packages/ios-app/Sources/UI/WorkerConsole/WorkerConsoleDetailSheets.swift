@@ -179,7 +179,7 @@ struct WorkerRunDetailSheet: View {
     @State private var selectedSession: WorkerRunSessionSelection?
     @State private var selectedResult: WorkerResultSelection?
     @State private var showInput = false
-    @State private var showOutput = false
+    @State private var showLegacyOutput = false
     @State private var showTechnicalTimeline = false
     @State private var confirmCancel = false
     @State private var isMutating = false
@@ -280,10 +280,10 @@ struct WorkerRunDetailSheet: View {
                     accent: .tronInfo
                 )
             }
-            .sheet(isPresented: $showOutput) {
-                if let output = currentRun.output {
+            .sheet(isPresented: $showLegacyOutput) {
+                if let output = currentRun.output?.legacyInline {
                     WorkerJSONDetailSheet(
-                        title: "Worker Result",
+                        title: "Legacy Worker Result",
                         value: output,
                         accent: color
                     )
@@ -335,6 +335,12 @@ struct WorkerRunDetailSheet: View {
                 Label(error, systemImage: "exclamationmark.circle")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronError)
+            } else if let reference = currentRun.output?.reference,
+                      !reference.preview.isEmpty {
+                Text(reference.preview)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(14)
@@ -406,9 +412,35 @@ struct WorkerRunDetailSheet: View {
         ) {
             VStack(spacing: 0) {
                 detailButton("Worker input", symbol: "arrow.down.doc") { showInput = true }
-                if currentRun.output != nil {
+                if let reference = currentRun.output?.reference {
                     WorkerMetadataDivider()
-                    detailButton("Run result projection", symbol: "doc.text") { showOutput = true }
+                    detailButton("Inspect typed result", symbol: "doc.text.magnifyingglass") {
+                        selectedResult = WorkerResultSelection(
+                            invocationId: reference.invocationId
+                        )
+                    }
+                    WorkerMetadataDivider()
+                    WorkerMetadataRow(
+                        label: "Result size",
+                        value: ByteCountFormatter.string(
+                            fromByteCount: Int64(clamping: reference.sizeBytes),
+                            countStyle: .file
+                        )
+                    )
+                    WorkerMetadataDivider()
+                    WorkerMetadataRow(
+                        label: "Content digest",
+                        value: WorkerConsolePresentation.compactIdentifier(
+                            reference.contentSha256,
+                            length: 16
+                        ),
+                        isCode: true
+                    )
+                } else if currentRun.output?.legacyInline != nil {
+                    WorkerMetadataDivider()
+                    detailButton("Legacy result evidence", symbol: "doc.text") {
+                        showLegacyOutput = true
+                    }
                 }
                 if !technicalTimelineValues.isEmpty {
                     WorkerMetadataDivider()

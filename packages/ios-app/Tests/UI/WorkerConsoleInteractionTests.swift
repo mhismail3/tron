@@ -135,7 +135,11 @@ struct WorkerConsoleInteractionTests {
             contentsOf: workerRoot.appendingPathComponent("WorkerConsoleDetailSheets.swift"),
             encoding: .utf8
         )
-        #expect(runDetail.contains("Run result projection"))
+        #expect(runDetail.contains("WorkerResultInspectorSheet("))
+        #expect(runDetail.contains("Inspect typed result"))
+        #expect(runDetail.contains("Legacy Worker Result"))
+        #expect(!runDetail.contains("Run result projection"))
+        #expect(!runDetail.contains("showOutput"))
     }
 
     @Test("Worker tabs and execution actions share liquid glass components")

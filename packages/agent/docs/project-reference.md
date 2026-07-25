@@ -1909,6 +1909,14 @@ It exposes:
 - live refresh from `worker.lifecycle` and `worker.invocations` cursors, owned by
   the persistent sidebar task so state remains current while the sheet is closed.
 
+Successful run and inbox DTOs carry integrity-bound result references and
+previews, never copied result bodies. The bounded result inspector is the
+explicit exact-read path. Native synchronous worker experiences may resolve
+only the just-completed bounded result needed by their typed contract; historical
+lists, reconnect, and server switching remain reference-only and reconstruct
+from server truth. A temporary inline decoder exists only for schema-v9
+migration compatibility.
+
 Conversational creation remains the authoring interface; the client does not
 contain a bundle editor. The Mac package is a server supervisor/pairing shell,
 so iOS is the only current operational engine client requiring the console.

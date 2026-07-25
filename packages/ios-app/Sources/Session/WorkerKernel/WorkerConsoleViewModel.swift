@@ -270,10 +270,13 @@ final class WorkerConsoleViewModel {
                 input: input,
                 idempotencyKey: .userAction("worker.invoke")
             )
-            invocationResult = Self.prettyJSON(AnyCodable(result.output?.value ?? [
-                "status": result.status,
-                "invocationId": result.invocationId,
-            ]))
+            invocationResult = Self.prettyJSON(
+                result.output?.presentationValue
+                    ?? AnyCodable([
+                        "status": result.status,
+                        "invocationId": result.invocationId,
+                    ])
+            )
         }
     }
 

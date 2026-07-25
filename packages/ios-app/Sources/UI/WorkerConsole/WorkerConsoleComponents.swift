@@ -332,7 +332,9 @@ struct WorkerInboxCard: View {
     let item: WorkerInboxItemDTO
     var workerName: String?
 
-    @State private var showDetail = false
+    @Environment(\.dependencies) private var dependencies
+    @State private var selectedResult: WorkerResultSelection?
+    @State private var showLegacyDetail = false
 
     private var color: Color {
         switch WorkerConsolePresentation.normalized(item.severity) {
@@ -343,7 +345,15 @@ struct WorkerInboxCard: View {
     }
 
     var body: some View {
-        Button { showDetail = true } label: {
+        Button {
+            if let receipt = item.result.receipt {
+                selectedResult = WorkerResultSelection(
+                    invocationId: receipt.reference.invocationId
+                )
+            } else {
+                showLegacyDetail = true
+            }
+        } label: {
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: item.contextAttached ? "tray" : "tray.full.fill")
                     .foregroundStyle(color)
@@ -384,12 +394,20 @@ struct WorkerInboxCard: View {
         .buttonStyle(.plain)
         .padding(11)
         .sectionFill(color, cornerRadius: 10, subtle: true, interactive: true)
-        .sheet(isPresented: $showDetail) {
-            WorkerJSONDetailSheet(
-                title: workerName ?? "Delivery Record",
-                value: item.result,
-                accent: color
+        .sheet(item: $selectedResult) { selection in
+            WorkerResultInspectorSheet(
+                invocationId: selection.invocationId,
+                repository: dependencies.workerKernelRepository
             )
+        }
+        .sheet(isPresented: $showLegacyDetail) {
+            if let legacy = item.result.legacyInline {
+                WorkerJSONDetailSheet(
+                    title: workerName ?? "Legacy Delivery Record",
+                    value: legacy,
+                    accent: color
+                )
+            }
         }
     }
 }
