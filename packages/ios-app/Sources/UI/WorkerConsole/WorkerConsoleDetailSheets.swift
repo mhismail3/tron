@@ -27,45 +27,6 @@ enum WorkerRunTranscriptDestination: Equatable {
     }
 }
 
-/// Stable sheet destination for unbounded human-readable detail.
-struct WorkerTextDetailSheet: View {
-    let title: String
-    let values: [String]
-    let accent: Color
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 9) {
-                    ForEach(Array(values.enumerated()), id: \.offset) { _, value in
-                        Text(value)
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                            .foregroundStyle(.tronTextSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                            .padding(11)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .sectionFill(accent, cornerRadius: 10, subtle: true, interactive: false)
-                    }
-                }
-                .padding(18)
-            }
-            .scrollContentBackground(.hidden)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    SheetTitle(title: title, color: accent)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    SheetDismissButton(color: accent)
-                }
-            }
-        }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .tint(accent)
-    }
-}
-
 /// Complete delivery ledger retained for audit without duplicating routine
 /// terminal results in the primary Activity timeline.
 struct WorkerInboxAuditSheet: View {

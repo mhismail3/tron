@@ -167,7 +167,13 @@
 //! needs the bytes. References preserve worker version, output-schema
 //! digest, content digest, size, and preview. Workers decide which paths or
 //! references their typed orchestration needs; the kernel never interprets
-//! source, claim, citation, or report fields.
+//! source, claim, citation, or report fields. Generic payload previews prefer
+//! conventional summary/answer text and otherwise describe only the JSON
+//! shape; they never reintroduce an arbitrary serialized-body prefix. A
+//! coordinator can therefore pass a causal result reference plus a
+//! worker-schema-constrained list of RFC 6901 paths. The downstream worker
+//! reads only those paths, verifies the returned reference identity, and keeps
+//! all selection semantics in its immutable bundle.
 //! Direct-worker session completions persist the originating provider-tool
 //! association rather than another output body. An internal, non-model-visible
 //! projection resolves those associations within the current session or causal

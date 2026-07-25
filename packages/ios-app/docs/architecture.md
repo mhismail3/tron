@@ -388,6 +388,12 @@ directory or reconstructs reports from client caches. Malformed or unrelated
 historical outputs remain neutral operational evidence and do not falsely mark
 a successful worker/catalog refresh as failed.
 
+Reference composition is also server/worker truth. Source Review preserves
+stable `/sources/N` records, Citation admits only a causal result reference plus
+explicit source pointers, and Coordinator reads only bounded synthesis fields
+from referenced Citation results. iOS receives the resulting references and
+semantic previews; it does not receive or infer the selected evidence graph.
+
 The Research sheet provides aggregate suite health and versions, coordinator
 and specialist run/query history, actionable delivery attention, reference
 previews and bounded typed-result inspection. Legacy inline reports retain
@@ -401,6 +407,8 @@ changes to the parent worker/run projection trigger a bounded suite refresh so
 the native view converges on current server truth. Unknown contract versions,
 secondary suite members, and missing bindings retain the generic-console
 fallback.
+Unbounded technical timeline text uses its own subordinate
+`WorkerTextDetailSheet`; it never expands the authoritative run sheet inline.
 Report rows and report summaries translate missing Brave Search or Exa
 bindings into explicit historical run-time limitations. This explains a
 `Partial` report without claiming that the profile remains unconfigured after

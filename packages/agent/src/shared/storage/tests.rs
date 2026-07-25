@@ -18,6 +18,38 @@ fn managed_hygiene_policy_uses_bounded_diagnostic_scope() {
 }
 
 #[test]
+fn payload_previews_are_semantic_and_never_copy_arbitrary_json_bodies() {
+    let report = serde_json::json!({
+        "schema":"research.report.v1",
+        "status":"complete",
+        "answer":{"format":"markdown","content":"A concise evidence-backed answer."},
+        "privateBulk":"x".repeat(10_000)
+    });
+    let report = serde_json::to_vec(&report).unwrap();
+    let preview = payload_preview(&report, 512);
+    assert_eq!(
+        preview,
+        "research.report.v1 · complete · A concise evidence-backed answer."
+    );
+    assert!(!preview.contains("privateBulk"));
+    assert!(!preview.contains(&"x".repeat(100)));
+
+    let opaque = serde_json::to_vec(&serde_json::json!({
+        "privateBulk":"secret-shaped-but-already-redacted",
+        "items":[1,2,3]
+    }))
+    .unwrap();
+    assert_eq!(payload_preview(&opaque, 512), "JSON object (2 fields)");
+    assert_eq!(
+        payload_preview(
+            &serde_json::to_vec(&serde_json::json!([1, 2, 3])).unwrap(),
+            512
+        ),
+        "JSON array (3 items)"
+    );
+}
+
+#[test]
 fn owned_payload_refs_inline_small_and_blob_large_payloads() {
     let conn = Connection::open_in_memory().unwrap();
     apply_runtime_pragmas(&conn).unwrap();

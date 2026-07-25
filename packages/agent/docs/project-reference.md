@@ -781,6 +781,10 @@ SHA-256-addressed, zstd-compressed blobs and the invocation column holds only
 an internal payload envelope. Both forms have an ownership row, digest, byte
 size, and preview. Successful inbox rows contain compact
 `{status, reference, preview}` receipts rather than a second output copy.
+Reference previews prefer conventional `summary`, `answer`, `report`,
+`result`, `message`, or `title` text and otherwise describe only the JSON
+shape. They never copy the first bytes of an arbitrary serialized result back
+into run lists, receipts, or model context.
 Provider-facing fixed invoke/await records contain references. A synchronous
 direct-worker result at or below 8 KiB is integrity-verified and hydrated in
 its exact worker schema for the immediately following provider turn; larger
@@ -799,7 +803,11 @@ must remain in the originating session or causal trace, while paired operator
 clients and system recovery can inspect profile-local results. A worker may
 accept and forward a result reference in its own input schema so a coordinator
 does not have to copy one specialist's complete output into every later child
-and model turn. The complete bounded page is available to the immediately
+and model turn. That schema can constrain downstream reads to explicit RFC
+6901 paths; the receiving worker verifies the returned reference identity and
+uses only those pages. Missing, unauthorized, truncated, or mismatched pages
+remain actionable worker outcomes without causing a root read. The complete
+bounded page is available to the immediately
 following model turn. On later turns the provider transcript carries only its
 integrity-bound result reference and exact pointer/page coordinates; a worker
 can explicitly re-read that page if it still needs the bytes. This projection
@@ -1357,17 +1365,27 @@ repeatedly improved by Tron through the same ordinary `gpt-5.5` session. The
 profile-owned `research-coordinator` agent worker projects
 `worker_research_coordinator`, is the primary component of Research suite
 presentation contract version 1, requires no secrets of its own, and retains
-only a manual trigger. Active immutable version
-`9370477ad5af01f50713104b4e6b3a10ed14d03ab487972bb44d2e7ad1870496`
-calls Search first, merges explicit seeds with discovered candidates, calls
-Source Review only when candidates exist, submits reviewed claims to Citation,
-and persists one strict `research.report.v1` through its worker-owned state
-helper.
+only a manual trigger. Its current contract calls Search first, merges explicit
+seeds with discovered candidates, calls Source Review only when candidates
+exist, submits reviewed claims to Citation, and persists one strict
+`research.report.v1` through its worker-owned state helper. Source Review
+preserves selected-candidate order so `S1` is addressable as `/sources/0`.
+Coordinator passes the unchanged causal result reference plus only
+claim-relevant source pointers to Citation; it never hydrates the Source Review
+root. Citation reads those declared paths in one parallel batch, verifies
+reference/content/source identity, and rejects missing, unauthorized,
+truncated, or mismatched evidence as a bounded `validation_failed` outcome.
+Referenced Citation results are likewise reduced to `/status`, `/claims`,
+`/sourceManifest`, `/issues`, and `/validation` for synthesis instead of being
+root-hydrated. Exact specialist outputs remain owned by their invocation
+ledgers, and the top-level report is delivered through the kernel's integrity
+reference.
 
 The useful final seeded proof used the official Brave and Exa search API
-references. Search returned the current profile's typed `unavailable` result
-because neither optional provider credential is configured, while the explicit
-seeds still flowed through Source Review and Citation. The completed run retained
+references. Search returned the profile's typed `unavailable` result because
+neither optional provider credential was configured for that historical run,
+while the explicit seeds still flowed through Source Review and Citation. The
+completed run retained
 two sources, 13 evidence items, six claims, 11 claim-linked citation records,
 and five fully supported claims. Its answer preserved documentation terms such
 as `x-subscription-token`, `x-api-key`, and Bearer authorization, reported one
@@ -1436,24 +1454,26 @@ immutable source to temporary storage before importing it.
 
 The Coordinator is therefore independently accepted for ordinary field use,
 same-session direct-tool routing, durable child/run/inbox inspection, retained
-version recovery, restart persistence, and generic-console access. Its current
-limitation is explicit: without Brave or Exa credentials, discovery cannot
-produce live search results, so the accepted cited run used caller-supplied
-official seeds. Semantic synthesis also remains model-fallible within the
-Citation worker's deterministic provenance and relation guard.
+version recovery, restart persistence, and generic-console access. That
+historical cited run used caller-supplied official seeds because Brave and Exa
+credentials were absent at the time; runtime binding state must always be
+resolved from the current profile. Semantic synthesis remains model-fallible
+within the Citation worker's deterministic provenance and relation guard.
 
 iOS now recognizes only the primary immutable `research-suite` presentation
 contract version 1 as the grouped native Research experience. It reads the
 canonical suite inventory plus bounded full-detail run and inbox contracts; it
-does not inspect worker-owned files. Exact `research.report.v1` coordinator
-outputs provide report history, answer export, claims, claim-linked citations,
-source and freshness metadata, contradictions, evidence gaps, limitations, and
-specialist outcomes. The same surface shows aggregate health, component
-versions, query/run history, and failures, and every component retains a path
-to its separately loaded generic technical console. Secondary components,
-unknown versions, and malformed or absent presentation metadata fall back to
-the generic console. Malformed canonical report output is surfaced as partial
-refresh evidence rather than silently rendered or adopted as client truth.
+does not inspect worker-owned files. Current coordinator runs expose result
+references, semantic previews, sizes, schema/version identity, and an explicit
+bounded result inspector; run lists and report history never receive the full
+report JSON. Schema-v9 inline `research.report.v1` values remain decodeable
+only as migration compatibility. The same surface shows aggregate health,
+component versions, query/run history, and failures, and every component
+retains a path to its separately loaded generic technical console. Secondary
+components, unknown versions, and malformed or absent presentation metadata
+fall back to the generic console. Malformed canonical report output is
+surfaced as partial refresh evidence rather than silently rendered or adopted
+as client truth.
 This closes the implemented Research UI slice; physical-device field review of
 the presentation remains an operator acceptance step before the broader
 field-confidence gate.

@@ -5,7 +5,10 @@
 //! content-addressed payload schema; ownership rows never cross databases.
 //! Runtime connections use WAL for safe concurrent reads/writes; checkpoints
 //! and exports create compact single-file artifacts when the operator needs
-//! one. Shared schema setup runs behind a savepoint with drift and
+//! one. Payload references expose only semantic previews from conventional
+//! summary/answer fields or structural JSON counts; they never copy an
+//! arbitrary serialized object prefix back into run lists or model context.
+//! Shared schema setup runs behind a savepoint with drift and
 //! payload-reference integrity checks.
 //! Startup and manual cleanup share one managed diagnostic horizon and active
 //! database budget. Those bounds prune only low-signal diagnostic data and
@@ -391,7 +394,46 @@ fn table_exists(conn: &Connection, table_name: &str) -> Result<bool> {
 }
 
 fn payload_preview(payload: &[u8], max_chars: usize) -> String {
-    let text = String::from_utf8_lossy(payload);
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload) else {
+        return truncate_preview(&String::from_utf8_lossy(payload), max_chars);
+    };
+    let preview = match &value {
+        serde_json::Value::Object(fields) => {
+            let identity = ["schema", "status"]
+                .into_iter()
+                .filter_map(|key| fields.get(key).and_then(serde_json::Value::as_str))
+                .collect::<Vec<_>>();
+            let narrative = ["summary", "answer", "report", "result", "message", "title"]
+                .into_iter()
+                .find_map(|key| semantic_preview_text(fields.get(key)?))
+                .or_else(|| fields.get("question").and_then(semantic_preview_text));
+            match (identity.is_empty(), narrative) {
+                (false, Some(narrative)) => {
+                    format!("{} · {narrative}", identity.join(" · "))
+                }
+                (true, Some(narrative)) => narrative,
+                (false, None) => identity.join(" · "),
+                (true, None) => format!("JSON object ({} fields)", fields.len()),
+            }
+        }
+        serde_json::Value::Array(values) => format!("JSON array ({} items)", values.len()),
+        serde_json::Value::String(text) => text.clone(),
+        value => value.to_string(),
+    };
+    truncate_preview(&preview, max_chars)
+}
+
+fn semantic_preview_text(value: &serde_json::Value) -> Option<String> {
+    value.as_str().map(ToOwned::to_owned).or_else(|| {
+        value
+            .as_object()
+            .and_then(|value| value.get("content"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn truncate_preview(text: &str, max_chars: usize) -> String {
     let mut preview = text.chars().take(max_chars).collect::<String>();
     if text.chars().count() > max_chars {
         preview.push_str("...");

@@ -139,6 +139,215 @@ async fn large_results_stay_exact_and_cross_provider_turns_by_reference() {
 }
 
 #[tokio::test]
+async fn downstream_workers_accept_causal_references_with_explicit_paths_only() {
+    let (runtime, _home) = test_runtime(None);
+    let mut evidence = command_bundle(vec![
+        "python3".to_owned(),
+        "-c".to_owned(),
+        "import json; print(json.dumps({'sources':[{'id':'S1','evidence':[{'id':'S1-E1','text':'bounded'}]}],'privateBulk':'x'*10000}))"
+            .to_owned(),
+    ]);
+    evidence.worker_id = Some("evidence-owner".to_owned());
+    evidence.name = "Evidence Owner".to_owned();
+    evidence.description = "Produces a durable evidence corpus with unrelated bulk data".to_owned();
+    evidence.tool_name = Some("worker_evidence_owner".to_owned());
+    evidence.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["sources","privateBulk"],
+        "properties":{
+            "sources":{"type":"array"},
+            "privateBulk":{"type":"string"}
+        }
+    });
+    runtime.upsert(evidence, None).await.unwrap();
+
+    let mut selector = command_bundle(vec![
+        "python3".to_owned(),
+        "-c".to_owned(),
+        "import json,sys; value=json.load(sys.stdin); print(json.dumps({'accepted':len(value['selection']['sources']),'padding':'y'*10000}))"
+            .to_owned(),
+    ]);
+    selector.worker_id = Some("evidence-selector".to_owned());
+    selector.name = "Evidence Selector".to_owned();
+    selector.description =
+        "Accepts only an integrity reference and explicit bounded evidence pointers".to_owned();
+    selector.tool_name = Some("worker_evidence_selector".to_owned());
+    selector.input_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["selection"],
+        "properties":{
+            "selection":{
+                "type":"object",
+                "additionalProperties":false,
+                "required":["reference","sources"],
+                "properties":{
+                    "reference":{
+                        "type":"object",
+                        "additionalProperties":true,
+                        "required":["kind","invocationId","contentSha256"],
+                        "properties":{
+                            "kind":{"const":"worker_result_reference"},
+                            "invocationId":{"type":"string"},
+                            "contentSha256":{"type":"string"}
+                        }
+                    },
+                    "sources":{
+                        "type":"array",
+                        "minItems":1,
+                        "maxItems":10,
+                        "uniqueItems":true,
+                        "items":{
+                            "type":"object",
+                            "additionalProperties":false,
+                            "required":["sourceId","pointer"],
+                            "properties":{
+                                "sourceId":{"type":"string"},
+                                "pointer":{"type":"string","pattern":"^/sources/(0|[1-9][0-9]*)$"}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    selector.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["accepted","padding"],
+        "properties":{
+            "accepted":{"type":"integer"},
+            "padding":{"type":"string"}
+        }
+    });
+    runtime.upsert(selector, None).await.unwrap();
+
+    let causal_context = CausalContext::new(
+        ActorId::new("agent:reference-composition").unwrap(),
+        ActorKind::Agent,
+        TraceId::new("trace-reference-composition").unwrap(),
+    )
+    .with_session_id("session-reference-composition");
+    let upstream = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::dynamic_evidence-owner").unwrap(),
+            json!({}),
+            causal_context
+                .clone()
+                .with_idempotency_key("reference-composition-upstream"),
+        ))
+        .await;
+    assert!(upstream.error.is_none(), "{:?}", upstream.error);
+    let reference = upstream.value.unwrap();
+    assert_eq!(reference["kind"], "worker_result_reference");
+    assert!(reference["sizeBytes"].as_u64().unwrap() > 8_192);
+    let invocation_id = reference["invocationId"].as_str().unwrap();
+
+    let selected = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::result_read").unwrap(),
+            json!({"invocationId":invocation_id,"pointer":"/sources/0"}),
+            causal_context
+                .clone()
+                .with_idempotency_key("reference-composition-read"),
+        ))
+        .await;
+    assert!(selected.error.is_none(), "{:?}", selected.error);
+    let selected = selected.value.unwrap();
+    assert_eq!(selected["value"]["id"], "S1");
+    assert_eq!(selected["truncated"], false);
+    assert!(
+        !selected.to_string().contains("privateBulk"),
+        "a selected path must not hydrate an unrelated result field"
+    );
+
+    let selector_input = json!({
+        "selection":{
+            "reference":reference,
+            "sources":[{"sourceId":"S1","pointer":"/sources/0"}]
+        }
+    });
+    let downstream = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::dynamic_evidence-selector").unwrap(),
+            selector_input,
+            causal_context
+                .clone()
+                .with_idempotency_key("reference-composition-downstream"),
+        ))
+        .await;
+    assert!(downstream.error.is_none(), "{:?}", downstream.error);
+    let downstream_reference = downstream.value.unwrap();
+    assert_eq!(
+        downstream_reference["kind"], "worker_result_reference",
+        "large downstream output should expose its durable invocation identity"
+    );
+    let downstream_record = runtime
+        .store()
+        .invocation(
+            downstream_reference["invocationId"]
+                .as_str()
+                .expect("downstream invocation id"),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(downstream_record.output.as_ref().unwrap()["accepted"], 1);
+    assert_eq!(
+        downstream_record.input["selection"]["reference"]["kind"],
+        "worker_result_reference"
+    );
+    assert!(
+        !downstream_record.input.to_string().contains("privateBulk"),
+        "downstream durable input must contain the reference and pointers, not upstream bytes"
+    );
+
+    let root_pointer = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::dynamic_evidence-selector").unwrap(),
+            json!({
+                "selection":{
+                    "reference":downstream_record.input["selection"]["reference"],
+                    "sources":[{"sourceId":"S1","pointer":""}]
+                }
+            }),
+            causal_context
+                .clone()
+                .with_idempotency_key("reference-composition-root-rejected"),
+        ))
+        .await;
+    assert!(root_pointer.error.is_some());
+    let root_pointer_error = root_pointer.error.unwrap().to_string();
+    assert!(
+        root_pointer_error.contains("pattern")
+            || root_pointer_error.contains("does not match")
+            || root_pointer_error.contains("invalid"),
+        "{root_pointer_error}"
+    );
+
+    let missing = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::result_read").unwrap(),
+            json!({"invocationId":invocation_id,"pointer":"/sources/99"}),
+            causal_context.with_idempotency_key("reference-composition-missing"),
+        ))
+        .await;
+    assert!(missing.error.is_some());
+    assert!(
+        missing
+            .error
+            .unwrap()
+            .to_string()
+            .contains("does not exist")
+    );
+}
+
+#[tokio::test]
 async fn selected_worker_input_contract_classifies_schema_violations() {
     let (runtime, _home) = test_runtime(None);
     let mut bundle = command_bundle(vec![
