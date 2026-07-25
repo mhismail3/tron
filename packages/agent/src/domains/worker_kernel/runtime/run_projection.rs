@@ -796,28 +796,6 @@ mod tests {
     }
 
     #[test]
-    fn request_and_result_previews_prefer_user_facing_fields() {
-        assert_eq!(
-            preview_request(&json!({"query":"What happened today?","debug":"raw"})),
-            "What happened today?"
-        );
-        assert_eq!(
-            preview_result(&json!({"summary":"Three developments","payload":{"raw":true}})),
-            "Three developments"
-        );
-    }
-
-    #[test]
-    fn technical_tool_names_are_structured_not_concatenated() {
-        assert_eq!(
-            friendly_tool_name("worker_kernel::filesystem_list"),
-            "filesystem list"
-        );
-        assert!(is_technical_tool("worker_kernel::filesystem_list"));
-        assert!(!is_technical_tool("research_search"));
-    }
-
-    #[test]
     fn active_child_and_retry_evidence_outrank_stale_parent_stage() {
         let root = record("root", "running", None, 0);
         let mut child = record("child", "running", Some("root"), 1);

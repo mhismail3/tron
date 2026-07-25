@@ -7,7 +7,11 @@
 //! projection, normalization, and redaction. Scenario tests live in `tests`.
 //! `run_projection` reconstructs bounded causal trees and structured timelines
 //! from durable invocation, attempt, stage, child-session, and model-turn truth;
-//! it never stores client-owned progress.
+//! it never stores client-owned progress. Its request preview prefers
+//! conventional user-authored question/query/task fields so clients never need
+//! to present a serialized worker input object as the run summary. Equal-time
+//! durable timeline facts retain lifecycle order (queued before detached)
+//! rather than falling back to display-text ordering.
 //! `admission` owns schema-checked durable enqueue, idempotent replay,
 //! exact-version latency prediction, bounded foreground ownership, atomic
 //! detachment, and observational waits plus the transient bridge to an

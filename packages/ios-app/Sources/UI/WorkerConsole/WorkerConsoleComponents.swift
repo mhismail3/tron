@@ -468,7 +468,7 @@ struct WorkerCodeBlock: View {
             Text(text)
                 .font(TronTypography.code(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextSecondary)
-                .fixedSize(horizontal: true, vertical: false)
+                .fixedSize(horizontal: true, vertical: true)
                 .textSelection(.enabled)
                 .padding(9)
         }

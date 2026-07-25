@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-24 for reference-owned worker results.
+> Last verified: 2026-07-25 for progressive worker-run and result disclosure.
 
 ## Overview
 
@@ -485,13 +485,15 @@ worker, version, runner, or primitive-group contract.
 The detail sheet is action-first rather than a generic JSON viewer. It shows a
 plain-language outcome and status first; schema-valid worker request/result
 objects become bounded typed forms; core primitives use concise operation rows;
-and artifacts, evidence, technical references, and raw request move through
-progressive disclosure into nested sheets. Worker results open only through the
-bounded reference inspector; a legacy raw-result sheet exists solely for
-schema-v9 migration compatibility. Direct typed command vectors render as a
-readable command while the technical detail retains their exact JSON evidence.
-Unbounded raw payloads and technical-reference collections never expand inline
-and displace the summary.
+and artifacts remain in the primary flow only when they are user-relevant.
+Identifiers, protocol references, and raw request/result values share one
+`Technical details` entry and move through progressive disclosure into nested
+sheets; the obsolete generic `Evidence` container is not a user-facing
+category. Worker results open only through the bounded reference inspector; a
+legacy raw-result sheet exists solely for schema-v9 migration compatibility.
+Direct typed command vectors render as a readable command while technical
+detail retains their exact JSON evidence. Unbounded raw payloads and
+technical-reference collections never expand inline and displace the summary.
 
 Generic non-worker calls retain the same sheet identity and may render bounded
 free-text `tool.invocation.progress`, `tool.invocation.output`, and terminal
@@ -499,22 +501,29 @@ lifecycle events. Direct worker calls do not accumulate those strings into a
 client-owned journey. Their chat chip resolves the persisted
 model-tool/invocation association through `worker_kernel::runs(detail:
 "graph")`, then renders the server's status, mode, meaningful stage, elapsed
-time, child counts, causal node order, structured timeline, critical-path
-timing, result or actionable failure, and child-session links. Active child
-work therefore outranks a stale parent model event, and starts/finishes cannot
-collapse into a concatenated “Latest output” blob.
+time, child counts, result or actionable failure, and links to execution
+detail. The primary sheet never embeds an unbounded causal tree or lifecycle
+history. `Work breakdown` and `Activity` open separate large-detail sheets that
+render the server-ordered causal nodes, child-session links, and user-facing
+timeline. Active child work therefore outranks a stale parent model event, and
+starts/finishes cannot collapse into a concatenated “Latest output” blob.
 
 The same generic graph surface offers detach, bounded await, causal-subtree
 cancel, terminal-failure retry, root/child session inspection, and typed-result
-inspection according to server state. Exact result inspection calls
-`worker_kernel::result_read` on demand: the sheet renders one server-bounded
-path or page, follows server-authored child pointers, keeps the immutable
-version and content/schema digests visible under technical detail, and never
-assembles an unbounded client-side copy. Raw run projections, schemas, trace
-identifiers, and technical process/filesystem entries live in subordinate
-detail sheets. One-second polling is only a live/reconnect fallback; every
-refresh re-reads server truth. The client never reads worker storage, infers a
-worker stage from tool names, or owns a second execution state.
+inspection according to server state. Terminal result previews remove
+protocol-only schema/status prefixes before presentation. Exact result
+inspection calls `worker_kernel::result_read` on demand: the primary result
+sheet is a readable field browser over one server-bounded path or page and
+follows server-authored child pointers. Primitive values wrap vertically as
+content rather than entering a code container. Raw JSON plus the immutable
+version and content/schema digests live in subordinate technical sheets; an
+empty collection receives an explicit empty state rather than a blank surface.
+The client never assembles an unbounded result copy. Raw run projections,
+schemas, trace identifiers, and technical process/filesystem entries likewise
+live in subordinate detail sheets. One-second polling is only a live/reconnect
+fallback; every refresh re-reads server truth. The client never reads worker
+storage, infers a worker stage from tool names, or owns a second execution
+state.
 Failure presentation classifies current schema and policy errors from their
 server evidence without inventing authorization state or retry policy.
 

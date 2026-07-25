@@ -414,6 +414,7 @@ struct ToolInvocationDetailSheet: View {
     let data: ToolInvocationData
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showTechnicalDetails = false
 
     private var display: ToolInvocationDisplayModel { data.display }
     private var evidence: ToolEvidencePresentation { ToolEvidencePresentation(data: data) }
@@ -443,6 +444,12 @@ struct ToolInvocationDetailSheet: View {
         )
     }
     private var tint: TintedColors { TintedColors(accent: accent, colorScheme: colorScheme) }
+    private var hasTechnicalDetails: Bool {
+        !brief.evidenceRows.isEmpty
+            || !brief.technicalRows.isEmpty
+            || brief.rawRequest != nil
+            || brief.rawResult != nil
+    }
 
     var body: some View {
         ToolDetailSheetContainer(
@@ -490,12 +497,24 @@ struct ToolInvocationDetailSheet: View {
                             .sheetSection()
                     }
 
-                    evidenceSection
-                        .sheetSection()
+                    if hasTechnicalDetails {
+                        technicalDetailsSection
+                            .sheetSection()
+                    }
                 }
                 .padding(.top, 16)
                 .padding(.bottom, 28)
             }
+        }
+        .sheet(isPresented: $showTechnicalDetails) {
+            ToolTechnicalDetailsSheet(
+                title: evidence.title,
+                evidenceRows: brief.evidenceRows,
+                technicalRows: brief.technicalRows,
+                rawRequest: brief.rawRequest,
+                rawResult: brief.rawResult,
+                accent: .tronSlate
+            )
         }
     }
 
@@ -612,13 +631,6 @@ struct ToolInvocationDetailSheet: View {
         }
     }
 
-    private func rowsSection(title: String, rows: [ToolDisplayRow], accent: Color) -> some View {
-        let sectionTint = TintedColors(accent: accent, colorScheme: colorScheme)
-        return ToolDetailSection(title: title, accent: accent, tint: sectionTint) {
-            ToolInlineRows(rows: rows, tint: sectionTint)
-        }
-    }
-
     private var resultSection: some View {
         ToolDetailSection(title: surface.resultTitle, accent: accent, tint: tint) {
             VStack(alignment: .leading, spacing: 12) {
@@ -656,83 +668,125 @@ struct ToolInvocationDetailSheet: View {
         }
     }
 
-    private var evidenceSection: some View {
+    private var technicalDetailsSection: some View {
         let evidenceTint = TintedColors(accent: .tronSlate, colorScheme: colorScheme)
-        return ToolDetailSection(title: "Evidence", accent: .tronSlate, tint: evidenceTint) {
-            VStack(alignment: .leading, spacing: 12) {
-                if !brief.evidenceRows.isEmpty {
-                    ToolInlineRows(rows: brief.evidenceRows, tint: evidenceTint)
+        return ToolDetailSection(title: "Technical details", accent: .tronSlate, tint: evidenceTint) {
+            Button {
+                showTechnicalDetails = true
+            } label: {
+                HStack(alignment: .center, spacing: 11) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .foregroundStyle(evidenceTint.accent)
+                        .frame(width: 22)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Open technical details")
+                            .font(TronTypography.sans(
+                                size: TronTypography.sizeBodySM,
+                                weight: .semibold
+                            ))
+                            .foregroundStyle(.tronTextPrimary)
+                        Text("Identifiers, protocol references, and raw request or result payloads.")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "arrow.up.right.square")
+                        .font(TronTypography.sans(
+                            size: TronTypography.sizeCaption,
+                            weight: .semibold
+                        ))
+                        .foregroundStyle(.tronTextMuted)
                 }
-
-                if !brief.technicalRows.isEmpty {
-                    ToolRowsDetailLink(title: "Technical refs", rows: brief.technicalRows, tint: evidenceTint)
-                }
-
-                if let rawRequest = brief.rawRequest {
-                    ToolRawDetailLink(title: "Raw request", text: rawRequest, tint: evidenceTint)
-                }
-
-                if let rawResult = brief.rawResult {
-                    ToolRawDetailLink(title: "Raw result", text: rawResult, tint: evidenceTint)
-                }
+                .padding(.vertical, 9)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
     }
 }
 
-private struct ToolRowsDetailLink: View {
+private struct ToolTechnicalDetailsSheet: View {
     let title: String
-    let rows: [ToolDisplayRow]
-    let tint: TintedColors
-
-    @State private var showDetail = false
-
-    var body: some View {
-        Button { showDetail = true } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-            }
-            .foregroundStyle(tint.heading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.vertical, 8)
-        .sheet(isPresented: $showDetail) {
-            ToolRowsDetailSheet(title: title, rows: rows, tint: tint)
-        }
-    }
-}
-
-private struct ToolRowsDetailSheet: View {
-    let title: String
-    let rows: [ToolDisplayRow]
-    let tint: TintedColors
+    let evidenceRows: [ToolDisplayRow]
+    let technicalRows: [ToolDisplayRow]
+    let rawRequest: String?
+    let rawResult: String?
+    let accent: Color
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                ToolInlineRows(rows: rows, tint: tint)
-                    .padding(18)
+                VStack(alignment: .leading, spacing: 16) {
+                    if !evidenceRows.isEmpty {
+                        ToolDetailSection(
+                            title: "Run identifiers",
+                            accent: accent,
+                            tint: tint
+                        ) {
+                            ToolInlineRows(rows: evidenceRows, tint: tint)
+                        }
+                        .sheetSection()
+                    }
+
+                    if !technicalRows.isEmpty {
+                        ToolDetailSection(
+                            title: "Protocol references",
+                            accent: accent,
+                            tint: tint
+                        ) {
+                            ToolInlineRows(rows: technicalRows, tint: tint)
+                        }
+                        .sheetSection()
+                    }
+
+                    if rawRequest != nil || rawResult != nil {
+                        ToolDetailSection(
+                            title: "Raw protocol",
+                            accent: accent,
+                            tint: tint
+                        ) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                if let rawRequest {
+                                    ToolRawDetailLink(
+                                        title: "Raw request",
+                                        text: rawRequest,
+                                        tint: tint
+                                    )
+                                }
+                                if let rawResult {
+                                    ToolRawDetailLink(
+                                        title: "Raw result",
+                                        text: rawResult,
+                                        tint: tint
+                                    )
+                                }
+                            }
+                        }
+                        .sheetSection()
+                    }
+                }
+                .padding(.top, 16)
+                .padding(.bottom, 28)
             }
             .scrollContentBackground(.hidden)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: title, color: tint.accent)
+                    SheetTitle(title: "\(title) Details", color: accent)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    SheetDismissButton(color: tint.accent)
+                    SheetDismissButton(color: accent)
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .tint(tint.accent)
+        .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
+        .tint(accent)
+    }
+
+    @Environment(\.colorScheme) private var colorScheme
+    private var tint: TintedColors {
+        TintedColors(accent: accent, colorScheme: colorScheme)
     }
 }
 

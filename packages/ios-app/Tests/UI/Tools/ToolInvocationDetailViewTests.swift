@@ -27,11 +27,16 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         XCTAssertTrue(source.contains(#""Live activity""#))
         XCTAssertTrue(source.contains(#""Current state""#))
         XCTAssertTrue(source.contains(#""Outcome""#))
-        XCTAssertTrue(source.contains("ToolRowsDetailLink"))
+        XCTAssertTrue(source.contains("ToolTechnicalDetailsSheet"))
         XCTAssertTrue(source.contains("ToolRawDetailLink"))
-        XCTAssertTrue(source.contains("ToolRowsDetailSheet"))
+        XCTAssertTrue(source.contains(#""Technical details""#))
+        XCTAssertTrue(source.contains(#""Run identifiers""#))
+        XCTAssertTrue(source.contains(#""Protocol references""#))
         XCTAssertTrue(source.contains(#""Raw request""#))
         XCTAssertTrue(source.contains(#""Raw result""#))
+        XCTAssertFalse(source.contains(#"ToolDetailSection(title: "Evidence""#))
+        XCTAssertFalse(source.contains("ToolRowsDetailLink"))
+        XCTAssertFalse(source.contains("ToolRowsDetailSheet"))
         XCTAssertFalse(source.contains("DisclosureGroup"))
         XCTAssertFalse(source.contains("ForEach(evidence.sections)"))
         XCTAssertFalse(source.contains("ToolInvocationCodeBlock(text: body)"))
@@ -126,6 +131,60 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         try XCTUnwrap(image.pngData()).write(to: outputURL)
         print("TRON_VISUAL_ARTIFACT_PATH=\(outputURL.path)")
         add(XCTAttachment(contentsOfFile: outputURL))
+    }
+
+    func testWorkerRunSummaryRendersProgressiveDisclosureForVisualQA() throws {
+        let size = CGSize(width: 430, height: 932)
+        let graph = Self.fixtureWorkerGraph
+        let view = NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    WorkerRunGraphSummaryView(graph: graph)
+                    WorkerRunDetailLinksView(
+                        graph: graph,
+                        openTree: {},
+                        openTimeline: {}
+                    )
+                    WorkerRunTerminalResultView(graph: graph, inspectResult: {})
+                }
+                .padding(18)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .background(Color(uiColor: .systemBackground))
+
+        let windowScene = try XCTUnwrap(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: windowScene)
+        window.frame = CGRect(origin: .zero, size: size)
+        let controller = UIHostingController(rootView: view)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.frame = window.bounds
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 2
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds, format: format).image { _ in
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+
+        XCTAssertEqual(image.size.width, size.width)
+        XCTAssertEqual(image.size.height, size.height)
+
+        let outputURL = try visualArtifactURL(outputName: "worker-run-progressive-detail-render.png")
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try XCTUnwrap(image.pngData()).write(to: outputURL)
+        print("TRON_VISUAL_ARTIFACT_PATH=\(outputURL.path)")
+        let attachment = XCTAttachment(contentsOfFile: outputURL)
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private static var fixtureInvocation: ToolInvocationData {
@@ -244,6 +303,95 @@ final class ToolInvocationDetailViewTests: XCTestCase {
                 )
             )
         ])
+    }
+
+    private static var fixtureWorkerGraph: WorkerRunGraphDTO {
+        let data = #"""
+        {
+          "rootInvocationId": "worker_run_fixture",
+          "requestedInvocationId": "worker_run_fixture",
+          "modelToolInvocationId": "tool_fixture",
+          "originSessionId": "session_fixture",
+          "workerId": "research-coordinator",
+          "workerName": "Research Coordinator",
+          "requestPreview": "{\"budget\":\"high\",\"question\":\"Compare contradictory reporting across six independent sources.\",\"depth\":\"deep\"}",
+          "status": "completed",
+          "mode": "background",
+          "stage": "completed",
+          "stageLabel": "Worker execution completed",
+          "expectedNextTransition": null,
+          "createdAt": "2026-07-25T06:23:17Z",
+          "startedAt": "2026-07-25T06:23:17Z",
+          "completedAt": "2026-07-25T06:37:58Z",
+          "elapsedMs": 881000,
+          "counts": {
+            "queued": 0,
+            "running": 0,
+            "completed": 5,
+            "failed": 0,
+            "cancelled": 0
+          },
+          "timing": {
+            "queueMs": 13,
+            "executionMs": 880987,
+            "wallMs": 881000,
+            "modelMs": 510000,
+            "childCriticalPathMs": 180000,
+            "criticalPathMs": 881000,
+            "criticalPathNodeIds": ["invocation:worker_run_fixture"]
+          },
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 2400,
+            "cacheReadTokens": 0,
+            "cacheCreationTokens": 0,
+            "cost": 0.42
+          },
+          "nodes": [
+            {
+              "id": "invocation:worker_run_fixture",
+              "kind": "invocation",
+              "parentId": null,
+              "invocationId": "worker_run_fixture",
+              "workerId": "research-coordinator",
+              "workerName": "Research Coordinator",
+              "workerVersion": "version",
+              "runner": "agent",
+              "status": "completed",
+              "mode": "background",
+              "stage": "completed",
+              "createdAt": "2026-07-25T06:23:17Z",
+              "startedAt": "2026-07-25T06:23:17Z",
+              "completedAt": "2026-07-25T06:37:58Z",
+              "elapsedMs": 881000
+            }
+          ],
+          "timeline": [
+            {
+              "occurredAt": "2026-07-25T06:23:17Z",
+              "nodeId": "invocation:worker_run_fixture",
+              "stage": "queued",
+              "status": "queued",
+              "summary": "Queued for durable worker execution",
+              "technical": false,
+              "invocationId": "worker_run_fixture"
+            },
+            {
+              "occurredAt": "2026-07-25T06:37:58Z",
+              "nodeId": "invocation:worker_run_fixture",
+              "stage": "completed",
+              "status": "completed",
+              "summary": "Worker execution completed",
+              "technical": false,
+              "invocationId": "worker_run_fixture"
+            }
+          ],
+          "resultPreview": "research.report.v1 · partial · The reviewed evidence supports a bounded conclusion while identifying two unresolved claims.",
+          "errorPreview": null,
+          "truncated": false
+        }
+        """#.data(using: .utf8)!
+        return try! JSONDecoder().decode(WorkerRunGraphDTO.self, from: data)
     }
 
     private func visualArtifactURL(outputName: String) throws -> URL {

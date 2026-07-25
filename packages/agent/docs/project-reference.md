@@ -785,6 +785,13 @@ Reference previews prefer conventional `summary`, `answer`, `report`,
 `result`, `message`, or `title` text and otherwise describe only the JSON
 shape. They never copy the first bytes of an arbitrary serialized result back
 into run lists, receipts, or model context.
+Run-graph request previews likewise prefer conventional user-authored
+`question`, `query`, `request`, `prompt`, `task`, `topic`, `title`, or `action`
+fields. Structured worker input remains available as technical detail, but the
+primary client summary never needs to render its serialized JSON object.
+Timeline ordering is chronological with lifecycle ordering for equal-time
+admission facts, so an atomically recorded queued transition appears before its
+detached transition rather than being alphabetized by display text.
 Provider-facing fixed invoke/await records contain references. A synchronous
 direct-worker result at or below 8 KiB is integrity-verified and hydrated in
 its exact worker schema for the immediately following provider turn; larger

@@ -3,6 +3,74 @@ import Testing
 @testable import TronMobile
 
 struct WorkerConsoleInteractionTests {
+    @Test("Worker summaries turn protocol previews into readable user-facing text")
+    func readableWorkerSummaryPresentation() {
+        let request = #"{"budget":"high","question":"Compare the reporting across six sources.","depth":"deep"}"#
+        #expect(
+            WorkerRunGraphPresentation.requestSummary(request)
+                == "Compare the reporting across six sources."
+        )
+        #expect(
+            WorkerRunGraphPresentation.requestSummary(
+                #"{"question":"Explain the durable run without showing JSON.","other":"truncated…"#
+            ) == "Explain the durable run without showing JSON."
+        )
+        #expect(
+            WorkerRunGraphPresentation.requestSummary(#"{"budget":"high","depth":"deep"}"#)
+                == "Structured worker request"
+        )
+
+        let result = WorkerRunGraphPresentation.resultPresentation(
+            "research.report.v1 · partial · The reviewed evidence supports a bounded conclusion."
+        )
+        #expect(result.status == "Partial")
+        #expect(result.summary == "The reviewed evidence supports a bounded conclusion.")
+    }
+
+    @Test("Worker result fields use bounded JSON-pointer navigation")
+    func workerResultFieldPresentation() throws {
+        let reference = WorkerResultReferenceDTO(
+            kind: "worker_result_reference",
+            invocationId: "invocation",
+            workerId: "worker",
+            workerVersion: "version",
+            outputSchemaSha256: "schema",
+            contentSha256: "content",
+            sizeBytes: 120,
+            preview: "worker.result.v1 · complete · Finished",
+            message: "Read selectively"
+        )
+        let chunk = WorkerResultChunkDTO(
+            kind: "worker_result_chunk",
+            reference: reference,
+            pointer: "",
+            value: AnyCodable([
+                "summary": "Readable result",
+                "path/to~value": true,
+            ]),
+            children: [],
+            offset: 0,
+            returned: 2,
+            total: 2,
+            nextOffset: nil,
+            truncated: false
+        )
+
+        let fields = WorkerResultInspectorPresentation.fields(in: chunk)
+        #expect(fields.first?.label == "Summary")
+        #expect(
+            fields.first(where: { $0.label == "Path/to~value" })?.pointer
+                == "/path~1to~0value"
+        )
+        #expect(
+            WorkerResultInspectorPresentation.isEmptyCollection(AnyCodable([String: Any]()))
+        )
+        #expect(
+            WorkerResultInspectorPresentation.primitiveText(AnyCodable("Exact text"))
+                == "Exact text"
+        )
+    }
+
     @Test("Run actions follow server status and foreground-background mode")
     func durableRunActionPolicy() {
         #expect(WorkerRunGraphPresentation.canDetach(status: "running", mode: "foreground"))
@@ -20,12 +88,19 @@ struct WorkerConsoleInteractionTests {
     @Test("Worker UI consumes structured graph stages and never joins raw event names")
     func durableRunPresentationUsesStructuredTruth() throws {
         let root = iosAppRoot()
-        let graph = try String(
+        let graphComponents = try String(
             contentsOf: root.appendingPathComponent(
                 "Sources/UI/WorkerConsole/WorkerRunGraphComponents.swift"
             ),
             encoding: .utf8
         )
+        let graphController = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/WorkerToolRunGraphView.swift"
+            ),
+            encoding: .utf8
+        )
+        let graph = graphComponents + graphController
         let tool = try String(
             contentsOf: root.appendingPathComponent(
                 "Sources/UI/Tools/ToolInvocationViews.swift"
@@ -44,9 +119,13 @@ struct WorkerConsoleInteractionTests {
         #expect(graph.contains("WorkerRunTimelineView"))
         #expect(graph.contains("entry.summary"))
         #expect(graph.contains("filter { !$0.technical }"))
+        #expect(graph.contains("WorkerRunDetailLinksView"))
+        #expect(graph.contains("WorkerRunTreeSheet"))
+        #expect(graph.contains("WorkerRunTimelineSheet"))
         #expect(tool.contains("WorkerToolRunGraphView("))
         #expect(graph.contains(".workerRunProjectionInvalidated"))
-        #expect(graph.contains("Inspect result"))
+        #expect(graph.contains("Open full result"))
+        #expect(!graph.contains("Inspect result"))
         #expect(graph.contains("WorkerResultInspectorSheet("))
         #expect(context.contains(".workerRunProjectionInvalidated"))
         #expect(!graph.contains("Started Filesystem"))
@@ -129,17 +208,27 @@ struct WorkerConsoleInteractionTests {
         #expect(resultInspector.contains("struct WorkerResultInspectorSheet"))
         #expect(resultInspector.contains("repository.workerResult("))
         #expect(resultInspector.contains("chunk.children"))
-        #expect(resultInspector.contains("Technical reference"))
+        #expect(resultInspector.contains("WorkerResultTechnicalSheet"))
+        #expect(resultInspector.contains("Open raw JSON"))
+        #expect(resultInspector.contains("Result fields"))
+        #expect(!resultInspector.contains(#"title: chunk.truncated ? "Result page" : "Result value""#))
         #expect(!resultInspector.contains("assembledResult"))
         let runDetail = try String(
             contentsOf: workerRoot.appendingPathComponent("WorkerConsoleDetailSheets.swift"),
             encoding: .utf8
         )
         #expect(runDetail.contains("WorkerResultInspectorSheet("))
-        #expect(runDetail.contains("Inspect typed result"))
+        #expect(runDetail.contains("WorkerRunTechnicalDetailsSheet"))
         #expect(runDetail.contains("Legacy Worker Result"))
+        #expect(!runDetail.contains("Inspect typed result"))
         #expect(!runDetail.contains("Run result projection"))
         #expect(!runDetail.contains("showOutput"))
+
+        let codeBlockSource = try String(
+            contentsOf: workerRoot.appendingPathComponent("WorkerConsoleComponents.swift"),
+            encoding: .utf8
+        )
+        #expect(codeBlockSource.contains(".fixedSize(horizontal: true, vertical: true)"))
     }
 
     @Test("Worker tabs and execution actions share liquid glass components")
