@@ -298,6 +298,116 @@ fn canonical_results_keep_small_json_inline_and_deduplicate_large_blobs() {
 }
 
 #[test]
+fn provider_projection_hydrates_only_fresh_authorized_small_results() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let small = json!({"answer":"fresh"});
+    let large = json!({"report":"bounded ".repeat(2_000)});
+    let mut invocation_ids = Vec::new();
+
+    for (key, model_tool_id, output) in [
+        ("projection-small", "call-small", &small),
+        ("projection-large", "call-large", &large),
+    ] {
+        let (run, _) = store
+            .begin_invocation_with_context(
+                &published.worker.worker_id,
+                &published.version,
+                &json!({"topic":key}),
+                key,
+                "trace-provider-projection",
+                0,
+                "manual",
+                Some("session-provider-projection"),
+                WorkerInteractionMode::Foreground,
+                Some(model_tool_id),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(store.claim_running(&run.invocation_id).unwrap());
+        store
+            .complete_invocation(&run.invocation_id, &published.worker.worker_id, Ok(output))
+            .unwrap();
+        invocation_ids.push(run.invocation_id);
+    }
+
+    let model_ids = vec!["call-small".to_owned(), "call-large".to_owned()];
+    let fresh = HashSet::from_iter(model_ids.iter().cloned());
+    let projected = store
+        .provider_result_projections(
+            &model_ids,
+            &[],
+            &fresh,
+            &HashSet::new(),
+            Some("session-provider-projection"),
+            None,
+        )
+        .unwrap();
+    assert_eq!(projected.len(), 2);
+    assert_eq!(projected[0]["providerValue"], small);
+    assert_eq!(
+        projected[1]["providerValue"]["kind"],
+        "worker_result_reference"
+    );
+    assert_eq!(projected[1]["reference"]["invocationId"], invocation_ids[1]);
+
+    let historical = store
+        .provider_result_projections(
+            &model_ids,
+            &[],
+            &HashSet::new(),
+            &HashSet::new(),
+            Some("session-provider-projection"),
+            None,
+        )
+        .unwrap();
+    assert!(historical.iter().all(|item| {
+        item["providerValue"]["kind"] == "worker_result_reference"
+            && item["reference"] == item["providerValue"]
+    }));
+    assert!(
+        store
+            .provider_result_projections(
+                &model_ids,
+                &[],
+                &fresh,
+                &HashSet::new(),
+                Some("another-session"),
+                Some("another-trace"),
+            )
+            .unwrap()
+            .is_empty()
+    );
+
+    store
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE storage_payload_refs SET payload_hash='corrupt'
+             WHERE owner_kind='worker_invocation' AND owner_id=?1",
+            [&invocation_ids[0]],
+        )
+        .unwrap();
+    let error = store
+        .provider_result_projections(
+            &["call-small".to_owned()],
+            &[],
+            &HashSet::from(["call-small".to_owned()]),
+            &HashSet::new(),
+            Some("session-provider-projection"),
+            None,
+        )
+        .unwrap_err();
+    assert!(error.contains("storage integrity failure"), "{error}");
+}
+
+#[test]
 fn result_completion_rolls_back_ownership_and_terminal_state_together() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();

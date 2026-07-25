@@ -153,6 +153,74 @@ fn oversized_completion_retains_exact_audit_output_and_bounded_model_context() {
     assert_ne!(model_context, raw);
 }
 
+#[test]
+fn direct_worker_completion_persists_association_without_copying_typed_output() {
+    let invocation = ToolInvocationDraft::new("call-worker", "research_search", Map::new());
+    let result = make_exec_result_with_details(
+        ToolResultBody::Text(r#"{"summary":"private canonical result"}"#.into()),
+        Some(json!({
+            "summary":"private canonical result",
+            "engineOutcome":{"replayed":false}
+        })),
+    );
+    let presentation = json!({
+        "surfaceKind":"worker",
+        "workerId":"research-search",
+        "workerVersion":"v1"
+    });
+
+    let payload = executed_completion_payload(
+        &invocation,
+        &result,
+        &provider_result_text(&result.result),
+        Some("run-worker"),
+        None,
+        None,
+        Some(presentation),
+    );
+
+    assert_eq!(
+        serde_json::from_str::<Value>(payload["content"].as_str().unwrap()).unwrap()["kind"],
+        super::super::turn_context::WORKER_RESULT_ASSOCIATION_KIND
+    );
+    assert_eq!(payload["details"]["modelToolInvocationId"], "call-worker");
+    assert_eq!(payload["details"]["engineOutcome"]["replayed"], false);
+    assert!(payload.get("modelContextContent").is_none());
+    assert!(!payload.to_string().contains("private canonical result"));
+}
+
+#[test]
+fn direct_worker_background_receipt_remains_provider_visible_and_compact() {
+    let invocation = ToolInvocationDraft::new("call-worker", "research_coordinator", Map::new());
+    let receipt = json!({
+        "kind":"worker_invocation_receipt",
+        "status":"running",
+        "mode":"background",
+        "invocationId":"winv_1",
+        "workerId":"research-coordinator",
+        "workerName":"Research Coordinator",
+        "originSessionId":"sess_1",
+        "message":"continuing"
+    });
+    let result = make_exec_result_with_details(
+        ToolResultBody::Text(receipt.to_string()),
+        Some(receipt.clone()),
+    );
+    let evidence = durable_worker_evidence(
+        &invocation,
+        &result,
+        &provider_result_text(&result.result),
+        Some(&json!({"surfaceKind":"worker"})),
+    )
+    .expect("worker evidence");
+
+    assert_eq!(
+        serde_json::from_str::<Value>(&evidence.content).unwrap(),
+        receipt
+    );
+    assert_eq!(evidence.details["workerInvocationId"], "winv_1");
+}
+
 struct PhasePersistenceHarness {
     emitter: Arc<EventEmitter>,
     persister: EventPersister,

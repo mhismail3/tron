@@ -32,6 +32,28 @@ fn engine_surface_snapshot_is_client_introspection_not_model_vocabulary() {
 }
 
 #[test]
+fn worker_result_projection_is_internal_kernel_reconstruction_not_model_vocabulary() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let projection = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == WORKER_RESULT_PROJECTION_FUNCTION)
+        .expect("result projection contract");
+    assert_eq!(projection.visibility, FunctionVisibility::Internal);
+    assert_eq!(projection.effect_class, EffectClass::PureRead);
+    assert!(
+        core_primitives()
+            .iter()
+            .all(|descriptor| descriptor.function_id != WORKER_RESULT_PROJECTION_FUNCTION)
+    );
+    let request = projection.request_schema.as_ref().unwrap();
+    assert_eq!(request["additionalProperties"], false);
+    assert_eq!(
+        request["properties"]["modelToolInvocationIds"]["maxItems"],
+        256
+    );
+}
+
+#[test]
 fn profile_owned_worker_mutations_do_not_require_a_session() {
     let definitions = function_definitions().expect("worker-kernel contracts");
     for function_id in [

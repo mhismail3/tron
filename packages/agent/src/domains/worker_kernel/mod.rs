@@ -168,6 +168,15 @@
 //! digest, content digest, size, and preview. Workers decide which paths or
 //! references their typed orchestration needs; the kernel never interprets
 //! source, claim, citation, or report fields.
+//! Direct-worker session completions persist the originating provider-tool
+//! association rather than another output body. An internal, non-model-visible
+//! projection resolves those associations within the current session or causal
+//! trace: a trailing result at or below 8 KiB is integrity-verified and
+//! hydrated for one accepted provider request, while large, background, and
+//! historical results remain references. Provider admission, restart, token
+//! estimation, and compaction all rebuild this projection from durable
+//! evidence. A missing or corrupt fresh association fails before the provider
+//! request and is reported as kernel storage failure rather than worker failure.
 //! Schema v10 stages historical ownership in restart-safe bounded
 //! transactions while leaving schema-v9 rows readable, then atomically swaps
 //! large outputs to internal envelopes, replaces successful inbox copies with
@@ -370,7 +379,8 @@ pub(crate) fn restore_profile_snapshot(
 
 pub(crate) use contract::{
     CONTEXT_SUMMARY_FUNCTION, CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES, SESSION_TITLE_FUNCTION,
-    WORKER_RELEVANCE_FUNCTION, estimate_context_summary_tokens, validate_context_summary_narrative,
+    WORKER_RELEVANCE_FUNCTION, WORKER_RESULT_PROJECTION_FUNCTION, estimate_context_summary_tokens,
+    validate_context_summary_narrative,
 };
 
 pub(crate) use runtime::WorkerRuntime;

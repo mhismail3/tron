@@ -33,7 +33,9 @@ pub struct ToolInvocationCompletedPayload {
     pub invocation_id: String,
     /// Model-facing tool name.
     pub tool_name: String,
-    /// Result content.
+    /// Durable result content. Direct-worker success stores only its
+    /// provider-tool association or an already compact receipt/reference; the
+    /// canonical typed body remains in the worker invocation ledger.
     pub content: String,
     /// Model-facing reconstruction content. When present, active clients keep
     /// rendering `content`, while session reconstruction feeds this richer

@@ -2,7 +2,9 @@
 //!
 //! Tool-result content is the only provider-portable channel back into
 //! the model. Engine/UI/audit metadata stays in `details`. Exact textual output
-//! remains durable while `turn_context` deterministically bounds the
+//! remains durable for non-worker tools while direct-worker completions retain
+//! only their provider-call association. `turn_context` resolves the canonical
+//! worker result from its invocation ledger and deterministically bounds the
 //! model-facing projection for both newly executed and reconstructed results,
 //! so every provider can reason about direct tool evidence without accepting
 //! unbounded local, web, worker, or binary-derived payloads. Every
@@ -25,6 +27,7 @@
 //! | `persistence` | Build and commit assistant/turn protocol rows |
 //! | `failure` | Atomically terminalize failed and interrupted turns |
 //! | `turn_context` | Build provider context and bounded worker-relevance intent |
+//! | `turn_worker_results` | Hydrate a fresh small direct-worker result once, then retain only its integrity reference |
 //!
 //! The root runner owns ordering across those phases. In particular, provider
 //! bytes cannot be consumed before request-audit persistence, and a successful
@@ -38,6 +41,7 @@ mod provider_phase;
 mod stream_phase;
 mod tool_phase;
 mod turn_context;
+mod turn_worker_results;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -239,7 +243,49 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         };
     }
 
-    // 2. Check context capacity (compact if needed), but let Stop cancel a
+    // 2. Canonicalize worker-result history before token estimation or
+    // compaction. Missing/corrupt fresh evidence is a storage failure and must
+    // stop before any provider request can observe divergent context.
+    let fresh_worker_results = match turn_context::canonicalize_worker_result_context(
+        context_manager,
+        engine_host,
+        session_id,
+        run_context.engine_trace_id.as_ref(),
+        run_context.parent_invocation_id.as_ref(),
+    )
+    .await
+    {
+        Ok(fresh) => fresh,
+        Err(error) => {
+            let error_msg = format!("failed to project durable worker results: {error}");
+            let failure = FailureEnvelope::new(
+                RUNTIME_PERSISTENCE_ERROR,
+                FailureCategory::Persistence,
+                error_msg.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            );
+            emit_turn_failure(
+                emitter,
+                persister,
+                session_id,
+                turn,
+                run_context,
+                sequence_counter,
+                &failure,
+                None,
+            );
+            return TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(StopReason::Error),
+                ..Default::default()
+            };
+        }
+    };
+
+    // 3. Check context capacity (compact if needed), but let Stop cancel a
     // long-running summarizer immediately and terminalize this active turn.
     let compaction_result = compaction
         .check_and_compact(
@@ -340,6 +386,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         server_origin,
         sequence_counter,
         engine_host,
+        fresh_worker_results: &fresh_worker_results,
     })
     .await
     {

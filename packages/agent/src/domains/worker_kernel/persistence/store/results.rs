@@ -20,6 +20,19 @@ struct LegacyResultRow {
     stored_output: String,
 }
 
+#[derive(Debug)]
+struct ProviderProjectionRow {
+    invocation_id: String,
+    worker_id: String,
+    worker_version: String,
+    worker_name: String,
+    status: String,
+    origin_session_id: Option<String>,
+    interaction_mode: String,
+    error: Option<String>,
+    stored_output: Option<String>,
+}
+
 impl WorkerStore {
     pub(super) fn store_result_in_transaction(
         transaction: &rusqlite::Transaction<'_>,
@@ -56,6 +69,92 @@ impl WorkerStore {
         validate_runtime_identifier(invocation_id, "invocation id", 256)?;
         let connection = self.connection()?;
         result_reference_from_connection(&connection, invocation_id).map(Some)
+    }
+
+    /// Resolve canonical worker-result projections for provider tool evidence.
+    ///
+    /// This is an internal kernel read, not model vocabulary. Historical reads
+    /// use ownership metadata only; a caller-designated fresh small result is
+    /// integrity-verified and hydrated for one provider turn.
+    #[allow(clippy::too_many_arguments)]
+    pub fn provider_result_projections(
+        &self,
+        model_tool_invocation_ids: &[String],
+        invocation_ids: &[String],
+        fresh_model_tool_invocation_ids: &HashSet<String>,
+        fresh_invocation_ids: &HashSet<String>,
+        origin_session_id: Option<&str>,
+        trace_id: Option<&str>,
+    ) -> Result<Vec<Value>, String> {
+        if model_tool_invocation_ids
+            .len()
+            .saturating_add(invocation_ids.len())
+            > 256
+        {
+            return Err("worker result projection exceeds 256 associations".to_owned());
+        }
+        if origin_session_id.is_none() && trace_id.is_none() {
+            return Err(
+                "worker result projection requires an originating session or causal trace"
+                    .to_owned(),
+            );
+        }
+        let connection = self.connection()?;
+        let mut projected = Vec::new();
+        let mut seen_invocations = HashSet::new();
+        for model_tool_invocation_id in model_tool_invocation_ids {
+            validate_runtime_identifier(model_tool_invocation_id, "model tool invocation id", 256)?;
+            let rows = provider_projection_rows(
+                &connection,
+                "i.model_tool_invocation_id=?1",
+                model_tool_invocation_id,
+                origin_session_id,
+                trace_id,
+            )?;
+            if rows.len() > 1 {
+                return Err(format!(
+                    "model tool invocation '{model_tool_invocation_id}' has ambiguous worker result ownership"
+                ));
+            }
+            let Some(row) = rows.into_iter().next() else {
+                continue;
+            };
+            if seen_invocations.insert(row.invocation_id.clone()) {
+                projected.push(provider_projection_value(
+                    &connection,
+                    row,
+                    Some(model_tool_invocation_id),
+                    fresh_model_tool_invocation_ids.contains(model_tool_invocation_id),
+                )?);
+            }
+        }
+        for invocation_id in invocation_ids {
+            validate_runtime_identifier(invocation_id, "worker invocation id", 256)?;
+            let rows = provider_projection_rows(
+                &connection,
+                "i.invocation_id=?1",
+                invocation_id,
+                origin_session_id,
+                trace_id,
+            )?;
+            if rows.len() > 1 {
+                return Err(format!(
+                    "worker invocation '{invocation_id}' has ambiguous result ownership"
+                ));
+            }
+            let Some(row) = rows.into_iter().next() else {
+                continue;
+            };
+            if seen_invocations.insert(row.invocation_id.clone()) {
+                projected.push(provider_projection_value(
+                    &connection,
+                    row,
+                    None,
+                    fresh_invocation_ids.contains(invocation_id),
+                )?);
+            }
+        }
+        Ok(projected)
     }
 
     pub(super) fn migrate_results_v10(&self, connection: &mut Connection) -> Result<(), String> {
@@ -309,6 +408,126 @@ impl WorkerStore {
             .map_err(|error| format!("remove unowned worker result blobs: {error:#}"))?;
         Ok(())
     }
+}
+
+fn provider_projection_rows(
+    connection: &Connection,
+    identity_condition: &str,
+    identity: &str,
+    origin_session_id: Option<&str>,
+    trace_id: Option<&str>,
+) -> Result<Vec<ProviderProjectionRow>, String> {
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT i.invocation_id,i.worker_id,i.worker_version,
+                    COALESCE(w.name,i.worker_id),i.status,i.origin_session_id,
+                    i.interaction_mode,i.error,i.output_json
+             FROM worker_invocations i
+             LEFT JOIN workers w ON w.worker_id=i.worker_id
+             WHERE {identity_condition}
+               AND (
+                    (?2 IS NOT NULL AND i.origin_session_id=?2)
+                    OR (?3 IS NOT NULL AND i.trace_id=?3)
+               )
+             ORDER BY i.created_at,i.invocation_id
+             LIMIT 2"
+        ))
+        .map_err(|error| format!("prepare worker result projection: {error}"))?;
+    statement
+        .query_map(params![identity, origin_session_id, trace_id], |row| {
+            Ok(ProviderProjectionRow {
+                invocation_id: row.get(0)?,
+                worker_id: row.get(1)?,
+                worker_version: row.get(2)?,
+                worker_name: row.get(3)?,
+                status: row.get(4)?,
+                origin_session_id: row.get(5)?,
+                interaction_mode: row.get(6)?,
+                error: row.get(7)?,
+                stored_output: row.get(8)?,
+            })
+        })
+        .map_err(|error| format!("query worker result projection: {error}"))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| format!("decode worker result projection: {error}"))
+}
+
+fn provider_projection_value(
+    connection: &Connection,
+    row: ProviderProjectionRow,
+    model_tool_invocation_id: Option<&str>,
+    fresh: bool,
+) -> Result<Value, String> {
+    let reference = if row.status == "completed" {
+        Some(result_reference_from_connection(
+            connection,
+            &row.invocation_id,
+        )?)
+    } else {
+        None
+    };
+    let provider_value = match (row.status.as_str(), reference.as_ref()) {
+        ("completed", Some(reference)) if fresh => {
+            let payload = crate::shared::storage::owned_payload_ref(
+                connection,
+                RESULT_OWNER_KIND,
+                &row.invocation_id,
+                RESULT_FIELD_NAME,
+            )
+            .map_err(|error| format!("load fresh worker result ownership: {error:#}"))?
+            .ok_or_else(|| {
+                format!(
+                    "fresh worker invocation '{}' has no result ownership",
+                    row.invocation_id
+                )
+            })?;
+            if payload.payload_size_bytes
+                <= crate::shared::protocol::model_tools::DEFAULT_MAX_INLINE_MODEL_TOOL_RESULT_BYTES
+            {
+                let stored_output = row.stored_output.as_deref().ok_or_else(|| {
+                    format!(
+                        "fresh worker invocation '{}' has no stored output",
+                        row.invocation_id
+                    )
+                })?;
+                resolve_stored_result(connection, &row.invocation_id, stored_output)?
+            } else {
+                reference.clone()
+            }
+        }
+        ("completed", Some(reference)) => reference.clone(),
+        ("queued" | "running", _) => json!({
+            "kind":"worker_invocation_receipt",
+            "status":row.status,
+            "mode":"background",
+            "invocationId":row.invocation_id,
+            "workerId":row.worker_id,
+            "workerName":row.worker_name,
+            "originSessionId":row.origin_session_id,
+            "message":"The durable worker run is continuing in the background. Do not poll or wait; report that it is running. Its result will appear in Session Context and the worker inbox.",
+        }),
+        _ => json!({
+            "kind":"worker_invocation_failure",
+            "status":row.status,
+            "invocationId":row.invocation_id,
+            "workerId":row.worker_id,
+            "workerName":row.worker_name,
+            "error":row.error.as_deref().map(|error| {
+                crate::shared::foundation::text::truncate_with_suffix(error, 4_096, "...")
+            }),
+        }),
+    };
+    Ok(json!({
+        "modelToolInvocationId":model_tool_invocation_id,
+        "invocationId":row.invocation_id,
+        "workerId":row.worker_id,
+        "workerVersion":row.worker_version,
+        "status":row.status,
+        "interactionMode":row.interaction_mode,
+        "reference":reference,
+        "providerValue":provider_value,
+        "fresh":fresh,
+    }))
 }
 
 pub(super) fn resolve_stored_result(

@@ -15,6 +15,10 @@
 //! row in that batch fails. A direct operation may return a one-time credential
 //! to the active model turn, but tool arguments, result content, and
 //! details are redacted before any durable row or lifecycle broadcast is built.
+//! Successful direct-worker completions persist only their provider-call
+//! association or an already compact receipt/reference. The exact typed value
+//! remains solely in the worker invocation ledger and is hydrated from that
+//! ledger for one consuming provider turn.
 //! Provider-requested calls in one batch execute concurrently; worker/kernel
 //! implementations own their real queueing and concurrency ceilings. There is
 //! no metadata-driven serialized execution mode.
@@ -70,6 +74,11 @@ pub(super) struct ToolPhaseOutcome {
 struct ExecutedToolInvocation {
     result: ToolInvocationExecutionResult,
     provider_text: String,
+}
+
+struct DurableWorkerEvidence {
+    content: String,
+    details: Value,
 }
 
 fn tool_event_context_json(
@@ -324,6 +333,16 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     let provider_text = super::turn_context::project_provider_result_text(
                         &provider_result_text(&result.result),
                     );
+                    let presentation_hints = params
+                        .primitive_surface
+                        .presentation_hints(&tool_invocation.name);
+                    let provider_context_text = durable_worker_evidence(
+                        tool_invocation,
+                        &result,
+                        &provider_text,
+                        presentation_hints.as_ref(),
+                    )
+                    .map_or_else(|| provider_text.clone(), |evidence| evidence.content);
                     info!(
                         component = "agent.tool",
                         agent_event = "tool_invocation_execute_completed",
@@ -346,9 +365,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                             params.run_id,
                             params.trace_id,
                             params.parent_invocation_id,
-                            params
-                                .primitive_surface
-                                .presentation_hints(&tool_invocation.name),
+                            presentation_hints,
                         )
                     });
 
@@ -356,7 +373,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                         idx,
                         ExecutedToolInvocation {
                             result,
-                            provider_text,
+                            provider_text: provider_context_text,
                         },
                         completion_payload,
                     )
@@ -407,19 +424,36 @@ fn executed_completion_payload(
     let durable_result_text = redact_sensitive_content(&result_text);
     let durable_provider_text = redact_sensitive_content(provider_text);
     let is_error = result.result.is_error.unwrap_or(false);
+    let durable_worker_evidence = durable_worker_evidence(
+        invocation,
+        result,
+        provider_text,
+        presentation_hints.as_ref(),
+    );
+    let has_durable_worker_evidence = durable_worker_evidence.is_some();
     let base_identity = tool_event_context_json(trace_id, parent_invocation_id, presentation_hints);
+    let (durable_result_text, durable_details) = durable_worker_evidence.map_or_else(
+        || {
+            (
+                durable_result_text,
+                result.result.details.as_ref().map(redact_sensitive_json),
+            )
+        },
+        |evidence| (evidence.content, Some(evidence.details)),
+    );
     let mut payload = json!({
         "invocationId": invocation.id,
         "toolName": invocation.name,
         "content": durable_result_text,
         "isError": is_error,
         "duration": result.duration_ms,
-        "details": result.result.details.as_ref().map(redact_sensitive_json),
+        "details": durable_details,
         "runId": run_id,
         "traceId": trace_id.map(|id| id.as_str()),
         "parentInvocationId": parent_invocation_id.map(|id| id.as_str()),
     });
-    if durable_provider_text != durable_result_text
+    if !has_durable_worker_evidence
+        && durable_provider_text != durable_result_text
         && let Some(payload) = payload.as_object_mut()
     {
         payload.insert(
@@ -436,6 +470,61 @@ fn executed_completion_payload(
         payload.extend(identity);
     }
     payload
+}
+
+fn durable_worker_evidence(
+    invocation: &crate::shared::protocol::messages::ToolInvocationDraft,
+    result: &ToolInvocationExecutionResult,
+    provider_text: &str,
+    presentation_hints: Option<&Value>,
+) -> Option<DurableWorkerEvidence> {
+    if result.result.is_error.unwrap_or(false)
+        || presentation_hints
+            .and_then(|hints| hints.get("surfaceKind"))
+            .and_then(Value::as_str)
+            != Some("worker")
+    {
+        return None;
+    }
+    let compact_value = serde_json::from_str::<Value>(provider_text)
+        .ok()
+        .filter(|value| {
+            matches!(
+                value.get("kind").and_then(Value::as_str),
+                Some("worker_result_reference" | "worker_invocation_receipt")
+            )
+        });
+    let content_value = compact_value.clone().unwrap_or_else(|| {
+        json!({
+            "kind":super::turn_context::WORKER_RESULT_ASSOCIATION_KIND,
+            "modelToolInvocationId":invocation.id,
+            "message":"The exact validated result is owned by the durable worker invocation and will be supplied once to the next model turn.",
+        })
+    });
+    let mut details = json!({
+        "kind":super::turn_context::WORKER_RESULT_ASSOCIATION_KIND,
+        "modelToolInvocationId":invocation.id,
+        "workerInvocationId":compact_value
+            .as_ref()
+            .and_then(|value| value.get("invocationId"))
+            .cloned(),
+    });
+    if let Some(engine_outcome) = result
+        .result
+        .details
+        .as_ref()
+        .and_then(|details| details.get("engineOutcome"))
+        && let Some(details) = details.as_object_mut()
+    {
+        details.insert("engineOutcome".to_owned(), engine_outcome.clone());
+    }
+    Some(DurableWorkerEvidence {
+        content: redact_sensitive_content(
+            &serde_json::to_string_pretty(&content_value)
+                .unwrap_or_else(|_| content_value.to_string()),
+        ),
+        details,
+    })
 }
 
 fn record_skipped_invocations(

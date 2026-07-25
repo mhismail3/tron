@@ -1,13 +1,15 @@
 //! Provider turn-context construction from the already resolved primitive surface.
 
+use std::sync::Arc;
+
 use crate::domains::agent::context::context_manager::ContextManager;
+use crate::engine::{EngineHostHandle, InvocationId, TraceId};
 #[cfg(test)]
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::content::{ToolResultContent, UserContent};
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
 use tracing::debug;
 
 const MAX_RELEVANCE_QUERY_CHARS: usize = 12_000;
@@ -23,16 +25,50 @@ const PROVIDER_RESULT_SUFFIX: &str = "\n--- retained suffix ---\n";
 const WORKER_RESULT_CHUNK_KIND: &str = "worker_result_chunk";
 const WORKER_RESULT_HISTORY_KIND: &str = "worker_result_read_history";
 
-pub(super) fn build_turn_context(
+pub(super) use super::turn_worker_results::{
+    FreshWorkerResults, WORKER_RESULT_ASSOCIATION_KIND, canonicalize_worker_result_context,
+};
+
+pub(super) struct TurnContextProjection {
+    pub context: Context,
+    pub retained_messages: Vec<Message>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn build_turn_context(
     context_manager: &mut ContextManager,
     server_origin: Option<&str>,
     primitive_surface: Vec<crate::shared::protocol::model_tools::ModelTool>,
-) -> Context {
+    engine_host: &EngineHostHandle,
+    session_id: &str,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
+    fresh_worker_results: &FreshWorkerResults,
+) -> Result<TurnContextProjection, String> {
     context_manager.set_server_origin(server_origin.map(String::from));
     context_manager.set_tools(primitive_surface.clone());
 
+    let messages = context_manager.get_messages_arc();
+    let provider_messages = super::turn_worker_results::project_messages(
+        messages.clone(),
+        engine_host,
+        session_id,
+        trace_id,
+        parent_invocation_id,
+        fresh_worker_results.model_tool_invocation_ids(),
+    )
+    .await?;
+    let retained_messages = super::turn_worker_results::project_messages(
+        messages,
+        engine_host,
+        session_id,
+        trace_id,
+        parent_invocation_id,
+        &std::collections::HashSet::new(),
+    )
+    .await?;
     let mut context = context_manager.build_base_context();
-    context.messages = project_provider_messages(context_manager.get_messages_arc());
+    context.messages = project_provider_messages(provider_messages);
     context.tools = Some(primitive_surface);
     context.server_origin = server_origin.map(String::from);
 
@@ -41,7 +77,10 @@ pub(super) fn build_turn_context(
         "primitive turn context"
     );
 
-    context
+    Ok(TurnContextProjection {
+        context,
+        retained_messages: project_retained_messages(retained_messages).to_vec(),
+    })
 }
 
 /// Bound textual tool evidence before it crosses any provider boundary.
@@ -74,8 +113,20 @@ pub(super) fn project_provider_result_text(text: &str) -> String {
     projected
 }
 
-fn project_provider_messages(messages: Arc<[Message]>) -> Arc<[Message]> {
+pub(super) fn project_provider_messages(messages: Arc<[Message]>) -> Arc<[Message]> {
     let fresh_result_start = trailing_tool_result_start(&messages);
+    project_provider_messages_from(messages, fresh_result_start)
+}
+
+fn project_retained_messages(messages: Arc<[Message]>) -> Arc<[Message]> {
+    let historical_end = messages.len();
+    project_provider_messages_from(messages, historical_end)
+}
+
+fn project_provider_messages_from(
+    messages: Arc<[Message]>,
+    fresh_result_start: usize,
+) -> Arc<[Message]> {
     if !messages.iter().enumerate().any(|(index, message)| {
         message_requires_projection(message)
             || (index < fresh_result_start && message_has_worker_result_chunk(message))
@@ -109,7 +160,7 @@ fn project_provider_messages(messages: Arc<[Message]>) -> Arc<[Message]> {
 /// A result earlier in the transcript has already been delivered to one model
 /// turn. Worker result chunks remain re-readable through their durable
 /// reference, so replaying those bytes on every later turn only grows context.
-fn trailing_tool_result_start(messages: &[Message]) -> usize {
+pub(super) fn trailing_tool_result_start(messages: &[Message]) -> usize {
     messages
         .iter()
         .rposition(|message| !matches!(message, Message::ToolResult { .. }))
@@ -525,6 +576,29 @@ mod tests {
         assert_eq!(
             content,
             &ToolResultMessageContent::Text("validation complete".to_owned())
+        );
+    }
+
+    #[test]
+    fn retained_context_ages_even_a_trailing_bounded_worker_page() {
+        let chunk = worker_result_chunk(&"evidence ".repeat(1_000));
+        let messages: Arc<[Message]> = vec![Message::ToolResult {
+            invocation_id: "call-read".to_owned(),
+            content: ToolResultMessageContent::Text(chunk),
+            is_error: None,
+        }]
+        .into();
+
+        let retained = project_retained_messages(messages);
+        let Message::ToolResult { content, .. } = &retained[0] else {
+            panic!("expected tool result");
+        };
+        let ToolResultMessageContent::Text(text) = content else {
+            panic!("expected text");
+        };
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(text).unwrap()["kind"],
+            WORKER_RESULT_HISTORY_KIND
         );
     }
 }

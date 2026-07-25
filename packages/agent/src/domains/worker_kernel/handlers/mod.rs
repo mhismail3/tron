@@ -59,6 +59,7 @@ operation_bindings! {
         "invoke" => |invocation, deps| { invocation::invoke_worker(invocation, deps).await },
         "await" => |invocation, deps| { support::response(invocation, invocation::await_worker(invocation, deps).await) },
         "result_read" => |invocation, deps| { support::response(invocation, invocation::read_worker_result(invocation, deps).await) },
+        "result_projection" => |invocation, deps| { support::response(invocation, invocation::project_worker_results(invocation, deps).await) },
         "detach" => |invocation, deps| { support::response(invocation, invocation::detach_worker_invocation(invocation, deps).await) },
         "cancel" => |invocation, deps| { support::response(invocation, invocation::cancel_worker_invocation(invocation, deps).await) },
         "stop" => |invocation, deps| { support::response(invocation, invocation::stop_worker(invocation, deps).await) },

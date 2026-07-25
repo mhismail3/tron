@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EngineHostHandle, FunctionDefinition, FunctionId,
@@ -123,6 +124,62 @@ pub(crate) async fn take_worker_inbox_context(
         .map(str::trim)
         .filter(|narrative| !narrative.is_empty())
         .map(ToOwned::to_owned)
+}
+
+/// Resolve server-truth worker result projections for provider reconstruction.
+///
+/// The operation is internal and never enters the model tool surface. Session
+/// events retain only provider-tool associations; this read reconstructs a
+/// fresh small typed result once and references on every historical turn.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn worker_result_projections(
+    host: &EngineHostHandle,
+    session_id: &str,
+    model_tool_invocation_ids: &[String],
+    invocation_ids: &[String],
+    fresh_model_tool_invocation_ids: &[String],
+    fresh_invocation_ids: &[String],
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
+) -> Result<Vec<Value>, String> {
+    if model_tool_invocation_ids.is_empty() && invocation_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let payload = serde_json::json!({
+        "modelToolInvocationIds":model_tool_invocation_ids,
+        "invocationIds":invocation_ids,
+        "freshModelToolInvocationIds":fresh_model_tool_invocation_ids,
+        "freshInvocationIds":fresh_invocation_ids,
+    });
+    let digest = hex::encode(Sha256::digest(
+        serde_json::to_vec(&payload).map_err(|error| error.to_string())?,
+    ));
+    let mut context = CausalContext::new(
+        ActorId::new("system:agent-runtime").map_err(|error| error.to_string())?,
+        ActorKind::System,
+        trace_id.cloned().unwrap_or_else(TraceId::generate),
+    )
+    .with_session_id(session_id.to_owned())
+    .with_idempotency_key(format!("worker-result-projection:{session_id}:{digest}"));
+    if let Some(parent) = parent_invocation_id {
+        context = context.with_parent_invocation(parent.clone());
+    }
+    let outcome = host
+        .invoke(Invocation::new_sync(
+            FunctionId::new(crate::domains::worker_kernel::WORKER_RESULT_PROJECTION_FUNCTION)
+                .map_err(|error| error.to_string())?,
+            payload,
+            context,
+        ))
+        .await;
+    if let Some(error) = outcome.error {
+        return Err(format!("project durable worker results: {error}"));
+    }
+    outcome
+        .value
+        .and_then(|value| value.get("items").cloned())
+        .and_then(|items| items.as_array().cloned())
+        .ok_or_else(|| "worker result projection returned no item array".to_owned())
 }
 
 #[derive(Clone, Debug)]

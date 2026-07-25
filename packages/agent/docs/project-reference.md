@@ -781,9 +781,16 @@ SHA-256-addressed, zstd-compressed blobs and the invocation column holds only
 an internal payload envelope. Both forms have an ownership row, digest, byte
 size, and preview. Successful inbox rows contain compact
 `{status, reference, preview}` receipts rather than a second output copy.
-Provider-facing direct-worker and fixed invoke/await responses may still
-hydrate a fresh small result for typed delivery; durable history, run graphs,
-Session Context, and inbox reads expose references and previews only.
+Provider-facing fixed invoke/await records contain references. A synchronous
+direct-worker result at or below 8 KiB is integrity-verified and hydrated in
+its exact worker schema for the immediately following provider turn; larger
+and background results are references or receipts immediately. Session tool
+completion evidence stores the provider-call association rather than another
+typed body. Once the provider accepts the request, all retained history, run
+graphs, Session Context, and inbox reads expose references and previews only.
+An internal kernel projection resolves associations within the originating
+session or causal trace. It is not model vocabulary, and a missing or corrupt
+fresh association fails the turn before a provider request.
 
 `worker_result_read` retrieves one RFC 6901 JSON pointer from that exact result.
 Array/object pages are limited to twenty entries and each response is bounded
@@ -796,9 +803,10 @@ and model turn. The complete bounded page is available to the immediately
 following model turn. On later turns the provider transcript carries only its
 integrity-bound result reference and exact pointer/page coordinates; a worker
 can explicitly re-read that page if it still needs the bytes. This projection
-is derived from durable transcript order rather than client or runtime shadow
-state. Path selection and interpretation remain worker-owned; the kernel has
-no source, claim, citation, or report vocabulary.
+and the provider, token-estimation, compaction, and restart inputs are derived
+from the same durable transcript and invocation evidence rather than client or
+runtime shadow state. Path selection and interpretation remain worker-owned;
+the kernel has no source, claim, citation, or report vocabulary.
 
 `worker_inspect` defaults to `detail=contract`: the active input/output schemas,
 runner contract, routing, provenance, presentation, bindings, triggers, route,
@@ -821,14 +829,15 @@ progress differently without parsing model-facing names or maintaining a
 second tool catalog. Result-owned presentation hints may add visual detail
 without erasing the pinned fixed/worker identity.
 
-Exact tool output remains in durable execution evidence. Worker results use the
-typed reference/read contract above once their serialized result crosses 8
-KiB, and consumed `worker_result_read` pages age to re-readable references after
-one model turn. Other textual tool results larger than 32 KiB are replaced in
-model context by a deterministic prefix/suffix projection carrying the
-original byte count and SHA-256 digest. The same projections are applied to
-reconstructed history, so a previously persisted large process, file, web, or
-worker result cannot repeatedly break a resumed model turn. These provider
+Exact non-worker tool output remains in durable session evidence. Exact worker
+output remains only in the invocation ledger for every size; session evidence
+retains its provider-call association, receipt, or reference. Consumed
+`worker_result_read` pages age to re-readable references after one model turn.
+Other textual tool results larger than 32 KiB are replaced in model context by
+a deterministic prefix/suffix projection carrying the original byte count and
+SHA-256 digest. The same projections are applied before token estimation,
+compaction, and reconstructed provider requests, so persisted process, file,
+web, or worker evidence cannot repeatedly grow a resumed turn. These provider
 boundaries do not reduce the complete operator/audit record.
 
 The provider-visible function description contains only version-stable purpose,

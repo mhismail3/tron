@@ -31,9 +31,9 @@ impl WorkerRuntime {
         self.result_reference(record)
     }
 
-    /// Project a fixed worker-control response without copying a large output
-    /// into provider context. Durable run and client graph reads still resolve
-    /// from the authoritative record.
+    /// Project a fixed worker-control response with a result reference for
+    /// every successful output size. Exact direct-worker delivery is owned by
+    /// the one-turn agent projection; fixed control records never copy it.
     pub(crate) fn provider_invocation_record(
         &self,
         record: InvocationRecord,
@@ -41,10 +41,6 @@ impl WorkerRuntime {
         let reference = record
             .output
             .as_ref()
-            .filter(|output| {
-                serialized_size(output)
-                    .is_ok_and(|bytes| bytes > DEFAULT_MAX_INLINE_MODEL_TOOL_RESULT_BYTES)
-            })
             .map(|_| self.result_reference(&record))
             .transpose()?;
         let mut projected = serde_json::to_value(record).map_err(|error| error.to_string())?;

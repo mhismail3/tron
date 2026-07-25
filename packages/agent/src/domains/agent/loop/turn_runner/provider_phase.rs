@@ -19,11 +19,12 @@ use crate::domains::model::responder::{ModelResponder, ModelResponse, ModelRespo
 use crate::shared::foundation::retry::RetryConfig;
 use crate::shared::server::failure::{
     ENGINE_TOOL_SURFACE_FAILED, FailureCategory, FailureEnvelope, FailureOrigin,
+    RUNTIME_PERSISTENCE_ERROR,
 };
 
 use super::failure::emit_turn_failure;
 use super::persistence::persist_model_provider_request_audit;
-use super::turn_context::{build_turn_context, worker_relevance_query};
+use super::turn_context::{FreshWorkerResults, build_turn_context, worker_relevance_query};
 use super::{interrupted_turn_result, terminalization_error_result, terminalize_cancellation};
 
 pub(super) struct ProviderPhaseParams<'a> {
@@ -39,6 +40,7 @@ pub(super) struct ProviderPhaseParams<'a> {
     pub server_origin: Option<&'a str>,
     pub sequence_counter: Option<&'a AtomicI64>,
     pub engine_host: &'a crate::engine::EngineHostHandle,
+    pub fresh_worker_results: &'a FreshWorkerResults,
 }
 
 pub(super) struct PreparedProviderResponse {
@@ -122,11 +124,48 @@ pub(super) async fn open_provider_response(
     )
     .await;
 
-    let mut context = build_turn_context(
+    let projection = match build_turn_context(
         params.context_manager,
         params.server_origin,
         primitive_surface.tools.clone(),
-    );
+        params.engine_host,
+        params.session_id,
+        params.run_context.engine_trace_id.as_ref(),
+        params.run_context.parent_invocation_id.as_ref(),
+        params.fresh_worker_results,
+    )
+    .await
+    {
+        Ok(projection) => projection,
+        Err(error) => {
+            let error_msg = format!("failed to project durable worker results: {error}");
+            let failure = FailureEnvelope::new(
+                RUNTIME_PERSISTENCE_ERROR,
+                FailureCategory::Persistence,
+                error_msg.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            );
+            emit_turn_failure(
+                params.emitter,
+                params.persister,
+                params.session_id,
+                params.turn,
+                params.run_context,
+                params.sequence_counter,
+                &failure,
+                None,
+            );
+            return Err(TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(crate::domains::agent::r#loop::errors::StopReason::Error),
+                ..Default::default()
+            });
+        }
+    };
+    let mut context = projection.context;
     let surface_context = primitive_surface::surface_context_primer(&primitive_surface.snapshot);
     let system_prompt = context.system_prompt.get_or_insert_with(String::new);
     if !system_prompt.is_empty() {
@@ -288,6 +327,12 @@ pub(super) async fn open_provider_response(
             });
         }
     };
+    // The provider accepted this request, so every worker result included in
+    // it has consumed its one-turn lease. Retain only references and bounded
+    // page coordinates for token accounting, compaction, and later turns.
+    params
+        .context_manager
+        .set_messages(projection.retained_messages);
 
     Ok(PreparedProviderResponse {
         primitive_surface,

@@ -1,5 +1,6 @@
 //! Manual worker dispatch, waiting, lifecycle, and profile stop state.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -179,6 +180,48 @@ pub(super) async fn read_worker_result(
         offset,
         limit,
     )
+}
+
+pub(super) async fn project_worker_results(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, String> {
+    let model_tool_invocation_ids = string_array(&invocation.payload, "modelToolInvocationIds")?;
+    let invocation_ids = string_array(&invocation.payload, "invocationIds")?;
+    let fresh_model_tool_invocation_ids =
+        string_array(&invocation.payload, "freshModelToolInvocationIds")?
+            .into_iter()
+            .collect::<HashSet<_>>();
+    let fresh_invocation_ids = string_array(&invocation.payload, "freshInvocationIds")?
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let items = deps.runtime.store().provider_result_projections(
+        &model_tool_invocation_ids,
+        &invocation_ids,
+        &fresh_model_tool_invocation_ids,
+        &fresh_invocation_ids,
+        invocation.causal_context.session_id.as_deref(),
+        Some(invocation.causal_context.trace_id.as_str()),
+    )?;
+    Ok(json!({"items":items}))
+}
+
+fn string_array(payload: &Value, key: &str) -> Result<Vec<String>, String> {
+    let Some(values) = payload.get(key) else {
+        return Ok(Vec::new());
+    };
+    let values = values
+        .as_array()
+        .ok_or_else(|| format!("{key} must be an array"))?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| format!("{key} entries must be strings"))
+        })
+        .collect()
 }
 
 pub(super) async fn detach_worker_invocation(

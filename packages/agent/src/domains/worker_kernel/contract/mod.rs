@@ -41,6 +41,7 @@ pub(crate) const CONTEXT_SUMMARY_MAX_ESTIMATED_TOKENS: usize = 10_000;
 pub(crate) const CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES: usize = 40_000;
 pub(crate) const SESSION_TITLE_FUNCTION: &str = "worker_kernel::session_title";
 pub(crate) const WORKER_RELEVANCE_FUNCTION: &str = "worker_kernel::worker_relevance";
+pub(crate) const WORKER_RESULT_PROJECTION_FUNCTION: &str = "worker_kernel::result_projection";
 pub(super) const DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 5;
 pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
 pub(super) const DEFAULT_TEXT_SEARCH_WALK_ENTRIES: usize = 20_000;
@@ -582,6 +583,67 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }))
         .idempotency(IdempotencyContract::session())
         .description("Invoke worker-owned pending-result context policy, atomically attach its selected observations, and retain deterministic recovery when no hook is active.")
+        .build()?,
+    );
+    specs.push(
+        FunctionContract::new(
+            WORKER_RESULT_PROJECTION_FUNCTION,
+            WORKER,
+            EffectClass::PureRead,
+            RiskLevel::Low,
+        )
+        .visibility(FunctionVisibility::Internal)
+        .request_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "properties":{
+                "modelToolInvocationIds":{
+                    "type":"array","maxItems":256,"uniqueItems":true,
+                    "items":{"type":"string","minLength":1,"maxLength":256}
+                },
+                "invocationIds":{
+                    "type":"array","maxItems":256,"uniqueItems":true,
+                    "items":{"type":"string","minLength":1,"maxLength":256}
+                },
+                "freshModelToolInvocationIds":{
+                    "type":"array","maxItems":256,"uniqueItems":true,
+                    "items":{"type":"string","minLength":1,"maxLength":256}
+                },
+                "freshInvocationIds":{
+                    "type":"array","maxItems":256,"uniqueItems":true,
+                    "items":{"type":"string","minLength":1,"maxLength":256}
+                }
+            }
+        }))
+        .response_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["items"],
+            "properties":{
+                "items":{"type":"array","maxItems":256,"items":{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":[
+                        "modelToolInvocationId","invocationId","workerId",
+                        "workerVersion","status","interactionMode","reference",
+                        "providerValue","fresh"
+                    ],
+                    "properties":{
+                        "modelToolInvocationId":{},
+                        "invocationId":{"type":"string"},
+                        "workerId":{"type":"string"},
+                        "workerVersion":{"type":"string"},
+                        "status":{"type":"string"},
+                        "interactionMode":{"type":"string"},
+                        "reference":{},
+                        "providerValue":{},
+                        "fresh":{"type":"boolean"}
+                    }
+                }}
+            }
+        }))
+        .idempotency(IdempotencyContract::session())
+        .description("Project canonical worker result references and one-turn fresh typed values for trusted provider-context reconstruction. This internal operation is not model vocabulary.")
         .build()?,
     );
     specs.push(

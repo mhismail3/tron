@@ -43,6 +43,11 @@
 //! boundary proof, and restart replay:
 //! compaction actions, epoch records, audit refs, and provider-safe projections
 //! remain server-owned record-plane custody.
+//! Before token pressure is measured, the turn runner rebuilds worker tool
+//! evidence from the invocation ledger: only a trailing unconsumed small
+//! result is hydrated, while all historical results and consumed bounded pages
+//! are references. Compaction and provider admission therefore estimate the
+//! same canonical projection without a context-owned worker result cache.
 
 pub mod compaction_engine;
 pub mod compaction_trigger;

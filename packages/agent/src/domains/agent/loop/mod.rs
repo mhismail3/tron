@@ -10,13 +10,18 @@
 //! stream lifecycle, and model-requested tool execution. INFO logs mark
 //! durable lifecycle transitions and IDs; TRACE logs add high-volume stream
 //! sizes and sequencing metadata without recording prompt text, generated text,
-//! or tool arguments. Exact tool results remain in durable execution evidence,
-//! while every provider request receives a deterministic bounded projection of
+//! or tool arguments. Non-worker tool results remain in durable session
+//! evidence. Direct-worker session evidence instead retains the provider-call
+//! association because the invocation ledger already owns the exact typed
+//! result. Every provider request receives a deterministic bounded projection of
 //! oversized textual results with original byte count and digest. This applies
 //! to newly executed tools and reconstructed history, preventing local files,
 //! process output, web pages, or binary-derived text from becoming unbounded
 //! provider input. Failures rejected before durable trace insertion still rely
 //! on direct bounded failure result evidence.
+//! A trailing small worker result is integrity-verified and hydrated for its
+//! first consuming provider turn; accepted requests immediately age it to the
+//! same reference used by restart, token estimation, and compaction.
 //!
 //! Every `TronAgent` owns a required engine host for its full lifetime. Each
 //! turn borrows that host to adapt the worker-kernel-owned live tool surface
