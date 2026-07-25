@@ -235,7 +235,7 @@ struct WorkerResultInspectorSheet: View {
                 await load()
             }
         }
-        .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronSuccess)
     }
 
@@ -480,7 +480,7 @@ private struct WorkerResultTechnicalSheet: View {
                 )
             }
         }
-        .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronSlate)
     }
 

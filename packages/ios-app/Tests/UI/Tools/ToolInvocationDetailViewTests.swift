@@ -58,6 +58,66 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         XCTAssertFalse(source.contains("Color.tronSurface.opacity(0.86)"))
     }
 
+    func testToolDetailDestinationsStartAtMediumAndOfferLarge() throws {
+        let mediumAndLarge =
+            ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
+        let largeOnly =
+            ".adaptivePresentationDetents([.large], ipadSizing: .largeForm)"
+
+        let sourcesWithExpectedCounts: [(String, Int)] = [
+            (
+                try source(pathComponents: [
+                    "Sources", "UI", "Tools", "Shared", "ToolDetailSheetContainer.swift",
+                ]),
+                1
+            ),
+            (
+                try source(pathComponents: [
+                    "Sources", "UI", "Tools", "ToolInvocationDetailComponents.swift",
+                ]),
+                1
+            ),
+            (
+                try source(pathComponents: [
+                    "Sources", "UI", "Tools", "ToolInvocationViews.swift",
+                ]),
+                1
+            ),
+            (
+                try source(pathComponents: [
+                    "Sources", "UI", "WorkerConsole", "WorkerRunGraphComponents.swift",
+                ]),
+                2
+            ),
+            (
+                try source(pathComponents: [
+                    "Sources", "UI", "WorkerConsole", "WorkerResultInspectorSheet.swift",
+                ]),
+                2
+            ),
+            (
+                try source(pathComponents: [
+                    "Sources", "UI", "WorkerConsole", "WorkerJSONDetailSheet.swift",
+                ]),
+                1
+            ),
+        ]
+
+        for (sheetSource, expectedCount) in sourcesWithExpectedCounts {
+            XCTAssertEqual(occurrences(of: mediumAndLarge, in: sheetSource), expectedCount)
+            XCTAssertFalse(sheetSource.contains(largeOnly))
+        }
+
+        let workerDetails = try source(pathComponents: [
+            "Sources", "UI", "WorkerConsole", "WorkerConsoleDetailSheets.swift",
+        ])
+        let auditSheet = try XCTUnwrap(
+            workerDetails.components(separatedBy: "struct WorkerAuditSessionSheet").last
+        )
+        XCTAssertEqual(occurrences(of: mediumAndLarge, in: auditSheet), 1)
+        XCTAssertFalse(auditSheet.contains(largeOnly))
+    }
+
     func testToolInvocationDetailRendersActionFirstSummaryForVisualQA() throws {
         let size = CGSize(width: 430, height: 932)
         let view = ToolInvocationDetailSheet(data: Self.fixtureInvocation)
@@ -405,6 +465,10 @@ final class ToolInvocationDetailViewTests: XCTestCase {
             url.appendPathComponent(component)
         }
         return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    private func occurrences(of needle: String, in source: String) -> Int {
+        source.components(separatedBy: needle).count - 1
     }
 
     private func projectRoot() throws -> URL {

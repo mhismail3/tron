@@ -774,7 +774,7 @@ private struct ToolTechnicalDetailsSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(accent)
     }
 

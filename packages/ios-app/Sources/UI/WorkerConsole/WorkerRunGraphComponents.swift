@@ -433,7 +433,7 @@ struct WorkerRunTreeSheet: View {
                 )
             }
         }
-        .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronCyan)
     }
 }
@@ -470,7 +470,7 @@ struct WorkerRunTimelineSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronPurple)
     }
 }

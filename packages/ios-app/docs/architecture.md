@@ -507,7 +507,11 @@ history. `Work breakdown` and `Activity` open separate large-detail sheets that
 render the server-ordered causal nodes, child-session links, and user-facing
 timeline. Those disclosure containers remain fully tappable without repeating
 right-aligned open-link symbols; their leading icon, title, and supporting text
-carry the navigation affordance. Active child work therefore outranks a stale
+carry the navigation affordance. Every detail destination reachable from a
+tool sheet—including work breakdown, activity, exact result, result technical
+detail, raw payload, and child-session views—declares medium and large detents.
+The shared adaptive presentation contract therefore opens each at medium on
+iPhone and leaves large available. Active child work therefore outranks a stale
 parent model event, and
 starts/finishes cannot collapse into a concatenated “Latest output” blob.
 
