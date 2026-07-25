@@ -510,9 +510,13 @@ invocation, and terminal retry linkage. Schema v8 adds append-only generic
 stage evidence for queueing, execution, retry/redelivery, validation,
 publication, detachment, interruption, and terminal transitions. These rows
 describe the existing invocation state machine; they are not jobs or a second
-execution owner. Migration backfills a parent only when exactly one prior-depth
-invocation in the trace can own it; ambiguous history remains unlinked rather
-than guessed.
+execution owner. Schema v9 adds a zero-based nested-call occurrence per direct
+parent and worker. Migration backfills linked historical children in durable
+creation order. A recovered agent attempt restarts its per-tool occurrences at
+zero, so a regenerated provider call observes the original durable child even
+if its transient call id or valid arguments changed. Parent migration still
+backfills only when exactly one prior-depth invocation in the trace can own it;
+ambiguous history remains unlinked rather than guessed.
 
 An agent runner's durable child prompt includes the invocation input and the
 immutable worker output schema verbatim. The child is told that the kernel will
@@ -749,11 +753,12 @@ attempt, version, and execution continue unchanged. Ten seconds is the model
 tool's conversational handoff budget, not a worker timeout; the independent
 two-hour reliability ceiling still bounds execution. Nested worker calls remain
 synchronous because their parent needs the typed result. Their idempotency
-identity derives from the durable parent invocation, logical worker turn,
-selected tool, and typed arguments rather than the transient child session or
-provider call id. If a parent attempt is reconstructed after restart, an
-already completed child is replayed and an active/recovered child is awaited;
-neither state admits a replacement invocation.
+identity retains the ordinary typed-argument fingerprint, while a separate
+durable parent/per-tool occurrence slot handles reconstruction. If a parent
+attempt is reconstructed after restart, occurrences restart at zero: an
+already completed child is replayed and an active/recovered child is awaited
+even when the provider regenerated its call id or valid arguments. Neither
+state admits a replacement invocation.
 
 `mode: enqueue` returns immediately after durable admission and starts
 best-effort delivery; the ordinary dispatcher remains restart recovery.
@@ -1773,7 +1778,7 @@ operational evidence:
 | `worker_versions` | rebuildable version index |
 | `worker_routes` | rebuildable direct-tool route and routing metadata |
 | `worker_triggers` | rebuildable trigger configuration and cursors |
-| `worker_invocations` | durable queue, idempotency, pinned version, originating user session, child-agent session, and exact typed results addressed by public result references |
+| `worker_invocations` | durable queue, idempotency, pinned version, originating user session, child-agent session, nested parent/per-tool call slot, and exact typed results addressed by public result references |
 | `worker_attempts` | numbered execution/redelivery attempts |
 | `worker_run_events` | append-only generic stage evidence for authoritative run timelines |
 | `worker_causal_traces` | trace roots, depth, delivery, and suppression counters |

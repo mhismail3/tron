@@ -84,6 +84,7 @@ impl WorkerStore {
             None,
             None,
             None,
+            None,
         )
     }
 
@@ -101,6 +102,7 @@ impl WorkerStore {
         interaction_mode: WorkerInteractionMode,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_worker_tool_ordinal: Option<u32>,
         retry_of_invocation_id: Option<&str>,
         max_sibling_invocations: Option<u32>,
     ) -> Result<(InvocationRecord, bool), String> {
@@ -118,6 +120,20 @@ impl WorkerStore {
         }
         if let Some(invocation_id) = retry_of_invocation_id {
             validate_runtime_identifier(invocation_id, "retry invocation id", 256)?;
+        }
+        if let (Some(parent_id), Some(ordinal)) =
+            (parent_worker_invocation_id, parent_worker_tool_ordinal)
+            && let Some(existing) =
+                self.invocation_by_parent_tool_slot(parent_id, worker_id, ordinal)?
+        {
+            self.record_suppressed_delivery(
+                trace_id,
+                worker_id,
+                trigger_kind,
+                idempotency_key,
+                causal_depth,
+            )?;
+            return Ok((existing, true));
         }
         if let Some(existing) = self.invocation_by_key(worker_id, idempotency_key)? {
             self.record_suppressed_delivery(
@@ -193,9 +209,9 @@ impl WorkerStore {
                     idempotency_key,trace_id,causal_depth,trigger_kind,
                     origin_session_id,interaction_mode,detached_at,
                     model_tool_invocation_id,parent_worker_invocation_id,
-                    retry_of_invocation_id,created_at
+                    parent_worker_tool_ordinal,retry_of_invocation_id,created_at
                  )
-                 VALUES (?1,?2,?3,'queued',?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                 VALUES (?1,?2,?3,'queued',?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
             params![
                 invocation_id,
                 worker_id,
@@ -210,12 +226,27 @@ impl WorkerStore {
                 detached_at,
                 model_tool_invocation_id,
                 parent_worker_invocation_id,
+                parent_worker_tool_ordinal,
                 retry_of_invocation_id,
                 created_at,
             ],
         );
         if let Err(error) = insert {
             drop(transaction);
+            if let (Some(parent_id), Some(ordinal)) =
+                (parent_worker_invocation_id, parent_worker_tool_ordinal)
+                && let Some(existing) =
+                    self.invocation_by_parent_tool_slot(parent_id, worker_id, ordinal)?
+            {
+                self.record_suppressed_delivery(
+                    trace_id,
+                    worker_id,
+                    trigger_kind,
+                    idempotency_key,
+                    causal_depth,
+                )?;
+                return Ok((existing, true));
+            }
             if let Some(existing) = self.invocation_by_key(worker_id, idempotency_key)? {
                 self.record_suppressed_delivery(
                     trace_id,
@@ -566,6 +597,27 @@ impl WorkerStore {
             )
             .optional()
             .map_err(|error| format!("load idempotent worker invocation: {error}"))
+    }
+
+    fn invocation_by_parent_tool_slot(
+        &self,
+        parent_invocation_id: &str,
+        worker_id: &str,
+        ordinal: u32,
+    ) -> Result<Option<InvocationRecord>, String> {
+        self.connection()?
+            .query_row(
+                invocation_select(
+                    "WHERE parent_worker_invocation_id=?1
+                       AND worker_id=?2
+                       AND parent_worker_tool_ordinal=?3",
+                )
+                .as_str(),
+                params![parent_invocation_id, worker_id, ordinal],
+                row_invocation,
+            )
+            .optional()
+            .map_err(|error| format!("load nested worker call slot: {error}"))
     }
 
     pub(super) fn record_suppressed_delivery(

@@ -16,6 +16,7 @@ struct InvocationAdmission<'a> {
     interaction_mode: WorkerInteractionMode,
     model_tool_invocation_id: Option<&'a str>,
     parent_worker_invocation_id: Option<&'a str>,
+    parent_worker_tool_ordinal: Option<u32>,
     retry_of_invocation_id: Option<&'a str>,
     worker_version: Option<&'a str>,
 }
@@ -26,6 +27,7 @@ impl Default for InvocationAdmission<'_> {
             interaction_mode: WorkerInteractionMode::Foreground,
             model_tool_invocation_id: None,
             parent_worker_invocation_id: None,
+            parent_worker_tool_ordinal: None,
             retry_of_invocation_id: None,
             worker_version: None,
         }
@@ -116,11 +118,13 @@ impl WorkerRuntime {
         request: InvokeRequest,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_worker_tool_ordinal: Option<u32>,
     ) -> Result<InvocationRecord, String> {
         self.invoke_from_provider_tool_with_admission(
             request,
             model_tool_invocation_id,
             parent_worker_invocation_id,
+            parent_worker_tool_ordinal,
             None,
             None,
         )
@@ -139,6 +143,7 @@ impl WorkerRuntime {
         origin_session_id: Option<String>,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_worker_tool_ordinal: Option<u32>,
     ) -> Result<InvocationRecord, String> {
         let original = self
             .store
@@ -164,6 +169,7 @@ impl WorkerRuntime {
             },
             model_tool_invocation_id,
             parent_worker_invocation_id,
+            parent_worker_tool_ordinal,
             Some(&original.worker_version),
             Some(retry_of_invocation_id),
         )
@@ -180,6 +186,7 @@ impl WorkerRuntime {
         origin_session_id: Option<String>,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_worker_tool_ordinal: Option<u32>,
     ) -> Result<InvocationRecord, String> {
         let original = self
             .store
@@ -208,6 +215,7 @@ impl WorkerRuntime {
                 interaction_mode: WorkerInteractionMode::Background,
                 model_tool_invocation_id,
                 parent_worker_invocation_id,
+                parent_worker_tool_ordinal,
                 retry_of_invocation_id: Some(retry_of_invocation_id),
                 worker_version: Some(&original.worker_version),
             },
@@ -233,6 +241,7 @@ impl WorkerRuntime {
         request: InvokeRequest,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_worker_tool_ordinal: Option<u32>,
         worker_version: Option<&str>,
         retry_of_invocation_id: Option<&str>,
     ) -> Result<InvocationRecord, String> {
@@ -242,6 +251,7 @@ impl WorkerRuntime {
                 InvocationAdmission {
                     model_tool_invocation_id,
                     parent_worker_invocation_id,
+                    parent_worker_tool_ordinal,
                     retry_of_invocation_id,
                     worker_version,
                     ..Default::default()
@@ -297,12 +307,14 @@ impl WorkerRuntime {
         request: InvokeRequest,
         target: ModelToolProgressTarget,
         parent_worker_invocation_id: Option<&str>,
+        parent_worker_tool_ordinal: Option<u32>,
     ) -> Result<InvocationRecord, String> {
         let (queued, _) = self.enqueue_request_with_admission(
             request,
             InvocationAdmission {
                 model_tool_invocation_id: Some(&target.invocation_id),
                 parent_worker_invocation_id,
+                parent_worker_tool_ordinal,
                 ..Default::default()
             },
         )?;
@@ -509,6 +521,7 @@ impl WorkerRuntime {
         request: InvokeRequest,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_worker_tool_ordinal: Option<u32>,
     ) -> Result<InvocationRecord, String> {
         let (queued, replayed) = self.enqueue_request_with_admission(
             request,
@@ -516,6 +529,7 @@ impl WorkerRuntime {
                 interaction_mode: WorkerInteractionMode::Background,
                 model_tool_invocation_id,
                 parent_worker_invocation_id,
+                parent_worker_tool_ordinal,
                 ..Default::default()
             },
         )?;
@@ -614,6 +628,7 @@ impl WorkerRuntime {
             admission.interaction_mode,
             admission.model_tool_invocation_id,
             admission.parent_worker_invocation_id,
+            admission.parent_worker_tool_ordinal,
             admission.retry_of_invocation_id,
             max_sibling_invocations,
         )?;

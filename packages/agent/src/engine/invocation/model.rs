@@ -38,6 +38,12 @@ pub struct CausalContext {
     /// This is causal identity for run-tree reconstruction and generic
     /// child-invocation ceilings. It is not authority or routing input.
     origin_worker_invocation_id: Option<String>,
+    /// Zero-based occurrence of this tool within the owning worker run.
+    ///
+    /// Agent-runner recovery resets this counter and deterministically replays
+    /// already admitted nested worker calls through their durable call slot.
+    /// It is trusted engine metadata, never provider input or authority.
+    origin_worker_tool_ordinal: Option<u32>,
     /// Generic agent-turn ceiling selected by the owning immutable worker.
     /// The agent runtime may only tighten its global ceiling with this value.
     worker_max_agent_turns: Option<u32>,
@@ -70,6 +76,7 @@ impl CausalContext {
             working_directory: None,
             origin_worker_id: None,
             origin_worker_invocation_id: None,
+            origin_worker_tool_ordinal: None,
             worker_max_agent_turns: None,
             model_tool_invocation_id: None,
             advertised_function_revision: None,
@@ -147,6 +154,19 @@ impl CausalContext {
     #[must_use]
     pub fn origin_worker_invocation_id(&self) -> Option<&str> {
         self.origin_worker_invocation_id.as_deref()
+    }
+
+    /// Preserve the deterministic nested-tool occurrence within a worker run.
+    #[must_use]
+    pub fn with_origin_worker_tool_ordinal(mut self, ordinal: u32) -> Self {
+        self.origin_worker_tool_ordinal = Some(ordinal);
+        self
+    }
+
+    /// Resolve the deterministic nested-tool occurrence within a worker run.
+    #[must_use]
+    pub fn origin_worker_tool_ordinal(&self) -> Option<u32> {
+        self.origin_worker_tool_ordinal
     }
 
     /// Tighten the delegated agent run to a worker-selected turn ceiling.

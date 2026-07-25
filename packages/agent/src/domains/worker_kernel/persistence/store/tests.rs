@@ -60,7 +60,7 @@ fn prepare_and_publish_is_atomic_and_versioned() {
 }
 
 #[test]
-fn schema_v8_preserves_inbox_state_and_adds_run_graph_evidence() {
+fn schema_v9_preserves_run_evidence_and_adds_nested_call_slots() {
     let temp = tempfile::tempdir().unwrap();
     let database_dir = temp.path().join("internal/database");
     std::fs::create_dir_all(&database_dir).unwrap();
@@ -133,6 +133,7 @@ fn schema_v8_preserves_inbox_state_and_adds_run_graph_evidence() {
         "detached_at",
         "model_tool_invocation_id",
         "parent_worker_invocation_id",
+        "parent_worker_tool_ordinal",
         "retry_of_invocation_id",
     ] {
         assert!(invocation_columns.contains(&column.to_owned()), "{column}");
@@ -155,7 +156,7 @@ fn schema_v8_preserves_inbox_state_and_adds_run_graph_evidence() {
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        8
+        9
     );
 }
 
@@ -184,6 +185,7 @@ fn run_events_and_causal_tree_are_durable_ordered_server_truth() {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
     assert!(store.claim_running(&parent.invocation_id).unwrap());
@@ -200,6 +202,7 @@ fn run_events_and_causal_tree_are_durable_ordered_server_truth() {
             WorkerInteractionMode::Foreground,
             Some("model-tool-child"),
             Some(&parent.invocation_id),
+            Some(0),
             None,
             None,
         )
@@ -276,6 +279,7 @@ fn run_events_and_causal_tree_are_durable_ordered_server_truth() {
             "manual",
             Some("session-origin"),
             WorkerInteractionMode::Background,
+            None,
             None,
             None,
             None,
@@ -937,6 +941,7 @@ fn background_invocation_identity_survives_interrupted_delivery_recovery() {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
     assert!(!replayed);
@@ -1002,6 +1007,7 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
             Some("session-detached-manual"),
             WorkerInteractionMode::Background,
             Some("provider-detached-manual"),
+            None,
             None,
             None,
             None,

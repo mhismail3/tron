@@ -5,9 +5,9 @@
 //! idempotency metadata. Direct kernel functions and active workers own their
 //! request/response schemas and reliability contracts at registration.
 //! Top-level calls bind idempotency to their provider invocation. Worker-owned
-//! calls instead bind it to the durable parent invocation, logical turn, tool,
-//! workspace, and typed arguments so child-session reconstruction cannot
-//! duplicate an already admitted operation.
+//! calls additionally carry a deterministic per-tool occurrence. The worker
+//! kernel uses that durable parent call slot to replay already admitted child
+//! work when provider call IDs or valid arguments change after reconstruction.
 //!
 //! Durable model-tool lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the
@@ -262,6 +262,8 @@ pub struct ToolExecutionContext<'a> {
     /// Durable parent worker invocation for child-run admission and run-tree
     /// reconstruction.
     pub origin_worker_invocation_id: Option<&'a str>,
+    /// Zero-based occurrence of this tool inside the owning worker run.
+    pub origin_worker_tool_ordinal: Option<u32>,
 }
 
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
@@ -360,6 +362,7 @@ pub async fn execute_tool(
             ctx.worker_causal_depth,
             ctx.origin_worker_id,
             ctx.origin_worker_invocation_id,
+            ctx.origin_worker_tool_ordinal,
             effective_args,
             &per_invocation_cancel,
         )
@@ -423,6 +426,7 @@ async fn execute_tool_via_engine(
     worker_causal_depth: u32,
     origin_worker_id: Option<&str>,
     origin_worker_invocation_id: Option<&str>,
+    origin_worker_tool_ordinal: Option<u32>,
     effective_args: Value,
     cancellation: &CancellationToken,
 ) -> crate::shared::protocol::model_tools::ToolResult {
@@ -499,6 +503,9 @@ async fn execute_tool_via_engine(
     }
     if let Some(invocation_id) = origin_worker_invocation_id {
         causal_context = causal_context.with_origin_worker_invocation_id(invocation_id.to_owned());
+    }
+    if let Some(ordinal) = origin_worker_tool_ordinal {
+        causal_context = causal_context.with_origin_worker_tool_ordinal(ordinal);
     }
     if let Some(parent) = parent_invocation_id {
         causal_context = causal_context.with_parent_invocation(parent.clone());

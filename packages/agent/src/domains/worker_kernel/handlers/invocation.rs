@@ -50,6 +50,7 @@ pub(super) async fn invoke_worker(
         .unwrap_or("wait");
     let model_tool_invocation_id = invocation.causal_context.model_tool_invocation_id();
     let parent_worker_invocation_id = invocation.causal_context.origin_worker_invocation_id();
+    let parent_worker_tool_ordinal = invocation.causal_context.origin_worker_tool_ordinal();
     let record = match (mode, retry_of_invocation_id, normal_request) {
         ("enqueue", Some(retry_of), None) => deps.runtime.retry_enqueue_from_provider_tool(
             retry_of,
@@ -59,6 +60,7 @@ pub(super) async fn invoke_worker(
             invocation.causal_context.session_id.clone(),
             model_tool_invocation_id,
             parent_worker_invocation_id,
+            parent_worker_tool_ordinal,
         ),
         ("wait", Some(retry_of), None) => {
             deps.runtime
@@ -70,6 +72,7 @@ pub(super) async fn invoke_worker(
                     invocation.causal_context.session_id.clone(),
                     model_tool_invocation_id,
                     parent_worker_invocation_id,
+                    parent_worker_tool_ordinal,
                 )
                 .await
         }
@@ -85,6 +88,7 @@ pub(super) async fn invoke_worker(
             },
             model_tool_invocation_id,
             parent_worker_invocation_id,
+            parent_worker_tool_ordinal,
         ),
         ("wait", None, Some((worker_id, input))) => {
             deps.runtime
@@ -100,6 +104,7 @@ pub(super) async fn invoke_worker(
                     },
                     model_tool_invocation_id,
                     parent_worker_invocation_id,
+                    parent_worker_tool_ordinal,
                 )
                 .await
         }

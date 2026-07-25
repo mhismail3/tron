@@ -1,11 +1,36 @@
 //! Runtime configuration and result types.
 
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
 use crate::domains::agent::context::types::CompactionConfig;
 pub use crate::domains::model::responder::ModelReasoningLevel as ReasoningLevel;
 use crate::shared::protocol::messages::TokenUsage;
 use serde::{Deserialize, Serialize};
 
 use crate::domains::agent::r#loop::errors::StopReason;
+
+/// Per-run deterministic occurrence allocator for nested model tools.
+///
+/// A recovered agent-runner starts from the same empty allocator, so the first
+/// call to each tool maps to occurrence zero again even when the provider emits
+/// different transient call IDs or valid-but-different arguments.
+#[derive(Clone, Debug, Default)]
+pub struct NestedToolOrdinalAllocator(Arc<Mutex<BTreeMap<String, u32>>>);
+
+impl NestedToolOrdinalAllocator {
+    #[must_use]
+    pub fn next(&self, tool_name: &str) -> u32 {
+        let mut ordinals = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let next = ordinals.entry(tool_name.to_owned()).or_default();
+        let ordinal = *next;
+        *next = next.saturating_add(1);
+        ordinal
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent configuration
@@ -111,6 +136,10 @@ pub struct RunContext {
     /// worker tools preserve it as their canonical parent.
     #[serde(skip)]
     pub origin_worker_invocation_id: Option<String>,
+    /// Stable per-tool call occurrences for one worker attempt. Recovery
+    /// deliberately starts from zero and replays durable child slots.
+    #[serde(skip)]
+    pub nested_tool_ordinals: NestedToolOrdinalAllocator,
     /// Reasoning level override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<ReasoningLevel>,
@@ -301,6 +330,19 @@ mod tests {
         let json = serde_json::to_string(&ctx).unwrap();
         let back: RunContext = serde_json::from_str(&json).unwrap();
         assert_eq!(back.reasoning_level, Some(ReasoningLevel::High));
+    }
+
+    #[test]
+    fn nested_tool_ordinals_are_per_tool_and_restart_deterministic() {
+        let first_attempt = NestedToolOrdinalAllocator::default();
+        assert_eq!(first_attempt.next("worker_search"), 0);
+        assert_eq!(first_attempt.next("worker_citation"), 0);
+        assert_eq!(first_attempt.next("worker_citation"), 1);
+
+        let recovered_attempt = NestedToolOrdinalAllocator::default();
+        assert_eq!(recovered_attempt.next("worker_search"), 0);
+        assert_eq!(recovered_attempt.next("worker_citation"), 0);
+        assert_eq!(recovered_attempt.next("worker_citation"), 1);
     }
 
     #[test]

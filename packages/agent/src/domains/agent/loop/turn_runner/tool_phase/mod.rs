@@ -57,6 +57,7 @@ pub(super) struct ToolPhaseParams<'a> {
     pub worker_causal_depth: u32,
     pub origin_worker_id: Option<&'a str>,
     pub origin_worker_invocation_id: Option<&'a str>,
+    pub nested_tool_ordinals: &'a crate::domains::agent::r#loop::types::NestedToolOrdinalAllocator,
 }
 
 #[derive(Default)]
@@ -266,6 +267,16 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
             "TOOL_INVOCATION_CANCELLED",
         );
     } else {
+        let nested_tool_ordinals = params
+            .stream_result
+            .tool_invocations
+            .iter()
+            .map(|tool_invocation| {
+                params
+                    .origin_worker_invocation_id
+                    .map(|_| params.nested_tool_ordinals.next(&tool_invocation.name))
+            })
+            .collect::<Vec<_>>();
         let futures: Vec<_> = params
             .stream_result
             .tool_invocations
@@ -288,6 +299,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     worker_causal_depth: params.worker_causal_depth,
                     origin_worker_id: params.origin_worker_id,
                     origin_worker_invocation_id: params.origin_worker_invocation_id,
+                    origin_worker_tool_ordinal: nested_tool_ordinals[idx],
                 };
                 let working_dir = working_dir.as_str();
                 async move {

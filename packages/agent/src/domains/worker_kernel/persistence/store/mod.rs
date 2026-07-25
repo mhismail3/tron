@@ -68,7 +68,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 8)?;
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 9)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
@@ -241,6 +241,7 @@ impl WorkerStore {
                     detached_at TEXT,
                     model_tool_invocation_id TEXT,
                     parent_worker_invocation_id TEXT,
+                    parent_worker_tool_ordinal INTEGER,
                     retry_of_invocation_id TEXT,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
@@ -366,6 +367,10 @@ impl WorkerStore {
                 "parent_worker_invocation_id",
                 "parent_worker_invocation_id TEXT",
             ),
+            (
+                "parent_worker_tool_ordinal",
+                "parent_worker_tool_ordinal INTEGER",
+            ),
             ("retry_of_invocation_id", "retry_of_invocation_id TEXT"),
         ] {
             if !table_has_column(&connection, "worker_invocations", column)? {
@@ -411,6 +416,34 @@ impl WorkerStore {
                 [],
             )
             .map_err(|error| format!("backfill unambiguous worker parents: {error}"))?;
+        connection
+            .execute_batch(
+                "WITH ranked AS (
+                    SELECT invocation_id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY parent_worker_invocation_id,worker_id
+                               ORDER BY created_at,invocation_id
+                           ) - 1 AS ordinal
+                    FROM worker_invocations
+                    WHERE parent_worker_invocation_id IS NOT NULL
+                 )
+                 UPDATE worker_invocations
+                 SET parent_worker_tool_ordinal=(
+                    SELECT ordinal FROM ranked
+                    WHERE ranked.invocation_id=worker_invocations.invocation_id
+                 )
+                 WHERE parent_worker_invocation_id IS NOT NULL
+                   AND parent_worker_tool_ordinal IS NULL;
+                 CREATE UNIQUE INDEX IF NOT EXISTS worker_invocations_parent_tool_slot
+                    ON worker_invocations(
+                        parent_worker_invocation_id,
+                        worker_id,
+                        parent_worker_tool_ordinal
+                    )
+                    WHERE parent_worker_invocation_id IS NOT NULL
+                      AND parent_worker_tool_ordinal IS NOT NULL;",
+            )
+            .map_err(|error| format!("index nested worker call slots: {error}"))?;
         if !table_has_column(&connection, "worker_inbox", "context_attached")? {
             if !table_has_column(&connection, "worker_inbox", "seen")? {
                 return Err("worker inbox has no context-delivery column".to_owned());
@@ -464,6 +497,13 @@ impl WorkerStore {
                 [],
             )
             .map_err(|error| format!("record worker schema v8: {error}"))?;
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                 VALUES (9, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                [],
+            )
+            .map_err(|error| format!("record worker schema v9: {error}"))?;
         super::rebuild::rebuild_indexes(&self.root, &self.database)?;
         self.recover_interrupted()
     }

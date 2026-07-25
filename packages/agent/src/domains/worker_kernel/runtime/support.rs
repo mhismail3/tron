@@ -251,6 +251,7 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
                         request,
                         target,
                         invocation.causal_context.origin_worker_invocation_id(),
+                        invocation.causal_context.origin_worker_tool_ordinal(),
                     )
                     .await
                     .map_err(crate::engine::EngineError::HandlerFailed)?,

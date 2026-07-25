@@ -143,9 +143,13 @@
 //! five samples. Unknown or predicted-fast work gets at most ten seconds in the
 //! foreground, after which the same invocation is atomically detached rather
 //! than cancelled or recreated. Nested worker calls remain synchronous because
-//! their parent requires the typed result. `worker_await` is bounded by the
-//! same interaction budget, and `worker_detach` only changes interaction
-//! ownership.
+//! their parent requires the typed result. Each nested worker call also owns a
+//! durable parent/per-tool occurrence slot. A reconstructed agent attempt
+//! starts those occurrences from zero, so changed provider call ids or
+//! regenerated valid arguments observe the original completed/running child
+//! instead of admitting duplicate specialist work. `worker_await` is bounded
+//! by the same interaction budget, and `worker_detach` only changes
+//! interaction ownership.
 //! Exact terminal worker output is validated and retained once in the durable
 //! invocation ledger. Provider-facing worker results use the shared 8 KiB
 //! inline-payload boundary: larger values become integrity-bound

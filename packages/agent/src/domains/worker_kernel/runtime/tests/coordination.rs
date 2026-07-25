@@ -64,6 +64,7 @@ async fn model_tool_worker_invocation_streams_correlated_live_progress() {
                 root_invocation_id: Some("root-live".to_owned()),
             },
             None,
+            None,
         )
         .await
         .unwrap();
@@ -136,6 +137,7 @@ async fn reconstructed_parent_awaits_the_same_running_child_invocation() {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
     assert!(!replayed);
@@ -167,15 +169,22 @@ async fn reconstructed_parent_awaits_the_same_running_child_invocation() {
                     root_invocation_id: Some("provider-parent-before-restart".to_owned()),
                 },
                 Some(&parent_id),
+                Some(0),
             )
             .await
     });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
+    let recovered_request = InvokeRequest {
+        input: json!({"value":"provider regenerated different valid arguments"}),
+        idempotency_key: "different-recovered-provider-call".to_owned(),
+        origin_session_id: Some("session-after-restart".to_owned()),
+        ..child_request
+    };
     let recovered = runtime
         .invoke_from_model_tool(
-            child_request,
+            recovered_request,
             ModelToolProgressTarget {
                 session_id: "session-after-restart".to_owned(),
                 invocation_id: "provider-child-after-restart".to_owned(),
@@ -185,6 +194,7 @@ async fn reconstructed_parent_awaits_the_same_running_child_invocation() {
                 root_invocation_id: Some("provider-parent-after-restart".to_owned()),
             },
             Some(&parent.invocation_id),
+            Some(0),
         )
         .await
         .unwrap();
@@ -298,6 +308,7 @@ async fn worker_declared_child_ceiling_is_transactional_and_causally_linked() {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
     assert!(!replayed);
@@ -323,6 +334,7 @@ async fn worker_declared_child_ceiling_is_transactional_and_causally_linked() {
                     root_invocation_id: Some("provider-parent".to_owned()),
                 },
                 Some(&parent.invocation_id),
+                Some(ordinal),
             )
             .await
             .unwrap();
@@ -352,6 +364,7 @@ async fn worker_declared_child_ceiling_is_transactional_and_causally_linked() {
                 root_invocation_id: Some("provider-parent".to_owned()),
             },
             Some(&parent.invocation_id),
+            Some(2),
         )
         .await
         .unwrap_err();
@@ -387,6 +400,7 @@ async fn terminal_retry_reuses_immutable_contract_and_is_idempotently_linked() {
             Some("session-retry".to_owned()),
             Some("provider-retry"),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -411,6 +425,7 @@ async fn terminal_retry_reuses_immutable_contract_and_is_idempotently_linked() {
             0,
             Some("session-retry".to_owned()),
             Some("provider-retry"),
+            None,
             None,
         )
         .await
@@ -460,6 +475,7 @@ async fn cancelling_an_invocation_cancels_only_its_durable_causal_subtree() {
                     },
                     Some(&format!("provider-cancel-tree-{ordinal}")),
                     Some(&parent.invocation_id),
+                    Some(ordinal),
                 )
                 .unwrap(),
         );
@@ -476,6 +492,7 @@ async fn cancelling_an_invocation_cancels_only_its_durable_causal_subtree() {
                 origin_session_id: Some("session-cancel-tree".to_owned()),
             },
             Some("provider-cancel-tree-unrelated"),
+            None,
             None,
         )
         .unwrap();
@@ -544,6 +561,7 @@ async fn cancelled_model_tool_wait_drops_its_transient_progress_bridge() {
                         trace_id: "trace-live-progress".to_owned(),
                         root_invocation_id: None,
                     },
+                    None,
                     None,
                 )
                 .await

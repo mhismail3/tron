@@ -15,8 +15,11 @@
 //! - `store` owns canonical publication plus durable invocation, attempt,
 //!   generic run-stage evidence, inbox, trigger, health, and audit ledgers.
 //!   Run-stage rows are append-only observations attached to the invocation
-//!   state machine, not a second job or execution owner. Its concern modules
-//!   and scenario tests live beside that single state owner.
+//!   state machine, not a second job or execution owner. Nested worker calls
+//!   retain a parent/per-tool occurrence slot so restart reconstruction replays
+//!   one existing child even if a provider regenerates its transient call id
+//!   or valid arguments. Its concern modules and scenario tests live beside
+//!   that single state owner.
 
 mod filesystem;
 mod rebuild;

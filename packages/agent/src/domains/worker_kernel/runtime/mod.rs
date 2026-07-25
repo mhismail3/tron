@@ -11,10 +11,11 @@
 //! `admission` owns schema-checked durable enqueue, idempotent replay,
 //! exact-version latency prediction, bounded foreground ownership, atomic
 //! detachment, and observational waits plus the transient bridge to an
-//! originating model-tool chip. Nested model-tool identity is derived from the
-//! durable parent invocation, logical turn, tool, and typed input, so a
-//! reconstructed parent observes the same child through recovery and waits for
-//! its typed terminal result instead of duplicating it. `invocation` owns
+//! originating model-tool chip. Nested calls retain their ordinary typed-input
+//! idempotency and also receive a durable parent/per-tool occurrence slot. A
+//! reconstructed parent restarts those occurrences at zero, observes the same
+//! child even when provider ids or valid arguments change, and waits for its
+//! typed terminal result instead of duplicating it. `invocation` owns
 //! claimed delivery, concurrency, progress phases, and terminal completion so
 //! detachment never becomes a second execution path.
 //! `result` owns generic artifact-style references for large validated worker
