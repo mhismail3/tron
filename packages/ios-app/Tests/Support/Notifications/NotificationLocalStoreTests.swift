@@ -6,13 +6,224 @@ import Testing
 @Suite("Native notification local durability")
 @MainActor
 struct NotificationLocalStoreTests {
-    @Test("installation identity, inbox, readiness, and response outbox survive reconstruction")
-    func roundTrip() {
-        IsolatedTestState.withDefaults(label: "notification-local-store") { defaults in
-            let store = NotificationLocalStore(defaults: defaults)
+    @Test("legacy defaults migrate once to the actor-owned durable file")
+    func legacyMigrationRoundTrip() async throws {
+        try await IsolatedTestState.withState(
+            label: "notification-local-store"
+        ) { state in
+            let fileURL = state.rootURL.appendingPathComponent(
+                "Notifications/state-v2.json"
+            )
+            let item = Self.item(deliveryId: "notification_1")
+            let mutation = Self.mutation(
+                id: "mutation_1",
+                deliveryId: item.delivery.deliveryId,
+                acknowledgement: .snooze
+            )
+            let readiness = Self.readiness
+            state.defaults.set(
+                try JSONEncoder().encode([item]),
+                forKey: "nativeNotifications.inbox.v1"
+            )
+            state.defaults.set(
+                try JSONEncoder().encode([mutation]),
+                forKey: "nativeNotifications.outbox.v1"
+            )
+            state.defaults.set(
+                try JSONEncoder().encode([readiness]),
+                forKey: "nativeNotifications.readiness.v1"
+            )
+
+            let store = NotificationLocalStore(
+                defaults: NotificationDefaultsHandle(value: state.defaults),
+                fileURL: fileURL
+            )
             let installationId = store.installationId
-            let delivery = NotificationDeliveryDTO(
-                deliveryId: "notification_1",
+            let migrated = try await store.load()
+
+            #expect(migrated.inbox == [item])
+            #expect(migrated.outbox == [mutation])
+            #expect(migrated.readiness == [readiness])
+            #expect(FileManager.default.fileExists(atPath: fileURL.path))
+            #expect(
+                state.defaults.object(
+                    forKey: "nativeNotifications.inbox.v1"
+                ) == nil
+            )
+            #expect(
+                state.defaults.object(
+                    forKey: "nativeNotifications.outbox.v1"
+                ) == nil
+            )
+
+            let restored = NotificationLocalStore(
+                defaults: NotificationDefaultsHandle(value: state.defaults),
+                fileURL: fileURL
+            )
+            #expect(restored.installationId == installationId)
+            #expect(try await restored.load() == migrated)
+            #expect(
+                !state.defaults.dictionaryRepresentation().description
+                    .contains("device-token")
+            )
+        }
+    }
+
+    @Test("one Mark All Read batch is durable and pending optimism survives sync")
+    func batchedOutboxAndSynchronization() async throws {
+        try await IsolatedTestState.withState(
+            label: "notification-outbox-batch"
+        ) { state in
+            let fileURL = state.rootURL.appendingPathComponent(
+                "Notifications/state-v2.json"
+            )
+            let first = Self.item(deliveryId: "delivery_1")
+            let second = Self.item(deliveryId: "delivery_2")
+            state.defaults.set(
+                try JSONEncoder().encode([first, second]),
+                forKey: "nativeNotifications.inbox.v1"
+            )
+            let store = NotificationLocalStore(
+                defaults: NotificationDefaultsHandle(value: state.defaults),
+                fileURL: fileURL
+            )
+            _ = try await store.load()
+
+            let clear = Self.mutation(
+                id: "clear_1",
+                deliveryId: first.delivery.deliveryId,
+                acknowledgement: .clearUnread
+            )
+            let complete = Self.mutation(
+                id: "complete_2",
+                deliveryId: second.delivery.deliveryId,
+                acknowledgement: .complete
+            )
+            let appended = try await store.appendMutations([
+                clear,
+                complete,
+            ])
+            #expect(appended.outbox == [clear, complete])
+            #expect(appended.inbox.allSatisfy { !$0.delivery.isUnread })
+
+            var authoritativeFirst = first.delivery
+            authoritativeFirst.readAt = "2026-07-25T00:02:00Z"
+            let committed = try await store.commitSynchronization(
+                acknowledgedMutationIds: [clear.mutationId],
+                deliveriesByServer: [
+                    first.serverId: [
+                        authoritativeFirst,
+                        second.delivery,
+                    ],
+                ]
+            )
+
+            #expect(committed.outbox == [complete])
+            #expect(
+                committed.inbox.first {
+                    $0.delivery.deliveryId == second.delivery.deliveryId
+                }?.delivery.terminalResponse == "complete"
+            )
+
+            let restored = NotificationLocalStore(
+                defaults: NotificationDefaultsHandle(value: state.defaults),
+                fileURL: fileURL
+            )
+            #expect(try await restored.load() == committed)
+        }
+    }
+
+    @Test("concurrent response appends serialize without lost mutations")
+    func concurrentAppendsSerialize() async throws {
+        try await IsolatedTestState.withState(
+            label: "notification-outbox-concurrency"
+        ) { state in
+            let store = NotificationLocalStore(
+                defaults: NotificationDefaultsHandle(value: state.defaults),
+                fileURL: state.rootURL.appendingPathComponent(
+                    "Notifications/state-v2.json"
+                )
+            )
+
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for index in 0..<40 {
+                    group.addTask {
+                        _ = try await store.appendMutations([
+                            Self.mutation(
+                                id: "mutation_\(index)",
+                                deliveryId: "delivery_\(index)",
+                                acknowledgement: .clearUnread
+                            ),
+                        ])
+                    }
+                }
+                try await group.waitForAll()
+            }
+
+            let snapshot = try await store.load()
+            #expect(snapshot.outbox.count == 40)
+            #expect(Set(snapshot.outbox.map(\.mutationId)).count == 40)
+        }
+    }
+
+    @Test("coordinator shutdown drains one batched Mark All Read outbox")
+    func coordinatorShutdownDrainsMarkAllRead() async throws {
+        try await IsolatedTestState.withState(
+            label: "notification-coordinator-shutdown"
+        ) { state in
+            let fileURL = state.rootURL.appendingPathComponent(
+                "Notifications/state-v2.json"
+            )
+            let items = [
+                Self.item(deliveryId: "delivery_1"),
+                Self.item(deliveryId: "delivery_2"),
+                Self.item(deliveryId: "delivery_3"),
+            ]
+            state.defaults.set(
+                try JSONEncoder().encode(items),
+                forKey: "nativeNotifications.inbox.v1"
+            )
+            let coordinator = NativeNotificationCoordinator(
+                defaults: state.defaults,
+                storeURL: fileURL,
+                runtimeMode: .hostedUnitTests,
+                servers: { [] },
+                notificationSession: { _, _ in
+                    throw EngineClientError.connectionNotEstablished
+                }
+            )
+
+            _ = await coordinator.handleQuietRefresh([
+                "tron": ["serverId": "server_1"],
+            ])
+            #expect(coordinator.aggregateUnreadCount == 3)
+
+            coordinator.clearAllUnread()
+            #expect(coordinator.aggregateUnreadCount == 0)
+            await coordinator.shutdown()
+
+            let restored = NotificationLocalStore(
+                defaults: NotificationDefaultsHandle(value: state.defaults),
+                fileURL: fileURL
+            )
+            let snapshot = try await restored.load()
+            #expect(snapshot.outbox.count == 3)
+            #expect(
+                snapshot.outbox.allSatisfy {
+                    $0.acknowledgement == .clearUnread
+                }
+            )
+            #expect(snapshot.inbox.allSatisfy { !$0.delivery.isUnread })
+        }
+    }
+
+    nonisolated private static func item(
+        deliveryId: String
+    ) -> NotificationInboxItem {
+        NotificationInboxItem(
+            serverId: "server_1",
+            delivery: NotificationDeliveryDTO(
+                deliveryId: deliveryId,
                 workerId: "automation-reminders",
                 workerVersion: "version_1",
                 sourceWorkerId: "automation-reminders",
@@ -45,36 +256,32 @@ struct NotificationLocalStoreTests {
                     cancelled: 0
                 )
             )
-            let item = NotificationInboxItem(serverId: "server_1", delivery: delivery)
-            let mutation = NotificationMutation(
-                mutationId: "mutation_1",
-                serverId: "server_1",
-                deliveryId: delivery.deliveryId,
-                acknowledgement: .snooze,
-                occurredAt: "2026-07-25T00:01:00Z"
-            )
-            let readiness = NotificationServerReadiness(
-                serverId: "server_1",
-                ready: false,
-                deviceReady: true,
-                transportMode: .relay,
-                transportConfigured: false,
-                transportProblem: "relay_offline",
-                authorizationStatus: .authorized,
-                registeredAt: nil,
-                problem: "Offline"
-            )
-
-            store.saveInbox([item])
-            store.saveOutbox([mutation])
-            store.saveReadiness([readiness])
-
-            let restored = NotificationLocalStore(defaults: defaults)
-            #expect(restored.installationId == installationId)
-            #expect(restored.loadInbox() == [item])
-            #expect(restored.loadOutbox() == [mutation])
-            #expect(restored.loadReadiness() == [readiness])
-            #expect(!defaults.dictionaryRepresentation().description.contains("device-token"))
-        }
+        )
     }
+
+    nonisolated private static func mutation(
+        id: String,
+        deliveryId: String,
+        acknowledgement: NotificationAcknowledgement
+    ) -> NotificationMutation {
+        NotificationMutation(
+            mutationId: id,
+            serverId: "server_1",
+            deliveryId: deliveryId,
+            acknowledgement: acknowledgement,
+            occurredAt: "2026-07-25T00:01:00Z"
+        )
+    }
+
+    nonisolated private static let readiness = NotificationServerReadiness(
+        serverId: "server_1",
+        ready: false,
+        deviceReady: true,
+        transportMode: .relay,
+        transportConfigured: false,
+        transportProblem: "relay_offline",
+        authorizationStatus: .authorized,
+        registeredAt: nil,
+        problem: "Offline"
+    )
 }

@@ -366,6 +366,35 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
+    func artifactDeliveries(
+        limit: UInt16,
+        offset: UInt64
+    ) async throws -> WorkerArtifactPageDTO {
+        try await client.artifactDeliveries(limit: limit, offset: offset)
+    }
+
+    func artifactContent(
+        workerId: String,
+        artifactId: String
+    ) async throws -> WorkerArtifactContentDTO {
+        try await client.artifactContent(
+            workerId: workerId,
+            artifactId: artifactId
+        )
+    }
+
+    func deleteArtifact(
+        workerId: String,
+        artifactId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerArtifactDeleteDTO {
+        try await client.deleteArtifact(
+            workerId: workerId,
+            artifactId: artifactId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func invokeWorker(
         workerId: String,
         input: AnyCodable,

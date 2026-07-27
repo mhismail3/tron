@@ -26,6 +26,10 @@ fn session_updated_event_type() {
             duration_ms: Some(12),
             ..Default::default()
         }]),
+        labels: Some(vec!["Work".into()]),
+        organization_group: Some("Projects".into()),
+        organization_changed: Some(true),
+        is_archived: Some(false),
     };
     assert_eq!(e.event_type(), "session_updated");
     assert_eq!(e.session_id(), "s1");
@@ -34,6 +38,10 @@ fn session_updated_event_type() {
     assert_eq!(json["turnCount"], 2);
     assert_eq!(json["activityLines"][0]["toolName"], "filesystem_read");
     assert_eq!(json["activityLines"][0]["durationMs"], 12);
+    assert_eq!(json["labels"], serde_json::json!(["Work"]));
+    assert_eq!(json["organizationGroup"], "Projects");
+    assert_eq!(json["organizationChanged"], true);
+    assert_eq!(json["isArchived"], false);
     assert!(json["activityLines"][0].get("text").is_none());
 }
 

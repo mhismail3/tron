@@ -7,7 +7,11 @@
 //! schema migration. Stateless codecs and generic SQL helpers live in `support`;
 //! `notification_validation` owns the closed device/APNs route validation
 //! boundary; `notification_attention` owns sanitized transport-failure inbox
-//! evidence; scenario tests live in `tests`.
+//! evidence. `inbox` keeps current Attention as an unresolved-error projection
+//! over immutable inbox history, excluding only exact bounded timeouts from the
+//! two deterministic-fallback semantic hooks. Error-context eligibility uses
+//! that same actionable-error predicate, while informational context remains
+//! separate. Scenario tests live in `tests`.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -19,18 +23,23 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use super::super::artifacts::ArtifactIntent;
 use super::super::dispatches::PreparedWorkerDispatch;
 use super::super::types::{
     ActiveWorker, BUNDLE_SCHEMA, InvocationRecord, MAX_INVOCATION_SECONDS, PreparedWorker,
-    UpsertOutcome, WebhookCredential, WorkerBundle, WorkerClientAction, WorkerCommand,
-    WorkerEngineHook, WorkerInteractionMode, WorkerRunEvent, WorkerRunStage, WorkerRunner,
-    WorkerState, WorkerSummary, WorkerTrigger,
+    UpsertOutcome, WebhookCredential, WorkerBundle, WorkerClientAction, WorkerClientDelivery,
+    WorkerCommand, WorkerEngineHook, WorkerInteractionMode, WorkerPresentation,
+    WorkerPresentationSection, WorkerPresentationSectionKind, WorkerRunEvent, WorkerRunStage,
+    WorkerRunner, WorkerState, WorkerSummary, WorkerTrigger,
 };
+use super::super::wakeups::PreparedWorkerWakeup;
 pub(super) use state::validate_bundle;
 use support::*;
 
+mod artifacts;
 mod dispatches;
 mod history;
+mod inbox;
 mod interaction;
 mod invocation_completion;
 mod invocations;
@@ -45,6 +54,8 @@ pub(in crate::domains::worker_kernel) use notifications::{
 };
 mod publication;
 mod results;
+mod session_organization;
+pub(in crate::domains::worker_kernel) use session_organization::SessionOrganizationDispatch;
 mod state;
 mod support;
 mod triggers;
@@ -83,7 +94,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 12)?;
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 15)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
@@ -258,6 +269,8 @@ impl WorkerStore {
                     parent_worker_invocation_id TEXT,
                     parent_worker_tool_ordinal INTEGER,
                     retry_of_invocation_id TEXT,
+                    not_before TEXT,
+                    wake_source_invocation_id TEXT,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
                     completed_at TEXT,
@@ -396,6 +409,11 @@ impl WorkerStore {
                 "parent_worker_tool_ordinal INTEGER",
             ),
             ("retry_of_invocation_id", "retry_of_invocation_id TEXT"),
+            ("not_before", "not_before TEXT"),
+            (
+                "wake_source_invocation_id",
+                "wake_source_invocation_id TEXT",
+            ),
         ] {
             if !table_has_column(&connection, "worker_invocations", column)? {
                 connection
@@ -416,6 +434,10 @@ impl WorkerStore {
                     ON worker_invocations(parent_worker_invocation_id, created_at ASC);
                  CREATE INDEX IF NOT EXISTS worker_invocations_retry
                     ON worker_invocations(retry_of_invocation_id, created_at ASC);
+                 CREATE INDEX IF NOT EXISTS worker_invocations_due
+                    ON worker_invocations(status,not_before,created_at);
+                 CREATE INDEX IF NOT EXISTS worker_invocations_wake_source
+                    ON worker_invocations(wake_source_invocation_id,created_at);
                  CREATE INDEX IF NOT EXISTS worker_model_tool_result_associations_model_tool
                     ON worker_model_tool_result_associations(
                         model_tool_invocation_id,
@@ -732,9 +754,105 @@ impl WorkerStore {
 
                 INSERT OR IGNORE INTO worker_schema(version, applied_at)
                     VALUES (12, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+                INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                    VALUES (13, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
                 ",
             )
             .map_err(|error| format!("initialize worker dispatch schema v12: {error}"))?;
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS worker_artifacts (
+                    worker_id TEXT NOT NULL,
+                    artifact_id TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    media_type TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    content_sha256 TEXT NOT NULL,
+                    content_reference_json TEXT NOT NULL,
+                    content_pointer TEXT NOT NULL,
+                    source_invocation_id TEXT NOT NULL,
+                    source_worker_version TEXT NOT NULL,
+                    trace_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(worker_id,artifact_id)
+                );
+                CREATE INDEX IF NOT EXISTS worker_artifacts_inbox
+                    ON worker_artifacts(created_at DESC,worker_id,artifact_id);
+                CREATE INDEX IF NOT EXISTS worker_artifacts_source
+                    ON worker_artifacts(source_invocation_id);
+                CREATE TABLE IF NOT EXISTS worker_artifact_storage_state (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                    state TEXT NOT NULL,
+                    attention_inbox_id TEXT,
+                    updated_at TEXT NOT NULL
+                );
+                INSERT OR IGNORE INTO worker_artifact_storage_state(
+                    singleton,state,attention_inbox_id,updated_at
+                ) VALUES (
+                    1,'normal',NULL,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                );
+                INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                    VALUES (14, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+                ",
+            )
+            .map_err(|error| format!("initialize artifact schema v14: {error}"))?;
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS worker_session_organization_intents (
+                    intent_id TEXT PRIMARY KEY,
+                    source_invocation_id TEXT NOT NULL UNIQUE,
+                    worker_id TEXT NOT NULL,
+                    worker_version TEXT NOT NULL,
+                    trace_id TEXT NOT NULL,
+                    mutations_json TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    attempt_count INTEGER NOT NULL,
+                    next_attempt_at TEXT NOT NULL,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    applied_at TEXT,
+                    FOREIGN KEY(source_invocation_id)
+                        REFERENCES worker_invocations(invocation_id) ON DELETE CASCADE
+                );
+                INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                    VALUES (15, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+                ",
+            )
+            .map_err(|error| format!("initialize session organization schema v15: {error}"))?;
+        if !table_has_column(
+            &connection,
+            "worker_session_organization_intents",
+            "next_attempt_at",
+        )? {
+            connection
+                .execute(
+                    "ALTER TABLE worker_session_organization_intents
+                     ADD COLUMN next_attempt_at TEXT NOT NULL
+                     DEFAULT '1970-01-01T00:00:00Z'",
+                    [],
+                )
+                .map_err(|error| {
+                    format!("add session organization next-attempt custody: {error}")
+                })?;
+        }
+        connection
+            .execute_batch(
+                "DROP INDEX IF EXISTS worker_session_organization_due;
+                 CREATE INDEX worker_session_organization_due
+                    ON worker_session_organization_intents(
+                        state,next_attempt_at,created_at,intent_id
+                    );
+                 UPDATE worker_session_organization_intents
+                    SET state='queued',
+                        error='canonical apply interrupted before durable acknowledgement',
+                        next_attempt_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+                        updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                    WHERE state='applying';",
+            )
+            .map_err(|error| format!("index session organization custody: {error}"))?;
         super::rebuild::rebuild_indexes(&self.root, &self.database)?;
         self.recover_interrupted()
     }

@@ -58,6 +58,13 @@ pub(crate) enum Command {
         #[command(subcommand)]
         action: StateAction,
     },
+    /// Chrome-owned closed Native Messaging host for the Browser Operator.
+    #[command(name = "browser-native-host", hide = true)]
+    BrowserNativeHost {
+        /// Owner-only Unix socket used by the ordinary Browser Operator worker.
+        #[arg(long)]
+        socket: PathBuf,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -177,6 +184,9 @@ pub(crate) async fn run_subcommand(cmd: &Command) -> Result<()> {
             StateAction::Verify { snapshot } => verify_profile_snapshot_cli(snapshot),
             StateAction::Restore { snapshot } => restore_profile_snapshot_cli(snapshot),
         },
+        Command::BrowserNativeHost { socket } => {
+            crate::app::browser_operator::run_native_host(socket).await
+        }
     }
 }
 

@@ -74,6 +74,12 @@
 //! - Asynchronous worker-owned session naming uses a storage-level
 //!   compare-and-set that updates only a null or blank title, so a delayed
 //!   policy result cannot overwrite an explicit concurrent user/model title.
+//! - Session organization remains canonical session-row state: ordinary tags
+//!   are labels, exactly one reserved tag encodes the group, and archive state
+//!   remains `ended_at`. Closed worker intents acquire sorted session locks and
+//!   commit the entire target batch or none of it while preserving system tags.
+//!   Omitted label/group patches preserve canonical values; explicit null is
+//!   reserved for clearing the group.
 //!
 //! ## Test Ownership
 //!
@@ -112,6 +118,8 @@ pub(crate) use store::AppendBatchItem;
 pub use store::{
     AppendOptions, ClientLogEntry, ClientLogIngestResult, CreateSessionResult, EventStore,
     ForkOptions, ForkResult, LogEntry, LogSessionFilter, RecentLogQuery,
+    SESSION_ORGANIZATION_GROUP_TAG_PREFIX, SessionOrganizationArchiveAction,
+    SessionOrganizationMutation, SessionOrganizationSnapshot, session_organization_from_tags,
 };
 pub use types::{
     EventType, Message, MessageWithEventId, SessionEvent, SessionState, TokenTotals, TokenUsage,

@@ -4,8 +4,22 @@ import Foundation
 extension EngineConnection {
     // MARK: - Reconnection
 
-    func handleDisconnect() async {
-        guard !reconnectLoopActive else {
+    func handleDisconnect(
+        expectedTask: URLSessionWebSocketTask? = nil,
+        expectedGeneration: UInt64? = nil
+    ) async {
+        if expectedTask != nil || expectedGeneration != nil {
+            guard let expectedTask,
+                  let expectedGeneration,
+                  ownsTransport(expectedTask, generation: expectedGeneration) else {
+                logger.debug(
+                    "Disconnect ignored for retired transport owner",
+                    category: .websocket
+                )
+                return
+            }
+        }
+        guard !reconnectLoopActive || engineConnectionTask != nil else {
             logger.debug(
                 "Disconnect coalesced into the active reconnect owner",
                 category: .websocket
@@ -29,8 +43,7 @@ extension EngineConnection {
         pingTask = nil
         receiveTask?.cancel()
         receiveTask = nil
-        engineConnectionTask?.cancel(with: .goingAway, reason: nil)
-        engineConnectionTask = nil
+        retireCurrentTransport(closeCode: .goingAway)
         urlSession?.invalidateAndCancel()
         urlSession = nil
         sessionDelegate = nil
@@ -74,8 +87,18 @@ extension EngineConnection {
 
     private func finishReconnectOwnership(generation: UInt64) {
         guard reconnectTaskGeneration == generation else { return }
+        let shouldRestartAfterLateDisconnect: Bool
+        switch connectionState {
+        case .reconnecting, .deployRestarting:
+            shouldRestartAfterLateDisconnect = !isConnectedFlag && !isInBackground
+        case .connected, .connecting, .disconnected, .failed, .unauthorized:
+            shouldRestartAfterLateDisconnect = false
+        }
         reconnectLoopActive = false
         reconnectTask = nil
+        if shouldRestartAfterLateDisconnect {
+            startReconnectOwnership(deployRestart: isDeployRestarting)
+        }
     }
 
     /// Run foreground reconnect probes until the socket returns or parks.
@@ -217,8 +240,7 @@ extension EngineConnection {
         }
 
         if !isConnectedFlag && !isInBackground {
-            reconnectTask = Task { [weak self] in
-                await self?.startReconnection()
-            }
+            startReconnectOwnership(deployRestart: false)
         }
-    }}
+    }
+}

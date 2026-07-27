@@ -44,6 +44,40 @@ fn context_summary_bundle(worker_id: &str, narrative: &str) -> WorkerBundle {
     bundle
 }
 
+fn continuity_context_bundle(worker_id: &str, narrative: &str) -> WorkerBundle {
+    let mut bundle = command_bundle(vec![
+        "sh".to_owned(),
+        "-c".to_owned(),
+        format!(
+            "printf '%s' '{}'",
+            serde_json::to_string(&json!({"narrative":narrative})).unwrap()
+        ),
+    ]);
+    bundle.worker_id = Some(worker_id.to_owned());
+    bundle.tool_name = Some(format!("worker_{worker_id}"));
+    bundle.name = format!("Continuity context {worker_id}");
+    bundle.description = format!("Recalls bounded continuity through {worker_id}");
+    bundle.input_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["action","query"],
+        "properties":{
+            "action":{"const":"continuity_context"},
+            "query":{"type":"string","minLength":1,"maxLength":12000},
+            "project":{"type":"string","minLength":1,"maxLength":2048},
+            "limit":{"type":"integer","minimum":1,"maximum":8}
+        }
+    });
+    bundle.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["narrative"],
+        "properties":{"narrative":{"type":"string","maxLength":6000}}
+    });
+    bundle.engine_hooks = vec![WorkerEngineHook::ContinuityContext];
+    bundle
+}
+
 fn hook_invocation(actor_id: &str, actor_kind: ActorKind, key: &str) -> Invocation {
     Invocation::new_sync(
         FunctionId::new(super::super::super::CONTEXT_SUMMARY_FUNCTION).unwrap(),
@@ -56,6 +90,74 @@ fn hook_invocation(actor_id: &str, actor_kind: ActorKind, key: &str) -> Invocati
         .with_session_id("hook-test")
         .with_idempotency_key(key),
     )
+}
+
+#[tokio::test]
+async fn atomic_upsert_activates_continuity_context_without_a_binding_step() {
+    let (runtime, _home) = test_runtime(None);
+    let outcome = runtime
+        .upsert(
+            continuity_context_bundle("continuity-one", "worker-owned memory"),
+            None,
+        )
+        .await
+        .unwrap();
+    let execution = runtime
+        .execute_engine_hook(
+            WorkerEngineHook::ContinuityContext,
+            json!({
+                "action":"continuity_context",
+                "query":"release acceptance",
+                "project":"/workspace/example",
+                "limit":6
+            }),
+            None,
+            &Invocation::new_sync(
+                FunctionId::new(super::super::super::CONTINUITY_CONTEXT_FUNCTION).unwrap(),
+                json!({"query":"release acceptance"}),
+                CausalContext::new(
+                    ActorId::new("agent:continuity-test").unwrap(),
+                    ActorKind::Agent,
+                    TraceId::new("trace-continuity-hook").unwrap(),
+                )
+                .with_session_id("continuity-hook-test")
+                .with_idempotency_key("continuity-hook"),
+            ),
+        )
+        .await
+        .unwrap()
+        .expect("continuity execution");
+
+    assert_eq!(execution.worker_id, outcome.worker.worker_id);
+    assert_eq!(execution.output["narrative"], "worker-owned memory");
+    assert_eq!(
+        runtime.engine_hook_inventory().unwrap(),
+        vec![json!({
+            "hook":"continuity_context",
+            "workerId":outcome.worker.worker_id,
+            "workerVersion":outcome.worker.active_version,
+        })]
+    );
+}
+
+#[tokio::test]
+async fn continuity_schema_must_reject_unbounded_narrative_before_activation() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = continuity_context_bundle("continuity-unbounded", "valid");
+    bundle.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["narrative"],
+        "properties":{"narrative":{"type":"string"}}
+    });
+
+    let error = runtime.upsert(bundle, None).await.unwrap_err();
+
+    assert!(
+        error.contains("engine hook 'continuity_context' output"),
+        "{error}"
+    );
+    assert!(runtime.store().list(true).unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -238,6 +340,36 @@ async fn context_summary_timeout_cancels_the_run_and_disables_the_owner() {
     assert_eq!(run.status, "cancelled");
 }
 
+#[tokio::test(start_paused = true)]
+async fn worker_declared_invocation_ceiling_bounds_hook_runner_and_disables_it() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = context_summary_bundle("context-summary-bounded", "unused");
+    bundle.execution_limits.max_invocation_seconds = Some(3);
+    bundle.runner = WorkerRunner::Command {
+        command: vec!["sh".to_owned(), "-c".to_owned(), "sleep 120".to_owned()],
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+
+    let error = runtime
+        .invoke_engine_hook(
+            WorkerEngineHook::ContextSummary,
+            json!({"messages":[{"role":"user","text":"Preserve this task."}]}),
+            None,
+            &hook_invocation("agent:hook-test", ActorKind::Agent, "hook-bounded"),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(error.contains("exceeded 3 seconds"), "{error}");
+    let worker = runtime
+        .store()
+        .summary(&outcome.worker.worker_id)
+        .unwrap()
+        .unwrap();
+    assert!(!worker.enabled);
+    assert_eq!(worker.health, "failed");
+}
+
 #[tokio::test]
 async fn hook_owner_does_not_recursively_invoke_itself() {
     let (runtime, _home) = test_runtime(None);
@@ -409,6 +541,7 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
         "workerId":"background-report",
         "name":"Background Report",
         "description":"Produces a durable background report",
+        "modelExposure":"internal",
         "inputSchema":{"type":"object","additionalProperties":false},
         "outputSchema":{
             "type":"object","additionalProperties":false,"required":["report"],
@@ -583,8 +716,23 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
             .is_empty()
     );
 
+    let second_pending = context
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::invoke").unwrap(),
+            json!({
+                "workerId":"background-report",
+                "input":{},
+                "mode":"wait",
+                "idempotencyKey":"background-report-second-pending"
+            }),
+            actor().with_idempotency_key("invoke-inbox-source-second-pending"),
+        ))
+        .await;
+    assert_eq!(second_pending.error, None);
+
     let hook_output = serde_json::to_string(&json!({
-        "consumedInboxIds":[inbox_id],
+        "consumedInboxIds":[inbox_id.clone()],
         "narrative":"The background report is ready."
     }))
     .unwrap();
@@ -593,6 +741,7 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
         "workerId":"inbox-narrator",
         "name":"Inbox Narrator",
         "description":"Selects pending worker results and creates transient context",
+        "modelExposure":"internal",
         "inputSchema":{
             "type":"object","additionalProperties":false,"required":["query","items"],
             "properties":{
@@ -660,7 +809,14 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
             actor().with_idempotency_key("read-claimed-inbox-source"),
         ))
         .await;
-    assert_eq!(inbox.value.unwrap()["items"][0]["contextAttached"], true);
+    let inbox = inbox.value.unwrap();
+    let claimed = inbox["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["inboxId"] == inbox_id)
+        .expect("selected inbox observation remains auditable");
+    assert_eq!(claimed["contextAttached"], true);
 
     let invoked = context
         .engine_host
@@ -734,6 +890,7 @@ async fn worker_run_and_inbox_history_pages_remain_fully_auditable() {
         "workerId":"history-page-worker",
         "name":"History Page Worker",
         "description":"Produces deterministic audit records",
+        "modelExposure":"internal",
         "inputSchema":{"type":"object","additionalProperties":false},
         "outputSchema":{
             "type":"object","additionalProperties":false,"required":["ok"],

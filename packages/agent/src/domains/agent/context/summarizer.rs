@@ -314,6 +314,7 @@ mod tests {
             "workerId":worker_id,
             "name":"Context Summary Policy",
             "description":"Creates durable semantic context summaries",
+            "modelExposure":"internal",
             "inputSchema":{
                 "type":"object","additionalProperties":false,"required":["messages"],
                 "properties":{

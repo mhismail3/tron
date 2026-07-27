@@ -8,7 +8,12 @@ fn bundle() -> WorkerBundle {
         name: "Recent Research".to_owned(),
         description: "Research a topic across recent sources".to_owned(),
         tool_name: None,
-        tool_input_schema: None,
+        model_exposure: Default::default(),
+        tool_input_schema: Some(json!({
+            "type":"object",
+            "properties":{"topic":{"type":"string"}}
+        })),
+        agent_tools: None,
         input_schema: json!({"type":"object","properties":{"topic":{"type":"string"}}}),
         output_schema: json!({"type":"object"}),
         runner: WorkerRunner::Command {
@@ -73,6 +78,327 @@ fn candidate_rejects_a_non_object_direct_tool_schema() {
 }
 
 #[test]
+fn direct_worker_requires_an_outcome_oriented_tool_schema() {
+    let mut candidate = bundle();
+    candidate.tool_input_schema = None;
+    assert_eq!(
+        validate_bundle(&candidate).unwrap_err(),
+        "modelExposure direct requires toolInputSchema"
+    );
+}
+
+#[test]
+fn internal_worker_rejects_unused_direct_tool_schema() {
+    let mut candidate = bundle();
+    candidate.model_exposure = crate::domains::worker_kernel::types::WorkerModelExposure::Internal;
+    candidate.tool_input_schema = Some(json!({"type":"object"}));
+    assert_eq!(
+        validate_bundle(&candidate).unwrap_err(),
+        "toolInputSchema is only valid when modelExposure is direct"
+    );
+}
+
+#[test]
+fn agent_tool_allowlist_is_agent_only_unique_and_bounded() {
+    let mut command = bundle();
+    command.agent_tools = Some(vec!["web_fetch".to_owned()]);
+    assert_eq!(
+        validate_bundle(&command).unwrap_err(),
+        "agentTools is only valid for agent runners"
+    );
+
+    let mut agent = bundle();
+    agent.runner = WorkerRunner::Agent {
+        instructions: "Return an object.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    agent.agent_tools = Some(vec!["web_fetch".to_owned(), "web_fetch".to_owned()]);
+    assert_eq!(
+        validate_bundle(&agent).unwrap_err(),
+        "duplicate agentTools entry 'web_fetch'"
+    );
+
+    agent.agent_tools = Some(
+        (0..33)
+            .map(|index| format!("worker_tool_{index}"))
+            .collect(),
+    );
+    assert_eq!(
+        validate_bundle(&agent).unwrap_err(),
+        "agentTools must contain at most 32 model tool names"
+    );
+
+    agent.agent_tools = Some(vec!["tool/name".to_owned()]);
+    assert_eq!(
+        validate_bundle(&agent).unwrap_err(),
+        "agentTools entry must contain only ASCII letters, numbers, '-' or '_'"
+    );
+
+    agent.agent_tools = Some(vec!["a".repeat(65)]);
+    assert_eq!(
+        validate_bundle(&agent).unwrap_err(),
+        "agentTools entries must be at most 64 UTF-8 bytes"
+    );
+}
+
+#[test]
+fn artifact_delivery_requires_the_reserved_output_property() {
+    let mut candidate = bundle();
+    candidate.client_deliveries = vec![WorkerClientDelivery::ArtifactDelivery];
+    assert_eq!(
+        validate_bundle(&candidate).unwrap_err(),
+        "outputSchema must explicitly declare the reserved artifactDeliveries property when clientDeliveries contains artifact_delivery"
+    );
+}
+
+#[test]
+fn notification_policy_can_publish_title_body_without_internal_protocol_fields() {
+    let mut candidate = bundle();
+    candidate.worker_id = Some("notification-policy".to_owned());
+    candidate.name = "Notification Policy".to_owned();
+    candidate.tool_input_schema = Some(json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["title","body"],
+        "properties":{
+            "title":{"type":"string","minLength":1,"maxLength":120},
+            "body":{"type":"string","minLength":1,"maxLength":512}
+        }
+    }));
+    candidate.input_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "oneOf":[
+            {
+                "not":{"required":["action"]},
+                "required":["title","body"]
+            },
+            {
+                "properties":{"action":{"const":"deliver"}},
+                "required":["action","sourceRecordId","title","body"]
+            }
+        ],
+        "properties":{
+            "action":{"const":"deliver"},
+            "sourceRecordId":{"type":"string"},
+            "title":{"type":"string"},
+            "body":{"type":"string"}
+        }
+    });
+
+    validate_bundle(&candidate).unwrap();
+    assert!(
+        candidate
+            .effective_tool_input_schema()
+            .pointer("/properties/action")
+            .is_none()
+    );
+    assert!(
+        candidate
+            .input_schema
+            .pointer("/properties/action")
+            .is_some()
+    );
+}
+
+#[test]
+fn self_wakeup_completion_is_atomic_deduplicated_and_not_early() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(directory.path().to_path_buf()).unwrap();
+    let mut candidate = bundle();
+    candidate.worker_id = Some("self-wakeup-worker".to_owned());
+    candidate.name = "Self Wakeup Worker".to_owned();
+    let mut prepared = store.prepare(candidate, None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let not_before = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+
+    for source_key in ["wakeup-source-one", "wakeup-source-two"] {
+        let (source, replayed) = store
+            .begin_invocation(
+                &published.worker.worker_id,
+                &published.version,
+                &json!({"topic":"tick"}),
+                source_key,
+                &format!("trace-{source_key}"),
+                0,
+                "manual",
+                None,
+            )
+            .unwrap();
+        assert!(!replayed);
+        assert!(store.claim_running(&source.invocation_id).unwrap());
+        store
+            .complete_invocation_with_effects(
+                &source.invocation_id,
+                &published.worker.worker_id,
+                &json!({"status":"accepted"}),
+                &[],
+                &[],
+                &[],
+                Some(&PreparedWorkerWakeup {
+                    not_before: not_before.clone(),
+                    deduplication_key: "same-next-wakeup".to_owned(),
+                    input: json!({"topic":"tick"}),
+                }),
+            )
+            .unwrap();
+    }
+
+    let connection = store.connection().unwrap();
+    let (count, version, source, stored_not_before, stored_key): (
+        u32,
+        String,
+        String,
+        String,
+        String,
+    ) = connection
+        .query_row(
+            "SELECT COUNT(*),worker_version,wake_source_invocation_id,not_before,idempotency_key
+             FROM worker_invocations WHERE trigger_kind='self_wakeup'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+    assert_eq!(version, published.version);
+    assert!(source.starts_with("worker_run_"));
+    assert_eq!(stored_not_before, not_before);
+    assert_eq!(stored_key, "self_wakeup:same-next-wakeup");
+    assert!(
+        store
+            .queued_invocations(100)
+            .unwrap()
+            .iter()
+            .all(|invocation| invocation.trigger_kind != "self_wakeup")
+    );
+    connection
+        .execute(
+            "UPDATE worker_invocations SET not_before=?1 WHERE trigger_kind='self_wakeup'",
+            [(chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339()],
+        )
+        .unwrap();
+    assert!(
+        store
+            .queued_invocations(100)
+            .unwrap()
+            .iter()
+            .any(|invocation| invocation.trigger_kind == "self_wakeup")
+    );
+}
+
+#[test]
+fn interrupted_claim_is_terminalized_before_redelivery() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(directory.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let (run, _) = store
+        .begin_invocation(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({"topic":"recover"}),
+            "recover-owned-delivery",
+            "trace-recover-owned-delivery",
+            0,
+            "manual",
+            None,
+        )
+        .unwrap();
+    assert!(store.claim_running(&run.invocation_id).unwrap());
+
+    let queued = store
+        .interrupt_running_invocation(&run.invocation_id, "test owner disappeared")
+        .unwrap();
+    assert_eq!(queued.status, "queued");
+    let attempts = store.attempts(&run.invocation_id).unwrap();
+    assert_eq!(attempts[0]["status"], "interrupted");
+    assert!(store.claim_running(&run.invocation_id).unwrap());
+    assert_eq!(store.attempts(&run.invocation_id).unwrap().len(), 2);
+}
+
+#[test]
+fn interrupted_attempt_count_survives_store_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let (worker_id, version) = {
+        let store = WorkerStore::open_without_snapshot(directory.path().to_path_buf()).unwrap();
+        let mut prepared = store.prepare(bundle(), None).unwrap();
+        store.finalize(&mut prepared).unwrap();
+        let published = store.publish(prepared).unwrap();
+        (published.worker.worker_id, published.version)
+    };
+    let reason = "claimed worker delivery lost its in-process owner";
+
+    for index in 1..=3 {
+        let store = WorkerStore::open_without_snapshot(directory.path().to_path_buf()).unwrap();
+        let (run, _) = store
+            .begin_invocation(
+                &worker_id,
+                &version,
+                &json!({"index":index}),
+                &format!("durable-orphan-{index}"),
+                &format!("trace-durable-orphan-{index}"),
+                0,
+                "manual",
+                None,
+            )
+            .unwrap();
+        assert!(store.claim_running(&run.invocation_id).unwrap());
+        store
+            .interrupt_running_invocation(&run.invocation_id, reason)
+            .unwrap();
+        assert_eq!(
+            store.interrupted_attempt_count(&worker_id, reason).unwrap(),
+            index
+        );
+    }
+}
+
+#[test]
+fn schema_v13_or_later_retains_only_delayed_invocation_custody() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(directory.path().to_path_buf()).unwrap();
+    let connection = store.connection().unwrap();
+    let version: u32 = connection
+        .query_row("SELECT MAX(version) FROM worker_schema", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(version >= 13);
+    let columns = connection
+        .prepare("PRAGMA table_info(worker_invocations)")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert!(columns.contains(&"not_before".to_owned()));
+    assert!(columns.contains(&"wake_source_invocation_id".to_owned()));
+    let extra_tables: u32 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_schema
+             WHERE type='table' AND name LIKE '%wakeup%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        extra_tables, 0,
+        "self-wakeup must reuse the invocation ledger"
+    );
+}
+
+#[test]
 fn worker_dispatch_completion_atomically_queues_one_causal_child_and_replays() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
@@ -120,6 +446,7 @@ fn worker_dispatch_completion_atomically_queues_one_causal_child_and_replays() {
                 &source.worker.worker_id,
                 &json!({"status":"accepted"}),
                 &[],
+                &[],
                 &[PreparedWorkerDispatch {
                     route: "policy".to_owned(),
                     deduplication_key: "logical-occurrence".to_owned(),
@@ -129,6 +456,7 @@ fn worker_dispatch_completion_atomically_queues_one_causal_child_and_replays() {
                     response_owner:
                         crate::domains::worker_kernel::types::WorkerDispatchResponseOwner::Source,
                 }],
+                None,
             )
             .unwrap();
     }
@@ -188,6 +516,107 @@ fn worker_dispatch_completion_atomically_queues_one_causal_child_and_replays() {
 }
 
 #[test]
+fn worker_dispatch_admission_failure_rolls_back_source_completion_for_retry() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+
+    let mut target = bundle();
+    target.worker_id = Some("session-organizer".to_owned());
+    target.name = "Session Organizer".to_owned();
+    let mut prepared = store.prepare(target, None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let target = store.publish(prepared).unwrap();
+
+    let mut source = bundle();
+    source.worker_id = Some("session-title-policy".to_owned());
+    source.name = "Session Title Policy".to_owned();
+    let mut prepared = store.prepare(source, None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let source = store.publish(prepared).unwrap();
+    let (run, replayed) = store
+        .begin_invocation(
+            &source.worker.worker_id,
+            &source.version,
+            &json!({"userPrompt":"Organize this session."}),
+            "session-title-organization-admission",
+            "trace-session-organization",
+            0,
+            "engine_hook:session_title",
+            Some("session-organization-source"),
+        )
+        .unwrap();
+    assert!(!replayed);
+    assert!(store.claim_running(&run.invocation_id).unwrap());
+    store
+        .connection()
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER fail_session_organization_dispatch
+             BEFORE INSERT ON worker_dispatches
+             WHEN NEW.route='session-organization-after-title'
+             BEGIN
+                 SELECT RAISE(ABORT,'simulated organization admission failure');
+             END;",
+        )
+        .unwrap();
+    let dispatch = PreparedWorkerDispatch {
+        route: "session-organization-after-title".to_owned(),
+        deduplication_key: "session-title-source".to_owned(),
+        input: json!({"action":"session_organization"}),
+        target_worker_id: target.worker.worker_id.clone(),
+        target_worker_version: target.version.clone(),
+        response_owner: crate::domains::worker_kernel::types::WorkerDispatchResponseOwner::Target,
+    };
+
+    let error = store
+        .complete_invocation_with_effects(
+            &run.invocation_id,
+            &source.worker.worker_id,
+            &json!({"title":"Organized Session"}),
+            &[],
+            &[],
+            std::slice::from_ref(&dispatch),
+            None,
+        )
+        .unwrap_err();
+    assert!(error.contains("simulated organization admission failure"));
+    let still_running = store.invocation(&run.invocation_id).unwrap().unwrap();
+    assert_eq!(still_running.status, "running");
+    assert!(still_running.output.is_none());
+    assert!(
+        store
+            .worker_dispatches_for_source(&run.invocation_id)
+            .unwrap()
+            .is_empty()
+    );
+
+    store
+        .connection()
+        .unwrap()
+        .execute_batch("DROP TRIGGER fail_session_organization_dispatch;")
+        .unwrap();
+    let completed = store
+        .complete_invocation_with_effects(
+            &run.invocation_id,
+            &source.worker.worker_id,
+            &json!({"title":"Organized Session"}),
+            &[],
+            &[],
+            &[dispatch],
+            None,
+        )
+        .unwrap();
+    assert_eq!(completed.status, "completed");
+    assert_eq!(
+        store
+            .worker_dispatches_for_source(&run.invocation_id)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn dispatched_notification_binds_responses_to_the_declared_source_owner() {
     use crate::domains::worker_kernel::notifications::{
         NotificationIntent, NotificationResponseAction,
@@ -230,6 +659,7 @@ fn dispatched_notification_binds_responses_to_the_declared_source_owner() {
             &reminder.worker.worker_id,
             &json!({"status":"queued"}),
             &[],
+            &[],
             &[PreparedWorkerDispatch {
                 route: "notification-policy".to_owned(),
                 deduplication_key: "occurrence-one-attempt-one".to_owned(),
@@ -238,6 +668,7 @@ fn dispatched_notification_binds_responses_to_the_declared_source_owner() {
                 target_worker_version: policy.version.clone(),
                 response_owner: WorkerDispatchResponseOwner::Source,
             }],
+            None,
         )
         .unwrap();
     let child = store
@@ -410,15 +841,15 @@ fn schema_v12_preserves_run_evidence_and_adds_dispatch_notification_ownership() 
     let retained = store.inbox_filtered(None, Some(true), None, 10).unwrap();
     assert_eq!(retained.len(), 1);
     assert_eq!(retained[0]["contextAttached"], true);
-    assert_eq!(
+    assert!(
         store
             .connection()
             .unwrap()
             .query_row("SELECT MAX(version) FROM worker_schema", [], |row| {
                 row.get::<_, u32>(0)
             })
-            .unwrap(),
-        12
+            .unwrap()
+            >= 12
     );
     let delivery_columns = store
         .connection()
@@ -936,15 +1367,15 @@ fn schema_v10_result_migration_is_resumable_and_idempotent() {
     drop(store);
 
     let reopened = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
-    assert_eq!(
+    assert!(
         reopened
             .connection()
             .unwrap()
             .query_row("SELECT MAX(version) FROM worker_schema", [], |row| {
                 row.get::<_, u32>(0)
             })
-            .unwrap(),
-        12
+            .unwrap()
+            >= 12
     );
     assert_eq!(
         reopened.resolve_result(&run.invocation_id).unwrap(),
@@ -1201,6 +1632,15 @@ fn presentation_binding_is_immutable_indexed_and_reconstructed() {
         suite_id: Some("research".to_owned()),
         component_role: Some("search".to_owned()),
         primary: false,
+        sections: vec![
+            serde_json::from_value(json!({
+                "sectionId":"summary",
+                "kind":"text",
+                "title":"Summary",
+                "valuePointer":"/summary"
+            }))
+            .unwrap(),
+        ],
     });
     let mut prepared = store.prepare(candidate, None).unwrap();
     store.finalize(&mut prepared).unwrap();
@@ -1228,6 +1668,19 @@ fn presentation_binding_is_immutable_indexed_and_reconstructed() {
             .as_deref(),
         Some("search")
     );
+    assert_eq!(
+        store
+            .load_version("recent-research", &version)
+            .unwrap()
+            .bundle
+            .presentation
+            .as_ref()
+            .unwrap()
+            .sections[0]
+            .value_pointer
+            .as_deref(),
+        Some("/summary")
+    );
 
     store
         .connection()
@@ -1246,6 +1699,134 @@ fn presentation_binding_is_immutable_indexed_and_reconstructed() {
             .experience_id,
         "research-suite"
     );
+    assert_eq!(
+        store
+            .summary("recent-research")
+            .unwrap()
+            .unwrap()
+            .presentation
+            .as_ref()
+            .unwrap()
+            .sections
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn declarative_presentation_is_bounded_result_bound_and_schema_validated() {
+    let mut candidate = bundle();
+    candidate.input_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["action"],
+        "properties":{"action":{"type":"string","enum":["refresh","approve"]}}
+    });
+    candidate.presentation = Some(
+        serde_json::from_value(json!({
+            "experienceId":"generic-workflow",
+            "contractVersion":1,
+            "sections":[
+                {"sectionId":"summary","kind":"text","title":"Summary","valuePointer":"/summary"},
+                {"sectionId":"state","kind":"status","valuePointer":"/status"},
+                {"sectionId":"completion","kind":"progress","valuePointer":"/progress"},
+                {
+                    "sectionId":"records","kind":"table","title":"Records","valuePointer":"/records",
+                    "columns":[
+                        {"label":"Name","valuePointer":"/name"},
+                        {"label":"State","valuePointer":"/status"}
+                    ]
+                },
+                {"sectionId":"notes","kind":"list","valuePointer":"/notes"},
+                {"sectionId":"source","kind":"link","label":"Open source","url":"https://example.com/source"},
+                {"sectionId":"artifact","kind":"artifact","label":"Inspect report","valuePointer":"/report"},
+                {
+                    "sectionId":"approve","kind":"confirmation","title":"Approve result",
+                    "detail":"Run the immutable approval action?",
+                    "action":{"actionId":"approve","label":"Approve","input":{"action":"approve"}}
+                },
+                {
+                    "sectionId":"refresh","kind":"worker_action",
+                    "action":{"actionId":"refresh","label":"Refresh","input":{"action":"refresh"}}
+                }
+            ]
+        }))
+        .unwrap(),
+    );
+    validate_bundle(&candidate).expect("closed presentation is valid");
+
+    let mut unsafe_link = candidate.clone();
+    unsafe_link
+        .presentation
+        .as_mut()
+        .unwrap()
+        .sections
+        .iter_mut()
+        .find(|section| section.section_id == "source")
+        .unwrap()
+        .url = Some("javascript:alert(1)".to_owned());
+    assert!(
+        validate_bundle(&unsafe_link)
+            .unwrap_err()
+            .contains("absolute public HTTPS URL")
+    );
+    unsafe_link
+        .presentation
+        .as_mut()
+        .unwrap()
+        .sections
+        .iter_mut()
+        .find(|section| section.section_id == "source")
+        .unwrap()
+        .url = Some("https://127.0.0.1/private".to_owned());
+    assert!(
+        validate_bundle(&unsafe_link)
+            .unwrap_err()
+            .contains("absolute public HTTPS URL")
+    );
+
+    let mut invalid_pointer = candidate.clone();
+    invalid_pointer.presentation.as_mut().unwrap().sections[0].value_pointer =
+        Some("/bad~2pointer".to_owned());
+    assert!(
+        validate_bundle(&invalid_pointer)
+            .unwrap_err()
+            .contains("invalid RFC 6901 escape")
+    );
+
+    let mut invalid_action = candidate;
+    invalid_action
+        .presentation
+        .as_mut()
+        .unwrap()
+        .sections
+        .last_mut()
+        .unwrap()
+        .action
+        .as_mut()
+        .unwrap()
+        .input = json!({"action":"delete-device"});
+    assert!(
+        validate_bundle(&invalid_action)
+            .unwrap_err()
+            .contains("does not match inputSchema")
+    );
+}
+
+#[test]
+fn declarative_presentation_struct_rejects_arbitrary_native_code_fields() {
+    for field in ["html", "javascript", "swiftView", "clientCommand"] {
+        let mut value = json!({
+            "experienceId":"generic-workflow",
+            "contractVersion":1,
+            "sections":[
+                {"sectionId":"summary","kind":"text","valuePointer":"/summary"}
+            ]
+        });
+        value["sections"][0][field] = json!("unsafe");
+        let error = serde_json::from_value::<WorkerPresentation>(value).unwrap_err();
+        assert!(error.to_string().contains("unknown field"), "{error}");
+    }
 }
 
 #[test]
@@ -1477,6 +2058,11 @@ fn traversal_in_worker_files_is_rejected() {
 fn worker_selected_execution_ceilings_are_bounded_before_publication() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut invalid_timeout = bundle();
+    invalid_timeout.execution_limits.max_invocation_seconds = Some(0);
+    let error = store.prepare(invalid_timeout, None).unwrap_err();
+    assert!(error.contains("maxInvocationSeconds"), "{error}");
+
     let mut invalid_turns = bundle();
     invalid_turns.execution_limits.max_agent_turns = Some(0);
     let error = store.prepare(invalid_turns, None).unwrap_err();
@@ -1488,12 +2074,17 @@ fn worker_selected_execution_ceilings_are_bounded_before_publication() {
     assert!(error.contains("maxChildInvocations"), "{error}");
 
     let mut bounded = bundle();
+    bounded.execution_limits.max_invocation_seconds = Some(3);
     bounded.execution_limits.max_agent_turns = Some(7);
     bounded.execution_limits.max_child_invocations = Some(6);
     let mut prepared = store.prepare(bounded, None).unwrap();
     store.finalize(&mut prepared).unwrap();
     let published = store.publish(prepared).unwrap();
     let active = store.load_active(&published.worker.worker_id).unwrap();
+    assert_eq!(
+        active.bundle.execution_limits.max_invocation_seconds,
+        Some(3)
+    );
     assert_eq!(active.bundle.execution_limits.max_agent_turns, Some(7));
     assert_eq!(
         active.bundle.execution_limits.max_child_invocations,
@@ -1505,6 +2096,19 @@ fn worker_selected_execution_ceilings_are_bounded_before_publication() {
 fn runner_and_check_configuration_is_validated_before_staging() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut invalid_reasoning = bundle();
+    invalid_reasoning.runner = WorkerRunner::Agent {
+        instructions: "Return a typed result.".to_owned(),
+        model: None,
+        reasoning_level: Some("fastest".to_owned()),
+    };
+    assert!(
+        store
+            .prepare(invalid_reasoning, None)
+            .unwrap_err()
+            .contains("reasoningLevel")
+    );
+
     let mut remote_service = bundle();
     remote_service.runner = WorkerRunner::Service {
         command: vec!["worker-service".to_owned()],
@@ -1927,25 +2531,23 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
     let attention = store
         .inbox_filtered_page(Some(&outcome.worker.worker_id), None, None, true, 10, 0)
         .unwrap();
-    assert_eq!(attention.len(), 3);
-    assert!(
-        attention
-            .iter()
-            .all(|item| item["requiresAttention"] == true)
-    );
-    assert!(
-        attention
-            .iter()
-            .any(|item| { item["triggerKind"] == "schedule" && item["hasInvocation"] == true })
-    );
-    assert!(attention.iter().any(|item| {
-        item["invocationId"] == detached_manual.invocation_id && item["triggerKind"] == "manual"
+    assert_eq!(attention.len(), 1);
+    assert_eq!(attention[0]["requiresAttention"], true);
+    assert_eq!(attention[0]["triggerKind"], "system");
+    assert_eq!(attention[0]["hasInvocation"], false);
+    let history = store
+        .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
+        .unwrap();
+    assert!(history.iter().any(|item| {
+        item["triggerKind"] == "schedule"
+            && item["severity"] == "info"
+            && item["requiresAttention"] == false
     }));
-    assert!(
-        attention
-            .iter()
-            .any(|item| { item["triggerKind"] == "system" && item["hasInvocation"] == false })
-    );
+    assert!(history.iter().any(|item| {
+        item["invocationId"] == detached_manual.invocation_id
+            && item["severity"] == "info"
+            && item["requiresAttention"] == false
+    }));
     let first = store
         .take_notable_pending(Some("recent research"), 10)
         .unwrap();
@@ -1985,6 +2587,172 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
     assert_eq!(retained.len(), 4);
     assert!(retained.iter().any(|item| {
         item["result"]["phase"] == "resident_supervision" && item["requiresAttention"] == false
+    }));
+}
+
+#[test]
+fn completed_schedule_and_reminder_outcomes_remain_history_without_attention() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+
+    for (worker_id, trigger_kind) in [
+        ("automation-schedules", "schedule"),
+        ("automation-reminders", "worker_dispatch"),
+    ] {
+        let mut candidate = bundle();
+        candidate.worker_id = Some(worker_id.to_owned());
+        candidate.name = worker_id.replace('-', " ");
+        let mut prepared = store.prepare(candidate, None).unwrap();
+        store.finalize(&mut prepared).unwrap();
+        let outcome = store.publish(prepared).unwrap();
+        let (run, _) = store
+            .begin_invocation(
+                &outcome.worker.worker_id,
+                &outcome.version,
+                &json!({"action":"reconcile"}),
+                &format!("{worker_id}-completed"),
+                &format!("trace-{worker_id}-completed"),
+                0,
+                trigger_kind,
+                None,
+            )
+            .unwrap();
+        assert!(store.claim_running(&run.invocation_id).unwrap());
+        store
+            .complete_invocation(
+                &run.invocation_id,
+                &outcome.worker.worker_id,
+                Ok(&json!({"status":"completed"})),
+            )
+            .unwrap();
+    }
+
+    let history = store.inbox_filtered(None, None, None, 10).unwrap();
+    assert_eq!(history.len(), 2);
+    assert!(history.iter().all(|item| {
+        item["severity"] == "info"
+            && item["requiresAttention"] == false
+            && item["contextAttached"] == false
+    }));
+    assert!(
+        store
+            .inbox_filtered_page(None, None, None, true, 10, 0)
+            .unwrap()
+            .is_empty(),
+        "successful scheduler and reminder history is not a current operator problem"
+    );
+}
+
+#[test]
+fn optional_fallback_hook_timeouts_are_history_while_other_hook_failures_need_attention() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+
+    for (worker_id, trigger_kind, error) in [
+        (
+            "worker-relevance-timeout",
+            "engine_hook:worker_relevance",
+            "worker invocation exceeded 3 seconds",
+        ),
+        (
+            "inbox-context-timeout",
+            "engine_hook:inbox_context",
+            "worker invocation exceeded 3 seconds",
+        ),
+        (
+            "worker-relevance-invalid",
+            "engine_hook:worker_relevance",
+            "worker output does not match its schema",
+        ),
+        (
+            "context-summary-timeout",
+            "engine_hook:context_summary",
+            "worker invocation exceeded 3 seconds",
+        ),
+    ] {
+        let mut candidate = bundle();
+        candidate.worker_id = Some(worker_id.to_owned());
+        candidate.name = worker_id.replace('-', " ");
+        candidate.execution_limits.max_invocation_seconds = Some(3);
+        let mut prepared = store.prepare(candidate, None).unwrap();
+        store.finalize(&mut prepared).unwrap();
+        let outcome = store.publish(prepared).unwrap();
+        let (run, _) = store
+            .begin_invocation(
+                &outcome.worker.worker_id,
+                &outcome.version,
+                &json!({}),
+                &format!("{worker_id}-failure"),
+                &format!("trace-{worker_id}-failure"),
+                0,
+                trigger_kind,
+                None,
+            )
+            .unwrap();
+        assert!(store.claim_running(&run.invocation_id).unwrap());
+        store
+            .complete_invocation(&run.invocation_id, &outcome.worker.worker_id, Err(error))
+            .unwrap();
+    }
+
+    let history = store.inbox_filtered(None, None, Some("error"), 10).unwrap();
+    assert_eq!(history.len(), 4);
+    for worker_id in ["worker-relevance-timeout", "inbox-context-timeout"] {
+        let timeout = history
+            .iter()
+            .find(|item| item["workerId"] == worker_id)
+            .unwrap();
+        assert_eq!(timeout["requiresAttention"], false);
+    }
+    let pending = store.pending_inbox_context_candidates(10).unwrap();
+    assert_eq!(pending.len(), 2);
+    assert!(pending.iter().all(|item| {
+        item["workerId"] != "worker-relevance-timeout"
+            && item["workerId"] != "inbox-context-timeout"
+    }));
+    let relevance_timeout_id = history
+        .iter()
+        .find(|item| item["workerId"] == "worker-relevance-timeout")
+        .unwrap()["inboxId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        store
+            .attach_pending_inbox_context(&[relevance_timeout_id])
+            .unwrap()
+            .is_empty(),
+        "an expected fallback timeout cannot be injected into later agent context"
+    );
+    let invalid_output_id = history
+        .iter()
+        .find(|item| item["workerId"] == "worker-relevance-invalid")
+        .unwrap()["inboxId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        store
+            .attach_pending_inbox_context(&[invalid_output_id])
+            .unwrap()
+            .len(),
+        1,
+        "invalid typed output remains actionable context"
+    );
+    let notable = store.take_notable_pending(None, 10).unwrap();
+    assert_eq!(notable.len(), 1);
+    assert_eq!(notable[0]["workerId"], "context-summary-timeout");
+    let attention = store
+        .inbox_filtered_page(None, None, None, true, 10, 0)
+        .unwrap();
+    assert_eq!(attention.len(), 2);
+    assert!(attention.iter().any(|item| {
+        item["workerId"] == "worker-relevance-invalid"
+            && item["result"]["error"] == "worker output does not match its schema"
+    }));
+    assert!(attention.iter().any(|item| {
+        item["workerId"] == "context-summary-timeout"
+            && item["result"]["error"] == "worker invocation exceeded 3 seconds"
     }));
 }
 
@@ -3010,5 +3778,457 @@ fn quiet_refresh_updates_wait_behind_the_inflight_attempt() {
             })
             .unwrap(),
         0
+    );
+}
+
+#[test]
+fn artifact_custody_is_atomic_content_addressed_and_explicitly_deleted() {
+    use crate::domains::worker_kernel::artifacts::artifact_intents_for_bundle;
+
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut candidate = bundle();
+    candidate.worker_id = Some("document-artifact".to_owned());
+    candidate.name = "Document Artifact".to_owned();
+    candidate.client_deliveries = vec![WorkerClientDelivery::ArtifactDelivery];
+    candidate.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["document","artifactDeliveries"],
+        "properties":{
+            "document":{
+                "type":"object","required":["data"],
+                "properties":{"data":{"type":"string"}}
+            },
+            "artifactDeliveries":{"type":"array"}
+        }
+    });
+    let mut prepared = store.prepare(candidate, None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+
+    let (run, replayed) = store
+        .begin_invocation(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({"title":"Report"}),
+            "artifact-run-one",
+            "trace-artifact-one",
+            0,
+            "manual",
+            Some("session-artifact"),
+        )
+        .unwrap();
+    assert!(!replayed);
+    assert!(store.claim_running(&run.invocation_id).unwrap());
+    let output = json!({
+        "document":{"data":"aGVsbG8="},
+        "artifactDeliveries":[{
+            "artifactId":"report-1",
+            "displayName":"report.md",
+            "mediaType":"text/markdown",
+            "sizeBytes":5,
+            "contentReference":{
+                "kind":"worker_result_reference",
+                "invocationId":run.invocation_id,
+                "pointer":"/document/data",
+                "encoding":"base64"
+            }
+        }]
+    });
+    let active = store
+        .load_version(&published.worker.worker_id, &published.version)
+        .unwrap();
+    let intents = artifact_intents_for_bundle(&active.bundle, &run.invocation_id, &output).unwrap();
+    store
+        .complete_invocation_with_effects(
+            &run.invocation_id,
+            &published.worker.worker_id,
+            &output,
+            &[],
+            &intents,
+            &[],
+            None,
+        )
+        .unwrap();
+
+    let inbox = store.artifact_deliveries(20, 0).unwrap();
+    assert_eq!(inbox["returned"], 1);
+    assert_eq!(inbox["artifacts"][0]["artifactId"], "report-1");
+    assert_eq!(inbox["artifacts"][0]["traceId"], "trace-artifact-one");
+    assert_eq!(
+        inbox["artifacts"][0]["contentReference"]["kind"],
+        "artifact_content_reference"
+    );
+    let content = store
+        .artifact_content(&published.worker.worker_id, "report-1")
+        .unwrap();
+    assert_eq!(content["data"], "aGVsbG8=");
+    assert_eq!(content["artifact"]["sizeBytes"], 5);
+
+    let connection = store.connection().unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM storage_payload_refs
+                 WHERE owner_kind='worker_artifact'
+                   AND retention_class='user_artifact'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1
+    );
+    let schema_version = connection
+        .query_row("SELECT MAX(version) FROM worker_schema", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap();
+    assert!(schema_version >= 14);
+    drop(connection);
+
+    assert_eq!(
+        store
+            .delete_artifact(&published.worker.worker_id, "report-1")
+            .unwrap()["deleted"],
+        true
+    );
+    assert_eq!(
+        store
+            .delete_artifact(&published.worker.worker_id, "report-1")
+            .unwrap()["deleted"],
+        false
+    );
+    assert!(
+        store.artifact_deliveries(20, 0).unwrap()["artifacts"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let connection = store.connection().unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM storage_payload_refs
+                 WHERE owner_kind='worker_artifact'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn session_organization_outbox_is_atomic_due_bounded_and_recovers_stale_claims() {
+    use crate::domains::worker_kernel::session_organization::{
+        PreparedSessionOrganizationIntent, SessionOrganizationArchiveAction,
+        SessionOrganizationMutation,
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut candidate = bundle();
+    candidate.worker_id = Some("session-organizer".to_owned());
+    candidate.name = "Session Organizer".to_owned();
+    let mut prepared = store.prepare(candidate, None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let (run, replayed) = store
+        .begin_invocation(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({"action":"organize"}),
+            "organizer-outbox",
+            "trace-organizer-outbox",
+            0,
+            "manual",
+            Some("sess-organized"),
+        )
+        .unwrap();
+    assert!(!replayed);
+    assert!(store.claim_running(&run.invocation_id).unwrap());
+    assert_eq!(
+        store
+            .session_organization_intent_state(&run.invocation_id)
+            .unwrap(),
+        None
+    );
+    let intent = PreparedSessionOrganizationIntent {
+        mutations: vec![SessionOrganizationMutation {
+            session_id: "sess-organized".to_owned(),
+            labels: Some(vec!["Work".to_owned()]),
+            group: Some(Some("Projects".to_owned())),
+            archive_action: SessionOrganizationArchiveAction::Preserve,
+        }],
+    };
+    store
+        .complete_invocation_with_effects_and_session_organization(
+            &run.invocation_id,
+            &published.worker.worker_id,
+            &json!({"status":"accepted"}),
+            &[],
+            &[],
+            &[],
+            None,
+            Some(&intent),
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .session_organization_intent_state(&run.invocation_id)
+            .unwrap()
+            .as_deref(),
+        Some("queued")
+    );
+
+    let dispatch = store
+        .pending_session_organization_intents(8)
+        .unwrap()
+        .remove(0);
+    assert!(
+        store
+            .claim_session_organization_intent(&dispatch.intent_id)
+            .unwrap()
+    );
+    assert_eq!(
+        store
+            .release_session_organization_intent(
+                &dispatch.intent_id,
+                "temporarily unavailable",
+                false,
+            )
+            .unwrap(),
+        1
+    );
+    assert!(
+        store
+            .pending_session_organization_intents(8)
+            .unwrap()
+            .is_empty(),
+        "bounded retry backoff must keep a released claim from hot-looping"
+    );
+
+    let connection = store.connection().unwrap();
+    connection
+        .execute(
+            "UPDATE worker_session_organization_intents
+             SET state='applying',attempt_count=3,
+                 updated_at='2000-01-01T00:00:00Z',
+                 next_attempt_at='2000-01-01T00:00:00Z'
+             WHERE intent_id=?1",
+            [&dispatch.intent_id],
+        )
+        .unwrap();
+    drop(connection);
+    store.recover_stale_session_organization_intents().unwrap();
+    assert_eq!(
+        store.pending_session_organization_intents(8).unwrap().len(),
+        1,
+        "a stale in-process claim must return to the same durable dispatcher"
+    );
+    let connection = store.connection().unwrap();
+    let attention: u32 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM worker_inbox
+             WHERE worker_id='session-organizer'
+               AND result_json LIKE '%session_organization%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(attention, 1);
+    assert_eq!(
+        connection
+            .query_row("SELECT MAX(version) FROM worker_schema", [], |row| {
+                row.get::<_, u32>(0)
+            })
+            .unwrap(),
+        15
+    );
+    connection
+        .execute(
+            "UPDATE worker_session_organization_intents
+             SET state='applying',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             WHERE intent_id=?1",
+            [&dispatch.intent_id],
+        )
+        .unwrap();
+    drop(connection);
+    let reopened = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    assert_eq!(
+        reopened
+            .session_organization_intent_state(&run.invocation_id)
+            .unwrap()
+            .as_deref(),
+        Some("queued"),
+        "startup must recover an interrupted canonical apply claim"
+    );
+}
+
+#[test]
+fn immutable_artifact_collision_rolls_back_invocation_completion() {
+    use crate::domains::worker_kernel::artifacts::artifact_intents_for_bundle;
+
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut candidate = bundle();
+    candidate.worker_id = Some("document-artifact".to_owned());
+    candidate.client_deliveries = vec![WorkerClientDelivery::ArtifactDelivery];
+    candidate.output_schema = json!({
+        "type":"object",
+        "properties":{
+            "document":{"type":"object"},
+            "artifactDeliveries":{"type":"array"}
+        }
+    });
+    let mut prepared = store.prepare(candidate, None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let active = store
+        .load_version(&published.worker.worker_id, &published.version)
+        .unwrap();
+
+    for (index, encoded) in ["b25l", "dHdv"].into_iter().enumerate() {
+        let (run, _) = store
+            .begin_invocation(
+                &published.worker.worker_id,
+                &published.version,
+                &json!({}),
+                &format!("artifact-collision-{index}"),
+                &format!("trace-artifact-{index}"),
+                0,
+                "manual",
+                None,
+            )
+            .unwrap();
+        assert!(store.claim_running(&run.invocation_id).unwrap());
+        let output = json!({
+            "document":{"data":encoded},
+            "artifactDeliveries":[{
+                "artifactId":"stable-report",
+                "displayName":"report.txt",
+                "mediaType":"text/plain",
+                "sizeBytes":3,
+                "contentReference":{
+                    "kind":"worker_result_reference",
+                    "invocationId":run.invocation_id,
+                    "pointer":"/document/data",
+                    "encoding":"base64"
+                }
+            }]
+        });
+        let intents =
+            artifact_intents_for_bundle(&active.bundle, &run.invocation_id, &output).unwrap();
+        let result = store.complete_invocation_with_effects(
+            &run.invocation_id,
+            &published.worker.worker_id,
+            &output,
+            &[],
+            &intents,
+            &[],
+            None,
+        );
+        if index == 0 {
+            result.unwrap();
+        } else {
+            assert!(
+                result
+                    .unwrap_err()
+                    .contains("immutable and already names different content")
+            );
+            assert_eq!(
+                store
+                    .invocation(&run.invocation_id)
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                "running"
+            );
+        }
+    }
+    assert_eq!(store.artifact_deliveries(20, 0).unwrap()["returned"], 1);
+}
+
+#[test]
+fn artifact_storage_attention_is_transition_aware_and_resolvable() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let (run, _) = store
+        .begin_invocation(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({}),
+            "artifact-pressure-source",
+            "trace-artifact-pressure",
+            0,
+            "manual",
+            None,
+        )
+        .unwrap();
+    let created_at = chrono::Utc::now().to_rfc3339();
+
+    let mut connection = store.connection().unwrap();
+    let transaction = connection.transaction().unwrap();
+    super::artifacts::reconcile_artifact_storage_attention_with_budget(
+        &transaction,
+        &run.invocation_id,
+        &published.worker.worker_id,
+        &created_at,
+        1,
+    )
+    .unwrap();
+    super::artifacts::reconcile_artifact_storage_attention_with_budget(
+        &transaction,
+        &run.invocation_id,
+        &published.worker.worker_id,
+        &created_at,
+        1,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let attention = store
+        .inbox_filtered_page(None, None, None, true, 20, 0)
+        .unwrap();
+    assert_eq!(attention.len(), 1);
+    assert_eq!(
+        attention[0]["result"]["status"],
+        "artifact_storage_pressure"
+    );
+
+    let mut connection = store.connection().unwrap();
+    let transaction = connection.transaction().unwrap();
+    super::artifacts::reconcile_artifact_storage_attention_with_budget(
+        &transaction,
+        &run.invocation_id,
+        &published.worker.worker_id,
+        &chrono::Utc::now().to_rfc3339(),
+        u64::MAX,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    assert!(
+        store
+            .inbox_filtered_page(None, None, None, true, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM worker_inbox
+                 WHERE json_extract(result_json,'$.status')='artifact_storage_pressure'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1,
+        "resolved attention remains immutable audit evidence"
     );
 }

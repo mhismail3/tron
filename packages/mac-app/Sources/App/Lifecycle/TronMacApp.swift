@@ -192,6 +192,8 @@ struct CommandModeHostView: View {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
+    private let macOperatorSafety = MacOperatorSafetyState()
+    private var macOperatorBridge: MacOperatorHostBridge?
     private var wizardCompletionObserver: NSObjectProtocol?
     private var instanceLock: SingleInstanceLock?
 
@@ -310,6 +312,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Tear down the menu bar before releasing the single-instance
         // lock so a second wrapper cannot observe a half-disposed item.
+        if let macOperatorBridge {
+            macOperatorBridge.stop()
+        } else {
+            macOperatorSafety.stop()
+        }
+        macOperatorBridge = nil
         menuBarController?.dispose()
         menuBarController = nil
         instanceLock?.release()
@@ -318,7 +326,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func installMenuBar(setup: EnvironmentSetup, context: MacAppStartupContext) {
         guard menuBarController == nil else { return }
-        let controller = MenuBarController(setup: setup)
+        if setup.canManageLaunchAgent, macOperatorBridge == nil {
+            do {
+                let bridge = MacOperatorHostBridge(
+                    socketURL: TronPaths.macOperatorSocketPath,
+                    safety: macOperatorSafety
+                )
+                try bridge.start()
+                macOperatorBridge = bridge
+            } catch {
+                // Do not log the socket path or a native error description:
+                // both can contain user-specific home-directory information.
+                NSLog("[Tron] Mac Operator host bridge could not start.")
+            }
+        }
+        let controller = MenuBarController(
+            setup: setup,
+            macOperatorSafety: macOperatorSafety,
+            onStopMacOperator: { [weak self] in
+                if let bridge = self?.macOperatorBridge {
+                    bridge.emergencyStop()
+                } else {
+                    self?.macOperatorSafety.stop()
+                }
+            }
+        )
         controller.install()
         menuBarController = controller
         Task { [weak controller] in

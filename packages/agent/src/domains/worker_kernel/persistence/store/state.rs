@@ -63,10 +63,25 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
         return Err("worker name and description are required".to_owned());
     }
     validate_object_schema(&bundle.input_schema, "inputSchema")?;
+    if bundle.exposes_model_tool() && bundle.tool_input_schema.is_none() {
+        return Err("modelExposure direct requires toolInputSchema".to_owned());
+    }
     if let Some(tool_input_schema) = &bundle.tool_input_schema {
+        if !bundle.exposes_model_tool() {
+            return Err("toolInputSchema is only valid when modelExposure is direct".to_owned());
+        }
         validate_object_schema(tool_input_schema, "toolInputSchema")?;
     }
     validate_object_schema(&bundle.output_schema, "outputSchema")?;
+    if bundle
+        .execution_limits
+        .max_invocation_seconds
+        .is_some_and(|limit| !(1..=MAX_INVOCATION_SECONDS).contains(&limit))
+    {
+        return Err(format!(
+            "executionLimits.maxInvocationSeconds must be between 1 and {MAX_INVOCATION_SECONDS}"
+        ));
+    }
     if bundle
         .execution_limits
         .max_agent_turns
@@ -82,19 +97,7 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
         return Err("executionLimits.maxChildInvocations must be at most 256".to_owned());
     }
     if let Some(presentation) = &bundle.presentation {
-        validate_identifier(&presentation.experience_id, "presentation experienceId")?;
-        if presentation.contract_version == 0 {
-            return Err("presentation contractVersion must be greater than zero".to_owned());
-        }
-        if let Some(suite_id) = presentation.suite_id.as_deref() {
-            validate_identifier(suite_id, "presentation suiteId")?;
-        }
-        if let Some(role) = presentation.component_role.as_deref() {
-            validate_identifier(role, "presentation componentRole")?;
-        }
-        if presentation.primary && presentation.suite_id.is_none() {
-            return Err("a primary presentation component requires suiteId".to_owned());
-        }
+        validate_presentation(presentation, &bundle.input_schema)?;
     }
     let mut engine_hooks = BTreeSet::new();
     for hook in &bundle.engine_hooks {
@@ -115,6 +118,20 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
         if !client_deliveries.insert(*delivery) {
             return Err(format!("duplicate client delivery '{}'", delivery.as_str()));
         }
+    }
+    if bundle
+        .client_deliveries
+        .contains(&WorkerClientDelivery::ArtifactDelivery)
+        && bundle
+            .output_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .is_none_or(|properties| !properties.contains_key("artifactDeliveries"))
+    {
+        return Err(
+            "outputSchema must explicitly declare the reserved artifactDeliveries property when clientDeliveries contains artifact_delivery"
+                .to_owned(),
+        );
     }
     let mut dispatch_routes = BTreeSet::new();
     for route in &bundle.worker_dispatch_routes {
@@ -182,10 +199,29 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
     for relative in bundle.files.keys() {
         let _ = safe_relative_path(relative)?;
     }
+    if let Some(agent_tools) = &bundle.agent_tools {
+        if !matches!(bundle.runner, WorkerRunner::Agent { .. }) {
+            return Err("agentTools is only valid for agent runners".to_owned());
+        }
+        if agent_tools.len() > 32 {
+            return Err("agentTools must contain at most 32 model tool names".to_owned());
+        }
+        let mut unique_agent_tools = BTreeSet::new();
+        for tool_name in agent_tools {
+            if tool_name.len() > 64 {
+                return Err("agentTools entries must be at most 64 UTF-8 bytes".to_owned());
+            }
+            validate_identifier(tool_name, "agentTools entry")?;
+            if !unique_agent_tools.insert(tool_name.as_str()) {
+                return Err(format!("duplicate agentTools entry '{tool_name}'"));
+            }
+        }
+    }
     match &bundle.runner {
         WorkerRunner::Agent {
             instructions,
             model,
+            reasoning_level,
         } => {
             if instructions.trim().is_empty() {
                 return Err("agent runner instructions must not be empty".to_owned());
@@ -195,6 +231,15 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
                 .is_some_and(|model| model.trim().is_empty())
             {
                 return Err("agent runner model must not be empty when provided".to_owned());
+            }
+            if reasoning_level.as_deref().is_some_and(|level| {
+                crate::domains::agent::r#loop::types::ReasoningLevel::from_str_canonical(level)
+                    .is_none()
+            }) {
+                return Err(
+                    "agent runner reasoningLevel must be one of none, low, medium, high, x_high, or max"
+                        .to_owned(),
+                );
             }
         }
         WorkerRunner::Command { command } => validate_command(command)?,
@@ -268,11 +313,273 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
     Ok(())
 }
 
+const MAX_PRESENTATION_SECTIONS: usize = 24;
+const MAX_PRESENTATION_COLUMNS: usize = 8;
+const MAX_PRESENTATION_POINTER_BYTES: usize = 256;
+const MAX_PRESENTATION_ACTION_INPUT_BYTES: usize = 16 * 1_024;
+const MAX_PRESENTATION_BYTES: usize = 64 * 1_024;
+
+fn validate_presentation(
+    presentation: &WorkerPresentation,
+    input_schema: &Value,
+) -> Result<(), String> {
+    validate_identifier(&presentation.experience_id, "presentation experienceId")?;
+    if presentation.contract_version == 0 {
+        return Err("presentation contractVersion must be greater than zero".to_owned());
+    }
+    if let Some(suite_id) = presentation.suite_id.as_deref() {
+        validate_identifier(suite_id, "presentation suiteId")?;
+    }
+    if let Some(role) = presentation.component_role.as_deref() {
+        validate_identifier(role, "presentation componentRole")?;
+    }
+    if presentation.primary && presentation.suite_id.is_none() {
+        return Err("a primary presentation component requires suiteId".to_owned());
+    }
+    if presentation.sections.len() > MAX_PRESENTATION_SECTIONS {
+        return Err(format!(
+            "presentation sections must contain at most {MAX_PRESENTATION_SECTIONS} items"
+        ));
+    }
+    let encoded_bytes = serde_json::to_vec(presentation)
+        .map_err(|error| format!("encode presentation: {error}"))?
+        .len();
+    if encoded_bytes > MAX_PRESENTATION_BYTES {
+        return Err(format!(
+            "presentation descriptor must be at most {MAX_PRESENTATION_BYTES} UTF-8 bytes"
+        ));
+    }
+
+    let mut section_ids = BTreeSet::new();
+    let mut action_ids = BTreeSet::new();
+    for section in &presentation.sections {
+        validate_identifier(&section.section_id, "presentation sectionId")?;
+        if !section_ids.insert(section.section_id.as_str()) {
+            return Err(format!(
+                "duplicate presentation sectionId '{}'",
+                section.section_id
+            ));
+        }
+        validate_optional_presentation_text(
+            section.title.as_deref(),
+            "presentation section title",
+            80,
+        )?;
+        validate_optional_presentation_text(
+            section.detail.as_deref(),
+            "presentation section detail",
+            512,
+        )?;
+        validate_optional_presentation_text(
+            section.label.as_deref(),
+            "presentation section label",
+            80,
+        )?;
+        if let Some(pointer) = section.value_pointer.as_deref() {
+            validate_presentation_pointer(pointer, "presentation section valuePointer")?;
+        }
+        if section.columns.len() > MAX_PRESENTATION_COLUMNS {
+            return Err(format!(
+                "presentation table columns must contain at most {MAX_PRESENTATION_COLUMNS} items"
+            ));
+        }
+        for column in &section.columns {
+            validate_presentation_text(&column.label, "presentation column label", 80)?;
+            validate_presentation_pointer(
+                &column.value_pointer,
+                "presentation column valuePointer",
+            )?;
+        }
+        if let Some(action) = section.action.as_ref() {
+            validate_identifier(&action.action_id, "presentation actionId")?;
+            if !action_ids.insert(action.action_id.as_str()) {
+                return Err(format!(
+                    "duplicate presentation actionId '{}'",
+                    action.action_id
+                ));
+            }
+            validate_presentation_text(&action.label, "presentation action label", 80)?;
+            let input_bytes = serde_json::to_vec(&action.input)
+                .map_err(|error| format!("encode presentation action input: {error}"))?
+                .len();
+            if input_bytes > MAX_PRESENTATION_ACTION_INPUT_BYTES {
+                return Err(format!(
+                    "presentation action input must be at most {MAX_PRESENTATION_ACTION_INPUT_BYTES} UTF-8 bytes"
+                ));
+            }
+            let function_id = crate::engine::FunctionId::new("worker_kernel::presentation_action")
+                .map_err(|error| error.to_string())?;
+            crate::engine::validate_engine_schema_payload(
+                &function_id,
+                "request",
+                input_schema,
+                &action.input,
+            )
+            .map_err(|error| {
+                format!(
+                    "presentation action '{}' input does not match inputSchema: {error}",
+                    action.action_id
+                )
+            })?;
+        }
+        validate_presentation_section_shape(section)?;
+    }
+    Ok(())
+}
+
+fn validate_presentation_section_shape(section: &WorkerPresentationSection) -> Result<(), String> {
+    use WorkerPresentationSectionKind as Kind;
+
+    let has_pointer = section.value_pointer.is_some();
+    let has_columns = !section.columns.is_empty();
+    let has_label = section.label.is_some();
+    let has_url = section.url.is_some();
+    let has_action = section.action.is_some();
+    let shape_is_valid = match section.kind {
+        Kind::Text | Kind::Status | Kind::Progress | Kind::List => {
+            has_pointer && !has_columns && !has_label && !has_url && !has_action
+        }
+        Kind::Table => has_pointer && has_columns && !has_label && !has_url && !has_action,
+        Kind::Link => !has_pointer && !has_columns && has_label && has_url && !has_action,
+        Kind::Artifact => has_pointer && !has_columns && has_label && !has_url && !has_action,
+        Kind::Confirmation => {
+            section.title.is_some()
+                && section.detail.is_some()
+                && !has_pointer
+                && !has_columns
+                && !has_label
+                && !has_url
+                && has_action
+        }
+        Kind::WorkerAction => !has_pointer && !has_columns && !has_label && !has_url && has_action,
+    };
+    if !shape_is_valid {
+        return Err(format!(
+            "presentation section '{}' has fields incompatible with kind {:?}",
+            section.section_id, section.kind
+        ));
+    }
+    if let Some(url) = section.url.as_deref() {
+        validate_presentation_url(url)?;
+    }
+    Ok(())
+}
+
+fn validate_presentation_text(value: &str, field: &str, max_bytes: usize) -> Result<(), String> {
+    if value.trim().is_empty() || value.len() > max_bytes || value.chars().any(char::is_control) {
+        return Err(format!(
+            "{field} must be non-empty, at most {max_bytes} UTF-8 bytes, and contain no control characters"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_optional_presentation_text(
+    value: Option<&str>,
+    field: &str,
+    max_bytes: usize,
+) -> Result<(), String> {
+    value.map_or(Ok(()), |value| {
+        validate_presentation_text(value, field, max_bytes)
+    })
+}
+
+fn validate_presentation_pointer(value: &str, field: &str) -> Result<(), String> {
+    if value.len() > MAX_PRESENTATION_POINTER_BYTES
+        || (!value.is_empty() && !value.starts_with('/'))
+    {
+        return Err(format!(
+            "{field} must be an RFC 6901 JSON pointer of at most {MAX_PRESENTATION_POINTER_BYTES} UTF-8 bytes"
+        ));
+    }
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'~' {
+            if index + 1 >= bytes.len() || !matches!(bytes[index + 1], b'0' | b'1') {
+                return Err(format!("{field} contains an invalid RFC 6901 escape"));
+            }
+            index += 2;
+        } else {
+            index += 1;
+        }
+    }
+    Ok(())
+}
+
+fn validate_presentation_url(value: &str) -> Result<(), String> {
+    if value.len() > 2_048 {
+        return Err("presentation link URL must be at most 2048 UTF-8 bytes".to_owned());
+    }
+    let url = url::Url::parse(value).map_err(|error| format!("presentation link URL: {error}"))?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.host().is_some_and(presentation_host_is_local)
+    {
+        return Err(
+            "presentation link URL must be an absolute public HTTPS URL without embedded credentials"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
+fn presentation_host_is_local(host: url::Host<&str>) -> bool {
+    match host {
+        url::Host::Domain(domain) => {
+            domain.eq_ignore_ascii_case("localhost")
+                || domain
+                    .to_ascii_lowercase()
+                    .strip_suffix(".localhost")
+                    .is_some()
+        }
+        url::Host::Ipv4(address) => {
+            address.is_private()
+                || address.is_loopback()
+                || address.is_link_local()
+                || address.is_unspecified()
+                || address.is_multicast()
+                || address.is_broadcast()
+        }
+        url::Host::Ipv6(address) => {
+            let first = address.segments()[0];
+            address.is_loopback()
+                || address.is_unspecified()
+                || address.is_multicast()
+                || first & 0xfe00 == 0xfc00
+                || first & 0xffc0 == 0xfe80
+        }
+    }
+}
+
 fn validate_engine_hook_contract(
     hook: WorkerEngineHook,
     bundle: &WorkerBundle,
 ) -> Result<(), String> {
     let (input, output, invalid_inputs, invalid_outputs) = match hook {
+        WorkerEngineHook::ContinuityContext => (
+            json!({
+                "action":"continuity_context",
+                "query":"notification testing preferences",
+                "project":"/workspace/example",
+                "limit":6
+            }),
+            json!({
+                "narrative":"Relevant saved continuity: use physical-device acceptance."
+            }),
+            vec![
+                json!({}),
+                json!({"action":"continuity_context","query":""}),
+                json!({"action":"continuity_context","query":"x","limit":9}),
+            ],
+            vec![
+                json!({}),
+                json!({"narrative":7}),
+                json!({"narrative":"x".repeat(6_001)}),
+            ],
+        ),
         WorkerEngineHook::ContextSummary => (
             json!({
                 "originWorkerId":"delegated-context",
@@ -315,6 +622,36 @@ fn validate_engine_hook_contract(
                 json!({"consumedInboxIds":[""],"narrative":"invalid id"}),
                 json!({"consumedInboxIds":"invalid","narrative":"invalid list"}),
                 json!({"consumedInboxIds":[],"narrative":7}),
+            ],
+        ),
+        WorkerEngineHook::SessionOrganization => (
+            json!({
+                "action":"session_organization",
+                "session":{
+                    "sessionId":"session_test",
+                    "title":"Implement session organization",
+                    "workingDirectory":"/workspace/example",
+                    "labels":["Work"],
+                    "group":"Projects",
+                    "isArchived":false
+                },
+                "userPrompt":"Organize this completed task.",
+                "assistantResponse":"The requested implementation and tests are complete."
+            }),
+            json!({
+                "status":"proposed",
+                "proposal":{
+                    "sessionId":"session_test",
+                    "labels":["Work","Completed"],
+                    "group":"Projects",
+                    "archiveAction":"preserve",
+                    "reason":"Keep active implementation work together."
+                }
+            }),
+            vec![json!({}), json!({"action":"session_organization"})],
+            vec![
+                json!({}),
+                json!({"proposal":{"sessionId":"","labels":[],"archiveAction":"delete"}}),
             ],
         ),
         WorkerEngineHook::SessionTitle => (

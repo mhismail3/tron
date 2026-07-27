@@ -28,6 +28,10 @@ impl ModelResponder for JsonResponder {
         assert!(context.contains("Output JSON Schema"), "{context}");
         assert!(context.contains("kernel rejects"), "{context}");
         assert!(context.contains("answer"), "{context}");
+        assert_eq!(
+            request.reasoning_level,
+            Some(crate::domains::model::responder::ModelReasoningLevel::Low)
+        );
         let text = "{\"answer\":\"agent-runner\"}";
         let events = vec![
             Ok(StreamEvent::Start),
@@ -92,6 +96,7 @@ async fn agent_runner_returns_typed_json() {
     bundle.runner = WorkerRunner::Agent {
         instructions: "Return the requested typed JSON answer.".to_owned(),
         model: None,
+        reasoning_level: Some("low".to_owned()),
     };
     let outcome = runtime.upsert(bundle, None).await.unwrap();
     let result = runtime
@@ -130,6 +135,7 @@ async fn agent_runner_captures_a_fast_terminal_provider_failure() {
     bundle.runner = WorkerRunner::Agent {
         instructions: "Return an object.".to_owned(),
         model: None,
+        reasoning_level: None,
     };
     let outcome = runtime.upsert(bundle, None).await.unwrap();
     let result = runtime
@@ -223,7 +229,7 @@ impl ModelResponder for NestedDepthResponder {
                     .iter()
                     .map(|tool| tool.name.as_str())
                     .collect::<Vec<_>>();
-                assert!(tools.contains(&"worker_invoke"), "{tools:?}");
+                assert_eq!(tools, vec!["worker_invoke"]);
                 Ok(Self::tool_call())
             }
             1 => {
@@ -296,7 +302,9 @@ async fn agent_runner_preserves_causal_depth_for_nested_worker_calls() {
     agent.runner = WorkerRunner::Agent {
         instructions: "Attempt the nested worker call, then return typed JSON.".to_owned(),
         model: None,
+        reasoning_level: None,
     };
+    agent.agent_tools = Some(vec!["worker_invoke".to_owned()]);
     let outcome = runtime.upsert(agent, None).await.unwrap();
     let mut invocation = request(&outcome.worker.worker_id, json!({}), "nested-depth-agent");
     invocation.causal_depth = MAX_CAUSAL_DEPTH;
@@ -313,6 +321,167 @@ async fn agent_runner_preserves_causal_depth_for_nested_worker_calls() {
             .unwrap()
             .is_empty(),
         "over-depth nested dispatch must fail before persistence"
+    );
+}
+
+struct InternalWorkerToolResponder {
+    calls: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl ModelResponder for InternalWorkerToolResponder {
+    fn info(&self) -> ModelResponderInfo {
+        worker_test_responder_info()
+    }
+
+    async fn respond(
+        &self,
+        request: ModelResponseRequest,
+    ) -> Result<ModelResponse, ModelResponseError> {
+        match self.calls.fetch_add(1, Ordering::SeqCst) {
+            0 => {
+                let tools = request
+                    .context
+                    .tools
+                    .as_ref()
+                    .expect("internal worker tool surface")
+                    .iter()
+                    .map(|tool| tool.name.as_str())
+                    .collect::<Vec<_>>();
+                assert_eq!(tools, vec!["worker_internal_specialist"]);
+                let arguments = serde_json::Map::new();
+                Ok(NestedDepthResponder::response(vec![
+                    Ok(StreamEvent::Start),
+                    Ok(StreamEvent::ToolInvocationDraftStart {
+                        invocation_id: "internal-specialist-call".to_owned(),
+                        name: "worker_internal_specialist".to_owned(),
+                    }),
+                    Ok(StreamEvent::ToolInvocationDraftDelta {
+                        invocation_id: "internal-specialist-call".to_owned(),
+                        arguments_delta: "{}".to_owned(),
+                    }),
+                    Ok(StreamEvent::ToolInvocationDraftEnd {
+                        tool_invocation:
+                            crate::shared::protocol::messages::ToolInvocationDraft::new(
+                                "internal-specialist-call",
+                                "worker_internal_specialist",
+                                arguments,
+                            ),
+                    }),
+                    Ok(StreamEvent::Done {
+                        message: AssistantMessage {
+                            content: Vec::new(),
+                            token_usage: None,
+                        },
+                        stop_reason: "tool_invocation".to_owned(),
+                    }),
+                ]))
+            }
+            1 => {
+                let messages = serde_json::to_string(&request.context.messages).unwrap();
+                assert!(messages.contains("specialist"), "{messages}");
+                let result = "{\"answer\":\"internal-specialist-composed\"}";
+                Ok(NestedDepthResponder::response(vec![
+                    Ok(StreamEvent::Start),
+                    Ok(StreamEvent::TextDelta {
+                        delta: result.to_owned(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        message: AssistantMessage {
+                            content: vec![AssistantContent::text(result)],
+                            token_usage: None,
+                        },
+                        stop_reason: "end_turn".to_owned(),
+                    }),
+                ]))
+            }
+            call => panic!("unexpected internal worker responder call {call}"),
+        }
+    }
+}
+
+struct InternalWorkerToolResponderFactory {
+    calls: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl ModelResponderFactory for InternalWorkerToolResponderFactory {
+    async fn create_for_model(
+        &self,
+        _model: &str,
+        _settings: &crate::domains::settings::ApiSettings,
+    ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
+        Ok(Arc::new(InternalWorkerToolResponder {
+            calls: Arc::clone(&self.calls),
+        }))
+    }
+}
+
+#[tokio::test]
+async fn allowlisted_agent_runner_calls_internal_worker_tool_without_generic_invoke() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (runtime, _home) = test_runtime(Some(Arc::new(InternalWorkerToolResponderFactory {
+        calls: Arc::clone(&calls),
+    })));
+
+    let mut specialist = command_bundle(vec![
+        "printf".to_owned(),
+        "{\"specialist\":\"ready\"}".to_owned(),
+    ]);
+    specialist.worker_id = Some("internal-specialist".to_owned());
+    specialist.name = "Internal Specialist".to_owned();
+    specialist.description = "Deterministic internal specialist".to_owned();
+    specialist.tool_name = Some("worker_internal_specialist".to_owned());
+    specialist.model_exposure = crate::domains::worker_kernel::types::WorkerModelExposure::Internal;
+    specialist.tool_input_schema = None;
+    specialist.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["specialist"],
+        "properties":{"specialist":{"const":"ready"}}
+    });
+    runtime.upsert(specialist, None).await.unwrap();
+
+    let mut coordinator = command_bundle(Vec::new());
+    coordinator.worker_id = Some("internal-specialist-coordinator".to_owned());
+    coordinator.name = "Internal Specialist Coordinator".to_owned();
+    coordinator.description = "Calls one exact internal specialist tool".to_owned();
+    coordinator.tool_name = Some("worker_internal_specialist_coordinator".to_owned());
+    coordinator.agent_tools = Some(vec!["worker_internal_specialist".to_owned()]);
+    coordinator.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["answer"],
+        "properties":{"answer":{"type":"string"}}
+    });
+    coordinator.runner = WorkerRunner::Agent {
+        instructions: "Call the internal specialist and return the composed answer.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    let coordinator = runtime.upsert(coordinator, None).await.unwrap();
+
+    let completed = runtime
+        .invoke(request(
+            &coordinator.worker.worker_id,
+            json!({}),
+            "internal-specialist-coordination",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(completed.status, "completed", "{completed:?}");
+    assert_eq!(
+        completed.output,
+        Some(json!({"answer":"internal-specialist-composed"}))
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        runtime
+            .store()
+            .runs_filtered(Some("internal-specialist"), None, 10)
+            .unwrap()
+            .len(),
+        1
     );
 }
 
@@ -360,6 +529,7 @@ async fn top_level_agent_worker_returns_a_tagged_background_receipt_immediately(
     bundle.runner = WorkerRunner::Agent {
         instructions: "Wait for explicit cancellation.".to_owned(),
         model: None,
+        reasoning_level: None,
     };
     let outcome = runtime.upsert(bundle, None).await.unwrap();
     runtime
@@ -415,6 +585,7 @@ async fn disabling_agent_worker_aborts_its_spawned_child_session() {
     bundle.runner = WorkerRunner::Agent {
         instructions: "Wait until the invocation is stopped.".to_owned(),
         model: None,
+        reasoning_level: None,
     };
     let outcome = runtime.upsert(bundle, None).await.unwrap();
     let worker_id = outcome.worker.worker_id.clone();
@@ -468,6 +639,7 @@ async fn cancelling_one_agent_invocation_aborts_only_its_child_session() {
     bundle.runner = WorkerRunner::Agent {
         instructions: "Wait until this invocation is cancelled.".to_owned(),
         model: None,
+        reasoning_level: None,
     };
     let outcome = runtime.upsert(bundle, None).await.unwrap();
     let worker_id = outcome.worker.worker_id.clone();

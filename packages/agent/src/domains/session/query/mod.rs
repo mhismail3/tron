@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::domains::session::Deps;
-use crate::domains::session::event_store::ListSessionsOptions;
+use crate::domains::session::event_store::{ListSessionsOptions, session_organization_from_tags};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, ToolError};
 
@@ -145,6 +145,8 @@ impl SessionQueryService {
                     let is_cached = session_manager.is_cached(&session.id);
                     let is_running = orchestrator.has_active_run(&session.id);
                     let preview = previews.get(&session.id);
+                    let (labels, organization_group) =
+                        session_organization_from_tags(&session.tags);
                     json!({
                         "sessionId": session.id,
                         "model": session.latest_model,
@@ -157,6 +159,8 @@ impl SessionQueryService {
                         "isActive": is_cached,
                         "isRunning": is_running,
                         "isArchived": session.ended_at.is_some(),
+                        "labels": labels,
+                        "organizationGroup": organization_group,
                         "eventCount": session.event_count,
                         "turnCount": session.turn_count,
                         "messageCount": session.message_count,

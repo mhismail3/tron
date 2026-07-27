@@ -106,6 +106,141 @@ struct WorkerConsolePresentationTests {
         )
     }
 
+    @Test("Declarative worker presentation decodes the closed native section vocabulary")
+    func declarativePresentationDecoding() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "experienceId": "generic-workflow",
+            "contractVersion": 1,
+            "primary": false,
+            "sections": [
+                ["sectionId": "summary", "kind": "text", "valuePointer": "/summary"],
+                ["sectionId": "state", "kind": "status", "valuePointer": "/status"],
+                ["sectionId": "completion", "kind": "progress", "valuePointer": "/progress"],
+                [
+                    "sectionId": "records",
+                    "kind": "table",
+                    "valuePointer": "/records",
+                    "columns": [
+                        ["label": "Name", "valuePointer": "/name"],
+                        ["label": "State", "valuePointer": "/status"],
+                    ],
+                ],
+                ["sectionId": "notes", "kind": "list", "valuePointer": "/notes"],
+                [
+                    "sectionId": "source",
+                    "kind": "link",
+                    "label": "Open source",
+                    "url": "https://example.com/source",
+                ],
+                [
+                    "sectionId": "artifact",
+                    "kind": "artifact",
+                    "label": "Inspect report",
+                    "valuePointer": "/report",
+                ],
+                [
+                    "sectionId": "approve",
+                    "kind": "confirmation",
+                    "title": "Approve",
+                    "detail": "Run approval?",
+                    "action": [
+                        "actionId": "approve",
+                        "label": "Approve",
+                        "input": ["action": "approve"],
+                    ],
+                ],
+                [
+                    "sectionId": "refresh",
+                    "kind": "worker_action",
+                    "action": [
+                        "actionId": "refresh",
+                        "label": "Refresh",
+                        "input": ["action": "refresh"],
+                    ],
+                ],
+            ],
+        ])
+        let presentation = try JSONDecoder().decode(WorkerPresentationDTO.self, from: data)
+
+        #expect(presentation.sections.count == 9)
+        #expect(
+            presentation.sections.compactMap {
+                WorkerDeclarativePresentation.kind(of: $0)
+            }.count == 9
+        )
+        #expect(
+            WorkerDeclarativePresentation.resultPointers(in: presentation)
+                == ["/notes", "/progress", "/records", "/report", "/status", "/summary"]
+        )
+        #expect(
+            presentation.sections.last?.action?.input.dictionaryValue?["action"] as? String
+                == "refresh"
+        )
+    }
+
+    @Test("Legacy and future presentation contracts retain generic-console fallback")
+    func declarativePresentationFallback() throws {
+        let legacy = try JSONDecoder().decode(
+            WorkerPresentationDTO.self,
+            from: Data(
+                """
+                {"experienceId":"legacy","contractVersion":1,"primary":false}
+                """.utf8
+            )
+        )
+        #expect(legacy.sections.isEmpty)
+        let future = WorkerPresentationSectionDTO(
+            sectionId: "future",
+            kind: "custom_swift_view"
+        )
+        #expect(WorkerDeclarativePresentation.kind(of: future) == nil)
+    }
+
+    @Test("Declarative values remain bounded and unsafe links are inert")
+    func declarativeValueProjection() {
+        #expect(
+            WorkerDeclarativePresentation.safeURL("https://example.com/report")?.host
+                == "example.com"
+        )
+        #expect(WorkerDeclarativePresentation.safeURL("http://example.com") == nil)
+        #expect(WorkerDeclarativePresentation.safeURL("javascript:alert(1)") == nil)
+        #expect(WorkerDeclarativePresentation.safeURL("https://user:secret@example.com") == nil)
+        #expect(WorkerDeclarativePresentation.safeURL("https://localhost/private") == nil)
+        #expect(WorkerDeclarativePresentation.safeURL("https://127.0.0.1/private") == nil)
+        #expect(WorkerDeclarativePresentation.safeURL("https://192.168.1.2/private") == nil)
+        #expect(WorkerDeclarativePresentation.progressValue(AnyCodable(1.4)) == 1)
+        #expect(WorkerDeclarativePresentation.progressValue(AnyCodable(-0.2)) == 0)
+        #expect(
+            WorkerDeclarativePresentation.listItems(
+                AnyCodable(Array(repeating: "item", count: 30))
+            ).count == 20
+        )
+
+        let rows = WorkerDeclarativePresentation.tableRows(
+            AnyCodable([
+                ["name": "Alpha", "nested": ["state": "ready"]],
+                ["name": "Beta", "nested": ["state": "blocked"]],
+            ]),
+            columns: [
+                WorkerPresentationColumnDTO(label: "Name", valuePointer: "/name"),
+                WorkerPresentationColumnDTO(label: "State", valuePointer: "/nested/state"),
+            ]
+        )
+        #expect(rows == [["Alpha", "ready"], ["Beta", "blocked"]])
+        #expect(
+            WorkerDeclarativePresentation.value(
+                at: "/escaped~1key/~0value",
+                in: ["escaped/key": ["~value": "safe"]]
+            ) as? String == "safe"
+        )
+        #expect(
+            WorkerDeclarativePresentation.value(
+                at: "/bad~2escape",
+                in: ["bad~2escape": "unsafe"]
+            ) == nil
+        )
+    }
+
     private func worker(
         enabled: Bool = true,
         retired: Bool = false,

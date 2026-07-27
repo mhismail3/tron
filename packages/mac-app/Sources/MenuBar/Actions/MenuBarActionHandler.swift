@@ -12,6 +12,8 @@ enum MenuBarAction: Equatable, Sendable {
     case resumeServer
     case restartServer
     case stopDevServer
+    case stopMacOperator
+    case resumeMacOperator
     case uninstall
 }
 
@@ -46,6 +48,10 @@ final class MenuBarActionHandler {
             await restartServer()
         case .stopDevServer:
             await stopDevServer()
+        case .stopMacOperator:
+            menuBarController?.stopMacOperator()
+        case .resumeMacOperator:
+            menuBarController?.resumeMacOperator()
         case .uninstall:
             await confirmAndUninstall()
         }

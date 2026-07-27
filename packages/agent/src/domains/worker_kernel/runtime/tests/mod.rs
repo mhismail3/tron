@@ -35,7 +35,9 @@ fn command_bundle(command: Vec<String>) -> WorkerBundle {
         name: "Echo Worker".to_owned(),
         description: "Returns typed JSON input for durable runner tests".to_owned(),
         tool_name: Some("worker_echo".to_owned()),
-        tool_input_schema: None,
+        model_exposure: Default::default(),
+        tool_input_schema: Some(json!({"type":"object"})),
+        agent_tools: None,
         input_schema: json!({"type":"object"}),
         output_schema: json!({"type":"object"}),
         runner: WorkerRunner::Command { command },
@@ -104,7 +106,17 @@ print(json.dumps({
             name: "Last 30 Days Research".to_owned(),
             description: "Research a topic across sources published in the last 30 days with citations and graceful behavior when optional credentials are absent".to_owned(),
             tool_name: Some("worker_last30days_research".to_owned()),
-            tool_input_schema: None,
+            model_exposure: Default::default(),
+            tool_input_schema: Some(json!({
+                "type":"object",
+                "additionalProperties":false,
+                "required":["topic"],
+                "properties":{
+                    "topic":{"type":"string","minLength":1},
+                    "asOf":{"type":"string"}
+                }
+            })),
+            agent_tools: None,
             input_schema: json!({
                 "type":"object",
                 "additionalProperties":false,

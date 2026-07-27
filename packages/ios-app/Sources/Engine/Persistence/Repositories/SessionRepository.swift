@@ -11,8 +11,8 @@ final class SessionRepository: @unchecked Sendable {
          working_directory, created_at, last_activity_at, archived_at, event_count,
          turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
          cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
-         activity_lines_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         activity_lines_json, labels_json, organization_group)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             workspace_id = excluded.workspace_id,
             root_event_id = excluded.root_event_id,
@@ -35,7 +35,9 @@ final class SessionRepository: @unchecked Sendable {
             is_fork = excluded.is_fork,
             is_processing = excluded.is_processing,
             server_origin = excluded.server_origin,
-            activity_lines_json = excluded.activity_lines_json
+            activity_lines_json = excluded.activity_lines_json,
+            labels_json = excluded.labels_json,
+            organization_group = excluded.organization_group
     """
 
     private weak var transport: (any DatabaseTransport)?
@@ -242,7 +244,7 @@ final class SessionRepository: @unchecked Sendable {
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
-                       activity_lines_json
+                       activity_lines_json, labels_json, organization_group
                 FROM sessions WHERE id = ?
             """
 
@@ -274,7 +276,7 @@ final class SessionRepository: @unchecked Sendable {
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
-                       activity_lines_json
+                       activity_lines_json, labels_json, organization_group
                 FROM sessions ORDER BY last_activity_at DESC, id DESC
             """
 
@@ -311,7 +313,7 @@ final class SessionRepository: @unchecked Sendable {
                            working_directory, created_at, last_activity_at, archived_at, event_count,
                            turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                            cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
-                           activity_lines_json
+                           activity_lines_json, labels_json, organization_group
                     FROM sessions
                     WHERE server_origin = ?
                     ORDER BY last_activity_at DESC, id DESC
@@ -322,7 +324,7 @@ final class SessionRepository: @unchecked Sendable {
                            working_directory, created_at, last_activity_at, archived_at, event_count,
                            turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                            cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
-                           activity_lines_json
+                           activity_lines_json, labels_json, organization_group
                     FROM sessions ORDER BY last_activity_at DESC, id DESC
                 """
             }
@@ -506,6 +508,13 @@ final class SessionRepository: @unchecked Sendable {
         } else {
             sqlite3_bind_null(stmt, 23)
         }
+        if let data = try? JSONEncoder().encode(session.labels),
+           let json = String(data: data, encoding: .utf8) {
+            sqlite3_bind_text(stmt, 24, json, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        } else {
+            sqlite3_bind_text(stmt, 24, "[]", -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        }
+        sqliteBindOptionalText(stmt, 25, session.organizationGroup)
     }
 
     private static func parseSessionRow(_ stmt: OpaquePointer?) -> CachedSession? {
@@ -538,6 +547,15 @@ final class SessionRepository: @unchecked Sendable {
            let data = jsonStr.data(using: .utf8) {
             activityLines = try? JSONDecoder().decode([ActivityLine].self, from: data)
         }
+        let labels: [String]
+        if let json = sqliteGetOptionalText(stmt, 23),
+           let data = json.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            labels = decoded
+        } else {
+            labels = []
+        }
+        let organizationGroup = sqliteGetOptionalText(stmt, 24)
 
         var session = CachedSession(
             id: id,
@@ -564,6 +582,8 @@ final class SessionRepository: @unchecked Sendable {
         )
         session.lastActivityLines = activityLines
         session.isProcessing = isProcessing
+        session.labels = labels
+        session.organizationGroup = organizationGroup
         return session
     }
 

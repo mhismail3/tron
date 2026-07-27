@@ -112,7 +112,7 @@ impl WorkerStore {
                 transaction,
                 &target_invocation_id,
                 WorkerRunStage::Queued,
-                "Queued from a declared worker dispatch route",
+                "Queued from a durable worker dispatch",
                 created_at,
             )?;
             insert_run_event(

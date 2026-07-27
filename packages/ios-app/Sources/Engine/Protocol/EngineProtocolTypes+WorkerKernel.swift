@@ -23,6 +23,107 @@ struct WorkerPresentationDTO: Codable, Equatable, Sendable {
     let suiteId: String?
     let componentRole: String?
     let primary: Bool
+    let sections: [WorkerPresentationSectionDTO]
+
+    init(
+        experienceId: String,
+        contractVersion: UInt32,
+        suiteId: String?,
+        componentRole: String?,
+        primary: Bool,
+        sections: [WorkerPresentationSectionDTO] = []
+    ) {
+        self.experienceId = experienceId
+        self.contractVersion = contractVersion
+        self.suiteId = suiteId
+        self.componentRole = componentRole
+        self.primary = primary
+        self.sections = sections
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case experienceId, contractVersion, suiteId, componentRole, primary, sections
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        experienceId = try container.decode(String.self, forKey: .experienceId)
+        contractVersion = try container.decode(UInt32.self, forKey: .contractVersion)
+        suiteId = try container.decodeIfPresent(String.self, forKey: .suiteId)
+        componentRole = try container.decodeIfPresent(String.self, forKey: .componentRole)
+        primary = try container.decodeIfPresent(Bool.self, forKey: .primary) ?? false
+        sections = try container.decodeIfPresent(
+            [WorkerPresentationSectionDTO].self,
+            forKey: .sections
+        ) ?? []
+    }
+}
+
+struct WorkerPresentationColumnDTO: Codable, Equatable, Sendable {
+    let label: String
+    let valuePointer: String
+}
+
+struct WorkerPresentationActionDTO: Codable, Equatable, Sendable {
+    let actionId: String
+    let label: String
+    let input: AnyCodable
+}
+
+struct WorkerPresentationSectionDTO: Codable, Equatable, Identifiable, Sendable {
+    let sectionId: String
+    let kind: String
+    let title: String?
+    let detail: String?
+    let valuePointer: String?
+    let columns: [WorkerPresentationColumnDTO]
+    let label: String?
+    let url: String?
+    let action: WorkerPresentationActionDTO?
+
+    var id: String { sectionId }
+
+    init(
+        sectionId: String,
+        kind: String,
+        title: String? = nil,
+        detail: String? = nil,
+        valuePointer: String? = nil,
+        columns: [WorkerPresentationColumnDTO] = [],
+        label: String? = nil,
+        url: String? = nil,
+        action: WorkerPresentationActionDTO? = nil
+    ) {
+        self.sectionId = sectionId
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.valuePointer = valuePointer
+        self.columns = columns
+        self.label = label
+        self.url = url
+        self.action = action
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sectionId, kind, title, detail, valuePointer, columns, label, url, action
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sectionId = try container.decode(String.self, forKey: .sectionId)
+        kind = try container.decode(String.self, forKey: .kind)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
+        valuePointer = try container.decodeIfPresent(String.self, forKey: .valuePointer)
+        columns = try container.decodeIfPresent(
+            [WorkerPresentationColumnDTO].self,
+            forKey: .columns
+        ) ?? []
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        action = try container.decodeIfPresent(WorkerPresentationActionDTO.self, forKey: .action)
+    }
 }
 
 struct WorkerListResultDTO: Codable, Equatable, Sendable {
@@ -629,4 +730,68 @@ struct WorkerWebhookCredentialDTO: Codable, Equatable, Sendable {
 struct WorkerRollbackResultDTO: Codable, Equatable, Sendable {
     let worker: WorkerSummaryDTO
     let webhooks: [WorkerWebhookCredentialDTO]
+}
+
+struct WorkerArtifactContentReferenceDTO: Codable, Equatable, Sendable {
+    let kind: String
+    let workerId: String
+    let artifactId: String
+    let contentSha256: String
+    let sizeBytes: UInt64
+}
+
+struct WorkerArtifactDTO: Codable, Equatable, Identifiable, Sendable {
+    let workerId: String
+    let artifactId: String
+    let displayName: String
+    let mediaType: String
+    let sizeBytes: UInt64
+    let contentSha256: String
+    let contentReference: WorkerArtifactContentReferenceDTO
+    let sourceInvocationId: String
+    let sourceWorkerVersion: String
+    let traceId: String
+    let createdAt: String
+
+    var id: String { "\(workerId):\(artifactId)" }
+}
+
+struct WorkerArtifactStorageAttentionDTO: Codable, Equatable, Sendable {
+    let state: String
+    let artifactBytes: UInt64
+    let databaseBytes: UInt64
+    let databaseBudgetBytes: UInt64
+    let overBudget: Bool
+    let message: String?
+
+    var requiresAttention: Bool { state == "attention" }
+}
+
+struct WorkerArtifactPageDTO: Codable, Equatable, Sendable {
+    let artifacts: [WorkerArtifactDTO]
+    let returned: UInt64
+    let total: UInt64
+    let nextOffset: UInt64?
+    let storageAttention: WorkerArtifactStorageAttentionDTO
+}
+
+struct WorkerArtifactContentDTO: Codable, Equatable, Sendable {
+    let artifact: WorkerArtifactDTO
+    let data: String
+}
+
+struct WorkerArtifactDeleteDTO: Codable, Equatable, Sendable {
+    let workerId: String
+    let artifactId: String
+    let deleted: Bool
+}
+
+struct WorkerArtifactListRequestDTO: Codable, Equatable, Sendable {
+    let limit: UInt16
+    let offset: UInt64
+}
+
+struct WorkerArtifactIdentityRequestDTO: Codable, Equatable, Sendable {
+    let workerId: String
+    let artifactId: String
 }

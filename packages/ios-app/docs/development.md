@@ -80,10 +80,24 @@ The iOS engine transport logs redacted connection diagnostics under the
 `[WebSocket]` category for each `/engine` upgrade: host/path, timeout budget,
 Authorization header presence, URLSession task metrics, HTTP upgrade status
 when available, and NSError domain/code/underlying details. Tokens and URL
-queries are not logged. When physical-device pairing fails, copy the
+queries are not logged. Frame and event diagnostics admit only route metadata
+and encoded byte counts; their logging APIs have no raw-payload argument.
+When physical-device pairing fails, copy the
 `[WebSocket]` lines from Xcode first; they should identify whether the failure
 is local-network permission, Tailscale reachability, HTTP auth, or engine
 protocol response handling.
+
+Transport lifecycle tests must cover replacement races, not only ordinary
+disconnects. A receive, heartbeat, send, completion, or verification callback
+from an old socket must be unable to retire the current generation; manual
+retry must install exactly one reconnect owner. Chat lifecycle tests likewise
+assert that leaving a mounted chat cancels presentation-owned work and releases
+its display link while preserving reconstructable stream state. Run these
+focused checks with the Beta simulator scheme:
+
+```bash
+xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EnginePendingRequestLifecycleTests -only-testing:TronMobileTests/WebSocketRequestTransportTests -only-testing:TronMobileTests/EngineConnectionReconnectTests -only-testing:TronMobileTests/TronLoggerSensitiveDataTests -only-testing:TronMobileTests/StreamingManagerTypewriterTests -only-testing:TronMobileTests/ChatViewModelLifecycleTests
+```
 
 ### Codex App Local Actions
 
@@ -168,6 +182,24 @@ scripts/tron auth notifications use direct
 Never put a relay secret, `.p8`, APNs token, or physical device id in the
 repository or a test fixture. Status commands report only mode and readiness.
 The engine never fails over between relay and direct automatically.
+
+Notification foundation changes use the Beta simulator and must cover legacy
+cache migration, concurrent actor serialization, batched Mark All Read
+durability, pending-response replay over an authoritative sync page, per-server
+work coalescing, request/work budgets, and shutdown draining:
+
+```bash
+xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/NotificationLocalStoreTests -only-testing:TronMobileTests/NativeNotificationPolicyTests -only-testing:TronMobileTests/DependencyContainerTests
+```
+
+Artifact delivery changes also use the Beta simulator. The focused suite covers
+closed protocol decoding and routing, exact-content hash verification, bounded
+temporary-file lifecycle, explicit deletion, and the explicit draft-attachment
+bridge:
+
+```bash
+xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ArtifactInboxViewModelTests -only-testing:TronMobileTests/WorkerKernelDTOTests -only-testing:TronMobileTests/WorkerKernelClientTests
+```
 
 For physical production-notification acceptance:
 
@@ -419,11 +451,11 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/SessionListExpansionAccessibilityTests
 ```
 
-For Worker Console protocol, repository, state, or Settings parity changes, run
-the focused worker-first set:
+For Worker Console protocol, repository, declarative presentation, state, or
+Settings parity changes, run the focused worker-first set on Beta:
 
 ```bash
-xcodebuild test -scheme Tron \
+xcodebuild test -scheme 'Tron Beta' \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/WorkerKernelDTOTests \
   -only-testing:TronMobileTests/WorkerKernelClientTests \

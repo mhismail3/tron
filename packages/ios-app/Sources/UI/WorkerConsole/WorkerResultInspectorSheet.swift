@@ -173,7 +173,7 @@ struct WorkerResultInspectorSheet: View {
     let invocationId: String
     let repository: any WorkerKernelRepository
 
-    @State private var locations = [WorkerResultLocation(pointer: "", offset: 0)]
+    @State private var locations: [WorkerResultLocation]
     @State private var chunk: WorkerResultChunkDTO?
     @State private var isLoading = false
     @State private var error: String?
@@ -181,6 +181,18 @@ struct WorkerResultInspectorSheet: View {
 
     private var location: WorkerResultLocation {
         locations.last ?? WorkerResultLocation(pointer: "", offset: 0)
+    }
+
+    init(
+        invocationId: String,
+        repository: any WorkerKernelRepository,
+        initialPointer: String = ""
+    ) {
+        self.invocationId = invocationId
+        self.repository = repository
+        _locations = State(
+            initialValue: [WorkerResultLocation(pointer: initialPointer, offset: 0)]
+        )
     }
 
     var body: some View {

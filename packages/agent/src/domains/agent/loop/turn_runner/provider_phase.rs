@@ -64,6 +64,7 @@ pub(super) async fn open_provider_response(
         params.session_id,
         relevance_query.as_deref(),
         params.run_context.origin_worker_id.as_deref(),
+        params.run_context.worker_agent_tools.as_deref(),
     )
     .await
     {
@@ -112,17 +113,28 @@ pub(super) async fn open_provider_response(
         available_worker_count = primitive_surface.snapshot.available_worker_count,
         "provider primitive surface resolved"
     );
-    let worker_inbox_context = primitive_surface::take_worker_inbox_context(
-        params.engine_host,
-        &primitive_surface,
-        params.session_id,
-        params.turn,
-        relevance_query.as_deref(),
-        params.run_context.origin_worker_id.as_deref(),
-        params.run_context.engine_trace_id.as_ref(),
-        params.run_context.parent_invocation_id.as_ref(),
-    )
-    .await;
+    let (worker_inbox_context, continuity_context) = tokio::join!(
+        primitive_surface::take_worker_inbox_context(
+            params.engine_host,
+            &primitive_surface,
+            params.session_id,
+            params.turn,
+            relevance_query.as_deref(),
+            params.run_context.origin_worker_id.as_deref(),
+            params.run_context.engine_trace_id.as_ref(),
+            params.run_context.parent_invocation_id.as_ref(),
+        ),
+        primitive_surface::take_continuity_context(
+            params.engine_host,
+            params.session_id,
+            params.turn,
+            relevance_query.as_deref(),
+            Some(params.context_manager.get_working_directory()),
+            params.run_context.origin_worker_id.as_deref(),
+            params.run_context.engine_trace_id.as_ref(),
+            params.run_context.parent_invocation_id.as_ref(),
+        )
+    );
 
     let projection = match build_turn_context(
         params.context_manager,
@@ -172,6 +184,13 @@ pub(super) async fn open_provider_response(
         system_prompt.push_str("\n\n");
     }
     system_prompt.push_str(&surface_context);
+    if let Some(continuity_context) = continuity_context {
+        let system_prompt = context.system_prompt.get_or_insert_with(String::new);
+        if !system_prompt.is_empty() {
+            system_prompt.push_str("\n\n");
+        }
+        system_prompt.push_str(&continuity_context);
+    }
     if let Some(worker_inbox_context) = worker_inbox_context {
         let system_prompt = context.system_prompt.get_or_insert_with(String::new);
         if !system_prompt.is_empty() {

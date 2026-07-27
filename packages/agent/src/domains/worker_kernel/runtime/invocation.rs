@@ -2,6 +2,57 @@
 
 use super::*;
 
+/// Synchronous last-resort custody for one claimed attempt.
+///
+/// Normal execution disarms this immediately after durable terminalization.
+/// If the async future is dropped, panics, or returns through an unhandled
+/// error path after the claim, `Drop` marks the attempt interrupted and
+/// requeues the same invocation before its in-process owner disappears.
+struct ClaimedInvocationFinalizer {
+    store: WorkerStore,
+    invocation_id: String,
+    armed: bool,
+}
+
+impl ClaimedInvocationFinalizer {
+    fn new(store: WorkerStore, invocation_id: String) -> Self {
+        Self {
+            store,
+            invocation_id,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ClaimedInvocationFinalizer {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.store.interrupt_running_invocation(
+                &self.invocation_id,
+                "claimed worker delivery lost its execution future",
+            );
+        }
+    }
+}
+
+/// Own the in-process identity and cancellation registration for one delivery.
+/// This must clean up even when the async task itself is aborted.
+struct InvocationExecutionOwnership {
+    runtime: Arc<WorkerRuntime>,
+    invocation_id: String,
+}
+
+impl Drop for InvocationExecutionOwnership {
+    fn drop(&mut self) {
+        let _ = self.runtime.inflight.remove(&self.invocation_id);
+        let _ = self.runtime.invocation_stops.remove(&self.invocation_id);
+    }
+}
+
 impl WorkerRuntime {
     pub(super) async fn execute_queued(
         self: &Arc<Self>,
@@ -14,13 +65,62 @@ impl WorkerRuntime {
                 .invocation(&invocation_id)?
                 .ok_or_else(|| "worker invocation disappeared".to_owned());
         }
+        let _execution_ownership = InvocationExecutionOwnership {
+            runtime: Arc::clone(self),
+            invocation_id: invocation_id.clone(),
+        };
         let invocation_stop = self.invocation_stop(&invocation_id);
         let result = self
             .execute_queued_inner(queued, invocation_stop.clone())
             .await;
-        let _ = self.inflight.remove(&invocation_id);
-        let _ = self.invocation_stops.remove(&invocation_id);
-        result
+        self.finalize_claimed_delivery(&invocation_id, result).await
+    }
+
+    /// Ensure that losing an execution future cannot leave a claimed attempt
+    /// in the running state until the next process restart.
+    async fn finalize_claimed_delivery(
+        &self,
+        invocation_id: &str,
+        result: Result<InvocationRecord, String>,
+    ) -> Result<InvocationRecord, String> {
+        let current = self.store.invocation(invocation_id)?;
+        let Some(current) = current else {
+            return result;
+        };
+        if current.status != "running" {
+            return match result {
+                Ok(record) => Ok(record),
+                Err(_) => Ok(current),
+            };
+        }
+        let terminal = if self.shutting_down.load(Ordering::SeqCst) {
+            self.store.interrupt_running_invocation(
+                invocation_id,
+                "worker delivery interrupted by runtime shutdown",
+            )?
+        } else {
+            let error = result
+                .err()
+                .unwrap_or_else(|| "worker delivery returned without terminal evidence".to_owned());
+            let secrets = self.load_all_runtime_secrets().unwrap_or_default();
+            let redacted = redact_known_secrets(&error, &secrets);
+            self.store
+                .complete_invocation(invocation_id, &current.worker_id, Err(&redacted))?
+        };
+        self.publish_event(
+            "worker.invocations",
+            json!({
+                "action":terminal.status,
+                "invocationId":terminal.invocation_id,
+                "workerId":terminal.worker_id,
+                "error":terminal.error,
+                "causalDepth":terminal.causal_depth,
+                "recoveredOwnership":true,
+            }),
+            TraceId::new(terminal.trace_id.clone()).ok(),
+        )
+        .await;
+        Ok(terminal)
     }
 
     pub(super) async fn execute_queued_inner(
@@ -73,6 +173,8 @@ impl WorkerRuntime {
                 .invocation(&queued.invocation_id)?
                 .ok_or_else(|| "claimed worker invocation disappeared".to_owned());
         }
+        let mut finalization_guard =
+            ClaimedInvocationFinalizer::new(self.store.clone(), queued.invocation_id.clone());
 
         self.publish_event(
             "worker.invocations",
@@ -98,13 +200,18 @@ impl WorkerRuntime {
             format!("Worker execution started: {worker_name}"),
         );
 
+        let invocation_timeout_seconds = worker
+            .bundle
+            .execution_limits
+            .max_invocation_seconds
+            .unwrap_or(MAX_INVOCATION_SECONDS);
         let timed = tokio::time::timeout(
-            Duration::from_secs(MAX_INVOCATION_SECONDS),
+            Duration::from_secs(invocation_timeout_seconds),
             self.execute_worker(&worker, &queued),
         );
         let execution = tokio::select! {
             result = timed => result
-                .map_err(|_| format!("worker invocation exceeded {MAX_INVOCATION_SECONDS} seconds"))
+                .map_err(|_| format!("worker invocation exceeded {invocation_timeout_seconds} seconds"))
                 .and_then(|result| result),
             () = global_stop.cancelled() => Err("worker invocation stopped by engine stop-all".to_owned()),
             () = worker_stop.cancelled() => Err(self.worker_cancelled_error(&queued.worker_id, false)),
@@ -152,30 +259,102 @@ impl WorkerRuntime {
                     &output,
                     chrono::Utc::now(),
                 )?;
+            let artifact_intents =
+                crate::domains::worker_kernel::artifacts::artifact_intents_for_bundle(
+                    &worker.bundle,
+                    &queued.invocation_id,
+                    &output,
+                )?;
             let worker_dispatches = self.prepare_worker_dispatches(&worker.bundle, &output)?;
-            Ok((output, notification_intents, worker_dispatches))
+            let worker_wakeup = crate::domains::worker_kernel::wakeups::parse_worker_wakeup(
+                &worker.bundle,
+                &output,
+                chrono::Utc::now(),
+            )?;
+            let session_organization =
+                crate::domains::worker_kernel::session_organization::session_organization_intent_for_bundle(
+                    &worker.bundle,
+                    &output,
+                )?;
+            if let Some(wakeup) = &worker_wakeup {
+                crate::engine::validate_engine_schema_payload(
+                    &worker_function,
+                    "request",
+                    &worker.bundle.input_schema,
+                    &wakeup.input,
+                )
+                .map_err(|error| {
+                    format!("workerWakeup.input does not match inputSchema: {error}")
+                })?;
+            }
+            Ok((
+                output,
+                notification_intents,
+                artifact_intents,
+                worker_dispatches,
+                worker_wakeup,
+                session_organization,
+            ))
         });
         let execution = match execution {
-            Ok((output, notification_intents, worker_dispatches)) => self
+            Ok((
+                output,
+                notification_intents,
+                artifact_intents,
+                worker_dispatches,
+                worker_wakeup,
+                session_organization,
+            )) => self
                 .apply_session_title_result(&queued, &output)
                 .await
-                .map(|()| (output, notification_intents, worker_dispatches)),
+                .and_then(|session_organization_dispatch| {
+                    let mut worker_dispatches = worker_dispatches;
+                    if let Some(dispatch) = session_organization_dispatch {
+                        if worker_dispatches.len()
+                            >= crate::domains::worker_kernel::dispatches::MAX_WORKER_DISPATCHES_PER_INVOCATION
+                        {
+                            return Err(
+                                "session organization handoff exceeds the per-invocation worker dispatch limit"
+                                    .to_owned(),
+                            );
+                        }
+                        worker_dispatches.push(dispatch);
+                    }
+                    Ok((
+                        output,
+                        notification_intents,
+                        artifact_intents,
+                        worker_dispatches,
+                        worker_wakeup,
+                        session_organization,
+                    ))
+                }),
             Err(error) => Err(error),
         };
         let completed = match execution {
-            Ok((output, notification_intents, worker_dispatches)) => {
-                self.store.complete_invocation_with_effects(
+            Ok((
+                output,
+                notification_intents,
+                artifact_intents,
+                worker_dispatches,
+                worker_wakeup,
+                session_organization,
+            )) => self
+                .store
+                .complete_invocation_with_effects_and_session_organization(
                     &queued.invocation_id,
                     &queued.worker_id,
                     &output,
                     &notification_intents,
+                    &artifact_intents,
                     &worker_dispatches,
-                )?
-            }
+                    worker_wakeup.as_ref(),
+                    session_organization.as_ref(),
+                )?,
             Err(error) => {
                 let secrets = self.load_all_runtime_secrets().unwrap_or_default();
                 let redacted = redact_known_secrets(&error, &secrets);
-                if !was_stopped {
+                if !was_stopped && execution_failure_disables_worker(&queued.trigger_kind) {
                     self.store
                         .mark_failed(&queued.worker_id, "execution", &redacted)?;
                     let _ = self
@@ -204,6 +383,7 @@ impl WorkerRuntime {
                 )?
             }
         };
+        finalization_guard.disarm();
         self.publish_event(
             "worker.invocations",
             json!({
@@ -341,9 +521,17 @@ impl WorkerRuntime {
             WorkerRunner::Agent {
                 instructions,
                 model,
+                reasoning_level,
             } => {
-                self.execute_agent(worker, invocation, instructions, model.as_deref(), &secrets)
-                    .await
+                self.execute_agent(
+                    worker,
+                    invocation,
+                    instructions,
+                    model.as_deref(),
+                    reasoning_level.as_deref(),
+                    &secrets,
+                )
+                .await
             }
             WorkerRunner::Command { command } => {
                 let state_dir = self.store.state_dir(&worker.summary.worker_id)?;
@@ -456,6 +644,7 @@ impl WorkerRuntime {
         invocation: &InvocationRecord,
         instructions: &str,
         model: Option<&str>,
+        reasoning_level: Option<&str>,
         secrets: &HashMap<String, String>,
     ) -> Result<Value, String> {
         let (ephemeral, workdir) = self.materialize_runtime_artifact(
@@ -528,17 +717,24 @@ impl WorkerRuntime {
         if let Some(max_turns) = worker.bundle.execution_limits.max_agent_turns {
             context = context.with_worker_max_agent_turns(max_turns);
         }
+        if let Some(agent_tools) = &worker.bundle.agent_tools {
+            context = context.with_worker_agent_tools(agent_tools.clone());
+        }
         let mut agent_run_guard =
             AbortAgentRunOnDrop::new(Arc::clone(&self.orchestrator), session_id.clone());
         // Subscribe before prompt admission. A provider construction failure can
         // start and finish between the synchronous acknowledgement and the next
         // scheduler poll; the terminal broadcast is the lossless join point.
         let mut agent_events = self.orchestrator.subscribe();
+        let mut agent_payload = json!({"sessionId":session_id,"prompt":prompt});
+        if let Some(reasoning_level) = reasoning_level {
+            agent_payload["reasoningLevel"] = json!(reasoning_level);
+        }
         let outcome = self
             .host
             .invoke(Invocation::new_sync(
                 FunctionId::new("agent::prompt").map_err(|error| error.to_string())?,
-                json!({"sessionId":session_id,"prompt":prompt}),
+                agent_payload,
                 context,
             ))
             .await;
@@ -678,5 +874,31 @@ impl WorkerRuntime {
             process.ready = true;
         }
         Ok(())
+    }
+}
+
+fn execution_failure_disables_worker(trigger_kind: &str) -> bool {
+    !matches!(
+        trigger_kind,
+        "engine_hook:worker_relevance" | "engine_hook:inbox_context"
+    )
+}
+
+#[cfg(test)]
+mod failure_policy_tests {
+    use super::execution_failure_disables_worker;
+
+    #[test]
+    fn optional_semantic_hook_failure_preserves_deterministic_recovery_owner() {
+        assert!(!execution_failure_disables_worker(
+            "engine_hook:worker_relevance"
+        ));
+        assert!(!execution_failure_disables_worker(
+            "engine_hook:inbox_context"
+        ));
+        assert!(execution_failure_disables_worker(
+            "engine_hook:context_summary"
+        ));
+        assert!(execution_failure_disables_worker("manual"));
     }
 }

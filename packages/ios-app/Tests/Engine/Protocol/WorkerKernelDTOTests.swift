@@ -218,7 +218,17 @@ struct WorkerKernelDTOTests {
               "model":"openai/gpt-5.6-luna","turn":2,"modelToolInvocationId":"tool-1",
               "retryOfInvocationId":null,"inputTokens":1200,"outputTokens":140,
               "cacheReadTokens":50,"cacheCreationTokens":0,"cost":0.031,
-              "resultPreview":null,"errorPreview":null,"presentation":null
+              "resultPreview":null,"errorPreview":null,
+              "presentation":{
+                "experienceId":"generic-research","contractVersion":1,"primary":false,
+                "sections":[
+                  {"sectionId":"summary","kind":"text","valuePointer":"/summary"},
+                  {
+                    "sectionId":"refresh","kind":"worker_action",
+                    "action":{"actionId":"refresh","label":"Refresh","input":{"action":"refresh"}}
+                  }
+                ]
+              }
             }],
             "timeline":[{
               "occurredAt":"2026-07-24T12:00:08Z","nodeId":"invocation:run-root",
@@ -246,6 +256,12 @@ struct WorkerKernelDTOTests {
         #expect(graph.timing.childCriticalPathMs == 8_100)
         #expect(graph.usage.inputTokens == 1_200)
         #expect(graph.nodes.first?.sessionId == "sess-worker")
+        #expect(graph.nodes.first?.presentation?.sections.count == 2)
+        #expect(
+            graph.nodes.first?.presentation?.sections.last?.action?.input
+                .dictionaryValue?["action"] as? String == "refresh"
+        )
+        #expect(WorkerDeclarativePresentation.descriptor(for: graph) != nil)
         #expect(graph.timeline.first?.summary == "Research Source Review started")
         #expect(graph.timeline.first?.technical == false)
     }
@@ -295,5 +311,56 @@ struct WorkerKernelDTOTests {
         #expect(chunk.children.first?.pointer == "/claims")
         #expect(chunk.nextOffset == 1)
         #expect(chunk.truncated)
+    }
+
+    @Test("Artifact inbox metadata keeps content custody and source evidence closed")
+    func artifactInboxDecodesContentReferenceAndStorageAttention() throws {
+        let hash = "sha256:" + String(repeating: "a", count: 64)
+        let json = """
+        {
+          "artifacts":[{
+            "workerId":"document-artifact",
+            "artifactId":"report-1",
+            "displayName":"report.md",
+            "mediaType":"text/markdown",
+            "sizeBytes":5,
+            "contentSha256":"\(hash)",
+            "contentReference":{
+              "kind":"artifact_content_reference",
+              "workerId":"document-artifact",
+              "artifactId":"report-1",
+              "contentSha256":"\(hash)",
+              "sizeBytes":5
+            },
+            "sourceInvocationId":"worker_run_1",
+            "sourceWorkerVersion":"v1",
+            "traceId":"trace-1",
+            "createdAt":"2026-07-27T08:00:00Z"
+          }],
+          "returned":1,
+          "total":1,
+          "nextOffset":null,
+          "storageAttention":{
+            "state":"attention",
+            "artifactBytes":5,
+            "databaseBytes":450000000,
+            "databaseBudgetBytes":536870912,
+            "overBudget":false,
+            "message":"Delete artifacts you no longer need."
+          }
+        }
+        """
+
+        let page = try JSONDecoder().decode(
+            WorkerArtifactPageDTO.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(page.artifacts.first?.id == "document-artifact:report-1")
+        #expect(page.artifacts.first?.contentReference.kind == "artifact_content_reference")
+        #expect(page.artifacts.first?.sourceInvocationId == "worker_run_1")
+        #expect(page.storageAttention.requiresAttention)
+        #expect(page.storageAttention.databaseBytes == 450_000_000)
+        #expect(!page.storageAttention.overBudget)
     }
 }

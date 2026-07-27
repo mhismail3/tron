@@ -20,12 +20,14 @@ struct EngineSettingsOwnershipTests {
         #expect(MainSettingsGridDestination.order == [
             .engine,
             .providers,
+            .artifacts,
             .app,
             .logs,
         ])
         #expect(MainSettingsGridDestination.order.map(\.description) == [
             "Servers, session defaults, context",
             "OAuth and API keys",
+            "Worker-created files",
             "Appearance and behavior",
             "Local diagnostics",
         ])

@@ -183,6 +183,34 @@ All tests use **Swift Testing** (`@Test`, `@Suite`, `#expect`) rather than XCTes
 
 Mac wrapper tests run through the `TronMac` scheme so `@testable import TronMac` exercises the real app target. The generated scheme and CI both set `TRON_MAC_TEST_HOST=1`, and the app also recognizes Xcode's test-host environment markers, then renders an inert 1x1 host instead of the onboarding wizard or menu bar. Keep that path side-effect free: CI must never register Login Items, acquire production wrapper locks, or manage a real server just to run unit tests; window configuration must also exit before applying production styling. If Xcode changes its test-host markers, update `TronMacRuntime.isRunningUnderTests` and its test in `MacRuntimeVariantTests.swift` together.
 
+Mac Operator protocol and lifecycle tests remain permission-free:
+
+```bash
+cd packages/mac-app
+xcodegen generate
+xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' \
+  -only-testing:TronMacTests/MacOperatorProtocolTests \
+  -only-testing:TronMacTests/MenuBarItemBuilderTests
+```
+
+Those tests pin the closed action vocabulary, forbidden shell/script/path/device
+fields, byte/time bounds, native-only emergency-stop generation, same-app
+focused-window switching rejection, active-client/task cancellation and drain,
+owner-only socket mode, response redaction, socket cleanup, and menu routing.
+They do not grant Accessibility or Screen Recording, drive another application,
+or launch the runtime worker.
+
+Physical acceptance requires the manually signed installed wrapper because TCC
+permissions are code-signature and bundle-identity scoped. Build/install the
+normal Release artifact through the documented signing workflow, launch
+`/Applications/Tron.app`, and grant that app Accessibility and Screen Recording
+in System Settings. Then manually activate the staged ordinary `mac-operator`
+worker and verify status, foreground observation, an accessibility press/value
+action, latest-screenshot coordinate fallback, focus-change rejection,
+emergency stop/resume, timeout, app restart, and socket cleanup. Do not grant
+permissions to an unsigned helper, do not mutate TCC databases, and do not use
+the operator for iOS devices or simulators.
+
 GitHub's Mac CI pins the destination to the runner architecture, uses
 `xcodebuild build-for-testing` to compile the app plus the full Mac test
 bundle, then limits hosted execution to the known-stable `TronPathsTests`,

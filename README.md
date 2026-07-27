@@ -48,9 +48,16 @@ The Rust server owns model execution, authenticated transport, durable session
 truth, atomic worker handoffs, worker storage, and provider-acceptance evidence.
 The iOS app is a thin client with a Worker Console for health, versions,
 triggers, typed invocation, runs, inbox, rollback, retirement, cancellation,
-and stop controls, plus a synchronized native notification inbox.
+and stop controls, plus synchronized native notification and Artifact Inboxes.
+Artifact content stays in engine-owned content-addressed custody until explicit
+deletion; preview, share, export, and Attach to Draft use the existing native
+attachment pipeline.
 The Mac app packages and supervises the server and owns pairing; it is not a
-second engine client.
+second engine client. Its signed wrapper also hosts the narrow Mac Operator
+actuator for explicitly requested foreground-app work; the ordinary worker
+owns the plan and confirmation policy, while native code enforces permissions,
+fresh-window identity, serialized actions, and the user-controlled emergency
+stop.
 
 Worker bundles live under:
 

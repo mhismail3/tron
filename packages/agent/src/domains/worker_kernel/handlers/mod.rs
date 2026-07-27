@@ -9,6 +9,7 @@
 //! - `core` owns session-title, engine introspection/hooks, and isolated core
 //!   proposal handlers.
 //! - `authoring` owns atomic bundle upsert and bounded source-tree import.
+//! - `artifacts` owns authenticated native inbox, exact content, and explicit deletion.
 //! - `discovery` owns list, inspect, and relevance-backed promotion.
 //! - `invocation` owns manual dispatch, nested worker-input admission errors,
 //!   lifecycle controls, and bounded durable-result reads.
@@ -24,6 +25,7 @@ use crate::domains::registration::bindings::operation_bindings;
 use super::host;
 use super::runtime::WorkerRuntime;
 
+mod artifacts;
 mod authoring;
 mod core;
 mod discovery;
@@ -55,6 +57,9 @@ operation_bindings! {
         "notification_deliveries" => |invocation, deps| { support::response(invocation, notifications::deliveries(invocation, deps).await) },
         "notification_delivery_acknowledge" => |invocation, deps| { support::response(invocation, notifications::acknowledge(invocation, deps).await) },
         "notification_delivery_status" => |invocation, deps| { support::response(invocation, notifications::status(invocation, deps).await) },
+        "artifact_deliveries" => |invocation, deps| { support::response(invocation, artifacts::deliveries(invocation, deps).await) },
+        "artifact_content" => |invocation, deps| { support::response(invocation, artifacts::content(invocation, deps).await) },
+        "artifact_delete" => |invocation, deps| { support::response(invocation, artifacts::delete(invocation, deps).await) },
         "core_proposal_create" => |invocation, deps| { support::response(invocation, core::core_proposal_create(invocation, deps).await) },
         "core_proposal_list" => |invocation, deps| { support::response(invocation, core::core_proposal_list(invocation, deps).await) },
         "core_proposal_inspect" => |invocation, deps| { support::response(invocation, core::core_proposal_inspect(invocation, deps).await) },
@@ -81,6 +86,7 @@ operation_bindings! {
         "webhook_rotate" => |invocation, deps| { support::response(invocation, webhook::rotate_webhook(invocation, deps).await) },
         "stop_all" => |invocation, deps| { support::response(invocation, invocation::stop_all(invocation, deps).await) },
         "context_summary" => |invocation, deps| { support::response(invocation, core::context_summary(invocation, deps).await) },
+        "continuity_context" => |invocation, deps| { support::response(invocation, core::continuity_context(invocation, deps).await) },
         "session_title" => |invocation, deps| { support::response(invocation, core::session_title(invocation, deps).await) },
         "worker_relevance" => |invocation, deps| { support::response(invocation, core::worker_relevance(invocation, deps).await) },
         "surface_snapshot" => |invocation, deps| { support::response(invocation, core::engine_surface_snapshot(invocation, deps).await) },

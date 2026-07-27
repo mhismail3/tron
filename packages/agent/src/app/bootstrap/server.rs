@@ -532,6 +532,7 @@ mod tests {
                         "name":"HTTP Webhook Fixture",
                         "description":"Exercises the authenticated loopback HTTP trigger",
                         "toolName":"worker_http_webhook_fixture",
+                        "modelExposure":"internal",
                         "inputSchema":{"type":"object","additionalProperties":false,"properties":{"configured":{"type":"boolean"},"requestValue":{"type":"integer"}}},
                         "outputSchema":{"type":"object"},
                         "runner":{"kind":"command","command":["sh","-c","cat"]},

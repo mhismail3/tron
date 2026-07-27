@@ -217,10 +217,21 @@ pub(crate) async fn resolve_tool_surface(
     session_id: &str,
     relevance_query: Option<&str>,
     origin_worker_id: Option<&str>,
+    worker_agent_tools: Option<&[String]>,
 ) -> Result<ResolvedToolSurface, String> {
-    let actor_id =
-        ActorId::new(format!("agent:{session_id}")).map_err(|error| error.to_string())?;
-    let actor = ActorContext::new(actor_id, ActorKind::Agent);
+    let trusted_worker_allowlist = origin_worker_id.is_some() && worker_agent_tools.is_some();
+    let (actor_id, actor_kind) = if trusted_worker_allowlist {
+        (
+            ActorId::new("system:worker-agent-surface").map_err(|error| error.to_string())?,
+            ActorKind::System,
+        )
+    } else {
+        (
+            ActorId::new(format!("agent:{session_id}")).map_err(|error| error.to_string())?,
+            ActorKind::Agent,
+        )
+    };
+    let actor = ActorContext::new(actor_id, actor_kind);
     let (catalog_revision, mut functions) = host.visible_functions_with_revision(&actor).await;
     functions.sort_by_key(|function| {
         (
@@ -233,12 +244,21 @@ pub(crate) async fn resolve_tool_surface(
         )
     });
 
+    let explicit_agent_tools =
+        worker_agent_tools.map(|tools| tools.iter().map(String::as_str).collect::<BTreeSet<_>>());
     let promotion_entries = session_worker_promotion_entries(host, session_id).await?;
     let evidence = worker_surface_evidence(host, &functions).await?;
     let dynamic_documents = functions
         .iter()
         .filter_map(|function| {
             let worker = direct_worker_contract(function)?;
+            if explicit_agent_tools.as_ref().is_some_and(|allowed| {
+                model_tool_name(function)
+                    .as_deref()
+                    .is_none_or(|model_name| !allowed.contains(model_name))
+            }) {
+                return None;
+            }
             Some(retrieval_document(
                 function,
                 worker,
@@ -276,31 +296,45 @@ pub(crate) async fn resolve_tool_surface(
         .map(|(index, rank)| (rank.worker_id.clone(), index))
         .collect::<BTreeMap<_, _>>();
     let mut selected_dynamic = BTreeMap::new();
-    for promotion in &promotion_entries {
-        if selected_dynamic.len() >= MAX_RELEVANT_WORKERS {
-            break;
+    if let Some(allowed) = &explicit_agent_tools {
+        for function in &functions {
+            if direct_worker_contract(function).is_none() {
+                continue;
+            }
+            if model_tool_name(function)
+                .as_deref()
+                .is_some_and(|model_name| allowed.contains(model_name))
+            {
+                let _ = selected_dynamic.insert(function.id.as_str().to_owned(), "agent_allowlist");
+            }
         }
-        let Some(rank) = ranked
-            .iter()
-            .find(|rank| rank.worker_id == promotion.worker_id && rank.promoted)
-        else {
-            continue;
-        };
-        let _ = selected_dynamic.insert(rank.key.clone(), "session_promotion");
-    }
-    for rank in &ranked {
-        if selected_dynamic.contains_key(&rank.key)
-            || (!query_is_empty && rank.relevance_score == 0)
-            || selected_dynamic.len() >= MAX_RELEVANT_WORKERS
-        {
-            continue;
+    } else {
+        for promotion in &promotion_entries {
+            if selected_dynamic.len() >= MAX_RELEVANT_WORKERS {
+                break;
+            }
+            let Some(rank) = ranked
+                .iter()
+                .find(|rank| rank.worker_id == promotion.worker_id && rank.promoted)
+            else {
+                continue;
+            };
+            let _ = selected_dynamic.insert(rank.key.clone(), "session_promotion");
         }
-        let reason = if rank.relevance_score > 0 {
-            "relevance"
-        } else {
-            "default"
-        };
-        let _ = selected_dynamic.insert(rank.key.clone(), reason);
+        for rank in &ranked {
+            if selected_dynamic.contains_key(&rank.key)
+                || (!query_is_empty && rank.relevance_score == 0)
+                || selected_dynamic.len() >= MAX_RELEVANT_WORKERS
+            {
+                continue;
+            }
+            let reason = if rank.relevance_score > 0 {
+                "relevance"
+            } else {
+                "default"
+            };
+            let _ = selected_dynamic.insert(rank.key.clone(), reason);
+        }
     }
     let available_workers = ranked
         .iter()
@@ -347,6 +381,12 @@ pub(crate) async fn resolve_tool_surface(
         let Some(model_name) = model_tool_name(&function) else {
             continue;
         };
+        if explicit_agent_tools
+            .as_ref()
+            .is_some_and(|allowed| !allowed.contains(model_name.as_str()))
+        {
+            continue;
+        }
         if !function
             .model_tool
             .as_ref()
@@ -518,7 +558,7 @@ fn retrieval_document(
         key: function.id.as_str().to_owned(),
         worker_id: worker.worker_id.clone(),
         name: worker.worker_name.clone(),
-        description: function.description.clone(),
+        description: worker.worker_description.clone(),
         intents: worker.intents.clone(),
         examples: worker.examples.clone(),
         provenance: worker.provenance.clone(),
@@ -635,6 +675,47 @@ mod tests {
         let mut changed = tool;
         changed.function_revision = 2;
         assert_ne!(first, surface_hash(&[changed]).expect("changed hash"));
+    }
+
+    #[test]
+    fn semantic_routing_uses_canonical_worker_description_not_provider_runtime_text() {
+        let mut function = FunctionDefinition::new(
+            crate::engine::FunctionId::new("worker_kernel::dynamic_research").unwrap(),
+            crate::engine::WorkerId::new("worker_kernel").unwrap(),
+            "Canonical research purpose\nPersistent worker: activeVersion=abc; provenance=test. Agent-runner work begins durably in the background.",
+            crate::engine::FunctionVisibility::Public,
+            crate::engine::EffectClass::ExternalSideEffect,
+        );
+        let worker = DirectWorkerToolContract {
+            worker_id: "research".to_owned(),
+            worker_name: "Research".to_owned(),
+            worker_description: "Canonical research purpose".to_owned(),
+            worker_version: "abc".to_owned(),
+            runner_kind: "agent".to_owned(),
+            updated_at: "2026-07-27T00:00:00Z".to_owned(),
+            intents: vec!["research".to_owned()],
+            examples: Vec::new(),
+            provenance: vec!["test".to_owned()],
+        };
+        function.model_tool = Some(crate::engine::ModelToolContract {
+            name: "worker_research".to_owned(),
+            callable: true,
+            order: None,
+            group: None,
+            worker: Some(worker.clone()),
+        });
+
+        let document = retrieval_document(&function, &worker, None);
+        let candidate =
+            crate::domains::worker_kernel::retrieval::semantic_candidate_payload(&document);
+        assert_eq!(candidate["description"], "Canonical research purpose");
+        let encoded = serde_json::to_string(&candidate).unwrap();
+        assert!(!encoded.contains("activeVersion"));
+        assert!(!encoded.contains("Agent-runner work begins"));
+        assert!(
+            function.description.contains("activeVersion"),
+            "provider-facing function description remains unchanged"
+        );
     }
 
     #[tokio::test]

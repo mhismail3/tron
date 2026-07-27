@@ -194,6 +194,8 @@ extension EventStoreManager {
         session.isProcessing = info.isRunning ?? false
         session.lastUserPrompt = info.lastUserPrompt
         session.lastAssistantResponse = info.lastAssistantResponse
+        session.labels = info.labels ?? []
+        session.organizationGroup = info.organizationGroup
         if let serverLines = info.activityLines {
             session.lastActivityLines = serverLines.compactMap { $0.toActivityLine() }
         }
@@ -236,6 +238,8 @@ extension EventStoreManager {
         session.isProcessing = serverInfo.isRunning ?? existing.isProcessing
         session.lastUserPrompt = serverInfo.lastUserPrompt ?? existing.lastUserPrompt
         session.lastAssistantResponse = serverInfo.lastAssistantResponse ?? existing.lastAssistantResponse
+        session.labels = serverInfo.labels ?? existing.labels
+        session.organizationGroup = serverInfo.organizationGroup
         if let serverLines = serverInfo.activityLines {
             session.lastActivityLines = serverLines.compactMap { $0.toActivityLine() }
         } else {

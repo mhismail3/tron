@@ -61,6 +61,10 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let isRunning: Bool?
     /// Server-computed activity summary lines for session list rows
     let activityLines: [ServerActivityLine]?
+    /// Canonical ordinary session tags projected as user-facing labels.
+    var labels: [String]? = nil
+    /// Canonical single group decoded from the reserved organization tag.
+    var organizationGroup: String? = nil
 
     var id: String { sessionId }
 

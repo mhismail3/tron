@@ -88,6 +88,13 @@ enum TronPaths {
         runDir.appendingPathComponent(macWrapperLockFileName(bundleIdentifier: Bundle.main.bundleIdentifier), isDirectory: false)
     }
 
+    /// Owner-only local actuator socket created by the signed wrapper. The
+    /// ordinary Mac Operator worker derives this path from its Tron home; no
+    /// socket path or host identity enters its direct tool schema.
+    static var macOperatorSocketPath: URL {
+        runDir.appendingPathComponent("mac-operator.sock", isDirectory: false)
+    }
+
     static var settingsPath: URL {
         tronHome.appendingPathComponent(HomeComponent.settingsFile, isDirectory: false)
     }

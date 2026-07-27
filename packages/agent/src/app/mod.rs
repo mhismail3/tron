@@ -9,6 +9,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`cli`] | Terminal argument parsing, current OAuth bridges, and auth subcommand dispatch |
+//! | [`browser_operator`] | Closed Chrome Native Messaging actuator transport |
 //! | [`bootstrap`] | Runtime assembly, service initialization, database open, and server bind |
 //! | [`health`] | Health/metrics endpoints and disk checks |
 //! | [`lifecycle`] | Onboarding, bearer-token state, and shutdown coordination |
@@ -44,6 +45,7 @@
 //! assertions belong in integration/static targets under `packages/agent/tests/`.
 
 pub mod bootstrap;
+pub(crate) mod browser_operator;
 pub mod cli;
 pub mod health;
 pub mod lifecycle;

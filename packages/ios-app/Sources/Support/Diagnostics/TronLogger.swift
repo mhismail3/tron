@@ -240,25 +240,23 @@ final class TronLogger: @unchecked Sendable {
         info(msg, category: .websocket)
     }
 
-    func logWebSocketMessage(direction: String, type: String, size: Int, preview: String? = nil) {
+    /// Record protocol metadata only. Raw frame content is deliberately absent
+    /// from this API so a future caller cannot accidentally buffer or ingest
+    /// user text, credentials, or notification content.
+    func logWebSocketMessage(direction: String, type: String, size: Int) {
         #if DEBUG || BETA
-        var msg = "\(direction) [\(type)] \(size) bytes"
-        if preview != nil {
-            msg += " preview=redacted"
-        }
-        verbose(msg, category: .websocket)
+        verbose("\(direction) [\(type)] \(size) bytes", category: .websocket)
         #endif
     }
 
-    func logEvent(type: String, sessionId: String?, data: String? = nil) {
+    /// Record the closed event route and encoded byte count, never its payload.
+    func logEvent(type: String, sessionId: String?, payloadBytes: Int) {
         #if DEBUG || BETA
         var msg = "Event: \(type)"
         if let sid = sessionId {
             msg += " [session: \(sid.prefix(8))...]"
         }
-        if let data = data {
-            msg += " dataBytes=\(data.utf8.count)"
-        }
+        msg += " payloadBytes=\(payloadBytes)"
         debug(msg, category: .events)
         #endif
     }

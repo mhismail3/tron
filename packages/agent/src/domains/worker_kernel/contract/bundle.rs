@@ -9,6 +9,8 @@ use serde_json::{Value, json};
 const ENGINE_HOOK_AUTHORING_CONTRACT: &str = "\
 Optional semantic engine roles activated atomically with this version. No separate binding or grant is required. \
 The bundle inputSchema and outputSchema are the complete worker-facing contracts below; toolInputSchema affects only direct model calls and never changes an engine hook contract. These schemas are authoritative, so do not inspect Tron databases, auth stores, binaries, runtime files, or private server endpoints to discover hook schemas. \
+continuity_context input is a closed object requiring action:continuity_context and query:string(1..12000), and permitting project:string(max 2048) and limit:integer(1..8); output must accept a closed object requiring narrative:string(max 6000), where an empty narrative means no continuity should be injected. The engine supplies the current working-directory identity as project when available, redacts sensitive credential shapes, and bounds the provider-context projection. \
+session_organization input is a closed object requiring action:session_organization, one closed canonical session projection, and the completed userPrompt/assistantResponse strings(max 4096 each). Output requires one bounded proposal and may include the explicitly declared reserved sessionOrganizationMutations array(max 16). Each closed mutation names sessionId and only preserve, archive, or restore; replacement labels(max 12 strings of max 64 characters) and one nullable group(max 80) are optional. Omitted labels or group preserve canonical state, while explicit null clears the group. The engine preserves system tags and applies the exact batch durably after successful completion; delete and arbitrary tags are not expressible. \
 session_title input is a closed object requiring userPrompt:string(max 4096) and assistantResponse:string(max 4096); output is a closed object requiring title:string(1..160). It runs after the first successful exchange of an untitled ordinary session. \
 context_summary input is a closed object requiring messages:array(max 256) of closed {role:user|assistant|tool,text:string(max 4096)} and permitting originWorkerId:string; output is a closed object requiring narrative:string(1..40000 characters), with authoritative runtime ceilings of 10000 estimated tokens and 40000 UTF-8 bytes. \
 inbox_context input is a closed object requiring query:string and items:array(max 32) of closed {inboxId,invocationId,workerId,workerName,workerDescription,severity,triggerKind,resultPreview,createdAt} strings; output is a closed object requiring consumedInboxIds:unique string array(max 32) and narrative:string. \
@@ -25,13 +27,167 @@ const CLIENT_DELIVERY_AUTHORING_CONTRACT: &str = "\
 Optional worker-to-client deliveries activated atomically with this version. They are distinct from client-initiated actions and never grant general device control. \
 notification_delivery reserves the top-level output field notificationDeliveries. When present it is an array(max 32) of closed objects requiring deduplicationKey:string(1..64 UTF-8 bytes), title:string(1..120 characters), body:string(1..512 characters), and expiresAt:future RFC3339 timestamp no later than 30 days. \
 Each item may additionally carry notBefore:RFC3339 timestamp earlier than expiresAt, threadKey:string(1..64 UTF-8 bytes), sourceRecordId:string(1..128 UTF-8 bytes), actions:unique array containing only snooze or complete, and onOpen:complete. \
-The engine generates delivery and routing identity, durably fans out to authenticated installations, and rejects arbitrary URLs, APNs dictionaries, sounds, priorities, media, device identifiers, or action names.";
+The engine generates delivery and routing identity, durably fans out to authenticated installations, and rejects arbitrary URLs, APNs dictionaries, sounds, priorities, media, device identifiers, or action names. \
+artifact_delivery reserves the top-level output field artifactDeliveries, which outputSchema must explicitly declare. When present it is an array(max 8) of closed objects requiring artifactId:string(1..128 identifier bytes), displayName:safe file name(1..160 UTF-8 bytes), mediaType from the closed native-preview allowlist, sizeBytes:integer(1..2097152), and contentReference. \
+contentReference is a closed {kind:worker_result_reference,invocationId,pointer,encoding:base64} object. It must name the current invocation and a non-root RFC 6901 pointer(max 256 bytes) resolving to base64 inside that invocation's validated result. Total decoded artifact bytes are capped at 2097152. The engine gives exact bytes content-addressed custody atomically with invocation completion. URLs, paths, active HTML, client commands, and draft mutations are not expressible.";
 
 const WORKER_DISPATCH_AUTHORING_CONTRACT: &str = "\
 Optional fixed asynchronous worker handoffs activated with this immutable version. Each route binds one route name to one targetWorkerId and a clientResponseOwner of source or target. \
 Successful output may include the reserved workerDispatches array only when outputSchema explicitly declares that property. Each item is a closed object requiring route, deduplicationKey, and input. \
 Output cannot choose a worker id, worker version, causal trace, session, device, response destination, or credential. The engine validates target input against the selected immutable target version, then atomically commits source completion, handoff evidence, and the queued child invocation. \
 At most 32 handoffs are accepted per invocation; route and deduplication keys are at most 64 UTF-8 bytes, each input at most 64 KiB, and all inputs together at most 256 KiB. Handoffs are asynchronous only.";
+
+const WORKER_WAKEUP_AUTHORING_CONTRACT: &str = "\
+ A successful worker may request one durable future invocation of the same immutable worker version by explicitly declaring the reserved workerWakeup property in outputSchema and returning a closed {at,deduplicationKey,input} object. \
+ at is a future RFC3339 timestamp no more than 366 days away; deduplicationKey contains 1..64 UTF-8 bytes without whitespace or controls; input is at most 64 KiB and must satisfy the complete inputSchema. \
+ The worker cannot select another worker, version, trace, session, device, or credential. Completion and wakeup admission are one transaction. Use this for the next useful reconciliation time instead of an always-running short schedule trigger.";
+
+fn presentation_action_schema() -> Value {
+    json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["actionId","label","input"],
+        "properties":{
+            "actionId":{"type":"string","minLength":1,"maxLength":96},
+            "label":{"type":"string","minLength":1,"maxLength":80},
+            "input":{"type":"object"}
+        }
+    })
+}
+
+fn presentation_section_schema(
+    kind: &str,
+    extra_required: &[&str],
+    extra_properties: Value,
+) -> Value {
+    let mut required = vec![json!("sectionId"), json!("kind")];
+    required.extend(extra_required.iter().map(|field| json!(field)));
+    let mut properties = serde_json::Map::from_iter([
+        (
+            "sectionId".to_owned(),
+            json!({"type":"string","minLength":1,"maxLength":96}),
+        ),
+        ("kind".to_owned(), json!({"type":"string","const":kind})),
+        (
+            "title".to_owned(),
+            json!({"type":"string","minLength":1,"maxLength":80}),
+        ),
+        (
+            "detail".to_owned(),
+            json!({"type":"string","minLength":1,"maxLength":512}),
+        ),
+    ]);
+    if let Some(extra) = extra_properties.as_object() {
+        properties.extend(extra.clone());
+    }
+    json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":required,
+        "properties":properties
+    })
+}
+
+pub(super) fn presentation_schema() -> Value {
+    let pointer = json!({
+        "type":"string",
+        "maxLength":256,
+        "pattern":"^(?:|/(?:[^~]|~[01])*)$",
+        "description":"RFC 6901 pointer into the exact durable invocation result."
+    });
+    let action = presentation_action_schema();
+    let bound = |kind: &str| {
+        presentation_section_schema(
+            kind,
+            &["valuePointer"],
+            json!({"valuePointer":pointer.clone()}),
+        )
+    };
+    json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["experienceId","contractVersion"],
+        "description":"Optional immutable worker experience plus a closed declarative native presentation. Clients hydrate only bounded RFC 6901 result paths through worker_result_read and otherwise fall back to the generic Worker Console. HTML, JavaScript, custom native code, arbitrary client commands, and arbitrary URL schemes are not expressible.",
+        "properties":{
+            "experienceId":{"type":"string","minLength":1,"maxLength":96},
+            "contractVersion":{"type":"integer","minimum":1},
+            "suiteId":{"type":"string","minLength":1,"maxLength":96},
+            "componentRole":{"type":"string","minLength":1,"maxLength":96},
+            "primary":{"type":"boolean"},
+            "sections":{
+                "type":"array",
+                "maxItems":24,
+                "items":{
+                    "oneOf":[
+                        bound("text"),
+                        bound("status"),
+                        bound("progress"),
+                        presentation_section_schema(
+                            "table",
+                            &["valuePointer","columns"],
+                            json!({
+                                "valuePointer":pointer.clone(),
+                                "columns":{
+                                    "type":"array","minItems":1,"maxItems":8,
+                                    "items":{
+                                        "type":"object","additionalProperties":false,
+                                        "required":["label","valuePointer"],
+                                        "properties":{
+                                            "label":{"type":"string","minLength":1,"maxLength":80},
+                                            "valuePointer":pointer.clone()
+                                        }
+                                    }
+                                }
+                            })
+                        ),
+                        bound("list"),
+                        presentation_section_schema(
+                            "link",
+                            &["label","url"],
+                            json!({
+                                "label":{"type":"string","minLength":1,"maxLength":80},
+                                "url":{"type":"string","minLength":1,"maxLength":2048,"pattern":"^https://"}
+                            })
+                        ),
+                        presentation_section_schema(
+                            "artifact",
+                            &["label","valuePointer"],
+                            json!({
+                                "label":{"type":"string","minLength":1,"maxLength":80},
+                                "valuePointer":pointer.clone()
+                            })
+                        ),
+                        presentation_section_schema(
+                            "confirmation",
+                            &["title","detail","action"],
+                            json!({"action":action.clone()})
+                        ),
+                        presentation_section_schema(
+                            "worker_action",
+                            &["action"],
+                            json!({"action":action})
+                        )
+                    ]
+                }
+            }
+        }
+    })
+}
+
+fn agent_tools_schema() -> Value {
+    json!({
+        "type":"array",
+        "maxItems":32,
+        "uniqueItems":true,
+        "items":{
+            "type":"string",
+            "minLength":1,
+            "maxLength":64,
+            "pattern":"^[A-Za-z0-9_-]+$"
+        },
+        "description":"Optional exact allowlist of model-tool names projected inside an agent-runner worker session. It is invalid for command and service runners. Omission preserves the migration surface; an empty array exposes no tools. Names must resolve to current fixed primitives or enabled direct/internal worker functions when the bundle activates. Internal names remain absent from ordinary agent discovery."
+    })
+}
 
 pub(super) fn worker_bundle_schema() -> Value {
     let command = json!({
@@ -46,7 +202,7 @@ pub(super) fn worker_bundle_schema() -> Value {
             "timeoutSeconds":{"type":"integer","minimum":1,"maximum":7200}
         }
     });
-    json!({
+    let mut schema = json!({
         "type":"object",
         "additionalProperties":false,
         "description":"Complete self-contained persistent worker bundle. This public schema is authoritative: no external proposal, installer, binding, private source documentation, database inspection, binary inspection, or private endpoint discovery is required. If it cannot express required behavior, report an engine-contract gap instead of probing Tron internals.",
@@ -74,9 +230,15 @@ pub(super) fn worker_bundle_schema() -> Value {
                 "type":"string",
                 "description":"Optional stable direct tool name. Plain names are normalized to the worker_<name> namespace automatically; omit to retain the predecessor name or derive it from the worker name."
             },
+            "modelExposure":{
+                "type":"string",
+                "enum":["direct","internal"],
+                "default":"direct",
+                "description":"Whether this version publishes an ordinary agent model tool. direct is the migration default. internal remains absent from ordinary agent discovery while keeping hooks, triggers, client actions, worker dispatches, authenticated generic invocation, and exact agentTools specialist routing active through the same immutable worker function."
+            },
             "toolInputSchema":{
                 "type":"object",
-                "description":"Optional narrower JSON object schema exposed by this worker's direct model tool. Use it to hide trigger, event, and worker-handoff coordination fields. inputSchema remains authoritative for all runtime inputs, and every direct call is still validated against it before durable admission."
+                "description":"Required JSON object schema for every direct worker model tool. Keep it outcome-oriented and exclude trigger, event, worker-handoff, causal, and storage bookkeeping fields. It is invalid for internal workers. inputSchema remains authoritative for all runtime inputs, and every direct call is still validated against it before durable admission."
             },
             "inputSchema":{
                 "type":"object",
@@ -84,7 +246,7 @@ pub(super) fn worker_bundle_schema() -> Value {
             },
             "outputSchema":{
                 "type":"object",
-                "description":"JSON object schema for typed worker output."
+                "description":format!("JSON object schema for typed worker output.{WORKER_WAKEUP_AUTHORING_CONTRACT}")
             },
             "runner":{
                 "description":"Exactly one durable runner contract.",
@@ -95,7 +257,8 @@ pub(super) fn worker_bundle_schema() -> Value {
                         "properties":{
                             "kind":{"type":"string","enum":["agent"]},
                             "instructions":{"type":"string","minLength":1},
-                            "model":{"type":"string"}
+                            "model":{"type":"string"},
+                            "reasoningLevel":{"type":"string","enum":["none","low","medium","high","x_high","max"]}
                         }
                     },
                     {
@@ -214,7 +377,7 @@ pub(super) fn worker_bundle_schema() -> Value {
                 "type":"array",
                 "uniqueItems":true,
                 "description":ENGINE_HOOK_AUTHORING_CONTRACT,
-                "items":{"type":"string","enum":["context_summary","inbox_context","session_title","worker_relevance"]}
+                "items":{"type":"string","enum":["continuity_context","context_summary","inbox_context","session_organization","session_title","worker_relevance"]}
             },
             "clientActions":{
                 "type":"array",
@@ -226,7 +389,7 @@ pub(super) fn worker_bundle_schema() -> Value {
                 "type":"array",
                 "uniqueItems":true,
                 "description":CLIENT_DELIVERY_AUTHORING_CONTRACT,
-                "items":{"type":"string","enum":["notification_delivery"]}
+                "items":{"type":"string","enum":["notification_delivery","artifact_delivery"]}
             },
             "workerDispatchRoutes":{
                 "type":"array",
@@ -246,8 +409,9 @@ pub(super) fn worker_bundle_schema() -> Value {
             "executionLimits":{
                 "type":"object",
                 "additionalProperties":false,
-                "description":"Optional worker-selected ceilings enforced generically by the kernel. These bound agent turns and direct child worker calls without moving task-specific orchestration policy into the engine.",
+                "description":"Optional worker-selected ceilings enforced generically by the kernel. These bound wall-clock invocation time, agent turns, and direct child worker calls without moving task-specific orchestration policy into the engine.",
                 "properties":{
+                    "maxInvocationSeconds":{"type":"integer","minimum":1,"maximum":7200},
                     "maxAgentTurns":{"type":"integer","minimum":1,"maximum":250},
                     "maxChildInvocations":{"type":"integer","minimum":0,"maximum":256}
                 }
@@ -264,19 +428,7 @@ pub(super) fn worker_bundle_schema() -> Value {
                     }
                 }
             },
-            "presentation":{
-                "type":"object",
-                "additionalProperties":false,
-                "required":["experienceId","contractVersion"],
-                "description":"Optional immutable binding to a supported worker experience. Unknown or unsupported contracts fall back to the generic Worker Console.",
-                "properties":{
-                    "experienceId":{"type":"string","minLength":1},
-                    "contractVersion":{"type":"integer","minimum":1},
-                    "suiteId":{"type":"string","minLength":1},
-                    "componentRole":{"type":"string","minLength":1},
-                    "primary":{"type":"boolean"}
-                }
-            },
+            "presentation":presentation_schema(),
             "routing":{
                 "type":"object","additionalProperties":false,
                 "properties":{
@@ -285,5 +437,7 @@ pub(super) fn worker_bundle_schema() -> Value {
                 }
             }
         }
-    })
+    });
+    schema["properties"]["agentTools"] = agent_tools_schema();
+    schema
 }

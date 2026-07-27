@@ -19,7 +19,8 @@
 //!   retain a parent/per-tool occurrence slot so restart reconstruction replays
 //!   one existing child even if a provider regenerates its transient call id
 //!   or valid arguments. Its concern modules and scenario tests live beside
-//!   that single state owner.
+//!   that single state owner. Current Attention is a derived view of unresolved
+//!   error evidence; informational outcomes remain immutable inbox history.
 
 mod filesystem;
 mod rebuild;
@@ -28,7 +29,7 @@ mod store;
 
 pub(in crate::domains::worker_kernel) use store::{
     NotificationDispatchOutcome, NotificationRefreshDispatch, NotificationTargetDispatch,
-    WorkerStore,
+    SessionOrganizationDispatch, WorkerStore,
 };
 
 pub(crate) use snapshot::{

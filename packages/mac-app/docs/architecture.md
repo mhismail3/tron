@@ -42,6 +42,7 @@ packages/mac-app/
 │   │   ├── MenuBarController.swift # NSStatusItem and window lifecycle
 │   │   ├── Actions/                # Typed menu commands, action handler, and feedback issue action
 │   │   └── Presentation/           # Pure typed-descriptor builder, logs reader, logs window
+│   ├── Operator/                    # Signed, closed Mac Operator actuator boundary
 │   ├── Resources/                  # tracked icons, fonts, and helper/LaunchAgent metadata
 │   │   ├── Fonts/
 │   │   │   └── Exo2-Variable.ttf   # bundled Google Fonts sans face for wizard typography
@@ -148,6 +149,47 @@ not independently maintained resources.
 `LaunchAgentRuntimeInfo` retains only launchd fields consumed by replacement,
 refresh, or status UI policy: PID/uptime, parent bundle identity/version, helper
 executable path, and launch-constraint refresh state.
+
+### Mac Operator signed-host boundary
+
+The ordinary `mac-operator` worker owns outcome interpretation, action
+planning, confirmation policy, semantic verification, and recovery. The
+wrapper contributes only the native seam a worker process cannot safely own:
+Accessibility, Screen Recording, and foreground AppKit/WindowServer identity.
+This is the core delta for the capability; the Rust engine gains no Mac-control
+primitive, store, dispatcher, or semantic policy.
+
+After onboarding, the installed Release wrapper (or isolated-install Debug
+wrapper) creates one `0600` Unix socket inside its own Tron home. Debug
+companion mode never competes for that socket. The socket admits only status,
+visible-application discovery, foreground-window observation, ScreenCaptureKit
+window capture, accessibility press/value assignment, a fixed key set, bounded
+scroll, and a normalized coordinate fallback. The same-user peer check,
+64-KiB request ceiling, 20-second deadline ceiling, exact-key decoding, and
+single serial accept loop form the closed transport boundary.
+
+The actuator retains exactly one observation. Every mutation must name that
+observation and the same foreground bundle/window. Validation resolves the
+current Accessibility-focused window and requires both its AX identity and
+WindowServer number to match, so switching between two still-visible windows
+in the same app invalidates the observation. The observation is consumed
+before actuation, then a fresh observation is returned. Coordinate fallback
+also requires the latest screenshot identity and is invalidated after use.
+Editable values, secure text, process IDs, typed content, socket paths, and
+native errors are excluded from native action evidence. Accessibility tree
+traversal is bounded to 256 elements and ten levels. Screenshot bytes are
+returned only to the invoking worker; the native bridge never writes them to
+disk or its logs.
+
+The menu's **Stop Mac Operator** action increments a native safety generation,
+invalidating pending observations immediately. The host bridge also owns the
+active client descriptor and action task: emergency stop shuts down that
+client, cancels its task, and does not return until it has drained. Only
+**Resume Mac Operator** in the signed native menu can clear that stop; the
+socket protocol deliberately contains no resume operation. Wrapper termination
+stops admission, closes the listener and active client, cancels and drains the
+active task, and removes the socket only after the accept loop exits. Test-host
+mode remains inert and never starts the bridge or asks for a TCC permission.
 
 ### Wizard visual system
 

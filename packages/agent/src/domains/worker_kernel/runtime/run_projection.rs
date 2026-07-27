@@ -875,6 +875,7 @@ mod tests {
             "workerId":"graph-agent",
             "name":"Graph Agent",
             "description":"Exercises authoritative agent-session graph projection",
+            "modelExposure":"internal",
             "inputSchema":{
                 "type":"object","additionalProperties":false,
                 "required":["query"],"properties":{"query":{"type":"string"}}

@@ -150,6 +150,10 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
         false
     );
     assert_eq!(
+        bundle["properties"]["executionLimits"]["properties"]["maxInvocationSeconds"]["maximum"],
+        7200
+    );
+    assert_eq!(
         bundle["properties"]["executionLimits"]["properties"]["maxAgentTurns"]["maximum"],
         250
     );
@@ -161,12 +165,22 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
         bundle["properties"]["toolInputSchema"]["type"],
         json!("object")
     );
+    assert_eq!(
+        bundle["properties"]["modelExposure"]["enum"],
+        json!(["direct", "internal"])
+    );
+    assert_eq!(
+        bundle["properties"]["modelExposure"]["default"],
+        json!("direct")
+    );
     assert!(
         bundle["properties"]["toolInputSchema"]["description"]
             .as_str()
             .unwrap()
-            .contains("narrower")
+            .contains("Required JSON object schema")
     );
+    assert_eq!(bundle["properties"]["agentTools"]["maxItems"], 32);
+    assert_eq!(bundle["properties"]["agentTools"]["uniqueItems"], true);
     assert!(
         bundle["required"]
             .as_array()
@@ -180,6 +194,10 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
             .unwrap()
             .len(),
         3
+    );
+    assert_eq!(
+        bundle["properties"]["runner"]["oneOf"][0]["properties"]["reasoningLevel"]["enum"],
+        json!(["none", "low", "medium", "high", "x_high", "max"])
     );
     assert_eq!(
         bundle["properties"]["triggers"]["items"]["oneOf"]
@@ -219,8 +237,10 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
     assert_eq!(
         bundle["properties"]["engineHooks"]["items"]["enum"],
         json!([
+            "continuity_context",
             "context_summary",
             "inbox_context",
+            "session_organization",
             "session_title",
             "worker_relevance"
         ])
@@ -229,6 +249,12 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
         .as_str()
         .expect("engine hook authoring contract");
     for required_contract in [
+        "continuity_context input is a closed object requiring action:continuity_context",
+        "empty narrative means no continuity should be injected",
+        "supplies the current working-directory identity as project",
+        "session_organization input is a closed object",
+        "sessionOrganizationMutations array(max 16)",
+        "delete and arbitrary tags are not expressible",
         "session_title input is a closed object requiring userPrompt:string(max 4096) and assistantResponse:string(max 4096)",
         "output is a closed object requiring title:string(1..160)",
         "context_summary input is a closed object",
@@ -248,6 +274,29 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
             .as_str()
             .unwrap_or_default()
             .contains("../dependencies/<name>")
+    );
+}
+
+#[test]
+fn continuity_context_is_a_closed_internal_projection_not_model_vocabulary() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let hook = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == CONTINUITY_CONTEXT_FUNCTION)
+        .expect("continuity context contract");
+    assert_eq!(hook.visibility, FunctionVisibility::Internal);
+    let request = hook.request_schema.as_ref().expect("request schema");
+    assert_eq!(request["required"], json!(["query"]));
+    assert_eq!(request["properties"]["query"]["maxLength"], 12000);
+    assert_eq!(request["properties"]["project"]["maxLength"], 2048);
+    assert_eq!(
+        hook.response_schema.as_ref().expect("response schema")["properties"]["narrative"]["maxLength"],
+        6000
+    );
+    assert!(
+        core_primitives()
+            .iter()
+            .all(|primitive| primitive.function_id != CONTINUITY_CONTEXT_FUNCTION)
     );
 }
 
@@ -333,17 +382,20 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
         name: "Round-trip worker".to_owned(),
         description: "Proves inspectable canonical bundles remain valid upsert input.".to_owned(),
         tool_name: None,
+        model_exposure: Default::default(),
         tool_input_schema: Some(json!({
             "type":"object",
             "additionalProperties":false,
             "required":["query"],
             "properties":{"query":{"type":"string"}}
         })),
+        agent_tools: Some(vec!["web_fetch".to_owned()]),
         input_schema: json!({"type":"object"}),
         output_schema: json!({"type":"object"}),
         runner: WorkerRunner::Agent {
             instructions: "Return an object.".to_owned(),
             model: None,
+            reasoning_level: None,
         },
         files: Default::default(),
         dependencies: vec![WorkerDependency {
@@ -371,6 +423,7 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
         presentation: None,
     };
     let mut service_bundle = bundle.clone();
+    service_bundle.agent_tools = None;
     service_bundle.runner = WorkerRunner::Service {
         command: vec!["fixture-service".to_owned()],
         invoke_url: "http://127.0.0.1:9876/invoke".to_owned(),
@@ -382,7 +435,9 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
         input: json!({}),
     }];
     let serialized = serde_json::to_value(bundle).expect("serialize canonical bundle");
+    assert_eq!(serialized["modelExposure"], json!("direct"));
     assert_eq!(serialized["toolInputSchema"]["required"], json!(["query"]));
+    assert_eq!(serialized["agentTools"], json!(["web_fetch"]));
     assert!(
         serialized
             .pointer("/provenance/0")
@@ -409,6 +464,14 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
             ..
         }
     ));
+    let mut legacy = serialized.clone();
+    legacy
+        .as_object_mut()
+        .expect("bundle object")
+        .remove("modelExposure");
+    let decoded_legacy: WorkerBundle =
+        serde_json::from_value(legacy).expect("decode pre-model-exposure bundle");
+    assert!(decoded_legacy.exposes_model_tool());
     let upsert = function_definitions()
         .unwrap()
         .into_iter()
@@ -429,6 +492,186 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
         &json!({"bundle":serialized_service}),
     )
     .expect("serialized service bundle remains valid worker_upsert input");
+}
+
+#[test]
+fn worker_upsert_exposes_only_the_closed_declarative_presentation_vocabulary() {
+    let upsert = function_definitions()
+        .unwrap()
+        .into_iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::upsert")
+        .expect("worker upsert contract");
+    let request_schema = upsert.request_schema.expect("upsert request schema");
+    let presentation = &request_schema["properties"]["bundle"]["properties"]["presentation"];
+    assert_eq!(presentation["properties"]["sections"]["maxItems"], 24);
+    assert_eq!(
+        presentation["properties"]["sections"]["items"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .len(),
+        9
+    );
+    let description = presentation["description"].as_str().unwrap();
+    for forbidden in [
+        "HTML",
+        "JavaScript",
+        "custom native code",
+        "arbitrary client commands",
+        "arbitrary URL schemes",
+    ] {
+        assert!(description.contains(forbidden), "{forbidden}");
+    }
+
+    let canonical_bundle = json!({
+        "schemaVersion":"tron.worker_bundle.v1",
+        "name":"Presentation worker",
+        "description":"Exercises the generic native descriptor.",
+        "inputSchema":{
+            "type":"object","additionalProperties":false,
+            "required":["action"],
+            "properties":{"action":{"type":"string"}}
+        },
+        "outputSchema":{"type":"object"},
+        "runner":{"kind":"agent","instructions":"Return a typed result."},
+        "provenance":[{"source":"test:presentation"}],
+        "presentation":{
+            "experienceId":"generic-workflow",
+            "contractVersion":1,
+            "sections":[
+                {"sectionId":"summary","kind":"text","valuePointer":"/summary"},
+                {
+                    "sectionId":"refresh","kind":"worker_action",
+                    "action":{"actionId":"refresh","label":"Refresh","input":{"action":"refresh"}}
+                }
+            ]
+        }
+    });
+    let function_id = crate::engine::FunctionId::new("worker_kernel::upsert").unwrap();
+    crate::engine::validate_engine_schema_payload(
+        &function_id,
+        "request",
+        &request_schema,
+        &json!({"bundle":canonical_bundle.clone()}),
+    )
+    .expect("closed declarative presentation is admitted");
+
+    for (field, value) in [
+        ("html", json!("<script>unsafe()</script>")),
+        ("javascript", json!("unsafe()")),
+        ("swiftView", json!("UnsafeView")),
+        ("clientCommand", json!("erase_device")),
+    ] {
+        let mut invalid = canonical_bundle.clone();
+        invalid["presentation"]["sections"][0][field] = value;
+        crate::engine::validate_engine_schema_payload(
+            &function_id,
+            "request",
+            &request_schema,
+            &json!({"bundle":invalid}),
+        )
+        .expect_err("undeclared native execution fields must be rejected");
+    }
+
+    let mut unsafe_url = canonical_bundle;
+    unsafe_url["presentation"]["sections"][0] = json!({
+        "sectionId":"source",
+        "kind":"link",
+        "label":"Open source",
+        "url":"javascript:alert(1)"
+    });
+    crate::engine::validate_engine_schema_payload(
+        &function_id,
+        "request",
+        &request_schema,
+        &json!({"bundle":unsafe_url}),
+    )
+    .expect_err("non-HTTPS presentation links must be rejected");
+
+    let runs = function_definitions()
+        .unwrap()
+        .into_iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::runs")
+        .expect("worker runs contract");
+    let run_node_presentation = &runs.response_schema.unwrap()["properties"]["graphs"]["items"]["properties"]
+        ["nodes"]["items"]["properties"]["presentation"]["oneOf"][0];
+    assert_eq!(
+        run_node_presentation["properties"]["sections"]["maxItems"],
+        24
+    );
+    assert_eq!(
+        run_node_presentation["properties"]["sections"]["items"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .len(),
+        9
+    );
+}
+
+#[test]
+fn artifact_delivery_is_closed_and_exact_content_stays_authenticated() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let upsert = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::upsert")
+        .expect("worker upsert contract");
+    let bundle = &upsert.request_schema.as_ref().unwrap()["properties"]["bundle"];
+    assert!(
+        bundle["properties"]["clientDeliveries"]["items"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("artifact_delivery"))
+    );
+    let description = bundle["properties"]["clientDeliveries"]["description"]
+        .as_str()
+        .unwrap();
+    for required in [
+        "worker_result_reference",
+        "current invocation",
+        "RFC 6901",
+        "content-addressed custody",
+    ] {
+        assert!(description.contains(required), "{required}");
+    }
+    for forbidden in ["URLs", "paths", "client commands", "draft mutations"] {
+        assert!(description.contains(forbidden), "{forbidden}");
+    }
+
+    let list = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::artifact_deliveries")
+        .expect("artifact list contract");
+    assert_eq!(list.effect_class, EffectClass::PureRead);
+    assert_eq!(
+        list.request_schema.as_ref().unwrap()["properties"]["limit"]["maximum"],
+        200
+    );
+    assert_eq!(
+        list.response_schema.as_ref().unwrap()["properties"]["nextOffset"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let content = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::artifact_content")
+        .expect("artifact content contract");
+    assert_eq!(content.effect_class, EffectClass::PureRead);
+    assert_eq!(
+        content.response_schema.as_ref().unwrap()["properties"]["artifact"]["properties"]["contentReference"]
+            ["properties"]["kind"]["const"],
+        "artifact_content_reference"
+    );
+    assert_eq!(
+        content.response_schema.as_ref().unwrap()["properties"]["data"]["maxLength"],
+        2_796_204
+    );
+    let delete = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::artifact_delete")
+        .expect("artifact delete contract");
+    assert_eq!(delete.effect_class, EffectClass::IdempotentWrite);
+    assert_eq!(delete.risk_level, RiskLevel::Medium);
 }
 
 #[test]

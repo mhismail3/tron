@@ -74,12 +74,14 @@ enum MainSettingsListLayout {
 enum MainSettingsGridDestination: Hashable, Sendable {
     case engine
     case providers
+    case artifacts
     case app
     case logs
 
     static let order: [Self] = [
         .engine,
         .providers,
+        .artifacts,
         .app,
         .logs,
     ]
@@ -92,6 +94,8 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return MainSettingsLocalCategoryStyle.appIcon
         case .providers:
             return ServerSettingsCategory.providers.icon
+        case .artifacts:
+            return "tray.full"
         case .logs:
             return "doc.text.magnifyingglass"
         }
@@ -105,6 +109,8 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return "App"
         case .providers:
             return ServerSettingsCategory.providers.title
+        case .artifacts:
+            return "Artifacts"
         case .logs:
             return "Logs"
         }
@@ -118,6 +124,8 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return "Appearance and behavior"
         case .providers:
             return ServerSettingsCategory.providers.subtitle
+        case .artifacts:
+            return "Worker-created files"
         case .logs:
             return "Local diagnostics"
         }
@@ -131,6 +139,8 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return "Configure local app settings."
         case .providers:
             return "Configure server-held provider accounts."
+        case .artifacts:
+            return "Review, export, attach, or delete worker-created files."
         case .logs:
             return "Review local diagnostic entries."
         }

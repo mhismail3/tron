@@ -30,14 +30,21 @@ struct SettingsView: View {
     @State var isPreparingFeedback = false
 
     enum SettingsPage: String, Identifiable {
-        case engine, providers, notifications, app
+        case engine, providers, notifications, artifacts, app
         var id: String { rawValue }
     }
 
     @State private var settingsState = SettingsState()
     private let launchServerOnboarding: (PairedServer?) -> Void
+    private let draftSessionId: String?
 
-    init(launchServerOnboarding: @escaping (PairedServer?) -> Void = { ServerOnboardingLauncher.post(prefill: $0) }) {
+    init(
+        draftSessionId: String? = nil,
+        launchServerOnboarding: @escaping (PairedServer?) -> Void = {
+            ServerOnboardingLauncher.post(prefill: $0)
+        }
+    ) {
+        self.draftSessionId = draftSessionId
         self.launchServerOnboarding = launchServerOnboarding
     }
 
@@ -235,6 +242,11 @@ struct SettingsView: View {
             NotificationInboxView(
                 coordinator: dependencies.notificationCoordinator,
                 servers: dependencies.pairedServerStore.servers
+            )
+        case .artifacts:
+            ArtifactInboxView(
+                repository: dependencies.workerKernelRepository,
+                draftSessionId: draftSessionId
             )
         }
     }

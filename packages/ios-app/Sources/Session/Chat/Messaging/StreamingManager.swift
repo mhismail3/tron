@@ -289,6 +289,15 @@ final class StreamingManager {
         flushesSinceLastScroll = 0
     }
 
+    /// Finish projecting any accepted deltas and release the screen-refresh
+    /// resource when the owning chat is no longer mounted. Streaming identity
+    /// remains intact so a transient SwiftUI disappearance does not erase
+    /// recoverable in-flight state.
+    func suspendDisplayUpdates() {
+        flushPendingText()
+        releaseDisplayLink()
+    }
+
     // MARK: - State Queries
 
     var isApproachingLimit: Bool {

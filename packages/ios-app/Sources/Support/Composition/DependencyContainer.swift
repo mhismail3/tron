@@ -63,6 +63,9 @@ final class DependencyContainer {
     /// the database. Empty working-directory default resolution must never bypass it.
     @ObservationIgnored
     private let documentsURL: URL
+    /// App-private actor-owned native notification projection.
+    @ObservationIgnored
+    private let notificationStoreURL: URL
 
     /// Per-server bearer-token storage selected by the composition policy.
     @ObservationIgnored
@@ -76,11 +79,13 @@ final class DependencyContainer {
     lazy var notificationCoordinator: NativeNotificationCoordinator = {
         NativeNotificationCoordinator(
             defaults: pairedServerDefaults,
+            storeURL: notificationStoreURL,
             servers: { [unowned self] in pairedServerStore.servers },
-            activeServer: { [unowned self] in pairedServerStore.activeServer },
-            activeClient: { [unowned self] in engineClient },
-            token: { [unowned self] serverId in
-                pairedServerTokenStore.token(forServerId: serverId)
+            notificationSession: { [unowned self] server, operation in
+                try await withNotificationRepository(
+                    for: server,
+                    operation: operation
+                )
             }
         )
     }()
@@ -198,6 +203,7 @@ final class DependencyContainer {
     ) {
         let pairedServerDefaults = storage.defaults
         let documentsURL = storage.documentsURL
+        let notificationStoreURL = storage.notificationStoreURL
         let db = storage.eventDatabase
         _workingDirectory = AppStorage(
             wrappedValue: "",
@@ -216,6 +222,7 @@ final class DependencyContainer {
         )
         self.pairedServerDefaults = pairedServerDefaults
         self.documentsURL = documentsURL
+        self.notificationStoreURL = notificationStoreURL
         self.runtimeIO = runtimeIO
         pairedServerTokenStore = runtimeIO.pairedServerTokenStore
         pairedServerStore = PairedServerStore(defaults: pairedServerDefaults)
@@ -458,6 +465,50 @@ final class DependencyContainer {
         case .failed: return "failed"
         case .unauthorized: return "unauthorized"
         }
+    }
+
+    /// Lend one narrow notification repository for a bounded server pass.
+    ///
+    /// The native coordinator never receives transport, URL, or credential
+    /// control. The active server reuses its canonical connection; an inactive
+    /// server gets one authenticated short-lived client that this method always
+    /// disconnects before returning.
+    private func withNotificationRepository(
+        for server: PairedServer,
+        operation: NativeNotificationCoordinator.NotificationSessionOperation
+    ) async throws {
+        if pairedServerStore.activeServer?.id == server.id {
+            guard engineClient.connectionState.isConnected else {
+                throw EngineClientError.connectionNotEstablished
+            }
+            try await operation(
+                DefaultNotificationRepository(client: engineClient.notifications)
+            )
+            return
+        }
+
+        guard let bearerToken = pairedServerTokenStore.token(
+            forServerId: server.id
+        ) else {
+            throw EngineClientError.connectionNotEstablished
+        }
+        let client = EngineClient(
+            serverURL: Self.buildServerURL(
+                host: server.host,
+                port: String(server.port)
+            ),
+            bearerTokenProvider: { bearerToken },
+            sessionAttemptDirective: runtimeIO.sessionAttemptDirective
+        )
+        await client.connect()
+        guard client.connectionState.isConnected else {
+            client.disconnect()
+            throw EngineClientError.connectionNotEstablished
+        }
+        defer { client.disconnect() }
+        try await operation(
+            DefaultNotificationRepository(client: client.notifications)
+        )
     }
 
     private func rebuildServerBoundServices(connectAfterSwitch: Bool = false) {

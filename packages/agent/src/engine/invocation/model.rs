@@ -47,6 +47,12 @@ pub struct CausalContext {
     /// Generic agent-turn ceiling selected by the owning immutable worker.
     /// The agent runtime may only tighten its global ceiling with this value.
     worker_max_agent_turns: Option<u32>,
+    /// Exact model-tool names selected by the owning immutable agent worker.
+    ///
+    /// This is trusted provider-surface custody, not semantic authority.
+    /// Absence preserves the migration surface; an explicit empty vector
+    /// projects no callable model tools.
+    worker_agent_tools: Option<Vec<String>>,
     /// Provider/model tool-call id that originated this engine invocation.
     ///
     /// This is transient observation metadata used to correlate live progress
@@ -78,6 +84,7 @@ impl CausalContext {
             origin_worker_invocation_id: None,
             origin_worker_tool_ordinal: None,
             worker_max_agent_turns: None,
+            worker_agent_tools: None,
             model_tool_invocation_id: None,
             advertised_function_revision: None,
             advertised_worker_version: None,
@@ -180,6 +187,19 @@ impl CausalContext {
     #[must_use]
     pub fn worker_max_agent_turns(&self) -> Option<u32> {
         self.worker_max_agent_turns
+    }
+
+    /// Restrict a delegated agent worker to exact model-tool names.
+    #[must_use]
+    pub fn with_worker_agent_tools(mut self, tools: Vec<String>) -> Self {
+        self.worker_agent_tools = Some(tools);
+        self
+    }
+
+    /// Read the immutable worker's exact provider tool allowlist.
+    #[must_use]
+    pub fn worker_agent_tools(&self) -> Option<&[String]> {
+        self.worker_agent_tools.as_deref()
     }
 
     /// Preserve the originating provider/model tool-call id for live

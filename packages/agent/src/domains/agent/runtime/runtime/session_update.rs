@@ -136,6 +136,8 @@ fn load_session_update_event_once(
     let (last_user_prompt, last_assistant_response) = preview.map_or((None, None), |preview| {
         (preview.last_user_prompt, preview.last_assistant_response)
     });
+    let (labels, organization_group) =
+        crate::domains::session::event_store::session_organization_from_tags(&session.tags);
 
     Ok(Some(TronEvent::SessionUpdated {
         base: BaseEvent::now(session_id),
@@ -156,6 +158,10 @@ fn load_session_update_event_once(
         last_assistant_response,
         parent_session_id: session.parent_session_id,
         activity_lines: Some(activity_lines),
+        labels: Some(labels),
+        organization_group,
+        organization_changed: Some(true),
+        is_archived: Some(session.ended_at.is_some()),
     }))
 }
 

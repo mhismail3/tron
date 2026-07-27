@@ -117,6 +117,47 @@ final class WorkerKernelClient: EngineDomainClient {
         )
     }
 
+    func artifactDeliveries(
+        limit: UInt16 = 100,
+        offset: UInt64 = 0
+    ) async throws -> WorkerArtifactPageDTO {
+        try await invokeRead(
+            "worker_kernel::artifact_deliveries",
+            WorkerArtifactListRequestDTO(
+                limit: min(max(limit, 1), 200),
+                offset: offset
+            )
+        )
+    }
+
+    func artifactContent(
+        workerId: String,
+        artifactId: String
+    ) async throws -> WorkerArtifactContentDTO {
+        try await invokeRead(
+            "worker_kernel::artifact_content",
+            WorkerArtifactIdentityRequestDTO(
+                workerId: workerId,
+                artifactId: artifactId
+            )
+        )
+    }
+
+    func deleteArtifact(
+        workerId: String,
+        artifactId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerArtifactDeleteDTO {
+        try await invokeWrite(
+            "worker_kernel::artifact_delete",
+            WorkerArtifactIdentityRequestDTO(
+                workerId: workerId,
+                artifactId: artifactId
+            ),
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func invokeWorker(
         workerId: String,
         input: AnyCodable,

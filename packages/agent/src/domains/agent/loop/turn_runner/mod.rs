@@ -21,7 +21,7 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `provider_phase` | Resolve the live surface, attach worker inbox context, persist the request audit, and open the provider stream |
+//! | `provider_phase` | Resolve the live surface, concurrently project bounded worker inbox and continuity context, persist the request audit, and open the provider stream |
 //! | `stream_phase` | Journal and consume the provider stream, including durable failure and cancellation terminalization |
 //! | `tool_phase` | Execute a provider-requested tool batch and persist its lifecycle |
 //! | `persistence` | Build and commit assistant/turn protocol rows |

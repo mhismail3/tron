@@ -426,3 +426,33 @@ fn size_budget_runs_safe_retention_and_checkpoint_without_dropping_audit_refs() 
         .unwrap();
     assert_eq!(audit_refs, 1);
 }
+
+#[test]
+fn binary_owner_read_verifies_exact_content_identity() {
+    let connection = Connection::open_in_memory().unwrap();
+    let payload = b"artifact bytes";
+    let stored = store_owned_payload_ref(
+        &connection,
+        payload,
+        &StorePayloadOptions::new("worker_artifact", "artifact-1", "content", "user_artifact")
+            .with_inline_threshold(0),
+    )
+    .unwrap();
+    assert!(stored.payload_blob_id.is_some());
+    assert_eq!(
+        resolve_owned_payload_bytes(&connection, "worker_artifact", "artifact-1", "content")
+            .unwrap(),
+        payload
+    );
+    connection
+        .execute(
+            "UPDATE storage_payload_refs SET payload_hash='tampered'
+             WHERE owner_kind='worker_artifact'",
+            [],
+        )
+        .unwrap();
+    assert!(
+        resolve_owned_payload_bytes(&connection, "worker_artifact", "artifact-1", "content")
+            .is_err()
+    );
+}

@@ -1,7 +1,7 @@
 //! Durable worker orchestration.
 //!
 //! [`WorkerRuntime`] is the single mutable coordinator for activation,
-//! invocation, lifecycle, dispatch, direct-tool projection, and resident
+//! invocation, lifecycle, dispatch, public/internal worker-tool projection, and resident
 //! supervision. The concern modules below extend that one coordinator without
 //! duplicating state. `support` owns stateless bounded I/O, artifact integrity,
 //! projection, normalization, and redaction. Scenario tests live in `tests`.
@@ -21,7 +21,9 @@
 //! child even when provider ids or valid arguments change, and waits for its
 //! typed terminal result instead of duplicating it. `invocation` owns
 //! claimed delivery, concurrency, progress phases, and terminal completion so
-//! detachment never becomes a second execution path.
+//! detachment never becomes a second execution path. A claimed delivery cannot
+//! release its process-local owner while its durable status is still running;
+//! shutdown and orphan recovery interrupt and requeue the same invocation.
 //! `result` owns generic artifact-style references for large validated worker
 //! outputs plus bounded, causally authorized JSON reads. Task-specific result
 //! interpretation remains in workers.
@@ -29,8 +31,16 @@
 //! labels; raw child content remains in its canonical audit session.
 //! `client_actions` selects the current healthy worker for narrow native
 //! capture/presentation seams without creating a second execution path.
+//! `hooks` selects one immutable healthy owner and joins the ordinary durable
+//! invocation. Pure relevance/inbox selection derives short-lived exact-input
+//! idempotency from canonical JSON; session- and trace-bound hooks preserve
+//! their causal key. It owns neither a result cache nor a second execution
+//! path.
 //! `notifications` drains the durable worker-to-client outbox through APNs;
 //! provider acceptance is evidence, never a human-delivery receipt.
+//! Closed self-wakeup output queues only the same immutable worker version at
+//! its worker-selected future time, reusing this dispatcher and invocation
+//! ledger instead of introducing another timer or job subsystem.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -60,6 +70,7 @@ use support::*;
 
 mod activation;
 mod admission;
+mod artifacts;
 pub(super) use admission::ModelToolInvocationOutcome;
 pub(crate) use admission::WorkerInputContractError;
 mod client_actions;
@@ -75,6 +86,7 @@ mod run_projection;
 mod run_projection_format;
 mod secrets;
 mod session;
+mod session_organization;
 mod support;
 mod worker_dispatches;
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
@@ -194,6 +206,7 @@ pub struct WorkerRuntime {
     stopped: AtomicBool,
     shutting_down: AtomicBool,
     notification_maintenance_ticks: AtomicUsize,
+    session_organization_maintenance_ticks: AtomicUsize,
     notification_configuration_revision: Mutex<Option<String>>,
     http: reqwest::Client,
     notification_transport: super::notifications::transport::NotificationTransport,
@@ -245,6 +258,7 @@ impl WorkerRuntime {
             stopped: AtomicBool::new(stopped),
             shutting_down: AtomicBool::new(false),
             notification_maintenance_ticks: AtomicUsize::new(0),
+            session_organization_maintenance_ticks: AtomicUsize::new(0),
             notification_configuration_revision: Mutex::new(None),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(MAX_INVOCATION_SECONDS))
@@ -271,10 +285,15 @@ impl WorkerRuntime {
         relevance_query: Option<&str>,
     ) -> Result<Value, String> {
         let session_id = session_id.unwrap_or("engine-dashboard");
-        let surface =
-            super::surface::resolve_tool_surface(&self.host, session_id, relevance_query, None)
-                .await?
-                .snapshot;
+        let surface = super::surface::resolve_tool_surface(
+            &self.host,
+            session_id,
+            relevance_query,
+            None,
+            None,
+        )
+        .await?
+        .snapshot;
         let fixed_tools = super::surface::fixed_tool_inventory(&self.host, &surface).await?;
         Ok(json!({
             "dispatchStopped": self.store.stop_all()?,

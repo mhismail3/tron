@@ -36,6 +36,9 @@ pub(super) async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Val
         let Ok(active) = deps.runtime.store().load_active(&worker.worker_id) else {
             continue;
         };
+        if !active.bundle.exposes_model_tool() {
+            continue;
+        }
         let Ok(evidence) = deps.runtime.store().success_evidence(&worker.worker_id) else {
             continue;
         };
@@ -161,7 +164,9 @@ fn project_inspection(mut inspection: Value, detail: &str) -> Result<Value, Stri
                         | "name"
                         | "description"
                         | "toolName"
+                        | "modelExposure"
                         | "toolInputSchema"
+                        | "agentTools"
                         | "inputSchema"
                         | "outputSchema"
                         | "runner"
@@ -193,7 +198,9 @@ mod tests {
             "bundle":{
                 "schemaVersion":"worker.bundle.v1",
                 "workerId":"research",
+                "modelExposure":"direct",
                 "toolInputSchema":{"type":"object","required":["query"]},
+                "agentTools":["web_fetch"],
                 "inputSchema":{"type":"object"},
                 "outputSchema":{"type":"object"},
                 "runner":{"kind":"command"},
@@ -221,6 +228,8 @@ mod tests {
             projected["bundle"]["toolInputSchema"]["required"],
             json!(["query"])
         );
+        assert_eq!(projected["bundle"]["modelExposure"], "direct");
+        assert_eq!(projected["bundle"]["agentTools"], json!(["web_fetch"]));
         assert_eq!(projected["bundle"]["inputSchema"]["type"], "object");
 
         let full = project_inspection(inspection, "full").unwrap();
@@ -228,5 +237,59 @@ mod tests {
         assert!(full["audit"].is_array());
         assert!(full["healthHistory"].is_array());
         assert!(full["bundle"]["files"].is_array());
+    }
+
+    #[tokio::test]
+    async fn model_facing_discovery_omits_internal_workers() {
+        let home = tempfile::tempdir().unwrap();
+        let (_context, runtime) =
+            crate::shared::server::test_support::make_test_context_and_worker_runtime_at(
+                home.path(),
+                None,
+            );
+        for (worker_id, exposure) in [
+            ("direct-discovery", "direct"),
+            ("internal-hook", "internal"),
+        ] {
+            let mut bundle = json!({
+                "schemaVersion":"tron.worker_bundle.v1",
+                "workerId":worker_id,
+                "name":worker_id,
+                "description":format!("Discover {worker_id}"),
+                "modelExposure":exposure,
+                "inputSchema":{"type":"object"},
+                "outputSchema":{"type":"object"},
+                "runner":{"kind":"command","command":["python3","-c","print('{}')"]},
+                "provenance":[{"source":"test:discovery"}]
+            });
+            if exposure == "direct" {
+                bundle["toolInputSchema"] = json!({"type":"object"});
+            }
+            let bundle = serde_json::from_value(bundle).unwrap();
+            runtime.upsert(bundle, None).await.unwrap();
+        }
+        let invocation = Invocation::new_sync(
+            crate::engine::FunctionId::new("worker_kernel::discover").unwrap(),
+            json!({"query":"discover"}),
+            crate::engine::CausalContext::new(
+                crate::engine::ActorId::new("agent:discovery-test").unwrap(),
+                crate::engine::ActorKind::Agent,
+                crate::engine::TraceId::new("trace-discovery-test").unwrap(),
+            )
+            .with_session_id("session-discovery-test"),
+        );
+
+        let result = discover(&invocation, &Deps { runtime }).await.unwrap();
+        let workers = result["workers"].as_array().unwrap();
+        assert!(
+            workers
+                .iter()
+                .any(|worker| worker["worker"]["workerId"] == "direct-discovery")
+        );
+        assert!(
+            workers
+                .iter()
+                .all(|worker| worker["worker"]["workerId"] != "internal-hook")
+        );
     }
 }

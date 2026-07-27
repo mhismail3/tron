@@ -1,6 +1,27 @@
 use super::*;
 
 #[tokio::test]
+async fn activation_rejects_agent_tool_names_outside_the_live_model_catalog() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = command_bundle(vec!["true".to_owned()]);
+    bundle.worker_id = Some("closed-agent".to_owned());
+    bundle.name = "Closed Agent".to_owned();
+    bundle.runner = WorkerRunner::Agent {
+        instructions: "Return an object.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    bundle.agent_tools = Some(vec!["arbitrary_device_control".to_owned()]);
+
+    let error = runtime.upsert(bundle, None).await.unwrap_err();
+    assert_eq!(
+        error,
+        "agentTools contains model tools unavailable at activation: arbitrary_device_control"
+    );
+    assert!(runtime.store().summary("closed-agent").unwrap().is_none());
+}
+
+#[tokio::test]
 async fn enqueue_and_await_compose_long_work_without_blocking_admission() {
     let (runtime, _home) = test_runtime(None);
     let bundle = command_bundle(vec![
@@ -32,6 +53,51 @@ async fn enqueue_and_await_compose_long_work_without_blocking_admission() {
     assert!(!timed_out);
     assert_eq!(completed.status, "completed");
     assert_eq!(completed.output, Some(json!({"mode":"parallel"})));
+}
+
+#[tokio::test]
+async fn identical_reverification_reuses_one_immutable_version() {
+    let (runtime, home) = test_runtime(None);
+    let bundle = command_bundle(vec!["cat".to_owned()]);
+
+    let first = runtime.upsert(bundle.clone(), None).await.unwrap();
+    let second = runtime.upsert(bundle, None).await.unwrap();
+
+    assert_eq!(second.worker.worker_id, first.worker.worker_id);
+    assert_eq!(second.version, first.version);
+    assert!(!second.created);
+    let versions = std::fs::read_dir(
+        home.path()
+            .join("workspace/workers")
+            .join(&first.worker.worker_id)
+            .join("versions"),
+    )
+    .unwrap()
+    .collect::<Result<Vec<_>, _>>()
+    .unwrap();
+    assert_eq!(
+        versions.len(),
+        1,
+        "reverification timestamps belong in health history, not content identity"
+    );
+    let verification: Value = serde_json::from_slice(
+        &std::fs::read(versions[0].path().join("verification.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        verification.get("verifiedAt").is_none(),
+        "immutable verification evidence must remain deterministic"
+    );
+    assert_eq!(
+        runtime.store().inspect(&first.worker.worker_id).unwrap()["healthHistory"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry["source"] == "activation")
+            .count(),
+        2,
+        "each successful activation still needs timestamped operational evidence"
+    );
 }
 
 #[tokio::test]
@@ -567,6 +633,78 @@ async fn direct_tool_uses_narrow_schema_while_internal_invocation_keeps_full_sch
             .unwrap()
             .unwrap()
             .enabled
+    );
+}
+
+#[tokio::test]
+async fn internal_exposure_hides_from_agents_but_retains_exact_catalog_routing() {
+    let (runtime, _home) = test_runtime(None);
+    let command = vec![
+        "python3".to_owned(),
+        "-c".to_owned(),
+        "import json,sys; print(json.dumps(json.load(sys.stdin)))".to_owned(),
+    ];
+    let direct = command_bundle(command);
+    let direct_outcome = runtime.upsert(direct.clone(), None).await.unwrap();
+    let function_id = FunctionId::new(format!(
+        "worker_kernel::dynamic_{}",
+        direct_outcome.worker.worker_id
+    ))
+    .unwrap();
+    runtime
+        .host
+        .inspect_function(&function_id, &system_actor())
+        .await
+        .expect("direct worker tool is registered");
+
+    let mut internal = direct;
+    internal.worker_id = Some(direct_outcome.worker.worker_id.clone());
+    internal.model_exposure = crate::domains::worker_kernel::types::WorkerModelExposure::Internal;
+    internal.tool_input_schema = None;
+    internal.provenance[0].revision = Some("2".to_owned());
+    let internal_outcome = runtime.upsert(internal, None).await.unwrap();
+
+    let ordinary_agent = crate::engine::ActorContext::new(
+        ActorId::new("agent:ordinary-surface").unwrap(),
+        ActorKind::Agent,
+    );
+    assert!(
+        runtime
+            .host
+            .inspect_function(&function_id, &ordinary_agent)
+            .await
+            .is_err(),
+        "internal worker must remain absent from ordinary agent discovery"
+    );
+    let internal_definition = runtime
+        .host
+        .inspect_function(&function_id, &system_actor())
+        .await
+        .expect("engine retains the internal worker function");
+    assert_eq!(internal_definition.visibility, FunctionVisibility::Internal);
+    assert_eq!(
+        internal_definition.request_schema,
+        Some(json!({"type":"object"})),
+        "internal worker function uses the complete invocation schema"
+    );
+    let invoked = runtime
+        .invoke(request(
+            &internal_outcome.worker.worker_id,
+            json!({"still":"callable"}),
+            "internal-generic-invocation",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invoked.status, "completed");
+    assert_eq!(invoked.output, Some(json!({"still":"callable"})));
+    assert_eq!(
+        runtime
+            .store()
+            .load_active(&internal_outcome.worker.worker_id)
+            .unwrap()
+            .bundle
+            .model_exposure,
+        crate::domains::worker_kernel::types::WorkerModelExposure::Internal
     );
 }
 

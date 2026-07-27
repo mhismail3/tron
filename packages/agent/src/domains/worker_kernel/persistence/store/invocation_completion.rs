@@ -3,8 +3,9 @@
 use rusqlite::params;
 use serde_json::{Value, json};
 
-use super::invocations::COMPLETED_ENGINE_HOOK_CONTEXT_ATTACHED_SQL;
+use super::inbox::COMPLETED_ENGINE_HOOK_CONTEXT_ATTACHED_SQL;
 use super::*;
+use crate::domains::worker_kernel::session_organization::PreparedSessionOrganizationIntent;
 
 impl WorkerStore {
     pub fn complete_invocation(
@@ -14,12 +15,25 @@ impl WorkerStore {
         result: Result<&Value, &str>,
     ) -> Result<InvocationRecord, String> {
         match result {
-            Ok(output) => {
-                self.complete_invocation_with_effects(invocation_id, worker_id, output, &[], &[])
-            }
-            Err(error) => {
-                self.complete_invocation_inner(invocation_id, worker_id, Err(error), &[], &[])
-            }
+            Ok(output) => self.complete_invocation_with_effects(
+                invocation_id,
+                worker_id,
+                output,
+                &[],
+                &[],
+                &[],
+                None,
+            ),
+            Err(error) => self.complete_invocation_inner(
+                invocation_id,
+                worker_id,
+                Err(error),
+                &[],
+                &[],
+                &[],
+                None,
+                None,
+            ),
         }
     }
 
@@ -37,6 +51,8 @@ impl WorkerStore {
             output,
             notification_intents,
             &[],
+            &[],
+            None,
         )
     }
 
@@ -46,14 +62,42 @@ impl WorkerStore {
         worker_id: &str,
         output: &Value,
         notification_intents: &[crate::domains::worker_kernel::notifications::NotificationIntent],
+        artifact_intents: &[ArtifactIntent],
         worker_dispatches: &[PreparedWorkerDispatch],
+        worker_wakeup: Option<&PreparedWorkerWakeup>,
+    ) -> Result<InvocationRecord, String> {
+        self.complete_invocation_with_effects_and_session_organization(
+            invocation_id,
+            worker_id,
+            output,
+            notification_intents,
+            artifact_intents,
+            worker_dispatches,
+            worker_wakeup,
+            None,
+        )
+    }
+
+    pub(in crate::domains::worker_kernel) fn complete_invocation_with_effects_and_session_organization(
+        &self,
+        invocation_id: &str,
+        worker_id: &str,
+        output: &Value,
+        notification_intents: &[crate::domains::worker_kernel::notifications::NotificationIntent],
+        artifact_intents: &[ArtifactIntent],
+        worker_dispatches: &[PreparedWorkerDispatch],
+        worker_wakeup: Option<&PreparedWorkerWakeup>,
+        session_organization: Option<&PreparedSessionOrganizationIntent>,
     ) -> Result<InvocationRecord, String> {
         self.complete_invocation_inner(
             invocation_id,
             worker_id,
             Ok(output),
             notification_intents,
+            artifact_intents,
             worker_dispatches,
+            worker_wakeup,
+            session_organization,
         )
     }
 
@@ -63,7 +107,10 @@ impl WorkerStore {
         worker_id: &str,
         result: Result<&Value, &str>,
         notification_intents: &[crate::domains::worker_kernel::notifications::NotificationIntent],
+        artifact_intents: &[ArtifactIntent],
         worker_dispatches: &[PreparedWorkerDispatch],
+        worker_wakeup: Option<&PreparedWorkerWakeup>,
+        session_organization: Option<&PreparedSessionOrganizationIntent>,
     ) -> Result<InvocationRecord, String> {
         let mut connection = self.connection()?;
         let tx = connection
@@ -177,6 +224,15 @@ impl WorkerStore {
                 notification_intents,
                 &completed_at,
             )?;
+            Self::insert_artifacts(
+                &tx,
+                invocation_id,
+                worker_id,
+                &worker_version,
+                &trace_id,
+                artifact_intents,
+                &completed_at,
+            )?;
             Self::insert_worker_dispatches(
                 &tx,
                 invocation_id,
@@ -186,6 +242,25 @@ impl WorkerStore {
                 causal_depth,
                 origin_session_id.as_deref(),
                 worker_dispatches,
+                &completed_at,
+            )?;
+            if let Some(wakeup) = worker_wakeup {
+                Self::insert_self_wakeup(
+                    &tx,
+                    invocation_id,
+                    worker_id,
+                    &worker_version,
+                    wakeup,
+                    &completed_at,
+                )?;
+            }
+            Self::insert_session_organization_intent(
+                &tx,
+                invocation_id,
+                worker_id,
+                &worker_version,
+                &trace_id,
+                session_organization,
                 &completed_at,
             )?;
         }
@@ -199,5 +274,100 @@ impl WorkerStore {
         tx.commit().map_err(|error| error.to_string())?;
         self.invocation(invocation_id)?
             .ok_or_else(|| "completed worker invocation disappeared".to_owned())
+    }
+
+    fn insert_self_wakeup(
+        transaction: &rusqlite::Transaction<'_>,
+        source_invocation_id: &str,
+        worker_id: &str,
+        worker_version: &str,
+        wakeup: &PreparedWorkerWakeup,
+        created_at: &str,
+    ) -> Result<(), String> {
+        let target_invocation_id = format!("worker_run_{}", uuid::Uuid::now_v7());
+        let trace_id = format!("worker-wakeup-{}", uuid::Uuid::now_v7());
+        let internal_idempotency_key = format!("self_wakeup:{}", wakeup.deduplication_key);
+        let inserted = transaction
+            .execute(
+                "INSERT OR IGNORE INTO worker_invocations(
+                    invocation_id,worker_id,worker_version,status,input_json,
+                    idempotency_key,trace_id,causal_depth,trigger_kind,
+                    origin_session_id,interaction_mode,detached_at,
+                    created_at,not_before,wake_source_invocation_id
+                 )
+                 VALUES (?1,?2,?3,'queued',?4,?5,?6,0,'self_wakeup',
+                    NULL,'background',?7,?7,?8,?9)",
+                params![
+                    target_invocation_id,
+                    worker_id,
+                    worker_version,
+                    serde_json::to_string(&wakeup.input).map_err(|error| error.to_string())?,
+                    internal_idempotency_key,
+                    trace_id,
+                    created_at,
+                    wakeup.not_before,
+                    source_invocation_id,
+                ],
+            )
+            .map_err(|error| format!("admit durable worker self-wakeup: {error}"))?;
+        if inserted == 0 {
+            insert_audit(
+                transaction,
+                worker_id,
+                "self_wakeup_deduplicated",
+                &json!({
+                    "sourceInvocationId":source_invocation_id,
+                    "deduplicationKey":wakeup.deduplication_key,
+                    "notBefore":wakeup.not_before,
+                }),
+            )?;
+            return Ok(());
+        }
+        upsert_causal_trace(
+            transaction,
+            &trace_id,
+            Some(&target_invocation_id),
+            0,
+            false,
+        )?;
+        transaction
+            .execute(
+                "INSERT INTO worker_trace_deliveries(
+                    trace_id,worker_id,trigger_kind,idempotency_key,invocation_id,created_at
+                 ) VALUES (?1,?2,'self_wakeup',?3,?4,?5)",
+                params![
+                    trace_id,
+                    worker_id,
+                    internal_idempotency_key,
+                    target_invocation_id,
+                    created_at,
+                ],
+            )
+            .map_err(|error| format!("record durable worker self-wakeup delivery: {error}"))?;
+        insert_run_event(
+            transaction,
+            &target_invocation_id,
+            WorkerRunStage::Queued,
+            "Queued for a durable self-wakeup",
+            created_at,
+        )?;
+        insert_run_event(
+            transaction,
+            &target_invocation_id,
+            WorkerRunStage::Detached,
+            "Waiting for its durable wake time",
+            created_at,
+        )?;
+        insert_audit(
+            transaction,
+            worker_id,
+            "self_wakeup_scheduled",
+            &json!({
+                "sourceInvocationId":source_invocation_id,
+                "targetInvocationId":target_invocation_id,
+                "deduplicationKey":wakeup.deduplication_key,
+                "notBefore":wakeup.not_before,
+            }),
+        )
     }
 }

@@ -399,6 +399,10 @@ async fn worker_first_baseline_characterizes_startup_tools_events_settings_and_c
                     "description": "Echo typed input for the startup characterization fixture",
                     "toolName": "worker_baseline_echo",
                     "inputSchema": {"type":"object"},
+                    "toolInputSchema": {
+                        "type": "object",
+                        "additionalProperties": false
+                    },
                     "outputSchema": {"type":"object"},
                     "runner": {"kind":"command", "command":["sh", "-c", "cat"]},
                     "triggers": [{"kind":"manual", "id":"manual"}],

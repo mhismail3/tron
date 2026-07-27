@@ -156,6 +156,24 @@ struct SessionInfoTests {
         let info = makeSessionInfo(parentSessionId: nil)
         #expect(info.isFork == false)
     }
+
+    @Test("canonical labels and group decode without an organizer shadow model")
+    func organizationProjectionDecodes() throws {
+        let data = Data("""
+        {
+          "sessionId":"sess-organized",
+          "model":"model",
+          "createdAt":"2026-07-27T00:00:00Z",
+          "messageCount":2,
+          "isActive":false,
+          "labels":["Work","Follow Up"],
+          "organizationGroup":"Projects"
+        }
+        """.utf8)
+        let info = try JSONDecoder().decode(SessionInfo.self, from: data)
+        #expect(info.labels == ["Work", "Follow Up"])
+        #expect(info.organizationGroup == "Projects")
+    }
 }
 
 @Suite("SessionCreateParams encoding")

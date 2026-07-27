@@ -172,6 +172,12 @@ pub struct DirectWorkerToolContract {
     pub worker_id: String,
     /// Human-readable worker name.
     pub worker_name: String,
+    /// Canonical bundle description used for worker retrieval.
+    ///
+    /// Provider-facing function descriptions may append immutable runtime
+    /// instructions and evidence; semantic routing must never ingest that
+    /// transport text.
+    pub worker_description: String,
     /// Immutable active content version.
     pub worker_version: String,
     /// Runner implementation used by the active worker version.

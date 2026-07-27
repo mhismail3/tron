@@ -2,6 +2,8 @@
 
 use super::*;
 
+const ORPHANED_DELIVERY_REASON: &str = "claimed worker delivery lost its in-process owner";
+
 impl WorkerRuntime {
     pub(super) async fn run_dispatcher(self: &Arc<Self>, cancellation: CancellationToken) {
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
@@ -15,18 +17,73 @@ impl WorkerRuntime {
                         if self.execution_stop.lock().await.is_cancelled() {
                             *self.execution_stop.lock().await = CancellationToken::new();
                         }
+                        self.reconcile_orphaned_invocations(true).await;
                         self.dispatch_resident_supervision(&mut runs);
                         self.dispatch_queued(&mut runs).await;
                         self.dispatch_schedules(&mut runs).await;
                         self.dispatch_events(&mut runs).await;
                         self.dispatch_notifications(&mut runs).await;
+                        self.dispatch_session_organization(&mut runs).await;
                     }
                 }
                 Some(_) = runs.join_next(), if !runs.is_empty() => {}
             }
         }
-        runs.abort_all();
         self.shutdown().await;
+        runs.abort_all();
+        while runs.join_next().await.is_some() {}
+        self.inflight.clear();
+        self.reconcile_orphaned_invocations(false).await;
+    }
+
+    pub(super) async fn reconcile_orphaned_invocations(&self, record_attention: bool) {
+        let Ok(running) =
+            self.store
+                .runs_filtered_page_exact(None, Some("running"), None, None, None, 128, 0)
+        else {
+            return;
+        };
+        for invocation in running {
+            if self.inflight.contains(&invocation.invocation_id) {
+                continue;
+            }
+            let Ok(requeued) = self
+                .store
+                .interrupt_running_invocation(&invocation.invocation_id, ORPHANED_DELIVERY_REASON)
+            else {
+                continue;
+            };
+            if record_attention
+                && let Ok(count) = self
+                    .store
+                    .interrupted_attempt_count(&invocation.worker_id, ORPHANED_DELIVERY_REASON)
+            {
+                if count == 3 {
+                    let _ = self.store.record_system_inbox(
+                        &invocation.worker_id,
+                        "orphan_recovery",
+                        &json!({
+                            "status":"failed",
+                            "phase":"orphan_recovery",
+                            "error":"Worker delivery ownership was recovered repeatedly",
+                            "recoveryCount":count,
+                        }),
+                    );
+                }
+            }
+            self.publish_event(
+                "worker.invocations",
+                json!({
+                    "action":"queued",
+                    "invocationId":requeued.invocation_id,
+                    "workerId":requeued.worker_id,
+                    "causalDepth":requeued.causal_depth,
+                    "recoveredOwnership":true,
+                }),
+                TraceId::new(requeued.trace_id.clone()).ok(),
+            )
+            .await;
+        }
     }
 
     pub(super) async fn dispatch_queued(self: &Arc<Self>, runs: &mut JoinSet<()>) {

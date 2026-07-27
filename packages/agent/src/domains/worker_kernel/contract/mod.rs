@@ -28,15 +28,17 @@ Create or improve a persistent worker in one atomic validate, test, activate ope
 Canonical authoring protocol: (1) use worker_discover, worker_list, or worker_inspect only when existing-worker context is useful; semantic overlap is also checked during upsert; \
 (2) design the complete typed bundle from this public operation schema, including runner, triggers, named-secret bindings, provenance, smoke tests, and health checks; \
 (3) author and exercise source in a temporary directory with the public host tools, then pass sourceDirectory instead of echoing files into the call; \
-(4) call worker_upsert once to import, validate, dependency-lock, smoke-test, atomically publish, activate, and project the direct tool; \
+(4) call worker_upsert once to import, validate, dependency-lock, smoke-test, atomically publish, activate, and, when modelExposure is direct, project the direct tool; \
 (5) use the returned worker id/version and public worker tools to verify behavior. \
-Use inputSchema for the complete runtime contract. When triggers, events, or worker handoffs need internal coordination fields, add a narrower toolInputSchema so the direct model tool exposes only human-facing inputs. \
+Use modelExposure=direct only for an intuitive ordinary agent-facing capability and always declare a narrow, outcome-oriented toolInputSchema without internal coordination fields. Use modelExposure=internal for hook, trigger, client-action, worker-dispatch, or exact agentTools specialist owners that should not advertise an ordinary model tool. inputSchema always remains the complete runtime contract. \
+For sparse background work, a worker may explicitly declare and emit one closed workerWakeup object to durably invoke the same immutable version at its next useful time; do not add a short periodic trigger merely to poll for work. \
 This operation description and request schema are the complete authoritative authoring contract. Never inspect or modify Tron databases, auth stores, binaries, runtime files, lock files, or private server endpoints to infer schemas, activate a worker, or discover hidden steps. \
 If a required behavior is absent from the public contract, report a concrete engine-contract gap instead of guessing or probing internals. Inspect external sources and user workspace data only when they are inputs to the worker's useful behavior. \
 Imported source is published as non-executable text: command runners and smoke/health commands use exact argv without shell parsing, start in files/, and must invoke scripts through an explicit interpreter such as python3 or bash. They read typed JSON from stdin and emit JSON on stdout. \
 A fetched dependency <name> is available at ../dependencies/<name>; its optional install command runs inside that dependency directory first. A dependency may omit checksum; worker_upsert fetches it and seals the actual digest into the immutable bundle. \
 Engine-event input supplies typed defaults; matching top-level event payload keys declared by inputSchema override them. bundle.engineHooks contains the complete authoritative engine-hook contracts.";
 pub(crate) const ENGINE_SURFACE_SNAPSHOT_FUNCTION: &str = "engine::surface_snapshot";
+pub(crate) const CONTINUITY_CONTEXT_FUNCTION: &str = "worker_kernel::continuity_context";
 pub(crate) const CONTEXT_SUMMARY_FUNCTION: &str = "worker_kernel::context_summary";
 pub(crate) const CONTEXT_SUMMARY_MAX_ESTIMATED_TOKENS: usize = 10_000;
 pub(crate) const CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES: usize = 40_000;
@@ -241,6 +243,47 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         "Read one logical notification and its sanitized per-installation APNs evidence. APNs acceptance is not represented as human delivery.",
     )?);
     specs.push(spec(
+        "worker_kernel::artifact_deliveries",
+        EffectClass::PureRead,
+        RiskLevel::Low,
+        json!({
+            "type":"object","additionalProperties":false,
+            "properties":{
+                "limit":{"type":"integer","minimum":1,"maximum":200},
+                "offset":{"type":"integer","minimum":0,"maximum":1000000}
+            }
+        }),
+        "Read a bounded page of content-addressed native artifacts and immutable source trace metadata.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::artifact_content",
+        EffectClass::PureRead,
+        RiskLevel::Low,
+        json!({
+            "type":"object","additionalProperties":false,
+            "required":["workerId","artifactId"],
+            "properties":{
+                "workerId":{"type":"string","minLength":1,"maxLength":128},
+                "artifactId":{"type":"string","minLength":1,"maxLength":128}
+            }
+        }),
+        "Read exact integrity-verified base64 content for one native artifact.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::artifact_delete",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Medium,
+        json!({
+            "type":"object","additionalProperties":false,
+            "required":["workerId","artifactId"],
+            "properties":{
+                "workerId":{"type":"string","minLength":1,"maxLength":128},
+                "artifactId":{"type":"string","minLength":1,"maxLength":128}
+            }
+        }),
+        "Explicitly delete one native artifact and its content custody. Artifacts are never removed by normal diagnostic retention.",
+    )?);
+    specs.push(spec(
         "worker_kernel::session_set_title",
         EffectClass::IdempotentWrite,
         RiskLevel::Medium,
@@ -414,7 +457,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         EffectClass::PureRead,
         RiskLevel::Low,
         json!({"type":"object","additionalProperties":false,"properties":{"workerId":{"type":"string"},"contextAttached":{"type":"boolean"},"severity":{"type":"string","enum":["info","error"]},"attentionOnly":{"type":"boolean","default":false},"limit":{"type":"integer","minimum":1,"maximum":20},"offset":{"type":"integer","minimum":0},"detail":{"type":"string","enum":["summary","full"],"default":"summary"}}}),
-        "Read a bounded page of durable worker delivery records. Filter by whether a result was attached to later agent context, severity, or the high-signal attention projection. Attention includes unresolved failures plus pending non-manual background outcomes. A later verified healthy activation or rollback resolves older failures without deleting them from this audit ledger; merely enabling a failed worker does not. Routine successful manual-result copies remain available only in the unfiltered audit ledger. Omit workerId to query the entire profile; continue with nextOffset when present. Compact summaries are the default; explicit full detail is bounded to 20 records and 8 KiB per result.",
+        "Read a bounded page of durable worker delivery records. Filter by whether a result was attached to later agent context, severity, or the high-signal attention projection. Attention contains unresolved failures and setup blockers, never successful informational history. Exact bounded timeouts from the deterministic-fallback worker-relevance and inbox-context hooks remain failed audit history without becoming current Attention or future agent context; malformed output and every other hook failure remain actionable. A later verified healthy activation or rollback resolves older failures without deleting them from this audit ledger; merely enabling a failed worker does not. Successful outcomes remain available in the unfiltered audit ledger and may separately be eligible for one-time relevant agent context. Omit workerId to query the entire profile; continue with nextOffset when present. Compact summaries are the default; explicit full detail is bounded to 20 records and 8 KiB per result.",
     )?);
     specs.push(spec(
         "worker_kernel::runs",
@@ -515,6 +558,38 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         .description(
             "Return authoritative fixed-tool, selected-worker, and engine worker inventory for authenticated clients.",
         )
+        .build()?,
+    );
+    specs.push(
+        FunctionContract::new(
+            CONTINUITY_CONTEXT_FUNCTION,
+            WORKER,
+            EffectClass::ExternalSideEffect,
+            RiskLevel::Medium)
+        .visibility(FunctionVisibility::Internal)
+        .request_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["query"],
+            "properties":{
+                "query":{"type":"string","minLength":1,"maxLength":12000},
+                "project":{"type":"string","minLength":1,"maxLength":2048},
+                "originWorkerId":{"type":"string"}
+            }
+        }))
+        .response_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["handled"],
+            "properties":{
+                "handled":{"type":"boolean"},
+                "workerId":{"type":"string"},
+                "workerVersion":{"type":"string"},
+                "narrative":{"type":"string","maxLength":6000}
+            }
+        }))
+        .idempotency(IdempotencyContract::session())
+        .description("Recall bounded project-first continuity through the active worker-owned memory policy. Missing, empty, or failed recall adds no provider context.")
         .build()?,
     );
     specs.push(

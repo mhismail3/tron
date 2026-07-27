@@ -214,6 +214,59 @@ pub fn owned_payload_ref(
     .context("failed to load owned payload ref")
 }
 
+/// Resolve exact bytes through one explicit durable owner.
+///
+/// Binary domains force blob custody by setting an inline threshold of zero
+/// when storing. This read verifies owner metadata, blob metadata, decoded
+/// size, and content hash before returning bytes.
+pub fn resolve_owned_payload_bytes(
+    conn: &Connection,
+    owner_kind: &str,
+    owner_id: &str,
+    field_name: &str,
+) -> Result<Vec<u8>> {
+    let owner = owned_payload_ref(conn, owner_kind, owner_id, field_name)?.with_context(|| {
+        format!("payload owner {owner_kind}/{owner_id}/{field_name} is missing")
+    })?;
+    let blob_id = owner
+        .payload_blob_id
+        .as_deref()
+        .context("binary payload owner has no blob custody")?;
+    let (content, compression, original_size, blob_hash, mime_type): (
+        Vec<u8>,
+        String,
+        i64,
+        String,
+        String,
+    ) = conn
+        .query_row(
+            "SELECT content,compression,uncompressed_size,hash,mime_type
+             FROM blobs WHERE id=?1",
+            params![blob_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .with_context(|| format!("failed to load payload blob {blob_id}"))?;
+    if blob_hash != owner.payload_hash
+        || mime_type != owner.payload_kind
+        || usize::try_from(original_size).unwrap_or(usize::MAX) != owner.payload_size_bytes
+    {
+        anyhow::bail!("payload blob metadata does not match its durable owner");
+    }
+    let decoded = decode_blob_content(&content, &compression, original_size)?;
+    if decoded.len() != owner.payload_size_bytes || hex_sha256(&decoded) != owner.payload_hash {
+        anyhow::bail!("payload blob content failed size or SHA-256 verification");
+    }
+    Ok(decoded)
+}
+
 /// Remove every payload owned by one logical record and repair blob refcounts.
 ///
 /// The caller owns the surrounding transaction when deletion must be atomic

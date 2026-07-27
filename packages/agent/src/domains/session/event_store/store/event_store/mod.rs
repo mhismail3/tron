@@ -22,10 +22,15 @@ mod auxiliary;
 mod event_log;
 mod locking;
 mod logs;
+mod organization;
 mod session_lifecycle;
 mod state;
 
 pub use logs::{ClientLogEntry, ClientLogIngestResult, LogEntry, LogSessionFilter, RecentLogQuery};
+pub use organization::{
+    SESSION_ORGANIZATION_GROUP_TAG_PREFIX, SessionOrganizationArchiveAction,
+    SessionOrganizationMutation, SessionOrganizationSnapshot, session_organization_from_tags,
+};
 
 /// Result of creating a new session.
 #[derive(Debug)]

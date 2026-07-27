@@ -280,6 +280,17 @@ impl WorkerRuntime {
     ) -> Result<(), String> {
         let active = self.store.load_active(worker_id)?;
         self.refresh_worker_surface_evidence(worker_id).await?;
+        let (visibility, request_schema) = if active.bundle.exposes_model_tool() {
+            (
+                FunctionVisibility::Public,
+                active.bundle.effective_tool_input_schema().clone(),
+            )
+        } else {
+            (
+                FunctionVisibility::Internal,
+                active.bundle.input_schema.clone(),
+            )
+        };
         let provenance = active
             .bundle
             .provenance
@@ -304,12 +315,12 @@ impl WorkerRuntime {
             function_id,
             WorkerId::new("worker_kernel").map_err(|error| error.to_string())?,
             model_description,
-            FunctionVisibility::Public,
+            visibility,
             EffectClass::ExternalSideEffect,
         )
         .with_risk(RiskLevel::High)
         .with_idempotency(IdempotencyContract::session())
-        .with_request_schema(active.bundle.effective_tool_input_schema().clone())
+        .with_request_schema(request_schema)
         .with_response_schema(json!({
             "anyOf":[
                 active.bundle.output_schema.clone(),
@@ -342,6 +353,7 @@ impl WorkerRuntime {
             worker: Some(DirectWorkerToolContract {
                 worker_id: active.summary.worker_id,
                 worker_name: active.summary.name,
+                worker_description: active.summary.description,
                 worker_version: active.summary.active_version,
                 runner_kind: active.summary.runner_kind,
                 updated_at: active.summary.updated_at,

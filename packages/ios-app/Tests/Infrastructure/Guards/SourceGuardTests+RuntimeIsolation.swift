@@ -275,7 +275,12 @@ extension SourceGuardTests {
         #expect(runtime.contains("pairedServerTokenStore: PairedServerTokenStore()"))
         #expect(runtime.contains("makePairingProbe: { URLSessionPairingProbe() }"))
         #expect(container.contains("private let runtimeIO: DependencyContainerRuntimeIO"))
-        #expect(occurrences(of: "sessionAttemptDirective: runtimeIO.sessionAttemptDirective", in: container) == 2)
+        #expect(
+            occurrences(
+                of: "sessionAttemptDirective: runtimeIO.sessionAttemptDirective",
+                in: container
+            ) == 3
+        )
         #expect(container.contains("pairedServerTokenStore = runtimeIO.pairedServerTokenStore"))
         #expect(container.contains("lazy var pairingProbe: any PairingProbing = runtimeIO.makePairingProbe()"))
         #expect(fixture.contains("sessionAttemptDirective: { [attemptRecorder] request in"))

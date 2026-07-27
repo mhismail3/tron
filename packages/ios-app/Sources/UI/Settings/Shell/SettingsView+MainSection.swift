@@ -98,7 +98,7 @@ extension SettingsView {
         switch destination {
         case .engine, .app, .logs:
             return true
-        case .providers:
+        case .providers, .artifacts:
             return serverSettingsReady
         }
     }
@@ -120,6 +120,8 @@ extension SettingsView {
             activePage = .app
         case .providers:
             activePage = .providers
+        case .artifacts:
+            activePage = .artifacts
         case .logs:
             showLogViewer = true
         }

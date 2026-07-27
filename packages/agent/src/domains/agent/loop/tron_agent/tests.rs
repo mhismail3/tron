@@ -213,6 +213,12 @@ impl ModelResponder for PersistentAdaptationResponder {
                     "name":"Model Authored Recent Research",
                     "description":"Reusable recent research synthesized from the referenced upstream method",
                     "toolName":TOOL,
+                    "toolInputSchema":{
+                        "type":"object",
+                        "required":["query"],
+                        "properties":{"query":{"type":"string"}},
+                        "additionalProperties":false
+                    },
                     "inputSchema":{
                         "type":"object",
                         "required":["query"],

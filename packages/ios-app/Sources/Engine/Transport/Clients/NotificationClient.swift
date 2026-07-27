@@ -3,6 +3,11 @@ import Foundation
 /// Closed authenticated client for native notification registration, inbox
 /// synchronization, fixed responses, and sanitized delivery evidence.
 final class NotificationClient: EngineDomainClient {
+    /// Notification background work must never inherit the ordinary unbounded
+    /// UI lifetime. Connection establishment has its own bounded open budget;
+    /// every protocol operation owns this independent deadline.
+    nonisolated static let requestTimeout: TimeInterval = 8
+
     func upsertDevice(
         _ registration: NotificationDeviceUpsertDTO,
         idempotencyKey: EngineIdempotencyKey
@@ -10,7 +15,8 @@ final class NotificationClient: EngineDomainClient {
         try await invokeWrite(
             "worker_kernel::notification_device_upsert",
             registration,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            timeout: Self.requestTimeout
         )
     }
 
@@ -21,7 +27,8 @@ final class NotificationClient: EngineDomainClient {
         try await invokeWrite(
             "worker_kernel::notification_device_disable",
             ["installationId": installationId],
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            timeout: Self.requestTimeout
         )
     }
 
@@ -36,7 +43,8 @@ final class NotificationClient: EngineDomainClient {
                 cursor: cursor,
                 limit: min(max(limit, 1), 200),
                 unreadOnly: unreadOnly
-            )
+            ),
+            timeout: Self.requestTimeout
         )
     }
 
@@ -47,14 +55,16 @@ final class NotificationClient: EngineDomainClient {
         try await invokeWrite(
             "worker_kernel::notification_delivery_acknowledge",
             response,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            timeout: Self.requestTimeout
         )
     }
 
     func status(deliveryId: String) async throws -> NotificationDeliveryStatusDTO {
         try await invokeRead(
             "worker_kernel::notification_delivery_status",
-            NotificationDeliveryStatusRequestDTO(deliveryId: deliveryId)
+            NotificationDeliveryStatusRequestDTO(deliveryId: deliveryId),
+            timeout: Self.requestTimeout
         )
     }
 }

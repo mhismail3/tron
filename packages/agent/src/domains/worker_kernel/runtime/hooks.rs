@@ -8,6 +8,7 @@
 use super::*;
 
 const MAX_ENGINE_HOOK_SECONDS: u64 = 60;
+const ENGINE_HOOK_CACHE_WINDOW_SECONDS: i64 = 30;
 
 pub(crate) struct EngineHookExecution {
     pub(crate) worker_id: String,
@@ -152,14 +153,18 @@ impl WorkerRuntime {
         let Some(worker) = self.active_engine_hook(hook, origin_worker_id)? else {
             return Ok(None);
         };
+        let idempotency_key = engine_hook_invocation_key(
+            hook,
+            &worker.summary.active_version,
+            &input,
+            chrono::Utc::now().timestamp(),
+            invocation.causal_context.idempotency_key.as_deref(),
+            invocation.id.as_str(),
+        );
         let queued = self.enqueue_and_dispatch(InvokeRequest {
             worker_id: worker.summary.worker_id.clone(),
             input,
-            idempotency_key: invocation
-                .causal_context
-                .idempotency_key
-                .clone()
-                .unwrap_or_else(|| format!("engine-hook:{}:{}", hook.as_str(), invocation.id)),
+            idempotency_key,
             trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
             causal_depth: invocation.causal_context.trigger_depth(),
             trigger_kind: format!("engine_hook:{}", hook.as_str()),
@@ -183,7 +188,7 @@ impl WorkerRuntime {
         .await
     }
 
-    fn active_engine_hook(
+    pub(super) fn active_engine_hook(
         &self,
         hook: WorkerEngineHook,
         excluded_worker_id: Option<&str>,
@@ -199,5 +204,171 @@ impl WorkerRuntime {
             }
         }
         Ok(None)
+    }
+}
+
+fn engine_hook_invocation_key(
+    hook: WorkerEngineHook,
+    worker_version: &str,
+    input: &Value,
+    unix_seconds: i64,
+    causal_key: Option<&str>,
+    invocation_id: &str,
+) -> String {
+    if matches!(
+        hook,
+        WorkerEngineHook::WorkerRelevance | WorkerEngineHook::InboxContext
+    ) {
+        return engine_hook_cache_key(hook, worker_version, input, unix_seconds);
+    }
+    causal_key
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("engine-hook:{}:{invocation_id}", hook.as_str()))
+}
+
+/// Reuse the ordinary durable invocation ledger as a tiny result cache only
+/// for pure ranking/selection hooks. Session- or trace-bound hooks retain their
+/// causal key because their result may own effects outside the typed output.
+fn engine_hook_cache_key(
+    hook: WorkerEngineHook,
+    worker_version: &str,
+    input: &Value,
+    unix_seconds: i64,
+) -> String {
+    let mut canonical_input = String::new();
+    write_canonical_json(input, &mut canonical_input);
+    let window = unix_seconds.div_euclid(ENGINE_HOOK_CACHE_WINDOW_SECONDS);
+    let digest = Sha256::digest(
+        format!(
+            "{}\n{worker_version}\n{window}\n{canonical_input}",
+            hook.as_str()
+        )
+        .as_bytes(),
+    );
+    format!("engine-hook-cache:{}", hex::encode(digest))
+}
+
+fn write_canonical_json(value: &Value, output: &mut String) {
+    match value {
+        Value::Null => output.push_str("null"),
+        Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+        Value::Number(value) => output.push_str(&value.to_string()),
+        Value::String(value) => {
+            output.push_str(&serde_json::to_string(value).expect("JSON strings always serialize"));
+        }
+        Value::Array(values) => {
+            output.push('[');
+            for (index, value) in values.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                write_canonical_json(value, output);
+            }
+            output.push(']');
+        }
+        Value::Object(values) => {
+            output.push('{');
+            let mut keys = values.keys().collect::<Vec<_>>();
+            keys.sort_unstable();
+            for (index, key) in keys.into_iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(
+                    &serde_json::to_string(key).expect("JSON object keys always serialize"),
+                );
+                output.push(':');
+                write_canonical_json(
+                    values.get(key).expect("key came from the same JSON object"),
+                    output,
+                );
+            }
+            output.push('}');
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn semantic_hook_cache_key_is_exact_canonical_versioned_and_short_lived() {
+        let input = json!({"query":"compiler","candidates":[{"workerId":"research"}]});
+        let reordered =
+            serde_json::from_str(r#"{"candidates":[{"workerId":"research"}],"query":"compiler"}"#)
+                .unwrap();
+        let key = engine_hook_cache_key(WorkerEngineHook::WorkerRelevance, "version-a", &input, 60);
+        assert_eq!(
+            key,
+            engine_hook_cache_key(
+                WorkerEngineHook::WorkerRelevance,
+                "version-a",
+                &reordered,
+                89,
+            )
+        );
+        assert_ne!(
+            key,
+            engine_hook_cache_key(
+                WorkerEngineHook::WorkerRelevance,
+                "version-a",
+                &json!({"query":"different","candidates":[{"workerId":"research"}]}),
+                60,
+            )
+        );
+        assert_ne!(
+            key,
+            engine_hook_cache_key(WorkerEngineHook::WorkerRelevance, "version-b", &input, 60,)
+        );
+        assert_ne!(
+            key,
+            engine_hook_cache_key(WorkerEngineHook::WorkerRelevance, "version-a", &input, 90,)
+        );
+    }
+
+    #[test]
+    fn session_and_trace_bound_hooks_preserve_causal_idempotency() {
+        let input = json!({"userPrompt":"Question","assistantResponse":"Answer"});
+        assert_eq!(
+            engine_hook_invocation_key(
+                WorkerEngineHook::SessionTitle,
+                "version-a",
+                &input,
+                60,
+                Some("session-title:session-a"),
+                "invocation-a",
+            ),
+            "session-title:session-a"
+        );
+        assert_ne!(
+            engine_hook_invocation_key(
+                WorkerEngineHook::SessionTitle,
+                "version-a",
+                &input,
+                60,
+                None,
+                "invocation-a",
+            ),
+            engine_hook_invocation_key(
+                WorkerEngineHook::SessionTitle,
+                "version-a",
+                &input,
+                60,
+                None,
+                "invocation-b",
+            )
+        );
+        assert_eq!(
+            engine_hook_invocation_key(
+                WorkerEngineHook::ContextSummary,
+                "version-a",
+                &json!({"messages":[]}),
+                60,
+                Some("compaction:trace-a"),
+                "invocation-c",
+            ),
+            "compaction:trace-a"
+        );
     }
 }

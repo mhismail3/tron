@@ -169,6 +169,10 @@ pub(crate) async fn switch_model(params: Option<&Value>, deps: &Deps) -> Result<
             last_assistant_response: None,
             parent_session_id: session.parent_session_id.clone(),
             activity_lines: None,
+            labels: None,
+            organization_group: None,
+            organization_changed: None,
+            is_archived: None,
         },
     );
 

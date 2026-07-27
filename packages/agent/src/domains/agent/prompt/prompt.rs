@@ -318,6 +318,9 @@ fn trusted_agent_internal_child_context(
     if let Some(max_turns) = parent.worker_max_agent_turns() {
         context = context.with_worker_max_agent_turns(max_turns);
     }
+    if let Some(agent_tools) = parent.worker_agent_tools() {
+        context = context.with_worker_agent_tools(agent_tools.to_vec());
+    }
     context
 }
 
@@ -412,7 +415,8 @@ mod tests {
             )
             .with_session_id("worker-child")
             .with_origin_worker_invocation_id("worker_run_parent")
-            .with_worker_max_agent_turns(7),
+            .with_worker_max_agent_turns(7)
+            .with_worker_agent_tools(vec!["web_fetch".to_owned()]),
         );
 
         let child = trusted_agent_internal_child_context(&parent, "agent::prompt_apply");
@@ -425,6 +429,10 @@ mod tests {
             Some("worker_run_parent")
         );
         assert_eq!(child.worker_max_agent_turns(), Some(7));
+        assert_eq!(
+            child.worker_agent_tools(),
+            Some(["web_fetch".to_owned()].as_slice())
+        );
     }
 
     #[test]

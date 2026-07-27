@@ -11,6 +11,30 @@ import UIKit
 @MainActor
 struct ChatViewModelLifecycleTests {
 
+    @Test("Mounted chat teardown drains queued UI work and releases frame resources")
+    func testMountedTeardownReleasesTransientResources() {
+        let engineClient = EngineClient(
+            serverURL: URL(string: "ws://localhost:8080/engine")!
+        )
+        let viewModel = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "mounted-resource-test"
+        )
+
+        viewModel.streamingManager.handleTextDelta("accepted delta")
+        viewModel.uiUpdateQueue.enqueueTextDelta(
+            .init(delta: "queued delta", totalLength: 12)
+        )
+        #expect(viewModel.uiUpdateQueue.pendingCount == 1)
+        #expect(viewModel.streamingManager.hasInstalledDisplayLink)
+
+        viewModel.deactivateMountedResources()
+
+        #expect(viewModel.uiUpdateQueue.pendingCount == 0)
+        #expect(!viewModel.streamingManager.hasInstalledDisplayLink)
+        #expect(viewModel.streamingManager.streamingText == "accepted delta")
+    }
+
     @Test("Session tasks release their owning view model")
     func testSessionTasksReleaseOwner() async {
         let mockURL = URL(string: "ws://localhost:8080/engine")!

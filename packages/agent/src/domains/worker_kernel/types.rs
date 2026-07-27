@@ -29,13 +29,28 @@ pub struct WorkerBundle {
     pub description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
-    /// Optional narrower schema projected to the model-facing direct tool.
+    /// Whether this worker publishes an ordinary model-facing tool.
+    ///
+    /// Omitted legacy bundles remain direct. Internal workers retain every
+    /// invocation path and one system-visible catalog function for exact
+    /// agent-runner allowlists, but remain absent from ordinary agent surfaces.
+    #[serde(default)]
+    pub model_exposure: WorkerModelExposure,
+    /// Required narrow schema projected by newly activated direct workers.
     ///
     /// `input_schema` remains authoritative for every runtime source,
     /// including triggers and worker handoffs. This projection keeps
-    /// engine-owned coordination fields out of ordinary model calls.
+    /// engine-owned coordination fields out of ordinary model calls. `Option`
+    /// remains only so already-active migration bundles can still load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_input_schema: Option<Value>,
+    /// Exact model-tool names available inside this agent-runner's sessions.
+    ///
+    /// Absence preserves the migration surface. An explicit empty array gives
+    /// the agent runner no callable tools. The kernel filters provider
+    /// projection only; it does not interpret why the worker needs a tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_tools: Option<Vec<String>>,
     #[serde(default = "object_schema")]
     pub input_schema: Value,
     #[serde(default = "object_schema")]
@@ -95,6 +110,10 @@ pub struct WorkerBundle {
 }
 
 impl WorkerBundle {
+    pub(crate) const fn exposes_model_tool(&self) -> bool {
+        matches!(self.model_exposure, WorkerModelExposure::Direct)
+    }
+
     pub(crate) fn effective_tool_input_schema(&self) -> &Value {
         self.tool_input_schema
             .as_ref()
@@ -102,10 +121,27 @@ impl WorkerBundle {
     }
 }
 
-/// Worker-selected ceilings enforced by the generic agent runner.
+/// Ordinary model-surface policy for one immutable worker version.
+///
+/// This is intentionally not an authority grant: internal workers can still
+/// run through declared hooks, client actions, worker dispatches, triggers,
+/// authenticated generic invocation, and exact agent-runner allowlists.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerModelExposure {
+    #[default]
+    Direct,
+    Internal,
+}
+
+/// Worker-selected ceilings enforced by the generic runtime.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkerExecutionLimits {
+    /// Maximum wall-clock seconds for one claimed invocation across every
+    /// runner kind. Omitted versions retain the kernel's global ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_invocation_seconds: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_agent_turns: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -114,7 +150,9 @@ pub struct WorkerExecutionLimits {
 
 impl WorkerExecutionLimits {
     fn is_default(&self) -> bool {
-        self.max_agent_turns.is_none() && self.max_child_invocations.is_none()
+        self.max_invocation_seconds.is_none()
+            && self.max_agent_turns.is_none()
+            && self.max_child_invocations.is_none()
     }
 }
 
@@ -171,8 +209,11 @@ pub struct WorkerRunEvent {
     pub occurred_at: String,
 }
 
-/// Minimal immutable worker-experience identity used before the generalized
-/// declarative presentation descriptor exists.
+/// Immutable worker experience plus an optional closed native presentation.
+///
+/// Sections bind only to bounded RFC 6901 reads of the owning invocation's
+/// durable result. Actions invoke the same immutable worker through its
+/// ordinary typed input contract; they cannot select client commands.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkerPresentation {
@@ -184,6 +225,65 @@ pub struct WorkerPresentation {
     pub component_role: Option<String>,
     #[serde(default)]
     pub primary: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<WorkerPresentationSection>,
+}
+
+/// Closed native component vocabulary for generic worker result rendering.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerPresentationSectionKind {
+    Text,
+    Status,
+    Progress,
+    Table,
+    List,
+    Link,
+    Artifact,
+    Confirmation,
+    WorkerAction,
+}
+
+/// One bounded column projected from each object in a table result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerPresentationColumn {
+    pub label: String,
+    pub value_pointer: String,
+}
+
+/// One immutable same-worker invocation exposed by a native action.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerPresentationAction {
+    pub action_id: String,
+    pub label: String,
+    pub input: Value,
+}
+
+/// One declarative section rendered by generic clients.
+///
+/// The kind determines which optional fields are legal; bundle validation
+/// rejects incomplete or cross-kind combinations before publication.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerPresentationSection {
+    pub section_id: String,
+    pub kind: WorkerPresentationSectionKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_pointer: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub columns: Vec<WorkerPresentationColumn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<WorkerPresentationAction>,
 }
 
 /// Semantic policy seams that may be implemented by normal workers.
@@ -194,8 +294,10 @@ pub struct WorkerPresentation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerEngineHook {
+    ContinuityContext,
     ContextSummary,
     InboxContext,
+    SessionOrganization,
     SessionTitle,
     WorkerRelevance,
 }
@@ -203,8 +305,10 @@ pub enum WorkerEngineHook {
 impl WorkerEngineHook {
     pub const fn all() -> &'static [Self] {
         &[
+            Self::ContinuityContext,
             Self::ContextSummary,
             Self::InboxContext,
+            Self::SessionOrganization,
             Self::SessionTitle,
             Self::WorkerRelevance,
         ]
@@ -212,8 +316,10 @@ impl WorkerEngineHook {
 
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::ContinuityContext => "continuity_context",
             Self::ContextSummary => "context_summary",
             Self::InboxContext => "inbox_context",
+            Self::SessionOrganization => "session_organization",
             Self::SessionTitle => "session_title",
             Self::WorkerRelevance => "worker_relevance",
         }
@@ -253,12 +359,14 @@ impl WorkerClientAction {
 #[serde(rename_all = "snake_case")]
 pub enum WorkerClientDelivery {
     NotificationDelivery,
+    ArtifactDelivery,
 }
 
 impl WorkerClientDelivery {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::NotificationDelivery => "notification_delivery",
+            Self::ArtifactDelivery => "artifact_delivery",
         }
     }
 }
@@ -298,6 +406,12 @@ pub enum WorkerRunner {
         instructions: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        #[serde(
+            default,
+            rename = "reasoningLevel",
+            skip_serializing_if = "Option::is_none"
+        )]
+        reasoning_level: Option<String>,
     },
     Command {
         command: Vec<String>,

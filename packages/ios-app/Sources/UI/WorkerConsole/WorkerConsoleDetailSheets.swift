@@ -181,6 +181,10 @@ struct WorkerRunDetailSheet: View {
                                 invocationId: graph.requestedInvocationId
                             )
                         }
+                        WorkerRunDeclarativePresentationView(
+                            graph: graph,
+                            repository: dependencies.workerKernelRepository
+                        )
                         WorkerRunActionBar(
                             graph: graph,
                             isMutating: isMutating,

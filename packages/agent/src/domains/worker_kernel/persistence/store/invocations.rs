@@ -1,41 +1,6 @@
-//! Durable invocation, attempt, trace, inbox, success, and audit ledgers.
+//! Durable invocation, attempt, trace, success, and audit ledgers.
 
 use super::*;
-
-const MAX_INBOX_CONTEXT_CANDIDATES: u32 = 200;
-
-// INVARIANT: attention is a live projection over immutable evidence. A
-// successful activation or rollback is verified recovery; merely toggling an
-// existing failed worker back on is not. Resolved errors remain in the inbox
-// audit and invocation ledger but cannot stay in operator Attention or be
-// injected into a later agent context.
-const UNRESOLVED_INBOX_ERROR_SQL: &str = "
-    i.severity='error'
-    AND NOT EXISTS (
-        SELECT 1
-        FROM worker_health recovery
-        WHERE recovery.worker_id=i.worker_id
-          AND recovery.status='healthy'
-          AND recovery.source IN ('activation','rollback')
-          AND recovery.recorded_at>i.created_at
-    )
-";
-
-// INVARIANT: a successful engine hook is synchronously consumed by the engine
-// boundary that invoked it. Its inbox row remains immutable audit evidence, but
-// it is born attached so the same policy output cannot later surface as
-// unrelated background context. Hook failures remain pending Attention.
-pub(super) const COMPLETED_ENGINE_HOOK_CONTEXT_ATTACHED_SQL: &str = "
-    CASE
-        WHEN ?4='info'
-         AND COALESCE(
-            (SELECT trigger_kind FROM worker_invocations WHERE invocation_id=?2),
-            ''
-         ) LIKE 'engine_hook:%'
-        THEN 1
-        ELSE 0
-    END
-";
 
 impl WorkerStore {
     #[cfg(test)]
@@ -377,6 +342,109 @@ impl WorkerStore {
         Ok(changed == 1)
     }
 
+    /// Terminalize the current delivery attempt and return the same invocation
+    /// to the durable queue.
+    ///
+    /// This is used only when runtime ownership disappears before a typed
+    /// result can be committed. Domain retry policy remains inside the worker;
+    /// the kernel merely preserves at-least-once delivery evidence.
+    pub fn interrupt_running_invocation(
+        &self,
+        invocation_id: &str,
+        reason: &str,
+    ) -> Result<InvocationRecord, String> {
+        validate_runtime_identifier(invocation_id, "invocation id", 256)?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("start worker interruption recovery: {error}"))?;
+        let current = transaction
+            .query_row(
+                "SELECT worker_id,status FROM worker_invocations WHERE invocation_id=?1",
+                [invocation_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|error| format!("load interrupted worker invocation: {error}"))?
+            .ok_or_else(|| format!("worker invocation '{invocation_id}' was not found"))?;
+        if current.1 != "running" {
+            drop(transaction);
+            return self
+                .invocation(invocation_id)?
+                .ok_or_else(|| "worker invocation disappeared during interruption".to_owned());
+        }
+        let interrupted_at = chrono::Utc::now().to_rfc3339();
+        transaction
+            .execute(
+                "UPDATE worker_attempts
+                 SET status='interrupted',completed_at=?2,error=?3
+                 WHERE invocation_id=?1 AND status='running'",
+                params![invocation_id, interrupted_at, reason],
+            )
+            .map_err(|error| format!("interrupt worker delivery attempt: {error}"))?;
+        transaction
+            .execute(
+                "UPDATE worker_invocations
+                 SET status='queued',started_at=NULL,agent_session_id=NULL
+                 WHERE invocation_id=?1 AND status='running'",
+                [invocation_id],
+            )
+            .map_err(|error| format!("requeue interrupted worker invocation: {error}"))?;
+        transaction
+            .execute(
+                "UPDATE worker_dispatches SET state='queued'
+                 WHERE target_invocation_id=?1 AND state='running'",
+                [invocation_id],
+            )
+            .map_err(|error| format!("requeue interrupted worker dispatch: {error}"))?;
+        insert_run_event(
+            &transaction,
+            invocation_id,
+            WorkerRunStage::Interrupted,
+            "Delivery ownership ended before a durable terminal result",
+            &interrupted_at,
+        )?;
+        insert_run_event(
+            &transaction,
+            invocation_id,
+            WorkerRunStage::Queued,
+            "Queued for durable redelivery after interruption",
+            &interrupted_at,
+        )?;
+        insert_audit(
+            &transaction,
+            &current.0,
+            "invocation_interrupted",
+            &json!({"invocationId":invocation_id,"reason":reason}),
+        )?;
+        transaction
+            .commit()
+            .map_err(|error| format!("commit worker interruption recovery: {error}"))?;
+        self.invocation(invocation_id)?
+            .ok_or_else(|| "requeued worker invocation disappeared".to_owned())
+    }
+
+    /// Count immutable interrupted-attempt evidence for one worker and reason.
+    ///
+    /// Runtime recovery uses this instead of process-local counters so repeated
+    /// ownership loss remains visible across engine restarts.
+    pub fn interrupted_attempt_count(&self, worker_id: &str, reason: &str) -> Result<u32, String> {
+        validate_runtime_identifier(worker_id, "worker id", 256)?;
+        self.connection()?
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM worker_attempts attempt
+                 JOIN worker_invocations invocation
+                   ON invocation.invocation_id=attempt.invocation_id
+                 WHERE invocation.worker_id=?1
+                   AND attempt.status='interrupted'
+                   AND attempt.error=?2",
+                params![worker_id, reason],
+                |row| row.get::<_, u32>(0),
+            )
+            .map_err(|error| format!("count interrupted worker attempts: {error}"))
+    }
+
     pub fn set_agent_session_id(
         &self,
         invocation_id: &str,
@@ -493,17 +561,24 @@ impl WorkerStore {
     }
 
     pub fn queued_invocations(&self, limit: u32) -> Result<Vec<InvocationRecord>, String> {
+        let now = chrono::Utc::now().to_rfc3339();
         let connection = self.connection()?;
         let mut statement = connection
             .prepare(&format!(
                 "{} JOIN workers w ON w.worker_id=worker_invocations.worker_id
                      WHERE worker_invocations.status='queued' AND w.enabled=1 AND w.retired=0
-                     ORDER BY worker_invocations.created_at LIMIT ?1",
+                       AND (
+                         worker_invocations.not_before IS NULL
+                         OR worker_invocations.not_before<=?1
+                       )
+                     ORDER BY worker_invocations.created_at LIMIT ?2",
                 invocation_select_base()
             ))
             .map_err(|error| error.to_string())?;
         statement
-            .query_map([limit.min(1_000)], |row| row_invocation(&connection, row))
+            .query_map(params![now, limit.min(1_000)], |row| {
+                row_invocation(&connection, row)
+            })
             .map_err(|error| error.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| error.to_string())
@@ -598,278 +673,6 @@ impl WorkerStore {
         transaction
             .commit()
             .map_err(|error| format!("commit worker loop suppression: {error}"))
-    }
-
-    #[cfg(test)]
-    pub fn inbox_filtered(
-        &self,
-        worker_id: Option<&str>,
-        context_attached: Option<bool>,
-        severity: Option<&str>,
-        limit: u32,
-    ) -> Result<Vec<Value>, String> {
-        self.inbox_filtered_page(worker_id, context_attached, severity, false, limit, 0)
-    }
-
-    pub fn inbox_filtered_page(
-        &self,
-        worker_id: Option<&str>,
-        context_attached: Option<bool>,
-        severity: Option<&str>,
-        attention_only: bool,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Vec<Value>, String> {
-        let connection = self.connection()?;
-        let attention_sql = format!(
-            "({UNRESOLVED_INBOX_ERROR_SQL})
-             OR (i.severity!='error'
-                 AND i.context_attached=0
-                 AND (
-                    COALESCE(r.trigger_kind,'system')!='manual'
-                    OR COALESCE(r.interaction_mode,'foreground')='background'
-                 ))"
-        );
-        let mut statement = connection
-            .prepare(&format!(
-                "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
-                        i.context_attached,i.created_at,COALESCE(r.trigger_kind,'system'),
-                        CASE WHEN r.invocation_id IS NULL THEN 0 ELSE 1 END,
-                        CASE WHEN {attention_sql} THEN 1 ELSE 0 END
-                 FROM worker_inbox i
-                 LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
-                 WHERE (?1 IS NULL OR i.worker_id=?1)
-                    AND (?2 IS NULL OR i.context_attached=?2)
-                    AND (?3 IS NULL OR i.severity=?3)
-                    AND (?4=0 OR {attention_sql})
-                 ORDER BY i.created_at DESC LIMIT ?5 OFFSET ?6"
-            ))
-            .map_err(|error| error.to_string())?;
-        statement
-            .query_map(
-                params![
-                    worker_id,
-                    context_attached.map(i64::from),
-                    severity,
-                    i64::from(attention_only),
-                    limit.min(500),
-                    offset
-                ],
-                |row| {
-                    let result: String = row.get(4)?;
-                    Ok(json!({
-                        "inboxId": row.get::<_, String>(0)?,
-                        "invocationId": row.get::<_, String>(1)?,
-                        "workerId": row.get::<_, String>(2)?,
-                        "severity": row.get::<_, String>(3)?,
-                        "result": serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),
-                        "contextAttached": row.get::<_, i64>(5)? != 0,
-                        "createdAt": row.get::<_, String>(6)?,
-                        "triggerKind": row.get::<_, String>(7)?,
-                        "hasInvocation": row.get::<_, i64>(8)? != 0,
-                        "requiresAttention": row.get::<_, i64>(9)? != 0,
-                    }))
-                },
-            )
-            .map_err(|error| error.to_string())?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|error| error.to_string())
-    }
-
-    pub fn record_system_inbox(
-        &self,
-        worker_id: &str,
-        phase: &str,
-        result: &Value,
-    ) -> Result<(), String> {
-        validate_runtime_identifier(phase, "system inbox phase", 64)?;
-        self.connection()?
-            .execute(
-                "INSERT INTO worker_inbox(inbox_id,invocation_id,worker_id,severity,result_json,created_at)
-                 VALUES (?1,?2,?3,'error',?4,?5)",
-                params![
-                    format!("worker_inbox_{}", uuid::Uuid::now_v7()),
-                    format!("worker_system_{phase}_{}", uuid::Uuid::now_v7()),
-                    worker_id,
-                    serde_json::to_string(result).map_err(|error| error.to_string())?,
-                    chrono::Utc::now().to_rfc3339(),
-                ],
-            )
-            .map_err(|error| format!("record worker system inbox result: {error}"))?;
-        Ok(())
-    }
-
-    /// Return a bounded newest-first projection for worker-owned transient
-    /// context policy. Reading candidates never changes delivery state.
-    pub fn pending_inbox_context_candidates(&self, limit: u32) -> Result<Vec<Value>, String> {
-        let connection = self.connection()?;
-        let mut statement = connection
-            .prepare(&format!(
-                "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
-                        i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
-                 FROM worker_inbox i
-                 LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
-                 JOIN workers w ON w.worker_id=i.worker_id
-                 WHERE i.context_attached=0
-                   AND (i.severity!='error' OR ({UNRESOLVED_INBOX_ERROR_SQL}))
-                 ORDER BY i.created_at DESC LIMIT ?1"
-            ))
-            .map_err(|error| error.to_string())?;
-        statement
-            .query_map(
-                [limit.min(MAX_INBOX_CONTEXT_CANDIDATES)],
-                inbox_context_candidate,
-            )
-            .map_err(|error| error.to_string())?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|error| error.to_string())
-    }
-
-    /// Atomically attach still-pending policy-selected observations and return
-    /// only rows this claimant actually won. Input order is preserved.
-    pub fn attach_pending_inbox_context(&self, inbox_ids: &[String]) -> Result<Vec<Value>, String> {
-        let mut connection = self.connection()?;
-        let transaction = connection
-            .transaction()
-            .map_err(|error| error.to_string())?;
-        let mut candidates = Vec::new();
-        for inbox_id in inbox_ids {
-            let candidate = transaction
-                .query_row(
-                    &format!(
-                        "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
-                            i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
-                     FROM worker_inbox i
-                     LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
-                     JOIN workers w ON w.worker_id=i.worker_id
-                     WHERE i.inbox_id=?1
-                       AND i.context_attached=0
-                       AND (i.severity!='error' OR ({UNRESOLVED_INBOX_ERROR_SQL}))"
-                    ),
-                    [inbox_id],
-                    inbox_context_candidate,
-                )
-                .optional()
-                .map_err(|error| error.to_string())?;
-            let Some(candidate) = candidate else {
-                return Ok(Vec::new());
-            };
-            candidates.push(candidate);
-        }
-        for inbox_id in inbox_ids {
-            let updated = transaction
-                .execute(
-                    "UPDATE worker_inbox SET context_attached=1
-                     WHERE inbox_id=?1 AND context_attached=0",
-                    [inbox_id],
-                )
-                .map_err(|error| format!("claim worker inbox context: {error}"))?;
-            if updated != 1 {
-                return Ok(Vec::new());
-            }
-        }
-        transaction.commit().map_err(|error| error.to_string())?;
-        Ok(candidates)
-    }
-
-    /// Claim notable pending background results for transient prompt attachment.
-    /// Unresolved errors are always notable; verified recovery removes them
-    /// from transient context without deleting their audit evidence. Successful
-    /// foreground manual calls are already visible to their caller and are
-    /// intentionally omitted. Detached or predicted-background manual results
-    /// remain notable because no foreground caller received the typed output.
-    pub fn take_notable_pending(
-        &self,
-        relevance_query: Option<&str>,
-        limit: u32,
-    ) -> Result<Vec<Value>, String> {
-        let mut connection = self.connection()?;
-        let transaction = connection
-            .transaction()
-            .map_err(|error| error.to_string())?;
-        let query_terms = relevance_query.map(terms).unwrap_or_default();
-        let candidates = {
-            let mut statement = transaction
-                .prepare(&format!(
-                    "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
-                            i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
-                     FROM worker_inbox i
-                     LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
-                     JOIN workers w ON w.worker_id=i.worker_id
-                     WHERE i.context_attached=0
-                        AND (
-                            i.severity!='info'
-                            OR COALESCE(r.trigger_kind,'system')!='manual'
-                            OR COALESCE(r.interaction_mode,'foreground')='background'
-                        )
-                        AND (i.severity!='error' OR ({UNRESOLVED_INBOX_ERROR_SQL}))
-                     ORDER BY i.created_at DESC LIMIT 200"
-                ))
-                .map_err(|error| error.to_string())?;
-            statement
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, String>(6)?,
-                        row.get::<_, String>(7)?,
-                        row.get::<_, String>(8)?,
-                    ))
-                })
-                .map_err(|error| error.to_string())?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(|error| error.to_string())?
-        };
-        let mut selected = Vec::new();
-        for (
-            inbox_id,
-            invocation_id,
-            worker_id,
-            severity,
-            result,
-            created_at,
-            trigger,
-            name,
-            description,
-        ) in candidates
-        {
-            let worker_terms = terms(&format!("{name} {description}"));
-            let relevant = severity == "error"
-                || query_terms.is_empty()
-                || !query_terms.is_disjoint(&worker_terms);
-            if !relevant {
-                continue;
-            }
-            selected.push(json!({
-                "inboxId":inbox_id,
-                "invocationId":invocation_id,
-                "workerId":worker_id,
-                "workerName":name,
-                "severity":severity,
-                "triggerKind":trigger,
-                "result":serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),
-                "contextAttached":false,
-                "createdAt":created_at,
-            }));
-            if selected.len() >= limit.min(32) as usize {
-                break;
-            }
-        }
-        for item in &selected {
-            transaction
-                .execute(
-                    "UPDATE worker_inbox SET context_attached=1
-                     WHERE inbox_id=?1 AND context_attached=0",
-                    [item["inboxId"].as_str().unwrap_or_default()],
-                )
-                .map_err(|error| format!("mark worker inbox context attached: {error}"))?;
-        }
-        transaction.commit().map_err(|error| error.to_string())?;
-        Ok(selected)
     }
 
     pub fn audit(&self, worker_id: Option<&str>, limit: u32) -> Result<Vec<Value>, String> {

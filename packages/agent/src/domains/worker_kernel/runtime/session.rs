@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 
 use super::WorkerRuntime;
 use crate::domains::session::event_store::SessionRow;
+use crate::domains::worker_kernel::dispatches::PreparedWorkerDispatch;
 use crate::domains::worker_kernel::types::{InvocationRecord, WorkerEngineHook};
 use crate::engine::Invocation;
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
@@ -130,21 +131,22 @@ impl WorkerRuntime {
     /// Re-execution is safe because the session store compare-and-set never
     /// overwrites an explicit or previously applied title.
     pub(super) async fn apply_session_title_result(
-        &self,
+        self: &Arc<Self>,
         invocation: &InvocationRecord,
         output: &Value,
-    ) -> Result<(), String> {
+    ) -> Result<Option<PreparedWorkerDispatch>, String> {
         if invocation.trigger_kind != "engine_hook:session_title" {
-            return Ok(());
+            return Ok(None);
         }
         let session_id = title_target_session_id(invocation.origin_session_id.as_deref())?;
         let title = proposed_title(output).ok_or_else(|| {
             "engine hook 'session_title' output is invalid: title must contain 1 to 160 characters"
                 .to_owned()
         })?;
-        self.set_session_title_if_untitled(session_id, title)
-            .await
-            .map(|_| ())
+        let (_, session) = self
+            .set_session_title_if_untitled(session_id.clone(), title)
+            .await?;
+        self.prepare_session_organization_after_title(invocation, session)
     }
 
     async fn set_session_title_if_untitled(
@@ -208,6 +210,10 @@ impl WorkerRuntime {
                 last_assistant_response: None,
                 parent_session_id: session.parent_session_id,
                 activity_lines: None,
+                labels: None,
+                organization_group: None,
+                organization_changed: None,
+                is_archived: None,
             });
     }
 }

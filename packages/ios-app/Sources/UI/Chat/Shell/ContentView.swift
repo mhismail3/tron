@@ -110,7 +110,7 @@ struct ContentView: View {
                 newSessionFlowSheet
             }
             .sheet(isPresented: $showSettings, onDismiss: launchDeferredServerOnboardingIfNeeded) {
-                SettingsView { server in
+                SettingsView(draftSessionId: selectedSessionId) { server in
                     deferredServerOnboardingLaunch.request(prefill: server)
                     showSettings = false
                 }

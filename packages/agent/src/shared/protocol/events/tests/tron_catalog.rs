@@ -196,6 +196,10 @@ fn tron_event_all_event_types() {
             last_assistant_response: None,
             parent_session_id: None,
             activity_lines: None,
+            labels: None,
+            organization_group: None,
+            organization_changed: None,
+            is_archived: None,
         },
         TronEvent::ContextCleared {
             base: base.clone(),

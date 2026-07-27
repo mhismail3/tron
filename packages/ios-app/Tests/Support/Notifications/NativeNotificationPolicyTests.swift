@@ -74,4 +74,21 @@ struct NativeNotificationPolicyTests {
         #expect(!route.contains("private reminder body"))
         #expect(NativeNotificationCoordinator.quietRefreshWaitBudget <= .seconds(8))
     }
+
+    @Test("registration and synchronization coalesce into one server lane request")
+    func serverWorkCoalesces() {
+        var work = NotificationServerWork(registration: true)
+        work.formUnion(NotificationServerWork(synchronization: true))
+        work.formUnion(NotificationServerWork(registration: true))
+
+        #expect(work.registration)
+        #expect(work.synchronization)
+        #expect(
+            NativeNotificationCoordinator.maximumMutationsPerServerPass <= 32
+        )
+        #expect(
+            NativeNotificationCoordinator.serverWorkBudget <= .seconds(20)
+        )
+        #expect(NotificationClient.requestTimeout <= 8)
+    }
 }

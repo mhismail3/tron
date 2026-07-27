@@ -137,6 +137,20 @@ struct ChatView: View {
                 }
             )
         }
+        .onReceive(NotificationCenter.default.publisher(for: .attachArtifactToDraft)) { notification in
+            guard presentationMode == .interactiveSession,
+                  let request = notification.object as? ArtifactDraftAttachmentRequest,
+                  shouldAttachArtifact(
+                      request,
+                      to: sessionId,
+                      existingAttachmentIds: Set(
+                          viewModel.inputBarState.attachments.map(\.id)
+                      )
+                  ) else {
+                return
+            }
+            viewModel.inputBarState.attachments.append(request.attachment)
+        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             scrollCoordinator.sceneDidBecomeActive(
@@ -152,9 +166,7 @@ struct ChatView: View {
                 Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
             }
             viewModel.clearLocalNotifications()
-            viewModel.cancelRecording()
-            viewModel.stopLiveEventStream()
-            viewModel.stopSpeechTranscriptionMonitoring()
+            viewModel.deactivateMountedResources()
             let sessionEvents = services.events
             Task { @MainActor in
                 await sessionEvents.releaseSessionEventSubscription(

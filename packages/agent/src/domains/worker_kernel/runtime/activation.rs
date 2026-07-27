@@ -12,6 +12,13 @@ impl WorkerRuntime {
         self.reject_secret_material_in_bundle(&bundle)?;
         self.validate_worker_dispatch_route_targets(&bundle)?;
         let mut prepared = self.store.prepare(bundle, predecessor)?;
+        if let Err(error) = self
+            .validate_agent_tool_allowlist_at_activation(&prepared.bundle)
+            .await
+        {
+            self.store.abandon(&prepared);
+            return Err(error);
+        }
         if let Err(error) = self.prepare_dependencies_and_test(&mut prepared).await {
             self.store.abandon(&prepared);
             return Err(error);
@@ -43,6 +50,45 @@ impl WorkerRuntime {
         )
         .await;
         Ok(outcome)
+    }
+
+    async fn validate_agent_tool_allowlist_at_activation(
+        &self,
+        bundle: &WorkerBundle,
+    ) -> Result<(), String> {
+        let Some(agent_tools) = &bundle.agent_tools else {
+            return Ok(());
+        };
+        let actor = crate::engine::ActorContext::new(
+            ActorId::new("system:worker-activation").map_err(|error| error.to_string())?,
+            ActorKind::System,
+        );
+        let (_, functions) = self.host.visible_functions_with_revision(&actor).await;
+        let mut available = functions
+            .into_iter()
+            .filter_map(|function| {
+                function
+                    .model_tool
+                    .filter(|tool| tool.callable)
+                    .map(|tool| tool.name)
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        if let Some(tool_name) = &bundle.tool_name {
+            let _ = available.insert(tool_name.clone());
+        }
+        let unavailable = agent_tools
+            .iter()
+            .filter(|tool_name| !available.contains(tool_name.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if unavailable.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "agentTools contains model tools unavailable at activation: {}",
+                unavailable.join(", ")
+            ))
+        }
     }
 
     pub(super) async fn handle_tool_activation_failure(
@@ -194,7 +240,6 @@ impl WorkerRuntime {
         }
         let verification = json!({
             "format":"tron.worker_verification.v1",
-            "verifiedAt":chrono::Utc::now().to_rfc3339(),
             "dependencies":prepared.bundle.dependencies,
             "dependencyInstalls":install_evidence,
             "smokeTests":smoke_evidence,

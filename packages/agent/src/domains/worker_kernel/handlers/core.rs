@@ -10,6 +10,9 @@ use super::super::types::WorkerEngineHook;
 use super::Deps;
 use super::support::{required_content, required_string};
 
+const CONTINUITY_CONTEXT_LIMIT: u64 = 6;
+const CONTINUITY_CONTEXT_MAX_BYTES: usize = 12_000;
+
 pub(super) async fn session_set_title(
     invocation: &Invocation,
     deps: &Deps,
@@ -90,6 +93,62 @@ pub(super) async fn context_summary(invocation: &Invocation, deps: &Deps) -> Res
         .await
 }
 
+pub(super) async fn continuity_context(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, String> {
+    let mut worker_input = json!({
+        "action":"continuity_context",
+        "query":required_string(&invocation.payload, "query")?,
+        "limit":CONTINUITY_CONTEXT_LIMIT,
+    });
+    if let Some(project) = invocation.payload.get("project").and_then(Value::as_str) {
+        worker_input["project"] = json!(project);
+    }
+    let Some(execution) = deps
+        .runtime
+        .execute_engine_hook(
+            WorkerEngineHook::ContinuityContext,
+            worker_input,
+            invocation
+                .payload
+                .get("originWorkerId")
+                .and_then(Value::as_str),
+            invocation,
+        )
+        .await?
+    else {
+        return Ok(json!({"handled":false}));
+    };
+    let Some(narrative) = execution.output.get("narrative").and_then(Value::as_str) else {
+        let reason = deps
+            .runtime
+            .reject_engine_hook_output(
+                &execution,
+                WorkerEngineHook::ContinuityContext,
+                "output must contain a narrative string",
+            )
+            .await;
+        return Err(reason);
+    };
+    let narrative =
+        crate::shared::foundation::redaction::redact_sensitive_content(narrative.trim());
+    if narrative.is_empty() {
+        return Ok(json!({"handled":false}));
+    }
+    let narrative = crate::shared::foundation::text::truncate_with_suffix(
+        &narrative,
+        CONTINUITY_CONTEXT_MAX_BYTES,
+        "…",
+    );
+    Ok(json!({
+        "handled":true,
+        "workerId":execution.worker_id,
+        "workerVersion":execution.worker_version,
+        "narrative":narrative,
+    }))
+}
+
 pub(super) async fn session_title(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
     deps.runtime.enqueue_session_title_hook(invocation).await
 }
@@ -107,6 +166,10 @@ pub(super) async fn worker_relevance(
         .iter()
         .filter_map(|candidate| candidate.get("workerId").and_then(Value::as_str))
         .collect::<BTreeSet<_>>();
+    let query = invocation.payload.get("query").and_then(Value::as_str);
+    if candidate_ids.len() <= 1 || super::super::retrieval::query_is_empty(query) {
+        return Ok(json!({"handled":false,"rankings":[]}));
+    }
     let Some(execution) = deps
         .runtime
         .execute_engine_hook(
@@ -166,6 +229,20 @@ mod tests {
                 .unwrap_err()
                 .contains("requires a current causal session")
         );
+    }
+
+    #[test]
+    fn continuity_projection_redacts_and_bounds_sensitive_content() {
+        let secret = format!("api_key={}", "a".repeat(64));
+        let redacted = crate::shared::foundation::redaction::redact_sensitive_content(&secret);
+        assert!(!redacted.contains(&"a".repeat(64)));
+        let bounded = crate::shared::foundation::text::truncate_with_suffix(
+            &"🦀".repeat(4_000),
+            CONTINUITY_CONTEXT_MAX_BYTES,
+            "…",
+        );
+        assert!(bounded.len() <= CONTINUITY_CONTEXT_MAX_BYTES);
+        assert!(bounded.is_char_boundary(bounded.len()));
     }
 }
 

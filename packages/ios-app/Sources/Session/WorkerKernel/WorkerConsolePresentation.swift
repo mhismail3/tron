@@ -258,3 +258,193 @@ enum WorkerConsolePresentation {
         }
     }
 }
+
+enum WorkerPresentationSectionKind: String, CaseIterable, Sendable {
+    case text
+    case status
+    case progress
+    case table
+    case list
+    case link
+    case artifact
+    case confirmation
+    case workerAction = "worker_action"
+}
+
+/// Pure projection for the closed declarative worker presentation contract.
+///
+/// Unknown contract versions and section kinds are ignored so an older client
+/// retains the generic run/result console instead of failing protocol decode.
+enum WorkerDeclarativePresentation {
+    static func descriptor(for graph: WorkerRunGraphDTO) -> WorkerPresentationDTO? {
+        let presentation = graph.nodes.first {
+            $0.invocationId == graph.requestedInvocationId
+        }?.presentation ?? graph.nodes.first {
+            $0.workerId == graph.workerId && $0.presentation != nil
+        }?.presentation
+        guard let presentation,
+              presentation.contractVersion == 1,
+              !presentation.sections.isEmpty else {
+            return nil
+        }
+        return presentation
+    }
+
+    static func kind(of section: WorkerPresentationSectionDTO) -> WorkerPresentationSectionKind? {
+        WorkerPresentationSectionKind(rawValue: section.kind)
+    }
+
+    static func resultPointers(in presentation: WorkerPresentationDTO) -> [String] {
+        Array(
+            Set(
+                presentation.sections
+                    .filter { kind(of: $0).map(requiresResult) == true }
+                    .compactMap(\.valuePointer)
+            )
+        ).sorted()
+    }
+
+    static func safeURL(_ value: String?) -> URL? {
+        guard let value,
+              value.count <= 2_048,
+              let components = URLComponents(string: value),
+              components.scheme?.lowercased() == "https",
+              let host = components.host?.lowercased(),
+              !host.isEmpty,
+              !isLocalHost(host),
+              components.user == nil,
+              components.password == nil else {
+            return nil
+        }
+        return components.url
+    }
+
+    static func primitiveText(_ value: AnyCodable) -> String? {
+        if let string = value.stringValue {
+            return WorkerConsolePresentation.compactText(string, maxLength: 4_096)
+        }
+        if let bool = value.boolValue {
+            return bool ? "True" : "False"
+        }
+        if let int = value.intValue {
+            return String(int)
+        }
+        if let double = value.doubleValue {
+            return String(double)
+        }
+        return nil
+    }
+
+    static func progressValue(_ value: AnyCodable) -> Double? {
+        let number: Double?
+        if let double = value.doubleValue {
+            number = double
+        } else if let int = value.intValue {
+            number = Double(int)
+        } else {
+            number = nil
+        }
+        guard let number, number.isFinite else { return nil }
+        return min(max(number, 0), 1)
+    }
+
+    static func listItems(_ value: AnyCodable) -> [String] {
+        guard let values = value.arrayValue else { return [] }
+        return values.prefix(20).compactMap {
+            primitiveText(AnyCodable($0)).map {
+                WorkerConsolePresentation.compactText($0, maxLength: 512)
+            }
+        }
+    }
+
+    static func tableRows(
+        _ value: AnyCodable,
+        columns: [WorkerPresentationColumnDTO]
+    ) -> [[String]] {
+        guard let rows = value.arrayValue else { return [] }
+        return rows.prefix(20).map { row in
+            columns.map { column in
+                Self.value(at: column.valuePointer, in: row)
+                    .flatMap { primitiveText(AnyCodable($0)) }
+                    .map { WorkerConsolePresentation.compactText($0, maxLength: 160) }
+                    ?? "—"
+            }
+        }
+    }
+
+    static func value(at pointer: String, in root: Any) -> Any? {
+        guard pointer.isEmpty || pointer.hasPrefix("/") else { return nil }
+        var value = root
+        if pointer.isEmpty {
+            return value
+        }
+        for rawToken in pointer.dropFirst().split(separator: "/", omittingEmptySubsequences: false) {
+            guard let token = decodePointerToken(String(rawToken)) else { return nil }
+            if let dictionary = AnyCodable(value).dictionaryValue {
+                guard let next = dictionary[token] else { return nil }
+                value = next
+            } else if let array = AnyCodable(value).arrayValue,
+                      let index = Int(token),
+                      index >= 0,
+                      index < array.count {
+                value = array[index]
+            } else {
+                return nil
+            }
+        }
+        return value
+    }
+
+    private static func requiresResult(_ kind: WorkerPresentationSectionKind) -> Bool {
+        switch kind {
+        case .text, .status, .progress, .table, .list, .artifact:
+            true
+        case .link, .confirmation, .workerAction:
+            false
+        }
+    }
+
+    private static func isLocalHost(_ host: String) -> Bool {
+        if host == "localhost"
+            || host.hasSuffix(".localhost")
+            || host.hasSuffix(".local")
+            || host == "::1"
+            || host.hasPrefix("fe80:")
+            || host.hasPrefix("fc")
+            || host.hasPrefix("fd")
+            || host.contains(":ffff:") {
+            return true
+        }
+        let octets = host.split(separator: ".", omittingEmptySubsequences: false)
+            .compactMap { UInt8($0) }
+        guard octets.count == 4 else { return false }
+        return octets[0] == 10
+            || octets[0] == 127
+            || octets[0] == 0
+            || octets[0] >= 224
+            || (octets[0] == 169 && octets[1] == 254)
+            || (octets[0] == 172 && (16 ... 31).contains(octets[1]))
+            || (octets[0] == 192 && octets[1] == 168)
+    }
+
+    private static func decodePointerToken(_ token: String) -> String? {
+        var result = ""
+        var index = token.startIndex
+        while index < token.endIndex {
+            if token[index] == "~" {
+                let next = token.index(after: index)
+                guard next < token.endIndex else { return nil }
+                switch token[next] {
+                case "0": result.append("~")
+                case "1": result.append("/")
+                default: return nil
+                }
+                index = token.index(after: next)
+            } else {
+                result.append(token[index])
+                index = token.index(after: index)
+            }
+        }
+        return result
+    }
+}

@@ -122,20 +122,30 @@ The bearer token comes from pairing and is never logged. Unauthorized state
 requires re-pairing.
 
 Connection, reconnect, and per-subscription admission are single-flight. Swift
-task cancellation immediately retires only that caller's pending continuation;
-one request timeout never tears down otherwise healthy shared transport.
-Heartbeat and actual send/receive failures own socket liveness. Raw inbound
-frames and generic response DTOs decode off the main actor, in receive order,
-before compact state or event delivery returns to UI ownership. Transport logs
-record frame metadata only, never payload previews.
+task cancellation removes exactly one request record; that record owns both
+its continuation and deadline, so timeout, response, cancellation, and
+disconnect cannot leave parallel resource maps out of sync or resume twice.
+One request timeout never tears down otherwise healthy shared transport.
+Heartbeat and actual send/receive failures own socket liveness. Receive,
+heartbeat, and verification work captures both the socket and its monotonic
+transport generation; completion from a retired owner is discarded instead of
+reading from or disconnecting its replacement. Manual retry rejoins the same
+generation-owned reconnect loop rather than creating an untracked second
+owner. Connection-owned serial decoder actors normalize raw text and binary
+frames and decode generic response DTOs off the main actor, in receive order,
+without allocating an unstructured detached task per frame. Only compact state
+or event delivery returns to UI ownership. Transport logging APIs accept route,
+direction, byte count, and bounded session prefixes only; raw payload previews
+cannot be passed to them.
 
 Session live tails have explicit domain leases. The presented chat and the
 background processing projection retain independent interests in the same
 subscription. Switching chats or observing terminal processing releases its
 interest; the final release sends an idempotent `unsubscribe`. Reconnect
 restores only still-interested session keys, while disconnect clears all
-interests. This prevents previously visited tasks from remaining in the
-engine's polling loop.
+connection-local subscription identifiers. This prevents previously visited
+tasks from remaining in the engine's polling loop without losing the interests
+that a reconnect must restore.
 
 An open WebSocket is transport state, not application readiness. The connection
 remains publicly `connecting` until the bounded `hello` exchange succeeds and
@@ -184,7 +194,7 @@ worker metadata from the client. The server supplies internal causal context.
 
 - `WorkerSummaryDTO` for identity, tool name, runner, health, active version,
   enabled/retired status, trigger count, immutable presentation/suite binding,
-  and update time;
+  its optional closed native section descriptor, and update time;
 - `WorkerInspectResultDTO` for the bundle, versions, triggers, audit, and
   canonical version directory;
 - `WorkerInvocationDTO` for queued/running/terminal runs, typed input and an
@@ -349,6 +359,18 @@ provides:
 - stop current work without disabling the worker, enable/disable, retirement,
   exact run cancellation, and confirmation-backed archive-then-purge whose
   result retains the recovery archive path and checksum.
+
+The canonical run detail and chat-embedded run graph also reuse one generic
+declarative renderer for presentation contract version 1. It supports only
+native text, status, progress, bounded table/list, public HTTPS link, durable-result
+artifact, native confirmation, and fixed same-worker action sections. Bound
+values are loaded concurrently from distinct RFC 6901 paths through
+`worker_kernel::result_read`, never from copied output or a client presentation
+cache. Artifacts reopen the existing generic result inspector at their declared
+path. Actions use the ordinary worker repository and immutable server-validated
+input; no worker-specific screen, downloaded code, HTML, arbitrary URL scheme,
+or client command is interpreted. Unknown contract versions and future section
+kinds leave the standard console intact.
 
 Loading, disconnected, empty, partial-error, and section-empty states all use
 the same compact semantic cards instead of raw list placeholders. An empty
@@ -653,9 +675,11 @@ prompt cannot disconnect the client or erase retryable content.
 Streaming text uses a lazy, explicitly invalidated display link with a weak
 target. Received deltas drain from an append-only chunk queue, so each display
 tick appends only new characters instead of indexing and copying the complete
-growing response. Draft metadata remains database-owned; potentially large
-draft attachment reads and writes run through one serial file actor rather than
-blocking SwiftUI.
+growing response. Mounted-chat teardown cancels recording and live monitors,
+drains its accepted UI batch, flushes pending text, and invalidates the display
+link without erasing recoverable stream identity. Draft metadata remains
+database-owned; potentially large draft attachment reads and writes run through
+one serial file actor rather than blocking SwiftUI.
 
 ## Context Lifecycle Presentation
 
@@ -753,6 +777,17 @@ Dashboard tabs, color-mode choices, and text/code font choices share selected
 contrast, material tint, shapes, accessibility selection state, and press
 feedback rather than maintaining separate solid-button implementations.
 
+## Canonical Session Organization Projection
+
+Session labels, one group, and archive state arrive through the existing
+`SessionInfo` snapshot and `session.updated` event. `CachedSession` persists
+them in the existing disposable `sessions` table (`labels_json` and
+`organization_group`) beside canonical archive projection. There is no
+organizer-specific cache, view model, polling loop, or duplicate grouping
+owner. A full server snapshot clears a removed group and replaces labels;
+live events use `organizationChanged` so an explicit null group also clears
+the cached value.
+
 ## Notification Boundary
 
 Native notifications are the narrow client boundary for worker-authored
@@ -773,10 +808,13 @@ reminders; they are not a general device-control surface.
   embedded APNs route is forwarded with that token: local physical Prod/Prod
   Fast installs use sandbox to match development signing, while distributed
   Prod uses production.
-- Registration fans out to all paired engines. The active server reuses its
-  current `/engine` connection. Inactive servers use bounded, short-lived
-  authenticated clients with their own stored bearer token and never change
-  the selected server.
+- Registration fans out to all paired engines through a narrow
+  `NotificationRepository` session. `DependencyContainer` alone selects and
+  owns the transport: the active server reuses its current `/engine`
+  connection, while an inactive server gets one bounded, short-lived
+  authenticated client that is disconnected when the repository operation
+  returns. The coordinator never receives socket, URL, token, or connection
+  controls and never changes the selected server.
 - `NotificationLifecycleBridge` presents worker-authored title/body as ordinary
   banner, list, and sound notifications. APNs `thread-id` comes only from the
   worker's bounded `threadKey`. The fixed reminder category exposes Snooze and
@@ -791,9 +829,12 @@ reminders; they are not a general device-control surface.
   and readiness surface. It distinguishes system permission, aligned
   per-server device/token and provider readiness, selected relay/direct
   transport, and the last sanitized provider problem. Its app-private cache
-  shows logical deliveries while transport failures remain engine-owned
-  Activity/Attention evidence. Mark All Read lives in the sheet toolbar and
-  emits only `clear_unread`.
+  is one actor-owned, file-protected atomic projection rather than whole-array
+  main-thread defaults writes. It shows logical deliveries while transport
+  failures remain engine-owned Activity/Attention evidence. The actor migrates
+  the former defaults arrays only after a successful file write. Mark All Read
+  lives in the sheet toolbar, emits only `clear_unread`, and appends its full
+  mutation batch with one durable store transaction.
 - Notification inbox and detail presentations use the standard Settings
   container, liquid-glass cards, toolbar actions, and medium/large detents.
   Opening an item completes its occurrence. Snooze and Complete stay fixed
@@ -804,19 +845,44 @@ reminders; they are not a general device-control surface.
   content below, previews use compact one-title/two-body-line cards, and native
   swipes expose Details, read-state clearing, and only the Snooze/Complete
   actions declared by that delivery.
+- The Settings Artifacts row opens a native Artifact Inbox backed by server
+  metadata rather than a second local content cache. Selecting an item performs
+  one authenticated exact-content read, verifies worker/artifact identity,
+  declared byte count, and SHA-256, then asks the actor-owned file coordinator
+  for a bounded temporary preview file. Quick Look, Share, and Export reuse that
+  file; identical content is reference-counted so one artifact cannot invalidate
+  another artifact's preview. Closing the detail or inbox cancels work and
+  removes temporary files. Metadata pages load lazily from the engine rather
+  than materializing an unbounded local array or content cache.
+  Server custody persists until explicit Delete. Storage pressure reflects the
+  whole worker database and remains Engine Attention rather than silently
+  evicting user artifacts.
+- Attach to Draft is the only bridge from Artifact Inbox into chat. It converts
+  already-verified bytes into the existing `Attachment` value and sends an
+  explicit app-local intent carrying the target session ID. Only the matching
+  mounted interactive chat may consume it, and that chat remains the sole
+  writer of its live draft state; other mounted chats ignore it. When Settings
+  has no selected session the action stays unavailable. Merely opening,
+  previewing, sharing, exporting, or deleting an artifact never mutates a draft.
+  The client does not interpret worker URLs, paths, HTML, or arbitrary commands.
 - Open, Complete, Snooze, and clear-read mutations enter a durable per-server
   outbox, apply optimistically, retry after reconnect/foreground, and reconcile
   to the engine's first-wins terminal state. Quiet pushes refresh one server;
   foreground and reconnect refresh all paired servers. The app badge is the
   aggregate unread count across cached server truth.
 
-Registration and inbox synchronization use coalescing drain lanes: a request
-arriving during active work schedules one follow-up instead of canceling and
-duplicating network/storage owners. One server pass reuses one authenticated
-client, batches outbox deletion and inbox persistence, and bounds
-quiet-refresh waiting to eight seconds. Sanitized lifecycle diagnostics record
-only a short route hash for receipt, foreground presentation, and response
-handling.
+Registration and inbox synchronization share one coalescing lane per paired
+server: requests for the same engine serialize and merge, while unrelated
+engines can progress independently. One server pass reuses one authenticated
+client for registration, a bounded response batch, and inbox refresh. Protocol
+requests own an eight-second timeout, each pass admits at most 32 responses
+within a twenty-second work budget, and quiet-refresh waiting remains bounded
+to eight seconds. Synchronization commits acknowledgement removal and
+authoritative pages atomically, then reapplies any newer pending optimistic
+responses. Explicit coordinator shutdown cancels network/system lanes and
+awaits every accepted local outbox write. Sanitized lifecycle diagnostics
+record only a short route hash for receipt, foreground presentation, and
+response handling.
 
 The client contract is closed to device registration, inbox sync, fixed
 responses, and sanitized status reads. It never accepts raw APNs payloads,

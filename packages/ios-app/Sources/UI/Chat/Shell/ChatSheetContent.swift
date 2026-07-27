@@ -21,7 +21,7 @@ struct ChatSheetContent: View {
     private var sheetContent: some View {
         switch sheet {
         case .settings:
-            SettingsView { server in
+            SettingsView(draftSessionId: sessionId) { server in
                 viewModel.showSettings = false
                 sheetCoordinator?.activeSheet = nil
                 ServerOnboardingLauncher.post(prefill: server)

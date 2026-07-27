@@ -46,6 +46,12 @@ struct CachedSession: Identifiable, Codable, Sendable {
     /// Whether this session is pending server deletion
     var isDeleting: Bool = false
 
+    /// Canonical labels projected by the server through ordinary session tags.
+    var labels: [String] = []
+
+    /// Canonical single server-owned organization group.
+    var organizationGroup: String?
+
     /// Total input tokens sent to model (uncached + cache read)
     var totalInputTokens: Int { inputTokens + cacheReadTokens }
 

@@ -15,6 +15,7 @@ const MAX_FULL_HISTORY_LIMIT: u32 = 20;
 const MAX_GRAPH_HISTORY_LIMIT: u32 = 10;
 const SUMMARY_VALUE_BYTES: usize = 512;
 const FULL_VALUE_BYTES: usize = 8_192;
+const MAX_INBOX_CONTEXT_CANDIDATES: u32 = 32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HistoryDetail {
@@ -135,9 +136,20 @@ pub(super) async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result
         .get("relevanceQuery")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let candidates = deps.runtime.store().pending_inbox_context_candidates(64)?;
+    let candidates = deps
+        .runtime
+        .store()
+        .pending_inbox_context_candidates(MAX_INBOX_CONTEXT_CANDIDATES)?;
     if candidates.is_empty() {
         return Ok(json!({"handled":false,"items":[],"narrative":""}));
+    }
+    if !inbox_hook_input_is_nontrivial(query, candidates.len()) {
+        let items = deps
+            .runtime
+            .store()
+            .take_notable_pending(Some(query), limit)?;
+        let narrative = deterministic_inbox_context(&items);
+        return Ok(json!({"handled":false,"items":items,"narrative":narrative}));
     }
     let candidate_ids = candidates
         .iter()
@@ -222,6 +234,10 @@ pub(super) async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result
         "items":items,
         "narrative":narrative,
     }))
+}
+
+fn inbox_hook_input_is_nontrivial(query: &str, candidate_count: usize) -> bool {
+    candidate_count > 1 && !super::super::retrieval::query_is_empty(Some(query))
 }
 
 fn deterministic_inbox_context(items: &[Value]) -> String {
@@ -405,6 +421,19 @@ fn optional_enum<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inbox_semantic_hook_skips_empty_candidates_and_trivial_queries() {
+        assert!(!inbox_hook_input_is_nontrivial("background report", 0));
+        assert!(!inbox_hook_input_is_nontrivial("", 4));
+        assert!(!inbox_hook_input_is_nontrivial(
+            "user: use a worker\nassistant: tool result",
+            4,
+        ));
+        assert!(!inbox_hook_input_is_nontrivial("background report", 1));
+        assert!(inbox_hook_input_is_nontrivial("background report", 2));
+        assert_eq!(MAX_INBOX_CONTEXT_CANDIDATES, 32);
+    }
 
     #[test]
     fn summary_values_are_compact_observations_and_full_values_have_a_hard_ceiling() {

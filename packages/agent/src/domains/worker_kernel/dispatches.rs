@@ -137,7 +137,9 @@ mod tests {
             name: "Source".to_owned(),
             description: "Source".to_owned(),
             tool_name: None,
-            tool_input_schema: None,
+            model_exposure: Default::default(),
+            tool_input_schema: Some(json!({"type":"object"})),
+            agent_tools: None,
             input_schema: json!({"type":"object"}),
             output_schema: json!({
                 "type":"object",

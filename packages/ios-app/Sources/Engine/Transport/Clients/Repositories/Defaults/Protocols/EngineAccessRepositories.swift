@@ -307,6 +307,19 @@ protocol WorkerKernelRepository: AnyObject {
         offset: UInt64?,
         attentionOnly: Bool
     ) async throws -> WorkerInboxResultDTO
+    func artifactDeliveries(
+        limit: UInt16,
+        offset: UInt64
+    ) async throws -> WorkerArtifactPageDTO
+    func artifactContent(
+        workerId: String,
+        artifactId: String
+    ) async throws -> WorkerArtifactContentDTO
+    func deleteArtifact(
+        workerId: String,
+        artifactId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerArtifactDeleteDTO
     func invokeWorker(
         workerId: String,
         input: AnyCodable,
@@ -377,6 +390,28 @@ protocol WorkerKernelRepository: AnyObject {
 }
 
 extension WorkerKernelRepository {
+    func artifactDeliveries(
+        limit _: UInt16,
+        offset _: UInt64
+    ) async throws -> WorkerArtifactPageDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func artifactContent(
+        workerId _: String,
+        artifactId _: String
+    ) async throws -> WorkerArtifactContentDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func deleteArtifact(
+        workerId _: String,
+        artifactId _: String,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> WorkerArtifactDeleteDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
     /// Resolve only a just-completed bounded result needed by a native worker
     /// contract. Historical lists and presentation paths must keep references
     /// and use the explicit inspector instead.

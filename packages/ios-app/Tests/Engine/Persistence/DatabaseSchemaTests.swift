@@ -34,6 +34,7 @@ final class DatabaseSchemaTests: XCTestCase {
             "output_tokens", "last_turn_input_tokens", "cache_read_tokens",
             "cache_creation_tokens", "cost", "is_fork", "is_processing", "server_origin",
             "activity_lines_json",
+            "labels_json", "organization_group",
         ])
         await actor.close()
     }
@@ -47,6 +48,41 @@ final class DatabaseSchemaTests: XCTestCase {
 
         let columns = try await tableColumns("session_drafts", actor: actor)
         XCTAssertEqual(columns, ["session_id", "text", "attachment_metadata_json", "updated_at"])
+        await actor.close()
+    }
+
+    func testExistingSessionCacheAddsOrganizationProjectionColumns() async throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath, &db), SQLITE_OK)
+        XCTAssertEqual(
+            sqlite3_exec(
+                db,
+                """
+                CREATE TABLE sessions(
+                    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
+                    root_event_id TEXT, head_event_id TEXT, title TEXT,
+                    latest_model TEXT NOT NULL, working_directory TEXT NOT NULL,
+                    created_at TEXT NOT NULL, last_activity_at TEXT NOT NULL,
+                    archived_at TEXT, event_count INTEGER, turn_count INTEGER,
+                    message_count INTEGER, input_tokens INTEGER, output_tokens INTEGER,
+                    last_turn_input_tokens INTEGER, cache_read_tokens INTEGER,
+                    cache_creation_tokens INTEGER, cost REAL, is_fork INTEGER,
+                    is_processing INTEGER, server_origin TEXT, activity_lines_json TEXT
+                )
+                """,
+                nil,
+                nil,
+                nil
+            ),
+            SQLITE_OK
+        )
+        sqlite3_close(db)
+
+        let actor = DatabaseActor(dbPath: dbPath)
+        try await actor.open()
+        let columns = try await tableColumns("sessions", actor: actor)
+        XCTAssertTrue(columns.contains("labels_json"))
+        XCTAssertTrue(columns.contains("organization_group"))
         await actor.close()
     }
 

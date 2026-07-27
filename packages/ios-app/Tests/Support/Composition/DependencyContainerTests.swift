@@ -343,12 +343,22 @@ final class DependencyContainerTests: XCTestCase {
         let storage = DependencyContainerStorage.production(
             defaults: { testState.defaults },
             documentsURL: { testState.documentsURL },
-            eventDatabase: { database }
+            eventDatabase: { database },
+            notificationStoreURL: {
+                testState.documentsURL.appendingPathComponent(
+                    "native-notifications-v2.json"
+                )
+            }
         )
 
         XCTAssertTrue(storage.defaults === testState.defaults)
         XCTAssertEqual(storage.documentsURL, testState.documentsURL)
         XCTAssertTrue(storage.eventDatabase === database)
+        XCTAssertTrue(
+            storage.notificationStoreURL.path.hasPrefix(
+                testState.documentsURL.path
+            )
+        )
     }
 
 }

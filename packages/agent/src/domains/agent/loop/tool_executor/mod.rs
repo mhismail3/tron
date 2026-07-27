@@ -30,7 +30,8 @@ use crate::domains::agent::r#loop::primitive_surface::{
 };
 use crate::domains::agent::r#loop::types::ToolInvocationExecutionResult;
 use crate::engine::{
-    ActorId, ActorKind, CausalContext, EngineHostHandle, Invocation, InvocationId, TraceId,
+    ActorId, ActorKind, CausalContext, EngineHostHandle, FunctionVisibility, Invocation,
+    InvocationId, TraceId,
 };
 use crate::shared::foundation::redaction::{redact_sensitive_content, redact_sensitive_json};
 use crate::shared::protocol::content::ToolResultContent;
@@ -463,10 +464,21 @@ async fn execute_tool_via_engine(
         origin_worker_invocation_id,
         &effective_args,
     );
-    let (actor_identity, actor_kind) = origin_worker_id.map_or_else(
-        || (format!("agent:{session_id}"), ActorKind::Agent),
-        |worker_id| (format!("worker:{worker_id}"), ActorKind::Worker),
-    );
+    // INVARIANT: an internal function can enter this executor only through the
+    // exact trusted agentTools surface resolved for an origin worker. Use the
+    // System actor solely for that already-admitted catalog target, then retain
+    // the worker as causal ownership. Ordinary agents never discover internal
+    // functions and cannot manufacture a PrimitiveExecutionTarget.
+    let trusted_internal_worker_call =
+        target.function.visibility == FunctionVisibility::Internal && origin_worker_id.is_some();
+    let (actor_identity, actor_kind) = if trusted_internal_worker_call {
+        ("system:worker-agent-tool".to_owned(), ActorKind::System)
+    } else {
+        origin_worker_id.map_or_else(
+            || (format!("agent:{session_id}"), ActorKind::Agent),
+            |worker_id| (format!("worker:{worker_id}"), ActorKind::Worker),
+        )
+    };
     let actor_id = match ActorId::new(actor_identity) {
         Ok(id) => id,
         Err(error) => {
@@ -498,6 +510,10 @@ async fn execute_tool_via_engine(
         .with_trigger_depth(worker_causal_depth)
         .with_session_id(session_id.to_owned())
         .with_idempotency_key(idempotency_key);
+    if trusted_internal_worker_call {
+        causal_context =
+            causal_context.with_origin_worker_id(origin_worker_id.expect("checked worker origin"));
+    }
     if let Some(workspace_id) = workspace_id {
         causal_context = causal_context.with_workspace_id(workspace_id.to_owned());
     }

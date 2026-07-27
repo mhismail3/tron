@@ -227,6 +227,15 @@ extension EventStoreManager {
             if let lines = result.activityLines {
                 session.lastActivityLines = lines.compactMap { $0.toActivityLine() }
             }
+            if let labels = result.labels { session.labels = labels }
+            if result.organizationChanged == true {
+                session.organizationGroup = result.organizationGroup
+            }
+            if let isArchived = result.isArchived {
+                session.archivedAt = isArchived
+                    ? (session.archivedAt ?? result.lastActivity ?? session.lastActivityAt)
+                    : nil
+            }
         }
         guard let session = sessions.first(where: { $0.id == sessionId }) else { return }
         do {

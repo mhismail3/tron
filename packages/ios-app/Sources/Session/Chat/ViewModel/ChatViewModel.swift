@@ -349,6 +349,17 @@ final class ChatViewModel {
         eventTask = nil
     }
 
+    /// Release work whose lifecycle belongs to one mounted chat presentation.
+    /// Durable message/session state remains available for reconstruction when
+    /// the same SwiftUI state returns after a transient disappearance.
+    func deactivateMountedResources() {
+        cancelRecording()
+        stopLiveEventStream()
+        stopSpeechTranscriptionMonitoring()
+        uiUpdateQueue.flush()
+        streamingManager.suspendDisplayUpdates()
+    }
+
     /// Single cancel-and-replace owner for the current PhotosPicker selection.
     @ObservationIgnored
     var selectedImageTask: Task<Void, Never>?

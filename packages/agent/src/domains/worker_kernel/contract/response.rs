@@ -91,6 +91,52 @@ pub(super) fn response_schema(function: &str) -> Value {
             "required":["delivery","targets","attempts"],
             "properties":{"delivery":{"type":"object"},"targets":{"type":"array"},"attempts":{"type":"array"}}
         }),
+        "worker_kernel::artifact_deliveries" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["artifacts","returned","total","nextOffset","storageAttention"],
+            "properties":{
+                "artifacts":{"type":"array","items":artifact_metadata_response_schema()},
+                "returned":{"type":"integer","minimum":0,"maximum":200},
+                "total":{"type":"integer","minimum":0},
+                "nextOffset":{
+                    "oneOf":[
+                        {"type":"integer","minimum":0,"maximum":1000000},
+                        {"type":"null"}
+                    ]
+                },
+                "storageAttention":{
+                    "type":"object","additionalProperties":false,
+                    "required":[
+                        "state","artifactBytes","databaseBytes",
+                        "databaseBudgetBytes","overBudget","message"
+                    ],
+                    "properties":{
+                        "state":{"type":"string","enum":["normal","attention"]},
+                        "artifactBytes":{"type":"integer","minimum":0},
+                        "databaseBytes":{"type":"integer","minimum":0},
+                        "databaseBudgetBytes":{"type":"integer","minimum":1},
+                        "overBudget":{"type":"boolean"},
+                        "message":{"oneOf":[{"type":"string"},{"type":"null"}]}
+                    }
+                }
+            }
+        }),
+        "worker_kernel::artifact_content" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["artifact","data"],
+            "properties":{
+                "artifact":artifact_metadata_response_schema(),
+                "data":{"type":"string","maxLength":2796204}
+            }
+        }),
+        "worker_kernel::artifact_delete" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["workerId","artifactId","deleted"],
+            "properties":{
+                "workerId":{"type":"string"},"artifactId":{"type":"string"},
+                "deleted":{"type":"boolean"}
+            }
+        }),
         "worker_kernel::core_proposal_create"
         | "worker_kernel::core_proposal_inspect"
         | "worker_kernel::core_proposal_apply" => core_proposal_response_schema(),
@@ -172,6 +218,37 @@ pub(super) fn response_schema(function: &str) -> Value {
         }),
         _ => open_response(),
     }
+}
+
+fn artifact_metadata_response_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":[
+            "workerId","artifactId","displayName","mediaType","sizeBytes",
+            "contentSha256","contentReference","sourceInvocationId",
+            "sourceWorkerVersion","traceId","createdAt"
+        ],
+        "properties":{
+            "workerId":{"type":"string"},"artifactId":{"type":"string"},
+            "displayName":{"type":"string"},"mediaType":{"type":"string"},
+            "sizeBytes":{"type":"integer","minimum":1,"maximum":2097152},
+            "contentSha256":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+            "contentReference":{
+                "type":"object","additionalProperties":false,
+                "required":["kind","workerId","artifactId","contentSha256","sizeBytes"],
+                "properties":{
+                    "kind":{"const":"artifact_content_reference"},
+                    "workerId":{"type":"string"},"artifactId":{"type":"string"},
+                    "contentSha256":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+                    "sizeBytes":{"type":"integer","minimum":1,"maximum":2097152}
+                }
+            },
+            "sourceInvocationId":{"type":"string"},
+            "sourceWorkerVersion":{"type":"string"},
+            "traceId":{"type":"string"},
+            "createdAt":{"type":"string"}
+        }
+    })
 }
 
 fn mutation_file_response_schema(include_replacements: bool) -> Value {
@@ -285,7 +362,9 @@ fn worker_run_graph_response_schema() -> Value {
             "inputTokens":{"type":"integer"},"outputTokens":{"type":"integer"},
             "cacheReadTokens":{"type":"integer"},"cacheCreationTokens":{"type":"integer"},
             "cost":{"type":"number"},"resultPreview":{},
-            "errorPreview":{},"presentation":{}
+            "errorPreview":{},"presentation":{
+                "oneOf":[presentation_response_schema(),{"type":"null"}]
+            }
         }
     });
     let timeline = json!({
@@ -321,11 +400,11 @@ fn worker_run_graph_response_schema() -> Value {
 }
 
 fn presentation_response_schema() -> Value {
-    json!({
-        "type":"object","additionalProperties":false,
-        "required":["experienceId","contractVersion","primary"],
-        "properties":{"experienceId":{"type":"string"},"contractVersion":{"type":"integer"},"suiteId":{"type":"string"},"componentRole":{"type":"string"},"primary":{"type":"boolean"}}
-    })
+    let mut schema = super::bundle::presentation_schema();
+    if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
+        required.push(json!("primary"));
+    }
+    schema
 }
 
 fn webhook_credential_response_schema() -> Value {

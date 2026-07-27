@@ -34,8 +34,8 @@ pub use maintenance::{checkpoint_database, export_snapshot};
 pub use payloads::{
     decode_blob_content, delete_owned_payload_refs, delete_unowned_blobs, encode_blob_content,
     owned_payload_ref, register_existing_blob_owner, resolve_owned_json_value,
-    resolve_stored_json_string, resolve_stored_json_value, store_content_blob, store_json_bytes,
-    store_json_value, store_owned_payload_ref,
+    resolve_owned_payload_bytes, resolve_stored_json_string, resolve_stored_json_value,
+    store_content_blob, store_json_bytes, store_json_value, store_owned_payload_ref,
 };
 pub use schema::{apply_runtime_pragmas, ensure_storage_schema};
 pub use stats::storage_stats;

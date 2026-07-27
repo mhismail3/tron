@@ -184,6 +184,94 @@ struct WorkerKernelClientTests {
         #expect(result.reference.sizeBytes == 12_000)
     }
 
+    @Test("Artifact inbox uses closed metadata content and delete operations")
+    func artifactOperationsUseWorkerKernelBoundary() async throws {
+        let transport = connectedTransport()
+        let client = WorkerKernelClient(transport: transport)
+        let hash = "sha256:" + String(repeating: "a", count: 64)
+        let artifact = WorkerArtifactDTO(
+            workerId: "document-artifact",
+            artifactId: "report-1",
+            displayName: "report.md",
+            mediaType: "text/markdown",
+            sizeBytes: 5,
+            contentSha256: hash,
+            contentReference: WorkerArtifactContentReferenceDTO(
+                kind: "artifact_content_reference",
+                workerId: "document-artifact",
+                artifactId: "report-1",
+                contentSha256: hash,
+                sizeBytes: 5
+            ),
+            sourceInvocationId: "worker_run_1",
+            sourceWorkerVersion: "v1",
+            traceId: "trace-1",
+            createdAt: "2026-07-27T08:00:00Z"
+        )
+        var functions: [String] = []
+        transport.readHandler = { functionId, payload, _ in
+            functions.append(functionId.rawValue)
+            switch functionId.rawValue {
+            case "worker_kernel::artifact_deliveries":
+                let request = try #require(payload as? WorkerArtifactListRequestDTO)
+                #expect(request.limit == 200)
+                #expect(request.offset == 40)
+                return WorkerArtifactPageDTO(
+                    artifacts: [artifact],
+                    returned: 1,
+                    total: 1,
+                    nextOffset: nil,
+                    storageAttention: WorkerArtifactStorageAttentionDTO(
+                        state: "normal",
+                        artifactBytes: 5,
+                        databaseBytes: 10,
+                        databaseBudgetBytes: 100,
+                        overBudget: false,
+                        message: nil
+                    )
+                )
+            case "worker_kernel::artifact_content":
+                let request = try #require(payload as? WorkerArtifactIdentityRequestDTO)
+                #expect(request.workerId == artifact.workerId)
+                #expect(request.artifactId == artifact.artifactId)
+                return WorkerArtifactContentDTO(artifact: artifact, data: "aGVsbG8=")
+            default:
+                throw EngineConnectionError.invalidResponse
+            }
+        }
+        let key = EngineIdempotencyKey.userAction("delete-artifact")
+        transport.writeHandler = { functionId, payload, receivedKey, _ in
+            functions.append(functionId.rawValue)
+            #expect(functionId.rawValue == "worker_kernel::artifact_delete")
+            #expect(receivedKey == key)
+            let request = try #require(payload as? WorkerArtifactIdentityRequestDTO)
+            #expect(request.workerId == artifact.workerId)
+            #expect(request.artifactId == artifact.artifactId)
+            return WorkerArtifactDeleteDTO(
+                workerId: artifact.workerId,
+                artifactId: artifact.artifactId,
+                deleted: true
+            )
+        }
+
+        _ = try await client.artifactDeliveries(limit: 500, offset: 40)
+        _ = try await client.artifactContent(
+            workerId: artifact.workerId,
+            artifactId: artifact.artifactId
+        )
+        _ = try await client.deleteArtifact(
+            workerId: artifact.workerId,
+            artifactId: artifact.artifactId,
+            idempotencyKey: key
+        )
+
+        #expect(functions == [
+            "worker_kernel::artifact_deliveries",
+            "worker_kernel::artifact_content",
+            "worker_kernel::artifact_delete",
+        ])
+    }
+
     @Test("Worker run controls map to generic durable kernel operations")
     func runControlsUseGenericKernelOperations() async throws {
         let transport = connectedTransport()

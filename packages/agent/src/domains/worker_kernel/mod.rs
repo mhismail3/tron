@@ -1,8 +1,10 @@
 //! Trusted-local persistent worker kernel.
 //!
 //! This domain is the executable self-extension path. A complete bundle is
-//! staged, dependency-locked, smoke-tested, atomically versioned, activated,
-//! and projected as a direct typed model tool by one `worker_upsert` call.
+//! staged, dependency-locked, smoke-tested, atomically versioned, and activated
+//! by one `worker_upsert` call. Direct bundles also publish a typed model tool;
+//! internal bundles retain their hooks, triggers, dispatches, client actions,
+//! and authenticated generic invocation without entering the model surface.
 //! Acquisition seals dependency checksums before hashing; bounded UTF-8 source
 //! imports reject symlinks and special files. Filesystem bundles are canonical,
 //! while SQLite owns rebuildable indexes and durable operational evidence.
@@ -11,6 +13,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | `artifacts` | Closed self-result artifact admission for native custody |
 //! | `contract` | Primitive identity plus request, response, and worker-bundle schemas |
 //! | `dispatches` | Closed asynchronous worker-to-worker handoff parsing and limits |
 //! | `handlers` | Model/client operation bindings |
@@ -23,6 +26,7 @@
 //! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, semantic engine hooks, supervision, and primitive session-metadata actuation |
 //! | `surface` | Canonical fixed/dynamic model-tool selection and provider-neutral introspection evidence |
 //! | `types` | Worker bundle and durable runtime DTOs |
+//! | `wakeups` | Closed self-only durable wakeup parsing and bounds |
 //!
 //! ## Entry Points
 //!
@@ -101,11 +105,14 @@
 //! explicit operator detail request expands at most twenty records and still
 //! caps each retained input, output, or result, preventing durable history from
 //! becoming an unbounded provider-context or transport payload.
-//! Inbox Attention is derived rather than stored: errors remain active until a
-//! later successfully verified activation or rollback for that worker. A plain
-//! enable toggle is not recovery evidence. Resolved errors remain immutable in
-//! run and delivery audit history but are excluded from active Attention and
-//! future agent-context candidates.
+//! Inbox Attention is derived rather than stored: only unresolved error and
+//! setup-blocker evidence is active. Successful informational outcomes remain
+//! immutable history even when they came from schedules, dispatches, or
+//! background work; one-time agent-context eligibility is a separate
+//! projection. A later successfully verified activation or rollback resolves
+//! older errors for that worker, while a plain enable toggle is not recovery
+//! evidence. Resolved errors remain immutable in run and delivery audit history
+//! but are excluded from active Attention and future agent-context candidates.
 //! Workers may declare the closed `notification_delivery` client-delivery
 //! capability. Their successful top-level output is validated before commit,
 //! and logical delivery intents are inserted in the same SQLite transaction as
@@ -116,20 +123,50 @@
 //! delivered. Missing readiness creates durable Attention without turning a
 //! successfully accepted worker result into failure. Tokens and provider keys
 //! never enter responses, logs, worker bundles, or purge exports.
-//! The Engine Dashboard exposes active hook ownership. `context_summary`,
-//! `inbox_context`, `session_title`, and `worker_relevance` are production
-//! hooks. Context summary, inbox context, and worker relevance retain narrow
-//! deterministic recovery paths in the kernel so compaction, background
-//! context, and tool projection cannot depend recursively on their own policy
-//! worker. Session naming instead remains absent until a real worker owns it;
-//! an unavailable title policy leaves the completed session untitled.
-//! Synchronous hook calls have a sixty-second policy ceiling. A timed-out hook
-//! is cancelled and its owner is disabled through the ordinary worker-failure
-//! path rather than holding an engine lifecycle boundary for the general
-//! invocation maximum.
+//! Workers may separately declare the closed `artifact_delivery` capability.
+//! An artifact can name only base64 bytes at an RFC 6901 pointer in its own
+//! validated invocation result. Completion gives those bytes content-addressed
+//! custody in `workers.sqlite` atomically with the canonical result and source
+//! trace. Artifact metadata and bytes persist until an authenticated explicit
+//! delete; workers cannot provide URLs, filesystem paths, client commands, or
+//! draft mutations. Whole-worker-database pressure crosses into one
+//! transition-aware Attention record; it never silently evicts user artifacts
+//! or produces one error per retry.
+//! The Engine Dashboard exposes active hook ownership. `continuity_context`,
+//! `context_summary`, `inbox_context`, `session_organization`, `session_title`, and `worker_relevance`
+//! are production hooks. Context summary, inbox context, and worker relevance
+//! retain narrow deterministic recovery paths in the kernel so compaction,
+//! background context, and tool projection cannot depend recursively on their
+//! own policy worker. Continuity and session naming deliberately have no
+//! generated fallback: unavailable policy contributes no memory context and
+//! leaves a completed session untitled.
+//! `continuity_context` is a minimal fixed projection seam for one production
+//! Continuity Curator worker. The worker exclusively owns records, retention,
+//! project/global scope, retrieval, ranking, correction, promotion, and
+//! deletion. The provider runtime supplies only the bounded current request
+//! and canonical working-directory identity, then redacts credential-shaped
+//! text and injects at most one bounded narrative. Provider context is
+//! engine-owned and cannot be mutated safely from a worker process; that
+//! custody is the reason for the seam. It cannot select records, inspect worker
+//! state, choose retention, or manufacture fallback memory.
+//! Synchronous hook calls have a sixty-second default policy ceiling, and an
+//! immutable bundle may tighten the same generic invocation ceiling for every
+//! runner kind. A timed-out optional relevance or inbox policy is cancelled and
+//! recorded while its caller uses deterministic recovery; invalid output still
+//! disables the owner. Other hook failures use the ordinary worker-failure path.
+//! Exact canonical relevance and
+//! inbox-context inputs reuse the ordinary durable invocation ledger within a
+//! thirty-second window; owner version, hook identity, input bytes, and window
+//! all participate in the idempotency key, so there is no second cache
+//! subsystem. Session-title, compaction, and continuity hooks retain causal
+//! idempotency because their outputs may be bound to a specific session or
+//! trace.
 //! Successful hook results remain in the durable inbox as already-consumed
-//! audit evidence because their engine caller used them synchronously. Hook
-//! failures remain pending Attention and can enter later relevant context.
+//! audit evidence because their engine caller used them synchronously. Exact
+//! immutable-version timeouts from the fallback-backed `worker_relevance` and
+//! `inbox_context` hooks remain failed run/inbox history without becoming
+//! current operator Attention or future agent context; malformed output and all
+//! other hook failures remain actionable.
 //! The authenticated `engine::surface_snapshot` read returns the selected
 //! surface revision/hash/counts, every published worker's projection status,
 //! active engine-hook and native-client-action ownership, the complete
@@ -144,12 +181,19 @@
 //! Explicit discovery and automatic projection use one worker-owned relevance
 //! hook when installed. Its bounded candidate contract carries canonical worker
 //! metadata and operational evidence without exposing provider internals. The
+//! candidate description comes directly from the immutable bundle; the longer
+//! provider-facing function description may retain version, provenance, and
+//! interaction instructions without inflating or biasing semantic routing.
+//! The
 //! local recovery scorer uses exact field-weighted tokens and bounded adjacent
 //! phrases, so conversation framing and substring collisions cannot manufacture
-//! relevance when the hook is absent, unhealthy, or executing itself. Mutable
+//! relevance when the hook is absent, unhealthy, or any agent-runner worker is
+//! resolving its own surface. Automatic relevance, inbox, and continuity hooks
+//! are user-session context only; this prevents cross-hook recursion and keeps
+//! internal worker protocols isolated. Mutable
 //! run/health evidence is a rebuildable engine-state overlay, not
 //! function-contract text; successful work therefore cannot churn catalog
-//! revisions. Fixed invocation and direct worker tools share one durable
+//! revisions. Fixed invocation and public/internal worker tools share one durable
 //! interaction contract. Top-level agent runners begin in the background;
 //! command and service versions use completed exact-version p95 evidence after
 //! five samples. Unknown or predicted-fast work gets at most ten seconds in the
@@ -186,6 +230,14 @@
 //! worker-schema-constrained list of RFC 6901 paths. The downstream worker
 //! reads only those paths, verifies the returned reference identity, and keeps
 //! all selection semantics in its immutable bundle.
+//! The same immutable `presentation` envelope may declare a closed generic
+//! native descriptor. Its bounded text, status, progress, table, list, HTTPS
+//! link, artifact, confirmation, and same-worker action sections bind only to
+//! RFC 6901 result paths read through `worker_result_read`. Fixed action inputs
+//! pass the owning worker's complete input schema at bundle activation and use
+//! ordinary invocation at runtime. HTML, JavaScript, custom client code,
+//! arbitrary client commands, unsafe URL schemes, copied result bodies, and a
+//! second presentation cache are not expressible.
 //! Direct-worker session completions persist the originating provider-tool
 //! association rather than another output body. That association is a
 //! many-to-one durable relation: restart redelivery may regenerate a provider
@@ -213,17 +265,65 @@
 //! trace and origin session, increment causal depth, and identify their source
 //! invocation as parent. A source route may retain fixed client-response
 //! ownership without allowing worker output to choose its response destination.
+//! Schema v13 adds one self-only delayed invocation to the same transactional
+//! completion boundary. The worker owns the next useful time and typed input;
+//! the kernel stores only `not_before`, the immutable source linkage, and
+//! restart-safe queue custody. Claiming arms one synchronous drop finalizer;
+//! terminal commit disarms it. Task abort, panic, or an unhandled error
+//! therefore interrupts and requeues the attempt before its in-process owner
+//! disappears. A separate scope guard releases the in-flight identity and
+//! cancellation registration on the same paths. A bounded dispatcher
+//! reconciler remains a defense for independently corrupted ownership rather
+//! than the normal finalization path. Repeated orphan recovery is counted from
+//! immutable interrupted-attempt evidence, so the third occurrence produces
+//! one durable Attention item even when engine restarts separate the failures.
 //! The fixed invocation envelope and each selected worker's nested input
 //! schema are both transport admission boundaries. A nested schema or secret
 //! violation is returned as an actionable invalid request before any durable
 //! invocation exists; contract-loading and persistence failures remain
 //! internal failures rather than being blamed on caller input.
-//! A bundle may additionally declare a narrower `toolInputSchema` for its
-//! direct model tool. Triggers, events, worker handoffs, and authenticated
-//! generic invocation continue to use the complete `inputSchema`; direct calls
-//! pass both boundaries before durable admission. Internal occurrence,
-//! revision, mutation, and acknowledgement fields therefore need not become
-//! model ceremony.
+//! Every newly activated direct bundle must declare a narrow
+//! `toolInputSchema` for its model tool. Triggers, events, worker handoffs, and
+//! authenticated generic invocation continue to use the complete
+//! `inputSchema`; direct calls pass both boundaries before durable admission.
+//! Internal occurrence, revision, mutation, and acknowledgement fields
+//! therefore cannot silently become model ceremony. Canonical loading retains
+//! the full-input fallback only for already-active migration bundles.
+//! `modelExposure` is the closed ordinary-publication switch: `direct` is the
+//! legacy default, while `internal` suppresses the worker from ordinary agent
+//! discovery and provider surfaces. Internal versions retain one
+//! system-visible function in the same catalog so an agent runner may name it
+//! explicitly through `agentTools`; they do not gain a second registry or
+//! invocation path. Hooks, triggers, client actions, worker dispatches, and
+//! generic invocation continue to follow the same immutable version and
+//! durable execution path.
+//! This fixed seam is necessary because only the engine owns its callable
+//! function catalog; a worker process cannot safely publish or remove its own
+//! provider tool. The two-value contract carries no relevance or routing
+//! policy, and the active immutable bundle remains its single owner.
+//! Agent runners may additionally declare `agentTools`, an exact bounded list
+//! of model-tool names for their child provider sessions. This fixed seam has
+//! independent production callers in Engine Steward, Software Workspace,
+//! Browser Operator, Mac Operator, Research Coordinator, General Delegate,
+//! Worker Evaluator, and Worker Forge. A worker process cannot safely edit the
+//! authenticated provider function catalog, so activation validates at most 32
+//! unique 64-byte names against current fixed primitives, enabled direct or
+//! internal worker functions, and the candidate's own declared tool. The immutable
+//! bundle is the single owner; the allowlist crosses the existing causal
+//! context and exact fixed/dynamic filtering occurs at the existing provider
+//! boundary. Absence preserves the migration surface and an explicit empty
+//! list exposes no tools. Restart reloads the same immutable bundle, missing
+//! tools fail closed at projection, and neither the field nor the filter
+//! carries relevance, workflow, retry, or other semantic policy.
+//! Internal targets remain `FunctionVisibility::Internal`. The exact trusted
+//! surface is resolved under the System actor, and execution uses that actor
+//! only for the already-resolved target while retaining the originating worker
+//! as causal ownership. Ordinary Agent and Worker actors still cannot discover
+//! or invoke an internal function directly.
+//! Verification evidence inside an immutable version is deterministic.
+//! Activation time belongs to the append-only `worker_health` ledger, so
+//! re-verifying byte-identical source reuses one content version while still
+//! recording each successful activation and its recovery meaning.
 //! Every canonical load verifies both `content.sha256` and the full version
 //! tree against its directory name. File and symlink targets participate in
 //! dependency and version hashes. Command, agent, and resident runners execute
@@ -244,12 +344,19 @@
 //! no framework envelope is injected. A projected event outside the typed
 //! schema is a terminal worker failure, not an endlessly retried delivery. A
 //! persistence failure retains the cursor for retry.
-//! Immutable bundles may choose generic `maxAgentTurns` and
-//! `maxChildInvocations` ceilings. The agent runtime can only tighten its
-//! global turn limit, while child admission counts canonical parent links in
-//! the same SQLite transaction as insertion so a concurrent tool batch cannot
-//! race beyond its parent's ceiling. Source, claim, citation, model, and repair
-//! policy remain worker-owned.
+//! Immutable bundles may choose generic `maxInvocationSeconds`,
+//! `maxAgentTurns`, and `maxChildInvocations` ceilings. Invocation time applies
+//! to every runner kind and can only tighten the global two-hour maximum. The
+//! agent runtime can only tighten its global turn limit, while child admission
+//! counts canonical parent links in the same SQLite transaction as insertion
+//! so a concurrent tool batch cannot race beyond its parent's ceiling. Source,
+//! claim, citation, model, and repair policy remain worker-owned.
+//! Agent runners may also select one canonical provider-neutral
+//! `reasoningLevel`. This narrow execution seam has independent production
+//! callers in the latency-bounded relevance and inbox curators: the engine
+//! merely authenticates and projects the declared level into its existing
+//! model request, while the worker owns which level is sufficient. It adds no
+//! semantic branch, credential access, storage owner, or secondary model path.
 //! Lazy resident processes remain supervised between invocations: an exit or three
 //! consecutive health-check failures disables routing and creates a durable
 //! high-visibility inbox result. System inbox failures without invocation rows
@@ -276,6 +383,22 @@
 //! the kernel validates and compare-and-sets that result before terminal worker
 //! commit, so recovery redelivery cannot overwrite an explicit concurrent
 //! title. Title-policy failure remains normal worker health/inbox evidence.
+//! Successful one-shot title finalization prepares one closed internal dispatch
+//! to the active `session_organization` worker and commits that child admission
+//! in the same `workers.sqlite` transaction as the title worker's terminal
+//! result. A failed transaction leaves the source invocation running for the
+//! existing finalization/recovery path; organization work is never reduced to a
+//! best-effort log after the canonical title compare-and-set. Organization
+//! policy defaults and preferences stay in worker-owned state. The only
+//! canonical mutation seam is a closed bounded batch with optional replacement
+//! labels/group plus preserve/archive/restore. Omission preserves the canonical
+//! field and explicit null clears only the group, allowing a simple direct
+//! session-ID/outcome tool without destructive read-before-write ceremony.
+//! Completion admits that exact intent atomically to `workers.sqlite`; the
+//! existing dispatcher later applies it idempotently to canonical
+//! `sessions.tags`/`ended_at`, with bounded infrastructure backoff and
+//! stale-owner recovery. No per-turn polling, delete, arbitrary tag, or second
+//! organization cache exists.
 //! Raw web fetches default to 128 KiB and 30 seconds, expose explicit larger
 //! ceilings, and hash the retained bytes. HTML interpretation, crawling, and
 //! evidence policy remain worker behavior rather than growing the primitive.
@@ -372,6 +495,7 @@ use crate::domains::registration::composition::{
     DomainFunctionRegistration, DomainRegistrationContext,
 };
 
+mod artifacts;
 mod contract;
 mod core_proposals;
 mod dispatches;
@@ -382,10 +506,12 @@ mod persistence;
 mod process;
 mod retrieval;
 mod runtime;
+mod session_organization;
 mod surface;
 #[cfg(test)]
 mod tests;
 mod types;
+mod wakeups;
 
 pub(crate) fn create_profile_snapshot() -> Result<persistence::ProfileSnapshot, String> {
     persistence::create_profile_snapshot(&crate::shared::foundation::paths::tron_home())
@@ -417,9 +543,9 @@ pub(crate) fn restore_profile_snapshot(
 }
 
 pub(crate) use contract::{
-    CONTEXT_SUMMARY_FUNCTION, CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES, SESSION_TITLE_FUNCTION,
-    WORKER_RELEVANCE_FUNCTION, WORKER_RESULT_PROJECTION_FUNCTION, estimate_context_summary_tokens,
-    validate_context_summary_narrative,
+    CONTEXT_SUMMARY_FUNCTION, CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES, CONTINUITY_CONTEXT_FUNCTION,
+    SESSION_TITLE_FUNCTION, WORKER_RELEVANCE_FUNCTION, WORKER_RESULT_PROJECTION_FUNCTION,
+    estimate_context_summary_tokens, validate_context_summary_narrative,
 };
 
 pub(crate) use notifications::apns::validate_private_key as validate_apns_private_key;

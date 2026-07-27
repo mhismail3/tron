@@ -29,6 +29,73 @@ fn session_title_bundle(worker_id: &str, command_output: Value) -> WorkerBundle 
     bundle
 }
 
+fn session_organization_bundle() -> WorkerBundle {
+    let mut bundle = command_bundle(vec![
+        "printf".to_owned(),
+        serde_json::to_string(&json!({
+            "status":"proposed",
+            "proposal":{
+                "sessionId":"sess-proposal",
+                "labels":["Work"],
+                "group":null,
+                "archiveAction":"preserve",
+                "reason":"Keep current work active."
+            }
+        }))
+        .unwrap(),
+    ]);
+    bundle.worker_id = Some("session-organizer".to_owned());
+    bundle.name = "Session Organizer".to_owned();
+    bundle.description = "Proposes bounded session organization once after naming".to_owned();
+    bundle.tool_name = Some("worker_sessions".to_owned());
+    bundle.input_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["action","session","userPrompt","assistantResponse"],
+        "properties":{
+            "action":{"const":"session_organization"},
+            "session":{
+                "type":"object",
+                "additionalProperties":false,
+                "required":["sessionId","workingDirectory","labels","isArchived"],
+                "properties":{
+                    "sessionId":{"type":"string","minLength":1},
+                    "title":{"type":["string","null"]},
+                    "workingDirectory":{"type":"string"},
+                    "labels":{"type":"array","maxItems":12,"items":{"type":"string"}},
+                    "group":{"type":["string","null"]},
+                    "isArchived":{"type":"boolean"}
+                }
+            },
+            "userPrompt":{"type":"string","maxLength":4096},
+            "assistantResponse":{"type":"string","maxLength":4096}
+        }
+    });
+    bundle.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["status","proposal"],
+        "properties":{
+            "status":{"const":"proposed"},
+            "proposal":{
+                "type":"object",
+                "additionalProperties":false,
+                "required":["sessionId","labels","group","archiveAction","reason"],
+                "properties":{
+                    "sessionId":{"type":"string","minLength":1},
+                    "labels":{"type":"array","maxItems":12,"items":{"type":"string","minLength":1,"maxLength":64}},
+                    "group":{"type":["string","null"],"maxLength":80},
+                    "archiveAction":{"type":"string","enum":["preserve","archive","restore"]},
+                    "reason":{"type":"string","minLength":1,"maxLength":512}
+                }
+            },
+            "sessionOrganizationMutations":{"type":"array","maxItems":16}
+        }
+    });
+    bundle.engine_hooks = vec![WorkerEngineHook::SessionOrganization];
+    bundle
+}
+
 fn session_title_invocation(session_id: &str, key: &str) -> Invocation {
     Invocation::new_sync(
         FunctionId::new(super::super::super::SESSION_TITLE_FUNCTION).unwrap(),
@@ -97,6 +164,10 @@ async fn explicit_session_rename_persists_and_broadcasts() {
 #[tokio::test]
 async fn session_title_hook_names_the_original_untitled_session_once() {
     let (runtime, _home) = test_runtime(None);
+    runtime
+        .upsert(session_organization_bundle(), None)
+        .await
+        .unwrap();
     let worker = runtime
         .upsert(
             session_title_bundle(
@@ -120,10 +191,8 @@ async fn session_title_hook_names_the_original_untitled_session_once() {
     assert_eq!(first["handled"], true);
     assert_eq!(first["queued"], true);
     assert_eq!(first["workerId"], worker.worker.worker_id);
-    assert_eq!(
-        await_queued_title(&runtime, &first).await.status,
-        "completed"
-    );
+    let completed_title = await_queued_title(&runtime, &first).await;
+    assert_eq!(completed_title.status, "completed");
     assert_eq!(
         runtime
             .event_store
@@ -134,6 +203,18 @@ async fn session_title_hook_names_the_original_untitled_session_once() {
             .as_deref(),
         Some("Build a Reliable Work Ledger")
     );
+    for _ in 0..100 {
+        if runtime
+            .store()
+            .runs_filtered(Some("session-organizer"), None, 10)
+            .unwrap()
+            .len()
+            == 1
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     let second = runtime
         .enqueue_session_title_hook(&session_title_invocation(&session.id, "title-second"))
@@ -148,6 +229,25 @@ async fn session_title_hook_names_the_original_untitled_session_once() {
             .len(),
         1
     );
+    assert_eq!(
+        runtime
+            .store()
+            .runs_filtered(Some("session-organizer"), None, 10)
+            .unwrap()
+            .len(),
+        1,
+        "later turns cannot enqueue another one-shot organizer invocation"
+    );
+    let dispatches = runtime
+        .store()
+        .worker_dispatches_for_source(&completed_title.invocation_id)
+        .unwrap();
+    assert_eq!(dispatches.len(), 1);
+    assert_eq!(
+        dispatches[0]["route"],
+        super::super::session_organization::SESSION_ORGANIZATION_AFTER_TITLE_ROUTE
+    );
+    assert_eq!(dispatches[0]["targetWorkerId"], "session-organizer");
 }
 
 #[tokio::test]

@@ -15,6 +15,27 @@ final class StreamingManagerTypewriterTests: XCTestCase {
         XCTAssertFalse(manager.hasInstalledDisplayLink)
     }
 
+    func testMountedViewSuspensionFlushesAndReleasesDisplayLinkWithoutErasingStream() {
+        let manager = StreamingManager()
+        let messageId = UUID()
+        var callbackText: String?
+        manager.onCreateStreamingMessage = { messageId }
+        manager.onTextUpdate = { _, text in callbackText = text }
+
+        manager.handleTextDelta("preserved stream")
+        XCTAssertTrue(manager.hasInstalledDisplayLink)
+
+        manager.suspendDisplayUpdates()
+
+        XCTAssertFalse(manager.hasInstalledDisplayLink)
+        XCTAssertEqual(manager.streamingMessageId, messageId)
+        XCTAssertEqual(manager.streamingText, "preserved stream")
+        XCTAssertEqual(callbackText, "preserved stream")
+
+        manager.handleTextDelta(" resumed")
+        XCTAssertTrue(manager.hasInstalledDisplayLink)
+    }
+
     // MARK: - Typewriter Animation Tests
 
     func testTypewriterRevealsTextGradually() {

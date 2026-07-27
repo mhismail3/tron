@@ -209,8 +209,7 @@ struct TronLoggerSensitiveDataTests {
         logger.logWebSocketMessage(
             direction: "→ SEND",
             type: "auth.addApiKey",
-            size: 123,
-            preview: #"{"apiKey":"sk-test-abcdefghijklmnopqrstuvwxyz","apiKeyLabel":"Project"}"#
+            size: 123
         )
 
         let message = logger.getRecentLogs(category: .websocket).last?.3 ?? ""
@@ -220,6 +219,30 @@ struct TronLoggerSensitiveDataTests {
         #expect(!message.contains("sk-test-abcdefghijklmnopqrstuvwxyz"))
         #expect(!message.contains("apiKeyLabel"))
         #expect(!message.contains("Project"))
+    }
+
+    @Test("event logging admits metadata but has no payload input")
+    func eventLoggingRecordsOnlyMetadata() {
+        let logger = TronLogger.shared
+        let originalLevel = logger.minimumLevel
+        defer {
+            logger.minimumLevel = originalLevel
+            logger.clearBufferForCategory(.events)
+        }
+
+        logger.minimumLevel = .verbose
+        logger.clearBufferForCategory(.events)
+        logger.logEvent(
+            type: "notification.received",
+            sessionId: "session-private-suffix",
+            payloadBytes: 4_096
+        )
+
+        let message = logger.getRecentLogs(category: .events).last?.3 ?? ""
+        #expect(message.contains("notification.received"))
+        #expect(message.contains("session-..."))
+        #expect(message.contains("payloadBytes=4096"))
+        #expect(!message.contains("private-suffix"))
     }
 
     @Test("Malformed inbound frames never enter diagnostics verbatim")

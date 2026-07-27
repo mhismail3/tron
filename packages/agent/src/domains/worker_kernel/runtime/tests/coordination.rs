@@ -13,6 +13,7 @@ fn interaction_prediction_uses_runner_class_and_exact_version_p95() {
             &WorkerRunner::Agent {
                 instructions: "bounded work".to_owned(),
                 model: None,
+                reasoning_level: None,
             },
             Vec::new(),
             Duration::from_secs(10),
@@ -1158,6 +1159,111 @@ async fn stopping_one_worker_cancels_current_work_without_disabling_future_dispa
 }
 
 #[tokio::test]
+async fn aborting_a_claimed_execution_future_interrupts_and_requeues_it_immediately() {
+    let (runtime, home) = test_runtime(None);
+    let marker = home.path().join("claimed-future-started");
+    let bundle = command_bundle(vec![
+        "python3".to_owned(),
+        "-c".to_owned(),
+        "import json,pathlib,sys,time; marker=pathlib.Path(sys.argv[1]); first=not marker.exists(); marker.write_text('started'); time.sleep(30) if first else None; print(json.dumps({'ok':True}))".to_owned(),
+        marker.display().to_string(),
+    ]);
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+    let worker_id = outcome.worker.worker_id;
+    let delivery = {
+        let runtime = Arc::clone(&runtime);
+        let worker_id = worker_id.clone();
+        tokio::spawn(async move {
+            runtime
+                .invoke(request(&worker_id, json!({}), "abort-claimed-future"))
+                .await
+        })
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while tokio::time::Instant::now() < deadline && !marker.exists() {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(marker.exists(), "claimed worker process never started");
+    let running = runtime
+        .store()
+        .runs_filtered(Some(&worker_id), Some("running"), 10)
+        .unwrap();
+    assert_eq!(running.len(), 1);
+    let invocation_id = running[0].invocation_id.clone();
+
+    delivery.abort();
+    let _ = delivery.await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let record = runtime.store().invocation(&invocation_id).unwrap().unwrap();
+        if record.status == "queued" {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "drop finalizer did not requeue the claimed attempt"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let attempts = runtime.store().attempts(&invocation_id).unwrap();
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0]["status"], "interrupted");
+
+    let completed = runtime
+        .invoke(request(&worker_id, json!({}), "abort-claimed-future"))
+        .await
+        .unwrap();
+    assert_eq!(completed.invocation_id, invocation_id);
+    assert_eq!(completed.status, "completed");
+    assert_eq!(completed.attempt_count, 2);
+}
+
+#[tokio::test]
+async fn third_orphan_recovery_creates_one_durable_attention_item() {
+    let (runtime, _home) = test_runtime(None);
+    let outcome = runtime
+        .upsert(
+            command_bundle(vec![
+                "python3".to_owned(),
+                "-c".to_owned(),
+                "import json; print(json.dumps({'ok':True}))".to_owned(),
+            ]),
+            None,
+        )
+        .await
+        .unwrap();
+
+    for index in 1..=3 {
+        let (run, _) = runtime
+            .store()
+            .begin_invocation(
+                &outcome.worker.worker_id,
+                &outcome.version,
+                &json!({"index":index}),
+                &format!("orphan-attention-{index}"),
+                &format!("trace-orphan-attention-{index}"),
+                0,
+                "manual",
+                None,
+            )
+            .unwrap();
+        assert!(runtime.store().claim_running(&run.invocation_id).unwrap());
+        runtime.reconcile_orphaned_invocations(true).await;
+    }
+
+    let attention = runtime
+        .store()
+        .inbox_filtered_page(Some(&outcome.worker.worker_id), None, None, true, 20, 0)
+        .unwrap();
+    let orphan_attention = attention
+        .iter()
+        .filter(|item| item["result"]["phase"] == "orphan_recovery")
+        .collect::<Vec<_>>();
+    assert_eq!(orphan_attention.len(), 1);
+    assert_eq!(orphan_attention[0]["result"]["recoveryCount"], 3);
+}
+
+#[tokio::test]
 async fn shutdown_cancels_process_trees_and_restart_redelivers_the_interrupted_attempt() {
     let (runtime, home) = test_runtime(None);
     let child_started = home.path().join("shutdown-descendant-started");
@@ -1190,8 +1296,8 @@ async fn shutdown_cancels_process_trees_and_restart_redelivers_the_interrupted_a
     assert!(child_started.exists(), "worker descendant never started");
 
     runtime.shutdown().await;
-    let error = invoking.await.unwrap().unwrap_err();
-    assert!(error.contains("runtime shutdown"));
+    let interrupted = invoking.await.unwrap().unwrap();
+    assert_eq!(interrupted.status, "queued");
     let interrupted = runtime
         .store()
         .runs_filtered(Some(&worker_id), None, 10)
@@ -1199,7 +1305,7 @@ async fn shutdown_cancels_process_trees_and_restart_redelivers_the_interrupted_a
         .into_iter()
         .next()
         .unwrap();
-    assert_eq!(interrupted.status, "running");
+    assert_eq!(interrupted.status, "queued");
     assert_eq!(interrupted.attempt_count, 1);
     let summary = runtime.store().summary(&worker_id).unwrap().unwrap();
     assert!(summary.enabled);
@@ -1284,8 +1390,8 @@ async fn every_worker_console_lifecycle_mutation_emits_live_refresh_evidence() {
 async fn schedule_event_and_authenticated_webhook_share_the_durable_dispatch_path() {
     let (runtime, home) = test_runtime(None);
     let mut bundle = command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]);
-    bundle.worker_id = Some("all-trigger-worker".to_owned());
-    bundle.name = "All Trigger Worker".to_owned();
+    bundle.worker_id = Some("automation-reminders".to_owned());
+    bundle.name = "Automation Reminders".to_owned();
     bundle.tool_name = Some("worker_all_triggers".to_owned());
     bundle.triggers = vec![
         WorkerTrigger::Manual {
@@ -1370,6 +1476,23 @@ async fn schedule_event_and_authenticated_webhook_share_the_durable_dispatch_pat
     assert!(runs.iter().any(|run| run.trigger_kind == "engine_event"));
     assert!(runs.iter().any(|run| run.trigger_kind == "schedule"));
     assert!(runs.iter().all(|run| run.status == "completed"));
+    let history = runtime
+        .store()
+        .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 20)
+        .unwrap();
+    assert!(history.iter().any(|item| {
+        item["triggerKind"] == "schedule"
+            && item["severity"] == "info"
+            && item["requiresAttention"] == false
+    }));
+    assert!(
+        runtime
+            .store()
+            .inbox_filtered_page(Some(&outcome.worker.worker_id), None, None, true, 20, 0,)
+            .unwrap()
+            .is_empty(),
+        "completed reminder trigger outcomes stay in history without becoming Attention"
+    );
     let durable_bytes =
         std::fs::read(home.path().join("internal/database/workers.sqlite")).unwrap();
     assert!(!String::from_utf8_lossy(&durable_bytes).contains(&credential.token));

@@ -430,6 +430,14 @@ tron_events! {
         parent_session_id: Option<String>,
         #[serde(rename = "activityLines", skip_serializing_if = "Option::is_none")]
         activity_lines: Option<Vec<ActivitySummaryLine>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        labels: Option<Vec<String>>,
+        #[serde(rename = "organizationGroup", skip_serializing_if = "Option::is_none")]
+        organization_group: Option<String>,
+        #[serde(rename = "organizationChanged", skip_serializing_if = "Option::is_none")]
+        organization_changed: Option<bool>,
+        #[serde(rename = "isArchived", skip_serializing_if = "Option::is_none")]
+        is_archived: Option<bool>,
     } => "session_updated",
 
     /// Context cleared.

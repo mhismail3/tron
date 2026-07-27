@@ -48,59 +48,13 @@ struct NotificationMutation: Codable, Equatable, Identifiable, Sendable {
     var id: String { mutationId }
 }
 
-/// App-private durable cache and mutation outbox. APNs tokens are deliberately
-/// absent: Apple owns token persistence and the coordinator keeps only the
-/// current process token in memory.
-struct NotificationLocalStore {
-    private enum Key {
-        static let installationId = "nativeNotifications.installationId"
-        static let inbox = "nativeNotifications.inbox.v1"
-        static let outbox = "nativeNotifications.outbox.v1"
-        static let readiness = "nativeNotifications.readiness.v1"
-    }
+struct NotificationServerWork: Equatable, Sendable {
+    var registration = false
+    var synchronization = false
 
-    let defaults: UserDefaults
-
-    var installationId: String {
-        if let existing = defaults.string(forKey: Key.installationId), !existing.isEmpty {
-            return existing
-        }
-        let created = UUID().uuidString.lowercased()
-        defaults.set(created, forKey: Key.installationId)
-        return created
-    }
-
-    func loadInbox() -> [NotificationInboxItem] {
-        decode([NotificationInboxItem].self, key: Key.inbox) ?? []
-    }
-
-    func saveInbox(_ value: [NotificationInboxItem]) {
-        encode(value, key: Key.inbox)
-    }
-
-    func loadOutbox() -> [NotificationMutation] {
-        decode([NotificationMutation].self, key: Key.outbox) ?? []
-    }
-
-    func saveOutbox(_ value: [NotificationMutation]) {
-        encode(value, key: Key.outbox)
-    }
-
-    func loadReadiness() -> [NotificationServerReadiness] {
-        decode([NotificationServerReadiness].self, key: Key.readiness) ?? []
-    }
-
-    func saveReadiness(_ value: [NotificationServerReadiness]) {
-        encode(value, key: Key.readiness)
-    }
-
-    private func decode<T: Decodable>(_ type: T.Type, key: String) -> T? {
-        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(type, from: $0) }
-    }
-
-    private func encode<T: Encodable>(_ value: T, key: String) {
-        guard let data = try? JSONEncoder().encode(value) else { return }
-        defaults.set(data, forKey: key)
+    mutating func formUnion(_ other: NotificationServerWork) {
+        registration = registration || other.registration
+        synchronization = synchronization || other.synchronization
     }
 }
 
@@ -108,28 +62,39 @@ struct NotificationLocalStore {
 @MainActor
 final class NativeNotificationCoordinator {
     nonisolated static let quietRefreshWaitBudget: Duration = .seconds(8)
+    nonisolated static let serverWorkBudget: Duration = .seconds(20)
+    nonisolated static let maximumMutationsPerServerPass = 32
     typealias ServersProvider = @MainActor () -> [PairedServer]
-    typealias ActiveServerProvider = @MainActor () -> PairedServer?
-    typealias ActiveClientProvider = @MainActor () -> EngineClient
-    typealias TokenProvider = @MainActor (String) -> String?
+    typealias NotificationSessionOperation =
+        @MainActor (any NotificationRepository) async throws -> Void
+    typealias NotificationSessionProvider =
+        @MainActor (PairedServer, NotificationSessionOperation) async throws -> Void
 
     private let runtimeMode: AppRuntimeMode
     private let localStore: NotificationLocalStore
     private let serversProvider: ServersProvider
-    private let activeServerProvider: ActiveServerProvider
-    private let activeClientProvider: ActiveClientProvider
-    private let tokenProvider: TokenProvider
+    private let notificationSessionProvider: NotificationSessionProvider
     private let notificationCenter: UNUserNotificationCenter
     private var currentDeviceToken: String?
     private var outbox: [NotificationMutation]
     private var startedForCurrentLaunch = false
     private var authenticatedThisLaunch = false
     private var permissionRequestAttempted = false
-    private var registrationTask: Task<Void, Never>?
-    private var syncTask: Task<Void, Never>?
-    private var registrationRequested = false
-    private var pendingSyncServerIds: Set<String> = []
+    private var localStateLoaded = false
+    private var localLoadTask: Task<NotificationLocalState, Never>?
+    private var pendingMutationPersistence: [NotificationMutation] = []
+    private var mutationPersistenceTask: Task<Void, Never>?
+    private var mutationPersistenceGeneration: UInt64 = 0
+    private var pendingServerWork: [String: NotificationServerWork] = [:]
+    private var serverLaneTasks: [String: Task<Void, Never>] = [:]
+    private var serverLaneGenerations: [String: UInt64] = [:]
+    private var systemLifecycleTask: Task<Void, Never>?
+    private var systemRefreshRequested = false
+    private var systemPermissionEstablishmentRequested = false
     private var badgeTask: Task<Void, Never>?
+    private var pendingBadgeCount: Int?
+    private var shutdownTask: Task<Void, Never>?
+    private var isShuttingDown = false
 
     private(set) var authorizationStatus: NotificationAuthorizationState = .notDetermined
     private(set) var inbox: [NotificationInboxItem]
@@ -138,23 +103,24 @@ final class NativeNotificationCoordinator {
 
     init(
         defaults: UserDefaults,
+        storeURL: URL? = nil,
         runtimeMode: AppRuntimeMode = .current,
         notificationCenter: UNUserNotificationCenter = .current(),
         servers: @escaping ServersProvider,
-        activeServer: @escaping ActiveServerProvider,
-        activeClient: @escaping ActiveClientProvider,
-        token: @escaping TokenProvider
+        notificationSession:
+            @escaping NotificationSessionProvider
     ) {
         self.runtimeMode = runtimeMode
-        localStore = NotificationLocalStore(defaults: defaults)
+        localStore = NotificationLocalStore(
+            defaults: NotificationDefaultsHandle(value: defaults),
+            fileURL: storeURL ?? Self.defaultStoreURL
+        )
         serversProvider = servers
-        activeServerProvider = activeServer
-        activeClientProvider = activeClient
-        tokenProvider = token
+        notificationSessionProvider = notificationSession
         self.notificationCenter = notificationCenter
-        inbox = localStore.loadInbox()
-        outbox = localStore.loadOutbox()
-        readiness = localStore.loadReadiness()
+        inbox = []
+        outbox = []
+        readiness = []
     }
 
     var installationId: String { localStore.installationId }
@@ -169,17 +135,12 @@ final class NativeNotificationCoordinator {
     /// gate. Existing authorization registers with Apple immediately; the
     /// first permission prompt remains gated by authenticated pairing.
     func launch() {
-        guard runtimeMode.runsApplicationLifecycle, !startedForCurrentLaunch else { return }
+        guard runtimeMode.runsApplicationLifecycle,
+              !startedForCurrentLaunch,
+              !isShuttingDown else { return }
         startedForCurrentLaunch = true
         attachLifecycle()
-        Task {
-            await refreshAuthorizationStatus()
-            if NativeNotificationPermissionPolicy.permitsRemoteRegistration(authorizationStatus) {
-                UIApplication.shared.registerForRemoteNotifications()
-            }
-            scheduleRegistration()
-            scheduleSync()
-        }
+        scheduleSystemLifecycleRefresh(establishPermission: false)
     }
 
     /// Called only after an authenticated engine connection succeeds. This is
@@ -188,28 +149,23 @@ final class NativeNotificationCoordinator {
         guard runtimeMode.runsApplicationLifecycle else { return }
         launch()
         authenticatedThisLaunch = true
-        Task { await establishSystemAuthorization() }
+        scheduleSystemLifecycleRefresh(establishPermission: true)
     }
 
     func pairedServersDidChange() {
-        guard startedForCurrentLaunch else { return }
+        guard startedForCurrentLaunch, !isShuttingDown else { return }
+        retireRemovedServerLanes()
         scheduleRegistration()
         scheduleSync()
     }
 
     func foregrounded() {
-        guard startedForCurrentLaunch else { return }
-        Task {
-            await refreshAuthorizationStatus()
-            if NativeNotificationPermissionPolicy.permitsRemoteRegistration(authorizationStatus) {
-                UIApplication.shared.registerForRemoteNotifications()
-            }
-            scheduleRegistration()
-            scheduleSync()
-        }
+        guard startedForCurrentLaunch, !isShuttingDown else { return }
+        scheduleSystemLifecycleRefresh(establishPermission: false)
     }
 
     func didReceiveDeviceToken(_ data: Data) {
+        guard !isShuttingDown else { return }
         currentDeviceToken = data.map { String(format: "%02x", $0) }.joined()
         remoteRegistrationProblem = nil
         scheduleRegistration()
@@ -236,10 +192,12 @@ final class NativeNotificationCoordinator {
 
     func handleQuietRefresh(_ payload: [AnyHashable: Any]) async -> Bool {
         guard let serverId = Self.serverId(from: payload) else { return false }
+        await ensureLocalStateLoaded()
         let previous = inbox
         scheduleSync(serverIds: [serverId])
         let deadline = ContinuousClock.now + Self.quietRefreshWaitBudget
-        while syncTask != nil, ContinuousClock.now < deadline {
+        while hasPendingServerWork(serverId: serverId),
+              ContinuousClock.now < deadline {
             do {
                 try await Task.sleep(for: .milliseconds(100))
             } catch {
@@ -276,6 +234,7 @@ final class NativeNotificationCoordinator {
     }
 
     func synchronizeNow() {
+        guard !isShuttingDown else { return }
         scheduleSync()
     }
 
@@ -306,88 +265,262 @@ final class NativeNotificationCoordinator {
         authorizationStatus = Self.authorizationState(settings.authorizationStatus)
     }
 
-    private func scheduleRegistration() {
-        registrationRequested = true
-        guard registrationTask == nil else { return }
-        registrationTask = Task { @MainActor [weak self] in
-            await self?.drainRegistrationRequests()
+    private func scheduleSystemLifecycleRefresh(
+        establishPermission: Bool
+    ) {
+        guard !isShuttingDown else { return }
+        systemRefreshRequested = true
+        systemPermissionEstablishmentRequested =
+            systemPermissionEstablishmentRequested || establishPermission
+        guard systemLifecycleTask == nil else { return }
+        systemLifecycleTask = Task { @MainActor [weak self] in
+            await self?.drainSystemLifecycleRequests()
         }
     }
 
-    private func drainRegistrationRequests() async {
-        while registrationRequested, !Task.isCancelled {
-            registrationRequested = false
-            await registerWithAllPairedServers()
+    private func drainSystemLifecycleRequests() async {
+        await ensureLocalStateLoaded()
+        while systemRefreshRequested, !Task.isCancelled {
+            let establishPermission = systemPermissionEstablishmentRequested
+            systemRefreshRequested = false
+            systemPermissionEstablishmentRequested = false
+            if establishPermission {
+                await establishSystemAuthorization()
+            } else {
+                await refreshAuthorizationStatus()
+                if NativeNotificationPermissionPolicy.permitsRemoteRegistration(
+                    authorizationStatus
+                ) {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+                scheduleRegistration()
+                scheduleSync()
+            }
         }
-        registrationTask = nil
-        if registrationRequested {
-            scheduleRegistration()
+        systemLifecycleTask = nil
+        if systemRefreshRequested, !isShuttingDown {
+            scheduleSystemLifecycleRefresh(
+                establishPermission: systemPermissionEstablishmentRequested
+            )
         }
+    }
+
+    private func scheduleRegistration() {
+        requestServerWork(
+            serverIds: serversProvider().map(\.id),
+            work: NotificationServerWork(registration: true)
+        )
     }
 
     private func scheduleSync(serverIds: [String]? = nil) {
-        pendingSyncServerIds.formUnion(serverIds ?? serversProvider().map(\.id))
-        guard syncTask == nil else { return }
-        syncTask = Task { @MainActor [weak self] in
-            await self?.drainSyncRequests()
+        requestServerWork(
+            serverIds: serverIds ?? serversProvider().map(\.id),
+            work: NotificationServerWork(synchronization: true)
+        )
+    }
+
+    private func requestServerWork(
+        serverIds: [String],
+        work: NotificationServerWork
+    ) {
+        guard !isShuttingDown else { return }
+        for serverId in Set(serverIds) {
+            var pending = pendingServerWork[serverId] ?? NotificationServerWork()
+            pending.formUnion(work)
+            pendingServerWork[serverId] = pending
+            startServerLaneIfNeeded(serverId: serverId)
         }
     }
 
-    private func drainSyncRequests() async {
-        while !pendingSyncServerIds.isEmpty, !Task.isCancelled {
-            let serverIds = pendingSyncServerIds
-            pendingSyncServerIds.removeAll()
-            await synchronizeServers(serverIds: serverIds)
-        }
-        syncTask = nil
-        if !pendingSyncServerIds.isEmpty {
-            scheduleSync(serverIds: Array(pendingSyncServerIds))
+    private func startServerLaneIfNeeded(serverId: String) {
+        guard serverLaneTasks[serverId] == nil,
+              pendingServerWork[serverId] != nil,
+              !isShuttingDown else { return }
+        let generation = (serverLaneGenerations[serverId] ?? 0) &+ 1
+        serverLaneGenerations[serverId] = generation
+        serverLaneTasks[serverId] = Task { @MainActor [weak self] in
+            await self?.drainServerLane(
+                serverId: serverId,
+                generation: generation
+            )
         }
     }
 
-    private func registerWithAllPairedServers() async {
-        let servers = serversProvider()
+    private func drainServerLane(
+        serverId: String,
+        generation: UInt64
+    ) async {
+        await ensureLocalStateLoaded()
+        while !Task.isCancelled,
+              let work = pendingServerWork.removeValue(forKey: serverId) {
+            guard let server = serversProvider().first(where: {
+                $0.id == serverId
+            }) else {
+                continue
+            }
+            await flushPendingMutationPersistence()
+            guard !pendingMutationPersistence.contains(where: {
+                $0.serverId == serverId
+            }) else {
+                // Never transmit an action that has not reached durable local
+                // ownership. A later foreground or user action retries it.
+                continue
+            }
+            await performServerWork(work, server: server)
+        }
+        guard serverLaneGenerations[serverId] == generation else { return }
+        serverLaneTasks[serverId] = nil
+        if pendingServerWork[serverId] != nil, !isShuttingDown {
+            startServerLaneIfNeeded(serverId: serverId)
+        }
+    }
+
+    private func performServerWork(
+        _ work: NotificationServerWork,
+        server: PairedServer
+    ) async {
         let topic = Bundle.main.bundleIdentifier ?? ""
-        guard !topic.isEmpty else {
+        if work.registration, topic.isEmpty {
             remoteRegistrationProblem = "The application push topic is unavailable."
-            return
         }
-        for server in servers {
-            guard !Task.isCancelled else { return }
-            let token = NativeNotificationPermissionPolicy.permitsRemoteRegistration(authorizationStatus)
-                ? currentDeviceToken
-                : nil
-            do {
-                let registration = try await withClient(for: server) { client in
-                    try await client.notifications.upsertDevice(
-                        NotificationDeviceUpsertDTO(
-                            installationId: installationId,
-                            clientServerId: server.id,
-                            topic: topic,
-                            environment: Self.apnsEnvironment,
-                            authorizationStatus: authorizationStatus,
-                            token: token
-                        ),
-                        idempotencyKey: .userAction(
-                            "notification.device.upsert.\(server.id)"
+
+        let token = NativeNotificationPermissionPolicy.permitsRemoteRegistration(
+            authorizationStatus
+        ) ? currentDeviceToken : nil
+        let pendingForServer = outbox.filter { $0.serverId == server.id }
+        let mutationBatch = Array(
+            pendingForServer.prefix(Self.maximumMutationsPerServerPass)
+        )
+        var registrationResult: Result<
+            NotificationDeviceRegistrationDTO,
+            Error
+        >?
+        var acknowledgedMutationIds = Set<String>()
+        var synchronizedDeliveries: [String: [NotificationDeliveryDTO]] = [:]
+        var deferredMutations = pendingForServer.count > mutationBatch.count
+        var madeMutationProgress = false
+        var registrationMadeProgress = false
+        let deadline = ContinuousClock.now + Self.serverWorkBudget
+
+        do {
+            try await notificationSessionProvider(server) { repository in
+                if work.registration, !topic.isEmpty {
+                    do {
+                        let registration = try await repository.upsertDevice(
+                            NotificationDeviceUpsertDTO(
+                                installationId: installationId,
+                                clientServerId: server.id,
+                                topic: topic,
+                                environment: Self.apnsEnvironment,
+                                authorizationStatus: authorizationStatus,
+                                token: token
+                            ),
+                            idempotencyKey: .userAction(
+                                "notification.device.upsert.\(server.id)"
+                            )
                         )
-                    )
+                        registrationResult = .success(registration)
+                        registrationMadeProgress = true
+                    } catch {
+                        registrationResult = .failure(error)
+                    }
                 }
-                setReadiness(
+
+                if work.synchronization {
+                    for mutation in mutationBatch {
+                        guard !Task.isCancelled else {
+                            throw CancellationError()
+                        }
+                        guard ContinuousClock.now < deadline else {
+                            deferredMutations = true
+                            break
+                        }
+                        do {
+                            _ = try await repository.acknowledge(
+                                NotificationAcknowledgeDTO(
+                                    deliveryId: mutation.deliveryId,
+                                    installationId: installationId,
+                                    clientMutationId: mutation.mutationId,
+                                    acknowledgement: mutation.acknowledgement,
+                                    occurredAt: mutation.occurredAt
+                                ),
+                                idempotencyKey: EngineIdempotencyKey(
+                                    rawValue: mutation.mutationId
+                                )
+                            )
+                            acknowledgedMutationIds.insert(
+                                mutation.mutationId
+                            )
+                            madeMutationProgress = true
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            // Keep this response durable while allowing later
+                            // idempotent mutations in the same bounded batch.
+                        }
+                    }
+                    if ContinuousClock.now < deadline {
+                        do {
+                            let page = try await repository.deliveries(
+                                cursor: nil,
+                                limit: 200,
+                                unreadOnly: false
+                            )
+                            synchronizedDeliveries[server.id] = page.deliveries
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            // Preserve the previous local inbox.
+                        }
+                    }
+                }
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            if work.registration {
+                registrationResult = .failure(error)
+            }
+        }
+
+        if !acknowledgedMutationIds.isEmpty
+            || !synchronizedDeliveries.isEmpty {
+            do {
+                let state = try await localStore.commitSynchronization(
+                    acknowledgedMutationIds: acknowledgedMutationIds,
+                    deliveriesByServer: synchronizedDeliveries
+                )
+                applyInboxAndOutbox(state)
+            } catch {
+                logger.warning(
+                    "Failed to persist notification synchronization: \(error.localizedDescription)",
+                    category: .notification
+                )
+            }
+        }
+
+        if let registrationResult {
+            switch registrationResult {
+            case .success(let registration):
+                await setReadiness(
                     NotificationServerReadiness(
                         serverId: server.id,
-                        ready: registration.ready && registration.transport.configured,
+                        ready: registration.ready
+                            && registration.transport.configured,
                         deviceReady: registration.ready,
                         transportMode: registration.transport.mode,
-                        transportConfigured: registration.transport.configured,
-                        transportProblem: registration.transport.problemCode,
-                        authorizationStatus: registration.authorizationStatus,
+                        transportConfigured:
+                            registration.transport.configured,
+                        transportProblem:
+                            registration.transport.problemCode,
+                        authorizationStatus:
+                            registration.authorizationStatus,
                         registeredAt: registration.registeredAt,
                         problem: nil
                     )
                 )
-            } catch {
-                setReadiness(
+            case .failure(let error):
+                await setReadiness(
                     NotificationServerReadiness(
                         serverId: server.id,
                         ready: false,
@@ -396,11 +529,18 @@ final class NativeNotificationCoordinator {
                         transportConfigured: nil,
                         transportProblem: nil,
                         authorizationStatus: authorizationStatus,
-                        registeredAt: readiness.first { $0.serverId == server.id }?.registeredAt,
+                        registeredAt: readiness.first {
+                            $0.serverId == server.id
+                        }?.registeredAt,
                         problem: error.localizedDescription
                     )
                 )
             }
+        }
+
+        if deferredMutations,
+           madeMutationProgress || registrationMadeProgress {
+            scheduleSync(serverIds: [server.id])
         }
     }
 
@@ -421,14 +561,15 @@ final class NativeNotificationCoordinator {
     }
 
     private func enqueue(_ mutations: [NotificationMutation]) {
-        guard !mutations.isEmpty else { return }
+        guard !mutations.isEmpty, !isShuttingDown else { return }
         outbox.append(contentsOf: mutations)
-        localStore.saveOutbox(outbox)
+        pendingMutationPersistence.append(contentsOf: mutations)
         for mutation in mutations {
             optimisticallyApply(mutation)
         }
-        persistInboxAndBadge()
-        scheduleSync()
+        updateBadge()
+        scheduleMutationPersistence()
+        scheduleSync(serverIds: Array(Set(mutations.map(\.serverId))))
     }
 
     private func optimisticallyApply(_ mutation: NotificationMutation) {
@@ -442,116 +583,227 @@ final class NativeNotificationCoordinator {
         }
     }
 
-    /// Flush each server's durable mutation batch and read its authoritative
-    /// inbox over one client lifetime. Inactive paired servers therefore open
-    /// at most one short-lived socket per coalesced synchronization pass.
-    private func synchronizeServers(serverIds: Set<String>) async {
-        let pendingOutbox = outbox
-        let targetIds = serverIds.union(pendingOutbox.map(\.serverId))
-        var acknowledgedMutationIds = Set<String>()
-        var synchronizedDeliveries: [String: [NotificationDeliveryDTO]] = [:]
-
-        for server in serversProvider() where targetIds.contains(server.id) {
-            guard !Task.isCancelled else { return }
-            let mutations = pendingOutbox.filter { $0.serverId == server.id }
-            do {
-                try await withClient(for: server) { client in
-                    for mutation in mutations {
-                        guard !Task.isCancelled else { throw CancellationError() }
-                        do {
-                            _ = try await client.notifications.acknowledge(
-                                NotificationAcknowledgeDTO(
-                                    deliveryId: mutation.deliveryId,
-                                    installationId: installationId,
-                                    clientMutationId: mutation.mutationId,
-                                    acknowledgement: mutation.acknowledgement,
-                                    occurredAt: mutation.occurredAt
-                                ),
-                                idempotencyKey: EngineIdempotencyKey(
-                                    rawValue: mutation.mutationId
-                                )
-                            )
-                            acknowledgedMutationIds.insert(mutation.mutationId)
-                        } catch is CancellationError {
-                            throw CancellationError()
-                        } catch {
-                            // Keep this mutation in the durable outbox while
-                            // allowing later idempotent mutations to proceed.
-                        }
-                    }
-                    if serverIds.contains(server.id) {
-                        let page = try await client.notifications.deliveries(limit: 200)
-                        synchronizedDeliveries[server.id] = page.deliveries
-                    }
+    private func ensureLocalStateLoaded() async {
+        guard !localStateLoaded else { return }
+        let task: Task<NotificationLocalState, Never>
+        if let localLoadTask {
+            task = localLoadTask
+        } else {
+            let store = localStore
+            let created = Task {
+                do {
+                    return try await store.load()
+                } catch {
+                    logger.warning(
+                        "Failed to restore notification state: \(error.localizedDescription)",
+                        category: .notification
+                    )
+                    return NotificationLocalState()
                 }
-            } catch is CancellationError {
-                return
+            }
+            localLoadTask = created
+            task = created
+        }
+        let state = await task.value
+        guard !localStateLoaded else { return }
+        localStateLoaded = true
+        localLoadTask = nil
+        applyLocalState(state)
+    }
+
+    private func scheduleMutationPersistence() {
+        guard !pendingMutationPersistence.isEmpty,
+              mutationPersistenceTask == nil else { return }
+        mutationPersistenceGeneration &+= 1
+        let generation = mutationPersistenceGeneration
+        mutationPersistenceTask = Task { @MainActor [weak self] in
+            await self?.drainMutationPersistence(generation: generation)
+        }
+    }
+
+    private func drainMutationPersistence(generation: UInt64) async {
+        await ensureLocalStateLoaded()
+        var persistenceFailed = false
+        while !pendingMutationPersistence.isEmpty, !Task.isCancelled {
+            let batch = pendingMutationPersistence
+            let batchIds = Set(batch.map(\.mutationId))
+            do {
+                let state = try await localStore.appendMutations(batch)
+                pendingMutationPersistence.removeAll {
+                    batchIds.contains($0.mutationId)
+                }
+                applyInboxAndOutbox(state)
             } catch {
-                // Durable mutations and the previous inbox remain intact.
+                persistenceFailed = true
+                logger.warning(
+                    "Failed to persist notification response outbox: \(error.localizedDescription)",
+                    category: .notification
+                )
+                break
             }
         }
-
-        if !acknowledgedMutationIds.isEmpty {
-            outbox.removeAll { acknowledgedMutationIds.contains($0.mutationId) }
-            localStore.saveOutbox(outbox)
-        }
-
-        for (serverId, deliveries) in synchronizedDeliveries {
-            inbox.removeAll { $0.serverId == serverId }
-            inbox.append(contentsOf: deliveries.map {
-                NotificationInboxItem(serverId: serverId, delivery: $0)
-            })
-        }
-        if !synchronizedDeliveries.isEmpty {
-            inbox.sort { lhs, rhs in lhs.delivery.createdAt > rhs.delivery.createdAt }
-            persistInboxAndBadge()
+        guard mutationPersistenceGeneration == generation else { return }
+        mutationPersistenceTask = nil
+        if !pendingMutationPersistence.isEmpty,
+           !persistenceFailed,
+           !isShuttingDown {
+            scheduleMutationPersistence()
         }
     }
 
-    private func withClient<T>(
-        for server: PairedServer,
-        operation: (EngineClient) async throws -> T
-    ) async throws -> T {
-        if activeServerProvider()?.id == server.id {
-            let client = activeClientProvider()
-            guard client.connectionState.isConnected else {
-                throw EngineClientError.connectionNotEstablished
-            }
-            return try await operation(client)
-        }
-        guard let bearerToken = tokenProvider(server.id),
-              let url = URL(string: "ws://\(server.host):\(server.port)/engine")
-        else {
-            throw EngineClientError.connectionNotEstablished
-        }
-        let client = EngineClient(
-            serverURL: url,
-            bearerTokenProvider: { bearerToken }
-        )
-        await client.connect()
-        guard client.connectionState.isConnected else {
-            client.disconnect()
-            throw EngineClientError.connectionNotEstablished
-        }
-        defer { client.disconnect() }
-        return try await operation(client)
+    private func flushPendingMutationPersistence() async {
+        guard !pendingMutationPersistence.isEmpty else { return }
+        scheduleMutationPersistence()
+        await mutationPersistenceTask?.value
     }
 
-    private func setReadiness(_ value: NotificationServerReadiness) {
+    private func applyLocalState(_ state: NotificationLocalState) {
+        applyInboxAndOutbox(state)
+        readiness = state.readiness
+    }
+
+    private func applyInboxAndOutbox(_ state: NotificationLocalState) {
+        let durableIds = Set(state.outbox.map(\.mutationId))
+        let notYetDurable = pendingMutationPersistence.filter {
+            !durableIds.contains($0.mutationId)
+        }
+        inbox = state.inbox
+        outbox = state.outbox + notYetDurable
+        for mutation in outbox {
+            optimisticallyApply(mutation)
+        }
+        updateBadge()
+    }
+
+    private func retireRemovedServerLanes() {
+        let pairedIds = Set(serversProvider().map(\.id))
+        for serverId in serverLaneTasks.keys where !pairedIds.contains(serverId) {
+            serverLaneGenerations[serverId, default: 0] &+= 1
+            serverLaneTasks.removeValue(forKey: serverId)?.cancel()
+            pendingServerWork.removeValue(forKey: serverId)
+        }
+    }
+
+    private func hasPendingServerWork(serverId: String) -> Bool {
+        pendingServerWork[serverId] != nil
+            || serverLaneTasks[serverId] != nil
+    }
+
+    /// Cancel transport work and await every accepted local response write.
+    /// The production coordinator is process-lived; tests and replacement
+    /// composition roots call this explicit boundary before releasing state.
+    func shutdown() async {
+        if let shutdownTask {
+            await shutdownTask.value
+            return
+        }
+        let task = Task { @MainActor [self] in
+            await performShutdown()
+        }
+        shutdownTask = task
+        await task.value
+    }
+
+    private func performShutdown() async {
+        isShuttingDown = true
+        systemRefreshRequested = false
+        systemPermissionEstablishmentRequested = false
+        systemLifecycleTask?.cancel()
+        let systemTask = systemLifecycleTask
+        systemLifecycleTask = nil
+
+        let laneTasks = Array(serverLaneTasks.values)
+        serverLaneTasks.values.forEach { $0.cancel() }
+        serverLaneTasks.removeAll()
+        pendingServerWork.removeAll()
+        badgeTask?.cancel()
+
+        await systemTask?.value
+        for task in laneTasks {
+            await task.value
+        }
+        await badgeTask?.value
+        badgeTask = nil
+
+        await ensureLocalStateLoaded()
+        await mutationPersistenceTask?.value
+        if !pendingMutationPersistence.isEmpty {
+            let batch = pendingMutationPersistence
+            let batchIds = Set(batch.map(\.mutationId))
+            do {
+                let state = try await localStore.appendMutations(batch)
+                pendingMutationPersistence.removeAll {
+                    batchIds.contains($0.mutationId)
+                }
+                applyInboxAndOutbox(state)
+            } catch {
+                logger.warning(
+                    "Notification shutdown could not drain response outbox: \(error.localizedDescription)",
+                    category: .notification
+                )
+            }
+        }
+    }
+
+    nonisolated deinit {
+        MainActor.assumeIsolated {
+            shutdownTask?.cancel()
+            systemLifecycleTask?.cancel()
+            serverLaneTasks.values.forEach { $0.cancel() }
+            badgeTask?.cancel()
+        }
+    }
+
+    private func setReadiness(
+        _ value: NotificationServerReadiness
+    ) async {
         readiness.removeAll { $0.serverId == value.serverId }
         readiness.append(value)
         readiness.sort { $0.serverId < $1.serverId }
-        localStore.saveReadiness(readiness)
+        do {
+            let state = try await localStore.replaceReadiness(readiness)
+            readiness = state.readiness
+        } catch {
+            logger.warning(
+                "Failed to persist notification readiness: \(error.localizedDescription)",
+                category: .notification
+            )
+        }
     }
 
-    private func persistInboxAndBadge() {
-        localStore.saveInbox(inbox)
+    private func updateBadge() {
         guard runtimeMode.runsApplicationLifecycle else { return }
-        let unreadCount = aggregateUnreadCount
-        badgeTask?.cancel()
-        badgeTask = Task {
-            try? await UNUserNotificationCenter.current().setBadgeCount(unreadCount)
+        pendingBadgeCount = aggregateUnreadCount
+        guard badgeTask == nil else { return }
+        badgeTask = Task { @MainActor [weak self] in
+            await self?.drainBadgeUpdates()
         }
+    }
+
+    private func drainBadgeUpdates() async {
+        while let count = pendingBadgeCount, !Task.isCancelled {
+            pendingBadgeCount = nil
+            try? await notificationCenter.setBadgeCount(count)
+        }
+        badgeTask = nil
+        if pendingBadgeCount != nil, !isShuttingDown {
+            updateBadge()
+        }
+    }
+
+    private static var defaultStoreURL: URL {
+        guard let applicationSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            preconditionFailure(
+                "Application Support unavailable for notification state"
+            )
+        }
+        return applicationSupport
+            .appendingPathComponent("Tron", isDirectory: true)
+            .appendingPathComponent("Notifications", isDirectory: true)
+            .appendingPathComponent("state-v2.json")
     }
 
     private func routeToNotification(serverId: String, deliveryId: String) {

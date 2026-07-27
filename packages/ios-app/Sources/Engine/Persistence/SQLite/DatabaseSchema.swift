@@ -59,9 +59,23 @@ enum DatabaseSchema {
                 is_fork INTEGER DEFAULT 0,
                 is_processing INTEGER DEFAULT 0,
                 server_origin TEXT,
-                activity_lines_json TEXT
+                activity_lines_json TEXT,
+                labels_json TEXT NOT NULL DEFAULT '[]',
+                organization_group TEXT
             )
         """)
+        try ensureColumn(
+            db: db,
+            table: "sessions",
+            column: "labels_json",
+            definition: "TEXT NOT NULL DEFAULT '[]'"
+        )
+        try ensureColumn(
+            db: db,
+            table: "sessions",
+            column: "organization_group",
+            definition: "TEXT"
+        )
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)")
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(last_activity_at)")
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_archived ON sessions(archived_at)")
@@ -94,6 +108,27 @@ enum DatabaseSchema {
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw EventDatabaseError.executeFailed(errorMessage(db: db))
         }
+    }
+
+    /// Add a projection column to an existing disposable cache without
+    /// disturbing drafts or already-cached event history.
+    private static func ensureColumn(
+        db: OpaquePointer?,
+        table: String,
+        column: String,
+        definition: String
+    ) throws {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(table))", -1, &statement, nil) == SQLITE_OK else {
+            throw EventDatabaseError.prepareFailed(errorMessage(db: db))
+        }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if String(cString: sqlite3_column_text(statement, 1)) == column {
+                return
+            }
+        }
+        try execute(db: db, "ALTER TABLE \(table) ADD COLUMN \(column) \(definition)")
     }
 
     private static func errorMessage(db: OpaquePointer?) -> String {

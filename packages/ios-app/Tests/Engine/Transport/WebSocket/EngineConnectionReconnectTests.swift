@@ -105,6 +105,25 @@ struct EngineConnectionReconnectTests {
         #expect(connection.reconnectTask == nil)
     }
 
+    @Test("manual retry rejoins the generation-owned reconnect loop")
+    func manualRetryUsesReconnectOwner() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+
+        await connection.manualRetry()
+        await Task.yield()
+
+        #expect(connection.reconnectLoopActive)
+        #expect(connection.reconnectTask != nil)
+        #expect(connection.reconnectTaskGeneration > 0)
+
+        connection.cancelReconnectOwnership()
+        #expect(!connection.reconnectLoopActive)
+        #expect(connection.reconnectTask == nil)
+    }
+
     @Test(".failed reason after capped probe exhaustion uses tap-to-retry copy")
     func failedReasonCopy() {
         #expect(EngineConnection.failedAfterExhaustionReason == "Connection lost — tap to retry")

@@ -136,6 +136,12 @@ pub struct RunContext {
     /// worker tools preserve it as their canonical parent.
     #[serde(skip)]
     pub origin_worker_invocation_id: Option<String>,
+    /// Exact model tools selected by the immutable agent-runner bundle.
+    ///
+    /// `None` preserves the migration surface; `Some([])` intentionally
+    /// projects no callable tools. This is trusted engine metadata.
+    #[serde(skip)]
+    pub worker_agent_tools: Option<Vec<String>>,
     /// Stable per-tool call occurrences for one worker attempt. Recovery
     /// deliberately starts from zero and replays durable child slots.
     #[serde(skip)]

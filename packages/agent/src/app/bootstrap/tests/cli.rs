@@ -127,6 +127,22 @@ fn cli_parses_profile_snapshot_and_restore_commands() {
 }
 
 #[test]
+fn cli_parses_closed_browser_native_host_command() {
+    let cli = Cli::parse_from([
+        "tron",
+        "browser-native-host",
+        "--socket",
+        "/tmp/tron-browser-operator.sock",
+    ]);
+    assert!(matches!(
+        cli.command,
+        Some(Command::BrowserNativeHost { socket })
+            if socket == std::path::Path::new("/tmp/tron-browser-operator.sock")
+    ));
+    assert!(Cli::try_parse_from(["tron", "browser-native-host"]).is_err());
+}
+
+#[test]
 fn cli_no_subcommand_resolves_to_none() {
     // The bare `tron` invocation (with default host/port) MUST yield
     // `command: None` so the server-startup branch in `main` runs.
