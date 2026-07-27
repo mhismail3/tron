@@ -1377,6 +1377,24 @@ canonical mutation, and durable dispatch. Notification transport, artifact
 custody, microphone delivery, and host actuation therefore remain closed
 engine/native boundaries rather than semantic workers.
 
+Worker lifecycle access follows the same split. Engine Steward is a read-only
+diagnostic agent with only `worker_list`, `worker_inspect`, `worker_runs`,
+`worker_inbox`, and `worker_result_read`. Worker Forge accepts one natural
+`request` plus an optional worker name/ID; callers do not choose an operation
+enum. Its exact specialist allowlist permits inspection, bounded verification,
+creation/update activation, enable, disable, stop, rollback, and recoverable
+retirement. It cannot purge permanently, rotate secrets, change credentials,
+stop the whole engine, deploy, apply core changes, or access databases.
+
+The development profile accepted this contract through ordinary immutable
+upsert on 2026-07-27. Worker Forge version
+`aaa84f0feda68d7a088c3f6388cb42b088467bc5b0187024fcb460009e4cb6c5`
+passed its deterministic smoke/health checks. A live natural request to inspect
+Engine Steward completed with `no_change`, identified Steward version
+`5f106d9d221d9df58e97a8ddd43b14910a10e13bb41724a28cdd944fe1fa542a`
+as healthy and read-only, and produced completed durable run evidence for both
+workers without mutating either worker.
+
 For an ordinary chat request, the provider receives the intent-gated fixed
 primitive surface plus at most 12 of the enabled direct workers. Session
 promotions are considered first, followed by request relevance and bounded
@@ -1430,12 +1448,14 @@ hardcoded instruction set.
 
 Automatic worker projection and `worker_discover` share the active
 `worker_relevance` worker. Its input contains the latest user task query and
-bounded, locally meaningful candidate metadata; its output is a typed ranking. The engine
-retains one exact weighted-term and adjacent-phrase scorer as recovery when no
-hook is active, the hook fails, or the hook's own agent-runner turn resolves its
-surface. Trivial queries and sets with fewer than two meaningful candidates
-take that local path immediately. Session promotions remain version-bound and outrank both paths, so
-routing never depends exclusively on another worker being healthy.
+bounded, locally meaningful candidate metadata; its output is a typed ranking.
+The engine retains one exact weighted-term and adjacent-phrase scorer as
+recovery when no hook is active, the hook fails, or the hook's own agent-runner
+turn resolves its surface. Deterministic ranking runs first. The semantic
+router is invoked only when meaningful candidates exceed the caller's result
+bound and ranking can therefore change which workers are admitted. Session
+promotions remain version-bound and outrank both paths, so routing never
+depends exclusively on another worker being healthy.
 
 Three unrelated runtime boundaries use three deliberately separate closed
 types:
