@@ -347,7 +347,7 @@ impl WorkerRuntime {
         }));
         definition.model_tool = Some(ModelToolContract {
             name: active.summary.tool_name,
-            callable: true,
+            audience: crate::engine::ModelToolAudience::Ordinary,
             order: None,
             group: None,
             worker: Some(DirectWorkerToolContract {

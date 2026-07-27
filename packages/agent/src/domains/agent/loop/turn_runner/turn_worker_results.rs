@@ -348,7 +348,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_worker_control_record_keeps_metadata_but_references_its_output() {
+    fn fixed_worker_interaction_record_keeps_metadata_but_references_its_output() {
         let record = json!({
             "invocationId":"worker_run_1",
             "workerId":"specialist",

@@ -57,7 +57,6 @@ use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-use super::core_proposals::{CoreProposal, CoreProposalService};
 use super::persistence::WorkerStore;
 use super::process::{MAX_PROCESS_CAPTURE_BYTES, ProcessTree};
 use super::types::{
@@ -211,7 +210,6 @@ pub struct WorkerRuntime {
     notification_configuration_revision: Mutex<Option<String>>,
     http: reqwest::Client,
     notification_transport: super::notifications::transport::NotificationTransport,
-    core_proposals: CoreProposalService,
 }
 
 impl WorkerRuntime {
@@ -236,7 +234,6 @@ impl WorkerRuntime {
             }
         }
         let stopped = store.stop_all()?;
-        let core_proposals = CoreProposalService::new(store.home(), Arc::clone(&event_store))?;
         let notification_transport =
             super::notifications::transport::NotificationTransport::new(store.home())?;
         Ok(Arc::new(Self {
@@ -266,7 +263,6 @@ impl WorkerRuntime {
                 .build()
                 .map_err(|error| format!("build worker HTTP client: {error}"))?,
             notification_transport,
-            core_proposals,
         }))
     }
 
@@ -295,7 +291,7 @@ impl WorkerRuntime {
         )
         .await?
         .snapshot;
-        let fixed_tools = super::surface::fixed_tool_inventory(&self.host, &surface).await?;
+        let fixed_tools = super::surface::fixed_tool_inventory(&surface);
         let workers = self.store.list(true)?;
         let tool_owner_by_name = workers
             .iter()
@@ -375,6 +371,9 @@ impl WorkerRuntime {
                 "catalogRevision": surface.catalog_revision,
                 "surfaceHash": surface.surface_hash,
                 "fixedToolCount": surface.fixed_tool_count,
+                "ordinaryFixedToolCount": surface.ordinary_fixed_tool_count,
+                "specialistFixedToolCount": surface.specialist_fixed_tool_count,
+                "conditionalFixedToolCount": surface.conditional_fixed_tool_count,
                 "projectedWorkerCount": surface.projected_worker_count,
                 "availableWorkerCount": surface.available_worker_count,
                 "availableWorkers": surface.available_workers,
@@ -382,38 +381,6 @@ impl WorkerRuntime {
             "workers": workers,
             "workerArchitecture": worker_architecture,
         }))
-    }
-
-    pub async fn create_core_proposal(
-        &self,
-        title: String,
-        intent: String,
-        repository_path: String,
-        patch: String,
-        test_command: Vec<String>,
-    ) -> Result<CoreProposal, String> {
-        self.core_proposals
-            .create(title, intent, repository_path, patch, test_command)
-            .await
-    }
-
-    pub fn list_core_proposals(&self) -> Result<Vec<CoreProposal>, String> {
-        self.core_proposals.list()
-    }
-
-    pub fn inspect_core_proposal(&self, proposal_id: &str) -> Result<CoreProposal, String> {
-        self.core_proposals.inspect(proposal_id)
-    }
-
-    pub async fn apply_core_proposal(
-        &self,
-        proposal_id: &str,
-        approval_session_id: &str,
-        approval_message_id: &str,
-    ) -> Result<CoreProposal, String> {
-        self.core_proposals
-            .apply(proposal_id, approval_session_id, approval_message_id)
-            .await
     }
 
     pub async fn activate(self: &Arc<Self>, cancellation: CancellationToken) {

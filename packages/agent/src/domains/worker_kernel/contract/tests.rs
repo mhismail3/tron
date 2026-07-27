@@ -13,11 +13,7 @@ fn engine_surface_snapshot_is_client_introspection_not_model_vocabulary() {
         .expect("surface snapshot contract");
     assert_eq!(surface.id.as_str(), ENGINE_SURFACE_SNAPSHOT_FUNCTION);
     assert_eq!(surface.effect_class, EffectClass::PureRead);
-    assert!(
-        core_primitives()
-            .iter()
-            .all(|descriptor| descriptor.model_name != "engine_surface_snapshot")
-    );
+    assert!(surface.model_tool.is_none());
     let schema = surface.response_schema.as_ref().expect("response schema");
     assert_eq!(schema["additionalProperties"], false);
     assert_eq!(
@@ -40,11 +36,7 @@ fn worker_result_projection_is_internal_kernel_reconstruction_not_model_vocabula
         .expect("result projection contract");
     assert_eq!(projection.visibility, FunctionVisibility::Internal);
     assert_eq!(projection.effect_class, EffectClass::PureRead);
-    assert!(
-        core_primitives()
-            .iter()
-            .all(|descriptor| descriptor.function_id != WORKER_RESULT_PROJECTION_FUNCTION)
-    );
+    assert!(projection.model_tool.is_none());
     let request = projection.request_schema.as_ref().unwrap();
     assert_eq!(request["additionalProperties"], false);
     assert_eq!(
@@ -89,7 +81,6 @@ fn profile_owned_worker_mutations_do_not_require_a_session() {
         "worker_kernel::filesystem_edit",
         "worker_kernel::process_run",
         "worker_kernel::web_fetch",
-        "worker_kernel::session_set_title",
     ] {
         let definition = definitions
             .iter()
@@ -293,11 +284,7 @@ fn continuity_context_is_a_closed_internal_projection_not_model_vocabulary() {
         hook.response_schema.as_ref().expect("response schema")["properties"]["narrative"]["maxLength"],
         6000
     );
-    assert!(
-        core_primitives()
-            .iter()
-            .all(|primitive| primitive.function_id != CONTINUITY_CONTEXT_FUNCTION)
-    );
+    assert!(hook.model_tool.is_none());
 }
 
 #[test]
@@ -318,11 +305,7 @@ fn context_summary_is_an_internal_worker_seam_not_a_model_primitive() {
         estimate_context_summary_tokens(&"x".repeat(CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES)),
         CONTEXT_SUMMARY_MAX_ESTIMATED_TOKENS
     );
-    assert!(
-        core_primitives()
-            .iter()
-            .all(|primitive| primitive.function_id != CONTEXT_SUMMARY_FUNCTION)
-    );
+    assert!(hook.model_tool.is_none());
 }
 
 #[test]
@@ -337,11 +320,7 @@ fn session_title_is_an_internal_automatic_hook_not_a_model_primitive() {
         hook.request_schema.as_ref().expect("request schema")["required"],
         json!(["userPrompt", "assistantResponse"])
     );
-    assert!(
-        core_primitives()
-            .iter()
-            .all(|primitive| primitive.function_id != SESSION_TITLE_FUNCTION)
-    );
+    assert!(hook.model_tool.is_none());
 }
 
 #[test]
@@ -352,11 +331,7 @@ fn worker_relevance_is_internal_policy_not_provider_ceremony() {
         .find(|definition| definition.id.as_str() == WORKER_RELEVANCE_FUNCTION)
         .expect("worker relevance contract");
     assert_eq!(hook.visibility, FunctionVisibility::Internal);
-    assert!(
-        core_primitives()
-            .iter()
-            .all(|primitive| primitive.function_id != WORKER_RELEVANCE_FUNCTION)
-    );
+    assert!(hook.model_tool.is_none());
 }
 
 #[test]
@@ -367,11 +342,7 @@ fn inbox_context_is_worker_owned_policy_behind_an_internal_claim_boundary() {
         .find(|definition| definition.id.as_str() == "worker_kernel::inbox_attach")
         .expect("inbox attachment contract");
     assert_eq!(attach.visibility, FunctionVisibility::Internal);
-    assert!(
-        core_primitives()
-            .iter()
-            .all(|primitive| primitive.function_id != "worker_kernel::inbox_attach")
-    );
+    assert!(attach.model_tool.is_none());
 }
 
 #[test]
@@ -725,21 +696,6 @@ fn web_fetch_defaults_protect_context_and_current_session_is_implicit() {
             .unwrap()
             .contains(&json!("contentSha256"))
     );
-
-    let title = definitions
-        .iter()
-        .find(|definition| definition.id.as_str() == "worker_kernel::session_set_title")
-        .expect("explicit session title contract");
-    let title_schema = title.request_schema.as_ref().expect("title request schema");
-    assert_eq!(title_schema["required"], json!(["title"]));
-    assert_eq!(
-        title_schema["properties"]
-            .as_object()
-            .unwrap()
-            .keys()
-            .collect::<Vec<_>>(),
-        vec!["title"]
-    );
 }
 
 #[test]
@@ -806,25 +762,24 @@ fn mutation_checksum_contract_rejects_empty_or_inapplicable_preconditions() {
 #[test]
 fn every_fixed_model_primitive_has_a_closed_top_level_response_contract() {
     let definitions = function_definitions().expect("worker-kernel contracts");
-    for descriptor in core_primitives() {
-        let function_id = descriptor.function_id;
-        let definition = definitions
-            .iter()
-            .find(|definition| definition.id.as_str() == function_id)
-            .unwrap_or_else(|| panic!("missing contract for {}", descriptor.model_name));
+    for definition in definitions
+        .iter()
+        .filter(|definition| definition.model_tool.is_some())
+    {
+        let model_name = &definition.model_tool.as_ref().unwrap().name;
         let response = definition
             .response_schema
             .as_ref()
-            .unwrap_or_else(|| panic!("missing response schema for {}", descriptor.model_name));
+            .unwrap_or_else(|| panic!("missing response schema for {model_name}"));
         assert_eq!(
             response["additionalProperties"], false,
             "{} response must reject undeclared top-level fields",
-            descriptor.model_name
+            model_name
         );
         assert!(
             response["required"].is_array(),
             "{} response must name required observations",
-            descriptor.model_name
+            model_name
         );
     }
 }

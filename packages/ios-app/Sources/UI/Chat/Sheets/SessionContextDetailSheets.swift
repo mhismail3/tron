@@ -6,7 +6,11 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
     case messages([ContextMessageManifestDTO])
     case attachments([ContextMessageManifestDTO])
     case environment(ContextEnvironmentManifestDTO?)
-    case tools(selections: [SessionContextWorkerSelection], raw: AnyCodable?)
+    case tools(
+        fixed: [SessionContextFixedToolSelection],
+        workers: [SessionContextWorkerSelection],
+        raw: AnyCodable?
+    )
     case automatic(ContextAutomaticEvaluationDTO)
     case providerAudit(SessionContextRequestDetailDTO)
 
@@ -122,9 +126,21 @@ struct SessionContextDetailSheet: View {
                 emptyState("Environment provenance is unavailable for this request.")
             }
 
-        case .tools(let selections, let raw):
-            let selected = selections.filter(\.projected)
-            let omitted = selections.filter { !$0.projected }
+        case .tools(let fixed, let workers, let raw):
+            let selectedFixed = fixed.filter(\.projected)
+            let omittedFixed = fixed.filter { !$0.projected }
+            let selected = workers.filter(\.projected)
+            let omitted = workers.filter { !$0.projected }
+            SettingsSectionHeader(title: "Selected fixed tools", bottomPadding: 4)
+            fixedToolSelectionCards(
+                selectedFixed,
+                empty: "No fixed tools were selected for this request."
+            )
+            SettingsSectionHeader(title: "Other fixed tools", bottomPadding: 4)
+            fixedToolSelectionCards(
+                omittedFixed,
+                empty: "No fixed tools were omitted."
+            )
             SettingsSectionHeader(title: "Selected direct workers", bottomPadding: 4)
             workerSelectionCards(selected, empty: "No direct workers were selected.")
             SettingsSectionHeader(title: "Omitted direct workers", bottomPadding: 4)
@@ -255,6 +271,52 @@ struct SessionContextDetailSheet: View {
                 }
                 .padding(13)
                 .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func fixedToolSelectionCards(
+        _ tools: [SessionContextFixedToolSelection],
+        empty: String
+    ) -> some View {
+        if tools.isEmpty {
+            emptyState(empty)
+        } else {
+            ForEach(tools) { tool in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text(WorkerConsolePresentation.displayLabel(tool.modelName))
+                            .font(TronTypography.sans(
+                                size: TronTypography.sizeBodySM,
+                                weight: .semibold
+                            ))
+                        Spacer()
+                        Text(tool.projected ? "Available" : "Not shown")
+                            .font(TronTypography.pillValue)
+                            .foregroundStyle(tool.projected ? .tronEmerald : .tronTextMuted)
+                    }
+                    Text(
+                        [
+                            tool.audience.map(WorkerConsolePresentation.displayLabel),
+                            tool.accessPath.map(WorkerConsolePresentation.displayLabel),
+                            (tool.projected ? tool.selectionReason : tool.omissionReason)
+                                .map(WorkerConsolePresentation.displayLabel),
+                        ]
+                        .compactMap { $0 }
+                        .joined(separator: " · ")
+                    )
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+                    auditIdentifier("Function", tool.functionId)
+                }
+                .padding(13)
+                .sectionFill(
+                    tool.projected ? .tronEmerald : .tronTextMuted,
+                    cornerRadius: 12,
+                    subtle: true,
+                    interactive: false
+                )
             }
         }
     }

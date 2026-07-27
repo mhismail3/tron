@@ -60,7 +60,7 @@ pub(crate) fn surface_context_primer(
         .iter()
         .any(|tool| tool.model_name == "worker_discover")
         .then_some(
-            " Use worker_discover when the task needs an available worker not projected here.",
+            " Use worker_discover when a dynamic capability is omitted. Use Engine Steward for worker diagnosis and Worker Forge for worker changes; permanent deletion, secret rotation, and engine-wide stop remain authenticated dashboard actions.",
         )
         .unwrap_or_default();
     format!(
@@ -688,7 +688,7 @@ mod tests {
         }));
         definition.model_tool = Some(crate::engine::ModelToolContract {
             name: tool_name.to_owned(),
-            callable: true,
+            audience: crate::engine::ModelToolAudience::Ordinary,
             order: None,
             group: None,
             worker: dynamic.then(|| crate::engine::DirectWorkerToolContract {
@@ -1325,6 +1325,9 @@ mod tests {
                 surface_hash: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
                     .to_owned(),
                 fixed_tool_count: 29,
+                ordinary_fixed_tool_count: 11,
+                specialist_fixed_tool_count: 13,
+                conditional_fixed_tool_count: 1,
                 projected_worker_count: 1,
                 available_worker_count: 7,
                 ranking_mechanism: "semantic_hook".to_owned(),
@@ -1347,8 +1350,12 @@ mod tests {
                     worker_id: Some("recent".to_owned()),
                     worker_version: Some("abcdef1234567890".to_owned()),
                     primitive_group: None,
+                    audience: "ordinary".to_owned(),
+                    access_path: "dynamic_worker".to_owned(),
                     selection_reason: "relevance".to_owned(),
+                    omission_reason: None,
                 }],
+                fixed_tools: Vec::new(),
                 available_workers: vec![
                     crate::domains::worker_kernel::AvailableWorkerToolSnapshot {
                         worker_id: "recent".to_owned(),

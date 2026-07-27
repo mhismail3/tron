@@ -147,14 +147,45 @@ impl IdempotencyScope {
     }
 }
 
+/// Provider audience for a model-facing function.
+///
+/// This metadata belongs to the executable function contract. Provider
+/// surfaces derive admission from it instead of consulting a parallel tool
+/// inventory.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ModelToolAudience {
+    /// Included in ordinary main-chat requests.
+    Ordinary,
+    /// Available only to an exact specialist worker allowlist.
+    Specialist,
+    /// Included only when the latest user request matches one of the declared
+    /// normalized intent phrases.
+    Conditional {
+        /// Bounded phrases that describe the narrow admission condition.
+        latest_user_intent_phrases: Vec<String>,
+    },
+}
+
+impl ModelToolAudience {
+    /// Stable evidence key.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ordinary => "ordinary",
+            Self::Specialist => "specialist",
+            Self::Conditional { .. } => "conditional",
+        }
+    }
+}
+
 /// Typed model-tool projection attached only to functions intended for a
 /// provider request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelToolContract {
     /// Stable model-facing tool name.
     pub name: String,
-    /// Whether the current model surface exposes this tool.
-    pub callable: bool,
+    /// Requests that may receive this tool.
+    pub audience: ModelToolAudience,
     /// Stable ordering for fixed kernel tools. Dynamic workers have no fixed
     /// order because relevance owns their placement.
     pub order: Option<u16>,
@@ -269,6 +300,13 @@ impl FunctionDefinition {
     #[must_use]
     pub fn with_response_schema(mut self, schema: Value) -> Self {
         self.response_schema = Some(schema);
+        self
+    }
+
+    /// Attach a typed provider-tool projection.
+    #[must_use]
+    pub fn with_model_tool(mut self, model_tool: ModelToolContract) -> Self {
+        self.model_tool = Some(model_tool);
         self
     }
 }

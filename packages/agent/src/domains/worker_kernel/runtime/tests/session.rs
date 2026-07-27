@@ -135,10 +135,15 @@ async fn explicit_session_rename_persists_and_broadcasts() {
     let session_id = created.session.id;
     let mut events = runtime.orchestrator.subscribe();
 
-    let result = runtime
-        .set_session_title(session_id.clone(), "  Durable Worker Title  ".to_owned())
-        .await
-        .unwrap();
+    let result = crate::domains::session::title::set_title(
+        runtime.event_store.clone(),
+        &runtime.session_manager,
+        &runtime.orchestrator,
+        session_id.clone(),
+        "  Durable Worker Title  ".to_owned(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result["sessionId"], session_id);
     assert_eq!(result["title"], "Durable Worker Title");
@@ -289,10 +294,15 @@ async fn session_title_hook_returns_after_durable_admission_and_cannot_overwrite
             .is_none()
     );
 
-    runtime
-        .set_session_title(session.id.clone(), "Explicit Rename".to_owned())
-        .await
-        .unwrap();
+    crate::domains::session::title::set_title(
+        runtime.event_store.clone(),
+        &runtime.session_manager,
+        &runtime.orchestrator,
+        session.id.clone(),
+        "Explicit Rename".to_owned(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         await_queued_title(&runtime, &queued).await.status,
         "completed"

@@ -143,7 +143,7 @@ pub(super) async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result
     if candidates.is_empty() {
         return Ok(json!({"handled":false,"items":[],"narrative":""}));
     }
-    if !inbox_hook_input_is_nontrivial(query, candidates.len()) {
+    if !inbox_hook_input_requires_selection(query, candidates.len(), limit as usize) {
         let items = deps
             .runtime
             .store()
@@ -237,8 +237,12 @@ pub(super) async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result
     }))
 }
 
-fn inbox_hook_input_is_nontrivial(query: &str, candidate_count: usize) -> bool {
-    candidate_count > 1 && !super::super::retrieval::query_is_empty(Some(query))
+fn inbox_hook_input_requires_selection(
+    query: &str,
+    candidate_count: usize,
+    injection_limit: usize,
+) -> bool {
+    candidate_count > injection_limit && !super::super::retrieval::query_is_empty(Some(query))
 }
 
 fn deterministic_inbox_context(items: &[Value]) -> String {
@@ -424,15 +428,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn inbox_semantic_hook_skips_empty_candidates_and_trivial_queries() {
-        assert!(!inbox_hook_input_is_nontrivial("background report", 0));
-        assert!(!inbox_hook_input_is_nontrivial("", 4));
-        assert!(!inbox_hook_input_is_nontrivial(
-            "user: use a worker\nassistant: tool result",
-            4,
+    fn inbox_semantic_hook_runs_only_when_candidates_exceed_the_injection_bound() {
+        assert!(!inbox_hook_input_requires_selection(
+            "background report",
+            0,
+            8
         ));
-        assert!(!inbox_hook_input_is_nontrivial("background report", 1));
-        assert!(inbox_hook_input_is_nontrivial("background report", 2));
+        assert!(!inbox_hook_input_requires_selection("", 12, 8));
+        assert!(!inbox_hook_input_requires_selection(
+            "user: use a worker\nassistant: tool result",
+            12,
+            8,
+        ));
+        assert!(!inbox_hook_input_requires_selection(
+            "background report",
+            8,
+            8
+        ));
+        assert!(inbox_hook_input_requires_selection(
+            "background report",
+            9,
+            8
+        ));
         assert_eq!(MAX_INBOX_CONTEXT_CANDIDATES, 32);
     }
 

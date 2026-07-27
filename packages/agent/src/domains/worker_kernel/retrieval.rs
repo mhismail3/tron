@@ -134,28 +134,6 @@ pub(crate) fn rank_workers(
     ranked
 }
 
-/// Resolve semantic ranking through an active worker hook and recover through
-/// the deterministic local scorer when no hook is active or it fails.
-pub(crate) async fn rank_workers_with_hook(
-    host: &crate::engine::EngineHostHandle,
-    session_id: &str,
-    origin_worker_id: Option<&str>,
-    documents: Vec<WorkerRetrievalDocument>,
-    query: Option<&str>,
-    promoted_workers: &BTreeSet<String>,
-) -> Vec<WorkerRetrievalRank> {
-    rank_workers_with_hook_evidence(
-        host,
-        session_id,
-        origin_worker_id,
-        documents,
-        query,
-        promoted_workers,
-    )
-    .await
-    .ranks
-}
-
 /// Resolve ranking while retaining whether semantic policy or deterministic
 /// recovery produced the exact request surface.
 pub(crate) async fn rank_workers_with_hook_evidence(
@@ -165,6 +143,7 @@ pub(crate) async fn rank_workers_with_hook_evidence(
     documents: Vec<WorkerRetrievalDocument>,
     query: Option<&str>,
     promoted_workers: &BTreeSet<String>,
+    selection_limit: usize,
 ) -> WorkerRankingOutcome {
     // Agent-runner workers resolve their own bounded tool surface. Applying a
     // semantic router there can recurse across internal hook owners (for
@@ -185,14 +164,12 @@ pub(crate) async fn rank_workers_with_hook_evidence(
         );
     }
     let deterministic = rank_workers(documents.clone(), query, promoted_workers);
-    if deterministic
+    let meaningful_count = deterministic
         .iter()
         .filter(|candidate| candidate.relevance_score > 0)
-        .take(2)
-        .count()
-        <= 1
-    {
-        return WorkerRankingOutcome::deterministic(deterministic, "deterministic_trivial");
+        .count();
+    if meaningful_count <= selection_limit {
+        return WorkerRankingOutcome::deterministic(deterministic, "deterministic_within_limit");
     }
     let meaningful_worker_ids = deterministic
         .iter()
@@ -530,28 +507,32 @@ mod tests {
             document("formatter", "format notes", 0),
         ];
 
-        let ranked = rank_workers_with_hook(
+        let ranked = rank_workers_with_hook_evidence(
             &context.engine_host,
             "retrieval-test",
             None,
             documents.clone(),
             Some("recent research and format notes"),
             &BTreeSet::new(),
+            1,
         )
-        .await;
+        .await
+        .ranks;
         assert_eq!(ranked[0].worker_id, "formatter");
         assert_eq!(ranked[0].relevance_score, 1000);
         assert_eq!(ranked[0].explanation.as_deref(), Some("semantic match"));
 
-        let self_origin = rank_workers_with_hook(
+        let self_origin = rank_workers_with_hook_evidence(
             &context.engine_host,
             "retrieval-worker-test",
             Some("semantic-router"),
             documents,
             Some("recent research"),
             &BTreeSet::new(),
+            12,
         )
-        .await;
+        .await
+        .ranks;
         assert_eq!(self_origin[0].worker_id, "research");
         assert!(self_origin[0].relevance_score > 0);
     }
@@ -565,15 +546,17 @@ mod tests {
         )
         .await;
 
-        let ranked = rank_workers_with_hook(
+        let ranked = rank_workers_with_hook_evidence(
             &context.engine_host,
             "single-candidate-test",
             None,
             vec![document("research", "recent research", 1)],
             Some("recent research"),
             &BTreeSet::new(),
+            12,
         )
-        .await;
+        .await
+        .ranks;
 
         assert_eq!(ranked[0].worker_id, "research");
         assert!(ranked[0].relevance_score > 0);
@@ -605,7 +588,7 @@ mod tests {
         )
         .await;
 
-        let ranked = rank_workers_with_hook(
+        let ranked = rank_workers_with_hook_evidence(
             &context.engine_host,
             "one-meaningful-candidate-test",
             None,
@@ -615,8 +598,10 @@ mod tests {
             ],
             Some("recent research"),
             &BTreeSet::new(),
+            12,
         )
-        .await;
+        .await
+        .ranks;
 
         assert_eq!(ranked[0].worker_id, "research");
         let inspection = context
@@ -657,15 +642,17 @@ mod tests {
             document("formatter", "format notes", 0),
         ];
 
-        let ranked = rank_workers_with_hook(
+        let ranked = rank_workers_with_hook_evidence(
             &context.engine_host,
             "invalid-retrieval-test",
             None,
             documents,
             Some("recent research and format notes"),
             &BTreeSet::new(),
+            1,
         )
-        .await;
+        .await
+        .ranks;
         assert_eq!(ranked[0].worker_id, "research");
 
         let inspection = context

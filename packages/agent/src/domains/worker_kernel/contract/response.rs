@@ -31,11 +31,6 @@ pub(super) fn response_schema(function: &str) -> Value {
             "required":["url","status","contentType","contentLength","observedBytes","retainedBytes","contentSha256","truncated","content"],
             "properties":{"url":{"type":"string"},"status":{"type":"integer"},"contentType":{},"contentLength":{},"observedBytes":{"type":"integer"},"retainedBytes":{"type":"integer"},"contentSha256":{"type":"string"},"truncated":{"type":"boolean"},"content":{"type":"string"}}
         }),
-        "worker_kernel::session_set_title" => json!({
-            "type":"object","additionalProperties":false,
-            "required":["sessionId","title","updated"],
-            "properties":{"sessionId":{"type":"string"},"title":{"type":"string"},"updated":{"type":"boolean"}}
-        }),
         "worker_kernel::notification_device_upsert" => json!({
             "type":"object","additionalProperties":false,
             "required":["installationId","authorizationStatus","environment","topic","enabled","ready","registeredAt","transport"],
@@ -136,13 +131,6 @@ pub(super) fn response_schema(function: &str) -> Value {
                 "workerId":{"type":"string"},"artifactId":{"type":"string"},
                 "deleted":{"type":"boolean"}
             }
-        }),
-        "worker_kernel::core_proposal_create"
-        | "worker_kernel::core_proposal_inspect"
-        | "worker_kernel::core_proposal_apply" => core_proposal_response_schema(),
-        "worker_kernel::core_proposal_list" => json!({
-            "type":"object","additionalProperties":false,"required":["proposals"],
-            "properties":{"proposals":{"type":"array","items":core_proposal_response_schema()}}
         }),
         "worker_kernel::upsert" => json!({
             "type":"object","additionalProperties":false,
@@ -411,14 +399,6 @@ fn webhook_credential_response_schema() -> Value {
     json!({
         "type":"object","additionalProperties":false,"required":["triggerId","path","token"],
         "properties":{"triggerId":{"type":"string"},"path":{"type":"string"},"token":{"type":"string"}}
-    })
-}
-
-fn core_proposal_response_schema() -> Value {
-    json!({
-        "type":"object","additionalProperties":false,
-        "required":["proposalId","title","intent","repositoryPath","branch","commit","testCommand","testOutput","status","createdAt","appliedAt","appliedCommit","approvalSessionId","approvalMessageId"],
-        "properties":{"proposalId":{"type":"string"},"title":{"type":"string"},"intent":{"type":"string"},"repositoryPath":{"type":"string"},"branch":{"type":"string"},"commit":{"type":"string"},"testCommand":{"type":"array"},"testOutput":{"type":"string"},"status":{"type":"string"},"createdAt":{"type":"string"},"appliedAt":{},"appliedCommit":{},"approvalSessionId":{},"approvalMessageId":{}}
     })
 }
 

@@ -91,7 +91,6 @@ fn domain_workers_expose_contracts_not_services() {
     let worker_kernel = read_repo_file("packages/agent/src/domains/worker_kernel/mod.rs");
     for required in [
         "mod contract;",
-        "mod core_proposals;",
         "mod persistence;",
         "mod runtime;",
         "mod types;",
@@ -152,6 +151,33 @@ fn domain_workers_expose_contracts_not_services() {
         registration_call_leaks.is_empty(),
         "domain function registration must be centralized behind transport runtime setup:\n{}",
         registration_call_leaks.join("\n")
+    );
+}
+
+#[test]
+fn removed_fixed_subsystems_do_not_leave_runtime_or_active_documentation() {
+    let removed_phrase = ["core", "proposal"].join(" ");
+    let leaks = tracked_files()
+        .into_iter()
+        .filter(|path| {
+            (path.starts_with("packages/agent/src/")
+                || path == "README.md"
+                || path == "packages/agent/docs/project-reference.md")
+                && !is_test_support_path(path)
+                && repo_path(path).is_file()
+        })
+        .filter_map(|path| {
+            let text = read_repo_file(&path)
+                .to_ascii_lowercase()
+                .replace(['_', '-'], " ");
+            text.contains(&removed_phrase).then_some(path)
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        leaks.is_empty(),
+        "removed fixed subsystems must not remain in production source or active docs:\n{}",
+        leaks.join("\n")
     );
 }
 

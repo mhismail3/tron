@@ -94,11 +94,16 @@ struct WorkerConsolePresentationTests {
     @Test("Engine primitive groups use stable operator language")
     func engineDashboardProjection() {
         #expect(EngineDashboardPresentation.groupTitle("host") == "Host primitives")
-        #expect(EngineDashboardPresentation.groupTitle("worker_control") == "Worker controls")
-        #expect(EngineDashboardPresentation.groupTitle("core_change") == "Core changes")
+        #expect(
+            EngineDashboardPresentation.groupTitle("worker_interaction")
+                == "Worker interaction"
+        )
+        #expect(
+            EngineDashboardPresentation.groupTitle("worker_administration")
+                == "Worker administration"
+        )
         #expect(EngineDashboardPresentation.toolTitle("filesystem_read") == "Read File")
         #expect(EngineDashboardPresentation.toolTitle("worker_upsert") == "Create or Update Worker")
-        #expect(EngineDashboardPresentation.toolTitle("core_proposal_apply") == "Apply Core Proposal")
         #expect(EngineDashboardPresentation.toolTitle("future_operation") == "Future Operation")
         #expect(
             EngineDashboardPresentation.groupDetail("host", count: 6)

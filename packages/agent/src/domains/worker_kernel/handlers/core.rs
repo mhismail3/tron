@@ -1,4 +1,4 @@
-//! Engine introspection, semantic hooks, session title, and core proposals.
+//! Engine introspection and semantic policy hooks.
 
 use std::collections::BTreeSet;
 
@@ -8,61 +8,10 @@ use crate::engine::Invocation;
 
 use super::super::types::WorkerEngineHook;
 use super::Deps;
-use super::support::{required_content, required_string};
+use super::support::required_string;
 
 const CONTINUITY_CONTEXT_LIMIT: u64 = 6;
 const CONTINUITY_CONTEXT_MAX_BYTES: usize = 12_000;
-
-pub(super) async fn session_set_title(
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, String> {
-    deps.runtime
-        .set_session_title(
-            explicit_title_target_session_id(invocation.causal_context.session_id.as_deref())?,
-            required_string(&invocation.payload, "title")?,
-        )
-        .await
-}
-
-fn explicit_title_target_session_id(causal_session_id: Option<&str>) -> Result<String, String> {
-    causal_session_id
-        .map(str::trim)
-        .filter(|session_id| !session_id.is_empty())
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| "session_set_title requires a current causal session".to_owned())
-}
-
-pub(super) async fn core_proposal_create(
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, String> {
-    let test_command = invocation
-        .payload
-        .get("testCommand")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "testCommand must be an array".to_owned())?
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(ToOwned::to_owned)
-                .ok_or_else(|| "testCommand entries must be strings".to_owned())
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    serde_json::to_value(
-        deps.runtime
-            .create_core_proposal(
-                required_string(&invocation.payload, "title")?,
-                required_string(&invocation.payload, "intent")?,
-                required_string(&invocation.payload, "repositoryPath")?,
-                required_content(&invocation.payload, "patch")?,
-                test_command,
-            )
-            .await?,
-    )
-    .map_err(|error| error.to_string())
-}
 
 pub(super) async fn engine_surface_snapshot(
     invocation: &Invocation,
@@ -253,19 +202,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn session_title_targets_the_causal_session_without_a_synthetic_current_id() {
-        assert_eq!(
-            explicit_title_target_session_id(Some("sess_current")).unwrap(),
-            "sess_current"
-        );
-        assert!(
-            explicit_title_target_session_id(None)
-                .unwrap_err()
-                .contains("requires a current causal session")
-        );
-    }
-
-    #[test]
     fn continuity_projection_redacts_and_bounds_sensitive_content() {
         let secret = format!("api_key={}", "a".repeat(64));
         let redacted = crate::shared::foundation::redaction::redact_sensitive_content(&secret);
@@ -321,38 +257,4 @@ mod tests {
                 .all(|source| { matches!(source["scope"].as_str(), Some("global" | "project")) })
         );
     }
-}
-
-pub(super) async fn core_proposal_list(
-    _invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, String> {
-    Ok(json!({"proposals":deps.runtime.list_core_proposals()?}))
-}
-
-pub(super) async fn core_proposal_inspect(
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, String> {
-    serde_json::to_value(
-        deps.runtime
-            .inspect_core_proposal(&required_string(&invocation.payload, "proposalId")?)?,
-    )
-    .map_err(|error| error.to_string())
-}
-
-pub(super) async fn core_proposal_apply(
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, String> {
-    serde_json::to_value(
-        deps.runtime
-            .apply_core_proposal(
-                &required_string(&invocation.payload, "proposalId")?,
-                &required_string(&invocation.payload, "approvalSessionId")?,
-                &required_string(&invocation.payload, "approvalMessageId")?,
-            )
-            .await?,
-    )
-    .map_err(|error| error.to_string())
 }

@@ -257,8 +257,7 @@ mod tests {
             "worker_kernel::disable",
             "worker_kernel::rollback",
             "worker_kernel::stop_all",
-            "worker_kernel::core_proposal_create",
-            "worker_kernel::core_proposal_apply",
+            "session::set_title",
             "filesystem::create_dir",
             "filesystem::get_home",
             "filesystem::list_dir",
@@ -390,7 +389,7 @@ mod tests {
         let fixed_tools = value["fixedTools"]
             .as_array()
             .expect("fixed tool inventory");
-        assert_eq!(fixed_tools.len(), 31);
+        assert_eq!(fixed_tools.len(), 25);
         assert!(
             fixed_tools.iter().any(|tool| {
                 tool["modelName"] == "session_set_title" && tool["exposed"] == false
@@ -399,9 +398,9 @@ mod tests {
         assert_eq!(
             fixed_tools
                 .iter()
-                .filter(|tool| tool["primitiveGroup"] == "host")
+                .filter(|tool| tool["audience"] == "ordinary")
                 .count(),
-            8
+            11
         );
         assert!(
             fixed_tools
@@ -409,10 +408,30 @@ mod tests {
                 .any(|tool| tool["modelName"] == "worker_result_read")
         );
         assert!(value["surface"]["catalogRevision"].is_u64());
-        assert_eq!(value["surface"]["fixedToolCount"], 30);
+        assert_eq!(value["surface"]["fixedToolCount"], 11);
         assert!(value["surface"]["surfaceHash"].is_string());
         assert!(value["surface"]["availableWorkers"].is_array());
         assert!(value["surface"].get("tools").is_none());
+
+        let renamed = ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("engine::surface_snapshot").expect("surface function id"),
+                json!({"relevanceQuery":"please rename this conversation"}),
+                trusted_local_context("engine-surface-rename"),
+            ))
+            .await
+            .value
+            .expect("rename surface snapshot");
+        assert_eq!(renamed["surface"]["fixedToolCount"], 12);
+        assert!(renamed["fixedTools"].as_array().is_some_and(|tools| {
+            tools.iter().any(|tool| {
+                tool["modelName"] == "session_set_title"
+                    && tool["functionId"] == "session::set_title"
+                    && tool["audience"] == "conditional"
+                    && tool["exposed"] == true
+            })
+        }));
         assert!(value["workers"].is_array());
 
         let surface =

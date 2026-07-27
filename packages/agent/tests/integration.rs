@@ -462,7 +462,6 @@ async fn worker_first_baseline_characterizes_startup_tools_events_settings_and_c
     let model_tools = functions
         .iter()
         .filter_map(|function| function.model_tool.as_ref())
-        .filter(|tool| tool.callable)
         .map(|tool| tool.name.as_str())
         .collect::<Vec<_>>();
     assert!(model_tools.contains(&"worker_upsert"), "{model_tools:?}");

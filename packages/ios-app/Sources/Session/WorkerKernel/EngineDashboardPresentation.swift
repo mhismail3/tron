@@ -30,10 +30,6 @@ enum EngineDashboardPresentation {
         case "worker_runs": "View Worker Runs"
         case "worker_webhook_rotate": "Rotate Webhook Token"
         case "worker_stop_all": "Stop All Workers"
-        case "core_proposal_create": "Create Core Proposal"
-        case "core_proposal_list": "List Core Proposals"
-        case "core_proposal_inspect": "Inspect Core Proposal"
-        case "core_proposal_apply": "Apply Core Proposal"
         default: WorkerConsolePresentation.displayLabel(modelName)
         }
     }
@@ -41,8 +37,9 @@ enum EngineDashboardPresentation {
     static func groupTitle(_ group: String) -> String {
         switch group {
         case "host": "Host primitives"
-        case "worker_control": "Worker controls"
-        case "core_change": "Core changes"
+        case "session": "Session"
+        case "worker_interaction": "Worker interaction"
+        case "worker_administration": "Worker administration"
         default: WorkerConsolePresentation.displayLabel(group)
         }
     }
@@ -50,8 +47,9 @@ enum EngineDashboardPresentation {
     static func groupDetail(_ group: String, count: Int) -> String {
         let purpose = switch group {
         case "host": "Generic local read, write, process, search, and network closure."
-        case "worker_control": "Persistent adaptation, discovery, execution, recovery, and retirement."
-        case "core_change": "Isolated proposals with a later conversational approval boundary."
+        case "session": "Request-gated mutation of the current conversation."
+        case "worker_interaction": "Stable discovery and control of work already in progress."
+        case "worker_administration": "Exact specialist or authenticated-dashboard worker lifecycle operations."
         default: "Fixed engine tools."
         }
         return "\(count) fixed tool\(count == 1 ? "" : "s") · \(purpose)"

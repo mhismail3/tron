@@ -8,7 +8,6 @@ struct EngineCoreSection: View {
     private var color: Color {
         switch group {
         case "host": .tronCyan
-        case "core_change": .tronPurple
         default: .tronEmerald
         }
     }
@@ -65,7 +64,6 @@ struct EngineCoreToolDetailSheet: View {
     private var color: Color {
         switch tool.primitiveGroup {
         case "host": .tronCyan
-        case "core_change": .tronPurple
         default: .tronEmerald
         }
     }
@@ -83,7 +81,8 @@ struct EngineCoreToolDetailSheet: View {
                         HStack(spacing: 7) {
                             badge(WorkerConsolePresentation.displayLabel(tool.effectClass))
                             badge(tool.risk.capitalized)
-                            badge(tool.exposed ? "Model visible" : "Internal")
+                            badge(WorkerConsolePresentation.displayLabel(tool.audience ?? "unavailable"))
+                            badge(tool.exposed ? "This request" : "Not projected")
                         }
                     }
                     .padding(14)
@@ -94,6 +93,12 @@ struct EngineCoreToolDetailSheet: View {
                         metadata("Function", tool.functionId)
                         metadata("Owner", tool.ownerWorker)
                         metadata("Revision", "\(tool.functionRevision)")
+                        if let accessPath = tool.accessPath {
+                            metadata("Access", WorkerConsolePresentation.displayLabel(accessPath))
+                        }
+                        if let omissionReason = tool.omissionReason {
+                            metadata("Omitted because", WorkerConsolePresentation.displayLabel(omissionReason))
+                        }
                     }
 
                     detailSection(title: "Contract") {

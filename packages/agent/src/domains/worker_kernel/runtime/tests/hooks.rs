@@ -785,7 +785,7 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
         .engine_host
         .invoke(Invocation::new_sync(
             FunctionId::new("worker_kernel::inbox_attach").unwrap(),
-            json!({"relevanceQuery":"background report","limit":8}),
+            json!({"relevanceQuery":"background report","limit":1}),
             CausalContext::new(
                 ActorId::new("system:inbox-hook-test").unwrap(),
                 ActorKind::System,
@@ -849,7 +849,7 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
         .engine_host
         .invoke(Invocation::new_sync(
             FunctionId::new("worker_kernel::inbox_attach").unwrap(),
-            json!({"relevanceQuery":"background report","limit":8}),
+            json!({"relevanceQuery":"background report","limit":1}),
             CausalContext::new(
                 ActorId::new("system:inbox-hook-test").unwrap(),
                 ActorKind::System,

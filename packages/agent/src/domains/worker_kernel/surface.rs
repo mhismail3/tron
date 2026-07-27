@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::engine::{
     ActorContext, ActorId, ActorKind, DirectWorkerToolContract, EngineHostHandle, EngineStateScope,
-    FunctionDefinition,
+    FunctionDefinition, ModelToolAudience,
 };
 
 const MAX_RELEVANT_WORKERS: usize = 12;
@@ -164,7 +164,11 @@ pub(crate) struct SurfaceToolSnapshot {
     pub(crate) worker_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) primitive_group: Option<String>,
+    pub(crate) audience: String,
+    pub(crate) access_path: String,
     pub(crate) selection_reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) omission_reason: Option<String>,
 }
 
 /// Publication and selection evidence for every enabled direct worker tool,
@@ -198,6 +202,9 @@ pub(crate) struct EngineSurfaceSnapshot {
     pub(crate) catalog_revision: u64,
     pub(crate) surface_hash: String,
     pub(crate) fixed_tool_count: usize,
+    pub(crate) ordinary_fixed_tool_count: usize,
+    pub(crate) specialist_fixed_tool_count: usize,
+    pub(crate) conditional_fixed_tool_count: usize,
     pub(crate) projected_worker_count: usize,
     pub(crate) available_worker_count: usize,
     pub(crate) ranking_mechanism: String,
@@ -208,6 +215,7 @@ pub(crate) struct EngineSurfaceSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) router_invocation_id: Option<String>,
     pub(crate) tools: Vec<SurfaceToolSnapshot>,
+    pub(crate) fixed_tools: Vec<SurfaceToolSnapshot>,
     pub(crate) available_workers: Vec<AvailableWorkerToolSnapshot>,
 }
 
@@ -302,6 +310,7 @@ pub(crate) async fn resolve_tool_surface(
         dynamic_documents,
         relevance_query,
         &applicable_promotions,
+        MAX_RELEVANT_WORKERS,
     )
     .await;
     let ranked = &ranking.ranks;
@@ -394,7 +403,7 @@ pub(crate) async fn resolve_tool_surface(
     let mut seen_names = BTreeSet::new();
     let mut resolved = Vec::new();
     let mut snapshot_tools = Vec::new();
-    for function in functions {
+    for function in &functions {
         if !is_provider_primitive(&function) || function.request_schema.is_none() {
             continue;
         }
@@ -417,14 +426,7 @@ pub(crate) async fn resolve_tool_surface(
         {
             continue;
         }
-        if !function
-            .model_tool
-            .as_ref()
-            .is_some_and(|tool| tool.callable)
-        {
-            continue;
-        }
-        if !model_tool_exposure_allows(&function, relevance_query) {
+        if !model_tool_exposure_allows(&function, relevance_query, trusted_worker_allowlist) {
             continue;
         }
         if !seen_names.insert(model_name.clone()) {
@@ -460,11 +462,18 @@ pub(crate) async fn resolve_tool_surface(
                 .model_tool
                 .as_ref()
                 .and_then(|tool| tool.group.clone()),
+            audience: function
+                .model_tool
+                .as_ref()
+                .map_or("unavailable", |tool| tool.audience.as_str())
+                .to_owned(),
+            access_path: model_tool_access_path(&function).to_owned(),
             selection_reason: selection_reason.to_owned(),
+            omission_reason: None,
         });
         resolved.push(ResolvedToolFunction {
             model_name,
-            definition: function,
+            definition: function.clone(),
         });
     }
     resolved.sort_by_key(|resolved| {
@@ -498,8 +507,7 @@ pub(crate) async fn resolve_tool_surface(
             || {
                 (
                     0usize,
-                    super::contract::core_primitive_for_function(&tool.function_id)
-                        .map_or(usize::MAX, |descriptor| usize::from(descriptor.order)),
+                    functions_order(&tool.function_id, &resolved),
                     tool.function_id.clone(),
                 )
             },
@@ -518,6 +526,19 @@ pub(crate) async fn resolve_tool_surface(
         .filter(|tool| tool.worker_id.is_none())
         .count();
     let projected_worker_count = snapshot_tools.len().saturating_sub(fixed_tool_count);
+    let fixed_tools = fixed_tool_snapshots(&functions, &snapshot_tools)?;
+    let ordinary_fixed_tool_count = fixed_tools
+        .iter()
+        .filter(|tool| tool.audience == "ordinary")
+        .count();
+    let specialist_fixed_tool_count = fixed_tools
+        .iter()
+        .filter(|tool| tool.audience == "specialist")
+        .count();
+    let conditional_fixed_tool_count = fixed_tools
+        .iter()
+        .filter(|tool| tool.audience == "conditional")
+        .count();
     let surface_hash = surface_hash(&snapshot_tools)?;
     Ok(ResolvedToolSurface {
         functions: resolved,
@@ -525,6 +546,9 @@ pub(crate) async fn resolve_tool_surface(
             catalog_revision: catalog_revision.0,
             surface_hash,
             fixed_tool_count,
+            ordinary_fixed_tool_count,
+            specialist_fixed_tool_count,
+            conditional_fixed_tool_count,
             projected_worker_count,
             available_worker_count,
             ranking_mechanism: ranking.mechanism,
@@ -532,6 +556,7 @@ pub(crate) async fn resolve_tool_surface(
             router_worker_version: ranking.router_worker_version,
             router_invocation_id: ranking.router_invocation_id,
             tools: snapshot_tools,
+            fixed_tools,
             available_workers,
         },
     })
@@ -539,51 +564,93 @@ pub(crate) async fn resolve_tool_surface(
 
 /// Inspect the canonical fixed model-tool inventory independently of whether
 /// the current provider request projects those tools.
-pub(crate) async fn fixed_tool_inventory(
-    host: &EngineHostHandle,
+pub(crate) fn fixed_tool_inventory(
     resolved_surface: &EngineSurfaceSnapshot,
+) -> Vec<SurfaceToolSnapshot> {
+    resolved_surface.fixed_tools.clone()
+}
+
+fn fixed_tool_snapshots(
+    functions: &[FunctionDefinition],
+    projected_tools: &[SurfaceToolSnapshot],
 ) -> Result<Vec<SurfaceToolSnapshot>, String> {
-    let mut tools = Vec::with_capacity(super::contract::core_primitives().len());
-    let inspector = ActorContext::new(
-        ActorId::new("system:engine-introspection").map_err(|error| error.to_string())?,
-        ActorKind::System,
-    );
-    for descriptor in super::contract::core_primitives() {
-        let function_id = crate::engine::FunctionId::new(descriptor.function_id)
-            .map_err(|error| error.to_string())?;
-        let function = host
-            .inspect_function(&function_id, &inspector)
-            .await
-            .map_err(|error| error.to_string())?;
-        let exposed = resolved_surface
-            .tools
+    let projected = projected_tools
+        .iter()
+        .map(|tool| tool.function_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut fixed = functions
+        .iter()
+        .filter(|function| {
+            function.request_schema.is_some()
+                && function
+                    .model_tool
+                    .as_ref()
+                    .is_some_and(|tool| tool.worker.is_none())
+        })
+        .map(|function| {
+            let model_tool = function.model_tool.as_ref().expect("filtered model tool");
+            let input_schema = function
+                .request_schema
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({"type":"object"}));
+            let output_schema = function.response_schema.clone();
+            let exposed = projected.contains(function.id.as_str());
+            Ok(SurfaceToolSnapshot {
+                model_name: model_tool.name.clone(),
+                function_id: function.id.as_str().to_owned(),
+                function_revision: function.revision.0,
+                owner_worker: function.owner_worker.as_str().to_owned(),
+                description: function.description.clone(),
+                input_schema_sha256: schema_digest(&input_schema)?,
+                output_schema_sha256: output_schema.as_ref().map(schema_digest).transpose()?,
+                input_schema,
+                output_schema,
+                effect_class: function.effect_class.as_str().to_owned(),
+                risk: function.risk_level.as_str().to_owned(),
+                exposed,
+                worker_id: None,
+                worker_version: None,
+                primitive_group: model_tool.group.clone(),
+                audience: model_tool.audience.as_str().to_owned(),
+                access_path: model_tool_access_path(function).to_owned(),
+                selection_reason: if exposed {
+                    match &model_tool.audience {
+                        ModelToolAudience::Ordinary => "ordinary",
+                        ModelToolAudience::Specialist => "specialist_allowlist",
+                        ModelToolAudience::Conditional { .. } => "conditional_request",
+                    }
+                } else {
+                    "not_projected"
+                }
+                .to_owned(),
+                omission_reason: (!exposed)
+                    .then(|| match &model_tool.audience {
+                        ModelToolAudience::Ordinary => "not_in_specialist_allowlist",
+                        ModelToolAudience::Specialist => "specialist_only",
+                        ModelToolAudience::Conditional { .. } => "condition_not_satisfied",
+                    })
+                    .map(str::to_owned),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    fixed.sort_by_key(|tool| {
+        functions
             .iter()
-            .any(|tool| tool.function_id == function.id.as_str());
-        let input_schema = function
-            .request_schema
-            .clone()
-            .unwrap_or_else(|| serde_json::json!({"type":"object"}));
-        let output_schema = function.response_schema.clone();
-        tools.push(SurfaceToolSnapshot {
-            model_name: descriptor.model_name.to_owned(),
-            function_id: function.id.as_str().to_owned(),
-            function_revision: function.revision.0,
-            owner_worker: function.owner_worker.as_str().to_owned(),
-            description: function.description.clone(),
-            input_schema_sha256: schema_digest(&input_schema)?,
-            output_schema_sha256: output_schema.as_ref().map(schema_digest).transpose()?,
-            input_schema,
-            output_schema,
-            effect_class: function.effect_class.as_str().to_owned(),
-            risk: function.risk_level.as_str().to_owned(),
-            exposed,
-            worker_id: None,
-            worker_version: None,
-            primitive_group: Some(descriptor.group.as_str().to_owned()),
-            selection_reason: "fixed".to_owned(),
-        });
-    }
-    Ok(tools)
+            .find(|function| function.id.as_str() == tool.function_id)
+            .and_then(|function| function.model_tool.as_ref())
+            .and_then(|model_tool| model_tool.order)
+            .unwrap_or(u16::MAX)
+    });
+    Ok(fixed)
+}
+
+fn functions_order(function_id: &str, resolved: &[ResolvedToolFunction]) -> usize {
+    resolved
+        .iter()
+        .find(|resolved| resolved.definition.id.as_str() == function_id)
+        .and_then(|resolved| resolved.definition.model_tool.as_ref())
+        .and_then(|tool| tool.order)
+        .map_or(usize::MAX, usize::from)
 }
 
 fn surface_hash(tools: &[SurfaceToolSnapshot]) -> Result<String, String> {
@@ -629,21 +696,42 @@ fn is_provider_primitive(function: &FunctionDefinition) -> bool {
 fn model_tool_exposure_allows(
     function: &FunctionDefinition,
     latest_user_query: Option<&str>,
+    trusted_worker_allowlist: bool,
 ) -> bool {
-    if function.model_tool.is_none() {
+    let Some(model_tool) = function.model_tool.as_ref() else {
         return false;
-    }
-    let Some(phrases) = super::contract::core_primitive_for_function(function.id.as_str())
-        .and_then(|descriptor| descriptor.latest_user_intent_phrases())
-    else {
-        return true;
     };
-    let query = normalized_intent_text(latest_user_query.unwrap_or_default());
-    !query.is_empty()
-        && phrases.iter().any(|phrase| {
-            let phrase = normalized_intent_text(phrase);
-            !phrase.is_empty() && query.contains(&phrase)
-        })
+    if trusted_worker_allowlist {
+        return true;
+    }
+    match &model_tool.audience {
+        ModelToolAudience::Ordinary => true,
+        ModelToolAudience::Specialist => false,
+        ModelToolAudience::Conditional {
+            latest_user_intent_phrases,
+        } => {
+            let query = normalized_intent_text(latest_user_query.unwrap_or_default());
+            !query.is_empty()
+                && latest_user_intent_phrases.iter().any(|phrase| {
+                    let phrase = normalized_intent_text(phrase);
+                    !phrase.is_empty() && query.contains(&phrase)
+                })
+        }
+    }
+}
+
+fn model_tool_access_path(function: &FunctionDefinition) -> &'static str {
+    let Some(model_tool) = function.model_tool.as_ref() else {
+        return "unavailable";
+    };
+    if model_tool.worker.is_some() {
+        return "dynamic_worker";
+    }
+    match &model_tool.audience {
+        ModelToolAudience::Ordinary => "ordinary",
+        ModelToolAudience::Specialist => "specialist_worker_or_dashboard",
+        ModelToolAudience::Conditional { .. } => "conditional_request",
+    }
 }
 
 fn normalized_intent_text(value: &str) -> String {
@@ -677,7 +765,9 @@ mod tests {
         );
         definition.model_tool = Some(crate::engine::ModelToolContract {
             name: "conditional".to_owned(),
-            callable: true,
+            audience: crate::engine::ModelToolAudience::Conditional {
+                latest_user_intent_phrases: vec!["rename this conversation".to_owned()],
+            },
             order: Some(1),
             group: Some("host".to_owned()),
             worker: None,
@@ -690,12 +780,15 @@ mod tests {
         let definition = conditional_definition();
         assert!(!model_tool_exposure_allows(
             &definition,
-            Some("What's happening in the news today?")
+            Some("What's happening in the news today?"),
+            false,
         ));
         assert!(model_tool_exposure_allows(
             &definition,
-            Some("Please rename this conversation to Daily Briefing")
+            Some("Please rename this conversation to Daily Briefing"),
+            false,
         ));
+        assert!(model_tool_exposure_allows(&definition, None, true));
     }
 
     #[test]
@@ -719,7 +812,10 @@ mod tests {
             worker_id: Some("demo".to_owned()),
             worker_version: Some("abc".to_owned()),
             primitive_group: None,
+            audience: "ordinary".to_owned(),
+            access_path: "dynamic_worker".to_owned(),
             selection_reason: "relevance".to_owned(),
+            omission_reason: None,
         };
         let first = surface_hash(std::slice::from_ref(&tool)).expect("hash");
         let second = surface_hash(std::slice::from_ref(&tool)).expect("hash");
@@ -752,7 +848,7 @@ mod tests {
         };
         function.model_tool = Some(crate::engine::ModelToolContract {
             name: "worker_research".to_owned(),
-            callable: true,
+            audience: crate::engine::ModelToolAudience::Ordinary,
             order: None,
             group: None,
             worker: Some(worker.clone()),

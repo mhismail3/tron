@@ -21,7 +21,7 @@ async fn invocation_rejects_a_function_surface_that_changed_after_advertisement(
     let mut first = read_function("alpha::read", "w1");
     first.model_tool = Some(crate::engine::ModelToolContract {
         name: "worker_alpha".to_owned(),
-        callable: true,
+        audience: crate::engine::ModelToolAudience::Ordinary,
         order: None,
         group: None,
         worker: Some(crate::engine::DirectWorkerToolContract {

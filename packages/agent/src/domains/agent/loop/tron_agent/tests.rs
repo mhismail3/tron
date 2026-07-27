@@ -80,76 +80,12 @@ struct DirectWorkerListLoopResponder {
     observed_result: Arc<Mutex<Option<String>>>,
 }
 
-struct PersistentAdaptationResponder {
+struct OrdinarySurfaceResponder {
     calls: Arc<AtomicUsize>,
 }
 
-impl PersistentAdaptationResponder {
-    fn tool_call(
-        invocation_id: &str,
-        name: &str,
-        arguments: serde_json::Map<String, serde_json::Value>,
-    ) -> ModelResponse {
-        model_response(vec![
-            Ok(StreamEvent::Start),
-            Ok(StreamEvent::ToolInvocationDraftStart {
-                invocation_id: invocation_id.to_owned(),
-                name: name.to_owned(),
-            }),
-            Ok(StreamEvent::ToolInvocationDraftDelta {
-                invocation_id: invocation_id.to_owned(),
-                arguments_delta: serde_json::to_string(&arguments).expect("arguments json"),
-            }),
-            Ok(StreamEvent::ToolInvocationDraftEnd {
-                tool_invocation: crate::shared::protocol::messages::ToolInvocationDraft::new(
-                    invocation_id,
-                    name,
-                    arguments,
-                ),
-            }),
-            Ok(StreamEvent::Done {
-                message: AssistantMessage {
-                    content: vec![],
-                    token_usage: None,
-                },
-                stop_reason: "tool_invocation".to_owned(),
-            }),
-        ])
-    }
-
-    fn result_text(request: &ModelResponseRequest, invocation_id: &str) -> String {
-        request
-            .context
-            .messages
-            .iter()
-            .find_map(|message| match message {
-                Message::ToolResult {
-                    invocation_id: observed,
-                    content,
-                    ..
-                } if observed == invocation_id => Some(match content {
-                    ToolResultMessageContent::Text(text) => text.clone(),
-                    ToolResultMessageContent::Blocks(blocks) => blocks
-                        .iter()
-                        .filter_map(|block| match block {
-                            crate::shared::protocol::content::ToolResultContent::Text { text } => {
-                                Some(text.as_str())
-                            }
-                            crate::shared::protocol::content::ToolResultContent::Image {
-                                ..
-                            } => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                }),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("missing result for {invocation_id}"))
-    }
-}
-
 #[async_trait]
-impl ModelResponder for PersistentAdaptationResponder {
+impl ModelResponder for OrdinarySurfaceResponder {
     fn info(&self) -> ModelResponderInfo {
         test_responder_info()
     }
@@ -158,7 +94,6 @@ impl ModelResponder for PersistentAdaptationResponder {
         &self,
         request: ModelResponseRequest,
     ) -> Result<ModelResponse, ModelResponseError> {
-        const TOOL: &str = "worker_model_authored_research";
         let names = request
             .context
             .tools
@@ -167,141 +102,37 @@ impl ModelResponder for PersistentAdaptationResponder {
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>();
-        let call = self.calls.fetch_add(1, Ordering::SeqCst);
-        match call {
-            0 => {
-                assert!(names.contains(&"worker_upsert"), "{names:?}");
-                let upsert = request
-                    .context
-                    .tools
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .find(|tool| tool.name == "worker_upsert")
-                    .expect("worker_upsert tool schema");
-                for required_guidance in [
-                    "Canonical authoring protocol",
-                    "call worker_upsert once",
-                    "complete authoritative authoring contract",
-                    "Never inspect or modify Tron databases",
-                    "report a concrete engine-contract gap",
-                ] {
-                    assert!(
-                        upsert.description.contains(required_guidance),
-                        "primary agent did not receive worker-authoring guidance: {required_guidance}"
-                    );
-                }
-                let bundle = &upsert.parameters.properties.as_ref().unwrap()["bundle"];
-                assert_eq!(bundle["additionalProperties"], false);
-                assert_eq!(
-                    bundle["properties"]["runner"]["oneOf"]
-                        .as_array()
-                        .unwrap()
-                        .len(),
-                    3
-                );
-                assert!(bundle["properties"].get("healthChecks").is_some());
-                let serialized_messages = serde_json::to_string(&request.context.messages)
-                    .expect("serialize natural-language request");
-                assert!(
-                    serialized_messages.contains("https://github.com/mvanhorn/last30days-skill"),
-                    "{serialized_messages}"
-                );
-                let bundle = serde_json::json!({
-                    "schemaVersion":"tron.worker_bundle.v1",
-                    "workerId":"model-authored-research",
-                    "name":"Model Authored Recent Research",
-                    "description":"Reusable recent research synthesized from the referenced upstream method",
-                    "toolName":TOOL,
-                    "toolInputSchema":{
-                        "type":"object",
-                        "required":["query"],
-                        "properties":{"query":{"type":"string"}},
-                        "additionalProperties":false
-                    },
-                    "inputSchema":{
-                        "type":"object",
-                        "required":["query"],
-                        "properties":{"query":{"type":"string"}},
-                        "additionalProperties":false
-                    },
-                    "outputSchema":{
-                        "type":"object",
-                        "required":["query","source","useful"],
-                        "properties":{
-                            "query":{"type":"string"},
-                            "source":{"type":"string"},
-                            "useful":{"type":"boolean"}
-                        },
-                        "additionalProperties":false
-                    },
-                    "runner":{
-                        "kind":"command",
-                        "command":[
-                            "python3","-c",
-                            "import json,sys; value=json.load(sys.stdin); print(json.dumps({'query':value['query'],'source':'last30days','useful':True}))"
-                        ]
-                    },
-                    "triggers":[{"kind":"manual","id":"manual"}],
-                    "smokeTests":[{
-                        "command":["python3","-c","print('{}')"],
-                        "timeoutSeconds":10
-                    }],
-                    "healthChecks":[{
-                        "command":["python3","-c","import sys; sys.exit(0)"],
-                        "timeoutSeconds":10
-                    }],
-                    "provenance":[{
-                        "source":"https://github.com/mvanhorn/last30days-skill",
-                        "revision":"deterministic-replay-v1"
-                    }],
-                    "routing":{
-                        "intents":["recent research","last 30 days"],
-                        "examples":["Research recent persistent worker changes"]
-                    }
-                });
-                Ok(Self::tool_call(
-                    "tc-proactive-upsert",
-                    "worker_upsert",
-                    serde_json::Map::from_iter([("bundle".to_owned(), bundle)]),
-                ))
-            }
-            1 => {
-                assert!(names.contains(&TOOL), "new worker was not live: {names:?}");
-                let upsert = Self::result_text(&request, "tc-proactive-upsert");
-                assert!(upsert.contains("model-authored-research"), "{upsert}");
-                Ok(Self::tool_call(
-                    "tc-proactive-invoke",
-                    TOOL,
-                    serde_json::Map::from_iter([(
-                        "query".to_owned(),
-                        serde_json::json!("persistent worker changes"),
-                    )]),
-                ))
-            }
-            2 => {
-                assert!(names.contains(&TOOL), "{names:?}");
-                let result = Self::result_text(&request, "tc-proactive-invoke");
-                assert!(result.contains("persistent worker changes"), "{result}");
-                assert!(result.contains("last30days"), "{result}");
-                Ok(model_response(vec![
-                    Ok(StreamEvent::Start),
-                    Ok(StreamEvent::TextDelta {
-                        delta: "The research task completed successfully. I also created and activated the persistent typed worker worker_model_authored_research so this workflow is immediately reusable and survives restart.".to_owned(),
-                    }),
-                    Ok(StreamEvent::Done {
-                        message: AssistantMessage {
-                            content: vec![AssistantContent::text(
-                                "The research task completed successfully. I also created and activated the persistent typed worker worker_model_authored_research so this workflow is immediately reusable and survives restart.",
-                            )],
-                            token_usage: None,
-                        },
-                        stop_reason: "end_turn".to_owned(),
-                    }),
-                ]))
-            }
-            _ => panic!("unexpected persistent adaptation responder call {call}"),
+        assert_eq!(self.calls.fetch_add(1, Ordering::SeqCst), 0);
+        assert_eq!(names.len(), 11, "{names:?}");
+        assert!(names.contains(&"worker_discover"), "{names:?}");
+        for hidden in [
+            "worker_upsert",
+            "worker_list",
+            "worker_inspect",
+            "worker_purge",
+            "worker_webhook_rotate",
+            "worker_stop_all",
+        ] {
+            assert!(!names.contains(&hidden), "{hidden} leaked into {names:?}");
         }
+        let system_prompt = request.context.system_prompt.as_deref().unwrap_or_default();
+        assert!(system_prompt.contains("Worker Forge"), "{system_prompt}");
+        assert!(system_prompt.contains("Engine Steward"), "{system_prompt}");
+        Ok(model_response(vec![
+            Ok(StreamEvent::Start),
+            Ok(StreamEvent::TextDelta {
+                delta: "Ordinary chat retained a small fixed surface.".to_owned(),
+            }),
+            Ok(StreamEvent::Done {
+                message: AssistantMessage {
+                    content: vec![AssistantContent::text(
+                        "Ordinary chat retained a small fixed surface.",
+                    )],
+                    token_usage: None,
+                },
+                stop_reason: "end_turn".to_owned(),
+            }),
+        ]))
     }
 }
 
@@ -323,16 +154,19 @@ impl ModelResponder for DirectWorkerListLoopResponder {
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>();
-        assert!(tool_names.contains(&"worker_list"), "{tool_names:?}");
+        assert!(tool_names.contains(&"worker_discover"), "{tool_names:?}");
 
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         if call == 0 {
-            let arguments = serde_json::Map::new();
+            let arguments = serde_json::Map::from_iter([(
+                "query".to_owned(),
+                serde_json::json!("worker inventory"),
+            )]);
             let events = vec![
                 Ok(StreamEvent::Start),
                 Ok(StreamEvent::ToolInvocationDraftStart {
                     invocation_id: "tc-primitive-observe".into(),
-                    name: "worker_list".into(),
+                    name: "worker_discover".into(),
                 }),
                 Ok(StreamEvent::ToolInvocationDraftDelta {
                     invocation_id: "tc-primitive-observe".into(),
@@ -341,7 +175,7 @@ impl ModelResponder for DirectWorkerListLoopResponder {
                 Ok(StreamEvent::ToolInvocationDraftEnd {
                     tool_invocation: crate::shared::protocol::messages::ToolInvocationDraft::new(
                         "tc-primitive-observe",
-                        "worker_list",
+                        "worker_discover",
                         arguments,
                     ),
                 }),
@@ -383,7 +217,7 @@ impl ModelResponder for DirectWorkerListLoopResponder {
                 },
                 _ => None,
             })
-            .expect("worker_list result should be in second provider context");
+            .expect("worker_discover result should be in second provider context");
         assert!(observed.contains("workers"), "{observed}");
         *self.observed_result.lock() = Some(observed);
 
@@ -528,17 +362,16 @@ async fn primitive_loop_calls_direct_worker_tool_observes_result_and_continues()
 }
 
 #[tokio::test]
-async fn natural_language_task_proactively_creates_invokes_and_reports_persistent_worker() {
+async fn ordinary_chat_keeps_admin_tools_hidden_and_routes_to_worker_owners() {
     let calls = Arc::new(AtomicUsize::new(0));
     let ctx = crate::shared::server::test_support::make_test_context();
-    let home = ctx.settings_runtime.home().to_path_buf();
     let mut agent = TronAgent::new(
         AgentConfig {
-            max_turns: 3,
+            max_turns: 1,
             ..AgentConfig::default()
         },
         make_primitive_loop_deps(
-            PersistentAdaptationResponder {
+            OrdinarySurfaceResponder {
                 calls: Arc::clone(&calls),
             },
             ctx.engine_host.clone(),
@@ -548,7 +381,7 @@ async fn natural_language_task_proactively_creates_invokes_and_reports_persisten
 
     let result = agent
         .run(
-            "Research recent persistent worker changes using https://github.com/mvanhorn/last30days-skill and return a useful result.",
+            "Explain how I can inspect and improve one of my workers.",
             crate::domains::agent::r#loop::types::RunContext {
                 run_id: Some("proactive-adaptation-run".into()),
                 ..Default::default()
@@ -561,17 +394,10 @@ async fn natural_language_task_proactively_creates_invokes_and_reports_persisten
         "agent run failed: {:?}",
         result.error
     );
-    assert_eq!(result.turns_executed, 3);
-    assert_eq!(calls.load(Ordering::SeqCst), 3);
-    let state = home.join("workspace/workers/model-authored-research/worker.json");
-    assert!(
-        state.is_file(),
-        "persistent worker state missing at {}",
-        state.display()
-    );
+    assert_eq!(result.turns_executed, 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     let messages = serde_json::to_string(&agent.context_manager().get_messages()).unwrap();
-    assert!(messages.contains("research task completed successfully"));
-    assert!(messages.contains("created and activated"));
+    assert!(messages.contains("small fixed surface"));
 }
 
 #[tokio::test]

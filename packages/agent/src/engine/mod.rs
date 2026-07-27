@@ -24,8 +24,6 @@
 //! - Product scheduling, worker lifecycle, version switching, inbox delivery,
 //!   and loop suppression belong to the worker kernel, not parallel engine
 //!   proposal or metadata planes.
-//! - Source changes are never applied through this fabric without the worker
-//!   kernel's separately recorded conversational approval boundary.
 //!
 //! Engine behavior enters as a canonical typed function. Code outside engine/
 //! uses the narrow re-exports below rather than its internals.
@@ -58,8 +56,8 @@ pub(crate) use kernel::schema::validate_payload as validate_engine_schema_payloa
 pub(crate) use kernel::schema::validate_schema_definition as validate_engine_schema_definition;
 pub use kernel::types::{
     CatalogRevision, DedupeScope, DirectWorkerToolContract, EffectClass, FunctionDefinition,
-    FunctionRevision, FunctionVisibility, IdempotencyContract, IdempotencyScope, ModelToolContract,
-    RiskLevel, StreamVisibility,
+    FunctionRevision, FunctionVisibility, IdempotencyContract, IdempotencyScope, ModelToolAudience,
+    ModelToolContract, RiskLevel, StreamVisibility,
 };
 
 #[cfg(test)]

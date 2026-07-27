@@ -18,9 +18,50 @@ struct EngineSurfaceToolDTO: Codable, Equatable, Identifiable, Sendable {
     let workerId: String?
     let workerVersion: String?
     let primitiveGroup: String?
+    let audience: String?
+    let accessPath: String?
     let selectionReason: String
+    let omissionReason: String?
 
     var id: String { "\(functionId)@\(functionRevision)" }
+
+    init(
+        modelName: String,
+        functionId: String,
+        functionRevision: UInt64,
+        ownerWorker: String,
+        description: String,
+        inputSchema: AnyCodable,
+        outputSchema: AnyCodable?,
+        effectClass: String,
+        risk: String,
+        exposed: Bool,
+        workerId: String?,
+        workerVersion: String?,
+        primitiveGroup: String?,
+        audience: String? = nil,
+        accessPath: String? = nil,
+        selectionReason: String,
+        omissionReason: String? = nil
+    ) {
+        self.modelName = modelName
+        self.functionId = functionId
+        self.functionRevision = functionRevision
+        self.ownerWorker = ownerWorker
+        self.description = description
+        self.inputSchema = inputSchema
+        self.outputSchema = outputSchema
+        self.effectClass = effectClass
+        self.risk = risk
+        self.exposed = exposed
+        self.workerId = workerId
+        self.workerVersion = workerVersion
+        self.primitiveGroup = primitiveGroup
+        self.audience = audience
+        self.accessPath = accessPath
+        self.selectionReason = selectionReason
+        self.omissionReason = omissionReason
+    }
 }
 
 struct AvailableWorkerToolDTO: Codable, Equatable, Identifiable, Sendable {
@@ -72,6 +113,9 @@ struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
     let catalogRevision: UInt64
     let surfaceHash: String
     let fixedToolCount: UInt64
+    let ordinaryFixedToolCount: UInt64?
+    let specialistFixedToolCount: UInt64?
+    let conditionalFixedToolCount: UInt64?
     let projectedWorkerCount: UInt64
     let availableWorkerCount: UInt64
     let availableWorkers: [AvailableWorkerToolDTO]
@@ -84,6 +128,9 @@ struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
         catalogRevision: UInt64,
         surfaceHash: String,
         fixedToolCount: UInt64,
+        ordinaryFixedToolCount: UInt64? = nil,
+        specialistFixedToolCount: UInt64? = nil,
+        conditionalFixedToolCount: UInt64? = nil,
         projectedWorkerCount: UInt64,
         availableWorkerCount: UInt64,
         availableWorkers: [AvailableWorkerToolDTO],
@@ -95,6 +142,9 @@ struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
         self.catalogRevision = catalogRevision
         self.surfaceHash = surfaceHash
         self.fixedToolCount = fixedToolCount
+        self.ordinaryFixedToolCount = ordinaryFixedToolCount
+        self.specialistFixedToolCount = specialistFixedToolCount
+        self.conditionalFixedToolCount = conditionalFixedToolCount
         self.projectedWorkerCount = projectedWorkerCount
         self.availableWorkerCount = availableWorkerCount
         self.availableWorkers = availableWorkers

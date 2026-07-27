@@ -323,8 +323,10 @@ provides:
   tab;
 - the compiled kernel/product-boundary component map and profile-wide fixed and
   published worker-tool counts;
-- every fixed tool shown immediately under host, worker-control, and core-change
-  section headings; each operation is a separate compact title-only card that
+- every fixed model-addressable function shown immediately under host, session,
+  worker-interaction, and worker-administration section headings, including its
+  ordinary/specialist/conditional audience and request-specific exposure; each
+  operation is a separate compact title-only card that
   opens a dedicated detail sheet for its description, identifiers, exact
   schemas, effect, risk, and exposure state;
 - every published worker's profile-global availability to agents, without

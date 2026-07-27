@@ -66,12 +66,7 @@ impl WorkerRuntime {
         let (_, functions) = self.host.visible_functions_with_revision(&actor).await;
         let mut available = functions
             .into_iter()
-            .filter_map(|function| {
-                function
-                    .model_tool
-                    .filter(|tool| tool.callable)
-                    .map(|tool| tool.name)
-            })
+            .filter_map(|function| function.model_tool.map(|tool| tool.name))
             .collect::<std::collections::BTreeSet<_>>();
         if let Some(tool_name) = &bundle.tool_name {
             let _ = available.insert(tool_name.clone());

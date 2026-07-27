@@ -23,5 +23,5 @@ pub use catalog::{CatalogRevision, FunctionRevision, FunctionVisibility, StreamV
 pub use function::FunctionDefinition;
 pub use function::{
     DedupeScope, DirectWorkerToolContract, EffectClass, IdempotencyContract, IdempotencyScope,
-    ModelToolContract, RiskLevel,
+    ModelToolAudience, ModelToolContract, RiskLevel,
 };

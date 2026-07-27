@@ -5,65 +5,15 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use super::WorkerRuntime;
-use crate::domains::session::event_store::SessionRow;
 use crate::domains::worker_kernel::dispatches::PreparedWorkerDispatch;
 use crate::domains::worker_kernel::types::{InvocationRecord, WorkerEngineHook};
 use crate::engine::Invocation;
-use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{SESSION_NOT_FOUND, ToolError};
 
-const MAX_SESSION_TITLE_CHARS: usize = 160;
 const MAX_SESSION_TITLE_CONTEXT_CHARS: usize = 4_096;
 
 impl WorkerRuntime {
-    /// Apply an intentional user-authored rename to the current causal session.
-    pub(crate) async fn set_session_title(
-        &self,
-        session_id: String,
-        title: String,
-    ) -> Result<Value, String> {
-        let title = title.trim().to_owned();
-        if title.is_empty() || title.chars().count() > MAX_SESSION_TITLE_CHARS {
-            return Err(format!(
-                "title must contain 1 to {MAX_SESSION_TITLE_CHARS} characters"
-            ));
-        }
-
-        let store = self.event_store.clone();
-        let update_session_id = session_id.clone();
-        let update_title = title.clone();
-        let (updated, session) = run_blocking_task("worker_kernel.session_set_title", move || {
-            let Some(mut session) =
-                store
-                    .get_session(&update_session_id)
-                    .map_err(|error| ToolError::Internal {
-                        message: error.to_string(),
-                    })?
-            else {
-                return Err(ToolError::NotFound {
-                    code: SESSION_NOT_FOUND.to_owned(),
-                    message: format!("session not found: {update_session_id}"),
-                });
-            };
-            let updated = store
-                .update_session_title(&update_session_id, Some(&update_title))
-                .map_err(|error| ToolError::Internal {
-                    message: error.to_string(),
-                })?;
-            session.title = Some(update_title);
-            Ok((updated, session))
-        })
-        .await
-        .map_err(|error| error.to_string())?;
-
-        if updated {
-            self.publish_session_title_update(&session_id, session);
-        }
-
-        Ok(json!({"sessionId":session_id,"title":title,"updated":updated}))
-    }
-
     /// Durably enqueue the active title policy for one still-untitled session.
     ///
     /// The kernel owns eligibility and the final compare-and-set. The worker
@@ -143,78 +93,16 @@ impl WorkerRuntime {
             "engine hook 'session_title' output is invalid: title must contain 1 to 160 characters"
                 .to_owned()
         })?;
-        let (_, session) = self
-            .set_session_title_if_untitled(session_id.clone(), title)
-            .await?;
+        let (_, session) = crate::domains::session::title::set_title_if_untitled(
+            self.event_store.clone(),
+            &self.session_manager,
+            &self.orchestrator,
+            session_id,
+            title,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
         self.prepare_session_organization_after_title(invocation, session)
-    }
-
-    async fn set_session_title_if_untitled(
-        &self,
-        session_id: String,
-        title: String,
-    ) -> Result<(bool, SessionRow), String> {
-        let store = self.event_store.clone();
-        let update_session_id = session_id.clone();
-        let update_title = title.clone();
-        let (updated, session) =
-            run_blocking_task("worker_kernel.session_title_compare_and_set", move || {
-                let updated = store
-                    .set_session_title_if_untitled(&update_session_id, &update_title)
-                    .map_err(|error| ToolError::Internal {
-                        message: error.to_string(),
-                    })?;
-                let Some(session) =
-                    store
-                        .get_session(&update_session_id)
-                        .map_err(|error| ToolError::Internal {
-                            message: error.to_string(),
-                        })?
-                else {
-                    return Err(ToolError::NotFound {
-                        code: SESSION_NOT_FOUND.to_owned(),
-                        message: format!("session not found: {update_session_id}"),
-                    });
-                };
-                Ok((updated, session))
-            })
-            .await
-            .map_err(|error| error.to_string())?;
-        if updated {
-            self.publish_session_title_update(&session_id, session.clone());
-        }
-        Ok((updated, session))
-    }
-
-    fn publish_session_title_update(&self, session_id: &str, session: SessionRow) {
-        self.session_manager.invalidate_session(session_id);
-        let _ = self
-            .orchestrator
-            .broadcast()
-            .emit(TronEvent::SessionUpdated {
-                base: BaseEvent::now(&session.id),
-                title: session.title,
-                model: Some(session.latest_model),
-                event_count: Some(session.event_count),
-                turn_count: Some(session.turn_count),
-                message_count: Some(session.message_count),
-                input_tokens: Some(session.total_input_tokens),
-                output_tokens: Some(session.total_output_tokens),
-                last_turn_input_tokens: Some(session.last_turn_input_tokens),
-                cache_read_tokens: Some(session.total_cache_read_tokens),
-                cache_creation_tokens: Some(session.total_cache_creation_tokens),
-                cost: Some(session.total_cost),
-                last_activity: session.last_activity_at,
-                is_active: false,
-                last_user_prompt: None,
-                last_assistant_response: None,
-                parent_session_id: session.parent_session_id,
-                activity_lines: None,
-                labels: None,
-                organization_group: None,
-                organization_changed: None,
-                is_archived: None,
-            });
     }
 }
 
@@ -242,6 +130,9 @@ fn proposed_title(output: &Value) -> Option<String> {
         .get("title")
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|value| !value.is_empty() && value.chars().count() <= MAX_SESSION_TITLE_CHARS)
+        .filter(|value| {
+            !value.is_empty()
+                && value.chars().count() <= crate::domains::session::title::MAX_SESSION_TITLE_CHARS
+        })
         .map(ToOwned::to_owned)
 }

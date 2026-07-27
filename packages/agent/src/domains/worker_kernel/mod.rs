@@ -14,16 +14,15 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `artifacts` | Closed self-result artifact admission for native custody |
-//! | `contract` | Primitive identity plus request, response, and worker-bundle schemas |
+//! | `contract` | Function-owned model audiences plus request, response, and worker-bundle schemas |
 //! | `dispatches` | Closed asynchronous worker-to-worker handoff parsing and limits |
 //! | `handlers` | Model/client operation bindings |
 //! | `host` | Bounded trusted-local filesystem, process, and network primitives |
 //! | `notifications` | Narrow worker-to-client delivery validation and APNs transport |
 //! | `persistence` | Canonical bundles, worker-owned state, verified profile/purge archives, index reconstruction, and durable operational ledgers |
-//! | `core_proposals` | Temporary isolated Git worktrees, durable tested commits, bounded evidence, and recorded conversational approval |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
 //! | `retrieval` | Shared deterministic worker ranking and semantic-router recovery |
-//! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, semantic engine hooks, supervision, and primitive session-metadata actuation |
+//! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, semantic engine hooks, and supervision |
 //! | `surface` | Canonical fixed/dynamic model-tool selection and provider-neutral introspection evidence |
 //! | `types` | Worker bundle and durable runtime DTOs |
 //! | `wakeups` | Closed self-only durable wakeup parsing and bounds |
@@ -51,9 +50,9 @@
 //! the unpublished candidate before rebuilding those indexes.
 //! Failure while registering an already-published direct tool disables it and
 //! records the failure rather than leaving an enabled but unreachable worker.
-//! One typed core-primitive manifest owns the fixed provider names, groups, and
-//! stable order, and every fixed primitive has a closed top-level response
-//! contract. Function definitions carry one closed typed model-tool projection;
+//! Every model-facing function definition owns its provider name, audience,
+//! group, stable order, and closed top-level response contract; there is no
+//! parallel primitive manifest. Function definitions carry one closed typed model-tool projection;
 //! magic metadata keys cannot silently add tools, routing modes, or test-only
 //! ranking inputs. Resolved provider entries are callable by construction;
 //! availability is decided once during catalog projection rather than copied
@@ -472,23 +471,15 @@
 //! Presentation metadata is immutable worker-version identity. It binds a
 //! worker to a versioned native/declarative experience and optional suite role;
 //! unsupported or absent bindings remain operable through the generic console.
-//! Core proposal worktrees exist only while a patch is authored and tested.
-//! Successful creation removes the worktree and retains the branch/commit plus
-//! proposal evidence, so idle proposals do not duplicate an entire source tree.
 //! An agent-runner drop guard aborts its child on timeout, stop, disable, or
 //! shutdown. Causal depth survives the child hop, and pre-admission event
 //! subscription preserves even an immediate provider failure's terminal error.
 //! The child prompt carries the immutable output schema verbatim and explains
 //! that the kernel will validate it, so typed execution never asks a model to
 //! satisfy a hidden contract.
-//! Core proposal diffs retain exact text/newlines; purge removes live state
-//! only after creating a verified recovery archive, while retirement remains
-//! directly reversible from retained versions.
-//! Core proposal approval rejects negated or ambiguous messages. A failed
-//! approved cherry-pick is aborted and verified back at its original commit
-//! before the proposal remains in the tested state. Failed proposal creation
-//! removes its worktree, branch, and proposal directory; no inert proposal
-//! shell is retained.
+//! Purge removes live worker state only after creating a verified recovery
+//! archive, while retirement remains directly reversible from retained
+//! versions.
 //!
 //! ## Test Ownership
 //!
@@ -503,7 +494,6 @@ use crate::domains::registration::composition::{
 
 mod artifacts;
 mod contract;
-mod core_proposals;
 mod dispatches;
 mod handlers;
 mod host;
@@ -580,25 +570,12 @@ pub(crate) fn registration(
         deps.settings_runtime.clone(),
     )
     .map_err(crate::engine::EngineError::HandlerFailed)?;
-    let mut functions = handlers::bind_functions(
+    let functions = handlers::bind_functions(
         contract::function_definitions()?,
         handlers::Deps {
             runtime: Arc::clone(&runtime),
         },
     )?;
-    for registration in &mut functions {
-        if let Some(descriptor) =
-            contract::core_primitive_for_function(registration.definition.id.as_str())
-        {
-            registration.definition.model_tool = Some(crate::engine::ModelToolContract {
-                name: descriptor.model_name.to_owned(),
-                callable: true,
-                order: Some(descriptor.order),
-                group: Some(descriptor.group.as_str().to_owned()),
-                worker: None,
-            });
-        }
-    }
     let (engine_functions, functions): (Vec<_>, Vec<_>) = functions
         .into_iter()
         .partition(|registration| registration.definition.id.namespace() == "engine");

@@ -70,7 +70,7 @@ pub(super) async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Val
     }
     let include_unmatched = retrieval::query_is_empty(Some(&query));
     let origin_worker_id = invocation.causal_context.origin_worker_id();
-    let ranked = retrieval::rank_workers_with_hook(
+    let ranking = retrieval::rank_workers_with_hook_evidence(
         deps.runtime.host(),
         invocation
             .causal_context
@@ -81,12 +81,16 @@ pub(super) async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Val
         documents,
         Some(&query),
         &promoted,
+        limit,
     )
-    .await
-    .into_iter()
-    .filter(|rank| include_unmatched || rank.relevance_score > 0)
-    .take(limit)
-    .collect::<Vec<_>>();
+    .await;
+    let ranking_mechanism = ranking.mechanism.clone();
+    let ranked = ranking
+        .ranks
+        .into_iter()
+        .filter(|rank| include_unmatched || rank.relevance_score > 0)
+        .take(limit)
+        .collect::<Vec<_>>();
     if let Some(session_id) = invocation.causal_context.session_id.as_deref() {
         for rank in &ranked {
             let Some((worker, _, _)) = payloads.get(&rank.worker_id) else {
@@ -107,6 +111,11 @@ pub(super) async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Val
             let (worker, bundle, evidence) = payloads.remove(&rank.worker_id)?;
             Some(json!({
                 "score":rank.relevance_score,
+                "match":{
+                    "score":rank.relevance_score,
+                    "reason":rank.explanation,
+                    "mechanism":ranking_mechanism.clone(),
+                },
                 "promoted":rank.promoted,
                 "worker":worker,
                 "inputSchema":bundle.effective_tool_input_schema(),

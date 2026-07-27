@@ -4,8 +4,27 @@ use serde_json::json;
 
 use crate::domains::registration::contract::FunctionContract;
 use crate::engine::{
-    EffectClass, FunctionDefinition, IdempotencyContract, Result as EngineResult, RiskLevel,
+    EffectClass, FunctionDefinition, IdempotencyContract, ModelToolAudience,
+    Result as EngineResult, RiskLevel,
 };
+
+const SESSION_RENAME_INTENT_PHRASES: &[&str] = &[
+    "rename this chat",
+    "rename this conversation",
+    "rename this session",
+    "set the chat title",
+    "set the conversation title",
+    "set the session title",
+    "change the chat title",
+    "change the conversation title",
+    "change the session title",
+    "title this chat",
+    "title this conversation",
+    "name this chat",
+    "name this conversation",
+    "call this chat",
+    "call this conversation",
+];
 
 /// Canonical function contracts exposed by this domain worker.
 pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
@@ -91,6 +110,23 @@ pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
             }))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
+        FunctionContract::new("session::set_title", "session", EffectClass::IdempotentWrite, RiskLevel::Medium)
+            .request_schema(json!({"type":"object","additionalProperties":false,"required":["title"],"properties":{"title":{"type":"string","minLength":1,"maxLength":160}}}))
+            .response_schema(json!({"type":"object","additionalProperties":false,"required":["sessionId","title","updated"],"properties":{"sessionId":{"type":"string"},"title":{"type":"string"},"updated":{"type":"boolean"}}}))
+            .idempotency(IdempotencyContract::session())
+            .description("Rename the current conversation only when the user explicitly asks to rename, title, or name it. The target is always the current causal session. Do not use this during ordinary conversation; automatic title policy runs independently in a background worker.")
+            .model_tool(
+                "session_set_title",
+                ModelToolAudience::Conditional {
+                    latest_user_intent_phrases: SESSION_RENAME_INTENT_PHRASES
+                        .iter()
+                        .map(|phrase| (*phrase).to_owned())
+                        .collect(),
+                },
+                70,
+                "session",
+            )
+            .build()?,
         FunctionContract::new("session::reconstruct", "session", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"beforeEventId":{"type":"string"},"limit":{"type":"integer"},"sessionId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
@@ -126,6 +162,7 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use super::*;
+    use crate::engine::ModelToolAudience;
 
     #[test]
     fn session_contracts_contain_only_behavioral_inputs() {
@@ -161,6 +198,7 @@ mod tests {
                 "session::context_request_detail",
                 &["eventId", "sessionId"][..],
             ),
+            ("session::set_title", &["title"][..]),
             (
                 "session::reconstruct",
                 &["beforeEventId", "limit", "sessionId"][..],
@@ -215,6 +253,26 @@ mod tests {
             }),
         )
         .expect("page-two payload must pass the actual closed engine contract");
+    }
+
+    #[test]
+    fn explicit_title_is_session_owned_and_conditionally_model_visible() {
+        let title = function_definitions()
+            .expect("session contracts")
+            .into_iter()
+            .find(|definition| definition.id.as_str() == "session::set_title")
+            .expect("session title contract");
+        let model_tool = title.model_tool.expect("conditional model tool");
+        assert_eq!(model_tool.name, "session_set_title");
+        assert_eq!(model_tool.group.as_deref(), Some("session"));
+        assert!(matches!(
+            model_tool.audience,
+            ModelToolAudience::Conditional { .. }
+        ));
+        assert_eq!(
+            title.request_schema.expect("request schema")["required"],
+            json!(["title"])
+        );
     }
 
     #[test]

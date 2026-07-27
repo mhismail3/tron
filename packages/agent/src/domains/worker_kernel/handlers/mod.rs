@@ -6,8 +6,7 @@
 //!
 //! ## Ownership
 //!
-//! - `core` owns session-title, engine introspection/hooks, and isolated core
-//!   proposal handlers.
+//! - `core` owns engine introspection and semantic hook adapters.
 //! - `authoring` owns atomic bundle upsert and bounded source-tree import.
 //! - `artifacts` owns authenticated native inbox, exact content, and explicit deletion.
 //! - `discovery` owns list, inspect, and relevance-backed promotion.
@@ -51,7 +50,6 @@ operation_bindings! {
         "filesystem_edit" => |invocation, deps| { support::response(invocation, host::filesystem_edit(invocation, &deps.runtime).await) },
         "process_run" => |invocation, deps| { support::response(invocation, host::process_run(invocation, &deps.runtime).await) },
         "web_fetch" => |invocation, deps| { support::response(invocation, host::web_fetch(invocation, &deps.runtime).await) },
-        "session_set_title" => |invocation, deps| { support::response(invocation, core::session_set_title(invocation, deps).await) },
         "notification_device_upsert" => |invocation, deps| { support::response(invocation, notifications::device_upsert(invocation, deps).await) },
         "notification_device_disable" => |invocation, deps| { support::response(invocation, notifications::device_disable(invocation, deps).await) },
         "notification_deliveries" => |invocation, deps| { support::response(invocation, notifications::deliveries(invocation, deps).await) },
@@ -60,10 +58,6 @@ operation_bindings! {
         "artifact_deliveries" => |invocation, deps| { support::response(invocation, artifacts::deliveries(invocation, deps).await) },
         "artifact_content" => |invocation, deps| { support::response(invocation, artifacts::content(invocation, deps).await) },
         "artifact_delete" => |invocation, deps| { support::response(invocation, artifacts::delete(invocation, deps).await) },
-        "core_proposal_create" => |invocation, deps| { support::response(invocation, core::core_proposal_create(invocation, deps).await) },
-        "core_proposal_list" => |invocation, deps| { support::response(invocation, core::core_proposal_list(invocation, deps).await) },
-        "core_proposal_inspect" => |invocation, deps| { support::response(invocation, core::core_proposal_inspect(invocation, deps).await) },
-        "core_proposal_apply" => |invocation, deps| { support::response(invocation, core::core_proposal_apply(invocation, deps).await) },
         "upsert" => |invocation, deps| { support::response(invocation, authoring::upsert(invocation, deps).await) },
         "discover" => |invocation, deps| { support::response(invocation, discovery::discover(invocation, deps).await) },
         "list" => |invocation, deps| { support::response(invocation, discovery::list(invocation, deps).await) },

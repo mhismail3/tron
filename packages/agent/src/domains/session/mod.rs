@@ -13,6 +13,7 @@
 //! | `query` | Resume, list, head/state/history, provider-context audit, export, and replay manifest operation wrappers. |
 //! | `reconstruction` | Server-owned session reconstruction and in-flight reconciliation. |
 //! | `replay` | Canonical `tron.replay.v2` manifest export, hashing, idempotency refs, and offline roundtrip harness. |
+//! | `title` | Explicit title replacement, automatic compare-and-set, and live projection. |
 //! | `event_store` | Durable event/session/blob/log storage and reconstruction primitives. |
 //!
 //! ## Invariants
@@ -52,6 +53,7 @@ pub(crate) mod lifecycle;
 pub(crate) mod query;
 pub(crate) mod reconstruction;
 pub(crate) mod replay;
+pub(crate) mod title;
 
 use std::sync::Arc;
 
@@ -105,6 +107,7 @@ use query::{
     session_replay_manifest_value, session_resume_value,
 };
 use reconstruction::session_reconstruct_value;
+use title::session_set_title_value;
 
 operation_bindings! {
     deps = Deps;
@@ -139,6 +142,9 @@ operation_bindings! {
         },
         "context_request_detail" => |invocation, deps| {
             session_context_request_detail_value(Some(&invocation.payload), deps).await
+        },
+        "set_title" => |invocation, deps| {
+            session_set_title_value(invocation, deps).await
         },
         "reconstruct" => |invocation, deps| {
             session_reconstruct_value(Some(&invocation.payload), deps).await

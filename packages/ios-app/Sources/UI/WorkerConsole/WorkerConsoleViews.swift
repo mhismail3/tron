@@ -289,7 +289,7 @@ struct WorkerConsoleSheet: View {
 
     private var coreContent: some View {
         VStack(alignment: .leading, spacing: 18) {
-            ForEach(["host", "worker_control", "core_change"], id: \.self) { group in
+            ForEach(["host", "session", "worker_interaction", "worker_administration"], id: \.self) { group in
                 let tools = viewModel.coreTools.filter { $0.primitiveGroup == group }
                 EngineCoreSection(group: group, tools: tools) { tool in
                     selectedCoreTool = tool

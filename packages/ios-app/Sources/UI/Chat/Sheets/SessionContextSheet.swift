@@ -120,6 +120,43 @@ enum SessionContextPresentation {
             )
         }
     }
+
+    static func fixedToolSelections(
+        from toolSurface: AnyCodable?
+    ) -> [SessionContextFixedToolSelection] {
+        guard let surface = toolSurface?.dictionaryValue,
+              let rawTools = surface["fixedTools"] as? [Any] else {
+            return []
+        }
+        return rawTools.compactMap { raw in
+            guard let tool = AnyCodable(raw).dictionaryValue,
+                  let functionId = tool["functionId"] as? String,
+                  let modelName = tool["modelName"] as? String else {
+                return nil
+            }
+            return SessionContextFixedToolSelection(
+                functionId: functionId,
+                modelName: modelName,
+                projected: tool["exposed"] as? Bool ?? false,
+                audience: tool["audience"] as? String,
+                accessPath: tool["accessPath"] as? String,
+                selectionReason: tool["selectionReason"] as? String,
+                omissionReason: tool["omissionReason"] as? String
+            )
+        }
+    }
+}
+
+struct SessionContextFixedToolSelection: Identifiable, Equatable {
+    let functionId: String
+    let modelName: String
+    let projected: Bool
+    let audience: String?
+    let accessPath: String?
+    let selectionReason: String?
+    let omissionReason: String?
+
+    var id: String { functionId }
 }
 
 struct SessionContextWorkerSelection: Identifiable, Equatable {
@@ -217,6 +254,10 @@ struct SessionContextSheet: View {
     }
     private var requestWorkerSelections: [SessionContextWorkerSelection] {
         SessionContextPresentation.workerSelections(from: manifest?.toolSurface)
+    }
+
+    private var requestFixedToolSelections: [SessionContextFixedToolSelection] {
+        SessionContextPresentation.fixedToolSelections(from: manifest?.toolSurface)
     }
 
     var body: some View {
@@ -532,7 +573,8 @@ struct SessionContextSheet: View {
                     accent: .tronEmerald
                 ) {
                     selectedContextDetail = .tools(
-                        selections: requestWorkerSelections,
+                        fixed: requestFixedToolSelections,
+                        workers: requestWorkerSelections,
                         raw: manifest?.toolSurface
                     )
                 }
@@ -615,6 +657,7 @@ struct SessionContextSheet: View {
     private var requestToolsSection: some View {
         let selected = requestWorkerSelections.filter(\.projected)
         let omitted = requestWorkerSelections.filter { !$0.projected }
+        let omittedFixed = requestFixedToolSelections.filter { !$0.projected }
         return VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
             SettingsSectionHeader(
                 title: "Tools available for this request",
@@ -627,7 +670,7 @@ struct SessionContextSheet: View {
                     Divider().frame(height: 32)
                     metric(label: "Workers", value: "\(selected.count)")
                     Divider().frame(height: 32)
-                    metric(label: "Omitted", value: "\(omitted.count)")
+                    metric(label: "Omitted", value: "\(omitted.count + omittedFixed.count)")
                 }
 
                 if !selected.isEmpty {
@@ -637,16 +680,17 @@ struct SessionContextSheet: View {
                     }
                 }
 
-                if !omitted.isEmpty {
+                if !omitted.isEmpty || !omittedFixed.isEmpty {
                     Button {
                         selectedContextDetail = .tools(
-                            selections: requestWorkerSelections,
+                            fixed: requestFixedToolSelections,
+                            workers: requestWorkerSelections,
                             raw: manifest?.toolSurface
                         )
                     } label: {
                         HStack {
                             Label(
-                                "See \(omitted.count) omitted direct workers",
+                                "See exact tool access and omissions",
                                 systemImage: "eye.slash"
                             )
                             Spacer()

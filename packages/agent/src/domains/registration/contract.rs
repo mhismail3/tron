@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::engine::{
     EffectClass, FunctionDefinition, FunctionId, FunctionVisibility, IdempotencyContract,
-    Result as EngineResult, RiskLevel, WorkerId,
+    ModelToolAudience, ModelToolContract, Result as EngineResult, RiskLevel, WorkerId,
 };
 
 /// Fluent source-domain builder for one executable engine function.
@@ -23,6 +23,7 @@ pub(crate) struct FunctionContract {
     response_schema: Option<Value>,
     idempotency: Option<IdempotencyContract>,
     description: Option<&'static str>,
+    model_tool: Option<ModelToolContract>,
 }
 
 impl FunctionContract {
@@ -43,6 +44,7 @@ impl FunctionContract {
             response_schema: None,
             idempotency: None,
             description: None,
+            model_tool: None,
         }
     }
 
@@ -76,6 +78,24 @@ impl FunctionContract {
         self
     }
 
+    /// Attach the canonical model-facing identity and audience.
+    pub(crate) fn model_tool(
+        mut self,
+        name: &'static str,
+        audience: ModelToolAudience,
+        order: u16,
+        group: &'static str,
+    ) -> Self {
+        self.model_tool = Some(ModelToolContract {
+            name: name.to_owned(),
+            audience,
+            order: Some(order),
+            group: Some(group.to_owned()),
+            worker: None,
+        });
+        self
+    }
+
     /// Validate identities and build the exact engine definition.
     pub(crate) fn build(self) -> EngineResult<FunctionDefinition> {
         let function_id = FunctionId::new(self.function_id)?;
@@ -99,6 +119,9 @@ impl FunctionContract {
         }
         if let Some(schema) = self.response_schema {
             definition = definition.with_response_schema(schema);
+        }
+        if let Some(model_tool) = self.model_tool {
+            definition = definition.with_model_tool(model_tool);
         }
         Ok(definition)
     }

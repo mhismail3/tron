@@ -14,7 +14,7 @@
 //! | `auth`, `settings` | Authenticated product configuration |
 //! | `product` | Fixed client-only blob, logs, message, and system operations |
 //! | `filesystem` | Native workspace browsing used by clients |
-//! | `worker_kernel` | Worker bundles, runners, dispatch, inbox, and core proposals |
+//! | `worker_kernel` | Worker bundles, runners, dispatch, inbox, and narrow native boundaries |
 //! | `registration` | Composition validation for this fixed set |
 //!
 //! # Invariants
@@ -22,9 +22,8 @@
 //! Model-visible actions are direct typed worker-kernel functions or enabled
 //! persistent workers. Local calls execute directly with concrete actor
 //! identity and causal evidence. Remote transport authentication remains a
-//! transport concern. Source changes
-//! remain isolated core proposals until a later explicit user message approves
-//! application.
+//! transport concern. Repository work uses the same bounded host primitives as
+//! other local work.
 
 pub mod agent;
 pub mod auth;

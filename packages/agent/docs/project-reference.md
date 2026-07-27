@@ -29,15 +29,14 @@ The source-owned kernel retains only:
   management;
 - authenticated `/engine` transport and loopback token-authenticated worker
   webhook ingress;
-- isolated core-change proposal creation and explicitly approved application;
 - product settings, auth, session-compaction custody, logging, and blobs needed
   by current clients.
 
 The authenticated `filesystem` product domain contains only the three iOS
 workspace-picker operations (`get_home`, `list_dir`, and `create_dir`). Model
 filesystem work has one owner in the seven direct worker-kernel
-filesystem/process/network primitives. Session title mutation is the eighth
-host primitive and owns durable session metadata rather than host I/O.
+filesystem/process/network primitives. Conditional session title mutation is
+owned by the Session domain rather than the host or worker kernel.
 
 Higher-level behavior belongs in worker bundles. The fixed tree owns the model
 loop, authenticated product transport, durable custody, direct host actuators,
@@ -103,13 +102,14 @@ authoritative recovery evidence and do not affect permission or routing.
 
 ### Primitive admission rule
 
-A fixed model tool is admitted only when it passes one of two tests:
+A fixed function receives model exposure only when it passes one of two tests:
 
 1. **Kernel custody:** only the compiled engine can own the canonical state or
-   protected transition. Worker version activation, routing, stop/rollback,
-   credential rotation, and approved live-tree application are in this class;
-   implementing them as workers would require a worker to bootstrap or mutate
-   the substrate that defines the worker itself.
+   protected transition. Worker version activation, routing, and
+   stop/rollback are in this class; implementing them as workers would require
+   a worker to bootstrap or mutate the substrate that defines the worker
+   itself. Secret-returning and engine-wide emergency operations remain
+   authenticated-client-only.
 2. **Material execution leverage:** a high-frequency operation is theoretically
    expressible through `process_run`, but a direct typed form materially
    improves model success and runtime reliability. The filesystem primitives
@@ -123,8 +123,14 @@ A fixed model tool is admitted only when it passes one of two tests:
    chat. These are ergonomic or state-custody primitives, not semantic product
    policy.
 
-This admits the current 8/18/4 grouping without pretending the smallest
-possible tool count is the objective. It rejects fixed web search providers,
+Each function contract owns one audience: `ordinary`, `specialist`, or
+`conditional`. Ordinary chat receives seven host functions plus four worker
+interaction functions. Exact specialist-worker allowlists may receive thirteen
+worker-administration functions. `session_set_title` is conditional on an
+explicit rename request. Webhook rotation and engine-wide stop are
+authenticated-client-only and have no model projection.
+
+This rejects fixed web search providers,
 transcription, memory policy, notification timing/content policy, repository workflows, content
 analysis, and other task semantics: those belong in workers. The deterministic
 weighted worker ranker is the recovery substrate needed before a relevance
@@ -1048,7 +1054,7 @@ client payload.
 | `filesystem_edit` | `worker_kernel::filesystem_edit` | Exact occurrence-checked UTF-8 replacements with optional checksum and atomic publication |
 | `process_run` | `worker_kernel::process_run` | Local process with bounded output/timeout |
 | `web_fetch` | `worker_kernel::web_fetch` | Explicit raw UTF-8 HTTP(S) fetch with a 128 KiB/30-second default, explicit larger ceilings, redirect/status metadata, truncation evidence, and retained-content SHA-256 |
-| `session_set_title` | `worker_kernel::session_set_title` | Explicit user-requested title update for the current causal session; absent from unrelated provider turns |
+| `session_set_title` | `session::set_title` | Explicit user-requested title update for the current causal session; absent from unrelated provider turns |
 
 Filesystem reads, listings, searches, writes, and edits execute off the async
 runtime thread. Reads never load the remainder of a truncated file; listing
@@ -1062,6 +1068,10 @@ field for an unconditional write, use the exact `absent` sentinel only when a
 new file is required, or provide raw/`sha256:`-prefixed 64-digit hex.
 
 ### Worker operations
+
+Ordinary chat always receives `worker_discover`, `worker_await`,
+`worker_cancel`, and `worker_result_read`. The remaining model tools in this
+table are specialist-only and appear only in an exact agent-worker allowlist.
 
 | Model tool | Engine function |
 |---|---|
@@ -1079,8 +1089,9 @@ new file is required, or provide raw/`sha256:`-prefixed 64-digit hex.
 | `worker_rollback` | `worker_kernel::rollback` |
 | `worker_retire` / `worker_purge` | `worker_kernel::retire` / `purge` |
 | `worker_inbox` / `worker_runs` | `worker_kernel::inbox` / `runs` |
-| `worker_webhook_rotate` | `worker_kernel::webhook_rotate` |
-| `worker_stop_all` | `worker_kernel::stop_all` |
+
+`worker_webhook_rotate` and `worker_stop_all` remain authenticated dashboard
+operations and are intentionally not model tools.
 
 `worker_invoke` defaults to `mode: wait`. Top-level agent runners are admitted
 in background mode immediately. Command/service versions with five completed
@@ -1322,8 +1333,9 @@ Authenticated clients may call `engine::surface_snapshot` with optional session
 invocation context. The typed response returns the same provider-neutral surface
 evidence plus operational inventories:
 
-- all 29 fixed tools with their exact schemas, revisions, effect/risk,
-  primitive group, and model exposure;
+- all 25 model-addressable fixed functions with their exact schemas,
+  revisions, effect/risk, audience, access path, primitive group, and
+  request-specific projected/omitted reason;
 - every published direct worker tool, including its promoted/projected state,
   selection reason, relevance evidence, and immutable worker version;
 - current healthy engine-hook and native-client-action owners, including the
@@ -1484,36 +1496,6 @@ results or errors to either its in-memory idempotency cache or SQLite. A live
 caller can therefore receive a one-time credential, while replay and audit
 records cannot recover it.
 
-## Core Source Proposals
-
-Core changes use a separate boundary from workers. `core_proposal_create`:
-
-1. canonicalizes the requested Git repository;
-2. creates a dedicated `codex/core-proposal-*` branch and worktree under
-   `~/.tron/workspace/core-proposals/`;
-3. applies the supplied patch only in that worktree;
-4. runs the supplied test command with a two-hour ceiling;
-5. commits successful work and records branch, commit, worktree, and bounded
-   test evidence.
-
-Git and test processes use the same trusted-local executable search path as
-workers, including conventional host tool locations hidden by LaunchAgents.
-Patch text is preserved exactly through the operation boundary, including the
-terminal newline required by standard unified diffs.
-
-Failure removes the temporary worktree, branch, and proposal directory and does
-not retain an inert proposal shell. Creation never modifies the running tree or
-binary.
-
-`core_proposal_apply` accepts a proposal id plus session and message ids. It
-loads that later persisted event and requires a user-authored message created
-after the proposal that explicitly names and affirmatively approves/applies it.
-Messages containing negation or rejection language do not count as approval.
-Only then is the proposal commit cherry-picked into the named repository. A
-conflicting cherry-pick is aborted and the original live-tree commit is
-verified before the proposal remains `tested`. The approval message is recorded
-directly with the proposal evidence.
-
 ## Worker Restoration Backlog
 
 The clean cut intentionally removed higher-level source-owned behavior so it
@@ -1531,14 +1513,14 @@ capability families:
 | **Delegation Coordinator** | Bounded specialist-agent work: launch, status, inspection, results, invocation cancellation, reusable roles, later fan-out/synthesis, and child-session traceability. |
 | **Research Suite** | Source-backed freshness-aware answers: search, crawling, fetch/archive, freshness, source review, citation extraction, recent research, evidence comparison, contradictions, and synthesis. |
 | **Knowledge Index** | Retrievable durable source material: document/web/repository ingestion, semantic retrieval, provenance, lineage, previews, history, update detection, export/import, and corpus maintenance. Personal memory remains Continuity custody. |
-| **Software Workspace** | Safe repository work: structure/history, Git status/diff/branches/staging/commits, test selection, patch/review preparation, change analysis, and cleanup. Live-core application remains fixed custody. |
+| **Software Workspace** | Safe repository work: structure/history, Git status/diff/branches/staging/commits, test selection, patch/review preparation, change analysis, and cleanup through bounded host primitives. |
 | **Automation Orchestrator** | Work caused by time or events: reminders, schedules, engine events, follow-ups, background jobs, multistep programs, retries, notifications, and workflow state over the executable dispatcher. |
 | **Procedure Library and Worker Forge** | Reusable prompts, templates, procedures, skills, roles, hook patterns, external tool/API/repository scouting, worker creation/improvement, consolidation, and retirement recommendations. |
 | **Worker Evaluator** | Evidence of usefulness and reliability: run inspection, traces/logs/replay, failure clustering, regression fixtures, conformance, comparison, benchmarks, routing evidence, and improvement recommendations. |
 | **Connector Fabric** | Typed external-system adaptation: MCP/A2A/API adapters plus separately versioned email, calendar, issue/source-hosting, messaging, database, home, and business connectors where credentials/dependencies/failure domains differ. |
 | **Artifact Studio** | Focused text, data, document, PDF, spreadsheet, presentation, image, audio, video, transcription, language, diarization, transformation, analysis, and archival specialists. |
 | **Interactive Operator** | Stateful observe-act-verify loops for browser control, computer operation, screenshots, and device inspection. |
-| **Engine Steward** | Provider/model monitoring, diagnostics, core patch authoring, test selection, and isolated proposal evidence without application custody. |
+| **Engine Steward** | Read-only provider/model monitoring and diagnostics from canonical engine, worker, run, inbox, and result evidence. |
 
 Every restored behavior has one primary family owner. A family splits only
 when contracts, dependencies/credentials, failure isolation, semantic tool
@@ -2268,10 +2250,10 @@ these bullets as one tool apiece.
   compare worker contracts, validate scenario coverage, and recommend worker
   consolidation. `engine::surface_snapshot` supplies the operator truth; higher
   level analysis should be a worker.
-- **Core maintenance:** investigate a source change, author a patch, choose and
-  run tests, and prepare a core proposal. The fixed proposal operations retain
-  isolated worktree custody and approval enforcement; diagnosis and patch
-  authoring can be workers.
+- **Core maintenance:** Software Workspace may investigate source, author
+  bounded changes, and run tests through the ordinary host primitives. Tron
+  retains no separate proposal store or apply actuator; normal repository
+  history and the user's explicit request remain the review boundary.
 
 ### Kernel substrate already replacing separate behavior
 
@@ -2285,9 +2267,8 @@ these bullets as one tool apiece.
   version-bound promotion, dynamic surface revisions, and stale-contract
   rejection provide same-session adaptation without a separate catalog plane.
 - Durable sessions, provider/model turns, `tool.invocation.*` evidence,
-  compaction mechanics, authenticated transport, settings, credentials, blobs,
-  and source-proposal approval remain fixed because they custody the runtime
-  that workers depend on.
+  compaction mechanics, authenticated transport, settings, credentials, and
+  blobs remain fixed because they custody the runtime that workers depend on.
 
 ### Administrative planes that must not be recreated
 
@@ -2561,8 +2542,7 @@ Deterministic tests cover:
   schemas, and absence of local grant creation;
 - the real loopback HTTP webhook route, including token success/failure,
   durable dispatch, and remote-peer rejection;
-- remote auth and isolated core-proposal approval, including negation rejection
-  and cherry-pick cleanup;
+- remote authentication and client-only secret/emergency operation boundaries;
 - canonical tree tamper detection, disposable runner workspaces, bounded
   concurrent process I/O, process-group termination of background descendants,
   bounded resident responses, and symlink-preserving dependency/runtime copies;

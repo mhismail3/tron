@@ -123,6 +123,25 @@ struct SessionContextPresentationTests {
     @Test("Request tool evidence preserves selected and omitted workers")
     func requestWorkerSelectionEvidence() {
         let surface = AnyCodable([
+            "fixedTools": [
+                [
+                    "functionId": "worker_kernel::filesystem_read",
+                    "modelName": "filesystem_read",
+                    "exposed": true,
+                    "audience": "ordinary",
+                    "accessPath": "ordinary",
+                    "selectionReason": "ordinary",
+                ] as [String: Any],
+                [
+                    "functionId": "worker_kernel::upsert",
+                    "modelName": "worker_upsert",
+                    "exposed": false,
+                    "audience": "specialist",
+                    "accessPath": "specialist_worker",
+                    "selectionReason": "not_projected",
+                    "omissionReason": "specialist_only",
+                ] as [String: Any],
+            ],
             "availableWorkers": [
                 [
                     "workerId": "research",
@@ -147,6 +166,7 @@ struct SessionContextPresentationTests {
         ] as [String: Any])
 
         let workers = SessionContextPresentation.workerSelections(from: surface)
+        let fixed = SessionContextPresentation.fixedToolSelections(from: surface)
 
         #expect(workers.count == 2)
         #expect(workers[0].projected)
@@ -155,6 +175,11 @@ struct SessionContextPresentationTests {
         #expect(workers[0].explanation == "Research directly matches this request.")
         #expect(!workers[1].projected)
         #expect(workers[1].omissionReason == "selection_limit")
+        #expect(fixed.count == 2)
+        #expect(fixed[0].projected)
+        #expect(fixed[0].audience == "ordinary")
+        #expect(!fixed[1].projected)
+        #expect(fixed[1].omissionReason == "specialist_only")
     }
 
     @Test("Provider audit formatter never renders inline media bytes")
