@@ -261,7 +261,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             settingsMain.contains("ForEach(MainSettingsGridDestination.order, id: \\.self)")
                 && settingsMain.contains("SettingsCard {")
                 && settingsMain.contains("mainSettingsDestinationRow(destination)"),
-            "The three top-level settings pages should render as separate SettingsCard containers"
+            "The top-level settings destinations should render as separate SettingsCard containers"
         )
         XCTAssertTrue(
             settingsMain.contains("ForEach(SettingsDangerZoneAction.order, id: \\.self)")
@@ -281,6 +281,81 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             settingsMain.contains("chevron.right"),
             "Settings main rows should not show chevrons; the whole card remains the tappable affordance"
         )
+    }
+
+    func testNotificationAndLogsUseTheirOwnedSettingsEntryPoints() throws {
+        let settings = try source(
+            pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView.swift"]
+        )
+        let settingsMain = try source(
+            pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"]
+        )
+        let support = try source(
+            pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsSupport.swift"]
+        )
+
+        XCTAssertTrue(settings.contains("Button { activePage = .notifications }"))
+        XCTAssertTrue(settings.contains("Image(systemName: notificationToolbarIcon)"))
+        XCTAssertFalse(settings.contains("Button { showLogViewer = true } label:"))
+        XCTAssertTrue(settingsMain.contains("case .logs:"))
+        XCTAssertTrue(settingsMain.contains("showLogViewer = true"))
+        XCTAssertTrue(support.contains("case logs"))
+        XCTAssertFalse(support.contains("case notifications"))
+        XCTAssertTrue(
+            support.contains(
+                """
+                .app,
+                        .logs,
+                """
+            ),
+            "Logs should remain the final ordinary Settings row"
+        )
+    }
+
+    func testNotificationSheetsUseStandardCardsToolbarsAndMediumDetents() throws {
+        let inbox = try source(
+            pathComponents: ["Sources", "UI", "Notifications", "NotificationInboxViews.swift"]
+        )
+        let readiness = try source(
+            pathComponents: ["Sources", "UI", "Notifications", "NotificationReadinessView.swift"]
+        )
+        let pageContainer = try source(
+            pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsPageContainer.swift"]
+        )
+
+        XCTAssertTrue(inbox.contains("SettingsPageContainer("))
+        XCTAssertTrue(
+            inbox.components(
+                separatedBy: ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
+            ).count >= 3,
+            "Both notification sheets should own the standard medium/large presentation"
+        )
+        XCTAssertTrue(inbox.contains("accessibilityLabel: \"Mark all notifications read\""))
+        XCTAssertFalse(inbox.contains("Button(\"Mark All Read\")"))
+        XCTAssertTrue(inbox.contains("accessibilityLabel: \"Snooze notification\""))
+        XCTAssertTrue(inbox.contains("accessibilityLabel: \"Complete notification\""))
+        XCTAssertTrue(inbox.contains("if hasResponseActions {"))
+        XCTAssertTrue(inbox.contains("SettingsPageContainer(title: \"Notification\")"))
+        XCTAssertTrue(inbox.contains("SettingsSectionHeader(title: \"Reminder\")"))
+        XCTAssertTrue(inbox.contains("SettingsSectionHeader(title: \"Source\")"))
+        XCTAssertFalse(inbox.contains(".buttonStyle(.borderedProminent)"))
+        XCTAssertTrue(inbox.contains("scrollsContent: false"))
+        XCTAssertTrue(inbox.contains("List {"))
+        XCTAssertTrue(inbox.contains(".swipeActions(edge: .leading, allowsFullSwipe: false)"))
+        XCTAssertTrue(inbox.contains(".swipeActions(edge: .trailing, allowsFullSwipe: false)"))
+        XCTAssertTrue(inbox.contains("coordinator.acknowledge(.snooze, item: item)"))
+        XCTAssertTrue(inbox.contains("coordinator.acknowledge(.complete, item: item)"))
+        XCTAssertTrue(inbox.contains("coordinator.acknowledge(.clearUnread, item: item)"))
+        XCTAssertTrue(inbox.contains("NotificationInboxLayout.bodyLineLimit"))
+        XCTAssertTrue(
+            pageContainer.contains("if scrollsContent {"),
+            "List-backed settings sheets must be able to opt out of the container's outer ScrollView"
+        )
+
+        XCTAssertTrue(readiness.contains("SettingsRowDivider()"))
+        XCTAssertTrue(readiness.contains("icon: \"iphone\""))
+        XCTAssertTrue(readiness.contains("icon: \"network\""))
+        XCTAssertFalse(readiness.contains(".padding(.horizontal, 12)"))
     }
 
     func testStopAllWorkersLivesInConfirmedSettingsDangerAction() throws {

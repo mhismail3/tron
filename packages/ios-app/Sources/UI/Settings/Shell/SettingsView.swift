@@ -15,7 +15,7 @@ struct SettingsView: View {
     private var connectionRepository: any AppConnectionRepository { dependencies.connectionRepository }
     var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     @State var showingResetAlert = false
-    @State private var showLogViewer = false
+    @State var showLogViewer = false
     @State var showArchiveAllConfirmation = false
     @State var isArchivingAll = false
     @State var showWorkerDispatchConfirmation = false
@@ -105,11 +105,12 @@ struct SettingsView: View {
             SettingsPageContainer(
                 title: "Settings",
                 leadingToolbar: {
-                    Button { showLogViewer = true } label: {
-                        Image(systemName: "doc.text.magnifyingglass")
+                    Button { activePage = .notifications } label: {
+                        Image(systemName: notificationToolbarIcon)
                             .font(TronTypography.buttonSM)
                             .foregroundStyle(.tronEmerald)
                     }
+                    .accessibilityLabel(notificationToolbarAccessibilityLabel)
                 }
             ) {
                 mainSettingsSection
@@ -118,6 +119,18 @@ struct SettingsView: View {
 
             settingsFooterDockView
         }
+    }
+
+    private var notificationToolbarIcon: String {
+        dependencies.notificationCoordinator.aggregateUnreadCount > 0
+            ? "bell.badge.fill"
+            : "bell"
+    }
+
+    private var notificationToolbarAccessibilityLabel: String {
+        let unreadCount = dependencies.notificationCoordinator.aggregateUnreadCount
+        guard unreadCount > 0 else { return "Open notifications" }
+        return "Open notifications, \(unreadCount) unread"
     }
 
     private var settingsWithSheets: some View {

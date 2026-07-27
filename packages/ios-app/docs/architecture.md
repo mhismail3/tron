@@ -785,13 +785,25 @@ reminders; they are not a general device-control surface.
   `NavigationIntent.notification(serverId:deliveryId:)`. The app selects the
   owning paired engine when available and otherwise shows a safe unavailable
   detail.
-- The Notifications Settings page is the native synchronized inbox and
-  readiness surface. It distinguishes system permission, device/token
-  readiness, selected relay/direct transport, provider readiness, and the last
-  sanitized provider problem per server. Its app-private cache shows logical
-  deliveries while transport failures remain engine-owned Activity/Attention
-  evidence. Opening an item completes its occurrence. Mark All Read emits only
-  `clear_unread`.
+- The Settings leading toolbar bell opens the Notifications sheet. The ordinary
+  Settings list ends with Logs, keeping diagnostics available without using the
+  primary toolbar affordance. Notifications is the native synchronized inbox
+  and readiness surface. It distinguishes system permission, aligned
+  per-server device/token and provider readiness, selected relay/direct
+  transport, and the last sanitized provider problem. Its app-private cache
+  shows logical deliveries while transport failures remain engine-owned
+  Activity/Attention evidence. Mark All Read lives in the sheet toolbar and
+  emits only `clear_unread`.
+- Notification inbox and detail presentations use the standard Settings
+  container, liquid-glass cards, toolbar actions, and medium/large detents.
+  Opening an item completes its occurrence. Snooze and Complete stay fixed
+  reminder actions and live in the detail toolbar rather than ad hoc content
+  buttons. The leading toolbar slot is omitted when a delivery exposes no
+  response actions, so informational notifications never render empty chrome.
+  The inbox uses an unnested native list: section headers are grouped with the
+  content below, previews use compact one-title/two-body-line cards, and native
+  swipes expose Details, read-state clearing, and only the Snooze/Complete
+  actions declared by that delivery.
 - Open, Complete, Snooze, and clear-read mutations enter a durable per-server
   outbox, apply optimistically, retry after reconnect/foreground, and reconcile
   to the engine's first-wins terminal state. Quiet pushes refresh one server;
@@ -834,7 +846,7 @@ warning/error tail, not verbose WebSocket traffic. Connection
 toasts and compact in-chat error pills remain the immediate attention surfaces;
 worker execution failures belong in the server-owned Engine Dashboard inbox.
 
-The settings toolbar exposes Logs in every build configuration.
+The final Settings row exposes Logs in every build configuration.
 The client log ingestion service mirrors bounded client logs into the server `logs` table while connected.
 Successful ingest transport chatter is filtered so ingestion cannot create a
 diagnostics feedback loop.

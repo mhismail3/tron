@@ -2166,7 +2166,8 @@ visible run remains active.
 It has no parallel context-control resource client, resource/action audit,
 memory editor, or fabricated manual compact/clear API.
 
-Settings exposes the Logs sheet in every iOS build configuration from its toolbar.
+The final Settings row opens the Logs sheet in every iOS build configuration;
+the leading toolbar is reserved for the synchronized Notifications inbox.
 While connected, Tron automatically ingests deduplicated client logs into the
 server log store. Successful ingest plumbing is filtered to prevent
 self-feeding diagnostics loops.

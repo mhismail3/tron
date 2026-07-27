@@ -174,9 +174,9 @@ For physical production-notification acceptance:
 1. Start the development server and install the current Prod build through
    TestFlight or an App Store export. A locally development-signed Prod build is
    not production APNs acceptance.
-2. Pair successfully, accept notification permission, and confirm Settings →
-   Notifications separately reports permission, device/token readiness,
-   selected transport, and provider readiness.
+2. Pair successfully, accept notification permission, tap the Settings toolbar
+   bell, and confirm Notifications separately reports permission, device/token
+   readiness, selected transport, and provider readiness.
 3. Create a natural-language one-time reminder and background, then terminate,
    the app. Confirm exactly one notification arrives on every active
    installation.
@@ -440,7 +440,9 @@ run the focused ownership and no-summary-hero contracts:
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
   -only-testing:TronMobileTests/EngineSettingsOwnershipTests \
-  -only-testing:TronMobileTests/EngineSettingsPageLayoutTests/testEngineAndProvidersSheetsDoNotMountSummaryHeroes
+  -only-testing:TronMobileTests/EngineSettingsPageLayoutTests/testEngineAndProvidersSheetsDoNotMountSummaryHeroes \
+  -only-testing:TronMobileTests/EngineSettingsPageLayoutTests/testNotificationAndLogsUseTheirOwnedSettingsEntryPoints \
+  -only-testing:TronMobileTests/EngineSettingsPageLayoutTests/testNotificationSheetsUseStandardCardsToolbarsAndMediumDetents
 ```
 
 For settings, pairing, event decoding, error projection, and generic runtime

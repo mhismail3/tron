@@ -31,7 +31,7 @@ struct NotificationReadinessView: View {
             ForEach(servers) { server in
                 let state = coordinator.readiness.first { $0.serverId == server.id }
                 SettingsCard(accent: state?.ready == true ? .tronEmerald : .tronWarning) {
-                    VStack(alignment: .leading, spacing: 9) {
+                    VStack(spacing: 0) {
                         SettingsRow(
                             icon: state?.ready == true ? "bell.badge.fill" : "bell.slash",
                             label: server.label,
@@ -41,13 +41,20 @@ struct NotificationReadinessView: View {
                                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronTextMuted)
                         }
+                        SettingsRowDivider()
                         readinessLine(
+                            icon: "iphone",
                             label: "Device",
                             value: state?.deviceReady == true
                                 ? "Registered"
                                 : (state?.problem ?? "Waiting for registration")
                         )
-                        readinessLine(label: "Provider", value: providerDescription(state))
+                        SettingsRowDivider()
+                        readinessLine(
+                            icon: "network",
+                            label: "Provider",
+                            value: providerDescription(state)
+                        )
                     }
                 }
             }
@@ -64,18 +71,17 @@ struct NotificationReadinessView: View {
         }
     }
 
-    private func readinessLine(label: String, value: String) -> some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-            Spacer()
+    private func readinessLine(icon: String, label: String, value: String) -> some View {
+        SettingsRow(
+            icon: icon,
+            label: label,
+            accentColor: .tronTextSecondary
+        ) {
             Text(value)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
                 .lineLimit(1)
         }
-        .padding(.horizontal, 12)
     }
 
     private func providerDescription(_ state: NotificationServerReadiness?) -> String {

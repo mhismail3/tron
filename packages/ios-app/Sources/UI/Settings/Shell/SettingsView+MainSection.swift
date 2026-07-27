@@ -96,7 +96,7 @@ extension SettingsView {
 
     func isMainSettingsDestinationEnabled(_ destination: MainSettingsGridDestination) -> Bool {
         switch destination {
-        case .engine, .notifications, .app:
+        case .engine, .app, .logs:
             return true
         case .providers:
             return serverSettingsReady
@@ -120,8 +120,8 @@ extension SettingsView {
             activePage = .app
         case .providers:
             activePage = .providers
-        case .notifications:
-            activePage = .notifications
+        case .logs:
+            showLogViewer = true
         }
     }
 

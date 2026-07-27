@@ -170,6 +170,10 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Shell/SettingsView.swift"),
             encoding: .utf8
         )
+        let settingsMain = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Shell/SettingsView+MainSection.swift"),
+            encoding: .utf8
+        )
         let engineServersSection = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/EngineServersSection.swift"),
             encoding: .utf8
@@ -206,9 +210,12 @@ extension SourceGuardTests {
             encoding: .utf8
         )
 
-        #expect(settingsView.contains("@State private var showLogViewer = false"))
-        #expect(settingsView.contains("Button { showLogViewer = true }"))
+        #expect(settingsView.contains("@State var showLogViewer = false"))
+        #expect(settingsView.contains("Button { activePage = .notifications }"))
+        #expect(settingsView.contains("Image(systemName: notificationToolbarIcon)"))
         #expect(settingsView.contains("LogViewer()"))
+        #expect(settingsMain.contains("case .logs:"))
+        #expect(settingsMain.contains("showLogViewer = true"))
         #expect(!settingsView.contains("#if DEBUG || BETA"))
         #expect(!engineServersSection.contains("showLogs"))
         #expect(!engineServersSection.contains("LogViewer()"))
@@ -244,11 +251,11 @@ extension SourceGuardTests {
         #expect(!ingestBlock.contains("#if DEBUG || BETA"))
         #expect(!ingestBlock.contains("logger.info"))
 
-        #expect(architectureDoc.contains("The settings toolbar exposes Logs in"))
+        #expect(architectureDoc.contains("The final Settings row exposes Logs in"))
         #expect(architectureDoc.contains("client log ingestion service mirrors bounded client logs into the server"))
         #expect(architectureDoc.contains("`logs` table while connected"))
         #expect(architectureDoc.contains("Successful ingest transport chatter is filtered"))
-        #expect(rootReadme.contains("Settings exposes the Logs sheet in every iOS build configuration from its toolbar"))
+        #expect(rootReadme.contains("The final Settings row opens the Logs sheet in every iOS build configuration"))
         #expect(rootReadme.contains("automatically ingests deduplicated client logs"))
         #expect(rootReadme.contains("self-feeding diagnostics loops"))
     }

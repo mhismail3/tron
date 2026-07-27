@@ -20,14 +20,14 @@ struct EngineSettingsOwnershipTests {
         #expect(MainSettingsGridDestination.order == [
             .engine,
             .providers,
-            .notifications,
             .app,
+            .logs,
         ])
         #expect(MainSettingsGridDestination.order.map(\.description) == [
             "Servers, session defaults, context",
             "OAuth and API keys",
-            "Permission, delivery readiness, inbox",
             "Appearance and behavior",
+            "Local diagnostics",
         ])
         #expect(MainSettingsGridDestination.engine.description.contains("transcription") == false)
         let deletedTitles = ["Hooks", "Extension Sources", "Git Workflow", "Mem" + "ory", "Ru" + "les"]
