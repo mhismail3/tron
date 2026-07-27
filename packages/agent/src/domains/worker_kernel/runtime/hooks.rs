@@ -11,6 +11,7 @@ const MAX_ENGINE_HOOK_SECONDS: u64 = 60;
 const ENGINE_HOOK_CACHE_WINDOW_SECONDS: i64 = 30;
 
 pub(crate) struct EngineHookExecution {
+    pub(crate) invocation_id: String,
     pub(crate) worker_id: String,
     pub(crate) worker_version: String,
     pub(crate) output: Value,
@@ -132,6 +133,7 @@ impl WorkerRuntime {
             .output
             .ok_or_else(|| format!("engine hook '{}' returned no output", hook.as_str()))?;
         Ok(Some(EngineHookExecution {
+            invocation_id: record.invocation_id,
             worker_id: worker.summary.worker_id,
             worker_version: worker.summary.active_version,
             output,

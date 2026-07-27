@@ -14,11 +14,59 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use super::messages::Provider;
+use super::messages::{Context, Message, Provider};
 use crate::shared::foundation::redaction::redact_sensitive_content;
 
+/// Request-local provenance retained beside, but never inside, one message.
+///
+/// Message bodies remain canonical in the agent message store. This
+/// protocol-neutral sidecar carries only durable identifiers and an honest
+/// generated/source label for provider-request inspection.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MessageAuditSource {
+    /// Durable session events that contributed to the message.
+    pub event_ids: Vec<String>,
+    /// Worker/tool invocation that produced a tool-result message.
+    pub invocation_id: Option<String>,
+    /// `durable_event`, `worker_invocation`, or `generated`.
+    pub source_kind: String,
+}
+
+impl MessageAuditSource {
+    /// Mark a message as generated inside the active runtime.
+    #[must_use]
+    pub fn generated() -> Self {
+        Self {
+            source_kind: "generated".to_owned(),
+            ..Self::default()
+        }
+    }
+
+    /// Build a durable event-backed source.
+    #[must_use]
+    pub fn events(event_ids: Vec<String>) -> Self {
+        Self {
+            event_ids,
+            source_kind: "durable_event".to_owned(),
+            ..Self::default()
+        }
+    }
+
+    /// Build a tool/worker invocation-backed source.
+    #[must_use]
+    pub fn invocation(invocation_id: impl Into<String>, event_id: Option<String>) -> Self {
+        Self {
+            event_ids: event_id.into_iter().collect(),
+            invocation_id: Some(invocation_id.into()),
+            source_kind: "worker_invocation".to_owned(),
+        }
+    }
+}
+
 /// Canonical format marker for provider request audit events.
-pub const MODEL_PROVIDER_REQUEST_AUDIT_FORMAT: &str = "tron.model_provider_request.v2";
+pub const MODEL_PROVIDER_REQUEST_AUDIT_FORMAT: &str = "tron.model_provider_request.v3";
+/// Previous provider-request audit format retained for read compatibility.
+pub const LEGACY_MODEL_PROVIDER_REQUEST_AUDIT_FORMAT: &str = "tron.model_provider_request.v2";
 /// Maximum serialized JSON size accepted for a single provider request audit body.
 ///
 /// Provider audit rows are durable replay inputs, but they are not a bulk blob
@@ -67,6 +115,298 @@ pub enum ProviderAuditPayloadKind {
     /// A provider-independent snapshot whose bulk content or total structure
     /// required bounded projection.
     ProviderIndependentProjection,
+}
+
+/// One ordered provider-neutral contribution to the effective system prompt.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemContextContribution {
+    /// Stable contribution kind such as `base_instructions` or
+    /// `continuity_context`.
+    pub kind: String,
+    /// User-facing source label.
+    pub label: String,
+    /// Exact redacted contribution text in provider-neutral order.
+    pub content: String,
+    /// UTF-8 byte count before provider adaptation.
+    pub byte_count: usize,
+    /// Digest of the unredacted provider-neutral contribution.
+    pub sha256: String,
+    /// Request-specific source evidence.
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub provenance: Value,
+}
+
+impl SystemContextContribution {
+    /// Build one redacted, integrity-bound contribution.
+    #[must_use]
+    pub fn new(
+        kind: impl Into<String>,
+        label: impl Into<String>,
+        content: impl Into<String>,
+        provenance: Value,
+    ) -> Self {
+        let content = content.into();
+        Self {
+            kind: kind.into(),
+            label: label.into(),
+            byte_count: content.len(),
+            sha256: sha256_label(content.as_bytes()),
+            content: redact_provider_audit_text(&content),
+            provenance: redact_sensitive_json(provenance),
+        }
+    }
+}
+
+/// Result of evaluating one automatic context source for this request.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomaticContextEvaluation {
+    /// Stable source kind.
+    pub kind: String,
+    /// `injected`, `empty`, `unavailable`, `failed`, `skipped`, or
+    /// `deterministic_fallback`.
+    pub outcome: String,
+    /// Selection mechanism used for this request.
+    pub mechanism: String,
+    /// Exact redacted narrative when one was injected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub narrative: Option<String>,
+    /// Owning policy worker, when one ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_id: Option<String>,
+    /// Immutable owning worker version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_version: Option<String>,
+    /// Durable hook invocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_id: Option<String>,
+    /// Bounded source records or selected inbox items.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<Value>,
+    /// Sanitized fallback/failure explanation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Provider-visible message inventory entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextMessageManifest {
+    /// Zero-based position in the provider-neutral message sequence.
+    pub ordinal: usize,
+    /// Provider-neutral message role.
+    pub role: String,
+    /// Content forms projected into the message.
+    pub content_kinds: Vec<String>,
+    /// Serialized provider-neutral message size.
+    pub byte_count: usize,
+    /// Digest of the unredacted provider-neutral message.
+    pub sha256: String,
+    /// Bounded redacted human-readable preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    /// Whether the audit contains exact text or projected media metadata.
+    pub projection: String,
+    /// Durable source classification, or `generated` when no event exists.
+    pub source_kind: String,
+    /// Durable session events that contributed to this message, when known.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_event_ids: Vec<String>,
+    /// Source worker invocation for worker-result messages, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_id: Option<String>,
+}
+
+/// Provider-neutral environment contribution.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextEnvironmentManifest {
+    /// Redacted working-directory projection supplied to the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<String>,
+    /// Redacted server-origin projection supplied to the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_origin: Option<String>,
+    /// Digest of the unredacted provider-neutral environment fields.
+    pub sha256: String,
+}
+
+/// Canonical explanation of one finalized provider request context.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextManifest {
+    /// Ordered system contributions whose concatenation is the system prompt.
+    pub system_contributions: Vec<SystemContextContribution>,
+    /// Provider-visible message inventory in exact order.
+    pub messages: Vec<ContextMessageManifest>,
+    /// Exact provider-neutral tool/surface evidence, including selected and
+    /// omitted direct workers.
+    pub tool_surface: Value,
+    /// Outcomes from every automatic context source evaluated for the request.
+    pub automatic_context: Vec<AutomaticContextEvaluation>,
+    /// Provider-neutral environment contribution.
+    pub environment: ContextEnvironmentManifest,
+    /// Digest of the unredacted finalized system prompt.
+    pub system_prompt_sha256: String,
+    /// Digest of the unredacted finalized message sequence.
+    pub messages_sha256: String,
+    /// Digest of the unredacted finalized tool definitions.
+    pub tools_sha256: String,
+    /// Digest of the complete unredacted provider-neutral context.
+    pub context_sha256: String,
+}
+
+impl ContextManifest {
+    /// Finalize and verify one provider-neutral context manifest.
+    ///
+    /// The contribution sequence is authoritative for system-prompt
+    /// construction. Any divergence fails before the provider stream opens.
+    pub fn build(
+        context: &Context,
+        system_contributions: Vec<SystemContextContribution>,
+        tool_surface: Value,
+        automatic_context: Vec<AutomaticContextEvaluation>,
+        message_sources: &[MessageAuditSource],
+    ) -> Result<Self, String> {
+        let joined_system = system_contributions
+            .iter()
+            .map(|contribution| contribution.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let final_system = context.system_prompt.as_deref().unwrap_or_default();
+        let redacted_final_system = redact_provider_audit_text(final_system);
+        if joined_system != redacted_final_system {
+            return Err(
+                "system contribution manifest does not match finalized provider context".to_owned(),
+            );
+        }
+
+        // Explicit destructuring keeps context inspection compile-coupled to
+        // every provider-neutral Context field.
+        let Context {
+            system_prompt: _,
+            messages,
+            tools,
+            working_directory,
+            server_origin,
+        } = context;
+        let message_manifests = messages
+            .iter()
+            .enumerate()
+            .map(|(ordinal, message)| {
+                message_manifest(ordinal, message, message_sources.get(ordinal))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let messages_json = serde_json::to_vec(messages).map_err(|error| error.to_string())?;
+        let tools_json = serde_json::to_vec(tools).map_err(|error| error.to_string())?;
+        let environment_value = serde_json::json!({
+            "workingDirectory": working_directory,
+            "serverOrigin": server_origin,
+        });
+        let environment_json =
+            serde_json::to_vec(&environment_value).map_err(|error| error.to_string())?;
+        let context_json = serde_json::to_vec(context).map_err(|error| error.to_string())?;
+
+        Ok(Self {
+            system_contributions,
+            messages: message_manifests,
+            tool_surface: redact_sensitive_json(tool_surface),
+            automatic_context,
+            environment: ContextEnvironmentManifest {
+                working_directory: working_directory.as_deref().map(redact_provider_audit_text),
+                server_origin: server_origin.as_deref().map(redact_provider_audit_text),
+                sha256: sha256_label(&environment_json),
+            },
+            system_prompt_sha256: sha256_label(final_system.as_bytes()),
+            messages_sha256: sha256_label(&messages_json),
+            tools_sha256: sha256_label(&tools_json),
+            context_sha256: sha256_label(&context_json),
+        })
+    }
+}
+
+fn message_manifest(
+    ordinal: usize,
+    message: &Message,
+    source: Option<&MessageAuditSource>,
+) -> Result<ContextMessageManifest, String> {
+    let value = serde_json::to_value(message).map_err(|error| error.to_string())?;
+    let bytes = serde_json::to_vec(&value).map_err(|error| error.to_string())?;
+    let role = value["role"].as_str().unwrap_or("unknown").to_owned();
+    let content = &value["content"];
+    let content_kinds = match content {
+        Value::String(_) => vec!["text".to_owned()],
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter_map(|block| block["type"].as_str().map(ToOwned::to_owned))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let preview = message_preview(message)
+        .filter(|preview| !preview.is_empty())
+        .map(|preview| redact_provider_audit_text(&preview));
+    let invocation_id = source
+        .and_then(|source| source.invocation_id.clone())
+        .or_else(|| match message {
+            Message::ToolResult { invocation_id, .. } => Some(invocation_id.clone()),
+            _ => None,
+        });
+    Ok(ContextMessageManifest {
+        ordinal,
+        role,
+        content_kinds,
+        byte_count: bytes.len(),
+        sha256: sha256_label(&bytes),
+        preview,
+        projection: if message.is_compaction_summary() {
+            "compaction_summary".to_owned()
+        } else {
+            "provider_visible".to_owned()
+        },
+        source_kind: source
+            .map_or("generated", |source| source.source_kind.as_str())
+            .to_owned(),
+        source_event_ids: source
+            .map(|source| source.event_ids.clone())
+            .unwrap_or_default(),
+        invocation_id,
+    })
+}
+
+fn message_preview(message: &Message) -> Option<String> {
+    const MAX_PREVIEW_CHARS: usize = 240;
+    let text = match message {
+        Message::User { content, .. } => match content {
+            super::messages::UserMessageContent::Text(text) => text.clone(),
+            super::messages::UserMessageContent::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(super::content::UserContent::as_text)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        },
+        Message::Assistant { content, .. } => content
+            .iter()
+            .filter_map(super::content::AssistantContent::as_text)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Message::ToolResult { content, .. } => match content {
+            super::messages::ToolResultMessageContent::Text(text) => text.clone(),
+            super::messages::ToolResultMessageContent::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|block| match block {
+                    super::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                    super::content::ToolResultContent::Image { .. } => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        },
+    };
+    Some(text.chars().take(MAX_PREVIEW_CHARS).collect())
+}
+
+fn sha256_label(bytes: &[u8]) -> String {
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
 /// Provider request body captured for replay/audit.
@@ -322,6 +662,24 @@ pub struct ModelProviderRequestAudit {
     pub context_window: u64,
     /// Session id used for prompt-cache routing and replay joins.
     pub session_id: String,
+    /// Provider-loop turn ordinal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<u32>,
+    /// Engine trace inherited by this model request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// Parent engine invocation when this request belongs to durable work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_invocation_id: Option<String>,
+    /// Worker that owns this agent session, when this is a nested worker run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_worker_id: Option<String>,
+    /// Durable worker invocation that owns this nested agent request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_worker_invocation_id: Option<String>,
+    /// `main_chat` or `agent_worker`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_classification: Option<String>,
     /// Canonical reasoning level, when requested.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<String>,
@@ -334,6 +692,13 @@ pub struct ModelProviderRequestAudit {
     /// Provider request envelope, bounded envelope projection, or
     /// provider-independent request-input snapshot.
     pub provider_request: ProviderAuditPayload,
+    /// Provider-neutral context ledger corresponding to this exact request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_manifest: Option<ContextManifest>,
+    /// Provider-owned instruction/prefix evidence visible in the exact
+    /// provider envelope but not part of the neutral Context.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_additions: Vec<SystemContextContribution>,
 }
 
 #[cfg(test)]
@@ -480,6 +845,70 @@ mod tests {
         }));
         assert!(serde_json::to_vec(&bounded).unwrap().len() < MAX_PROVIDER_AUDIT_PAYLOAD_BYTES);
     }
+
+    #[test]
+    fn context_manifest_matches_context_and_retains_message_provenance() {
+        let context = Context {
+            system_prompt: Some("base\n\nremember this".to_owned()),
+            messages: vec![Message::user("hello")].into(),
+            tools: Some(Vec::new()),
+            working_directory: Some("/workspace/project".to_owned()),
+            server_origin: Some("localhost:9847".to_owned()),
+        };
+        let contributions = vec![
+            SystemContextContribution::new(
+                "base_instructions",
+                "Agent instructions",
+                "base",
+                json!({"owner":"runtime"}),
+            ),
+            SystemContextContribution::new(
+                "continuity_context",
+                "Continuity context",
+                "remember this",
+                json!({"workerId":"continuity-curator"}),
+            ),
+        ];
+        let source = MessageAuditSource::events(vec!["event-user-1".to_owned()]);
+
+        let manifest = ContextManifest::build(
+            &context,
+            contributions,
+            json!({"fixedToolCount":0}),
+            Vec::new(),
+            &[source],
+        )
+        .expect("matching manifest");
+
+        assert_eq!(manifest.messages[0].source_event_ids, ["event-user-1"]);
+        assert_eq!(manifest.messages[0].source_kind, "durable_event");
+        assert!(manifest.context_sha256.starts_with("sha256:"));
+        assert_eq!(manifest.system_contributions.len(), 2);
+    }
+
+    #[test]
+    fn context_manifest_rejects_unrecorded_system_mutation() {
+        let context = Context {
+            system_prompt: Some("base\n\nunrecorded".to_owned()),
+            ..Context::default()
+        };
+
+        let error = ContextManifest::build(
+            &context,
+            vec![SystemContextContribution::new(
+                "base_instructions",
+                "Agent instructions",
+                "base",
+                Value::Null,
+            )],
+            Value::Null,
+            Vec::new(),
+            &[],
+        )
+        .expect_err("unrecorded system text must fail closed");
+
+        assert!(error.contains("does not match"));
+    }
 }
 
 impl ModelProviderRequestAudit {
@@ -508,11 +937,48 @@ impl ModelProviderRequestAudit {
             model,
             context_window,
             session_id,
+            turn: None,
+            trace_id: None,
+            parent_invocation_id: None,
+            origin_worker_id: None,
+            origin_worker_invocation_id: None,
+            request_classification: None,
             reasoning_level,
             message_count,
             tool_count,
             stream_options,
             provider_request,
+            context_manifest: None,
+            provider_additions: Vec::new(),
         }
+    }
+
+    /// Attach request-specific causal and context evidence after provider
+    /// adaptation has produced the final redacted envelope.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_context_manifest(
+        mut self,
+        turn: u32,
+        trace_id: Option<String>,
+        parent_invocation_id: Option<String>,
+        origin_worker_id: Option<String>,
+        origin_worker_invocation_id: Option<String>,
+        context_manifest: ContextManifest,
+    ) -> Self {
+        self.turn = Some(turn);
+        self.trace_id = trace_id;
+        self.parent_invocation_id = parent_invocation_id;
+        self.request_classification = Some(
+            if origin_worker_id.is_some() {
+                "agent_worker"
+            } else {
+                "main_chat"
+            }
+            .to_owned(),
+        );
+        self.origin_worker_id = origin_worker_id;
+        self.origin_worker_invocation_id = origin_worker_invocation_id;
+        self.context_manifest = Some(context_manifest);
+        self
     }
 }

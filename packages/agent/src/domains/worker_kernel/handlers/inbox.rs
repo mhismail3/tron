@@ -231,6 +231,7 @@ pub(super) async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result
         "handled":true,
         "workerId":execution.worker_id,
         "workerVersion":execution.worker_version,
+        "invocationId":execution.invocation_id,
         "items":items,
         "narrative":narrative,
     }))

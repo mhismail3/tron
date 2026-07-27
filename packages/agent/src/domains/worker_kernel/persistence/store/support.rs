@@ -424,7 +424,11 @@ fn row_invocation_with_output(
                 super::results::resolve_stored_result(connection, &invocation_id, value)
             }
             InvocationOutputProjection::Reference => {
-                super::results::result_reference_from_connection(connection, &invocation_id)
+                super::results::result_reference_or_legacy_from_connection(
+                    connection,
+                    &invocation_id,
+                    value,
+                )
             }
         })
         .map(|result| result.map_err(result_projection_error))

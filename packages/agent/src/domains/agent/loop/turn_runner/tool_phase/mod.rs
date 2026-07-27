@@ -388,27 +388,30 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         interrupted = params.cancel.is_cancelled();
     }
 
-    if let Err(error) = persist_completion_batch(&params, completion_payloads) {
-        warn!(
-            session_id = params.session_id,
-            turn = params.turn,
-            error = %error,
-            "tool completion batch failed; terminalizing durable starts"
-        );
-        let error = match persist_failed_completion_batch(&params, &results) {
-            Ok(()) => error,
-            Err(repair_error) => RuntimeError::Persistence(format!(
-                "tool completion batch failed ({error}); durable terminal repair also failed ({repair_error})"
-            )),
-        };
-        return ToolPhaseOutcome {
-            interrupted,
-            error: Some(error),
-            ..Default::default()
-        };
-    }
+    let completion_event_ids = match persist_completion_batch(&params, completion_payloads) {
+        Ok(event_ids) => event_ids,
+        Err(error) => {
+            warn!(
+                session_id = params.session_id,
+                turn = params.turn,
+                error = %error,
+                "tool completion batch failed; terminalizing durable starts"
+            );
+            let error = match persist_failed_completion_batch(&params, &results) {
+                Ok(()) => error,
+                Err(repair_error) => RuntimeError::Persistence(format!(
+                    "tool completion batch failed ({error}); durable terminal repair also failed ({repair_error})"
+                )),
+            };
+            return ToolPhaseOutcome {
+                interrupted,
+                error: Some(error),
+                ..Default::default()
+            };
+        }
+    };
 
-    process_tool_results(results, params, interrupted).await
+    process_tool_results(results, completion_event_ids, params, interrupted).await
 }
 
 fn executed_completion_payload(
@@ -577,9 +580,9 @@ fn record_skipped_invocations(
 fn persist_completion_batch(
     params: &ToolPhaseParams<'_>,
     completion_payloads: Vec<Option<Value>>,
-) -> Result<(), RuntimeError> {
+) -> Result<Vec<Option<String>>, RuntimeError> {
     if params.persister.is_none() {
-        return Ok(());
+        return Ok(vec![None; completion_payloads.len()]);
     }
     let expected_count = completion_payloads.len();
     let payloads = completion_payloads
@@ -592,6 +595,7 @@ fn persist_completion_batch(
         })?;
     debug_assert_eq!(payloads.len(), expected_count);
     persist_and_broadcast_completion_payloads(params, &payloads)
+        .map(|event_ids| event_ids.into_iter().map(Some).collect())
 }
 
 fn persist_failed_completion_batch(
@@ -642,15 +646,15 @@ fn persist_failed_completion_batch(
             payload
         })
         .collect::<Vec<_>>();
-    persist_and_broadcast_completion_payloads(params, &payloads)
+    persist_and_broadcast_completion_payloads(params, &payloads).map(|_| ())
 }
 
 fn persist_and_broadcast_completion_payloads(
     params: &ToolPhaseParams<'_>,
     payloads: &[Value],
-) -> Result<(), RuntimeError> {
+) -> Result<Vec<String>, RuntimeError> {
     let Some(persister) = params.persister else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let events = payloads
         .iter()
@@ -665,11 +669,12 @@ fn persist_and_broadcast_completion_payloads(
     for (row, payload) in rows.iter().zip(payloads) {
         super::persistence::emit_persisted_tool_invocation_completed(params.emitter, row, payload);
     }
-    Ok(())
+    Ok(rows.into_iter().map(|row| row.id).collect())
 }
 
 async fn process_tool_results(
     mut results: Vec<Option<ExecutedToolInvocation>>,
+    completion_event_ids: Vec<Option<String>>,
     params: ToolPhaseParams<'_>,
     interrupted: bool,
 ) -> ToolPhaseOutcome {
@@ -689,11 +694,17 @@ async fn process_tool_results(
         outcome.tool_invocations_executed += 1;
         let is_error = exec_result.result.is_error.unwrap_or(false);
 
-        params.context_manager.add_message(Message::ToolResult {
-            invocation_id: tool_invocation.id.clone(),
-            content: ToolResultMessageContent::Text(provider_text),
-            is_error: if is_error { Some(true) } else { None },
-        });
+        params.context_manager.add_message_with_source(
+            Message::ToolResult {
+                invocation_id: tool_invocation.id.clone(),
+                content: ToolResultMessageContent::Text(provider_text),
+                is_error: if is_error { Some(true) } else { None },
+            },
+            crate::domains::agent::context::message_store::MessageAuditSource::invocation(
+                tool_invocation.id.clone(),
+                completion_event_ids.get(idx).cloned().flatten(),
+            ),
+        );
     }
 
     info!(

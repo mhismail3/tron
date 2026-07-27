@@ -50,6 +50,65 @@ pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
 pub(super) const DEFAULT_TEXT_SEARCH_WALK_ENTRIES: usize = 20_000;
 pub(super) const MAX_TEXT_SEARCH_WALK_ENTRIES: usize = 100_000;
 
+fn worker_architecture_response_schema() -> Value {
+    let call_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["kind","label"],
+        "properties":{
+            "kind":{"type":"string","enum":["worker_dispatch","agent_tool"]},
+            "label":{"type":"string"},
+            "targetWorkerId":{"type":["string","null"]},
+            "responseOwner":{"type":"string"}
+        }
+    });
+    let presentation_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["suiteId","componentRole","primary"],
+        "properties":{
+            "suiteId":{"type":["string","null"]},
+            "componentRole":{"type":["string","null"]},
+            "primary":{"type":"boolean"}
+        }
+    });
+    let provenance_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["source","revision","checksum"],
+        "properties":{
+            "source":{"type":"string"},
+            "revision":{"type":"string"},
+            "checksum":{"type":["string","null"]}
+        }
+    });
+    json!({
+        "type":"array",
+        "items":{
+            "type":"object",
+            "additionalProperties":false,
+            "required":["workerId","name","description","activeVersion","health","modelExposure","runnerKind","engineHooks","clientActions","clientDeliveries","triggerKinds","calls","presentation","provenance"],
+            "properties":{
+                "workerId":{"type":"string"},
+                "name":{"type":"string"},
+                "description":{"type":"string"},
+                "activeVersion":{"type":"string"},
+                "health":{"type":"string"},
+                "modelExposure":{"type":"string","enum":["direct","internal"]},
+                "runnerKind":{"type":"string","enum":["agent","command","service"]},
+                "runnerModel":{"type":["string","null"]},
+                "engineHooks":{"type":"array","items":{"type":"string"}},
+                "clientActions":{"type":"array","items":{"type":"string"}},
+                "clientDeliveries":{"type":"array","items":{"type":"string"}},
+                "triggerKinds":{"type":"array","items":{"type":"string"}},
+                "calls":{"type":"array","items":call_schema},
+                "presentation":presentation_schema,
+                "provenance":{"type":"array","items":provenance_schema}
+            }
+        }
+    })
+}
+
 /// Estimate semantic-summary tokens with the same cheap pre-call heuristic
 /// used by the agent context budget. Provider-reported usage remains the
 /// source of truth for completed model calls.
@@ -496,7 +555,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         .response_schema(json!({
             "type":"object",
             "additionalProperties":false,
-            "required":["dispatchStopped","activeEngineHooks","activeClientActions","activeClientDeliveries","fixedTools","surface","workers"],
+            "required":["dispatchStopped","activeEngineHooks","activeClientActions","activeClientDeliveries","fixedTools","surface","workers","workerArchitecture"],
             "properties":{
                 "dispatchStopped":{"type":"boolean"},
                 "activeEngineHooks":{
@@ -552,7 +611,8 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                         "availableWorkers":{"type":"array"}
                     }
                 },
-                "workers":{"type":"array"}
+                "workers":{"type":"array"},
+                "workerArchitecture":worker_architecture_response_schema()
             }
         }))
         .description(
@@ -585,7 +645,21 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                 "handled":{"type":"boolean"},
                 "workerId":{"type":"string"},
                 "workerVersion":{"type":"string"},
-                "narrative":{"type":"string","maxLength":6000}
+                "invocationId":{"type":"string"},
+                "narrative":{"type":"string","maxLength":6000},
+                "sources":{
+                    "type":"array","maxItems":6,
+                    "items":{
+                        "type":"object","additionalProperties":false,
+                        "required":["memoryId","revision","scope"],
+                        "properties":{
+                            "memoryId":{"type":"string","minLength":1,"maxLength":96},
+                            "revision":{"type":"integer","minimum":1},
+                            "scope":{"type":"string","enum":["global","project"]},
+                            "project":{"type":"string","maxLength":2048}
+                        }
+                    }
+                }
             }
         }))
         .idempotency(IdempotencyContract::session())
@@ -706,6 +780,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                 "handled":{"type":"boolean"},
                 "workerId":{"type":"string"},
                 "workerVersion":{"type":"string"},
+                "invocationId":{"type":"string"},
                 "rankings":{
                     "type":"array","maxItems":256,
                     "items":{
@@ -746,6 +821,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                 "handled":{"type":"boolean"},
                 "workerId":{"type":"string"},
                 "workerVersion":{"type":"string"},
+                "invocationId":{"type":"string"},
                 "narrative":{"type":"string","maxLength":12000},
                 "items":{"type":"array","maxItems":32,"items":{"type":"object"}}
             }

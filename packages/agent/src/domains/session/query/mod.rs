@@ -36,12 +36,123 @@ pub(crate) struct SessionListCursor {
 mod operations;
 
 pub(crate) use operations::{
-    session_export_value, session_get_head_value, session_get_history_value,
-    session_get_state_value, session_list_value, session_replay_manifest_value,
-    session_resume_value,
+    session_context_request_detail_value, session_context_requests_value, session_export_value,
+    session_get_head_value, session_get_history_value, session_get_state_value, session_list_value,
+    session_replay_manifest_value, session_resume_value,
 };
 
 impl SessionQueryService {
+    pub(crate) async fn context_requests(
+        deps: &Deps,
+        session_id: String,
+        before_sequence: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<Value, ToolError> {
+        let event_store = deps.event_store.clone();
+        run_blocking_task("session.context_requests", move || {
+            let _ = event_store
+                .get_session(&session_id)
+                .map_err(|error| ToolError::Internal {
+                    message: format!("Persistence error: {error}"),
+                })?
+                .ok_or_else(|| ToolError::NotFound {
+                    code: errors::SESSION_NOT_FOUND.into(),
+                    message: format!("Session '{session_id}' not found"),
+                })?;
+            let limit = limit.unwrap_or(10).clamp(1, 20);
+            let fetch_limit = i64::try_from(limit.saturating_add(1)).unwrap_or(21);
+            let mut rows = event_store
+                .get_provider_request_audits(&session_id, before_sequence, fetch_limit)
+                .map_err(|error| ToolError::Internal {
+                    message: error.to_string(),
+                })?;
+            let has_more = rows.len() > limit;
+            rows.truncate(limit);
+            let next_before_sequence = has_more
+                .then(|| rows.last().map(|(row, _)| row.sequence))
+                .flatten();
+            let requests = rows
+                .into_iter()
+                .map(|(row, payload)| {
+                    let format = payload
+                        .get("format")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    let manifest = payload.get("contextManifest");
+                    json!({
+                        "eventId":row.id,
+                        "sequence":row.sequence,
+                        "timestamp":row.timestamp,
+                        "format":format,
+                        "turn":payload.get("turn").cloned().unwrap_or(Value::Null),
+                        "providerType":payload.get("providerType").cloned().unwrap_or(Value::Null),
+                        "providerName":payload.get("providerName").cloned().unwrap_or(Value::Null),
+                        "model":payload.get("model").cloned().unwrap_or(Value::Null),
+                        "requestClassification":payload.get("requestClassification").cloned().unwrap_or_else(|| json!("legacy")),
+                        "messageCount":payload.get("messageCount").cloned().unwrap_or_else(|| json!(0)),
+                        "toolCount":payload.get("toolCount").cloned().unwrap_or_else(|| json!(0)),
+                        "automaticContextCount":manifest
+                            .and_then(|manifest| manifest.get("automaticContext"))
+                            .and_then(Value::as_array)
+                            .map_or(0, Vec::len),
+                        "manifestAvailable":manifest.is_some(),
+                        "provenanceAvailability":if format == crate::shared::protocol::model_audit::MODEL_PROVIDER_REQUEST_AUDIT_FORMAT {
+                            "complete"
+                        } else {
+                            "legacy_unavailable"
+                        },
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok(json!({
+                "requests":requests,
+                "hasMore":has_more,
+                "nextBeforeSequence":next_before_sequence,
+            }))
+        })
+        .await
+    }
+
+    pub(crate) async fn context_request_detail(
+        deps: &Deps,
+        session_id: String,
+        event_id: String,
+    ) -> Result<Value, ToolError> {
+        let event_store = deps.event_store.clone();
+        run_blocking_task("session.context_request_detail", move || {
+            let (row, payload) = event_store
+                .get_provider_request_audit(&session_id, &event_id)
+                .map_err(|error| ToolError::Internal {
+                    message: error.to_string(),
+                })?
+                .ok_or_else(|| ToolError::NotFound {
+                    code: errors::SESSION_NOT_FOUND.into(),
+                    message: format!(
+                        "Provider request audit '{event_id}' was not found in session '{session_id}'"
+                    ),
+                })?;
+            let format = payload
+                .get("format")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            Ok(json!({
+                "eventId":row.id,
+                "sequence":row.sequence,
+                "timestamp":row.timestamp,
+                "format":format,
+                "contextManifest":payload.get("contextManifest").cloned().unwrap_or(Value::Null),
+                "providerAdditions":payload.get("providerAdditions").cloned().unwrap_or_else(|| json!([])),
+                "providerAudit":payload,
+                "provenanceAvailability":if format == crate::shared::protocol::model_audit::MODEL_PROVIDER_REQUEST_AUDIT_FORMAT {
+                    "complete"
+                } else {
+                    "legacy_unavailable"
+                },
+            }))
+        })
+        .await
+    }
+
     pub(crate) async fn resume(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let session_manager = deps.session_manager.clone();
         let session_id_for_resume = session_id.clone();
@@ -635,6 +746,140 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(state["sessionId"], worker_session);
+    }
+
+    #[tokio::test]
+    async fn context_requests_page_only_provider_audits_and_label_legacy_provenance() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("context audit"))
+            .unwrap();
+        let legacy = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &sid,
+                event_type: EventType::ModelProviderRequest,
+                payload: json!({
+                    "format":crate::shared::protocol::model_audit::LEGACY_MODEL_PROVIDER_REQUEST_AUDIT_FORMAT,
+                    "providerType":"openai",
+                    "providerName":"openai",
+                    "model":"test",
+                    "messageCount":1,
+                    "toolCount":2,
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        let current = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &sid,
+                event_type: EventType::ModelProviderRequest,
+                payload: json!({
+                    "format":crate::shared::protocol::model_audit::MODEL_PROVIDER_REQUEST_AUDIT_FORMAT,
+                    "providerType":"openai",
+                    "providerName":"openai",
+                    "model":"test",
+                    "messageCount":2,
+                    "toolCount":3,
+                    "contextManifest":{"automaticContext":[]},
+                    "providerAdditions":[{
+                        "kind":"provider_system_prefix",
+                        "label":"Provider instructions",
+                        "content":"prefix",
+                        "byteCount":6,
+                        "sha256":"sha256:prefix"
+                    }]
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        ctx.event_store
+            .append(&AppendOptions {
+                session_id: &sid,
+                event_type: EventType::MessageUser,
+                payload: json!({"role":"user","content":"not an audit"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let first = SessionQueryService::context_requests(
+            &Deps::from_test_context(&ctx),
+            sid.clone(),
+            None,
+            Some(1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(first["requests"].as_array().unwrap().len(), 1);
+        assert_eq!(first["requests"][0]["eventId"], current.id);
+        assert_eq!(first["requests"][0]["provenanceAvailability"], "complete");
+        assert_eq!(first["hasMore"], true);
+
+        let second = SessionQueryService::context_requests(
+            &Deps::from_test_context(&ctx),
+            sid.clone(),
+            first["nextBeforeSequence"].as_i64(),
+            Some(1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(second["requests"][0]["eventId"], legacy.id);
+        assert_eq!(
+            second["requests"][0]["provenanceAvailability"],
+            "legacy_unavailable"
+        );
+        assert_eq!(second["hasMore"], false);
+
+        let detail = SessionQueryService::context_request_detail(
+            &Deps::from_test_context(&ctx),
+            sid,
+            current.id,
+        )
+        .await
+        .unwrap();
+        assert_eq!(detail["provenanceAvailability"], "complete");
+        assert!(detail["contextManifest"].is_object());
+        assert_eq!(
+            detail["providerAdditions"][0]["kind"],
+            "provider_system_prefix"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_request_detail_enforces_exact_session_ownership() {
+        let ctx = make_test_context();
+        let first = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("first"))
+            .unwrap();
+        let second = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("second"))
+            .unwrap();
+        let audit = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &first,
+                event_type: EventType::ModelProviderRequest,
+                payload: json!({"format":"tron.model_provider_request.v3"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let error = SessionQueryService::context_request_detail(
+            &Deps::from_test_context(&ctx),
+            second,
+            audit.id,
+        )
+        .await
+        .expect_err("cross-session audit read must fail");
+        assert!(matches!(error, ToolError::NotFound { .. }));
     }
 
     #[tokio::test]

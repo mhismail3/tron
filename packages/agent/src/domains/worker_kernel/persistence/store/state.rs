@@ -710,6 +710,34 @@ fn validate_engine_hook_contract(
             hook.as_str()
         )
     })?;
+    if hook == WorkerEngineHook::ContinuityContext
+        && bundle
+            .output_schema
+            .pointer("/properties/sources")
+            .is_some()
+    {
+        let sourced = json!({
+            "narrative":"Relevant saved continuity.",
+            "sources":[{
+                "memoryId":"memory-1",
+                "revision":2,
+                "scope":"project",
+                "project":"/workspace/example"
+            }]
+        });
+        crate::engine::validate_engine_schema_payload(
+            &function_id,
+            "response",
+            &bundle.output_schema,
+            &sourced,
+        )
+        .map_err(|error| {
+            format!(
+                "engine hook '{}' sources do not match outputSchema: {error}",
+                hook.as_str()
+            )
+        })?;
+    }
     crate::engine::validate_engine_schema_payload(
         &function_id,
         "response",

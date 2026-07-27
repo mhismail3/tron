@@ -356,6 +356,7 @@ pub(super) fn emit_response_complete(
 pub(super) fn add_assistant_message_to_context(
     context_manager: &mut ContextManager,
     stream_result: &StreamResult,
+    event_id: Option<String>,
 ) -> bool {
     let has_thinking = stream_result.message.content.iter().any(|c| {
         matches!(
@@ -397,13 +398,23 @@ pub(super) fn add_assistant_message_to_context(
             }
         };
 
-    context_manager.add_message(crate::shared::protocol::messages::Message::Assistant {
-        content: stream_result.message.content.clone(),
-        usage: stream_result.token_usage.clone().map(Box::new),
-        cost: None,
-        stop_reason: stop_reason_for_context,
-        thinking: thinking_text,
-    });
+    context_manager.add_message_with_source(
+        crate::shared::protocol::messages::Message::Assistant {
+            content: stream_result.message.content.clone(),
+            usage: stream_result.token_usage.clone().map(Box::new),
+            cost: None,
+            stop_reason: stop_reason_for_context,
+            thinking: thinking_text,
+        },
+        event_id.map_or_else(
+            crate::domains::agent::context::message_store::MessageAuditSource::generated,
+            |event_id| {
+                crate::domains::agent::context::message_store::MessageAuditSource::events(vec![
+                    event_id,
+                ])
+            },
+        ),
+    );
 
     has_thinking
 }
@@ -450,9 +461,9 @@ pub(super) fn persist_completed_assistant_message(
     session_id: &str,
     payload: Value,
     sequence_counter: Option<&AtomicI64>,
-) -> Result<(), crate::domains::agent::r#loop::errors::RuntimeError> {
+) -> Result<Option<EventRow>, crate::domains::agent::r#loop::errors::RuntimeError> {
     let Some(persister) = persister else {
-        return Ok(());
+        return Ok(None);
     };
     persister
         .append_with_runtime_sequence(
@@ -461,7 +472,7 @@ pub(super) fn persist_completed_assistant_message(
             payload,
             sequence_counter,
         )
-        .map(|_| ())
+        .map(Some)
         .inspect_err(|error| {
             error!(
                 session_id,

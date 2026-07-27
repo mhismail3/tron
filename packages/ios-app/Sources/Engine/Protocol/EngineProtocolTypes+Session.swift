@@ -178,6 +178,113 @@ struct SessionHistoryResult: Decodable {
     let hasMore: Bool
 }
 
+// MARK: - Inspectable Provider Context
+
+struct SessionContextRequestsParams: Encodable, Equatable {
+    let sessionId: String
+    let beforeSequence: Int64?
+    let limit: Int
+}
+
+struct SessionContextRequestDetailParams: Encodable, Equatable {
+    let sessionId: String
+    let eventId: String
+}
+
+struct SessionContextRequestSummaryDTO: Decodable, Equatable, Identifiable, Sendable {
+    let eventId: String
+    let sequence: Int64
+    let timestamp: String
+    let format: String
+    let turn: UInt64?
+    let providerType: String?
+    let providerName: String?
+    let model: String?
+    let requestClassification: String
+    let messageCount: UInt64
+    let toolCount: UInt64
+    let automaticContextCount: UInt64
+    let manifestAvailable: Bool
+    let provenanceAvailability: String
+
+    var id: String { eventId }
+}
+
+struct SessionContextRequestsResultDTO: Decodable, Equatable, Sendable {
+    let requests: [SessionContextRequestSummaryDTO]
+    let hasMore: Bool
+    let nextBeforeSequence: Int64?
+}
+
+struct ContextSystemContributionDTO: Decodable, Equatable, Identifiable, Sendable {
+    let kind: String
+    let label: String
+    let content: String
+    let byteCount: UInt64
+    let sha256: String
+    let provenance: AnyCodable?
+
+    var id: String { "\(kind):\(sha256)" }
+}
+
+struct ContextAutomaticEvaluationDTO: Decodable, Equatable, Identifiable, Sendable {
+    let kind: String
+    let outcome: String
+    let mechanism: String
+    let narrative: String?
+    let workerId: String?
+    let workerVersion: String?
+    let invocationId: String?
+    let sources: [AnyCodable]
+    let detail: String?
+
+    var id: String { "\(kind):\(invocationId ?? outcome)" }
+}
+
+struct ContextMessageManifestDTO: Decodable, Equatable, Identifiable, Sendable {
+    let ordinal: UInt64
+    let role: String
+    let contentKinds: [String]
+    let byteCount: UInt64
+    let sha256: String
+    let preview: String?
+    let projection: String
+    let sourceKind: String?
+    let sourceEventIds: [String]
+    let invocationId: String?
+
+    var id: String { "\(ordinal):\(sha256)" }
+}
+
+struct ContextEnvironmentManifestDTO: Decodable, Equatable, Sendable {
+    let workingDirectory: String?
+    let serverOrigin: String?
+    let sha256: String
+}
+
+struct SessionContextManifestDTO: Decodable, Equatable, Sendable {
+    let systemContributions: [ContextSystemContributionDTO]
+    let messages: [ContextMessageManifestDTO]
+    let toolSurface: AnyCodable
+    let automaticContext: [ContextAutomaticEvaluationDTO]
+    let environment: ContextEnvironmentManifestDTO
+    let systemPromptSha256: String
+    let messagesSha256: String
+    let toolsSha256: String
+    let contextSha256: String
+}
+
+struct SessionContextRequestDetailDTO: Decodable, Equatable, Sendable {
+    let eventId: String
+    let sequence: Int64
+    let timestamp: String
+    let format: String
+    let contextManifest: SessionContextManifestDTO?
+    let providerAdditions: [ContextSystemContributionDTO]?
+    let providerAudit: AnyCodable
+    let provenanceAvailability: String
+}
+
 // MARK: - Session Fork
 
 struct SessionForkParams: Encodable {

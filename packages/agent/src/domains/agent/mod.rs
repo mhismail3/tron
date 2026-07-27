@@ -26,14 +26,22 @@
 //! 4. `agent::prompt_apply` acquires the session run guard and starts
 //!    `agent::run_turn`.
 //! 5. The turn runner builds provider input from session state and supplies
-//!    direct typed kernel tools plus a compact relevant-worker projection.
-//! 6. Provider tool calls are written as session truth and invoked as typed
+//!    direct typed kernel tools plus a compact relevant-worker projection. One
+//!    turn-local context assembly records every ordered system contribution,
+//!    message source, automatic-context outcome, environment field, and exact
+//!    selected/omitted tool projection. It finalizes and persists the bounded
+//!    `tron.model_provider_request.v3` audit before any provider stream opens;
+//!    direct prompt mutation outside that assembly fails closed.
+//! 6. Provider adapters may report their own fixed request additions into that
+//!    same audit. Binary media, credential-shaped values, and hidden reasoning
+//!    remain projected or omitted rather than copied into durable context.
+//! 7. Provider tool calls are written as session truth and invoked as typed
 //!    engine invocations with Agent identity. An agent-runner child also
 //!    inherits its parent worker's causal depth, and the executor copies that
 //!    depth onto nested direct tools so composition cannot reset loop limits.
-//! 7. `/engine` subscriptions deliver prompt/runtime stream records to clients;
+//! 8. `/engine` subscriptions deliver prompt/runtime stream records to clients;
 //!    transport code does not own agent behavior.
-//! 8. The backend emits structured `component` + `agent_event` logs across
+//! 9. The backend emits structured `component` + `agent_event` logs across
 //!    runtime, loop, turn, provider stream, and tool-execution
 //!    phases. Those logs carry durable IDs and lifecycle metadata for agent and
 //!    operator inspection, while prompt text, streamed text, and tool arguments

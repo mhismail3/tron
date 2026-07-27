@@ -64,7 +64,8 @@ use super::types::{
     ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_ENGINE_CONCURRENCY,
     MAX_INVOCATION_SECONDS, MAX_WORKER_CONCURRENCY, PreparedWorker, PurgeOutcome, UpsertOutcome,
     WorkerBundle, WorkerClientAction, WorkerCommand, WorkerDependency, WorkerEngineHook,
-    WorkerInteractionMode, WorkerRunEvent, WorkerRunStage, WorkerRunner, WorkerTrigger,
+    WorkerInteractionMode, WorkerModelExposure, WorkerRunEvent, WorkerRunStage, WorkerRunner,
+    WorkerTrigger,
 };
 use support::*;
 
@@ -295,6 +296,75 @@ impl WorkerRuntime {
         .await?
         .snapshot;
         let fixed_tools = super::surface::fixed_tool_inventory(&self.host, &surface).await?;
+        let workers = self.store.list(true)?;
+        let tool_owner_by_name = workers
+            .iter()
+            .map(|worker| (worker.tool_name.clone(), worker.worker_id.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let worker_architecture = workers
+            .iter()
+            .filter(|summary| summary.enabled && !summary.retired)
+            .map(|summary| {
+                let active = self.store.load_indexed_active(&summary.worker_id)?;
+                let bundle = active.bundle;
+                let runner_model = match &bundle.runner {
+                    WorkerRunner::Agent { model, .. } => model.clone(),
+                    WorkerRunner::Command { .. } | WorkerRunner::Service { .. } => None,
+                };
+                let calls = bundle
+                    .worker_dispatch_routes
+                    .iter()
+                    .map(|route| json!({
+                        "kind":"worker_dispatch",
+                        "label":route.route,
+                        "targetWorkerId":route.target_worker_id,
+                        "responseOwner":route.client_response_owner.as_str(),
+                    }))
+                    .chain(
+                        bundle
+                            .agent_tools
+                            .as_deref()
+                            .unwrap_or_default()
+                            .iter()
+                            .map(|tool| {
+                                json!({
+                                    "kind":"agent_tool",
+                                    "label":tool,
+                                    "targetWorkerId":tool_owner_by_name.get(tool),
+                                })
+                            }),
+                    )
+                    .collect::<Vec<_>>();
+                Ok(json!({
+                    "workerId":summary.worker_id,
+                    "name":summary.name,
+                    "description":summary.description,
+                    "activeVersion":summary.active_version,
+                    "health":summary.health,
+                    "modelExposure":match bundle.model_exposure {
+                        WorkerModelExposure::Direct => "direct",
+                        WorkerModelExposure::Internal => "internal",
+                    },
+                    "runnerKind":bundle.runner.kind(),
+                    "runnerModel":runner_model,
+                    "engineHooks":bundle.engine_hooks.iter().map(|hook| hook.as_str()).collect::<Vec<_>>(),
+                    "clientActions":bundle.client_actions.iter().map(|action| action.as_str()).collect::<Vec<_>>(),
+                    "clientDeliveries":bundle.client_deliveries.iter().map(|delivery| delivery.as_str()).collect::<Vec<_>>(),
+                    "triggerKinds":bundle.triggers.iter().map(WorkerTrigger::kind).collect::<Vec<_>>(),
+                    "calls":calls,
+                    "presentation":{
+                        "suiteId":bundle.presentation.as_ref().and_then(|presentation| presentation.suite_id.as_deref()),
+                        "componentRole":bundle.presentation.as_ref().and_then(|presentation| presentation.component_role.as_deref()),
+                        "primary":bundle.presentation.as_ref().is_some_and(|presentation| presentation.primary),
+                    },
+                    "provenance":bundle.provenance.iter().take(8).map(|source| json!({
+                        "source":crate::shared::foundation::redaction::redact_sensitive_content(&source.source),
+                        "revision":source.revision,
+                        "checksum":source.checksum,
+                    })).collect::<Vec<_>>(),
+                }))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         Ok(json!({
             "dispatchStopped": self.store.stop_all()?,
             "activeEngineHooks": self.engine_hook_inventory()?,
@@ -309,7 +379,8 @@ impl WorkerRuntime {
                 "availableWorkerCount": surface.available_worker_count,
                 "availableWorkers": surface.available_workers,
             },
-            "workers": self.store.list(true)?,
+            "workers": workers,
+            "workerArchitecture": worker_architecture,
         }))
     }
 

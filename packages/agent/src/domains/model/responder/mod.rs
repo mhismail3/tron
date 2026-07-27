@@ -443,7 +443,9 @@ impl ModelResponder for ProviderBackedModelResponder {
             .provider
             .audit_payload(&request.context, &stream_options)
             .map_err(|error| ModelResponseError::from_provider_error(error, &info))?;
-        build_request_audit(info, request, stream_options, provider_request)
+        let mut audit = build_request_audit(info, request, stream_options, provider_request)?;
+        audit.provider_additions = self.provider.audit_context_additions();
+        Ok(audit)
     }
 
     async fn respond(

@@ -57,8 +57,9 @@
 //! magic metadata keys cannot silently add tools, routing modes, or test-only
 //! ranking inputs. Resolved provider entries are callable by construction;
 //! availability is decided once during catalog projection rather than copied
-//! into a second boolean. Every provider request records the exact catalog revision,
-//! function revisions, selected worker versions, reasons, and surface hash.
+//! into a second boolean. Every provider request records the exact catalog
+//! revision, function revisions, selected and omitted worker versions, routing
+//! mechanism, bounded ranking evidence, reasons, and surface hash.
 //! Provider calls pin the advertised function revision and immutable worker
 //! version; catalog preparation rejects drift and lets the next internal turn
 //! resolve a fresh surface. Session discovery promotions live in durable scoped
@@ -170,7 +171,12 @@
 //! The authenticated `engine::surface_snapshot` read returns the selected
 //! surface revision/hash/counts, every published worker's projection status,
 //! active engine-hook and native-client-action ownership, the complete
-//! fixed-tool inventory, and canonical engine worker summaries; exact provider
+//! fixed-tool inventory, canonical engine worker summaries, and a compact
+//! relationship graph derived from active immutable bundle declarations.
+//! Architecture nodes include exposure, runner, hooks, triggers, client
+//! boundaries, dispatch routes, exact `agentTools` dependencies, presentation
+//! suite, version, health, and provenance. This is introspection only: it adds
+//! no compiled hierarchy, routing policy, or second registry. Exact provider
 //! contracts are not duplicated into the client response. It is not itself
 //! model vocabulary and reports executable runtime facts rather than a
 //! separately maintained description of the source tree.

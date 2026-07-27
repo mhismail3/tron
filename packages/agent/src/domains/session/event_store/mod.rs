@@ -9,8 +9,9 @@
 //! - **Event store**: High-level API for session creation, event append, ancestor walk, fork
 //! - **`SQLite` backend**: `rusqlite` facade with repository pattern
 //! - **Replay identities**: Explicit IDs/timestamps for deterministic replay/import tests
-//! - **Provider request audits**: bounded `model.provider_request` structure and
-//!   digest evidence persisted before model streams without duplicating bulk media
+//! - **Provider request audits**: bounded `tron.model_provider_request.v3`
+//!   manifests plus redacted request evidence persisted before model streams
+//!   without duplicating bulk media or message bodies
 //! - **Logs**: bounded operational log queries
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
 //!   history, preserving separate client display text and model-facing tool result text
@@ -55,6 +56,10 @@
 //! - Persisted event rows are decoded through the owning SQLite connection so
 //!   inline and blob-backed payloads share one resolution path.
 //! - `model.provider_request` is written before any provider stream opens.
+//! - The append-only event is the sole durable request-context ledger. V3
+//!   records ordered instructions, automatic-context provenance, message
+//!   source sidecars, environment, and exact tool selection; no context table
+//!   or parallel cache is installed.
 //! - Provider audit events project bulk strings to byte-count and digest
 //!   evidence; provider request bytes remain owned by the model boundary.
 //! - Log query filters are applied in the storage owner so diagnostics callers

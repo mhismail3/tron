@@ -63,4 +63,26 @@ final class DefaultSessionRepository: NetworkSessionRepository {
     func getHistory(limit: Int = 100) async throws -> [HistoryMessage] {
         try await sessionClient.getHistory(limit: limit)
     }
+
+    func contextRequests(
+        sessionId: String,
+        beforeSequence: Int64?,
+        limit: Int
+    ) async throws -> SessionContextRequestsResultDTO {
+        try await sessionClient.contextRequests(
+            sessionId: sessionId,
+            beforeSequence: beforeSequence,
+            limit: limit
+        )
+    }
+
+    func contextRequestDetail(
+        sessionId: String,
+        eventId: String
+    ) async throws -> SessionContextRequestDetailDTO {
+        try await sessionClient.contextRequestDetail(
+            sessionId: sessionId,
+            eventId: eventId
+        )
+    }
 }

@@ -338,7 +338,7 @@ fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
 
     let audit = responder.request_audit(&request).unwrap();
 
-    assert_eq!(audit.format, "tron.model_provider_request.v2");
+    assert_eq!(audit.format, "tron.model_provider_request.v3");
     assert_eq!(
         audit.provider_type,
         crate::shared::protocol::messages::Provider::OpenAi

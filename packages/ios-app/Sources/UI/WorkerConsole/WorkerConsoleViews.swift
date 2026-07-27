@@ -116,6 +116,7 @@ struct WorkerConsoleSheet: View {
     @State private var selectedSection: EngineDashboardSection = .workers
     @State private var selectedCoreTool: EngineSurfaceToolDTO?
     @State private var showInboxAudit = false
+    @State private var showWorkerSystem = false
 
     var body: some View {
         NavigationStack {
@@ -200,6 +201,12 @@ struct WorkerConsoleSheet: View {
                         uniqueKeysWithValues: viewModel.workers.map { ($0.workerId, $0.name) }
                     ),
                     repository: repository
+                )
+            }
+            .sheet(isPresented: $showWorkerSystem) {
+                WorkerSystemSheet(
+                    workers: viewModel.engineSnapshot?.workerArchitecture ?? [],
+                    fixedToolCount: UInt64(viewModel.coreToolCount)
                 )
             }
             .task(id: EngineDashboardRefreshKey(
@@ -397,7 +404,7 @@ struct WorkerConsoleSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             WorkerConsoleSectionHeader(
                 title: "Persistent workers",
-                detail: "Each enabled worker publishes one direct typed tool for agents to select when useful."
+                detail: "Direct chat tools and internal policy specialists share one durable runtime."
             )
 
             if !connectionState.isConnected {
@@ -415,6 +422,33 @@ struct WorkerConsoleSheet: View {
                     detail: "Ask Tron to create a persistent worker. It will appear here once the server activates it."
                 )
             } else {
+                Button {
+                    showWorkerSystem = true
+                } label: {
+                    HStack(spacing: 11) {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                            .foregroundStyle(.tronCyan)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Open Worker System")
+                                .font(TronTypography.sans(
+                                    size: TronTypography.sizeBodySM,
+                                    weight: .semibold
+                                ))
+                                .foregroundStyle(.tronTextPrimary)
+                            Text("Inspect ownership, exposure, runners, hooks, boundaries, and relationships.")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextSecondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(12)
+                    .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.engineSnapshot?.workerArchitecture?.isEmpty != false)
+                .sectionFill(.tronCyan, cornerRadius: 11, subtle: true, interactive: true)
+
                 LazyVStack(spacing: 10) {
                     ForEach(viewModel.workers) { worker in
                         let surface = viewModel.availableWorkerTools.first {
@@ -494,100 +528,4 @@ struct WorkerConsoleSheet: View {
         }
     }
 
-}
-
-private struct WorkerConsoleRow: View {
-    let worker: WorkerSummaryDTO
-    let surface: AvailableWorkerToolDTO?
-
-    private var status: WorkerConsoleStatus {
-        WorkerConsolePresentation.status(for: worker)
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: status.systemImage)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(status.color)
-                .frame(width: 24, height: 24)
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 7) {
-                    Text(worker.name)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(1)
-                    Text(status.title)
-                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                        .foregroundStyle(status.color)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .glassEffect(.regular.tint(status.color.opacity(0.15)), in: .capsule)
-                }
-
-                Text(worker.description)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronTextSecondary)
-                    .lineLimit(2)
-
-                HStack(spacing: 8) {
-                    compactMetadataLabel(
-                        WorkerConsolePresentation.runnerLabel(worker.runnerKind),
-                        systemImage: "cpu"
-                    )
-                    compactMetadataLabel(
-                        WorkerConsolePresentation.triggerLabel(worker.triggerCount),
-                        systemImage: "alarm"
-                    )
-                    if let surface {
-                        compactMetadataLabel(
-                            WorkerConsolePresentation.completedRunLabel(surface.completedRuns),
-                            systemImage: "checkmark.circle"
-                        )
-                    }
-                }
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .lineLimit(1)
-
-                HStack(spacing: 7) {
-                    if surface != nil {
-                        workerSurfaceBadge("Available to agents", color: .tronSuccess)
-                    } else if worker.enabled && !worker.retired {
-                        workerSurfaceBadge("Tool unavailable", color: .tronWarning)
-                    }
-                    Text("Version \(WorkerConsolePresentation.compactIdentifier(worker.activeVersion, length: 8))")
-                        .font(TronTypography.code(size: TronTypography.sizeSM))
-                        .foregroundStyle(.tronTextMuted)
-                }
-                .lineLimit(1)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(13)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .sectionFill(status.color, cornerRadius: 12, subtle: true, interactive: true)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(worker.name), \(status.title), \(WorkerConsolePresentation.runnerLabel(worker.runnerKind))"
-        )
-    }
-
-    private func workerSurfaceBadge(_ title: String, color: Color) -> some View {
-        Text(title)
-            .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .glassEffect(.regular.tint(color.opacity(0.14)), in: .capsule)
-    }
-
-    private func compactMetadataLabel(_ title: String, systemImage: String) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: systemImage)
-            Text(title)
-        }
-    }
 }

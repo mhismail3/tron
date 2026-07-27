@@ -1224,6 +1224,52 @@ of this augmented provider-facing description, so active-version, provenance,
 background-delivery, and polling instructions do not inflate model input or
 bias relevance.
 
+### Inspectable provider context
+
+Every model request is explained by the existing append-only
+`model.provider_request` session event. Format
+`tron.model_provider_request.v3` adds a provider-neutral `contextManifest`
+beside the already bounded, redacted provider envelope; it does not introduce
+a context table, retention policy, cache, or registry. The turn runner persists
+this event before opening the provider stream.
+
+A turn-local context assembly is the only writer for automatic system
+contributions. It records, in order, base instructions, the engine-surface
+primer, Continuity Curator output, Inbox Context Curator output, environment
+information, and provider-adapter additions. Finalization verifies that those
+contributions exactly reconstruct the provider-neutral system prompt. It also
+records:
+
+- every provider-visible message in order, including its content kinds,
+  redacted preview, byte count, digest, projection state, durable source event
+  IDs, and worker invocation when one exists;
+- continuity and inbox evaluations even when they were empty, unavailable,
+  failed, skipped, or supplied by deterministic fallback;
+- continuity memory ID, revision, and scope evidence returned by compatible
+  Continuity Curator versions, without injecting those identifiers into the
+  prompt;
+- the exact fixed and worker tool surface, immutable worker versions,
+  selected/omitted state, routing mechanism, bounded ranking evidence, and
+  schema digests;
+- redacted environment projections and whole-section digests tying the
+  manifest to the final `Context`.
+
+Message text remains canonical in the normal session/context pipeline. A
+parallel in-memory sidecar carries only event and invocation identifiers;
+reconstruction derives it from existing event rows, and projection/compaction
+marks genuinely synthetic messages as generated rather than inventing
+provenance. Binary/media bytes, credential-shaped values, and hidden provider
+reasoning are never copied into the audit. Media is represented by type, byte
+counts, and digest evidence.
+
+Authenticated clients read this same authority with
+`session::context_requests` (reverse-chronological, cursor-paged, limit 1–20)
+and `session::context_request_detail` (exact event and session ID). These
+operations query only provider-request events and never invoke a model, hook,
+worker, or relevance calculation. Agent-worker session IDs use the same reads.
+Legacy v2 rows retain their redacted provider audit and counts while
+request-specific provenance is explicitly labeled unavailable.
+
 At each provider request boundary, the worker-kernel-owned resolver captures the
 catalog revision and ranks dynamic workers by explicit session promotion, the
 active `worker_relevance` hook, semantic score, recent successes, recency, and
@@ -1282,12 +1328,52 @@ evidence plus operational inventories:
   selection reason, relevance evidence, and immutable worker version;
 - current healthy engine-hook and native-client-action owners, including the
   immutable version that a client may invoke through the ordinary worker path;
-- canonical engine worker summaries and stop-all state.
+- canonical engine worker summaries and stop-all state;
+- a compact `workerArchitecture` graph derived from active immutable bundles:
+  exposure, runner kind/model, hooks, client actions/deliveries, triggers,
+  dispatch routes, exact `agentTools` dependencies, presentation suite/role,
+  version, health, and provenance.
 
 The selected `surface.tools` array is the exact next provider projection; the
 fixed and available-worker inventories are operator evidence and must not be
 mistaken for provider availability. The operation is deliberately not projected
-as model vocabulary.
+as model vocabulary. The architecture graph is introspection only. It does not
+create hierarchy, routing policy, or a second worker registry.
+
+### Current worker profile and shape
+
+Worker identity is profile-owned and dynamically loaded; neither Rust nor iOS
+compiles this list as permanent product vocabulary. At this checkpoint the
+development profile contains 26 enabled workers: 18 direct and 8 internal; 14
+agent runners and 12 deterministic command runners.
+
+| Family | Workers |
+|---|---|
+| Core policy | Compaction Worker (internal/agent), Continuity Curator (direct/command), Inbox Context Curator (internal/agent), Session Organizer (direct/command), Session Title Curator (internal/agent), Worker Relevance Router (internal/agent) |
+| Automation | Automation Schedules (internal/command), Automation Reminders (direct/command), Notification Policy (direct/command), Automation Workflows (direct/command) |
+| Native boundary | Local Transcription (internal/command), Artifact Studio (direct/command), Browser Operator (direct/agent), Mac Operator (direct/agent) |
+| Research | Research Search (direct/command), Research Source Review (internal/agent), Research Citation (internal/agent), Research Coordinator (direct/agent) |
+| Worker lifecycle | Engine Steward (direct/agent), Procedure Library (direct/command), Worker Evaluator (direct/agent), Worker Forge (direct/agent) |
+| Domain | Work Ledger (direct/command), Knowledge Index (direct/command), Software Workspace (direct/agent), General Delegate (direct/agent) |
+
+The shape follows four rules. One worker owns each independent domain state,
+lifecycle, or reusable policy; deterministic behavior uses command runners
+while semantic interpretation uses bounded agent runners; direct exposure is
+reserved for concise chat outcomes while hooks/specialists/protocol workers
+stay internal; fixed code owns only custody, authentication, native permission,
+canonical mutation, and durable dispatch. Notification transport, artifact
+custody, microphone delivery, and host actuation therefore remain closed
+engine/native boundaries rather than semantic workers.
+
+For an ordinary chat request, the provider receives the intent-gated fixed
+primitive surface plus at most 12 of the enabled direct workers. Session
+promotions are considered first, followed by request relevance and bounded
+defaults. `worker_discover` can find a direct worker omitted from that request.
+Internal workers never enter the ordinary chat tool list. An agent-runner
+worker instead receives only its immutable bundle-declared `agentTools`
+allowlist, which may name internal specialists. The v3 request manifest records
+the exact result for each request; global counts are not a substitute for that
+evidence.
 
 ## Local Authority and Provenance
 
@@ -2411,11 +2497,20 @@ but remain reachable from their run cards and native Delegation detail.
 Compaction is a direct durable session boundary. Context clearing is a live
 transport event; the resulting context size is reflected by later session/token
 truth rather than an unwritten `context.cleared` storage row. The iOS composer
-projects that same token truth as a context ring. Its minimal Session Context
-sheet combines used/remaining/window tokens with session input, output, and cost
-in one compact summary; it also shows current-model selection through
-`model::switch`, automatic-compaction status, and forking through
-`session::fork`. A bounded session-scoped worker section reads
+projects that same token truth as a context ring. Session Context uses the
+provider-request event as its sole request-context authority. It initially
+loads the latest summary, pages earlier requests on demand, and lazily loads
+exact detail. While connected it uses `session::context_requests` and
+`session::context_request_detail`; offline it decodes v3 rows already present
+in the existing EventDatabase rather than maintaining another cache.
+
+The sheet presents instructions, conversation/compaction, attachments,
+environment, automatic Continuity and Inbox contributions, exact selected and
+omitted tools with routing evidence, and the advanced redacted provider audit.
+It also embeds the dynamic Worker System graph from
+`engine::surface_snapshot`, including direct/internal and agent/command shape,
+hook/native boundaries, dispatches, and `agentTools` calls/called-by
+relationships. A bounded session-scoped worker section reads
 `worker_runs(originSessionId: ..., detail: "graph")`. The server pages by
 causal root so one coordinator's many descendants cannot crowd later runs out
 of Session Context; exact child and originating model-tool filters reopen the
@@ -2424,7 +2519,11 @@ another activity store. Worker progress/output strings are not accumulated
 into client state or concatenated into a guessed stage; only non-worker tools
 retain the generic free-text lifecycle presentation. Lifecycle invalidation
 and reconnect re-fetch the graph, with one-second polling used only while a
-visible run remains active.
+visible run remains active. Context-summary refresh likewise runs only while
+the sheet is open and the agent is active, followed by one terminal
+reconciliation. An agent-runner row can open the same Session Context
+inspection for its child `agentSessionId`; command workers truthfully report
+that no nested model context exists.
 It has no parallel context-control resource client, resource/action audit,
 memory editor, or fabricated manual compact/clear API.
 

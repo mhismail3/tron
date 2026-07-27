@@ -4,7 +4,10 @@
 //! Small JSON stays inline in `worker_invocations.output_json`; larger values
 //! use the shared payload-ref envelope and compressed blob tables in the same
 //! SQLite transaction. Inbox rows and public projections carry references,
-//! never a second exact result.
+//! never a second exact result. A retained historical invocation whose
+//! immutable bundle version was explicitly purged is the sole read-only
+//! exception: run-history projections resolve its still-owned output as legacy
+//! inline evidence because the original output-schema digest no longer exists.
 
 use super::*;
 
@@ -656,6 +659,31 @@ pub(super) fn result_reference_from_connection(
         "preview":payload.payload_preview,
         "message":"The exact validated result is stored durably. Pass this reference to workers that accept it, or call worker_result_read for only the JSON path/page needed.",
     }))
+}
+
+pub(super) fn result_reference_or_legacy_from_connection(
+    connection: &Connection,
+    invocation_id: &str,
+    stored_output: &str,
+) -> Result<Value, String> {
+    let immutable_version_exists = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1
+                FROM worker_invocations i
+                JOIN worker_versions v
+                  ON v.worker_id=i.worker_id AND v.version=i.worker_version
+                WHERE i.invocation_id=?1
+            )",
+            [invocation_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("inspect worker result version ownership: {error}"))?;
+    if immutable_version_exists {
+        result_reference_from_connection(connection, invocation_id)
+    } else {
+        resolve_stored_result(connection, invocation_id, stored_output)
+    }
 }
 
 pub(super) fn completed_result_receipt(reference: &Value) -> Value {

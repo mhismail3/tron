@@ -8,6 +8,7 @@
 //! row independently; same-role merging cannot normalize away malformed active
 //! content, while retired history cannot brick the session.
 
+use crate::domains::agent::context::message_store::MessageAuditSource;
 use crate::domains::session::event_store::{EventStore, SessionState};
 use crate::shared::protocol::messages::{Message, TokenUsage};
 
@@ -20,6 +21,8 @@ pub(in crate::domains) struct ReconstructedState {
     pub(in crate::domains) model: String,
     /// Reconstructed messages.
     pub(in crate::domains) messages: Vec<Message>,
+    /// Durable source identifiers aligned with `messages`.
+    pub(in crate::domains) message_sources: Vec<MessageAuditSource>,
     /// Cumulative token usage.
     pub(in crate::domains) token_usage: TokenUsage,
     /// Turn count.
@@ -65,6 +68,13 @@ fn from_session_state(state: &SessionState) -> Result<ReconstructedState, Runtim
             })
         })
         .collect::<Result<_, _>>()?;
+    let message_sources = state
+        .messages_with_event_ids
+        .iter()
+        .map(|message| {
+            MessageAuditSource::events(message.event_ids.iter().flatten().cloned().collect())
+        })
+        .collect();
 
     let token_usage = TokenUsage {
         input_tokens: state.token_usage.input_tokens as u64,
@@ -127,6 +137,7 @@ fn from_session_state(state: &SessionState) -> Result<ReconstructedState, Runtim
     Ok(ReconstructedState {
         model: state.model.clone(),
         messages,
+        message_sources,
         token_usage,
         turn_count,
         working_directory: Some(state.working_directory.clone()),
@@ -172,7 +183,7 @@ mod tests {
         let sid = &session.session.id;
 
         // Add user message event
-        let _ = store
+        let user_event = store
             .append(&AppendOptions {
                 session_id: sid,
                 event_type: EventType::MessageUser,
@@ -186,7 +197,7 @@ mod tests {
             .unwrap();
 
         // Add assistant message event
-        let _ = store
+        let assistant_event = store
             .append(&AppendOptions {
                 session_id: sid,
                 event_type: EventType::MessageAssistant,
@@ -202,6 +213,13 @@ mod tests {
         let state = reconstruct(&store, sid).unwrap();
         assert_eq!(state.model, "test-model");
         assert_eq!(state.messages.len(), 2);
+        assert_eq!(
+            state.message_sources,
+            vec![
+                MessageAuditSource::events(vec![user_event.id]),
+                MessageAuditSource::events(vec![assistant_event.id]),
+            ]
+        );
     }
 
     #[test]

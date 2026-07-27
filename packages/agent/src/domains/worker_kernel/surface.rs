@@ -150,8 +150,11 @@ pub(crate) struct SurfaceToolSnapshot {
     pub(crate) owner_worker: String,
     pub(crate) description: String,
     pub(crate) input_schema: Value,
+    pub(crate) input_schema_sha256: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) output_schema: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) output_schema_sha256: Option<String>,
     pub(crate) effect_class: String,
     pub(crate) risk: String,
     pub(crate) exposed: bool,
@@ -179,7 +182,12 @@ pub(crate) struct AvailableWorkerToolSnapshot {
     pub(crate) projected: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) selection_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) omission_reason: Option<String>,
+    pub(crate) ranking_mechanism: String,
     pub(crate) relevance_score: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) router_explanation: Option<String>,
     pub(crate) completed_runs: u64,
 }
 
@@ -192,6 +200,13 @@ pub(crate) struct EngineSurfaceSnapshot {
     pub(crate) fixed_tool_count: usize,
     pub(crate) projected_worker_count: usize,
     pub(crate) available_worker_count: usize,
+    pub(crate) ranking_mechanism: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) router_worker_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) router_worker_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) router_invocation_id: Option<String>,
     pub(crate) tools: Vec<SurfaceToolSnapshot>,
     pub(crate) available_workers: Vec<AvailableWorkerToolSnapshot>,
 }
@@ -280,7 +295,7 @@ pub(crate) async fn resolve_tool_surface(
         })
         .map(|promotion| promotion.worker_id.clone())
         .collect::<BTreeSet<_>>();
-    let ranked = super::retrieval::rank_workers_with_hook(
+    let ranking = super::retrieval::rank_workers_with_hook_evidence(
         host,
         session_id,
         origin_worker_id,
@@ -289,6 +304,7 @@ pub(crate) async fn resolve_tool_surface(
         &applicable_promotions,
     )
     .await;
+    let ranked = &ranking.ranks;
     let query_is_empty = super::retrieval::query_is_empty(relevance_query);
     let worker_rank = ranked
         .iter()
@@ -321,7 +337,7 @@ pub(crate) async fn resolve_tool_surface(
             };
             let _ = selected_dynamic.insert(rank.key.clone(), "session_promotion");
         }
-        for rank in &ranked {
+        for rank in ranked {
             if selected_dynamic.contains_key(&rank.key)
                 || (!query_is_empty && rank.relevance_score == 0)
                 || selected_dynamic.len() >= MAX_RELEVANT_WORKERS
@@ -356,7 +372,21 @@ pub(crate) async fn resolve_tool_surface(
                 promoted: rank.promoted,
                 projected: selection_reason.is_some(),
                 selection_reason,
+                omission_reason: (!selected_dynamic.contains_key(function.id.as_str())).then(
+                    || {
+                        if !query_is_empty && rank.relevance_score == 0 {
+                            "not_relevant"
+                        } else if selected_dynamic.len() >= MAX_RELEVANT_WORKERS {
+                            "projection_limit"
+                        } else {
+                            "not_selected"
+                        }
+                        .to_owned()
+                    },
+                ),
+                ranking_mechanism: ranking.mechanism.clone(),
                 relevance_score: rank.relevance_score,
+                router_explanation: rank.explanation.clone(),
                 completed_runs: rank.completed_runs,
             })
         })
@@ -402,17 +432,21 @@ pub(crate) async fn resolve_tool_surface(
                 "duplicate model tool name {model_name} in live catalog"
             ));
         }
+        let input_schema = function
+            .request_schema
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({"type":"object"}));
+        let output_schema = function.response_schema.clone();
         snapshot_tools.push(SurfaceToolSnapshot {
             model_name: model_name.clone(),
             function_id: function.id.as_str().to_owned(),
             function_revision: function.revision.0,
             owner_worker: function.owner_worker.as_str().to_owned(),
             description: function.description.clone(),
-            input_schema: function
-                .request_schema
-                .clone()
-                .unwrap_or_else(|| serde_json::json!({"type":"object"})),
-            output_schema: function.response_schema.clone(),
+            input_schema_sha256: schema_digest(&input_schema)?,
+            output_schema_sha256: output_schema.as_ref().map(schema_digest).transpose()?,
+            input_schema,
+            output_schema,
             effect_class: function.effect_class.as_str().to_owned(),
             risk: function.risk_level.as_str().to_owned(),
             exposed: true,
@@ -493,6 +527,10 @@ pub(crate) async fn resolve_tool_surface(
             fixed_tool_count,
             projected_worker_count,
             available_worker_count,
+            ranking_mechanism: ranking.mechanism,
+            router_worker_id: ranking.router_worker_id,
+            router_worker_version: ranking.router_worker_version,
+            router_invocation_id: ranking.router_invocation_id,
             tools: snapshot_tools,
             available_workers,
         },
@@ -521,17 +559,21 @@ pub(crate) async fn fixed_tool_inventory(
             .tools
             .iter()
             .any(|tool| tool.function_id == function.id.as_str());
+        let input_schema = function
+            .request_schema
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({"type":"object"}));
+        let output_schema = function.response_schema.clone();
         tools.push(SurfaceToolSnapshot {
             model_name: descriptor.model_name.to_owned(),
             function_id: function.id.as_str().to_owned(),
             function_revision: function.revision.0,
             owner_worker: function.owner_worker.as_str().to_owned(),
             description: function.description.clone(),
-            input_schema: function
-                .request_schema
-                .clone()
-                .unwrap_or_else(|| serde_json::json!({"type":"object"})),
-            output_schema: function.response_schema.clone(),
+            input_schema_sha256: schema_digest(&input_schema)?,
+            output_schema_sha256: output_schema.as_ref().map(schema_digest).transpose()?,
+            input_schema,
+            output_schema,
             effect_class: function.effect_class.as_str().to_owned(),
             risk: function.risk_level.as_str().to_owned(),
             exposed,
@@ -547,6 +589,12 @@ pub(crate) async fn fixed_tool_inventory(
 fn surface_hash(tools: &[SurfaceToolSnapshot]) -> Result<String, String> {
     let bytes = serde_json::to_vec(tools).map_err(|error| error.to_string())?;
     Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn schema_digest(schema: &Value) -> Result<String, String> {
+    serde_json::to_vec(schema)
+        .map(|bytes| hex::encode(Sha256::digest(bytes)))
+        .map_err(|error| format!("serialize tool schema for inspection digest: {error}"))
 }
 
 fn retrieval_document(
@@ -659,7 +707,12 @@ mod tests {
             owner_worker: "demo".to_owned(),
             description: "Demo worker".to_owned(),
             input_schema: serde_json::json!({"type":"object"}),
+            input_schema_sha256: schema_digest(&serde_json::json!({"type":"object"}))
+                .expect("input digest"),
             output_schema: Some(serde_json::json!({"type":"object"})),
+            output_schema_sha256: Some(
+                schema_digest(&serde_json::json!({"type":"object"})).expect("output digest"),
+            ),
             effect_class: "PureRead".to_owned(),
             risk: "low".to_owned(),
             exposed: true,

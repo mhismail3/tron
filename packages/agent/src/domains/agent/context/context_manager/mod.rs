@@ -11,7 +11,7 @@ use crate::shared::protocol::model_tools::ModelTool;
 
 use super::compaction_engine::{CompactionDeps, CompactionEngine};
 use super::constants::CHARS_PER_TOKEN;
-use super::message_store::MessageStore;
+use super::message_store::{MessageAuditSource, MessageStore};
 use super::summarizer::Summarizer;
 use super::token_estimator;
 use super::types::{CompactionResult, ContextManagerConfig};
@@ -59,8 +59,23 @@ impl ContextManager {
         self.messages.add(message);
     }
 
+    /// Add one message with request-inspection provenance.
+    pub fn add_message_with_source(&mut self, message: Message, source: MessageAuditSource) {
+        self.messages.add_with_source(message, source);
+    }
+
     pub fn set_messages(&mut self, messages: Vec<Message>) {
         self.messages.set(messages);
+        self.api_context_tokens = None;
+    }
+
+    /// Install reconstructed messages with their durable event sidecars.
+    pub fn set_messages_with_sources(
+        &mut self,
+        messages: Vec<Message>,
+        sources: Vec<MessageAuditSource>,
+    ) {
+        self.messages.set_with_sources(messages, sources);
         self.api_context_tokens = None;
     }
 
@@ -76,6 +91,12 @@ impl ContextManager {
     #[must_use]
     pub fn messages_slice(&self) -> &[Message] {
         self.messages.as_slice()
+    }
+
+    /// Return message provenance aligned with [`Self::messages_slice`].
+    #[must_use]
+    pub fn message_audit_sources(&self) -> &[MessageAuditSource] {
+        self.messages.audit_sources()
     }
 
     #[must_use]

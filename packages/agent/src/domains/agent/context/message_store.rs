@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use crate::shared::protocol::messages::Message;
+pub use crate::shared::protocol::model_audit::MessageAuditSource;
 
 use super::token_estimator::estimate_message_tokens;
 
@@ -34,6 +35,7 @@ pub struct MessageStoreConfig {
 #[derive(Clone, Debug)]
 pub struct MessageStore {
     messages: Vec<Message>,
+    audit_sources: Vec<MessageAuditSource>,
     token_cache: Vec<u32>,
     /// Cached Arc snapshot. Invalidated on add/set/clear.
     arc_snapshot: Option<Arc<[Message]>>,
@@ -45,6 +47,7 @@ impl MessageStore {
     pub fn new() -> Self {
         Self {
             messages: Vec::new(),
+            audit_sources: Vec::new(),
             token_cache: Vec::new(),
             arc_snapshot: None,
         }
@@ -65,9 +68,15 @@ impl MessageStore {
     ///
     /// The token estimate is computed and cached immediately.
     pub fn add(&mut self, message: Message) {
+        self.add_with_source(message, MessageAuditSource::generated());
+    }
+
+    /// Add a message and its request-inspection provenance atomically.
+    pub fn add_with_source(&mut self, message: Message, source: MessageAuditSource) {
         self.arc_snapshot = None;
         let tokens = estimate_message_tokens(&message);
         self.messages.push(message);
+        self.audit_sources.push(source);
         self.token_cache.push(tokens);
     }
 
@@ -77,7 +86,24 @@ impl MessageStore {
     pub fn set(&mut self, messages: Vec<Message>) {
         self.arc_snapshot = None;
         self.token_cache = messages.iter().map(estimate_message_tokens).collect();
+        self.audit_sources = preserve_sources(&self.messages, &self.audit_sources, &messages);
         self.messages = messages;
+    }
+
+    /// Replace all messages with an exact, parallel provenance sidecar.
+    ///
+    /// Used only when durable reconstruction already supplied canonical source
+    /// event identifiers.
+    pub fn set_with_sources(
+        &mut self,
+        messages: Vec<Message>,
+        audit_sources: Vec<MessageAuditSource>,
+    ) {
+        debug_assert_eq!(messages.len(), audit_sources.len());
+        self.arc_snapshot = None;
+        self.token_cache = messages.iter().map(estimate_message_tokens).collect();
+        self.messages = messages;
+        self.audit_sources = audit_sources;
     }
 
     /// Get a clone of all messages.
@@ -91,6 +117,12 @@ impl MessageStore {
     #[must_use]
     pub fn as_slice(&self) -> &[Message] {
         &self.messages
+    }
+
+    /// Return the provenance sidecar aligned with [`Self::as_slice`].
+    #[must_use]
+    pub fn audit_sources(&self) -> &[MessageAuditSource] {
+        &self.audit_sources
     }
 
     /// Get a shared reference-counted snapshot of messages (amortized zero-copy).
@@ -134,6 +166,33 @@ impl MessageStore {
     pub fn is_empty(&self) -> bool {
         self.messages.is_empty()
     }
+}
+
+fn preserve_sources(
+    old_messages: &[Message],
+    old_sources: &[MessageAuditSource],
+    new_messages: &[Message],
+) -> Vec<MessageAuditSource> {
+    if old_messages == new_messages {
+        return old_sources.to_vec();
+    }
+    let mut next_old = 0usize;
+    new_messages
+        .iter()
+        .map(|message| {
+            let match_index = old_messages[next_old..]
+                .iter()
+                .position(|candidate| candidate == message)
+                .map(|index| next_old + index);
+            match_index.map_or_else(MessageAuditSource::generated, |index| {
+                next_old = index.saturating_add(1);
+                old_sources
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(MessageAuditSource::generated)
+            })
+        })
+        .collect()
 }
 
 impl Default for MessageStore {
@@ -362,6 +421,96 @@ mod tests {
         assert_eq!(store.len(), 1);
         assert!(store.get_cached_tokens(0).is_some());
         assert!(store.get_cached_tokens(1).is_none());
+    }
+
+    #[test]
+    fn set_preserves_sources_for_messages_that_survive_projection() {
+        let first = Message::user("First");
+        let second = Message::assistant("Second");
+        let third = Message::user("Third");
+        let mut store = MessageStore::new();
+        store.add_with_source(
+            first.clone(),
+            MessageAuditSource::events(vec!["event-first".to_owned()]),
+        );
+        store.add_with_source(
+            second,
+            MessageAuditSource::events(vec!["event-second".to_owned()]),
+        );
+        store.add_with_source(
+            third.clone(),
+            MessageAuditSource::events(vec!["event-third".to_owned()]),
+        );
+
+        store.set(vec![first, third]);
+
+        assert_eq!(
+            store.audit_sources(),
+            &[
+                MessageAuditSource::events(vec!["event-first".to_owned()]),
+                MessageAuditSource::events(vec!["event-third".to_owned()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn set_marks_new_compaction_projection_as_generated() {
+        let original = Message::user("Original");
+        let mut store = MessageStore::new();
+        store.add_with_source(
+            original.clone(),
+            MessageAuditSource::events(vec!["event-original".to_owned()]),
+        );
+
+        store.set(vec![
+            Message::user("Generated compaction summary"),
+            original,
+        ]);
+
+        assert_eq!(store.audit_sources()[0], MessageAuditSource::generated());
+        assert_eq!(
+            store.audit_sources()[1],
+            MessageAuditSource::events(vec!["event-original".to_owned()])
+        );
+    }
+
+    #[test]
+    fn same_length_replacement_does_not_relabel_generated_messages_as_durable() {
+        let mut store = MessageStore::new();
+        store.add_with_source(
+            Message::user("Original user"),
+            MessageAuditSource::events(vec!["event-user".to_owned()]),
+        );
+        store.add_with_source(
+            Message::assistant("Original assistant"),
+            MessageAuditSource::events(vec!["event-assistant".to_owned()]),
+        );
+
+        store.set(vec![
+            Message::user("Generated summary"),
+            Message::assistant("Generated acknowledgement"),
+        ]);
+
+        assert_eq!(
+            store.audit_sources(),
+            &[
+                MessageAuditSource::generated(),
+                MessageAuditSource::generated(),
+            ]
+        );
+    }
+
+    #[test]
+    fn set_with_sources_keeps_invocation_and_event_identity_aligned() {
+        let source = MessageAuditSource::invocation(
+            "invocation-1",
+            Some("tool-completion-event".to_owned()),
+        );
+        let mut store = MessageStore::new();
+
+        store.set_with_sources(vec![Message::user("Tool result")], vec![source.clone()]);
+
+        assert_eq!(store.audit_sources(), &[source]);
     }
 
     // -- as_arc --

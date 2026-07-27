@@ -25,6 +25,7 @@ pub(super) async fn build_prompt_agent(
     working_dir: &str,
     server_origin: String,
     messages: Vec<crate::shared::protocol::messages::Message>,
+    message_sources: Vec<crate::domains::agent::context::message_store::MessageAuditSource>,
     initial_turn_offset: u32,
     resolved_workspace_id: Option<String>,
     worker_max_agent_turns: Option<u32>,
@@ -80,6 +81,7 @@ pub(super) async fn build_prompt_agent(
         CreateAgentOpts::primitive(
             responder,
             messages,
+            message_sources,
             initial_turn_offset,
             compactor_settings.into(),
             invocation_abort_registry,

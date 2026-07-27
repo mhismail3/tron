@@ -162,15 +162,19 @@ protocol error. There is no nested child-invocation response envelope.
 
 `WorkerKernelClient.engineSurfaceSnapshot` calls the authenticated,
 non-model-facing `engine::surface_snapshot` read. The profile-level Engine
-Dashboard intentionally omits session context; a future contextual chat view
-may supply it when per-turn routing evidence is useful and clearly attributed.
+Dashboard remains profile-scoped, while Session Context supplies its exact
+session and provider-request identity for per-turn routing evidence.
 Strongly typed catalog DTOs expose the complete executable fixed-tool
 inventory, catalog revision, surface hash/counts, function/worker versions,
 every published worker's promoted/projected state, selection evidence, and
-canonical worker inventory. The server does not send a separately maintained
-description of its own source architecture. UI code does not reconstruct model
-visibility from raw catalog `[AnyCodable]` entries. Exact selected tool
-contracts remain internal to the provider request. The profile dashboard
+canonical worker inventory. The compact `workerArchitecture` projection is
+derived by the server from active immutable bundles and includes exposure,
+runner, hooks, client boundaries, triggers, dispatch routes, `agentTools`,
+suite, health, version, and provenance. The client renders those nodes and
+calls/called-by edges dynamically; it does not hard-code the current worker
+catalog or reconstruct execution policy from raw catalog `[AnyCodable]`
+entries. Exact selected tool contracts remain internal to the provider
+request. The profile dashboard
 renders fixed-function ownership plus global worker publication, health,
 runner, version, trigger, and successful-run evidence. It does not present
 session promotion or query-relevance scores without a named chat and actual
@@ -688,11 +692,35 @@ and reconstruction project the same typed token counts, reason, summary, and
 turn counts into timeline pills. Tapping a completed compaction opens its event
 detail.
 
-The composer context ring and minimal Session Context sheet consume only
-existing session truth: current context tokens, selected-model window,
-remaining capacity, accumulated model traffic and cost in one compact summary,
-automatic-compaction status, the existing model catalog/switch operation, and
-`session::fork`. The sheet also requests bounded `detail: "graph"` worker runs
+The composer context ring and Session Context sheet consume only existing
+session truth. Token usage, model-window pressure, compaction, model switching,
+and `session::fork` retain their existing owners. The latest
+`model.provider_request` event is the sole durable explanation of what a model
+received. While connected the sheet lists bounded summaries through
+`session::context_requests` and loads one exact manifest/audit through
+`session::context_request_detail`; while offline it decodes provider-request
+events already held by EventDatabase. There is no context-specific database,
+cache, subscription, or polling service.
+
+The sheet initially loads only the latest request. Earlier requests page on
+demand and raw audit text loads only when opened. While an agent is active,
+latest-request reconciliation runs only while the sheet is visible and performs
+one final refresh after the run stops. Cancellation and view teardown own every
+task.
+
+The v3 manifest drives standardized sections for ordered instructions,
+conversation/compaction, attachments and documents, environment, automatic
+Continuity and Inbox evaluations, exact selected/omitted tools, and the advanced
+redacted provider audit. Empty, unavailable, failed, skipped, and deterministic
+fallback outcomes remain visible. Binary media renders only metadata, size,
+and digest; it is never converted to audit text. The Worker System section uses
+the dynamic architecture projection and a reusable detail sheet to show
+direct/internal exposure, agent/command runners, hooks/native boundaries,
+dispatch and `agentTools` relationships, suite, version, health, and provenance.
+The Engine dashboard opens this same sheet from its Workers section instead of
+maintaining another hierarchy view.
+
+The sheet also requests bounded `detail: "graph"` worker runs
 filtered by the durable originating session. Because causal descendants
 preserve the root session id, this includes direct and nested worker activity.
 Rows group by causal root and explicitly retain queued, running, detached,
@@ -703,11 +731,12 @@ geometry; headings remain attached to the content they introduce while wider
 inter-section spacing separates each completed card from the next section.
 The worker heading and explanatory line are one compact label block, and worker
 rows do not introduce a separate dashboard visual scale.
-Run detail opens a read-only transcript only when the invocation created a
-real agent child session. The originating session remains provenance and never
-masquerades as a worker transcript; command and resident-service runs therefore
-do not show a chat action. Fork confirmation is a native animated liquid-glass
-sheet rather than an abrupt dialog overlay.
+Run detail opens a read-only transcript and nested Model Context action only
+when the invocation created a real agent child session. The originating session
+remains provenance and never masquerades as a worker transcript; command and
+resident-service runs explicitly report that they have no nested model
+context. Fork confirmation is a native animated liquid-glass sheet rather than
+an abrupt dialog overlay.
 Session actions are disabled while disconnected, compacting, or running a turn.
 There is no parallel context-control repository, resource/action audit,
 memory editor, or manual compact/clear façade. Those controls may appear only

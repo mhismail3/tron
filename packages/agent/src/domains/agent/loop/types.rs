@@ -117,6 +117,9 @@ pub struct RunContext {
     /// context snapshots.
     #[serde(skip)]
     pub run_id: Option<String>,
+    /// Durable `message.user` event admitted before this run started.
+    #[serde(skip)]
+    pub user_event_id: Option<String>,
     /// Engine trace inherited from the hidden `agent::run_turn` invocation.
     #[serde(skip)]
     pub engine_trace_id: Option<crate::engine::TraceId>,

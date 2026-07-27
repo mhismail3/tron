@@ -97,6 +97,39 @@ pub(crate) async fn session_get_history_value(
     )
     .await
 }
+
+pub(crate) async fn session_context_requests_value(
+    params: Option<&Value>,
+    deps: &Deps,
+) -> Result<Value, ToolError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let before_sequence = params
+        .and_then(|payload| payload.get("beforeSequence"))
+        .and_then(Value::as_i64);
+    let limit = params
+        .and_then(|payload| payload.get("limit"))
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok());
+    crate::domains::session::query::SessionQueryService::context_requests(
+        deps,
+        session_id,
+        before_sequence,
+        limit,
+    )
+    .await
+}
+
+pub(crate) async fn session_context_request_detail_value(
+    params: Option<&Value>,
+    deps: &Deps,
+) -> Result<Value, ToolError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let event_id = require_string_param(params, "eventId")?;
+    crate::domains::session::query::SessionQueryService::context_request_detail(
+        deps, session_id, event_id,
+    )
+    .await
+}
 pub(crate) async fn session_export_value(
     params: Option<&Value>,
     deps: &Deps,

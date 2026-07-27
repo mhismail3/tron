@@ -40,7 +40,11 @@ struct ChatSheetContent: View {
                 isCompacting: viewModel.isCompacting,
                 isFork: eventStoreManager.sessions.first(where: { $0.id == sessionId })?.isFork == true,
                 modelRepository: dependencies.modelRepository,
+                sessionRepository: dependencies.sessionRepository,
                 workerRepository: dependencies.workerKernelRepository,
+                cachedProviderRequestEvents: viewModel.loadedReconstructionEvents.filter {
+                    $0.type == SessionEventType.modelProviderRequest.rawValue
+                },
                 onSelectModel: { model in
                     NotificationCenter.default.post(name: .modelPickerAction, object: model)
                 },

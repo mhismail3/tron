@@ -21,7 +21,7 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `provider_phase` | Resolve the live surface, concurrently project bounded worker inbox and continuity context, persist the request audit, and open the provider stream |
+//! | `provider_phase` | Resolve the live surface, concurrently evaluate bounded worker inbox and continuity context, finalize the typed context manifest, persist the v3 request audit, and only then open the provider stream |
 //! | `stream_phase` | Journal and consume the provider stream, including durable failure and cancellation terminalization |
 //! | `tool_phase` | Execute a provider-requested tool batch and persist its lifecycle |
 //! | `persistence` | Build and commit assistant/turn protocol rows |
@@ -32,7 +32,11 @@
 //! The root runner owns ordering across those phases. In particular, provider
 //! bytes cannot be consumed before request-audit persistence, and a successful
 //! stream cannot leave its journal until assistant, tool, and turn-end rows are
-//! durable.
+//! durable. Message bodies remain owned by the normal context/event pipeline;
+//! the parallel request-local source sidecar carries only event and invocation
+//! identifiers. Projection and compaction preserve matching identifiers and
+//! label genuinely synthetic messages as generated instead of fabricating
+//! provenance.
 
 mod failure;
 mod params;
@@ -452,39 +456,42 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         cost,
     );
 
-    if let Err(error) = persist_completed_assistant_message(
+    let assistant_event = match persist_completed_assistant_message(
         persister,
         session_id,
         assistant_payload,
         sequence_counter,
     ) {
-        let error_msg = format!("failed to persist assistant message: {error}");
-        error!(session_id, turn, error = %error_msg);
-        let failure = FailureEnvelope::new(
-            ASSISTANT_PERSIST_FAILED,
-            FailureCategory::Persistence,
-            error_msg.clone(),
-            false,
-            false,
-            FailureOrigin::AgentRuntime,
-        );
-        emit_turn_failure(
-            emitter,
-            persister,
-            session_id,
-            turn,
-            run_context,
-            sequence_counter,
-            &failure,
-            None,
-        );
-        return TurnResult {
-            success: false,
-            error: Some(error_msg),
-            stop_reason: Some(StopReason::Error),
-            ..Default::default()
-        };
-    }
+        Ok(event) => event,
+        Err(error) => {
+            let error_msg = format!("failed to persist assistant message: {error}");
+            error!(session_id, turn, error = %error_msg);
+            let failure = FailureEnvelope::new(
+                ASSISTANT_PERSIST_FAILED,
+                FailureCategory::Persistence,
+                error_msg.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            );
+            emit_turn_failure(
+                emitter,
+                persister,
+                session_id,
+                turn,
+                run_context,
+                sequence_counter,
+                &failure,
+                None,
+            );
+            return TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(StopReason::Error),
+                ..Default::default()
+            };
+        }
+    };
     info!(
         component = "agent.turn",
         agent_event = "assistant_message_persisted",
@@ -500,7 +507,11 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     // Persist succeeded — safe to commit the assistant turn to local context
     // and tell iOS the response is complete.
-    let _ = add_assistant_message_to_context(context_manager, &stream_result);
+    let _ = add_assistant_message_to_context(
+        context_manager,
+        &stream_result,
+        assistant_event.map(|event| event.id),
+    );
     if let Some(context_window_tokens) = token_record_json
         .as_ref()
         .and_then(|r| r["computed"]["contextWindowTokens"].as_u64())

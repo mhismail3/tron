@@ -6,6 +6,31 @@ use crate::domains::session::event_store::errors::Result;
 use crate::domains::session::event_store::types::payloads::TokenTotals;
 
 impl EventRepo {
+    /// Read one reverse-chronological page of one event type beneath an
+    /// optional sequence cursor.
+    pub(crate) fn get_by_type_before_sequence(
+        conn: &Connection,
+        session_id: &str,
+        event_type: &str,
+        before_sequence: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<EventRow>> {
+        let sql = format!(
+            "SELECT {EVENT_COLUMNS} FROM events
+             WHERE session_id = ?1 AND type = ?2
+               AND (?3 IS NULL OR sequence < ?3)
+             ORDER BY sequence DESC LIMIT ?4"
+        );
+        let mut statement = conn.prepare_cached(&sql)?;
+        let rows = statement
+            .query_map(
+                params![session_id, event_type, before_sequence, limit],
+                Self::map_row,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// Get events of specific types within a session.
     pub fn get_by_types(
         conn: &Connection,

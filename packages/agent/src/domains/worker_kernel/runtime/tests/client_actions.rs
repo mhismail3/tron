@@ -54,6 +54,15 @@ async fn atomic_upsert_exposes_current_healthy_speech_transcription_owner() {
             "workerVersion":outcome.worker.active_version,
         }])
     );
+    let architecture = surface["workerArchitecture"].as_array().unwrap();
+    let node = architecture
+        .iter()
+        .find(|node| node["workerId"] == outcome.worker.worker_id)
+        .expect("active worker architecture node");
+    assert_eq!(node["modelExposure"], "direct");
+    assert_eq!(node["runnerKind"], "command");
+    assert_eq!(node["clientActions"], json!(["speech_transcription"]));
+    assert!(node["calls"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

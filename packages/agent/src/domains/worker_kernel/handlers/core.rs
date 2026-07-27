@@ -141,12 +141,45 @@ pub(super) async fn continuity_context(
         CONTINUITY_CONTEXT_MAX_BYTES,
         "…",
     );
+    let sources = project_continuity_sources(execution.output.get("sources"));
     Ok(json!({
         "handled":true,
         "workerId":execution.worker_id,
         "workerVersion":execution.worker_version,
+        "invocationId":execution.invocation_id,
         "narrative":narrative,
+        "sources":sources,
     }))
+}
+
+fn project_continuity_sources(value: Option<&Value>) -> Vec<Value> {
+    value
+        .and_then(Value::as_array)
+        .map(|sources| {
+            sources
+                .iter()
+                .filter_map(|source| {
+                    let memory_id = source.get("memoryId")?.as_str()?;
+                    let revision = source.get("revision")?.as_u64()?;
+                    let scope = source.get("scope")?.as_str()?;
+                    matches!(scope, "global" | "project").then(|| {
+                        let mut projected = json!({
+                            "memoryId":crate::shared::foundation::redaction::redact_sensitive_content(memory_id),
+                            "revision":revision,
+                            "scope":scope,
+                        });
+                        if let Some(project) = source.get("project").and_then(Value::as_str) {
+                            projected["project"] = json!(
+                                crate::shared::foundation::redaction::redact_sensitive_content(project)
+                            );
+                        }
+                        projected
+                    })
+                })
+                .take(CONTINUITY_CONTEXT_LIMIT as usize)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(super) async fn session_title(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
@@ -210,6 +243,7 @@ pub(super) async fn worker_relevance(
         "handled":true,
         "workerId":execution.worker_id,
         "workerVersion":execution.worker_version,
+        "invocationId":execution.invocation_id,
         "rankings":rankings,
     }))
 }
@@ -243,6 +277,49 @@ mod tests {
         );
         assert!(bounded.len() <= CONTINUITY_CONTEXT_MAX_BYTES);
         assert!(bounded.is_char_boundary(bounded.len()));
+    }
+
+    #[test]
+    fn continuity_sources_are_bounded_validated_and_redacted() {
+        let mut sources = vec![json!({
+            "memoryId":format!("api_key={}", "a".repeat(64)),
+            "revision":2,
+            "scope":"project",
+            "project":format!("api_key={}", "b".repeat(64)),
+        })];
+        sources.push(json!({
+            "memoryId":"ignored-invalid-scope",
+            "revision":1,
+            "scope":"session",
+        }));
+        sources.extend((0..10).map(|index| {
+            json!({
+                "memoryId":format!("memory-{index}"),
+                "revision":index + 1,
+                "scope":"global",
+            })
+        }));
+
+        let projected = project_continuity_sources(Some(&Value::Array(sources)));
+
+        assert_eq!(projected.len(), CONTINUITY_CONTEXT_LIMIT as usize);
+        assert!(
+            !projected[0]["memoryId"]
+                .as_str()
+                .unwrap_or_default()
+                .contains(&"a".repeat(64))
+        );
+        assert!(
+            !projected[0]["project"]
+                .as_str()
+                .unwrap_or_default()
+                .contains(&"b".repeat(64))
+        );
+        assert!(
+            projected
+                .iter()
+                .all(|source| { matches!(source["scope"].as_str(), Some("global" | "project")) })
+        );
     }
 }
 

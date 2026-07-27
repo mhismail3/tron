@@ -203,6 +203,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         .map(|session| session.workspace_id)
         .filter(|id| !id.is_empty());
     let messages = state.messages.clone();
+    let message_sources = state.message_sources.clone();
     let initial_turn_offset = match resolve_turn_offset(&event_store, &session_id, state.turn_count)
     {
         Ok(offset) => offset,
@@ -238,6 +239,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         &working_dir,
         server_origin.clone(),
         messages,
+        message_sources,
         initial_turn_offset,
         resolved_workspace_id.clone(),
         engine_causality
@@ -283,6 +285,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         }),
         user_content_override,
         run_id: Some(run_id.clone()),
+        user_event_id: Some(user_event.id.clone()),
         engine_trace_id: engine_causality
             .as_ref()
             .map(|causality| causality.context.trace_id.clone()),

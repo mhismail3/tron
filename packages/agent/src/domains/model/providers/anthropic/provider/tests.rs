@@ -213,6 +213,16 @@ fn system_param_oauth_has_prefix() {
 }
 
 #[test]
+fn oauth_provider_audit_reports_the_same_system_prefix() {
+    let provider = AnthropicProvider::new(oauth_config());
+    let additions = Provider::audit_context_additions(&provider);
+
+    assert_eq!(additions.len(), 1);
+    assert_eq!(additions[0].kind, "provider_system_prefix");
+    assert_eq!(additions[0].content, OAUTH_SYSTEM_PROMPT_PREFIX);
+}
+
+#[test]
 fn system_param_oauth_only_stable() {
     let provider = AnthropicProvider::new(oauth_config());
     let ctx = Context {

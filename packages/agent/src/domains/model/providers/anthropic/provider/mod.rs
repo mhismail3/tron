@@ -420,6 +420,28 @@ impl Provider for AnthropicProvider {
             .map_err(ProviderError::Json)
     }
 
+    fn audit_context_additions(
+        &self,
+    ) -> Vec<crate::shared::protocol::model_audit::SystemContextContribution> {
+        if !self.is_oauth() {
+            return Vec::new();
+        }
+        let prefix = self
+            .config
+            .provider_settings
+            .system_prompt_prefix
+            .as_deref()
+            .unwrap_or(OAUTH_SYSTEM_PROMPT_PREFIX);
+        vec![
+            crate::shared::protocol::model_audit::SystemContextContribution::new(
+                "provider_system_prefix",
+                "Anthropic provider instructions",
+                prefix,
+                serde_json::json!({"provider":"anthropic","authentication":"oauth"}),
+            ),
+        ]
+    }
+
     #[instrument(skip_all, fields(provider = "anthropic", model = %self.config.model))]
     async fn stream(
         &self,

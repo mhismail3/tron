@@ -120,6 +120,57 @@ struct SessionContextPresentationTests {
         ) == "Completed")
     }
 
+    @Test("Request tool evidence preserves selected and omitted workers")
+    func requestWorkerSelectionEvidence() {
+        let surface = AnyCodable([
+            "availableWorkers": [
+                [
+                    "workerId": "research",
+                    "modelName": "worker_research",
+                    "workerVersion": "v2",
+                    "projected": true,
+                    "selectionReason": "relevance",
+                    "rankingMechanism": "semantic_hook",
+                    "relevanceScore": 900,
+                    "routerExplanation": "Research directly matches this request.",
+                ] as [String: Any],
+                [
+                    "workerId": "memory",
+                    "modelName": "worker_memory",
+                    "workerVersion": "v4",
+                    "projected": false,
+                    "omissionReason": "selection_limit",
+                    "rankingMechanism": "deterministic_fallback",
+                    "relevanceScore": 20,
+                ] as [String: Any],
+            ],
+        ] as [String: Any])
+
+        let workers = SessionContextPresentation.workerSelections(from: surface)
+
+        #expect(workers.count == 2)
+        #expect(workers[0].projected)
+        #expect(workers[0].selectionReason == "relevance")
+        #expect(workers[0].mechanism == "semantic_hook")
+        #expect(workers[0].explanation == "Research directly matches this request.")
+        #expect(!workers[1].projected)
+        #expect(workers[1].omissionReason == "selection_limit")
+    }
+
+    @Test("Provider audit formatter never renders inline media bytes")
+    func providerAuditMediaProjection() {
+        let audit = AnyCodable([
+            "image_url": "data:image/png;base64," + String(repeating: "a", count: 512),
+            "text": "visible",
+        ])
+
+        let rendered = SessionContextAuditFormatter.projectedJSONString(audit)
+
+        #expect(rendered.contains("[media omitted:"))
+        #expect(rendered.contains("visible"))
+        #expect(!rendered.contains(String(repeating: "a", count: 128)))
+    }
+
     private func workerRun(
         id: String,
         parent: String?,

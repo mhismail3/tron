@@ -57,6 +57,40 @@ pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
             .request_schema(json!({"additionalProperties":false,"properties":{"beforeId":{"type":"string"},"limit":{"type":"integer"},"sessionId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
+        FunctionContract::new("session::context_requests", "session", EffectClass::PureRead, RiskLevel::Low)
+            .request_schema(json!({
+                "additionalProperties":false,
+                "properties":{
+                    "sessionId":{"type":"string","minLength":1},
+                    "beforeSequence":{"type":"integer","minimum":1},
+                    "limit":{"type":"integer","minimum":1,"maximum":20}
+                },
+                "required":["sessionId"],
+                "type":"object"
+            }))
+            .response_schema(json!({
+                "additionalProperties":false,
+                "properties":{
+                    "requests":{"type":"array","maxItems":20,"items":{"type":"object"}},
+                    "hasMore":{"type":"boolean"},
+                    "nextBeforeSequence":{"type":["integer","null"]}
+                },
+                "required":["requests","hasMore","nextBeforeSequence"],
+                "type":"object"
+            }))
+            .build()?,
+        FunctionContract::new("session::context_request_detail", "session", EffectClass::PureRead, RiskLevel::Low)
+            .request_schema(json!({
+                "additionalProperties":false,
+                "properties":{
+                    "sessionId":{"type":"string","minLength":1},
+                    "eventId":{"type":"string","minLength":1}
+                },
+                "required":["sessionId","eventId"],
+                "type":"object"
+            }))
+            .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .build()?,
         FunctionContract::new("session::reconstruct", "session", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"beforeEventId":{"type":"string"},"limit":{"type":"integer"},"sessionId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
@@ -118,6 +152,14 @@ mod tests {
             (
                 "session::get_history",
                 &["beforeId", "limit", "sessionId"][..],
+            ),
+            (
+                "session::context_requests",
+                &["beforeSequence", "limit", "sessionId"][..],
+            ),
+            (
+                "session::context_request_detail",
+                &["eventId", "sessionId"][..],
             ),
             (
                 "session::reconstruct",

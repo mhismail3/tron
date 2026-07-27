@@ -389,6 +389,60 @@ impl EventStore {
         EventRepo::get_by_types(&conn, session_id, types, limit)
     }
 
+    /// Resolve one bounded reverse-chronological page of provider-request
+    /// audit events, including blob-backed payloads.
+    pub(crate) fn get_provider_request_audits(
+        &self,
+        session_id: &str,
+        before_sequence: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<(EventRow, serde_json::Value)>> {
+        let conn = self.conn()?;
+        EventRepo::get_by_type_before_sequence(
+            &conn,
+            session_id,
+            EventType::ModelProviderRequest.as_str(),
+            before_sequence,
+            limit,
+        )?
+        .into_iter()
+        .map(|row| {
+            let payload = crate::shared::storage::resolve_stored_json_value(&conn, &row.payload)
+                .map_err(|error| {
+                    crate::domains::session::event_store::errors::EventStoreError::Internal(
+                        format!("resolve provider request audit {}: {error:#}", row.id),
+                    )
+                })?;
+            Ok((row, payload))
+        })
+        .collect()
+    }
+
+    /// Resolve one exact provider-request audit owned by a session.
+    pub(crate) fn get_provider_request_audit(
+        &self,
+        session_id: &str,
+        event_id: &str,
+    ) -> Result<Option<(EventRow, serde_json::Value)>> {
+        let conn = self.conn()?;
+        let Some(row) = EventRepo::get_by_id(&conn, event_id)? else {
+            return Ok(None);
+        };
+        if row.session_id != session_id
+            || row.event_type != EventType::ModelProviderRequest.as_str()
+        {
+            return Ok(None);
+        }
+        let payload = crate::shared::storage::resolve_stored_json_value(&conn, &row.payload)
+            .map_err(|error| {
+                crate::domains::session::event_store::errors::EventStoreError::Internal(format!(
+                    "resolve provider request audit {}: {error:#}",
+                    row.id
+                ))
+            })?;
+        Ok(Some((row, payload)))
+    }
+
     /// Get the latest event of a specific type for one session-turn ordinal.
     pub(crate) fn get_latest_event_by_type_and_turn(
         &self,

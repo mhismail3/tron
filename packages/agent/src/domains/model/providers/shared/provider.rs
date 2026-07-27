@@ -447,6 +447,18 @@ pub trait Provider: Send + Sync {
         })))
     }
 
+    /// Provider-owned system additions that are not present in the neutral
+    /// [`Context`](crate::shared::protocol::messages::Context).
+    ///
+    /// This is inspection evidence only. Implementations must return the same
+    /// deterministic additions used by request construction and must never
+    /// include credentials or hidden reasoning.
+    fn audit_context_additions(
+        &self,
+    ) -> Vec<crate::shared::protocol::model_audit::SystemContextContribution> {
+        Vec::new()
+    }
+
     /// Stream a response from the LLM.
     ///
     /// Returns a stream of [`StreamEvent`]s. The caller should consume events

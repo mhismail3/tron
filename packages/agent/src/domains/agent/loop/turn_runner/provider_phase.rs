@@ -17,6 +17,10 @@ use crate::domains::agent::r#loop::primitive_surface::{self, ResolvedPrimitiveSu
 use crate::domains::agent::r#loop::types::{RunContext, TurnResult};
 use crate::domains::model::responder::{ModelResponder, ModelResponse, ModelResponseRequest};
 use crate::shared::foundation::retry::RetryConfig;
+use crate::shared::protocol::messages::Context;
+use crate::shared::protocol::model_audit::{
+    AutomaticContextEvaluation, ContextManifest, SystemContextContribution,
+};
 use crate::shared::server::failure::{
     ENGINE_TOOL_SURFACE_FAILED, FailureCategory, FailureEnvelope, FailureOrigin,
     RUNTIME_PERSISTENCE_ERROR,
@@ -46,6 +50,102 @@ pub(super) struct ProviderPhaseParams<'a> {
 pub(super) struct PreparedProviderResponse {
     pub primitive_surface: ResolvedPrimitiveSurface,
     pub response: ModelResponse,
+}
+
+/// Turn-local owner of the provider-neutral context and its inspection
+/// evidence. Callers cannot mutate the system prompt without recording the
+/// same ordered contribution.
+struct ProviderContextAssembly {
+    context: Context,
+    message_sources: Vec<crate::domains::agent::context::message_store::MessageAuditSource>,
+    system_contributions: Vec<SystemContextContribution>,
+    automatic_context: Vec<AutomaticContextEvaluation>,
+}
+
+impl ProviderContextAssembly {
+    fn new(
+        context: Context,
+        message_sources: Vec<crate::domains::agent::context::message_store::MessageAuditSource>,
+    ) -> Self {
+        let mut system_contributions = Vec::new();
+        if let Some(base) = context
+            .system_prompt
+            .as_deref()
+            .filter(|base| !base.is_empty())
+        {
+            system_contributions.push(SystemContextContribution::new(
+                "base_instructions",
+                "Agent instructions",
+                base,
+                serde_json::json!({"owner":"agent_runtime"}),
+            ));
+        }
+        Self {
+            context,
+            message_sources,
+            system_contributions,
+            automatic_context: Vec::new(),
+        }
+    }
+
+    fn append_system(
+        &mut self,
+        kind: &str,
+        label: &str,
+        content: &str,
+        provenance: serde_json::Value,
+    ) {
+        if content.is_empty() {
+            return;
+        }
+        let system_prompt = self.context.system_prompt.get_or_insert_with(String::new);
+        if !system_prompt.is_empty() {
+            system_prompt.push_str("\n\n");
+        }
+        system_prompt.push_str(content);
+        self.system_contributions
+            .push(SystemContextContribution::new(
+                kind, label, content, provenance,
+            ));
+    }
+
+    fn add_automatic_context(&mut self, evaluation: AutomaticContextEvaluation) {
+        if let Some(narrative) = evaluation.narrative.as_deref() {
+            self.append_system(
+                &format!("{}_context", evaluation.kind),
+                if evaluation.kind == "continuity" {
+                    "Continuity context"
+                } else {
+                    "Worker Inbox context"
+                },
+                narrative,
+                serde_json::json!({
+                    "outcome":evaluation.outcome,
+                    "mechanism":evaluation.mechanism,
+                    "workerId":evaluation.worker_id,
+                    "workerVersion":evaluation.worker_version,
+                    "invocationId":evaluation.invocation_id,
+                    "sources":evaluation.sources,
+                }),
+            );
+        }
+        self.automatic_context.push(evaluation);
+    }
+
+    fn finalize(
+        self,
+        surface: &crate::domains::worker_kernel::EngineSurfaceSnapshot,
+    ) -> Result<(Context, ContextManifest), String> {
+        let tool_surface = serde_json::to_value(surface).map_err(|error| error.to_string())?;
+        let manifest = ContextManifest::build(
+            &self.context,
+            self.system_contributions,
+            tool_surface,
+            self.automatic_context,
+            &self.message_sources,
+        )?;
+        Ok((self.context, manifest))
+    }
 }
 
 pub(super) async fn open_provider_response(
@@ -177,27 +277,52 @@ pub(super) async fn open_provider_response(
             });
         }
     };
-    let mut context = projection.context;
+    let mut assembly = ProviderContextAssembly::new(
+        projection.context,
+        params.context_manager.message_audit_sources().to_vec(),
+    );
     let surface_context = primitive_surface::surface_context_primer(&primitive_surface.snapshot);
-    let system_prompt = context.system_prompt.get_or_insert_with(String::new);
-    if !system_prompt.is_empty() {
-        system_prompt.push_str("\n\n");
-    }
-    system_prompt.push_str(&surface_context);
-    if let Some(continuity_context) = continuity_context {
-        let system_prompt = context.system_prompt.get_or_insert_with(String::new);
-        if !system_prompt.is_empty() {
-            system_prompt.push_str("\n\n");
+    assembly.append_system(
+        "engine_surface_primer",
+        "Engine tool surface",
+        &surface_context,
+        serde_json::json!({
+            "catalogRevision":primitive_surface.snapshot.catalog_revision,
+            "surfaceHash":primitive_surface.snapshot.surface_hash,
+        }),
+    );
+    assembly.add_automatic_context(continuity_context);
+    assembly.add_automatic_context(worker_inbox_context);
+    let (context, context_manifest) = match assembly.finalize(&primitive_surface.snapshot) {
+        Ok(finalized) => finalized,
+        Err(error) => {
+            let error_msg = format!("failed to finalize provider context manifest: {error}");
+            let failure = FailureEnvelope::new(
+                crate::shared::server::failure::MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED,
+                FailureCategory::Persistence,
+                error_msg.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            );
+            emit_turn_failure(
+                params.emitter,
+                params.persister,
+                params.session_id,
+                params.turn,
+                params.run_context,
+                params.sequence_counter,
+                &failure,
+                None,
+            );
+            return Err(TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(crate::domains::agent::r#loop::errors::StopReason::Error),
+                ..Default::default()
+            });
         }
-        system_prompt.push_str(&continuity_context);
-    }
-    if let Some(worker_inbox_context) = worker_inbox_context {
-        let system_prompt = context.system_prompt.get_or_insert_with(String::new);
-        if !system_prompt.is_empty() {
-            system_prompt.push_str("\n\n");
-        }
-        system_prompt.push_str(&worker_inbox_context);
-    }
+    };
 
     let model_request = ModelResponseRequest {
         context,
@@ -207,7 +332,22 @@ pub(super) async fn open_provider_response(
         retry_config: params.retry_config.cloned(),
     };
     let model_request_audit = match params.responder.request_audit(&model_request) {
-        Ok(audit) => audit,
+        Ok(audit) => audit.with_context_manifest(
+            params.turn,
+            params
+                .run_context
+                .engine_trace_id
+                .as_ref()
+                .map(|id| id.as_str().to_owned()),
+            params
+                .run_context
+                .parent_invocation_id
+                .as_ref()
+                .map(|id| id.as_str().to_owned()),
+            params.run_context.origin_worker_id.clone(),
+            params.run_context.origin_worker_invocation_id.clone(),
+            context_manifest,
+        ),
         Err(error) => {
             let error_msg = error.to_string();
             let failure = error.failure().clone();

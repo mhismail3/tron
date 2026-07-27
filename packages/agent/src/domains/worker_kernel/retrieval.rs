@@ -84,8 +84,31 @@ pub(crate) struct WorkerRetrievalRank {
     pub(crate) worker_id: String,
     pub(crate) promoted: bool,
     pub(crate) relevance_score: usize,
+    pub(crate) explanation: Option<String>,
     pub(crate) completed_runs: u64,
     pub(crate) updated_at: String,
+}
+
+/// Ranking plus request-specific evidence about how the ordering was chosen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WorkerRankingOutcome {
+    pub(crate) ranks: Vec<WorkerRetrievalRank>,
+    pub(crate) mechanism: String,
+    pub(crate) router_worker_id: Option<String>,
+    pub(crate) router_worker_version: Option<String>,
+    pub(crate) router_invocation_id: Option<String>,
+}
+
+impl WorkerRankingOutcome {
+    fn deterministic(ranks: Vec<WorkerRetrievalRank>, mechanism: &str) -> Self {
+        Self {
+            ranks,
+            mechanism: mechanism.to_owned(),
+            router_worker_id: None,
+            router_worker_version: None,
+            router_invocation_id: None,
+        }
+    }
 }
 
 pub(crate) fn rank_workers(
@@ -99,6 +122,7 @@ pub(crate) fn rank_workers(
         .into_iter()
         .map(|document| WorkerRetrievalRank {
             relevance_score: relevance_score(&document, &query_terms, &query_phrases),
+            explanation: None,
             promoted: promoted_workers.contains(&document.worker_id),
             key: document.key,
             worker_id: document.worker_id,
@@ -120,17 +144,45 @@ pub(crate) async fn rank_workers_with_hook(
     query: Option<&str>,
     promoted_workers: &BTreeSet<String>,
 ) -> Vec<WorkerRetrievalRank> {
+    rank_workers_with_hook_evidence(
+        host,
+        session_id,
+        origin_worker_id,
+        documents,
+        query,
+        promoted_workers,
+    )
+    .await
+    .ranks
+}
+
+/// Resolve ranking while retaining whether semantic policy or deterministic
+/// recovery produced the exact request surface.
+pub(crate) async fn rank_workers_with_hook_evidence(
+    host: &crate::engine::EngineHostHandle,
+    session_id: &str,
+    origin_worker_id: Option<&str>,
+    documents: Vec<WorkerRetrievalDocument>,
+    query: Option<&str>,
+    promoted_workers: &BTreeSet<String>,
+) -> WorkerRankingOutcome {
     // Agent-runner workers resolve their own bounded tool surface. Applying a
     // semantic router there can recurse across internal hook owners (for
     // example Relevance -> Inbox -> Relevance), so worker sessions always use
     // the deterministic recovery scorer.
     if origin_worker_id.is_some() {
-        return rank_workers(documents, query, promoted_workers);
+        return WorkerRankingOutcome::deterministic(
+            rank_workers(documents, query, promoted_workers),
+            "child_agent_allowlist",
+        );
     }
     // Ranking zero or one worker is deterministic and does not justify a
     // semantic-model lifecycle boundary.
     if query_is_empty(query) || documents.len() <= 1 {
-        return rank_workers(documents, query, promoted_workers);
+        return WorkerRankingOutcome::deterministic(
+            rank_workers(documents, query, promoted_workers),
+            "deterministic_trivial",
+        );
     }
     let deterministic = rank_workers(documents.clone(), query, promoted_workers);
     if deterministic
@@ -140,7 +192,7 @@ pub(crate) async fn rank_workers_with_hook(
         .count()
         <= 1
     {
-        return deterministic;
+        return WorkerRankingOutcome::deterministic(deterministic, "deterministic_trivial");
     }
     let meaningful_worker_ids = deterministic
         .iter()
@@ -172,13 +224,13 @@ pub(crate) async fn rank_workers_with_hook(
             ))
         });
     let Some(invocation) = invocation else {
-        return deterministic;
+        return WorkerRankingOutcome::deterministic(deterministic, "deterministic_fallback");
     };
     let outcome = host.invoke(invocation).await;
     let rankings = outcome
         .error
         .is_none()
-        .then_some(outcome.value)
+        .then_some(outcome.value.as_ref())
         .flatten()
         .filter(|value| value["handled"] == true)
         .and_then(|value| value["rankings"].as_array().cloned());
@@ -186,21 +238,55 @@ pub(crate) async fn rank_workers_with_hook(
         if let Some(error) = outcome.error {
             tracing::warn!(%error, "worker relevance hook failed; using deterministic recovery");
         }
-        return deterministic;
+        return WorkerRankingOutcome::deterministic(deterministic, "deterministic_fallback");
     };
-    let scores = rankings
+    let router_worker_id = outcome
+        .value
+        .as_ref()
+        .and_then(|value| value.get("workerId"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let router_worker_version = outcome
+        .value
+        .as_ref()
+        .and_then(|value| value.get("workerVersion"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let router_invocation_id = outcome
+        .value
+        .as_ref()
+        .and_then(|value| value.get("invocationId"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let semantic_evidence = rankings
         .into_iter()
         .filter_map(|ranking| {
             Some((
                 ranking["workerId"].as_str()?.to_owned(),
-                usize::try_from(ranking["score"].as_u64()?).ok()?,
+                (
+                    usize::try_from(ranking["score"].as_u64()?).ok()?,
+                    ranking["reason"].as_str().map(|reason| {
+                        crate::shared::foundation::text::truncate_with_suffix(
+                            &crate::shared::foundation::redaction::redact_sensitive_content(
+                                reason.trim(),
+                            ),
+                            512,
+                            "…",
+                        )
+                    }),
+                ),
             ))
         })
         .collect::<HashMap<_, _>>();
     let mut ranked = documents
         .into_iter()
         .map(|document| WorkerRetrievalRank {
-            relevance_score: scores.get(&document.worker_id).copied().unwrap_or(0),
+            relevance_score: semantic_evidence
+                .get(&document.worker_id)
+                .map_or(0, |evidence| evidence.0),
+            explanation: semantic_evidence
+                .get(&document.worker_id)
+                .and_then(|evidence| evidence.1.clone()),
             promoted: promoted_workers.contains(&document.worker_id),
             key: document.key,
             worker_id: document.worker_id,
@@ -209,7 +295,13 @@ pub(crate) async fn rank_workers_with_hook(
         })
         .collect::<Vec<_>>();
     ranked.sort_by(compare_rank);
-    ranked
+    WorkerRankingOutcome {
+        ranks: ranked,
+        mechanism: "semantic_hook".to_owned(),
+        router_worker_id,
+        router_worker_version,
+        router_invocation_id,
+    }
 }
 
 pub(super) fn semantic_candidate_payload(document: &WorkerRetrievalDocument) -> Value {
@@ -430,7 +522,7 @@ mod tests {
         let context = crate::shared::server::test_support::make_test_context();
         install_relevance_worker(
             &context.engine_host,
-            r#"{"rankings":[{"workerId":"formatter","score":1000},{"workerId":"research","score":1}]}"#,
+            r#"{"rankings":[{"workerId":"formatter","score":1000,"reason":"semantic match"},{"workerId":"research","score":1}]}"#,
         )
         .await;
         let documents = vec![
@@ -449,6 +541,7 @@ mod tests {
         .await;
         assert_eq!(ranked[0].worker_id, "formatter");
         assert_eq!(ranked[0].relevance_score, 1000);
+        assert_eq!(ranked[0].explanation.as_deref(), Some("semantic match"));
 
         let self_origin = rank_workers_with_hook(
             &context.engine_host,

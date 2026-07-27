@@ -126,10 +126,20 @@ impl TronAgent {
             UserMessageContent::Text(_) => "text",
             UserMessageContent::Blocks(_) => "blocks",
         };
-        self.context_manager.add_message(Message::User {
-            content: user_content,
-            timestamp: None,
-        });
+        self.context_manager.add_message_with_source(
+            Message::User {
+                content: user_content,
+                timestamp: None,
+            },
+            ctx.user_event_id.as_ref().map_or_else(
+                crate::domains::agent::context::message_store::MessageAuditSource::generated,
+                |event_id| {
+                    crate::domains::agent::context::message_store::MessageAuditSource::events(vec![
+                        event_id.clone(),
+                    ])
+                },
+            ),
+        );
 
         let run_base = |session_id: &str| {
             BaseEvent::now(session_id).with_trace_context(

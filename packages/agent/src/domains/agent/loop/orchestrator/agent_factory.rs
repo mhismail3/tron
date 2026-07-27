@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use crate::domains::agent::context::context_manager::ContextManager;
+use crate::domains::agent::context::message_store::MessageAuditSource;
 use crate::domains::agent::context::types::ContextManagerConfig;
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::r#loop::tron_agent::{AgentDeps, TronAgent};
@@ -13,6 +14,7 @@ use crate::shared::protocol::messages::Message;
 pub struct CreateAgentOpts {
     pub responder: Arc<dyn ModelResponder>,
     pub initial_messages: Vec<Message>,
+    pub initial_message_sources: Vec<MessageAuditSource>,
     pub initial_turn_offset: u32,
     pub compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
     pub invocation_abort_registry: Arc<InvocationAbortRegistry>,
@@ -23,6 +25,7 @@ impl CreateAgentOpts {
     pub fn primitive(
         responder: Arc<dyn ModelResponder>,
         initial_messages: Vec<Message>,
+        initial_message_sources: Vec<MessageAuditSource>,
         initial_turn_offset: u32,
         compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
         invocation_abort_registry: Arc<InvocationAbortRegistry>,
@@ -31,6 +34,7 @@ impl CreateAgentOpts {
         Self {
             responder,
             initial_messages,
+            initial_message_sources,
             initial_turn_offset,
             compaction_trigger_config,
             invocation_abort_registry,
@@ -56,7 +60,8 @@ impl AgentFactory {
             compaction,
         });
         if !opts.initial_messages.is_empty() {
-            context_manager.set_messages(opts.initial_messages);
+            context_manager
+                .set_messages_with_sources(opts.initial_messages, opts.initial_message_sources);
         }
 
         let mut agent = TronAgent::new(

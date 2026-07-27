@@ -120,6 +120,33 @@ final class SessionClient: EngineDomainClient {
         return result.messages
     }
 
+    func contextRequests(
+        sessionId: String,
+        beforeSequence: Int64? = nil,
+        limit: Int = 10
+    ) async throws -> SessionContextRequestsResultDTO {
+        try await invokeRead(
+            "session::context_requests",
+            SessionContextRequestsParams(
+                sessionId: sessionId,
+                beforeSequence: beforeSequence,
+                limit: min(max(limit, 1), 20)
+            ),
+            context: sessionContext(sessionId)
+        )
+    }
+
+    func contextRequestDetail(
+        sessionId: String,
+        eventId: String
+    ) async throws -> SessionContextRequestDetailDTO {
+        try await invokeRead(
+            "session::context_request_detail",
+            SessionContextRequestDetailParams(sessionId: sessionId, eventId: eventId),
+            context: sessionContext(sessionId)
+        )
+    }
+
     // MARK: - Reconstruction
 
     /// Reconstruct full session state for reconnection.

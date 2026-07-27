@@ -1581,6 +1581,52 @@ fn run_events_and_causal_tree_are_durable_ordered_server_truth() {
 }
 
 #[test]
+fn run_history_retains_output_when_an_immutable_worker_version_was_purged() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let (invocation, _) = store
+        .begin_invocation(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({"topic":"retained history"}),
+            "retained-history-key",
+            "trace-retained-history",
+            0,
+            "manual",
+            Some("session-retained-history"),
+        )
+        .unwrap();
+    assert!(store.claim_running(&invocation.invocation_id).unwrap());
+    store
+        .complete_invocation(
+            &invocation.invocation_id,
+            &published.worker.worker_id,
+            Ok(&json!({"ok":true})),
+        )
+        .unwrap();
+
+    store
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE worker_invocations
+             SET worker_version='purged-version'
+             WHERE invocation_id=?1",
+            [&invocation.invocation_id],
+        )
+        .unwrap();
+
+    let roots = store
+        .run_roots_filtered_page(None, None, Some("session-retained-history"), 10, 0)
+        .unwrap();
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0].output, Some(json!({"ok":true})));
+}
+
+#[test]
 fn restart_records_interruption_and_retry_without_replacing_the_invocation() {
     let temp = tempfile::tempdir().unwrap();
     let invocation_id = {

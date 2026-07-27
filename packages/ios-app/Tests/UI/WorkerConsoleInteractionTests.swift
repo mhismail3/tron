@@ -236,9 +236,13 @@ struct WorkerConsoleInteractionTests {
             contentsOf: workerRoot.appendingPathComponent("WorkerConsoleDetailSheets.swift"),
             encoding: .utf8
         )
+        let runTechnicalDetail = try String(
+            contentsOf: workerRoot.appendingPathComponent("WorkerRunTechnicalDetailsSheet.swift"),
+            encoding: .utf8
+        )
         #expect(runDetail.contains("WorkerResultInspectorSheet("))
         #expect(runDetail.contains("WorkerRunTechnicalDetailsSheet"))
-        #expect(runDetail.contains("Legacy Worker Result"))
+        #expect(runTechnicalDetail.contains("Legacy Worker Result"))
         #expect(!runDetail.contains("Inspect typed result"))
         #expect(!runDetail.contains("Run result projection"))
         #expect(!runDetail.contains("showOutput"))
@@ -306,6 +310,37 @@ struct WorkerConsoleInteractionTests {
         #expect(!dashboard.contains("struct EngineSurfaceCard"))
     }
 
+    @Test("Engine and Session Context reuse the dynamic Worker System sheet")
+    func workerSystemIsDynamicAndShared() throws {
+        let root = iosAppRoot()
+        let engine = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/WorkerConsoleViews.swift"
+            ),
+            encoding: .utf8
+        )
+        let context = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/Chat/Sheets/SessionContextSheet.swift"
+            ),
+            encoding: .utf8
+        )
+        let details = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/Chat/Sheets/SessionContextDetailSheets.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(engine.contains("WorkerSystemSheet("))
+        #expect(engine.contains("engineSnapshot?.workerArchitecture"))
+        #expect(context.contains("WorkerSystemSheet("))
+        #expect(context.contains("workerArchitecture"))
+        #expect(details.contains("struct WorkerSystemSheet"))
+        #expect(details.contains("worker.calls"))
+        #expect(details.contains("calledBy"))
+    }
+
     @Test("Worker sessions stay read only and inside dashboard sheets")
     func workerSessionsUseReadOnlySheets() throws {
         let root = iosAppRoot()
@@ -337,6 +372,9 @@ struct WorkerConsoleInteractionTests {
         #expect(details.contains("WorkerAuditSessionSheet"))
         #expect(details.contains("presentationMode: .workerAudit"))
         #expect(details.contains("readOnlyTitle: title"))
+        #expect(details.contains("title: \"Model Context\""))
+        #expect(details.contains("agentSessionId"))
+        #expect(details.contains("This deterministic command worker did not open a nested model request."))
         #expect(chat.contains("reconstructReadOnlyTranscript"))
         #expect(chat.contains("if presentationMode == .interactiveSession"))
         #expect(chat.contains("if presentationMode == .workerAudit"))

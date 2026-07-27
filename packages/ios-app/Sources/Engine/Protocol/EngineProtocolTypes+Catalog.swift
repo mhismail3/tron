@@ -32,10 +32,40 @@ struct AvailableWorkerToolDTO: Codable, Equatable, Identifiable, Sendable {
     let promoted: Bool
     let projected: Bool
     let selectionReason: String?
+    let omissionReason: String?
+    let rankingMechanism: String?
     let relevanceScore: UInt64
     let completedRuns: UInt64
 
     var id: String { workerId }
+
+    init(
+        workerId: String,
+        modelName: String,
+        functionId: String,
+        functionRevision: UInt64,
+        workerVersion: String?,
+        promoted: Bool,
+        projected: Bool,
+        selectionReason: String?,
+        omissionReason: String? = nil,
+        rankingMechanism: String? = nil,
+        relevanceScore: UInt64,
+        completedRuns: UInt64
+    ) {
+        self.workerId = workerId
+        self.modelName = modelName
+        self.functionId = functionId
+        self.functionRevision = functionRevision
+        self.workerVersion = workerVersion
+        self.promoted = promoted
+        self.projected = projected
+        self.selectionReason = selectionReason
+        self.omissionReason = omissionReason
+        self.rankingMechanism = rankingMechanism
+        self.relevanceScore = relevanceScore
+        self.completedRuns = completedRuns
+    }
 }
 
 struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
@@ -45,6 +75,34 @@ struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
     let projectedWorkerCount: UInt64
     let availableWorkerCount: UInt64
     let availableWorkers: [AvailableWorkerToolDTO]
+    let rankingMechanism: String?
+    let routerWorkerId: String?
+    let routerWorkerVersion: String?
+    let routerInvocationId: String?
+
+    init(
+        catalogRevision: UInt64,
+        surfaceHash: String,
+        fixedToolCount: UInt64,
+        projectedWorkerCount: UInt64,
+        availableWorkerCount: UInt64,
+        availableWorkers: [AvailableWorkerToolDTO],
+        rankingMechanism: String? = nil,
+        routerWorkerId: String? = nil,
+        routerWorkerVersion: String? = nil,
+        routerInvocationId: String? = nil
+    ) {
+        self.catalogRevision = catalogRevision
+        self.surfaceHash = surfaceHash
+        self.fixedToolCount = fixedToolCount
+        self.projectedWorkerCount = projectedWorkerCount
+        self.availableWorkerCount = availableWorkerCount
+        self.availableWorkers = availableWorkers
+        self.rankingMechanism = rankingMechanism
+        self.routerWorkerId = routerWorkerId
+        self.routerWorkerVersion = routerWorkerVersion
+        self.routerInvocationId = routerInvocationId
+    }
 }
 
 struct EngineHookOwnerDTO: Codable, Equatable, Identifiable, Sendable {
@@ -63,6 +121,41 @@ struct ClientActionOwnerDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String { action }
 }
 
+struct WorkerArchitectureEdgeDTO: Codable, Equatable, Identifiable, Sendable {
+    let kind: String
+    let label: String
+    let targetWorkerId: String?
+    let responseOwner: String?
+
+    var id: String { "\(kind):\(label):\(targetWorkerId ?? "fixed")" }
+}
+
+struct WorkerArchitecturePresentationDTO: Codable, Equatable, Sendable {
+    let suiteId: String?
+    let componentRole: String?
+    let primary: Bool
+}
+
+struct WorkerArchitectureNodeDTO: Codable, Equatable, Identifiable, Sendable {
+    let workerId: String
+    let name: String
+    let description: String
+    let activeVersion: String
+    let health: String
+    let modelExposure: String
+    let runnerKind: String
+    let runnerModel: String?
+    let engineHooks: [String]
+    let clientActions: [String]
+    let clientDeliveries: [String]
+    let triggerKinds: [String]
+    let calls: [WorkerArchitectureEdgeDTO]
+    let presentation: WorkerArchitecturePresentationDTO
+    let provenance: [AnyCodable]
+
+    var id: String { workerId }
+}
+
 struct EngineIntrospectionSnapshotDTO: Codable, Equatable, Sendable {
     let dispatchStopped: Bool
     let activeEngineHooks: [EngineHookOwnerDTO]
@@ -70,4 +163,23 @@ struct EngineIntrospectionSnapshotDTO: Codable, Equatable, Sendable {
     let fixedTools: [EngineSurfaceToolDTO]
     let surface: AgentToolSurfaceDTO
     let workers: [WorkerSummaryDTO]
+    let workerArchitecture: [WorkerArchitectureNodeDTO]?
+
+    init(
+        dispatchStopped: Bool,
+        activeEngineHooks: [EngineHookOwnerDTO],
+        activeClientActions: [ClientActionOwnerDTO],
+        fixedTools: [EngineSurfaceToolDTO],
+        surface: AgentToolSurfaceDTO,
+        workers: [WorkerSummaryDTO],
+        workerArchitecture: [WorkerArchitectureNodeDTO]? = nil
+    ) {
+        self.dispatchStopped = dispatchStopped
+        self.activeEngineHooks = activeEngineHooks
+        self.activeClientActions = activeClientActions
+        self.fixedTools = fixedTools
+        self.surface = surface
+        self.workers = workers
+        self.workerArchitecture = workerArchitecture
+    }
 }
