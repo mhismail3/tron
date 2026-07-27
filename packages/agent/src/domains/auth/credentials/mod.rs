@@ -19,11 +19,17 @@
 //! - [`google`]: Cloud Code Assist OAuth + API key
 //! - [`openai`]: OAuth + API key (provider key: `"openai-codex"`);
 //!   auth-path inference yields [`OpenAIAuthPath`] for model catalog filtering.
+//! - [`apple_push`]: typed APNs ES256 provider-token credentials used only by
+//!   native notification transport (provider key: `"apple-push"`)
+//! - [`notification_push`]: typed relay/direct transport selection and relay
+//!   credentials (provider key: `"notification-push"`)
 
 mod accounts;
 pub mod anthropic;
+pub(crate) mod apple_push;
 pub mod errors;
 pub mod google;
+pub(crate) mod notification_push;
 pub mod openai;
 pub mod pkce;
 mod provider_state;
@@ -54,7 +60,16 @@ pub(crate) fn shared_auth_client() -> &'static reqwest::Client {
 
 pub(crate) use crate::shared::server::error_mapping::map_auth_error;
 pub(crate) use accounts::*;
+pub(crate) use apple_push::{
+    ApplePushCredentials, clear_apple_push_credentials, load_apple_push_credentials,
+    save_apple_push_credentials,
+};
 pub use errors::AuthError;
+pub(crate) use notification_push::{
+    NotificationPushConfig, NotificationRelayCredentials, NotificationTransportMode,
+    clear_notification_relay_credentials, load_notification_push_config,
+    save_notification_relay_credentials, set_notification_transport_mode,
+};
 pub use pkce::{PkcePair, generate_pkce};
 pub(crate) use provider_state::*;
 pub(crate) use storage::{

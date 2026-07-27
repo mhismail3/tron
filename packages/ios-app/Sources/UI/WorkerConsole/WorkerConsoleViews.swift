@@ -24,6 +24,11 @@ private enum EngineDashboardSection: String, CaseIterable {
     case activity = "Activity"
 }
 
+private struct EngineDashboardRefreshKey: Equatable {
+    let isConnected: Bool
+    let section: EngineDashboardSection
+}
+
 struct WorkerConsoleDashboardBand: View {
     let viewModel: WorkerConsoleViewModel
     let action: () -> Void
@@ -197,7 +202,23 @@ struct WorkerConsoleSheet: View {
                     repository: repository
                 )
             }
-            .task { await refresh() }
+            .task(id: EngineDashboardRefreshKey(
+                isConnected: connectionState.isConnected,
+                section: selectedSection
+            )) {
+                await refresh()
+                if selectedSection == .activity {
+                    await viewModel.monitor(
+                        repository: repository,
+                        connectionState: connectionState
+                    )
+                } else {
+                    await viewModel.monitorSummary(
+                        repository: repository,
+                        connectionState: connectionState
+                    )
+                }
+            }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
@@ -460,10 +481,17 @@ struct WorkerConsoleSheet: View {
     }
 
     private func refresh() async {
-        await viewModel.refresh(
-            repository: repository,
-            connectionState: connectionState
-        )
+        if selectedSection == .activity {
+            await viewModel.refresh(
+                repository: repository,
+                connectionState: connectionState
+            )
+        } else {
+            await viewModel.refreshSummary(
+                repository: repository,
+                connectionState: connectionState
+            )
+        }
     }
 
 }

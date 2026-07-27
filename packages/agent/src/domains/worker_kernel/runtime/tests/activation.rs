@@ -494,6 +494,83 @@ async fn command_runner_upserts_invokes_and_replays_idempotently() {
 }
 
 #[tokio::test]
+async fn direct_tool_uses_narrow_schema_while_internal_invocation_keeps_full_schema() {
+    let (runtime, _home) = test_runtime(None);
+    let command = vec![
+        "python3".to_owned(),
+        "-c".to_owned(),
+        "import json,sys; print(json.dumps(json.load(sys.stdin)))".to_owned(),
+    ];
+    let mut bundle = command_bundle(command);
+    bundle.input_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["action"],
+        "properties":{"action":{"enum":["public","internal"]}}
+    });
+    bundle.tool_input_schema = Some(json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["action"],
+        "properties":{"action":{"const":"public"}}
+    }));
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+    let function_id = FunctionId::new(format!(
+        "worker_kernel::dynamic_{}",
+        outcome.worker.worker_id
+    ))
+    .unwrap();
+    let inspection_actor = crate::engine::ActorContext::new(
+        ActorId::new("system:narrow-tool-schema-test").unwrap(),
+        ActorKind::System,
+    );
+    let definition = runtime
+        .host
+        .inspect_function(&function_id, &inspection_actor)
+        .await
+        .unwrap();
+    assert_eq!(
+        definition.request_schema.unwrap()["properties"]["action"]["const"],
+        "public"
+    );
+
+    let direct_internal = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            function_id,
+            json!({"action":"internal"}),
+            CausalContext::new(
+                ActorId::new("agent:narrow-tool-schema-test").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-narrow-direct").unwrap(),
+            )
+            .with_session_id("session-narrow-direct")
+            .with_idempotency_key("narrow-direct"),
+        ))
+        .await;
+    assert!(direct_internal.error.is_some());
+
+    let internal = runtime
+        .invoke(request(
+            &outcome.worker.worker_id,
+            json!({"action":"internal"}),
+            "narrow-internal",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(internal.status, "completed");
+    assert_eq!(internal.output, Some(json!({"action":"internal"})));
+    assert!(
+        runtime
+            .store()
+            .summary(&outcome.worker.worker_id)
+            .unwrap()
+            .unwrap()
+            .enabled
+    );
+}
+
+#[tokio::test]
 async fn command_runner_writes_only_to_its_disposable_runtime_copy() {
     let (runtime, home) = test_runtime(None);
     let outcome = runtime

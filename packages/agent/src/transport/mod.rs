@@ -12,7 +12,10 @@
 //! the owning socket; it does not project transient connection state into the
 //! durable engine database. The engine applies visibility before stream pagination so a
 //! session-specific `/engine` subscriber cannot starve behind older events from
-//! other sessions. No durable subscription-record plane exists.
+//! other sessions. Clients explicitly unsubscribe when a presentation or
+//! processing lease ends; removal is idempotent, and each connection has a
+//! fixed active-subscription ceiling so abandoned clients cannot create
+//! unbounded polling work. No durable subscription-record plane exists.
 //!
 //! ## Submodules
 //!
@@ -56,6 +59,9 @@
 //!   parallel transport-owned lifecycle.
 //! - Live subscriptions without explicit cursors start at the topic tail; stored
 //!   replay requires explicit cursors.
+//! - Subscribe/unsubscribe state remains connection-local. Unsubscribe is
+//!   idempotent, and one connection cannot exceed the fixed active-subscription
+//!   ceiling.
 //!
 //! ## Test Ownership
 //!

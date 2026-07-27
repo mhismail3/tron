@@ -368,6 +368,18 @@ impl WorkerStore {
             };
             Self::delete_result_owners(&transaction, &invocation_ids)?;
             transaction
+                .execute(
+                    "DELETE FROM notification_delivery_attempts
+                     WHERE target_kind='alert' AND target_id IN (
+                        SELECT target.target_id
+                        FROM notification_delivery_targets target
+                        JOIN notification_deliveries delivery USING(delivery_id)
+                        WHERE delivery.worker_id=?1
+                     )",
+                    [worker_id],
+                )
+                .map_err(|error| format!("purge worker notification attempts: {error}"))?;
+            transaction
                 .execute("DELETE FROM worker_inbox WHERE worker_id=?1", [worker_id])
                 .map_err(|error| format!("purge worker inbox: {error}"))?;
             transaction
@@ -515,6 +527,107 @@ impl WorkerStore {
                 }))
             },
         )?;
+        let notification_deliveries = query_json_rows(
+            &connection,
+            "SELECT delivery_id,invocation_id,deduplication_key,title,body,thread_key,
+                    source_record_id,expires_at,actions_json,on_open_complete,read_at,
+                    read_reason,terminal_response,terminal_responded_at,trace_id,created_at,updated_at
+             FROM notification_deliveries WHERE worker_id=?1 ORDER BY created_at",
+            worker_id,
+            |row| {
+                let actions: String = row.get(8)?;
+                Ok(json!({
+                    "deliveryId":row.get::<_, String>(0)?,
+                    "invocationId":row.get::<_, String>(1)?,
+                    "deduplicationKey":row.get::<_, String>(2)?,
+                    "title":row.get::<_, String>(3)?,
+                    "body":row.get::<_, String>(4)?,
+                    "threadKey":row.get::<_, Option<String>>(5)?,
+                    "sourceRecordId":row.get::<_, Option<String>>(6)?,
+                    "expiresAt":row.get::<_, String>(7)?,
+                    "actions":serde_json::from_str::<Value>(&actions).unwrap_or(Value::Null),
+                    "onOpenComplete":row.get::<_, bool>(9)?,
+                    "readAt":row.get::<_, Option<String>>(10)?,
+                    "readReason":row.get::<_, Option<String>>(11)?,
+                    "terminalResponse":row.get::<_, Option<String>>(12)?,
+                    "terminalRespondedAt":row.get::<_, Option<String>>(13)?,
+                    "traceId":row.get::<_, String>(14)?,
+                    "createdAt":row.get::<_, String>(15)?,
+                    "updatedAt":row.get::<_, String>(16)?,
+                }))
+            },
+        )?;
+        let notification_targets = query_json_rows(
+            &connection,
+            "SELECT target.target_id,target.delivery_id,target.installation_id,target.state,
+                    target.attempt_count,target.apns_id,target.error_code,target.accepted_at,
+                    target.created_at,target.updated_at
+             FROM notification_delivery_targets target
+             JOIN notification_deliveries delivery USING(delivery_id)
+             WHERE delivery.worker_id=?1 ORDER BY target.created_at",
+            worker_id,
+            |row| {
+                Ok(json!({
+                    "targetId":row.get::<_, String>(0)?,
+                    "deliveryId":row.get::<_, String>(1)?,
+                    "installationId":row.get::<_, String>(2)?,
+                    "state":row.get::<_, String>(3)?,
+                    "attemptCount":row.get::<_, u32>(4)?,
+                    "apnsId":row.get::<_, Option<String>>(5)?,
+                    "errorCode":row.get::<_, Option<String>>(6)?,
+                    "acceptedAt":row.get::<_, Option<String>>(7)?,
+                    "createdAt":row.get::<_, String>(8)?,
+                    "updatedAt":row.get::<_, String>(9)?,
+                }))
+            },
+        )?;
+        let notification_attempts = query_json_rows(
+            &connection,
+            "SELECT attempt.attempt_id,attempt.target_id,attempt.attempt_number,
+                    attempt.state,attempt.apns_id,attempt.error_code,
+                    attempt.started_at,attempt.completed_at
+             FROM notification_delivery_attempts attempt
+             JOIN notification_delivery_targets target ON target.target_id=attempt.target_id
+             JOIN notification_deliveries delivery USING(delivery_id)
+             WHERE attempt.target_kind='alert' AND delivery.worker_id=?1
+             ORDER BY attempt.started_at",
+            worker_id,
+            |row| {
+                Ok(json!({
+                    "attemptId":row.get::<_, String>(0)?,
+                    "targetId":row.get::<_, String>(1)?,
+                    "attemptNumber":row.get::<_, u32>(2)?,
+                    "state":row.get::<_, String>(3)?,
+                    "apnsId":row.get::<_, Option<String>>(4)?,
+                    "errorCode":row.get::<_, Option<String>>(5)?,
+                    "startedAt":row.get::<_, String>(6)?,
+                    "completedAt":row.get::<_, String>(7)?,
+                }))
+            },
+        )?;
+        let notification_responses = query_json_rows(
+            &connection,
+            "SELECT response.response_id,response.client_mutation_id,response.delivery_id,
+                    response.installation_id,response.acknowledgement,response.accepted,
+                    response.response_json,response.created_at
+             FROM notification_responses response
+             JOIN notification_deliveries delivery USING(delivery_id)
+             WHERE delivery.worker_id=?1 ORDER BY response.created_at",
+            worker_id,
+            |row| {
+                let response: String = row.get(6)?;
+                Ok(json!({
+                    "responseId":row.get::<_, String>(0)?,
+                    "clientMutationId":row.get::<_, String>(1)?,
+                    "deliveryId":row.get::<_, String>(2)?,
+                    "installationId":row.get::<_, String>(3)?,
+                    "acknowledgement":row.get::<_, String>(4)?,
+                    "accepted":row.get::<_, bool>(5)?,
+                    "response":serde_json::from_str::<Value>(&response).unwrap_or(Value::Null),
+                    "createdAt":row.get::<_, String>(7)?,
+                }))
+            },
+        )?;
         Ok(json!({
             "format":"tron.worker_purge_records.v1",
             "exportedAt":chrono::Utc::now().to_rfc3339(),
@@ -526,6 +639,10 @@ impl WorkerStore {
             "inbox":inbox,
             "audit":audit,
             "health":health,
+            "notificationDeliveries":notification_deliveries,
+            "notificationTargets":notification_targets,
+            "notificationAttempts":notification_attempts,
+            "notificationResponses":notification_responses,
         }))
     }
 

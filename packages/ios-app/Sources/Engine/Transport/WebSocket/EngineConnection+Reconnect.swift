@@ -5,6 +5,13 @@ extension EngineConnection {
     // MARK: - Reconnection
 
     func handleDisconnect() async {
+        guard !reconnectLoopActive else {
+            logger.debug(
+                "Disconnect coalesced into the active reconnect owner",
+                category: .websocket
+            )
+            return
+        }
         logger.warning("Handling disconnect...", category: .websocket)
         isConnectedFlag = false
         negotiatedMaxMessageSize = nil
@@ -36,14 +43,39 @@ extension EngineConnection {
         }
 
         if isDeployRestarting {
-            reconnectTask = Task { [weak self] in
-                await self?.startDeployReconnection()
-            }
+            startReconnectOwnership(deployRestart: true)
         } else {
-            reconnectTask = Task { [weak self] in
-                await self?.startReconnection()
-            }
+            startReconnectOwnership(deployRestart: false)
         }
+    }
+
+    func startReconnectOwnership(deployRestart: Bool) {
+        guard !reconnectLoopActive else { return }
+        reconnectTaskGeneration &+= 1
+        let generation = reconnectTaskGeneration
+        reconnectLoopActive = true
+        reconnectTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            if deployRestart {
+                await startDeployReconnection()
+            } else {
+                await startReconnection()
+            }
+            finishReconnectOwnership(generation: generation)
+        }
+    }
+
+    func cancelReconnectOwnership() {
+        reconnectTaskGeneration &+= 1
+        reconnectLoopActive = false
+        reconnectTask?.cancel()
+        reconnectTask = nil
+    }
+
+    private func finishReconnectOwnership(generation: UInt64) {
+        guard reconnectTaskGeneration == generation else { return }
+        reconnectLoopActive = false
+        reconnectTask = nil
     }
 
     /// Run foreground reconnect probes until the socket returns or parks.
@@ -166,8 +198,7 @@ extension EngineConnection {
             return
         }
 
-        reconnectTask?.cancel()
-        reconnectTask = nil
+        cancelReconnectOwnership()
 
         reconnectAttempts = 0
         isDeployRestarting = false

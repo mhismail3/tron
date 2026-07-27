@@ -152,7 +152,16 @@ struct ChatView: View {
                 Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
             }
             viewModel.clearLocalNotifications()
+            viewModel.cancelRecording()
             viewModel.stopLiveEventStream()
+            viewModel.stopSpeechTranscriptionMonitoring()
+            let sessionEvents = services.events
+            Task { @MainActor in
+                await sessionEvents.releaseSessionEventSubscription(
+                    sessionId: sessionId,
+                    workspaceId: nil
+                )
+            }
             // Do not reset `initialLoadComplete` here. SwiftUI can send
             // `onDisappear` for transient app/sheet/navigation transitions
             // while the same view state may return; clearing it hides the
@@ -167,6 +176,31 @@ struct ChatView: View {
         }
         .task {
             let ticket = taskCoordinator.beginLifecycle()
+            taskCoordinator.replaceTask(.initialLoadWatchdog) { watchdogTicket in
+                do {
+                    try await Task.sleep(
+                        for: .milliseconds(
+                            ChatTranscriptRevealPolicy.initialShellLoadingBudgetMilliseconds
+                        )
+                    )
+                } catch {
+                    return
+                }
+                guard taskCoordinator.isCurrent(watchdogTicket),
+                      !Task.isCancelled,
+                      !initialLoadComplete else { return }
+                logger.warning(
+                    "[INIT] Initial reconstruction exceeded the shell loading budget; revealing recoverable state",
+                    category: .ui
+                )
+                viewModel.animationCoordinator.makeAllMessagesVisible(
+                    count: viewModel.messages.count
+                )
+                initialLoadComplete = true
+            }
+            if services.connection.connectionState.isConnected {
+                viewModel.startSpeechTranscriptionMonitoring()
+            }
             // PERFORMANCE OPTIMIZATION: Parallelize independent operations
             // and ensure UI is responsive immediately
             //
@@ -187,6 +221,7 @@ struct ChatView: View {
                 guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
                 await handleInitialMessageVisibility(guardedBy: ticket)
                 guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+                taskCoordinator.cancelTask(.initialLoadWatchdog)
                 if initialReconstructionOutcome == .retryableFailure {
                     scheduleCoalescedRecoveryRefresh()
                 }
@@ -211,6 +246,18 @@ struct ChatView: View {
             let recoveryGenerationBeforeReconstruction = viewModel.streamRecoveryRequestGeneration
             let initialReconstructionOutcome = await viewModel.connectAndReconstruct()
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+            do {
+                try await services.events.ensureSessionEventSubscription(
+                    sessionId: sessionId,
+                    workspaceId: nil
+                )
+            } catch {
+                logger.debug(
+                    "[INIT] Live session lease will retry on prompt/reconnect: \(error.localizedDescription)",
+                    category: .events
+                )
+            }
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             logger.debug("[INIT] connectAndReconstruct done, messages=\(viewModel.messages.count)", category: .ui)
 
             // Handle message visibility and set initialLoadComplete
@@ -218,6 +265,7 @@ struct ChatView: View {
             // AFTER the cascade starts, to prevent a flash where all messages are visible
             await handleInitialMessageVisibility(guardedBy: ticket)
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+            taskCoordinator.cancelTask(.initialLoadWatchdog)
             logger.debug("[INIT] handleInitialMessageVisibility done, initialLoadComplete=\(initialLoadComplete)", category: .ui)
             if initialReconstructionOutcome == .retryableFailure
                 || viewModel.streamRecoveryRequestGeneration != recoveryGenerationBeforeReconstruction {
@@ -225,6 +273,11 @@ struct ChatView: View {
             }
         }
         .onChange(of: services.connection.connectionState) { oldState, newState in
+            if newState.isConnected {
+                viewModel.startSpeechTranscriptionMonitoring()
+            } else {
+                viewModel.stopSpeechTranscriptionMonitoring()
+            }
             // React when connection transitions to connected
             if initialLoadComplete, newState.isConnected && !oldState.isConnected {
                 scheduleReconstructionRefresh()

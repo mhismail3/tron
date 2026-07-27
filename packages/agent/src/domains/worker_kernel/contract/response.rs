@@ -36,6 +36,61 @@ pub(super) fn response_schema(function: &str) -> Value {
             "required":["sessionId","title","updated"],
             "properties":{"sessionId":{"type":"string"},"title":{"type":"string"},"updated":{"type":"boolean"}}
         }),
+        "worker_kernel::notification_device_upsert" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["installationId","authorizationStatus","environment","topic","enabled","ready","registeredAt","transport"],
+            "properties":{
+                "installationId":{"type":"string"},"authorizationStatus":{"type":"string"},
+                "environment":{"type":"string"},"topic":{"type":"string"},
+                "enabled":{"type":"boolean"},"ready":{"type":"boolean"},
+                "registeredAt":{"type":"string"},
+                "transport":{
+                    "type":"object","additionalProperties":false,
+                    "required":["mode","configured"],
+                    "properties":{
+                        "mode":{"type":"string","enum":["relay","direct"]},
+                        "configured":{"type":"boolean"},
+                        "problemCode":{"type":"string"}
+                    }
+                }
+            }
+        }),
+        "worker_kernel::notification_device_disable" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["installationId","enabled","changed"],
+            "properties":{
+                "installationId":{"type":"string"},"enabled":{"type":"boolean"},
+                "changed":{"type":"boolean"}
+            }
+        }),
+        "worker_kernel::notification_deliveries" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["deliveries","unreadCount","nextCursor"],
+            "properties":{
+                "deliveries":{"type":"array"},"unreadCount":{"type":"integer"},
+                "nextCursor":{}
+            }
+        }),
+        "worker_kernel::notification_delivery_acknowledge" => json!({
+            "type":"object","additionalProperties":false,
+            "required":[
+                "deliveryId","clientMutationId","acknowledgement","accepted",
+                "currentTerminalResponse","read","eventRequired","workerId",
+                "sourceRecordId","traceId","occurredAt"
+            ],
+            "properties":{
+                "deliveryId":{"type":"string"},"clientMutationId":{"type":"string"},
+                "acknowledgement":{"type":"string"},"accepted":{"type":"boolean"},
+                "currentTerminalResponse":{},"read":{"type":"boolean"},
+                "eventRequired":{"type":"boolean"},"workerId":{"type":"string"},
+                "sourceRecordId":{},"traceId":{"type":"string"},"occurredAt":{"type":"string"}
+            }
+        }),
+        "worker_kernel::notification_delivery_status" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["delivery","targets","attempts"],
+            "properties":{"delivery":{"type":"object"},"targets":{"type":"array"},"attempts":{"type":"array"}}
+        }),
         "worker_kernel::core_proposal_create"
         | "worker_kernel::core_proposal_inspect"
         | "worker_kernel::core_proposal_apply" => core_proposal_response_schema(),

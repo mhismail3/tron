@@ -26,7 +26,10 @@ mod rebuild;
 mod snapshot;
 mod store;
 
-pub(super) use store::WorkerStore;
+pub(in crate::domains::worker_kernel) use store::{
+    NotificationDispatchOutcome, NotificationRefreshDispatch, NotificationTargetDispatch,
+    WorkerStore,
+};
 
 pub(crate) use snapshot::{
     ProfileSnapshot, create_profile_snapshot, ensure_worker_schema_snapshot,

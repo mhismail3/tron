@@ -23,7 +23,7 @@ enum AttachmentType: String, Codable, Equatable, Sendable {
 // MARK: - Attachment
 
 /// Unified attachment model for images, PDFs, and documents
-struct Attachment: Identifiable, Equatable {
+struct Attachment: Identifiable, Equatable, Sendable {
     let id: UUID
     let type: AttachmentType
     let data: Data

@@ -22,6 +22,8 @@ enum NavigationIntent: Equatable {
     case settings
     /// Process pending shared content from Share Extension
     case share
+    /// Open one engine-owned logical notification delivery.
+    case notification(serverId: String, deliveryId: String)
 }
 
 // MARK: - Deep Link Router
@@ -48,6 +50,12 @@ final class DeepLinkRouter {
     /// Handle notification payload from AppDelegate
     /// - Parameter notificationPayload: The userInfo dictionary from the notification
     func handle(notificationPayload: [AnyHashable: Any]) {
+        if let tron = notificationPayload["tron"] as? [String: Any],
+           let serverId = tron["serverId"] as? String,
+           let deliveryId = tron["deliveryId"] as? String {
+            pendingIntent = .notification(serverId: serverId, deliveryId: deliveryId)
+            return
+        }
         guard let sessionId = notificationPayload["sessionId"] as? String else {
             TronLogger.shared.warning("Deep link notification missing sessionId", category: .notification)
             return
@@ -98,10 +106,23 @@ final class DeepLinkRouter {
             TronLogger.shared.info("Deep link intent set: share", category: .notification)
             return true
 
+        case "notification":
+            return handleNotificationURL(url: url)
+
         default:
             TronLogger.shared.warning("Unknown deep link route: \(routeType)", category: .notification)
             return false
         }
+    }
+
+    private func handleNotificationURL(url: URL) -> Bool {
+        let path = url.pathComponents.filter { $0 != "/" }
+        guard path.count >= 2, !path[0].isEmpty, !path[1].isEmpty else {
+            TronLogger.shared.warning("Notification deep link missing server or delivery id", category: .notification)
+            return false
+        }
+        pendingIntent = .notification(serverId: path[0], deliveryId: path[1])
+        return true
     }
 
     /// Handle session URL (tron://session/{sessionId})

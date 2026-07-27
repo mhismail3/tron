@@ -37,13 +37,19 @@ extension EngineConnection {
                         continue
                     }
                     data = d
-                    logger.verbose("Received string message #\(messageCount): \(text.prefix(200))", category: .websocket)
+                    logger.verbose(
+                        "Received string message #\(messageCount): \(d.count) bytes",
+                        category: .websocket
+                    )
                 @unknown default:
                     logger.warning("Received unknown message type", category: .websocket)
                     continue
                 }
 
-                handleMessage(data)
+                let parsed = await Task.detached(priority: .userInitiated) {
+                    Self.parseInboundMessage(data)
+                }.value
+                handleParsedMessage(parsed, rawData: data)
 
             } catch {
                 if isConnectedFlag {
@@ -58,33 +64,87 @@ extension EngineConnection {
         logger.verbose("Receive loop exited after \(messageCount) messages", category: .websocket)
     }
 
-    func handleMessage(_ data: Data) {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            logger.warning("Received non-JSON message: \(String(data: data, encoding: .utf8) ?? "binary")", category: .websocket)
-            return
+    enum ParsedInboundMessage: Sendable {
+        case event(EngineEventDelivery)
+        case response(id: String)
+        case invalid(reason: InvalidInboundMessageReason)
+    }
+
+    enum InvalidInboundMessageReason: Sendable {
+        case malformedJSON
+        case malformedEvent
+        case missingRouting
+    }
+
+    private struct InboundRoutingFrame: Decodable, Sendable {
+        let type: String?
+        let id: String?
+        let topic: String?
+        let subscriptionId: String?
+        let cursor: UInt64?
+        let event: ServerEventPayload?
+    }
+
+    /// Decode potentially large response/event frames away from the main
+    /// actor. The receive loop still awaits each parse in order, so event
+    /// ordering and request correlation remain deterministic.
+    nonisolated static func parseInboundMessage(_ data: Data) -> ParsedInboundMessage {
+        guard let frame = try? JSONDecoder().decode(InboundRoutingFrame.self, from: data) else {
+            return .invalid(reason: .malformedJSON)
         }
 
-        if let type = json["type"] as? String, type == "event" {
-            guard let eventValue = json["event"],
-                  JSONSerialization.isValidJSONObject(eventValue),
-                  let eventData = try? JSONSerialization.data(withJSONObject: eventValue),
-                  let event = try? JSONDecoder().decode(ServerEventPayload.self, from: eventData) else {
-                logger.warning("Received malformed engine event frame", category: .websocket)
-                return
+        if frame.type == "event" {
+            guard let event = frame.event,
+                  let eventData = try? JSONEncoder().encode(event) else {
+                return .invalid(reason: .malformedEvent)
             }
-            #if DEBUG || BETA
-            logger.logEvent(type: event.type, sessionId: event.sessionId, data: event.data.map { String(describing: $0.value).prefix(300).description })
-            #endif
-            let cursor = (json["cursor"] as? UInt64).map(EngineStreamCursor.init(rawValue:))
-            let delivery = EngineEventDelivery(
-                topic: json["topic"] as? String,
-                subscriptionId: json["subscriptionId"] as? String,
-                cursor: cursor,
-                event: event,
-                eventData: eventData
+            return .event(
+                EngineEventDelivery(
+                    topic: frame.topic,
+                    subscriptionId: frame.subscriptionId,
+                    cursor: frame.cursor.map(EngineStreamCursor.init(rawValue:)),
+                    event: event,
+                    eventData: eventData
+                )
             )
+        }
+
+        if let id = frame.id {
+            return .response(id: id)
+        }
+        return .invalid(reason: .missingRouting)
+    }
+
+    func handleMessage(_ data: Data) async {
+        let parsed = await Task.detached(priority: .userInitiated) {
+            Self.parseInboundMessage(data)
+        }.value
+        handleParsedMessage(parsed, rawData: data)
+    }
+
+    private func handleParsedMessage(_ parsed: ParsedInboundMessage, rawData data: Data) {
+        switch parsed {
+        case .invalid(.malformedJSON):
+            logger.warning(
+                "Received malformed non-JSON message (\(data.count) bytes)",
+                category: .websocket
+            )
+        case .invalid(.malformedEvent):
+            logger.warning("Received malformed engine event frame", category: .websocket)
+        case .invalid(.missingRouting):
+            logger.warning("Received message without id or type", category: .websocket)
+        case .event(let delivery):
+            #if DEBUG || BETA
+            logger.logEvent(
+                type: delivery.event.type,
+                sessionId: delivery.event.sessionId,
+                data: delivery.event.data.map {
+                    String(describing: $0.value).prefix(300).description
+                }
+            )
+            #endif
             onEvent?(delivery)
-        } else if let id = json["id"] as? String {
+        case .response(let id):
             timeoutTasks[id]?.cancel()
             timeoutTasks.removeValue(forKey: id)
 
@@ -96,8 +156,6 @@ extension EngineConnection {
             } else {
                 logger.warning("Received response for unknown/expired id=\(id)", category: .websocket)
             }
-        } else {
-            logger.warning("Received message without id or type", category: .websocket)
         }
     }
 

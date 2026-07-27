@@ -45,6 +45,18 @@ final class StreamingManager {
     /// Character count of displayedText (avoids repeated String.count on large strings)
     @ObservationIgnored
     private(set) var displayedCharCount: Int = 0
+    /// Character count of receivedText. `String.count` is linear for extended
+    /// grapheme clusters, so the hot path maintains this value incrementally.
+    @ObservationIgnored
+    private var receivedCharCount: Int = 0
+    /// Append-only delta queue consumed from the front without repeatedly
+    /// indexing or copying the full growing response.
+    @ObservationIgnored
+    private var pendingTextChunks: [Substring] = []
+    @ObservationIgnored
+    private var pendingTextChunkIndex: Int = 0
+    @ObservationIgnored
+    private var pendingCharCount: Int = 0
 
     /// Public API — returns full received text for external callsites
     var streamingText: String { receivedText }
@@ -71,6 +83,7 @@ final class StreamingManager {
     /// Display link wrapper that manages its own lifecycle
     @ObservationIgnored
     private var displayLinkWrapper: DisplayLinkWrapper?
+    var hasInstalledDisplayLink: Bool { displayLinkWrapper != nil }
 
     /// Frame counter for throttling to ~30fps
     @ObservationIgnored
@@ -96,11 +109,11 @@ final class StreamingManager {
     // MARK: - Lifecycle
 
     init() {
-        setupDisplayLink()
         setupBackgroundObservers()
     }
 
-    private func setupDisplayLink() {
+    private func ensureDisplayLink() {
+        guard displayLinkWrapper == nil else { return }
         displayLinkWrapper = DisplayLinkWrapper { [weak self] in
             self?.displayLinkFired()
         }
@@ -126,7 +139,8 @@ final class StreamingManager {
     }
 
     @objc private func appWillEnterForeground() {
-        if displayedCharCount < receivedText.count && streamingMessageId != nil {
+        if pendingCharCount > 0 && streamingMessageId != nil {
+            ensureDisplayLink()
             displayLinkWrapper?.isPaused = false
         }
     }
@@ -143,13 +157,13 @@ final class StreamingManager {
 
     func flushPendingTextIfNeeded() {
         guard let messageId = streamingMessageId else {
-            if displayedCharCount >= receivedText.count {
+            if pendingCharCount == 0 {
                 displayLinkWrapper?.isPaused = true
             }
             return
         }
 
-        let bufferDepth = receivedText.count - displayedCharCount
+        let bufferDepth = pendingCharCount
         guard bufferDepth > 0 else {
             displayLinkWrapper?.isPaused = true
             return
@@ -168,10 +182,9 @@ final class StreamingManager {
                            + Int(ratio * Double(Config.maxCharsPerFrame - Config.baseCharsPerFrame))
         }
 
-        let newCharCount = min(displayedCharCount + charsThisFrame, receivedText.count)
-        let idx = receivedText.index(receivedText.startIndex, offsetBy: newCharCount)
-        displayedText = String(receivedText[..<idx])
-        displayedCharCount = newCharCount
+        let drainedText = drainPendingText(maxCharacters: charsThisFrame)
+        displayedText.append(contentsOf: drainedText)
+        displayedCharCount += drainedText.count
 
         onTextUpdate?(messageId, displayedText)
 
@@ -188,7 +201,8 @@ final class StreamingManager {
     /// Returns false if backpressure limit reached
     @discardableResult
     func handleTextDelta(_ delta: String) -> Bool {
-        guard receivedText.count + delta.count < Config.maxStreamingTextSize else {
+        let deltaCharCount = delta.count
+        guard receivedCharCount + deltaCharCount < Config.maxStreamingTextSize else {
             return false
         }
 
@@ -207,10 +221,13 @@ final class StreamingManager {
         }
 
         receivedText += effectiveDelta
+        let effectiveCharCount = effectiveDelta.count
+        receivedCharCount += effectiveCharCount
+        pendingCharCount += effectiveCharCount
+        pendingTextChunks.append(effectiveDelta[...])
 
-        if displayLinkWrapper?.isPaused == true {
-            displayLinkWrapper?.isPaused = false
-        }
+        ensureDisplayLink()
+        displayLinkWrapper?.isPaused = false
 
         return true
     }
@@ -220,10 +237,11 @@ final class StreamingManager {
     /// Snap all received text to display immediately
     func flushPendingText() {
         guard let messageId = streamingMessageId else { return }
-        guard displayedCharCount < receivedText.count else { return }
+        guard pendingCharCount > 0 else { return }
 
         displayedText = receivedText
-        displayedCharCount = receivedText.count
+        displayedCharCount = receivedCharCount
+        clearPendingText()
         onTextUpdate?(messageId, displayedText)
 
         flushesSinceLastScroll = 0
@@ -240,7 +258,7 @@ final class StreamingManager {
     /// Guarded by `TextStreamConvergenceTests`.
     func finalizeStreamingMessage() -> String {
         flushPendingText()
-        displayLinkWrapper?.isPaused = true
+        releaseDisplayLink()
 
         guard let messageId = streamingMessageId else { return "" }
 
@@ -250,19 +268,23 @@ final class StreamingManager {
 
         streamingMessageId = nil
         receivedText = ""
+        receivedCharCount = 0
         displayedText = ""
         displayedCharCount = 0
+        clearPendingText()
         return finalText
     }
 
     /// Cancel current streaming without finalizing
     func cancelStreaming() {
-        displayLinkWrapper?.isPaused = true
+        releaseDisplayLink()
 
         streamingMessageId = nil
         receivedText = ""
+        receivedCharCount = 0
         displayedText = ""
         displayedCharCount = 0
+        clearPendingText()
         scrollVersion = 0
         flushesSinceLastScroll = 0
     }
@@ -270,15 +292,15 @@ final class StreamingManager {
     // MARK: - State Queries
 
     var isApproachingLimit: Bool {
-        receivedText.count > Config.maxStreamingTextSize * 8 / 10
+        receivedCharCount > Config.maxStreamingTextSize * 8 / 10
     }
 
     var currentTextLength: Int {
-        receivedText.count
+        receivedCharCount
     }
 
     var remainingCapacity: Int {
-        Config.maxStreamingTextSize - receivedText.count
+        Config.maxStreamingTextSize - receivedCharCount
     }
 
     // MARK: - In-Progress Session Handling
@@ -286,8 +308,10 @@ final class StreamingManager {
     func catchUpToInProgress(existingText: String, messageId: UUID) {
         streamingMessageId = messageId
         receivedText = existingText
+        receivedCharCount = existingText.count
         displayedText = existingText
         displayedCharCount = existingText.count
+        clearPendingText()
 
         onTextUpdate?(messageId, displayedText)
         scrollVersion += 1
@@ -296,14 +320,50 @@ final class StreamingManager {
     // MARK: - Reset
 
     func reset() {
-        displayLinkWrapper?.isPaused = true
+        releaseDisplayLink()
 
         streamingMessageId = nil
         receivedText = ""
+        receivedCharCount = 0
         displayedText = ""
         displayedCharCount = 0
+        clearPendingText()
         scrollVersion = 0
         flushesSinceLastScroll = 0
+    }
+
+    private func releaseDisplayLink() {
+        displayLinkWrapper?.invalidate()
+        displayLinkWrapper = nil
+    }
+
+    private func drainPendingText(maxCharacters: Int) -> String {
+        var remaining = min(maxCharacters, pendingCharCount)
+        var drained = ""
+        drained.reserveCapacity(remaining)
+        while remaining > 0, pendingTextChunkIndex < pendingTextChunks.count {
+            let available = pendingTextChunks[pendingTextChunkIndex].count
+            let amount = min(remaining, available)
+            let prefix = pendingTextChunks[pendingTextChunkIndex].prefix(amount)
+            drained.append(contentsOf: prefix)
+            pendingTextChunks[pendingTextChunkIndex].removeFirst(amount)
+            pendingCharCount -= amount
+            remaining -= amount
+            if pendingTextChunks[pendingTextChunkIndex].isEmpty {
+                pendingTextChunkIndex += 1
+            }
+        }
+        if pendingTextChunkIndex >= 64 {
+            pendingTextChunks.removeFirst(pendingTextChunkIndex)
+            pendingTextChunkIndex = 0
+        }
+        return drained
+    }
+
+    private func clearPendingText() {
+        pendingTextChunks.removeAll(keepingCapacity: true)
+        pendingTextChunkIndex = 0
+        pendingCharCount = 0
     }
 }
 
@@ -313,6 +373,7 @@ final class StreamingManager {
 /// This class is not @MainActor so deinit can properly invalidate the display link
 private final class DisplayLinkWrapper {
     private var displayLink: CADisplayLink?
+    private var target: DisplayLinkTarget?
     private let handler: @MainActor () -> Void
 
     var isPaused: Bool {
@@ -327,12 +388,14 @@ private final class DisplayLinkWrapper {
     }
 
     deinit {
-        displayLink?.invalidate()
+        invalidate()
     }
 
     @MainActor
     private func setupDisplayLink() {
-        displayLink = CADisplayLink(target: self, selector: #selector(tick))
+        let target = DisplayLinkTarget(owner: self)
+        self.target = target
+        displayLink = CADisplayLink(target: target, selector: #selector(DisplayLinkTarget.tick))
 
         displayLink?.preferredFrameRateRange = CAFrameRateRange(
             minimum: 30,
@@ -344,10 +407,31 @@ private final class DisplayLinkWrapper {
         displayLink?.isPaused = true
     }
 
-    @objc private func tick() {
+    func invalidate() {
+        displayLink?.invalidate()
+        displayLink = nil
+        target = nil
+    }
+
+    fileprivate func tick() {
         let handler = self.handler
         MainActor.assumeIsolated {
             handler()
         }
+    }
+}
+
+/// CADisplayLink retains its target. The proxy must never retain the wrapper,
+/// otherwise the run loop owns a permanent target cycle after a transient chat
+/// state value is discarded.
+private final class DisplayLinkTarget: NSObject {
+    weak var owner: DisplayLinkWrapper?
+
+    init(owner: DisplayLinkWrapper) {
+        self.owner = owner
+    }
+
+    @objc func tick() {
+        owner?.tick()
     }
 }

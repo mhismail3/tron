@@ -4,8 +4,10 @@
 //! invocation, bounded history, interaction/causal relationship, trigger, and
 //! state concerns extend that same store without repository wrappers or
 //! duplicate caches. `results` owns canonical typed-result payloads and their
-//! schema migration. Stateless codecs, validators, and SQL helpers live in
-//! `support`; scenario tests live in `tests`.
+//! schema migration. Stateless codecs and generic SQL helpers live in `support`;
+//! `notification_validation` owns the closed device/APNs route validation
+//! boundary; `notification_attention` owns sanitized transport-failure inbox
+//! evidence; scenario tests live in `tests`.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -17,6 +19,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use super::super::dispatches::PreparedWorkerDispatch;
 use super::super::types::{
     ActiveWorker, BUNDLE_SCHEMA, InvocationRecord, MAX_INVOCATION_SECONDS, PreparedWorker,
     UpsertOutcome, WebhookCredential, WorkerBundle, WorkerClientAction, WorkerCommand,
@@ -26,10 +29,20 @@ use super::super::types::{
 pub(super) use state::validate_bundle;
 use support::*;
 
+mod dispatches;
 mod history;
 mod interaction;
+mod invocation_completion;
 mod invocations;
 mod lifecycle;
+mod notification_attention;
+mod notification_clients;
+mod notification_validation;
+mod notifications;
+use notification_attention::insert_notification_attention;
+pub(in crate::domains::worker_kernel) use notifications::{
+    NotificationDispatchOutcome, NotificationRefreshDispatch, NotificationTargetDispatch,
+};
 mod publication;
 mod results;
 mod state;
@@ -70,7 +83,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 10)?;
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 12)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
@@ -531,6 +544,197 @@ impl WorkerStore {
             )
             .map_err(|error| format!("record worker schema v9: {error}"))?;
         self.migrate_results_v10(&mut connection)?;
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS notification_installations (
+                    installation_id TEXT PRIMARY KEY,
+                    client_server_id TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    environment TEXT NOT NULL,
+                    authorization_status TEXT NOT NULL,
+                    token TEXT,
+                    token_hash TEXT,
+                    enabled INTEGER NOT NULL,
+                    last_registered_at TEXT NOT NULL,
+                    invalidated_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS notification_installations_active
+                    ON notification_installations(enabled,last_registered_at);
+                CREATE TABLE IF NOT EXISTS notification_deliveries (
+                    delivery_id TEXT PRIMARY KEY,
+                    worker_id TEXT NOT NULL,
+                    worker_version TEXT NOT NULL,
+                    invocation_id TEXT NOT NULL,
+                    deduplication_key TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    thread_key TEXT,
+                    source_record_id TEXT,
+                    expires_at TEXT NOT NULL,
+                    actions_json TEXT NOT NULL,
+                    on_open_complete INTEGER NOT NULL,
+                    read_at TEXT,
+                    read_reason TEXT,
+                    terminal_response TEXT,
+                    terminal_responded_at TEXT,
+                    trace_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(worker_id,deduplication_key),
+                    FOREIGN KEY(invocation_id) REFERENCES worker_invocations(invocation_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS notification_deliveries_inbox
+                    ON notification_deliveries(created_at DESC,delivery_id DESC);
+                CREATE INDEX IF NOT EXISTS notification_deliveries_unread
+                    ON notification_deliveries(read_at,created_at DESC);
+                CREATE TABLE IF NOT EXISTS notification_delivery_targets (
+                    target_id TEXT PRIMARY KEY,
+                    delivery_id TEXT NOT NULL,
+                    installation_id TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    next_attempt_at TEXT NOT NULL,
+                    attempt_count INTEGER NOT NULL,
+                    apns_id TEXT,
+                    error_code TEXT,
+                    accepted_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(delivery_id,installation_id),
+                    FOREIGN KEY(delivery_id) REFERENCES notification_deliveries(delivery_id) ON DELETE CASCADE,
+                    FOREIGN KEY(installation_id) REFERENCES notification_installations(installation_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS notification_delivery_targets_due
+                    ON notification_delivery_targets(state,next_attempt_at);
+                CREATE TABLE IF NOT EXISTS notification_delivery_attempts (
+                    attempt_id TEXT PRIMARY KEY,
+                    target_kind TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    attempt_number INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    apns_id TEXT,
+                    error_code TEXT,
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT NOT NULL,
+                    UNIQUE(target_kind,target_id,attempt_number)
+                );
+                CREATE TABLE IF NOT EXISTS notification_responses (
+                    response_id TEXT PRIMARY KEY,
+                    client_mutation_id TEXT NOT NULL UNIQUE,
+                    delivery_id TEXT NOT NULL,
+                    installation_id TEXT NOT NULL,
+                    acknowledgement TEXT NOT NULL,
+                    accepted INTEGER NOT NULL,
+                    response_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(delivery_id) REFERENCES notification_deliveries(delivery_id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS notification_refreshes (
+                    refresh_id TEXT PRIMARY KEY,
+                    installation_id TEXT NOT NULL UNIQUE,
+                    unread_count INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    next_attempt_at TEXT NOT NULL,
+                    attempt_count INTEGER NOT NULL,
+                    error_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(installation_id) REFERENCES notification_installations(installation_id) ON DELETE CASCADE
+                );
+                UPDATE notification_delivery_targets
+                    SET state='retry_wait',next_attempt_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+                        error_code='interrupted',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                    WHERE state='sending';
+                UPDATE notification_refreshes
+                    SET state='retry_wait',next_attempt_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+                        error_code='interrupted',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                    WHERE state IN ('sending','sending_pending');
+                INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                    VALUES (11, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+                ",
+            )
+            .map_err(|error| format!("initialize notification schema v11: {error}"))?;
+        for (column, definition) in [
+            ("source_worker_id", "source_worker_id TEXT"),
+            ("source_worker_version", "source_worker_version TEXT"),
+            ("producer_worker_id", "producer_worker_id TEXT"),
+            ("producer_worker_version", "producer_worker_version TEXT"),
+            ("source_invocation_id", "source_invocation_id TEXT"),
+            ("not_before", "not_before TEXT"),
+        ] {
+            if !table_has_column(&connection, "notification_deliveries", column)? {
+                connection
+                    .execute(
+                        &format!("ALTER TABLE notification_deliveries ADD COLUMN {definition}"),
+                        [],
+                    )
+                    .map_err(|error| {
+                        format!("add notification delivery schema-v12 column {column}: {error}")
+                    })?;
+            }
+        }
+        for (column, definition) in [
+            ("transport_kind", "transport_kind TEXT"),
+            ("provider_request_id", "provider_request_id TEXT"),
+        ] {
+            if !table_has_column(&connection, "notification_delivery_attempts", column)? {
+                connection
+                    .execute(
+                        &format!(
+                            "ALTER TABLE notification_delivery_attempts ADD COLUMN {definition}"
+                        ),
+                        [],
+                    )
+                    .map_err(|error| {
+                        format!("add notification attempt schema-v12 column {column}: {error}")
+                    })?;
+            }
+        }
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS worker_dispatches (
+                    dispatch_id TEXT PRIMARY KEY,
+                    source_invocation_id TEXT NOT NULL,
+                    source_worker_id TEXT NOT NULL,
+                    source_worker_version TEXT NOT NULL,
+                    route TEXT NOT NULL,
+                    deduplication_key TEXT NOT NULL,
+                    target_worker_id TEXT NOT NULL,
+                    target_worker_version TEXT NOT NULL,
+                    target_invocation_id TEXT NOT NULL UNIQUE,
+                    response_binding TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    UNIQUE(source_worker_id,route,deduplication_key),
+                    FOREIGN KEY(source_invocation_id)
+                        REFERENCES worker_invocations(invocation_id) ON DELETE CASCADE,
+                    FOREIGN KEY(target_invocation_id)
+                        REFERENCES worker_invocations(invocation_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS worker_dispatches_source
+                    ON worker_dispatches(source_invocation_id,created_at);
+                CREATE INDEX IF NOT EXISTS worker_dispatches_target
+                    ON worker_dispatches(target_invocation_id,state);
+
+                UPDATE notification_deliveries SET
+                    source_worker_id=COALESCE(source_worker_id,worker_id),
+                    source_worker_version=COALESCE(source_worker_version,worker_version),
+                    producer_worker_id=COALESCE(producer_worker_id,worker_id),
+                    producer_worker_version=COALESCE(producer_worker_version,worker_version),
+                    source_invocation_id=COALESCE(source_invocation_id,invocation_id),
+                    not_before=COALESCE(not_before,created_at);
+                UPDATE notification_delivery_attempts
+                    SET provider_request_id=COALESCE(provider_request_id,target_id);
+
+                INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                    VALUES (12, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+                ",
+            )
+            .map_err(|error| format!("initialize worker dispatch schema v12: {error}"))?;
         super::rebuild::rebuild_indexes(&self.root, &self.database)?;
         self.recover_interrupted()
     }

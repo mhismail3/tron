@@ -334,7 +334,7 @@ private final class DelegationMockRepository: WorkerKernelRepository {
     func purgeWorker(workerId: String, idempotencyKey: EngineIdempotencyKey) async throws -> WorkerPurgeResultDTO { throw MockError.unused }
     func setWorkersStopped(_ stopped: Bool, idempotencyKey: EngineIdempotencyKey) async throws -> WorkerStopAllResultDTO { throw MockError.unused }
     func rotateWorkerWebhook(workerId: String, triggerId: String, idempotencyKey: EngineIdempotencyKey) async throws -> WorkerWebhookCredentialDTO { throw MockError.unused }
-    func pollWorkerEvents(topic: String, cursor: EngineStreamCursor) async throws -> EngineStreamPage { throw MockError.unused }
+    func ensureWorkerEventSubscriptions() async throws {}
 
     private enum MockError: Error { case unused }
 }

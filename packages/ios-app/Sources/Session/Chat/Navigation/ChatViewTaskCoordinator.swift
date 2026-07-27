@@ -11,6 +11,7 @@ import Foundation
 @MainActor
 final class ChatViewTaskCoordinator {
     enum Key: Hashable {
+        case initialLoadWatchdog
         case modelPrefetch
         case connectionRefresh
         case deepLinkScroll

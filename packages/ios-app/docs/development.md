@@ -21,7 +21,13 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -versio
 ```
 
 Physical-device builds honor the same selection when `DEVELOPER_DIR` is passed
-to `scripts/tron-ios-beta`.
+to `scripts/tron-ios-device`.
+
+Codex variant selection is owned by the repository's `tron-ios` skill:
+simulator app-path work and hosted tests select `Tron Beta`; fast
+physical-device iteration selects `Tron Fast` / `ProdDebug`; an install handed
+to the user selects `Tron` / `Prod`. Physical Beta installs are exceptional and
+require an explicit user request.
 
 ### Project Generation
 
@@ -84,15 +90,17 @@ protocol response handling.
 The repository includes `.codex/environments/environment.toml` for Codex app
 toolbar actions. `Dev Server` starts `scripts/tron dev -bdt` from the project
 root, and `Stop Dev Server` runs `scripts/tron dev --stop`.
-`Rebuild + Install + Launch iOS Beta on iPhone` and `Rebuild + Install + Launch
-iOS Beta on iPad` run `scripts/tron-ios-beta install` with generic device-name
-selectors; the helper regenerates the Xcode project, preflights the active
-Xcode toolchain, and builds `TronMobile.xcodeproj` directly from the authoritative
-`project.yml`; arbitrary local workspaces do not override that generated owner.
-It builds the `Tron Beta` scheme for a physical iOS destination, writes a full
-log plus `.xcresult` bundle, installs the resulting app bundle with
-`xcrun devicectl`, and launches the resolved bundle ID with a bounded `devicectl`
-launch timeout.
+`Rebuild + Install + Launch iOS Beta Simulator` and `Just Launch Installed iOS
+Beta Simulator` use `scripts/tron-ios-simulator`; Codex-owned simulator
+app-path work therefore keeps the persistent Beta bundle and pairing container.
+Physical-device actions use `scripts/tron-ios-device`, which regenerates the
+Xcode project, preflights the active Xcode toolchain, and builds
+`TronMobile.xcodeproj` directly from authoritative `project.yml`; arbitrary
+local workspaces do not override that generated owner. It writes a full log
+plus `.xcresult` bundle, installs through `xcrun devicectl`, and launches the
+resolved bundle ID with a bounded `devicectl` launch timeout.
+The `status` and `stop` commands match the full app executable while tolerating
+the trailing column padding emitted by `devicectl` process tables.
 When Xcode fails before compilation, the helper preserves project-level
 diagnostics as well as file-and-line compiler errors. Signing failures such as a
 missing Apple account or development certificate are therefore shown directly
@@ -108,7 +116,8 @@ provides an iOS 27 SDK; it must never silently fall back to the system-selected
 iOS 26 SDK because SDK-linked SwiftUI behavior, including scroll-edge effects,
 would differ. The action prints both the Xcode version and selected iPhoneOS SDK
 before compiling so its toolchain is visible in the action log.
-`Rebuild + Install + Launch iOS Prod Release on iPhone` uses
+`Rebuild + Install + Launch iOS Prod Release on iPhone` and the matching iPad
+action use
 `TRON_IOS_SCHEME=Tron` and
 `TRON_IOS_CONFIGURATION=Prod`, so it builds the optimized production app,
 installs the fresh product, and then launches it through the same helper.
@@ -117,11 +126,72 @@ product so stale Beta or Prod app bundles left in DerivedData cannot be launched
 by a different action.
 Production rebuild actions use the helper's sole rebuild command, `install`, so
 local source changes are compiled before the app is reinstalled.
-The matching `Just Launch Installed ...` actions run `scripts/tron-ios-beta
-launch` for the already-installed app without rebuilding. The iPhone launch
-actions are deduplicated by bundle ID: Beta has its own launch action, and the
-single production launch action opens whichever `com.tron.mobile` binary is
-currently installed, whether it came from Prod Fast Debug or Prod Release.
+The matching physical `Just Launch Installed ...` actions run
+`scripts/tron-ios-device launch` without rebuilding. Prod Fast Debug and Prod
+Release are deduplicated by bundle ID: one production launch action per device
+opens whichever `com.tron.mobile` binary is currently installed.
+
+### Native Notification Validation
+
+The tracked Beta and production entitlement files declare their intended APNs
+environment, and the app declares the `remote-notification` background mode.
+Beta uses topic `com.tron.mobile.beta` with APNs sandbox; an App Store-exported
+Prod build uses `com.tron.mobile` with APNs production. The physical-device
+helper explicitly signs local Prod and ProdDebug installs for APNs development
+and embeds the matching `sandbox` registration route. This lets the
+production-bundle app receive notifications during device testing without
+misrouting its sandbox token to the production provider. It is still not
+production APNs acceptance; use TestFlight or an App Store export for that
+path. The relay accepts only the beta/sandbox, local-Prod/sandbox, and
+distributed-Prod/production routes. Every paired engine selects exactly one
+provider path. Development engines normally use the Cloudflare relay:
+
+```bash
+scripts/tron auth notifications configure-relay \
+  --url https://relay.example \
+  --secret-file /secure/path/relay-secret
+scripts/tron auth notifications use relay
+scripts/tron auth notifications status
+```
+
+Direct mode is explicit and requires local Apple signing credentials:
+
+```bash
+scripts/tron auth apns configure \
+  --team-id TEAM_ID \
+  --key-id KEY_ID \
+  --private-key-file /secure/path/AuthKey.p8
+scripts/tron auth apns status
+scripts/tron auth notifications use direct
+```
+
+Never put a relay secret, `.p8`, APNs token, or physical device id in the
+repository or a test fixture. Status commands report only mode and readiness.
+The engine never fails over between relay and direct automatically.
+
+For physical production-notification acceptance:
+
+1. Start the development server and install the current Prod build through
+   TestFlight or an App Store export. A locally development-signed Prod build is
+   not production APNs acceptance.
+2. Pair successfully, accept notification permission, and confirm Settings →
+   Notifications separately reports permission, device/token readiness,
+   selected transport, and provider readiness.
+3. Create a natural-language one-time reminder and background, then terminate,
+   the app. Confirm exactly one notification arrives on every active
+   installation.
+4. Exercise tap/Open, Snooze, and Complete. Confirm inbox/read/badge state
+   reconciles on a second device and after reconnect.
+5. Verify recurrence, bounded follow-ups, restart catch-up, offline response
+   retry, inactive paired-server registration, and deep-link server switching.
+6. Repeat with denied permission, cleared selected-transport credentials,
+   server downtime, relay timeout, scheduler/policy outage, and an invalidated
+   token. The reminder run must remain successful while Engine Activity shows
+   sanitized blocked/retry/permanent evidence and no duplicate logical
+   notification.
+
+APNs HTTP success proves provider acceptance only. Product copy, tests, and
+diagnostics must say `accepted_by_apns`, never delivered.
 
 Keep device-specific values out of the repo. The Codex app actions use generic
 `TRON_IOS_DEVICE_NAME=iPhone` and `TRON_IOS_DEVICE_NAME=iPad` selectors. For
@@ -152,14 +222,14 @@ preflight for SDK-sensitive workflows; the Codex Prod Fast action sets it to
 | Test | Every test action | Hosted unit/UI validation (debug, isolated test identities) |
 
 `Debug.xcconfig` owns the compiler and test settings shared by Beta, ProdDebug,
-and Test; each leaf configuration owns only its compilation conditions and
-product identity. `Base.xcconfig` remains common to every configuration.
+and Test; each leaf configuration owns its compilation conditions, product
+identity, and APNs route. `Base.xcconfig` remains common to every configuration.
 
 Use `Tron Fast` when you want Xcode's debug-speed rebuilds to install over the
 production app (`com.tron.mobile`) instead of the side-by-side beta app. It uses
-the production app icon, production bundle IDs, and production entitlements, but
-keeps `-Onone`, `ENABLE_TESTABILITY=YES`, and `ONLY_ACTIVE_ARCH=YES` like the
-beta debug build.
+the production app icon and production bundle IDs, but uses development APNs
+signing/sandbox delivery and keeps `-Onone`, `ENABLE_TESTABILITY=YES`, and
+`ONLY_ACTIVE_ARCH=YES` like the beta debug build.
 
 ### Persistent Paired Simulator
 
@@ -198,7 +268,7 @@ misclassifying the preserved app as absent; `start` boots and validates it.
 
 ```bash
 xcodebuild test \
-  -scheme Tron \
+  -scheme 'Tron Beta' \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 

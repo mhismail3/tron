@@ -58,6 +58,17 @@ struct EngineAckFrame: Encodable {
     let cursor: UInt64
 }
 
+struct EngineUnsubscribeFrame: Encodable {
+    let type = "unsubscribe"
+    let id: String
+    let subscriptionId: String
+}
+
+struct EngineUnsubscribeResult: Decodable, Equatable, Sendable {
+    let unsubscribed: Bool
+    let subscriptionId: String
+}
+
 struct EngineResponseEnvelope<R: Decodable>: Decodable {
     let type: String
     let id: String?

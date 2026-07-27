@@ -24,7 +24,7 @@ const OWNED_TREES: &[&str] = &[
 
 const REQUIRED_SINGLE_FILE_LAYOUTS: &[&str] = &[
     ".codex/environments",
-    ".codex/skills/tron-ios-beta",
+    ".codex/skills/tron-ios",
     "scripts/benchmarks/baselines",
     "packages/agent/docs",
     "packages/ios-app/docs/assets",

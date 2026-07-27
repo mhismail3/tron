@@ -146,21 +146,32 @@ impl WorkerRuntime {
                 &output,
             )
             .map_err(|error| format!("worker output does not match its schema: {error}"))?;
-            Ok(output)
+            let notification_intents =
+                crate::domains::worker_kernel::notifications::notification_intents_for_bundle(
+                    &worker.bundle,
+                    &output,
+                    chrono::Utc::now(),
+                )?;
+            let worker_dispatches = self.prepare_worker_dispatches(&worker.bundle, &output)?;
+            Ok((output, notification_intents, worker_dispatches))
         });
         let execution = match execution {
-            Ok(output) => self
+            Ok((output, notification_intents, worker_dispatches)) => self
                 .apply_session_title_result(&queued, &output)
                 .await
-                .map(|()| output),
+                .map(|()| (output, notification_intents, worker_dispatches)),
             Err(error) => Err(error),
         };
         let completed = match execution {
-            Ok(output) => self.store.complete_invocation(
-                &queued.invocation_id,
-                &queued.worker_id,
-                Ok(&output),
-            )?,
+            Ok((output, notification_intents, worker_dispatches)) => {
+                self.store.complete_invocation_with_effects(
+                    &queued.invocation_id,
+                    &queued.worker_id,
+                    &output,
+                    &notification_intents,
+                    &worker_dispatches,
+                )?
+            }
             Err(error) => {
                 let secrets = self.load_all_runtime_secrets().unwrap_or_default();
                 let redacted = redact_known_secrets(&error, &secrets);
@@ -205,7 +216,55 @@ impl WorkerRuntime {
             TraceId::new(completed.trace_id.clone()).ok(),
         )
         .await;
+        if let Some(dispatch) = self
+            .store
+            .worker_dispatch_for_target(&completed.invocation_id)
+            .unwrap_or_default()
+        {
+            self.publish_event(
+                "worker.dispatches",
+                json!({
+                    "action":dispatch["state"],
+                    "dispatchId":dispatch["dispatchId"],
+                    "sourceInvocationId":dispatch["sourceInvocationId"],
+                    "sourceWorkerId":dispatch["sourceWorkerId"],
+                    "route":dispatch["route"],
+                    "targetWorkerId":dispatch["targetWorkerId"],
+                    "targetWorkerVersion":dispatch["targetWorkerVersion"],
+                    "targetInvocationId":dispatch["targetInvocationId"],
+                    "responseBinding":dispatch["responseBinding"],
+                    "state":dispatch["state"],
+                    "causalDepth":completed.causal_depth,
+                }),
+                TraceId::new(completed.trace_id.clone()).ok(),
+            )
+            .await;
+        }
         if completed.status == "completed" {
+            for dispatch in self
+                .store
+                .worker_dispatches_for_source(&completed.invocation_id)
+                .unwrap_or_default()
+            {
+                self.publish_event(
+                    "worker.dispatches",
+                    json!({
+                        "action":"queued",
+                        "sourceInvocationId":completed.invocation_id,
+                        "sourceWorkerId":completed.worker_id,
+                        "dispatchId":dispatch["dispatchId"],
+                        "route":dispatch["route"],
+                        "targetWorkerId":dispatch["targetWorkerId"],
+                        "targetWorkerVersion":dispatch["targetWorkerVersion"],
+                        "targetInvocationId":dispatch["targetInvocationId"],
+                        "responseBinding":dispatch["responseBinding"],
+                        "state":dispatch["state"],
+                        "causalDepth":completed.causal_depth.saturating_add(1),
+                    }),
+                    TraceId::new(completed.trace_id.clone()).ok(),
+                )
+                .await;
+            }
             let _ = self
                 .refresh_worker_surface_evidence(&completed.worker_id)
                 .await;

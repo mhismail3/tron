@@ -125,12 +125,15 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .settings)
     }
 
-    func testHandleURLNotificationIsNotAPrimitiveRoute() {
+    func testHandleURLNotificationRoutesOwningServerAndDelivery() {
         let router = DeepLinkRouter()
-        let url = URL(string: "tron://notification/cap_abc")!
+        let url = URL(string: "tron://notification/server_abc/delivery_xyz")!
 
-        XCTAssertFalse(router.handle(url: url))
-        XCTAssertNil(router.pendingIntent)
+        XCTAssertTrue(router.handle(url: url))
+        XCTAssertEqual(
+            router.pendingIntent,
+            .notification(serverId: "server_abc", deliveryId: "delivery_xyz")
+        )
     }
 
     func testHandleURLNotificationWithMissingInvocationId() {
@@ -208,6 +211,27 @@ final class DeepLinkRouterTests: XCTestCase {
         )
         XCTAssertEqual(NavigationIntent.settings, NavigationIntent.settings)
         XCTAssertEqual(NavigationIntent.share, NavigationIntent.share)
+        XCTAssertEqual(
+            NavigationIntent.notification(serverId: "server", deliveryId: "delivery"),
+            NavigationIntent.notification(serverId: "server", deliveryId: "delivery")
+        )
         XCTAssertNotEqual(NavigationIntent.settings, NavigationIntent.share)
+    }
+
+    func testNotificationPayloadRoutesBeforeLegacySessionPayload() {
+        let router = DeepLinkRouter()
+        router.handle(notificationPayload: [
+            "sessionId": "legacy-session",
+            "tron": [
+                "kind": "notification",
+                "serverId": "server_abc",
+                "deliveryId": "delivery_xyz",
+            ],
+        ])
+
+        XCTAssertEqual(
+            router.pendingIntent,
+            .notification(serverId: "server_abc", deliveryId: "delivery_xyz")
+        )
     }
 }

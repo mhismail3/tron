@@ -121,7 +121,11 @@ struct WorkerToolRunGraphView: View {
             await observe()
         }
         .onReceive(NotificationCenter.default.publisher(for: .workerRunProjectionInvalidated)) { _ in
-            refreshRevision += 1
+            if WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(
+                status: graph?.status
+            ) {
+                refreshRevision += 1
+            }
         }
         .sheet(isPresented: $showRunTree) {
             if let graph {

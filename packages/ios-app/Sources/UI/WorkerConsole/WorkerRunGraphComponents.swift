@@ -93,6 +93,13 @@ enum WorkerRunGraphPresentation {
         return value == "queued" || value == "running"
     }
 
+    /// A missing graph still needs its first authoritative read. Once a graph
+    /// reaches a terminal state, unrelated worker invalidations must not
+    /// restart its detail query.
+    static func shouldRefreshAfterInvalidation(status: String?) -> Bool {
+        status.map(isActive(status:)) ?? true
+    }
+
     static func canDetach(status: String, mode: String) -> Bool {
         isActive(status: status)
             && WorkerConsolePresentation.normalized(mode) == "foreground"

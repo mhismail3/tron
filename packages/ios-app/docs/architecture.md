@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-25 for progressive worker-run and result disclosure.
+> Last verified: 2026-07-26 for split-worker native notification delivery.
 
 ## Overview
 
@@ -121,6 +121,22 @@ response continuations, stream polling, reconnection, and frame-size admission.
 The bearer token comes from pairing and is never logged. Unauthorized state
 requires re-pairing.
 
+Connection, reconnect, and per-subscription admission are single-flight. Swift
+task cancellation immediately retires only that caller's pending continuation;
+one request timeout never tears down otherwise healthy shared transport.
+Heartbeat and actual send/receive failures own socket liveness. Raw inbound
+frames and generic response DTOs decode off the main actor, in receive order,
+before compact state or event delivery returns to UI ownership. Transport logs
+record frame metadata only, never payload previews.
+
+Session live tails have explicit domain leases. The presented chat and the
+background processing projection retain independent interests in the same
+subscription. Switching chats or observing terminal processing releases its
+interest; the final release sends an idempotent `unsubscribe`. Reconnect
+restores only still-interested session keys, while disconnect clears all
+interests. This prevents previously visited tasks from remaining in the
+engine's polling loop.
+
 An open WebSocket is transport state, not application readiness. The connection
 remains publicly `connecting` until the bounded `hello` exchange succeeds and
 supplies the negotiated frame ceiling. Session restoration, reconnect hooks,
@@ -227,7 +243,8 @@ invalidation/change-feed contract only.
 - retire and purge;
 - stop/resume all;
 - webhook token rotation;
-- cursor polling for `worker.lifecycle` and `worker.invocations`.
+- cached connection-local live-tail subscriptions for `worker.lifecycle` and
+  `worker.invocations`.
 
 `WorkerKernelRepository` is the feature-facing contract. The default
 repository delegates without manufacturing substitute rows or local lifecycle
@@ -246,13 +263,15 @@ state.
 - one-time returned webhook credential;
 - refresh/mutation flags, stop-all status, and the last transport error.
 
-`refresh` loads one authoritative profile-level engine snapshot, then engine
-activity and the selected worker if it still exists. A disconnected
-refresh clears server-owned rows. `monitor` polls
-both worker stream topics with independent cursors and refreshes only after new
-events. Topic polling is historical replay, so the repository contract requires
-an explicit non-optional cursor and each monitoring pass begins at cursor `0`;
-only live subscription may omit its starting cursor. Mutations serialize
+The lightweight summary refresh loads one authoritative profile-level engine
+snapshot. A full dashboard refresh loads that snapshot, bounded activity, and
+attention concurrently, then loads the selected worker's inspection, runs, and
+attention concurrently if it still exists. A
+disconnected refresh clears server-owned rows. Monitoring subscribes from each
+worker topic's current durable tail, coalesces the adjacent facts produced by
+one run, and then reloads authoritative state. It never replays historical
+worker events into UI invalidation. Refreshes are single-flight; a full request
+arriving during a summary read is preserved and runs next. Mutations serialize
 through the view model's mutation state, call one repository operation, and
 reload canonical server truth.
 
@@ -263,10 +282,13 @@ the worker's actual input schema.
 ### Views
 
 The session sidebar contains a compact Engine band showing core, active-worker,
-and current unhealthy-worker counts. It opens `WorkerConsoleSheet`, whose visible product
-identity is Engine. The sidebar owns the monitoring task, so the dashboard
-continues to receive durable lifecycle/invocation changes while its sheet is
-closed. The dashboard uses
+and current unhealthy-worker counts. It opens `WorkerConsoleSheet`, whose
+visible product identity is Engine. While the sheet is closed, the sidebar
+reloads only its compact snapshot after a live invalidation. While the sheet is
+open, Workers and Core retain that one-read summary lane; only the Activity tab
+loads and monitors bounded runs and attention. Switching scopes cancels the old
+view task without creating another server subscription because subscriptions
+are cached per socket. The dashboard uses
 the same selected typography, semantic color tokens, liquid-glass section
 fills, tabs and execution actions, compact sheet chrome, status hierarchy, and
 progressive evidence disclosure as the rest of Tron. Inline expansion is
@@ -503,7 +525,10 @@ model-tool/invocation association through `worker_kernel::runs(detail:
 "graph")`, then renders the server's status, mode, meaningful stage, elapsed
 time, child counts, result or actionable failure, and links to execution
 detail. The primary sheet never embeds an unbounded causal tree or lifecycle
-history. `Work breakdown` and `Activity` open separate large-detail sheets that
+history. Live invalidations refresh only an absent or active graph; a terminal
+chip remains stable instead of restarting its durable result read when
+unrelated workers run. `Work breakdown` and `Activity` open separate
+large-detail sheets that
 render the server-ordered causal nodes, child-session links, and user-facing
 timeline. Those disclosure containers remain fully tappable without repeating
 right-aligned open-link symbols; their leading icon, title, and supporting text
@@ -570,6 +595,15 @@ returning Home. Popping the destination clears compact selection. This ensures
 the replacement `ChatView` always begins a new reconstruction and live-stream
 lifecycle instead of reusing a cancelled destination shell.
 
+Configured session creation publishes the new local session projection before
+navigating or dismissing its sheet. Chat identity also includes the
+selected-server generation, so a deep link or server switch cannot reuse a
+view model backed by the previous server's repositories. Initial
+reconstruction has a five-second presentation watchdog: cached, empty, or
+recoverable-failure state becomes interactive instead of leaving the composer
+permanently at “Loading latest messages.” Transcript reveal is bounded to
+roughly 400 ms; any final bottom correction continues after content is visible.
+
 The server-backed workspace browser uses its toolbar title as the current-path
 breadcrumb. The full abbreviated path remains available to accessibility, while
 compact displays truncate from the beginning so the selected folder and nearest
@@ -596,15 +630,32 @@ kernel-validated `speech_transcription` client action. Only then does the
 composer show its mic. Tapping it records a temporary WAV, invokes that worker
 through the ordinary durable worker API with the originating session, deletes
 the temporary file after loading, and inserts the worker's typed `text` result
-into the draft. Worker lifecycle polling refreshes ownership without reopening
-the chat. Model choice, recognition dependencies, language policy, cleanup, and
-quality remain worker-owned; the app has no fixed recognizer, transcription
-setting, or private transcription endpoint.
+into the draft. The shared live-tail worker subscription refreshes ownership
+only for worker lifecycle changes, not for ordinary scheduled or manual
+invocations. Each mounted chat owns at most one cancellation-aware monitor;
+navigation teardown stops it, and its weak event loop cannot retain a
+previously opened chat. Ownership therefore changes without historical replay,
+per-run engine reads, or reopening the chat. Model choice, recognition
+dependencies, language policy, cleanup, and quality remain worker-owned; the
+app has no fixed recognizer, transcription setting, or private transcription
+endpoint.
+
+Audio-session ownership is explicit: a capture engine deactivates the shared
+system session only after that same instance successfully activated it.
+Creating or destroying an idle chat therefore performs no process-global audio
+work.
 
 Attachment conversion commits before submission. Pending photo-picker objects
 remain with the conversion owner and are not treated as sendable attachments.
 The final encoded frame size is checked before socket send so an oversized
 prompt cannot disconnect the client or erase retryable content.
+
+Streaming text uses a lazy, explicitly invalidated display link with a weak
+target. Received deltas drain from an append-only chunk queue, so each display
+tick appends only new characters instead of indexing and copying the complete
+growing response. Draft metadata remains database-owned; potentially large
+draft attachment reads and writes run through one serial file actor rather than
+blocking SwiftUI.
 
 ## Context Lifecycle Presentation
 
@@ -704,24 +755,82 @@ feedback rather than maintaining separate solid-button implementations.
 
 ## Notification Boundary
 
-The worker-first client has no fixed APNs registration or notification-delivery
-plane. `AppDelegate` owns only application launch diagnostics, and deep links
-enter through the URL router. A future push workflow must arrive as an explicit
-worker-backed product slice with observable token custody, delivery, and client
-handling rather than a dormant fixed client façade.
+Native notifications are the narrow client boundary for worker-authored
+reminders; they are not a general device-control surface.
+
+- `AppDelegate` installs `NotificationLifecycleBridge` as the
+  `UNUserNotificationCenterDelegate` before launch completes and forwards APNs
+  registration callbacks and quiet background refreshes. The runtime-mode guard
+  keeps hosted tests inert.
+- `NativeNotificationCoordinator` waits for the first authenticated engine
+  connection before requesting permission. Denial is never repeatedly
+  requested; Settings exposes the system state and an Open System Settings
+  action.
+- Every already-authorized launch calls `registerForRemoteNotifications`
+  without waiting for engine connectivity. The current APNs
+  token lives only in coordinator memory. A stable installation UUID lives in
+  app-private defaults and is distinct from every paired-server id. The build's
+  embedded APNs route is forwarded with that token: local physical Prod/Prod
+  Fast installs use sandbox to match development signing, while distributed
+  Prod uses production.
+- Registration fans out to all paired engines. The active server reuses its
+  current `/engine` connection. Inactive servers use bounded, short-lived
+  authenticated clients with their own stored bearer token and never change
+  the selected server.
+- `NotificationLifecycleBridge` presents worker-authored title/body as ordinary
+  banner, list, and sound notifications. APNs `thread-id` comes only from the
+  worker's bounded `threadKey`. The fixed reminder category exposes Snooze and
+  Complete; system dismissal has no effect.
+- Default taps enqueue an idempotent Open response and route through
+  `NavigationIntent.notification(serverId:deliveryId:)`. The app selects the
+  owning paired engine when available and otherwise shows a safe unavailable
+  detail.
+- The Notifications Settings page is the native synchronized inbox and
+  readiness surface. It distinguishes system permission, device/token
+  readiness, selected relay/direct transport, provider readiness, and the last
+  sanitized provider problem per server. Its app-private cache shows logical
+  deliveries while transport failures remain engine-owned Activity/Attention
+  evidence. Opening an item completes its occurrence. Mark All Read emits only
+  `clear_unread`.
+- Open, Complete, Snooze, and clear-read mutations enter a durable per-server
+  outbox, apply optimistically, retry after reconnect/foreground, and reconcile
+  to the engine's first-wins terminal state. Quiet pushes refresh one server;
+  foreground and reconnect refresh all paired servers. The app badge is the
+  aggregate unread count across cached server truth.
+
+Registration and inbox synchronization use coalescing drain lanes: a request
+arriving during active work schedules one follow-up instead of canceling and
+duplicating network/storage owners. One server pass reuses one authenticated
+client, batches outbox deletion and inbox persistence, and bounds
+quiet-refresh waiting to eight seconds. Sanitized lifecycle diagnostics record
+only a short route hash for receipt, foreground presentation, and response
+handling.
+
+The client contract is closed to device registration, inbox sync, fixed
+responses, and sanitized status reads. It never accepts raw APNs payloads,
+arbitrary action names, device commands, URLs, media, or alert priority.
+Delivery records decode their source reminder worker separately from the
+producing notification-policy worker, plus `notBefore`, selected transport, and
+cancelled-target counts.
 
 ## Local Persistence and Diagnostics
 
 Local storage is bounded and concern-owned:
 
 - paired server and bearer material in the secure pairing owner;
+- native notification installation identity, logical inbox cache, server
+  readiness, and mutation outbox in app-private defaults; APNs tokens are never
+  persisted by Tron;
 - event cache for session reconstruction;
 - successful prompt history for Recent Inputs;
 - local logs, feedback bundles, MetricKit payloads, and hashed server-log
   correlation ids.
 
-Secrets, worker webhook tokens, provider credentials, and server runtime
-metadata must never enter local diagnostic logs. Connection
+Secrets, worker webhook tokens, provider credentials, notification content,
+raw protocol frames, and server runtime metadata must never enter local
+diagnostic logs. In-memory logs use bounded ring buffers with filtering and
+sorting outside the lock. Automatic server ingestion admits only a bounded
+warning/error tail, not verbose WebSocket traffic. Connection
 toasts and compact in-chat error pills remain the immediate attention surfaces;
 worker execution failures belong in the server-owned Engine Dashboard inbox.
 

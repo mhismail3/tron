@@ -395,6 +395,81 @@ async fn subscribe_without_cursor_starts_at_topic_tail() {
 }
 
 #[tokio::test]
+async fn unsubscribe_releases_connection_local_state_idempotently() {
+    let (mut session, mut rx) = test_session();
+    assert!(
+        session
+            .handle_text(r#"{"type":"subscribe","id":"s","topic":"events.session"}"#)
+            .await
+    );
+    let response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    let subscription_id = response["result"]["subscriptionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(session.subscriptions.lock().await.len(), 1);
+
+    for expected_removed in [true, false] {
+        assert!(
+            session
+                .handle_text(
+                    &json!({
+                        "type": "unsubscribe",
+                        "id": "u",
+                        "subscriptionId": subscription_id,
+                    })
+                    .to_string()
+                )
+                .await
+        );
+        let response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        assert_eq!(
+            response
+                .pointer("/result/unsubscribed")
+                .and_then(Value::as_bool),
+            Some(expected_removed)
+        );
+    }
+    assert!(session.subscriptions.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn subscribe_rejects_unbounded_connection_local_polling_work() {
+    let (mut session, mut rx) = test_session();
+    let mut subscriptions = session.subscriptions.lock().await;
+    for index in 0..MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION {
+        subscriptions.insert(
+            format!("existing-{index}"),
+            SubscriptionState {
+                topic: "events.session".to_owned(),
+                cursor: StreamCursor(0),
+                filters: None,
+                session_id: None,
+            },
+        );
+    }
+    drop(subscriptions);
+
+    assert!(
+        session
+            .handle_text(r#"{"type":"subscribe","id":"overflow","topic":"events.session"}"#)
+            .await
+    );
+    let response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    assert_eq!(response.get("ok").and_then(Value::as_bool), Some(false));
+    assert!(
+        response
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| message.contains("subscription limit reached"))
+    );
+    assert_eq!(
+        session.subscriptions.lock().await.len(),
+        MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION
+    );
+}
+
+#[tokio::test]
 async fn topic_poll_requires_explicit_cursor() {
     let (mut session, mut rx) = test_session();
     session.hello = Some(HelloState {

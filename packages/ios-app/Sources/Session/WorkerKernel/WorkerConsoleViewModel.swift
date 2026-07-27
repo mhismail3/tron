@@ -1,5 +1,10 @@
 import Foundation
 
+private enum WorkerConsoleRefreshScope {
+    case summary
+    case full
+}
+
 @Observable
 @MainActor
 final class WorkerConsoleViewModel {
@@ -24,6 +29,8 @@ final class WorkerConsoleViewModel {
     var monitoringError: String?
     private(set) var activityRunsNextOffset: UInt64?
     private(set) var activityAttentionNextOffset: UInt64?
+    private var activeRefreshScope: WorkerConsoleRefreshScope?
+    private var pendingFullRefresh = false
 
     var selectedWorker: WorkerSummaryDTO? {
         workers.first { $0.workerId == selectedWorkerId }
@@ -84,41 +91,105 @@ final class WorkerConsoleViewModel {
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState
     ) async {
-        guard connectionState.isConnected else {
-            engineSnapshot = nil
-            workers = []
-            activityRuns = []
-            activityAttention = []
-            activityRunsNextOffset = nil
-            activityAttentionNextOffset = nil
-            inspection = nil
-            runs = []
-            attention = []
-            hasLoaded = true
+        await requestRefresh(
+            scope: .full,
+            repository: repository,
+            connectionState: connectionState
+        )
+    }
+
+    func refreshSummary(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        await requestRefresh(
+            scope: .summary,
+            repository: repository,
+            connectionState: connectionState
+        )
+    }
+
+    private func requestRefresh(
+        scope: WorkerConsoleRefreshScope,
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        if isRefreshing {
+            if scope == .full, activeRefreshScope != .full {
+                pendingFullRefresh = true
+            }
             return
         }
+
         isRefreshing = true
         defer {
+            activeRefreshScope = nil
             isRefreshing = false
             hasLoaded = true
         }
-        do {
-            let snapshot = try await repository.engineSurfaceSnapshot(
-                sessionId: nil,
-                relevanceQuery: nil
+
+        var nextScope = scope
+        repeat {
+            activeRefreshScope = nextScope
+            pendingFullRefresh = false
+            await performRefresh(
+                scope: nextScope,
+                repository: repository,
+                connectionState: connectionState
             )
-            let globalRuns = try await repository.workerRuns(workerId: nil, limit: 20)
-            let globalAttention = try await repository.workerAttention(workerId: nil, limit: 20)
-            engineSnapshot = snapshot
-            workers = snapshot.workers
-            stopAll = snapshot.dispatchStopped
-            activityRuns = globalRuns.runs
-            activityAttention = globalAttention.items
-            activityRunsNextOffset = globalRuns.nextOffset
-            activityAttentionNextOffset = globalAttention.nextOffset
+            guard pendingFullRefresh else { return }
+            nextScope = .full
+        } while true
+    }
+
+    private func performRefresh(
+        scope: WorkerConsoleRefreshScope,
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard connectionState.isConnected else {
+            clearServerProjection()
+            return
+        }
+
+        do {
+            switch scope {
+            case .summary:
+                let snapshot = try await repository.engineSurfaceSnapshot(
+                    sessionId: nil,
+                    relevanceQuery: nil
+                )
+                apply(snapshot)
+            case .full:
+                let snapshotRequest = Task { @MainActor in
+                    try await repository.engineSurfaceSnapshot(
+                        sessionId: nil,
+                        relevanceQuery: nil
+                    )
+                }
+                let runsRequest = Task { @MainActor in
+                    try await repository.workerRuns(workerId: nil, limit: 20)
+                }
+                let attentionRequest = Task { @MainActor in
+                    try await repository.workerAttention(workerId: nil, limit: 20)
+                }
+                let (snapshot, globalRuns, globalAttention) = try await (
+                    snapshotRequest.value,
+                    runsRequest.value,
+                    attentionRequest.value
+                )
+                apply(snapshot)
+                activityRuns = globalRuns.runs
+                activityAttention = globalAttention.items
+                activityRunsNextOffset = globalRuns.nextOffset
+                activityAttentionNextOffset = globalAttention.nextOffset
+            }
+
             if let selectedWorkerId,
                workers.contains(where: { $0.workerId == selectedWorkerId }) {
-                try await loadWorker(selectedWorkerId, repository: repository)
+                if scope == .full {
+                    try await loadWorker(selectedWorkerId, repository: repository)
+                }
             } else {
                 selectedWorkerId = nil
                 inspection = nil
@@ -129,6 +200,26 @@ final class WorkerConsoleViewModel {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    private func apply(_ snapshot: EngineIntrospectionSnapshotDTO) {
+        engineSnapshot = snapshot
+        workers = snapshot.workers
+        stopAll = snapshot.dispatchStopped
+    }
+
+    private func clearServerProjection() {
+        engineSnapshot = nil
+        workers = []
+        activityRuns = []
+        activityAttention = []
+        activityRunsNextOffset = nil
+        activityAttentionNextOffset = nil
+        selectedWorkerId = nil
+        inspection = nil
+        runs = []
+        attention = []
+        stopAll = false
     }
 
     func loadOlderActivityRuns(repository: any WorkerKernelRepository) async {
@@ -192,41 +283,48 @@ final class WorkerConsoleViewModel {
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState
     ) async {
-        let topics = ["worker.lifecycle", "worker.invocations"]
-        // Topic polling is historical replay. Unlike live subscribe, the engine
-        // requires an explicit cursor, so every topic starts at the durable origin.
-        var cursors = Dictionary(
-            uniqueKeysWithValues: topics.map { ($0, EngineStreamCursor(rawValue: 0)) }
+        await monitor(
+            scope: .full,
+            repository: repository,
+            connectionState: connectionState
         )
-        while !Task.isCancelled && connectionState.isConnected {
-            var changed = false
-            var pollingError: String?
-            for topic in topics {
-                do {
-                    let page = try await repository.pollWorkerEvents(
-                        topic: topic,
-                        cursor: cursors[topic] ?? EngineStreamCursor(rawValue: 0)
-                    )
-                    if let next = page.nextCursor {
-                        cursors[topic] = EngineStreamCursor(rawValue: next)
-                    }
-                    changed = changed || !page.events.isEmpty
-                } catch {
-                    pollingError = error.localizedDescription
-                }
-            }
-            monitoringError = pollingError
-            if changed {
-                NotificationCenter.default.post(
-                    name: .workerRunProjectionInvalidated,
-                    object: nil
-                )
-                await refresh(
-                    repository: repository,
-                    connectionState: connectionState
-                )
-            }
-            try? await Task.sleep(for: .seconds(1))
+    }
+
+    func monitorSummary(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        await monitor(
+            scope: .summary,
+            repository: repository,
+            connectionState: connectionState
+        )
+    }
+
+    private func monitor(
+        scope: WorkerConsoleRefreshScope,
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard connectionState.isConnected else { return }
+        let invalidations = NotificationCenter.default.notifications(
+            named: .workerRunProjectionInvalidated
+        )
+        do {
+            try await repository.ensureWorkerEventSubscriptions()
+            monitoringError = nil
+        } catch {
+            monitoringError = error.localizedDescription
+            return
+        }
+
+        for await _ in invalidations {
+            guard !Task.isCancelled, connectionState.isConnected else { return }
+            await requestRefresh(
+                scope: scope,
+                repository: repository,
+                connectionState: connectionState
+            )
         }
     }
 
@@ -371,9 +469,23 @@ final class WorkerConsoleViewModel {
         _ workerId: String,
         repository: any WorkerKernelRepository
     ) async throws {
-        inspection = try await repository.inspectWorker(workerId)
-        runs = try await repository.workerRuns(workerId: workerId, limit: 20).runs
-        attention = try await repository.workerAttention(workerId: workerId, limit: 20).items
+        let inspectionRequest = Task { @MainActor in
+            try await repository.inspectWorker(workerId)
+        }
+        let runsRequest = Task { @MainActor in
+            try await repository.workerRuns(workerId: workerId, limit: 20)
+        }
+        let attentionRequest = Task { @MainActor in
+            try await repository.workerAttention(workerId: workerId, limit: 20)
+        }
+        let (loadedInspection, loadedRuns, loadedAttention) = try await (
+            inspectionRequest.value,
+            runsRequest.value,
+            attentionRequest.value
+        )
+        inspection = loadedInspection
+        runs = loadedRuns.runs
+        attention = loadedAttention.items
     }
 
     private func mutate(
@@ -426,5 +538,12 @@ extension Notification.Name {
     /// No worker execution state is carried in the notification.
     static let workerRunProjectionInvalidated = Notification.Name(
         "tron.worker-run-projection-invalidated"
+    )
+
+    /// A worker was activated, disabled, retired, restored, or otherwise
+    /// changed ownership metadata. Client-action availability observes this
+    /// narrow lane instead of refreshing for every ordinary invocation.
+    static let workerLifecycleProjectionInvalidated = Notification.Name(
+        "tron.worker-lifecycle-projection-invalidated"
     )
 }

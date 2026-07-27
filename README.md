@@ -18,6 +18,10 @@ engine-global worker through one atomic operation.
 - Agent, command, and lazy resident-service workers share one durable runtime.
 - Manual calls, schedules, engine events, and authenticated local webhooks share
   one at-least-once dispatcher.
+- Runtime-managed scheduler, reminder, and notification-policy workers divide
+  time calculation, occurrence lifecycle, and delivery relevance. The engine
+  durably hands work between them and transports narrow notification intents;
+  iOS owns permission, presentation, deep links, and read state.
 - Local agents and workers use the Mac user's normal authority without
   per-call permission objects or proposal-only activation steps.
 - Provenance, immutable versions, dependency locks, audit history, secret
@@ -35,17 +39,16 @@ engine-global worker through one atomic operation.
 │ chat + workers   │         │ model, runners, dispatch │
 └──────────────────┘         └────────────┬─────────────┘
                                          │
-                         ┌───────────────┴────────────────┐
-                         │ session SQLite + worker SQLite │
-                         │ filesystem-owned worker bundles│
-                         └────────────────────────────────┘
+                 schedules → reminders → notification policy
+                                         │
+                              relay or direct APNs transport
 ```
 
 The Rust server owns model execution, authenticated transport, durable session
-truth, worker dispatch, and worker storage. The iOS app is a thin client with a
-Worker Console for health, versions, triggers, typed invocation, runs, inbox,
-rollback, retirement, exact run cancellation, per-worker stop/disable, and
-engine stop-all controls.
+truth, atomic worker handoffs, worker storage, and provider-acceptance evidence.
+The iOS app is a thin client with a Worker Console for health, versions,
+triggers, typed invocation, runs, inbox, rollback, retirement, cancellation,
+and stop controls, plus a synchronized native notification inbox.
 The Mac app packages and supervises the server and owns pairing; it is not a
 second engine client.
 

@@ -92,24 +92,24 @@ struct WorkerConsoleViewModelTests {
         #expect(WorkerVersionAction.resolve(worker: restoredWorker, version: version) == nil)
     }
 
-    @Test("Worker monitoring replays every topic from an explicit origin cursor")
-    func monitoringUsesExplicitOriginCursors() async {
+    @Test("Worker monitoring subscribes at the live tail and refreshes only the sidebar summary")
+    func monitoringUsesLiveInvalidationsWithoutHistoryReplay() async {
         let repository = MockWorkerKernelRepository()
         let viewModel = WorkerConsoleViewModel()
 
         let monitor = Task {
-            await viewModel.monitor(repository: repository, connectionState: .connected)
+            await viewModel.monitorSummary(repository: repository, connectionState: .connected)
         }
+        try? await Task.sleep(for: .milliseconds(20))
+        NotificationCenter.default.post(name: .workerRunProjectionInvalidated, object: nil)
         try? await Task.sleep(for: .milliseconds(50))
         monitor.cancel()
         await monitor.value
 
-        #expect(repository.polledCursors.count >= 2)
-        #expect(Set(repository.polledCursors.prefix(2).map(\.topic)) == [
-            "worker.lifecycle",
-            "worker.invocations",
-        ])
-        #expect(repository.polledCursors.prefix(2).allSatisfy { $0.cursor == 0 })
+        #expect(repository.workerSubscriptionCount == 1)
+        #expect(repository.snapshotSessionIds.count == 1)
+        #expect(repository.runLimits.isEmpty)
+        #expect(repository.inboxLimits.isEmpty)
         #expect(viewModel.monitoringError == nil)
     }
 
@@ -141,7 +141,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var enabledMutations: [Bool] = []
     var rollbackVersions: [String] = []
     var lastInput: [String: Any]?
-    var polledCursors: [(topic: String, cursor: UInt64)] = []
+    var workerSubscriptionCount = 0
     var snapshotSessionIds: [String?] = []
     var runLimits: [UInt64] = []
     var inboxLimits: [UInt64] = []
@@ -363,12 +363,8 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
         WorkerWebhookCredentialDTO(triggerId: triggerId, path: "/hook", token: "redacted-test-token")
     }
 
-    func pollWorkerEvents(
-        topic: String,
-        cursor: EngineStreamCursor
-    ) async throws -> EngineStreamPage {
-        polledCursors.append((topic, cursor.rawValue))
-        return EngineStreamPage(events: [], hasMore: false, nextCursor: cursor.rawValue)
+    func ensureWorkerEventSubscriptions() async throws {
+        workerSubscriptionCount += 1
     }
 
     private func invocation(id: String, output: [String: Any]) -> WorkerInvocationDTO {

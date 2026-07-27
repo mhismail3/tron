@@ -7,10 +7,11 @@ extension EventStoreManager {
     /// Mark a session as processing (agent is thinking)
     func setSessionProcessing(_ sessionId: String, isProcessing: Bool) {
         applySessionProcessingState(sessionId, isProcessing: isProcessing)
-        if isProcessing {
-            Task { @MainActor [weak self] in
-                await self?.subscribeToProcessingSession(sessionId)
-            }
+        Task { @MainActor [weak self] in
+            await self?.setProcessingSessionSubscription(
+                sessionId,
+                isProcessing: isProcessing
+            )
         }
     }
 
@@ -19,21 +20,26 @@ extension EventStoreManager {
         isProcessing: Bool
     ) async {
         applySessionProcessingState(sessionId, isProcessing: isProcessing)
-        if isProcessing {
-            await subscribeToProcessingSession(sessionId)
-        }
+        await setProcessingSessionSubscription(sessionId, isProcessing: isProcessing)
     }
 
-    private func subscribeToProcessingSession(_ sessionId: String) async {
+    private func setProcessingSessionSubscription(
+        _ sessionId: String,
+        isProcessing: Bool
+    ) async {
         do {
-            try await engineClient.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
+            try await engineClient.setProcessingSessionEventSubscription(
+                sessionId: sessionId,
+                workspaceId: nil,
+                isActive: isProcessing
+            )
             logger.debug(
-                "Session projection subscribed to live events for processing session \(String(sessionId.prefix(12)))...",
+                "Session projection \(isProcessing ? "retained" : "released") live events for processing session \(String(sessionId.prefix(12)))...",
                 category: .events
             )
         } catch {
             logger.warning(
-                "Session projection could not subscribe to live events for \(String(sessionId.prefix(12)))...: \(error.localizedDescription)",
+                "Session projection could not update live-event ownership for \(String(sessionId.prefix(12)))...: \(error.localizedDescription)",
                 category: .events
             )
         }

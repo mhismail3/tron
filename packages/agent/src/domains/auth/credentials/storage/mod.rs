@@ -282,6 +282,12 @@ pub fn load_all_provider_api_keys(path: &Path) -> Result<HashMap<String, String>
             }
         }
     }
+    if let Some(credentials) = super::apple_push::load_apple_push_credentials(path)? {
+        let _ = values.insert(
+            "transport-apple-push-private-key".to_owned(),
+            credentials.private_key,
+        );
+    }
     Ok(values)
 }
 

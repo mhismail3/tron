@@ -74,11 +74,13 @@ enum MainSettingsListLayout {
 enum MainSettingsGridDestination: Hashable, Sendable {
     case engine
     case providers
+    case notifications
     case app
 
     static let order: [Self] = [
         .engine,
         .providers,
+        .notifications,
         .app,
     ]
 
@@ -90,6 +92,8 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return MainSettingsLocalCategoryStyle.appIcon
         case .providers:
             return ServerSettingsCategory.providers.icon
+        case .notifications:
+            return "bell.badge"
         }
     }
 
@@ -101,6 +105,8 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return "App"
         case .providers:
             return ServerSettingsCategory.providers.title
+        case .notifications:
+            return "Notifications"
         }
     }
 
@@ -109,9 +115,11 @@ enum MainSettingsGridDestination: Hashable, Sendable {
         case .engine:
             return ServerSettingsCategory.engine.subtitle
         case .app:
-            return "Appearance, notifications, behavior"
+            return "Appearance and behavior"
         case .providers:
             return ServerSettingsCategory.providers.subtitle
+        case .notifications:
+            return "Permission, delivery readiness, inbox"
         }
     }
 
@@ -123,6 +131,8 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return "Configure local app settings."
         case .providers:
             return "Configure server-held provider accounts."
+        case .notifications:
+            return "Review notification permission, paired-engine delivery readiness, and reminders."
         }
     }
 }

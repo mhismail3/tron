@@ -9,10 +9,16 @@ import CoreGraphics
 enum ChatTranscriptRevealPolicy {
     static let initialBottomTolerance: CGFloat = 16
     static let initialStableBottomSamples = 2
-    static let initialBottomSettleAttempts = 36
-    static let initialScrollProxyWaitAttempts = 20
-    static let initialScrollGeometryWaitAttempts = 20
-    static let initialSettleDelayMilliseconds = 60
+    static let initialBottomSettleAttempts = 4
+    static let initialScrollProxyWaitAttempts = 3
+    static let initialScrollGeometryWaitAttempts = 3
+    static let initialSettleDelayMilliseconds = 40
+    static let initialShellLoadingBudgetMilliseconds = 5_000
+    static let maximumTranscriptRevealDelayMilliseconds =
+        initialScrollProxyWaitAttempts * 25
+        + initialScrollGeometryWaitAttempts * 25
+        + initialBottomSettleAttempts * initialSettleDelayMilliseconds
+        + 80
     static let autoscrollBottomTolerance: CGFloat = 100
     static let scrollableOverflowTolerance: CGFloat = 1
 

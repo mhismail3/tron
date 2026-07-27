@@ -145,6 +145,10 @@ final class TestEngineTransport: EngineTransport {
         )
     }
 
+    func ensureWorkerEventSubscriptions() async throws {
+        _ = try requireConnection()
+    }
+
     func setCurrentModel(_ model: String) {
         currentModel = model
     }

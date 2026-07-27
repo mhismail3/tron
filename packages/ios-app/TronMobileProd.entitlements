@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>aps-environment</key>
-	<string>production</string>
+	<string>$(TRON_APNS_ENTITLEMENT_ENVIRONMENT)</string>
 	<key>application-identifier</key>
 	<string>MYGKXH6TY4.com.tron.mobile</string>
 	<key>com.apple.developer.team-identifier</key>

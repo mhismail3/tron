@@ -1,5 +1,10 @@
 import SwiftUI
 
+struct SettingsServerLoadKey: Equatable {
+    let serverSelectionVersion: Int
+    let isConnected: Bool
+}
+
 // MARK: - Settings View
 
 struct SettingsView: View {
@@ -25,7 +30,7 @@ struct SettingsView: View {
     @State var isPreparingFeedback = false
 
     enum SettingsPage: String, Identifiable {
-        case engine, providers, app
+        case engine, providers, notifications, app
         var id: String { rawValue }
     }
 
@@ -138,20 +143,20 @@ struct SettingsView: View {
 
     private var settingsWithLifecycle: some View {
         settingsWithSheets
-            .task {
+            .task(id: SettingsServerLoadKey(
+                serverSelectionVersion: dependencies.activeServerSelectionVersion,
+                isConnected: connectionRepository.connectionState.isConnected
+            )) {
                 cardsVisible = true
                 await loadServerOwnedState()
             }
             .onChange(of: dependencies.activeServerSelectionVersion) {
                 settingsState.clearServerSnapshot()
                 clearWorkerDispatchState()
-                Task { await loadServerOwnedState() }
             }
             .onChange(of: connectionRepository.connectionState) { oldState, newState in
                 guard hasPairedServers else { return }
-                if newState.isConnected {
-                    Task { await loadServerOwnedState() }
-                } else if oldState.isConnected {
+                if oldState.isConnected && !newState.isConnected {
                     settingsState.clearServerSnapshot()
                     clearWorkerDispatchState()
                 }
@@ -213,6 +218,11 @@ struct SettingsView: View {
             AppearanceSettingsPage(
                 confirmArchive: $confirmArchive
             )
+        case .notifications:
+            NotificationInboxView(
+                coordinator: dependencies.notificationCoordinator,
+                servers: dependencies.pairedServerStore.servers
+            )
         }
     }
 
@@ -256,7 +266,9 @@ struct SettingsView: View {
             return
         }
         let isAlive = await dependencies.verifyConnection()
-        guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+        guard !Task.isCancelled,
+              connection.connectionState.isConnected,
+              dependencies.pairedServerStore.activeServer?.id == activeServer.id,
               dependencies.activeServerSelectionVersion == selectionVersion else {
             return
         }
@@ -267,10 +279,14 @@ struct SettingsView: View {
         }
         settingsState.clearServerSnapshot()
         await settingsState.load(using: dependencies.settingsRepository) {
-            dependencies.pairedServerStore.activeServer?.id == activeServer.id
+            !Task.isCancelled
+                && dependencies.connectionRepository.connectionState.isConnected
+                && dependencies.pairedServerStore.activeServer?.id == activeServer.id
                 && dependencies.activeServerSelectionVersion == selectionVersion
         }
-        guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+        guard !Task.isCancelled,
+              dependencies.connectionRepository.connectionState.isConnected,
+              dependencies.pairedServerStore.activeServer?.id == activeServer.id,
               dependencies.activeServerSelectionVersion == selectionVersion else {
             return
         }
@@ -292,12 +308,15 @@ struct SettingsView: View {
         workerDispatchError = nil
         do {
             let snapshot = try await dependencies.workerKernelRepository.workers(includeRetired: false)
-            guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+            guard !Task.isCancelled,
+                  connectionRepository.connectionState.isConnected,
+                  dependencies.pairedServerStore.activeServer?.id == activeServer.id,
                   dependencies.activeServerSelectionVersion == selectionVersion else { return }
             workersStopped = snapshot.stopAll
             workerDispatchLoaded = true
         } catch {
-            guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+            guard !Task.isCancelled,
+                  dependencies.pairedServerStore.activeServer?.id == activeServer.id,
                   dependencies.activeServerSelectionVersion == selectionVersion else { return }
             workerDispatchError = error.localizedDescription
         }

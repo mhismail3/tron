@@ -63,6 +63,9 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
         return Err("worker name and description are required".to_owned());
     }
     validate_object_schema(&bundle.input_schema, "inputSchema")?;
+    if let Some(tool_input_schema) = &bundle.tool_input_schema {
+        validate_object_schema(tool_input_schema, "toolInputSchema")?;
+    }
     validate_object_schema(&bundle.output_schema, "outputSchema")?;
     if bundle
         .execution_limits
@@ -106,6 +109,35 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
             return Err(format!("duplicate client action '{}'", action.as_str()));
         }
         validate_client_action_contract(*action, bundle)?;
+    }
+    let mut client_deliveries = BTreeSet::new();
+    for delivery in &bundle.client_deliveries {
+        if !client_deliveries.insert(*delivery) {
+            return Err(format!("duplicate client delivery '{}'", delivery.as_str()));
+        }
+    }
+    let mut dispatch_routes = BTreeSet::new();
+    for route in &bundle.worker_dispatch_routes {
+        validate_identifier(&route.route, "worker dispatch route")?;
+        if route.route.len() > 64 {
+            return Err("worker dispatch route must be at most 64 UTF-8 bytes".to_owned());
+        }
+        validate_identifier(&route.target_worker_id, "worker dispatch targetWorkerId")?;
+        if !dispatch_routes.insert(route.route.as_str()) {
+            return Err(format!("duplicate worker dispatch route '{}'", route.route));
+        }
+    }
+    if !bundle.worker_dispatch_routes.is_empty()
+        && bundle
+            .output_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .is_none_or(|properties| !properties.contains_key("workerDispatches"))
+    {
+        return Err(
+            "outputSchema must explicitly declare the reserved workerDispatches property when workerDispatchRoutes are present"
+                .to_owned(),
+        );
     }
     let mut trigger_ids = BTreeSet::new();
     for trigger in &bundle.triggers {

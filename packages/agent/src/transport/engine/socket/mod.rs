@@ -14,6 +14,8 @@
 //! A peer remains live while it returns Pong or any other inbound activity.
 //! Missing activity after a sent Ping retires the socket; teardown cancels its
 //! pumps, drops connection-local stream cursors, and bounds child-task drain.
+//! Explicit unsubscribe releases one cursor idempotently, while the fixed
+//! per-connection subscription ceiling bounds the 250 ms push-poll workload.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -45,6 +47,7 @@ const MIN_PROTOCOL_VERSION: u64 = 1;
 const OUTBOUND_QUEUE_CAPACITY: usize = 256;
 const STREAM_DEFAULT_LIMIT: usize = 100;
 const STREAM_MAX_LIMIT: usize = 500;
+const MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION: usize = 64;
 const PUSH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 const CONTROL_QUEUE_CAPACITY: usize = 1;
 const CHILD_TASK_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -326,6 +329,7 @@ impl EngineWsSession {
             "hello" => self.handle_hello(id, value).await,
             "invoke" => self.handle_invoke(id, value).await,
             "subscribe" => self.handle_subscribe(id, value).await,
+            "unsubscribe" => self.handle_unsubscribe(id, value).await,
             "poll" => self.handle_poll(id, value).await,
             "ack" => self.handle_ack(id, value).await,
             "heartbeat" => self.handle_heartbeat(id, value).await,

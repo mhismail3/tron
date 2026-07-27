@@ -28,7 +28,8 @@ struct SessionSidebar: View {
 
     private var workerConsoleRefreshKey: WorkerConsoleRefreshKey {
         WorkerConsoleRefreshKey(
-            isConnected: dependencies.connectionRepository.connectionState.isConnected
+            isConnected: dependencies.connectionRepository.connectionState.isConnected,
+            dashboardPresented: showWorkerConsole
         )
     }
 
@@ -164,8 +165,9 @@ struct SessionSidebar: View {
             reconcileWorkspaceDisclosure(groupIds: Set(groupCounts.keys))
         }
         .task(id: workerConsoleRefreshKey) {
-            await refreshWorkerConsole()
-            await workerConsole.monitor(
+            guard !showWorkerConsole else { return }
+            await refreshWorkerConsoleSummary()
+            await workerConsole.monitorSummary(
                 repository: dependencies.workerKernelRepository,
                 connectionState: dependencies.connectionRepository.connectionState
             )
@@ -254,8 +256,8 @@ struct SessionSidebar: View {
         }
     }
 
-    private func refreshWorkerConsole() async {
-        await workerConsole.refresh(
+    private func refreshWorkerConsoleSummary() async {
+        await workerConsole.refreshSummary(
             repository: dependencies.workerKernelRepository,
             connectionState: dependencies.connectionRepository.connectionState
         )
@@ -308,4 +310,5 @@ struct SessionSidebar: View {
 
 private struct WorkerConsoleRefreshKey: Equatable {
     let isConnected: Bool
+    let dashboardPresented: Bool
 }

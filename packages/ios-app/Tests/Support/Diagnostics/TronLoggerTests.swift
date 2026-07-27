@@ -221,4 +221,51 @@ struct TronLoggerSensitiveDataTests {
         #expect(!message.contains("apiKeyLabel"))
         #expect(!message.contains("Project"))
     }
+
+    @Test("Malformed inbound frames never enter diagnostics verbatim")
+    func malformedInboundFrameLoggingOmitsContent() async {
+        let logger = TronLogger.shared
+        let originalLevel = logger.minimumLevel
+        defer {
+            logger.minimumLevel = originalLevel
+            logger.clearBufferForCategory(.websocket)
+        }
+        logger.minimumLevel = .verbose
+        logger.clearBufferForCategory(.websocket)
+        let sentinel = "private-notification-body-sentinel"
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:9847/engine")!
+        )
+
+        await connection.handleMessage(Data(sentinel.utf8))
+
+        let messages = logger.getRecentLogs(category: .websocket).map(\.3)
+        #expect(messages.contains { $0.contains("malformed non-JSON") })
+        #expect(!messages.contains { $0.contains(sentinel) })
+    }
+}
+
+@Suite("TronLogger Bounded Storage")
+@MainActor
+struct TronLoggerBoundedStorageTests {
+    @Test("Chatty transport logging keeps only the fixed ring capacity")
+    func websocketRingRemainsBounded() {
+        let logger = TronLogger.shared
+        let originalLevel = logger.minimumLevel
+        defer {
+            logger.minimumLevel = originalLevel
+            logger.clearBufferForCategory(.websocket)
+        }
+        logger.minimumLevel = .verbose
+        logger.clearBufferForCategory(.websocket)
+
+        for index in 0..<1_500 {
+            logger.verbose("frame \(index)", category: .websocket)
+        }
+
+        let logs = logger.getRecentLogs(count: 2_000, category: .websocket)
+        #expect(logs.count == 1_000)
+        #expect(logs.first?.3 == "frame 500")
+        #expect(logs.last?.3 == "frame 1499")
+    }
 }

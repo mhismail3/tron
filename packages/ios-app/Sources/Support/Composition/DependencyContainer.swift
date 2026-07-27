@@ -68,6 +68,23 @@ final class DependencyContainer {
     @ObservationIgnored
     let pairedServerTokenStore: PairedServerTokenStore
 
+    /// Native permission, APNs registration, synchronized inbox, and durable
+    /// response-outbox owner. Lazy construction preserves hosted-test
+    /// isolation and avoids touching notification APIs before production root
+    /// initialization.
+    @ObservationIgnored
+    lazy var notificationCoordinator: NativeNotificationCoordinator = {
+        NativeNotificationCoordinator(
+            defaults: pairedServerDefaults,
+            servers: { [unowned self] in pairedServerStore.servers },
+            activeServer: { [unowned self] in pairedServerStore.activeServer },
+            activeClient: { [unowned self] in engineClient },
+            token: { [unowned self] serverId in
+                pairedServerTokenStore.token(forServerId: serverId)
+            }
+        )
+    }()
+
     /// One immutable I/O policy reused by initial and rebuilt server services.
     @ObservationIgnored
     private let runtimeIO: DependencyContainerRuntimeIO
@@ -100,6 +117,8 @@ final class DependencyContainer {
     /// Client identity, rather than selection metadata, defines the generation.
     @ObservationIgnored
     private var activeServerStartupTask: Task<Void, Never>?
+    @ObservationIgnored
+    private let authUpdatedObserverLease = NotificationObserverLease()
 
     // MARK: - Repositories
 
@@ -234,7 +253,7 @@ final class DependencyContainer {
             logsProvider: {
                 TronLogger.shared.getRecentLogs(
                     count: ClientLogIngestionPlanner.defaultMaxEntries,
-                    level: .verbose,
+                    level: .warning,
                     category: nil
                 )
             }
@@ -272,7 +291,7 @@ final class DependencyContainer {
         // (`self` is fully available here).
         eventStoreManager.attachConnectionManager(manager)
         // Listen for auth updates from WebSocket events
-        NotificationCenter.default.addObserver(
+        authUpdatedObserverLease.token = NotificationCenter.default.addObserver(
             forName: .authDidUpdate,
             object: nil,
             queue: .main
@@ -526,5 +545,17 @@ final class DependencyContainer {
         }
 
         return tokenStore.token(forServerId: activeId)
+    }
+}
+
+/// Process observer ownership is independent of MainActor deinitialization.
+/// The block callback still hops to its weak main-actor container.
+private final class NotificationObserverLease: @unchecked Sendable {
+    var token: NSObjectProtocol?
+
+    deinit {
+        if let token {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 }

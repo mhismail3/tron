@@ -57,6 +57,35 @@ enum LogCategory: String, CaseIterable {
 // MARK: - Tron Logger
 
 final class TronLogger: @unchecked Sendable {
+    private typealias BufferedEntry = (Date, LogCategory, LogLevel, String)
+
+    /// Reference storage avoids array copy-on-write on every append. The fixed
+    /// ring makes chatty transport categories O(1) once full.
+    private final class LogRingBuffer {
+        private var storage: [BufferedEntry?]
+        private var nextIndex = 0
+        private(set) var count = 0
+
+        init(capacity: Int) {
+            storage = Array(repeating: nil, count: capacity)
+        }
+
+        func append(_ entry: BufferedEntry) {
+            guard !storage.isEmpty else { return }
+            storage[nextIndex] = entry
+            nextIndex = (nextIndex + 1) % storage.count
+            count = min(count + 1, storage.count)
+        }
+
+        func values() -> [BufferedEntry] {
+            guard count > 0 else { return [] }
+            let start = count == storage.count ? nextIndex : 0
+            return (0..<count).compactMap { offset in
+                storage[(start + offset) % storage.count]
+            }
+        }
+    }
+
     static let shared = TronLogger()
 
     // Thread-safe configuration properties — protected by bufferLock
@@ -86,7 +115,7 @@ final class TronLogger: @unchecked Sendable {
     }
 
     // In-memory log buffers - separate per category to prevent chatty categories from pushing out quieter ones
-    private var categoryBuffers: [LogCategory: [(Date, LogCategory, LogLevel, String)]] = [:]
+    private var categoryBuffers: [LogCategory: LogRingBuffer] = [:]
     private let bufferLock = NSLock()
 
     // Per-category buffer sizes - engine transport gets more since it contains important info.
@@ -155,13 +184,12 @@ final class TronLogger: @unchecked Sendable {
 
         // Add to category-specific buffer for local diagnostics and debug LogViewer.
         bufferLock.lock()
-        var buffer = categoryBuffers[category] ?? []
-        buffer.append((Date(), category, level, msg))
-        let maxSize = maxBufferSize(for: category)
-        if buffer.count > maxSize {
-            buffer.removeFirst(buffer.count - maxSize)
+        if categoryBuffers[category] == nil {
+            categoryBuffers[category] = LogRingBuffer(
+                capacity: maxBufferSize(for: category)
+            )
         }
-        categoryBuffers[category] = buffer
+        categoryBuffers[category]?.append((Date(), category, level, msg))
         bufferLock.unlock()
     }
 
@@ -238,17 +266,14 @@ final class TronLogger: @unchecked Sendable {
     // MARK: - Buffer Access
 
     func getRecentLogs(count: Int = 100, level: LogLevel? = nil, category: LogCategory? = nil) -> [(Date, LogCategory, LogLevel, String)] {
-        bufferLock.lock()
-        defer { bufferLock.unlock() }
-
-        var result: [(Date, LogCategory, LogLevel, String)]
-
-        if let category = category {
-            result = categoryBuffers[category] ?? []
-        } else {
-            result = categoryBuffers.values.flatMap { $0 }
+        let snapshot: [BufferedEntry] = bufferLock.withLock {
+            if let category {
+                return categoryBuffers[category]?.values() ?? []
+            }
+            return categoryBuffers.values.flatMap { $0.values() }
         }
 
+        var result = snapshot
         if let level = level {
             result = result.filter { $0.2 >= level }
         }
@@ -258,7 +283,9 @@ final class TronLogger: @unchecked Sendable {
 
     func clearBufferForCategory(_ category: LogCategory) {
         bufferLock.lock()
-        categoryBuffers[category] = []
+        categoryBuffers[category] = LogRingBuffer(
+            capacity: maxBufferSize(for: category)
+        )
         bufferLock.unlock()
     }
 

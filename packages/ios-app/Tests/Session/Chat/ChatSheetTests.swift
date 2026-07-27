@@ -252,6 +252,20 @@ struct SheetCoordinatorTests {
         #expect(coordinator.onDismiss == nil)
     }
 
+    @Test("Interactive dismissal releases callback and invokes it once")
+    func testPresentationDismissalIsIdempotent() {
+        let coordinator = SheetCoordinator()
+        var callbackCount = 0
+        coordinator.present(.settings) { callbackCount += 1 }
+
+        coordinator.presentationDidDismiss()
+        coordinator.presentationDidDismiss()
+
+        #expect(callbackCount == 1)
+        #expect(coordinator.activeSheet == nil)
+        #expect(coordinator.onDismiss == nil)
+    }
+
     // MARK: - Convenience Method Tests
 
     @Test("showSettings creates settings sheet")

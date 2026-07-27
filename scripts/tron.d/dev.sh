@@ -26,26 +26,7 @@ load_dev_relay_environment() {
     fi
 }
 
-xml_escape() {
-    local value="$1"
-    value="${value//&/&amp;}"
-    value="${value//</&lt;}"
-    value="${value//>/&gt;}"
-    value="${value//\"/&quot;}"
-    value="${value//\'/&apos;}"
-    printf '%s' "$value"
-}
-
 create_dev_launchd_plist() {
-    local relay_environment_xml=""
-    if [ -n "${TRON_RELAY_URL:-}" ]; then
-        relay_environment_xml="
-        <key>TRON_RELAY_URL</key>
-        <string>$(xml_escape "$TRON_RELAY_URL")</string>
-        <key>TRON_RELAY_SECRET</key>
-        <string>$(xml_escape "$TRON_RELAY_SECRET")</string>"
-    fi
-
     cat > "$DEV_PLIST_PATH" << PLIST || return 1
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -78,7 +59,6 @@ create_dev_launchd_plist() {
         <string>$RUST_WORKSPACE</string>
         <key>TRON_DEV_BINARY</key>
         <string>$DEV_BINARY</string>
-        $relay_environment_xml
     </dict>
 
     <key>StandardOutPath</key>
@@ -89,6 +69,17 @@ create_dev_launchd_plist() {
 </plist>
 PLIST
     chmod 600 "$DEV_PLIST_PATH" || return 1
+}
+
+migrate_dev_relay_environment() {
+    if [ -z "${TRON_RELAY_URL:-}" ]; then
+        return 0
+    fi
+    if ! _run_tron_auth_owner notifications import-legacy-environment >/dev/null; then
+        print_error "Failed to import development notification relay credentials"
+        return 1
+    fi
+    unset TRON_RELAY_URL TRON_RELAY_SECRET
 }
 
 cmd_dev() {
@@ -174,6 +165,8 @@ cmd_dev() {
     if [ "$do_build" != true ]; then
         build_rust_dev
     fi
+
+    migrate_dev_relay_environment || return 1
 
     if [ "$do_background" = true ]; then
         dev_start_background "$output_json" "$wait_seconds"

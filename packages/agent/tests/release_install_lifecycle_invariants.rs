@@ -1082,7 +1082,7 @@ fn runtime_command_help_has_one_shared_owner() {
         "status start stop restart uninstall logs errors rollback login auth state",
         "runtime dispatcher inventory drifted"
     );
-    let expected_help_commands = "status|start|stop|restart|uninstall|logs|errors|rollback|login|auth rotate|state snapshot|state snapshots"
+    let expected_help_commands = "status|start|stop|restart|uninstall|logs|errors|rollback|login|auth rotate|auth apns|auth notifications|state snapshot|state snapshots"
         .split('|')
         .collect::<Vec<_>>();
     assert_eq!(

@@ -87,6 +87,24 @@ struct EngineConnectionReconnectTests {
         #expect(configuration.timeoutIntervalForResource.isInfinite)
     }
 
+    @Test("concurrent disconnect signals share one reconnect owner")
+    func reconnectOwnershipIsSingleFlight() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+
+        connection.startReconnectOwnership(deployRestart: false)
+        connection.startReconnectOwnership(deployRestart: false)
+        await Task.yield()
+
+        #expect(connection.reconnectTaskGeneration == 1)
+        #expect(connection.reconnectLoopActive)
+        connection.cancelReconnectOwnership()
+        #expect(!connection.reconnectLoopActive)
+        #expect(connection.reconnectTask == nil)
+    }
+
     @Test(".failed reason after capped probe exhaustion uses tap-to-retry copy")
     func failedReasonCopy() {
         #expect(EngineConnection.failedAfterExhaustionReason == "Connection lost — tap to retry")

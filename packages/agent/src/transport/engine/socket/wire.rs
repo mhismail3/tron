@@ -103,6 +103,15 @@ pub(super) struct AckMessage {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct UnsubscribeMessage {
+    #[serde(rename = "type")]
+    pub(super) _message_type: String,
+    pub(super) id: Option<String>,
+    pub(super) subscription_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct HeartbeatMessage {
     #[serde(rename = "type")]
     pub(super) _message_type: String,

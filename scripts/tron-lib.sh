@@ -82,6 +82,8 @@ show_runtime_command_help() {
     echo "  rollback        Restore previous binary (--yes to skip confirmation)"
     echo "  login           Authenticate with a provider (--provider <name>, --label <name>)"
     echo "  auth rotate     Rotate the WebSocket bearer token (forces iOS re-pair)"
+    echo "  auth apns       Configure, inspect, or clear direct APNs credentials"
+    echo "  auth notifications Configure relay/direct notification transport"
     echo "  state snapshot  Create a verified compressed profile snapshot"
     echo "  state snapshots List profile snapshots; use verify/restore for recovery"
     echo "  logs            Query database logs (use -h for options)"

@@ -48,6 +48,13 @@ final class DefaultSessionEventRepository: SessionEventRepository {
     func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws {
         try await client.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: workspaceId)
     }
+
+    func releaseSessionEventSubscription(sessionId: String, workspaceId: String?) async {
+        await client.releaseSessionEventSubscription(
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
+    }
 }
 
 // MARK: - Default Settings Repository
@@ -225,9 +232,45 @@ final class DefaultWorkspaceBrowserRepository: WorkspaceBrowserRepository {
 
 // MARK: - Default Worker Kernel Repository
 
+/// Coalesces the profile-level Engine projection shared by dashboard and
+/// client-action capability consumers. Cancellation of one waiter does not
+/// cancel the shared read for the remaining consumers.
+@MainActor
+final class EngineSurfaceSnapshotLoader {
+    private var task: Task<EngineIntrospectionSnapshotDTO, any Error>?
+    private var generation: UInt64 = 0
+
+    func load(
+        operation: @escaping @MainActor () async throws -> EngineIntrospectionSnapshotDTO
+    ) async throws -> EngineIntrospectionSnapshotDTO {
+        if let task {
+            return try await task.value
+        }
+        generation &+= 1
+        let generation = generation
+        let task = Task { @MainActor in
+            try await operation()
+        }
+        self.task = task
+        defer {
+            if self.generation == generation {
+                self.task = nil
+            }
+        }
+        return try await task.value
+    }
+
+    func cancel() {
+        generation &+= 1
+        task?.cancel()
+        task = nil
+    }
+}
+
 @MainActor
 final class DefaultWorkerKernelRepository: WorkerKernelRepository {
     private let client: WorkerKernelClient
+    private let surfaceSnapshotLoader = EngineSurfaceSnapshotLoader()
 
     init(client: WorkerKernelClient) {
         self.client = client
@@ -237,7 +280,15 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         sessionId: String?,
         relevanceQuery: String?
     ) async throws -> EngineIntrospectionSnapshotDTO {
-        try await client.engineSurfaceSnapshot(
+        if sessionId == nil, relevanceQuery == nil {
+            return try await surfaceSnapshotLoader.load { [client] in
+                try await client.engineSurfaceSnapshot(
+                    sessionId: nil,
+                    relevanceQuery: nil
+                )
+            }
+        }
+        return try await client.engineSurfaceSnapshot(
             sessionId: sessionId,
             relevanceQuery: relevanceQuery
         )
@@ -460,10 +511,7 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
-    func pollWorkerEvents(
-        topic: String,
-        cursor: EngineStreamCursor
-    ) async throws -> EngineStreamPage {
-        try await client.pollWorkerEvents(topic: topic, cursor: cursor)
+    func ensureWorkerEventSubscriptions() async throws {
+        try await client.ensureWorkerEventSubscriptions()
     }
 }

@@ -20,11 +20,14 @@ extension ChatView {
 
     /// Switch model with optimistic UI update for instant feedback
     func switchModel(to model: ModelInfo) {
-        Task {
-            await viewModel.modelPickerState.switchModel(
+        let modelPickerState = viewModel.modelPickerState
+        let currentModel = viewModel.currentModel
+        let targetSessionId = sessionId
+        Task { [weak viewModel] in
+            await modelPickerState.switchModel(
                 to: model,
-                sessionId: sessionId,
-                currentModel: viewModel.currentModel,
+                sessionId: targetSessionId,
+                currentModel: currentModel,
                 onOptimisticSet: { [weak viewModel] _ in
                     // Update context window immediately with new model's value
                     viewModel?.contextState.currentContextWindow = model.contextWindow

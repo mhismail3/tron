@@ -538,6 +538,9 @@ extension SourceGuardTests {
     @Test("fast production scheme keeps prod identity with debug build settings")
     func testFastProductionSchemeUsesProdIdentityAndDebugSettings() throws {
         let iosRoot = iosAppRoot()
+        let repoRoot = iosRoot
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
 
         let projectYML = try String(
             contentsOf: iosRoot.appendingPathComponent("project.yml"),
@@ -582,6 +585,15 @@ extension SourceGuardTests {
         #expect(!prodDebugConfig.contains("BETA"))
         #expect(prodDebugConfig.contains("PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile"))
         #expect(prodDebugConfig.contains("ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon"))
+        #expect(prodDebugConfig.contains("TRON_APNS_ENTITLEMENT_ENVIRONMENT = development"))
+        #expect(prodDebugConfig.contains("TRON_APNS_ENVIRONMENT = sandbox"))
+
+        let deviceHelper = try String(
+            contentsOf: repoRoot.appendingPathComponent("scripts/tron-ios-device"),
+            encoding: .utf8
+        )
+        #expect(deviceHelper.contains("TRON_APNS_ENTITLEMENT_ENVIRONMENT=development"))
+        #expect(deviceHelper.contains("TRON_APNS_ENVIRONMENT=sandbox"))
 
         #expect(developmentDoc.contains("Tron Fast"))
         #expect(architectureDoc.contains("ProdDebug"))
@@ -589,8 +601,8 @@ extension SourceGuardTests {
     }
 
 
-    @Test("Codex iPhone actions rebuild and install production variants")
-    func testCodexIPhoneActionsRebuildAndInstallProductionVariants() throws {
+    @Test("Codex iOS actions enforce simulator and physical variant policy")
+    func testCodexIOSActionsEnforceSimulatorAndPhysicalVariantPolicy() throws {
         let iosRoot = iosAppRoot()
         let repoRoot = iosRoot
             .deletingLastPathComponent()
@@ -601,7 +613,11 @@ extension SourceGuardTests {
             encoding: .utf8
         )
         let installScript = try String(
-            contentsOf: repoRoot.appendingPathComponent("scripts/tron-ios-beta"),
+            contentsOf: repoRoot.appendingPathComponent("scripts/tron-ios-device"),
+            encoding: .utf8
+        )
+        let tronIOSSkill = try String(
+            contentsOf: repoRoot.appendingPathComponent(".codex/skills/tron-ios/SKILL.md"),
             encoding: .utf8
         )
         let developmentDoc = try String(
@@ -613,22 +629,38 @@ extension SourceGuardTests {
             encoding: .utf8
         )
 
-        #expect(environment.contains(#"name = "Rebuild + Install + Launch iOS Beta on iPhone""#))
+        #expect(environment.contains(#"name = "Rebuild + Install + Launch iOS Beta Simulator""#))
+        #expect(environment.contains(#"command = "scripts/tron-ios-simulator install""#))
+        #expect(!environment.contains("iOS Beta on iPhone"))
+        #expect(!environment.contains("iOS Beta on iPad"))
         #expect(environment.contains(#"name = "Rebuild + Install + Launch iOS Prod Fast Debug on iPhone""#))
         #expect(environment.contains(
-            #"command = "env DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer TRON_IOS_REQUIRED_SDK_MAJOR=27 TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME='Tron Fast' TRON_IOS_CONFIGURATION=ProdDebug scripts/tron-ios-beta install""#
+            #"command = "env DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer TRON_IOS_REQUIRED_SDK_MAJOR=27 TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME='Tron Fast' TRON_IOS_CONFIGURATION=ProdDebug scripts/tron-ios-device install""#
         ))
         #expect(environment.contains("TRON_IOS_DEVICE_NAME=iPhone"))
         #expect(environment.contains(#"TRON_IOS_SCHEME='Tron Fast'"#))
         #expect(environment.contains("TRON_IOS_CONFIGURATION=ProdDebug"))
-        #expect(environment.contains("scripts/tron-ios-beta install"))
+        #expect(environment.contains("scripts/tron-ios-device install"))
         #expect(environment.contains(#"name = "Rebuild + Install + Launch iOS Prod Release on iPhone""#))
+        #expect(environment.contains(#"name = "Rebuild + Install + Launch iOS Prod Release on iPad""#))
         #expect(environment.contains("TRON_IOS_SCHEME=Tron"))
-        #expect(environment.contains("TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-beta install"))
-        #expect(environment.contains(#"name = "Just Launch Installed iOS Beta on iPhone""#))
+        #expect(environment.contains("TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-device install"))
+        #expect(environment.contains(#"name = "Just Launch Installed iOS Beta Simulator""#))
+        #expect(environment.contains(#"command = "scripts/tron-ios-simulator start""#))
         #expect(environment.contains(#"name = "Just Launch Installed iOS Prod on iPhone""#))
+        #expect(environment.contains(#"name = "Just Launch Installed iOS Prod on iPad""#))
         #expect(!environment.contains(#"name = "Just Launch Installed iOS Prod Fast on iPhone""#))
-        #expect(environment.contains("TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-beta launch"))
+        #expect(environment.contains("TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-device launch"))
+        #expect(tronIOSSkill.contains("name: tron-ios"))
+        #expect(tronIOSSkill.contains("Use `Tron Beta` / `Beta` for simulator"))
+        #expect(tronIOSSkill.contains("Use `Tron Fast` / `ProdDebug` only when Codex"))
+        #expect(tronIOSSkill.contains("Use `Tron` / `Prod` whenever installing"))
+        #expect(tronIOSSkill.contains("Do not install the Beta bundle on the user's physical device by default."))
+        #expect(tronIOSSkill.contains("TestFlight or an App Store export"))
+        #expect(tronIOSSkill.contains("-scheme 'Tron Beta'"))
+        #expect(tronIOSSkill.contains("TRON_IOS_SCHEME=Tron TRON_IOS_CONFIGURATION=Prod"))
+        #expect(tronIOSSkill.contains("TRON_IOS_SCHEME='Tron Fast' TRON_IOS_CONFIGURATION=ProdDebug"))
+        #expect(!tronIOSSkill.contains("scripts/tron-ios-beta"))
         #expect(installScript.contains(#"/(:[0-9]+:[0-9]+)?: (error|warning|note):/"#))
         #expect(installScript.contains("grep -E '(:[0-9]+:[0-9]+)?: (error|warning):'"))
         #expect(installScript.contains("No Accounts|No signing certificate|requires a development team"))
@@ -656,10 +688,13 @@ extension SourceGuardTests {
             .allSatisfy { $0.hasPrefix("Rebuild + Install + Launch") })
         #expect(actionNames
             .filter { $0.hasPrefix("Just Launch Installed iOS Prod") }
-            == ["Just Launch Installed iOS Prod on iPhone"])
+            == [
+                "Just Launch Installed iOS Prod on iPhone",
+                "Just Launch Installed iOS Prod on iPad",
+            ])
 
-        #expect(installScript.contains(#"SCHEME="${TRON_IOS_SCHEME:-Tron Beta}""#))
-        #expect(installScript.contains(#"CONFIG="${TRON_IOS_CONFIGURATION:-Beta}""#))
+        #expect(installScript.contains(#"SCHEME="${TRON_IOS_SCHEME:-Tron}""#))
+        #expect(installScript.contains(#"CONFIG="${TRON_IOS_CONFIGURATION:-Prod}""#))
         #expect(installScript.contains(#"PROJECT="TronMobile.xcodeproj""#))
         #expect(installScript.contains(#"-project "$PROJECT""#))
         #expect(installScript.contains(#"-destination "platform=iOS,id=${device_id}""#))
@@ -677,6 +712,7 @@ extension SourceGuardTests {
 
         #expect(developmentDoc.contains("Rebuild + Install + Launch iOS Prod Fast Debug on iPhone"))
         #expect(developmentDoc.contains("Rebuild + Install + Launch iOS Prod Release on iPhone"))
+        #expect(developmentDoc.contains("Rebuild + Install + Launch iOS Beta Simulator"))
         #expect(developmentDoc.contains("Just Launch Installed"))
         #expect(developmentDoc.contains("deduplicated by bundle ID"))
         #expect(developmentDoc.contains("installs the requested configuration's `iphoneos`"))

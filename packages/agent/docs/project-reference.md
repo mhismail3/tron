@@ -1,6 +1,6 @@
 # Tron Worker-First Technical Reference
 
-> Last verified: 2026-07-24 on the worker-first POC branch.
+> Last verified: 2026-07-26 on the worker-first POC branch.
 
 This document describes the active worker-first implementation.
 
@@ -123,9 +123,9 @@ A fixed model tool is admitted only when it passes one of two tests:
    chat. These are ergonomic or state-custody primitives, not semantic product
    policy.
 
-This admits the current 8/17/4 grouping without pretending the smallest
+This admits the current 8/18/4 grouping without pretending the smallest
 possible tool count is the objective. It rejects fixed web search providers,
-transcription, memory policy, notifications, repository workflows, content
+transcription, memory policy, notification timing/content policy, repository workflows, content
 analysis, and other task semantics: those belong in workers. The deterministic
 weighted worker ranker is the recovery substrate needed before a relevance
 worker is available and while that worker handles its own agent turn. Stronger
@@ -334,6 +334,14 @@ state. The runtime:
    registers triggers, and installs the direct typed tool;
 8. emits redacted lifecycle evidence and returns one-time webhook credentials
    only through the active operation result.
+
+`inputSchema` is the complete runtime contract shared by authenticated generic
+invocation, triggers, events, and worker handoffs. A bundle may additionally
+declare a narrower `toolInputSchema` for its direct model tool. Direct calls
+must pass both schemas before durable admission. Discovery projects the narrow
+schema, while full inspection retains both, so revision keys, occurrence IDs,
+acknowledgements, and other engine-owned coordination fields do not become
+model-facing ceremony.
 
 Any failure before publication abandons staging and leaves the prior active
 version untouched. Existing invocations retain their pinned version while new
@@ -606,6 +614,169 @@ agent context—not whether a human opened the record. Both ledgers page on
 demand, so they remain inspectable without one unbounded transport response.
 Durable state remains complete in canonical storage—these are bounded read
 projections, not retention limits.
+
+## Reminder, Schedule, and Notification Workers
+
+The working path is intentionally three ordinary runtime-managed command
+workers, not three new engine domains:
+
+```text
+automation-schedules → automation-reminders → notification-policy
+                                                ↓
+                              engine relay/direct transport → iOS
+```
+
+`automation-schedules` owns reusable `once`, `interval`, `daily`, and `weekly`
+time calculation plus a durable occurrence ledger. Its private 15-second tick
+keeps daily and weekly rules anchored to IANA-zone wall time, rolls nonexistent
+DST times to the first valid minute, chooses the first repeated time, fires an
+overdue one-time schedule once, and collapses recurring catch-up without moving
+future cadence. A due occurrence remains pending and is retried with a new
+handoff-attempt key until its target acknowledges the stable occurrence key.
+
+`automation-reminders` owns reminder records, occurrence lifecycle, default
+snooze, completion, bounded follow-ups, and stable mutation identity in
+worker-owned SQLite. New and updated reminders are `registration_pending` until
+the scheduler acknowledges their revision. Existing reminders retain their
+local evaluator during migration; local and external clocks converge on the
+same reminder-plus-scheduled-UTC occurrence key. Once registration is
+acknowledged, the reminder becomes `external_active` and the local recurrence
+clock stops. Cancellation is immediately authoritative in reminder state.
+Snoozes and follow-ups become scheduler-owned one-time schedules. A private
+30-second reconciliation trigger retries only pending commands, policy
+requests, and acknowledgements; it performs no recurrence calculation after
+cutover.
+
+`notification-policy` deterministically preserves source-authored title/body,
+derives bounded deduplication and thread keys, applies the delivery window,
+next-recurrence boundary, and 30-day engine ceiling, and emits only fixed
+Snooze/Complete plus `onOpen: complete`. Typed quiet hours are disabled by
+default. When enabled, policy selects `notBefore` at the next quiet-hours end or
+suppresses work whose expiry comes first. It never combines several actionable
+reminders into one notification. Policy acknowledges `accepted`, `suppressed`,
+or `expired` back to the reminder; duplicate reconciliation attempts retain one
+logical notification.
+
+### Closed asynchronous worker handoffs
+
+A source bundle declares fixed routes:
+
+```json
+{
+  "workerDispatchRoutes": [{
+    "route": "notification-policy",
+    "targetWorkerId": "notification-policy",
+    "clientResponseOwner": "source"
+  }]
+}
+```
+
+Successful output may contain a reserved `workerDispatches` array of
+`route`, `deduplicationKey`, and `input`. Output cannot choose a worker/version,
+trace, session, device, response destination, or credential. Activation binds
+each route to an active immutable target. Completion validates the selected
+target input schema, then atomically persists source completion, dispatch
+evidence, causal child linkage, and the queued target invocation. Children use
+`worker_dispatch`, inherit trace/origin session, increment causal depth, and
+record the source invocation as parent. Deduplication is source worker plus
+route plus key. Limits are 32 handoffs, 64-byte route/key values, 64 KiB per
+input, and 256 KiB total. There is no synchronous worker RPC, arbitrary event
+emission, or cross-engine route.
+
+`clientResponseOwner: source` records the originating reminder worker/version
+as response owner while retaining `notification-policy` as producer. Direct
+notification emitters own their own responses.
+
+### Closed client delivery
+
+Only a worker declaring `clientDeliveries: ["notification_delivery"]` may emit
+`notificationDeliveries`. The array is capped at 32 and permits only
+`deduplicationKey`, `title`, `body`, `expiresAt`, optional `notBefore`,
+`threadKey`/`sourceRecordId`, fixed `snooze`/`complete`, and
+`onOpen: "complete"`. Keys, text, time bounds, and the final APNs payload are
+bounded. URLs, raw APNs dictionaries, device ids, custom actions/sounds,
+priority flags, media, and generalized device control are rejected. Delivery
+intent insertion shares the successful invocation transaction; transport
+unavailability becomes durable evidence instead of failing accepted worker
+work.
+
+Worker schema v12 adds `worker_dispatches`, source/producer notification
+ownership, `not_before`, target cancellation, and stable transport/provider
+request evidence to the v11 notification ledger. An installation is active
+only when enabled and refreshed in the last 30 days. Each logical delivery fans
+out to every active installation. Retryable transport, APNs 429/5xx, and network
+failures use bounded exponential backoff with jitter until expiry. Invalid APNs
+tokens disable the installation until later registration. Provider HTTP success
+is `accepted_by_apns`, never human delivery. Missing readiness creates
+sanitized Attention without exposing keys or device tokens. Retention keeps the
+newest 500 logical deliveries no older than 90 days with owning targets and
+attempts.
+
+Authenticated non-model client operations are:
+
+| Engine function | Ownership |
+|---|---|
+| `worker_kernel::notification_device_upsert` | Current installation id, paired-server route, topic/environment, permission, and optional current token |
+| `worker_kernel::notification_device_disable` | Disable one installation without a general device actuator |
+| `worker_kernel::notification_deliveries` | Cursor-bounded logical inbox and authoritative unread count |
+| `worker_kernel::notification_delivery_acknowledge` | Idempotent Open/Complete/Snooze or bulk-read mutation |
+| `worker_kernel::notification_delivery_status` | Sanitized logical and per-target APNs evidence |
+
+The first serialized Open, Complete, or Snooze wins across devices. Those
+responses mark the logical delivery read and publish a typed
+`notification.responses` engine event for the owning worker. `clear_unread` is
+the sole bulk exception: it synchronizes read state without completing worker
+work. Lifecycle changes publish `notification.deliveries` with the delivery,
+source worker/record, causal trace, and sanitized state.
+
+Every engine selects exactly one transport. It never automatically fails over,
+because an ambiguous timeout followed by a second provider can duplicate a
+push. Relay mode uses the closed Cloudflare provider in `packages/relay`;
+direct mode uses local APNs signing:
+
+```bash
+scripts/tron auth notifications configure-relay \
+  --url https://relay.example \
+  --secret-file /secure/path/relay-secret
+scripts/tron auth notifications use relay
+scripts/tron auth notifications status
+scripts/tron auth notifications clear-relay
+```
+
+The typed `notification-push` auth entry owns mode and relay HMAC credentials.
+The first development start imports complete legacy `TRON_RELAY_URL` and
+`TRON_RELAY_SECRET` values only when the typed entry is absent, then removes
+them from the launched process environment without modifying `.env.local`.
+Configuration changes immediately requeue unexpired configuration-blocked
+targets.
+
+The relay exposes only versioned single-target alert and quiet-refresh forms.
+HMAC covers method, path, timestamp, stable provider request id, and body hash.
+A SQLite Durable Object ledger coalesces retries by provider request id:
+accepted terminal results replay, while an ambiguous crash remains blocked
+instead of blindly resending. Topic/environment pairs are allowlisted, and
+tokens/secrets never enter logs or responses. The allowlist admits
+beta/sandbox, locally development-signed Prod/sandbox, and distributed
+Prod/production; it rejects every other pairing. A first-seen provider request
+is an ordinary optional ledger miss, not a storage error. Engine quiet-refresh
+rows also coalesce updates that arrive during an in-flight request and queue the
+latest unread count behind that attempt without reusing its attempt number.
+Relay deployment is manual.
+
+Direct credentials are the independent typed `apple-push` entry:
+
+```bash
+scripts/tron auth apns configure \
+  --team-id TEAM_ID \
+  --key-id KEY_ID \
+  --private-key-file /secure/path/AuthKey.p8
+scripts/tron auth apns status
+scripts/tron auth apns clear
+```
+
+Direct mode signs ES256 provider JWTs with bounded in-memory caching and HTTP/2.
+Both modes choose sandbox or production from validated client registration and
+send only ordinary alert or quiet-refresh pushes.
 
 ## Failure and Recovery
 
@@ -887,9 +1058,10 @@ in the provider surface and records the
 exact fixed functions, selected worker versions, selection reasons, and a stable
 surface hash. The model receives a compact revision/count/projected-worker
 primer in addition to native direct tool schemas. A `worker_discover` result
-promotes matching workers into that session's next internal turn without a
-restart; promotions are session-scoped durable engine state and survive server
-restarts. Recent worker success evidence uses the other supported state extent,
+returns the effective `toolInputSchema` when one is declared and promotes
+matching workers into that session's next internal turn without a restart;
+promotions are session-scoped durable engine state and survive server restarts.
+Recent worker success evidence uses the other supported state extent,
 profile-global state. There is no generic workspace state scope. Unknown stored
 scope kinds fail closed rather than being interpreted as global state. A newly
 upserted worker registers immediately.
@@ -1507,7 +1679,7 @@ cost, routing, and authority are deliberately absent from that public contract.
 The first immutable version,
 `36568f4a56101e83011a34324520012bc60ba2a1ca9ad9419abbe04feaa86eb6`,
 passed activation smoke and health checks and completed a real read-only
-inventory of `/Users/moose/Workspace/testspace`. Durable invocation
+inventory of `/Users/<USER>/Workspace/testspace`. Durable invocation
 `worker_run_019f8a08-1154-7821-921e-2d1f08b8bcd7` linked child session
 `sess_019f8a08-115e-7f52-8694-b1e735fce4bd`, returned the requested closed
 four-field deliverable, preserved three explicit constraint observations, and
@@ -1700,10 +1872,11 @@ these bullets as one tool apiece.
   activate, deactivate, and revise reusable procedures. Use direct worker
   versions and engine hooks; do not recreate a separate definition/request/
   decision plane.
-- **Schedules and reminders:** create, list, inspect, update, cancel, and fire
-  meaningful scheduled work. Schedule triggers are already executable kernel
-  substrate; reminder semantics, calendar reasoning, notification policy, and
-  recurrence UX belong in workers.
+- **Schedules and reminders:** `automation-reminders` now creates, lists,
+  inspects, updates, cancels, completes, snoozes, and fires meaningful
+  scheduled work. Schedule triggers remain kernel substrate; reminder
+  semantics, calendar reasoning, notification policy, and recurrence UX remain
+  worker-owned.
 - **Event automations:** filter engine events, correlate state, invoke follow-up
   work, and report results. Engine-event triggers and causal loop suppression
   are already substrate.
@@ -1729,11 +1902,11 @@ these bullets as one tool apiece.
   client sends that recording through the ordinary durable dispatcher and
   inserts its typed `text` result into the draft. Model choice, dependencies,
   recognition, and cleanup remain entirely worker-owned.
-- **Devices and notifications:** device list/inspect, send, list, inspect, mark
-  read, and mark all read. Delivery scheduling and message policy belong in
-  workers. A concrete mobile-delivery use case may justify a narrow
-  authenticated client actuator; it does not justify restoring a general
-  device domain.
+- **Devices and notifications:** the reminder use case now owns the narrow
+  `notification_delivery` path described above: authenticated registration,
+  logical inbox sync, status inspection, fixed acknowledgement actions, and
+  explicitly selected relay or direct APNs transport. Delivery scheduling and message policy remain in
+  workers. This contract is intentionally not a general device domain.
 - **External services:** email, calendars, issue trackers, source control
   hosting, messaging, databases, and home or business systems should enter as
   named-secret-bound workers authored when their first real workflow appears.
@@ -1785,10 +1958,11 @@ identity, dependency locks, content hashes, traces, health, runs, inbox results,
 and audit records remain observations, never permission gates.
 
 Several removed domains only recorded intended activity: import/update,
-notification delivery, procedural activation, scheduling, and web research did
-not themselves perform the useful external action. Their record shells are not
-missing functionality. Only the executable behaviors listed above should be
-restored, one proven worker at a time.
+procedural activation, scheduling, and web research did not themselves perform
+the useful external action. Their record shells are not missing functionality.
+Notification delivery is the deliberate exception now restored behind a real
+reminder worker and a narrow authenticated APNs contract. Other executable
+behaviors should still be restored one proven worker at a time.
 
 ## Storage
 
@@ -1822,7 +1996,7 @@ operational evidence:
 
 | Table | Ownership |
 |---|---|
-| `worker_schema` | worker index schema version; v10 establishes canonical invocation-owned results |
+| `worker_schema` | worker index schema version; v12 adds atomic worker handoffs and split notification ownership |
 | `blobs` | generic content-addressed compressed result bodies larger than 8 KiB |
 | `storage_payload_refs` | one generic ownership/integrity row for every successful invocation output |
 | `workers` | rebuildable current catalog |
@@ -1839,17 +2013,23 @@ operational evidence:
 | `worker_audit` | lifecycle and mutation evidence |
 | `worker_health` | versioned activation/lifecycle/execution health history |
 | `worker_runtime_settings` | durable engine stop-all state |
+| `worker_dispatches` | deduplicated source route, immutable target invocation, causal parent, response binding, and terminal handoff state |
+| `notification_installations` | registered iOS installation readiness, paired route, permission, and transport token material; tokens never enter API responses, exports, archives, or logs |
+| `notification_deliveries` | deduplicated logical worker-authored deliveries and synchronized read/terminal-response state |
+| `notification_delivery_targets` | independent per-installation dispatch state and sanitized APNs acceptance/failure evidence |
+| `notification_delivery_attempts` | append-only alert and quiet-refresh transport attempts |
+| `notification_responses` | idempotent client mutations and first-wins terminal disposition |
+| `notification_refreshes` | coalesced quiet-refresh work for unread and badge reconciliation |
 
-The fixed kernel has no device-token registration, notification inbox, or APNs
-delivery plane. A future notification workflow must be authored and exercised
-as a worker rather than restored as a fixed domain.
-
-Schema v10 is preceded by one verified profile snapshot. Its backfill writes
+Schema v10 was preceded by one verified profile snapshot. Its backfill writes
 content ownership in restart-safe bounded staging transactions without changing
 schema-v9 invocation or inbox rows. One final transaction verifies all
 owners/digests/blobs, publishes large-result envelopes and compact inbox
 receipts, and records v10. Interrupted staging therefore leaves the old logical
 view intact and safely resumes; only the verified cutover becomes visible.
+Schema v11 then adds notification durability without rewriting canonical worker
+run evidence. Schema v12 adds asynchronous handoffs and backfills direct
+deliveries with the original worker as both source and producer.
 
 ## Events and Transport
 
@@ -1860,6 +2040,13 @@ that function's value directly in the top-level result; there is no registered
 The wire admits client scope and optional idempotency metadata but rejects
 injected internal authority/runtime fields. Bearer rotation continues to force
 client re-pairing.
+
+Live subscriptions are socket-local resources. `subscribe` creates a cursor,
+`ack` advances it, and idempotent `unsubscribe` releases it as soon as the
+client's presentation or processing owner ends. A socket admits at most 64
+active subscriptions; disconnect still clears every remaining cursor. The cap
+and explicit release bound the server's 250 ms push-poll work without creating
+a durable subscription registry.
 
 Closed `session::*` payload schemas admit only values their owning operation
 consumes. Session and workspace provenance belongs to the authenticated

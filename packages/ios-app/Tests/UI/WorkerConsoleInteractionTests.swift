@@ -85,6 +85,16 @@ struct WorkerConsoleInteractionTests {
         #expect(!WorkerRunGraphPresentation.canInspectResult(status: "running"))
     }
 
+    @Test("Only unresolved or active run details refresh after global invalidation")
+    func durableRunInvalidationPolicy() {
+        #expect(WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(status: nil))
+        #expect(WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(status: "queued"))
+        #expect(WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(status: "running"))
+        #expect(!WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(status: "completed"))
+        #expect(!WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(status: "failed"))
+        #expect(!WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(status: "cancelled"))
+    }
+
     @Test("Worker UI consumes structured graph stages and never joins raw event names")
     func durableRunPresentationUsesStructuredTruth() throws {
         let root = iosAppRoot()
@@ -130,6 +140,7 @@ struct WorkerConsoleInteractionTests {
         #expect(graph.contains("WorkerRunTimelineSheet"))
         #expect(tool.contains("WorkerToolRunGraphView("))
         #expect(graph.contains(".workerRunProjectionInvalidated"))
+        #expect(graph.contains("WorkerRunGraphPresentation.shouldRefreshAfterInvalidation"))
         #expect(graph.contains("Open full result"))
         #expect(!graph.contains("Inspect result"))
         #expect(graph.contains("WorkerResultInspectorSheet("))

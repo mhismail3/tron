@@ -41,6 +41,21 @@ final class ContentViewCoordinatorTests: XCTestCase {
         XCTAssertFalse(navigated, "onNavigate should not be called for nil sessionId")
     }
 
+    func testCreatedSessionIsPublishedBeforeCoordinatorReturns() async throws {
+        try await container.initialize()
+        let created = NewSessionCreated(
+            sessionId: "sess-configured",
+            workspaceId: "/tmp/tron-fixtures/configured",
+            model: "test-model",
+            workingDirectory: "/tmp/tron-fixtures/configured"
+        )
+
+        let publishedId = try await coordinator.publishCreatedSession(created)
+
+        XCTAssertEqual(publishedId, created.sessionId)
+        XCTAssertTrue(container.eventStoreManager.sessionExists(created.sessionId))
+    }
+
 }
 
 // MARK: - Pending Deep Link State
@@ -78,6 +93,36 @@ final class CompactSessionRouteTests: XCTestCase {
         XCTAssertEqual(first.sessionId, second.sessionId)
         XCTAssertNotEqual(first.presentationId, second.presentationId)
         XCTAssertNotEqual(first, second)
+    }
+
+    func testChatIdentityChangesWhenServerSelectionChanges() {
+        let first = ChatSessionPresentationIdentity(
+            sessionId: "same-session-id",
+            serverSelectionVersion: 1
+        )
+        let second = ChatSessionPresentationIdentity(
+            sessionId: "same-session-id",
+            serverSelectionVersion: 2
+        )
+
+        XCTAssertNotEqual(first, second)
+    }
+}
+
+final class SettingsServerLoadKeyTests: XCTestCase {
+    func testConnectionAndServerGenerationOwnOneSettingsLoadIdentity() {
+        let initial = SettingsServerLoadKey(
+            serverSelectionVersion: 1,
+            isConnected: false
+        )
+        XCTAssertNotEqual(
+            initial,
+            SettingsServerLoadKey(serverSelectionVersion: 1, isConnected: true)
+        )
+        XCTAssertNotEqual(
+            initial,
+            SettingsServerLoadKey(serverSelectionVersion: 2, isConnected: false)
+        )
     }
 }
 

@@ -196,18 +196,18 @@ struct MarkdownTableView: View {
     let table: MarkdownTable
 
     /// Calculate column widths based on content
-    private var columnWidths: [CGFloat] {
+    static func columnWidths(for table: MarkdownTable) -> [CGFloat] {
         var widths: [CGFloat] = Array(repeating: 0, count: table.headers.count)
 
         // Check header widths
         for (index, header) in table.headers.enumerated() {
-            widths[index] = max(widths[index], estimateWidth(for: header, isHeader: true))
+            widths[index] = max(widths[index], estimateWidth(for: header))
         }
 
         // Check all row data
         for row in table.rows {
             for (index, cell) in row.enumerated() where index < widths.count {
-                widths[index] = max(widths[index], estimateWidth(for: cell, isHeader: false))
+                widths[index] = max(widths[index], estimateWidth(for: cell))
             }
         }
 
@@ -215,7 +215,7 @@ struct MarkdownTableView: View {
     }
 
     /// Estimate width needed for text (monospaced font)
-    private func estimateWidth(for text: String, isHeader: Bool) -> CGFloat {
+    private static func estimateWidth(for text: String) -> CGFloat {
         let charWidth: CGFloat = 7.5 // Approximate char width for 12pt monospaced
         let padding: CGFloat = 20 // Horizontal padding
         let minWidth: CGFloat = 50
@@ -223,6 +223,7 @@ struct MarkdownTableView: View {
     }
 
     var body: some View {
+        let widths = Self.columnWidths(for: table)
         ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
                 // Header row
@@ -232,7 +233,7 @@ struct MarkdownTableView: View {
                             header,
                             isHeader: true,
                             column: index,
-                            width: columnWidths[safe: index] ?? 80
+                            width: widths[safe: index] ?? 80
                         )
                     }
                 }
@@ -252,7 +253,7 @@ struct MarkdownTableView: View {
                                 cell,
                                 isHeader: false,
                                 column: colIndex,
-                                width: columnWidths[safe: colIndex] ?? 80
+                                width: widths[safe: colIndex] ?? 80
                             )
                         }
                     }

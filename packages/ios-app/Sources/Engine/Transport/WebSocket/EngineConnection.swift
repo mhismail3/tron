@@ -50,6 +50,8 @@ final class EngineConnection {
     }
 
     var reconnectTask: Task<Void, Never>?
+    var reconnectTaskGeneration: UInt64 = 0
+    var reconnectLoopActive = false
     var openedWebSocketTask: URLSessionWebSocketTask?
     var openContinuation: SingleResumeContinuationBox?
     var openTimeoutTask: Task<Void, Never>?
@@ -110,8 +112,7 @@ final class EngineConnection {
     func markUnauthorized(reason: String) {
         logger.warning("WS upgrade rejected (401): \(reason)", category: .websocket)
 
-        reconnectTask?.cancel()
-        reconnectTask = nil
+        cancelReconnectOwnership()
         reconnectAttempts = 0
         isDeployRestarting = false
         deployRestartExpectedMs = 0
@@ -333,8 +334,7 @@ final class EngineConnection {
         pingTask = nil
         receiveTask?.cancel()
         receiveTask = nil
-        reconnectTask?.cancel()
-        reconnectTask = nil
+        cancelReconnectOwnership()
 
         engineConnectionTask?.cancel(with: .goingAway, reason: nil)
         engineConnectionTask = nil
@@ -359,8 +359,7 @@ final class EngineConnection {
             switch connectionState {
             case .connecting, .reconnecting:
                 logger.info("Cancelling in-flight reconnect for background transition", category: .websocket)
-                reconnectTask?.cancel()
-                reconnectTask = nil
+                cancelReconnectOwnership()
                 reconnectAttempts = 0
                 connectionState = .disconnected
             case .connected, .disconnected, .failed, .deployRestarting, .unauthorized:

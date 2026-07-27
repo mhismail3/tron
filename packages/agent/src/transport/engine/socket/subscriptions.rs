@@ -12,8 +12,12 @@ use crate::shared::server::errors::INVALID_PARAMS;
 
 use super::outbound::send_engine_ws_value_async;
 use super::stream_projection::{protocol_event_value, stream_event_matches_filters};
-use super::wire::{AckMessage, PollMessage, SubscribeMessage, checked_limit, protocol_error};
-use super::{EngineWsSession, PUSH_POLL_INTERVAL, STREAM_MAX_LIMIT};
+use super::wire::{
+    AckMessage, PollMessage, SubscribeMessage, UnsubscribeMessage, checked_limit, protocol_error,
+};
+use super::{
+    EngineWsSession, MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION, PUSH_POLL_INTERVAL, STREAM_MAX_LIMIT,
+};
 
 #[derive(Clone, Debug)]
 pub(super) struct SubscriptionState {
@@ -44,6 +48,18 @@ impl EngineWsSession {
             Ok(limit) => limit,
             Err(error) => return self.send_error(message.id, error),
         };
+        if self.subscriptions.lock().await.len() >= MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION {
+            return self.send_error(
+                message.id,
+                protocol_error(
+                    INVALID_PARAMS,
+                    format!(
+                        "stream subscription limit reached ({MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION})"
+                    ),
+                    None,
+                ),
+            );
+        }
         let cursor = match message.cursor {
             Some(cursor) => StreamCursor(cursor),
             None => match self
@@ -160,6 +176,47 @@ impl EngineWsSession {
             limit,
             &actor,
             message.filters.as_ref(),
+        )
+        .await
+    }
+
+    pub(super) async fn handle_unsubscribe(&mut self, id: Option<String>, value: Value) -> bool {
+        let message = match serde_json::from_value::<UnsubscribeMessage>(value) {
+            Ok(message) => message,
+            Err(error) => {
+                return self.send_error(
+                    id,
+                    protocol_error(
+                        INVALID_PARAMS,
+                        format!("invalid unsubscribe: {error}"),
+                        None,
+                    ),
+                );
+            }
+        };
+        if message.subscription_id.trim().is_empty() {
+            return self.send_error(
+                message.id,
+                protocol_error(
+                    INVALID_PARAMS,
+                    "stream subscription id must not be empty",
+                    None,
+                ),
+            );
+        }
+        let removed = self
+            .subscriptions
+            .lock()
+            .await
+            .remove(&message.subscription_id)
+            .is_some();
+        self.send_success_async(
+            message.id,
+            json!({
+                "unsubscribed": removed,
+                "subscriptionId": message.subscription_id,
+            }),
+            None,
         )
         .await
     }

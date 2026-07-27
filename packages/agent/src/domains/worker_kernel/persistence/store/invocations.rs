@@ -25,7 +25,7 @@ const UNRESOLVED_INBOX_ERROR_SQL: &str = "
 // boundary that invoked it. Its inbox row remains immutable audit evidence, but
 // it is born attached so the same policy output cannot later surface as
 // unrelated background context. Hook failures remain pending Attention.
-const COMPLETED_ENGINE_HOOK_CONTEXT_ATTACHED_SQL: &str = "
+pub(super) const COMPLETED_ENGINE_HOOK_CONTEXT_ATTACHED_SQL: &str = "
     CASE
         WHEN ?4='info'
          AND COALESCE(
@@ -316,6 +316,13 @@ impl WorkerStore {
             )
             .map_err(|error| format!("mark worker invocation running: {error}"))?;
         if changed == 1 {
+            transaction
+                .execute(
+                    "UPDATE worker_dispatches SET state='running'
+                     WHERE target_invocation_id=?1 AND state='queued'",
+                    [invocation_id],
+                )
+                .map_err(|error| format!("mark inbound worker dispatch running: {error}"))?;
             let attempt_number = transaction
                 .query_row(
                     "SELECT COALESCE(MAX(attempt_number),0)+1 FROM worker_attempts WHERE invocation_id=?1",
@@ -368,113 +375,6 @@ impl WorkerStore {
             .commit()
             .map_err(|error| format!("commit worker delivery attempt: {error}"))?;
         Ok(changed == 1)
-    }
-
-    pub fn complete_invocation(
-        &self,
-        invocation_id: &str,
-        worker_id: &str,
-        result: Result<&Value, &str>,
-    ) -> Result<InvocationRecord, String> {
-        let mut connection = self.connection()?;
-        let tx = connection
-            .transaction()
-            .map_err(|error| error.to_string())?;
-        let (trace_id, origin_session_id): (String, Option<String>) = tx
-            .query_row(
-                "SELECT trace_id,origin_session_id FROM worker_invocations
-                 WHERE invocation_id=?1 AND worker_id=?2 AND status='running'",
-                params![invocation_id, worker_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .map_err(|error| format!("load completing worker invocation: {error}"))?;
-        let (status, output, error, severity, inbox_result) = match result {
-            Ok(output) => {
-                let stored = Self::store_result_in_transaction(
-                    &tx,
-                    invocation_id,
-                    output,
-                    &trace_id,
-                    origin_session_id.as_deref(),
-                )?;
-                ("completed", Some(stored), None, "info", Value::Null)
-            }
-            Err(error) => (
-                "failed",
-                None,
-                Some(error.to_owned()),
-                "error",
-                json!({"status":"failed","error":error}),
-            ),
-        };
-        let completed_at = chrono::Utc::now().to_rfc3339();
-        let changed = tx
-            .execute(
-                "UPDATE worker_invocations SET status=?2,output_json=?3,error=?4,completed_at=?5
-                 WHERE invocation_id=?1 AND status='running'",
-                params![invocation_id, status, output, error, completed_at],
-            )
-            .map_err(|error| format!("complete worker invocation: {error}"))?;
-        if changed != 1 {
-            return Err(format!(
-                "worker invocation '{invocation_id}' was not in a running state"
-            ));
-        }
-        let inbox_result = if status == "completed" {
-            results::completed_result_receipt(&results::result_reference_from_connection(
-                &tx,
-                invocation_id,
-            )?)
-        } else {
-            inbox_result
-        };
-        tx.execute(
-            "UPDATE worker_attempts SET status=?2,completed_at=?3,error=?4
-             WHERE attempt_id=(SELECT attempt_id FROM worker_attempts
-                WHERE invocation_id=?1 AND status='running' ORDER BY attempt_number DESC LIMIT 1)",
-            params![invocation_id, status, completed_at, error],
-        )
-        .map_err(|error| format!("complete worker delivery attempt: {error}"))?;
-        insert_run_event(
-            &tx,
-            invocation_id,
-            WorkerRunStage::Publication,
-            "Publishing the durable worker result",
-            &completed_at,
-        )?;
-        insert_run_event(
-            &tx,
-            invocation_id,
-            match status {
-                "completed" => WorkerRunStage::Completed,
-                _ => WorkerRunStage::Failed,
-            },
-            match status {
-                "completed" => "Worker execution completed",
-                _ => "Worker execution failed",
-            },
-            &completed_at,
-        )?;
-        tx.execute(
-            &format!(
-                "INSERT INTO worker_inbox(
-                    inbox_id,invocation_id,worker_id,severity,result_json,context_attached,created_at
-                 )
-                 VALUES (?1,?2,?3,?4,?5,{COMPLETED_ENGINE_HOOK_CONTEXT_ATTACHED_SQL},?6)"
-            ),
-            params![
-                format!("worker_inbox_{}", uuid::Uuid::now_v7()),
-                invocation_id,
-                worker_id,
-                severity,
-                serde_json::to_string(&inbox_result).map_err(|error| error.to_string())?,
-                completed_at,
-            ],
-        )
-        .map_err(|error| format!("record worker inbox result: {error}"))?;
-        tx.commit().map_err(|error| error.to_string())?;
-        self.invocation(invocation_id)?
-            .ok_or_else(|| "completed worker invocation disappeared".to_owned())
     }
 
     pub fn set_agent_session_id(
@@ -537,6 +437,14 @@ impl WorkerStore {
                     params![invocation_id, completed_at, reason],
                 )
                 .map_err(|error| format!("cancel worker delivery attempt: {error}"))?;
+            transaction
+                .execute(
+                    "UPDATE worker_dispatches
+                     SET state='cancelled',completed_at=?2
+                     WHERE target_invocation_id=?1 AND state IN ('queued','running')",
+                    params![invocation_id, completed_at],
+                )
+                .map_err(|error| format!("cancel inbound worker dispatch evidence: {error}"))?;
             transaction
                 .execute(
                     "INSERT INTO worker_inbox(inbox_id,invocation_id,worker_id,severity,result_json,created_at)

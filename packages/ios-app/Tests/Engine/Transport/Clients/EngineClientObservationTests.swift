@@ -79,6 +79,22 @@ struct EngineClientObservationTests {
         #expect(rpc.connectionState == .disconnected)
     }
 
+    @Test("Concurrent connect callers await one shared attempt")
+    func testConcurrentConnectIsSingleFlight() async {
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65530/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+
+        async let first: Void = rpc.connect()
+        async let second: Void = rpc.connect()
+        _ = await (first, second)
+
+        #expect(recorder.requests.count == 1)
+        #expect(rpc.connectionState == .disconnected)
+    }
+
     @Test("manual retry and reconnect preserve the immutable handled policy")
     func testHandledRetryAndReconnectRemainHandled() async {
         let recorder = HostedEngineAttemptRecorder()
@@ -153,6 +169,126 @@ struct EngineClientObservationTests {
         ))
     }
 
+    @Test("Switching current sessions releases stale presentation interest")
+    func testCurrentSessionInterestHasExactLifecycle() async {
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65527/engine")!
+        )
+
+        rpc.setCurrentSessionId("session-a")
+        for _ in 0..<20 where rpc.sessionSubscriptionInterests.isEmpty {
+            await Task.yield()
+        }
+        #expect(rpc.sessionSubscriptionInterests.count == 1)
+        #expect(rpc.sessionSubscriptionInterests.values.first == [.presentation])
+
+        rpc.setCurrentSessionId("session-b")
+        for _ in 0..<20 where rpc.sessionSubscriptionInterests.keys.first?.sessionId != "session-b" {
+            await Task.yield()
+        }
+        #expect(rpc.sessionSubscriptionInterests.count == 1)
+        #expect(rpc.sessionSubscriptionInterests.keys.first?.sessionId == "session-b")
+
+        rpc.setCurrentSessionId(nil)
+        for _ in 0..<20 where !rpc.sessionSubscriptionInterests.isEmpty {
+            await Task.yield()
+        }
+        #expect(rpc.sessionSubscriptionInterests.isEmpty)
+    }
+
+    @Test("Processing and presentation interests release independently")
+    func testSessionInterestsAreReferenceOwned() async {
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65526/engine")!
+        )
+        rpc.setCurrentSessionId("session-a")
+        for _ in 0..<20 where rpc.sessionSubscriptionInterests.isEmpty {
+            await Task.yield()
+        }
+        do {
+            try await rpc.setProcessingSessionEventSubscription(
+                sessionId: "session-a",
+                workspaceId: nil,
+                isActive: true
+            )
+        } catch {
+            // A disconnected transport cannot subscribe, but it retains the
+            // processing interest for automatic reconnect.
+        }
+        #expect(rpc.sessionSubscriptionInterests.values.first == [
+            .presentation,
+            .processing,
+        ])
+
+        rpc.setCurrentSessionId(nil)
+        for _ in 0..<20 where rpc.sessionSubscriptionInterests.values.first?.contains(.presentation) == true {
+            await Task.yield()
+        }
+        #expect(rpc.sessionSubscriptionInterests.values.first == [.processing])
+
+        try? await rpc.setProcessingSessionEventSubscription(
+            sessionId: "session-a",
+            workspaceId: nil,
+            isActive: false
+        )
+        #expect(rpc.sessionSubscriptionInterests.isEmpty)
+    }
+
+    @Test("Only closed worker lifecycle topics invalidate the dashboard projection")
+    func testWorkerProjectionTopicsAreClosed() {
+        #expect(EngineClientStreamSubscriptionPolicy.workerProjectionTopics == [
+            "worker.lifecycle",
+            "worker.invocations",
+        ])
+        #expect(EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic("worker.lifecycle"))
+        #expect(EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic("worker.invocations"))
+        #expect(EngineClientStreamSubscriptionPolicy.isWorkerLifecycleTopic("worker.lifecycle"))
+        #expect(!EngineClientStreamSubscriptionPolicy.isWorkerLifecycleTopic("worker.invocations"))
+        #expect(!EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic("events.session"))
+        #expect(!EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic(nil))
+    }
+
+    @Test("Profile surface reads are single-flight across concurrent consumers")
+    func testSurfaceSnapshotLoaderCoalescesConcurrentReads() async throws {
+        let loader = EngineSurfaceSnapshotLoader()
+        var operationCount = 0
+        var release: CheckedContinuation<EngineIntrospectionSnapshotDTO, Never>?
+        let waiters = (0..<20).map { _ in
+            Task { @MainActor in
+                try await loader.load {
+                    operationCount += 1
+                    return await withCheckedContinuation { continuation in
+                        release = continuation
+                    }
+                }
+            }
+        }
+
+        while release == nil {
+            await Task.yield()
+        }
+        #expect(operationCount == 1)
+        release?.resume(returning: EngineIntrospectionSnapshotDTO(
+            dispatchStopped: false,
+            activeEngineHooks: [],
+            activeClientActions: [],
+            fixedTools: [],
+            surface: AgentToolSurfaceDTO(
+                catalogRevision: 1,
+                surfaceHash: "single-flight",
+                fixedToolCount: 0,
+                projectedWorkerCount: 0,
+                availableWorkerCount: 0,
+                availableWorkers: []
+            ),
+            workers: []
+        ))
+        for waiter in waiters {
+            _ = try await waiter.value
+        }
+        #expect(operationCount == 1)
+    }
+
     @Test("Stream ACK coalescer sends only latest cursor per subscription")
     func testStreamAckCoalescerKeepsLatestCursor() {
         var coalescer = EngineStreamAckCoalescer()
@@ -168,6 +304,8 @@ struct EngineClientObservationTests {
         #expect(!needsReschedule)
         let nextSchedule = coalescer.record(subscriptionId: "sub-1", cursor: EngineStreamCursor(rawValue: 12))
         #expect(nextSchedule)
+        coalescer.remove(subscriptionId: "sub-1")
+        #expect(coalescer.takeForFlush(subscriptionId: "sub-1") == nil)
     }
 
     @Test("Stream ACK coalescer reschedules when events arrive during flush")

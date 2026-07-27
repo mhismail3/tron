@@ -11,6 +11,7 @@ final class DraftStore {
 
     private let eventDatabase: EventDatabase
     private let draftsRootURL: URL
+    private let attachmentFiles: DraftAttachmentFileStore
 
     // MARK: - Debounce State
 
@@ -22,10 +23,12 @@ final class DraftStore {
 
     init(eventDatabase: EventDatabase, documentsURL: URL) {
         self.eventDatabase = eventDatabase
-        self.draftsRootURL = documentsURL
+        let draftsRootURL = documentsURL
             .appendingPathComponent(".tron", isDirectory: true)
             .appendingPathComponent("database", isDirectory: true)
             .appendingPathComponent("drafts", isDirectory: true)
+        self.draftsRootURL = draftsRootURL
+        self.attachmentFiles = DraftAttachmentFileStore(rootURL: draftsRootURL)
     }
 
     // MARK: - Public API
@@ -63,7 +66,10 @@ final class DraftStore {
             }
 
             inputBarState.text = draft.text
-            inputBarState.attachments = readAttachmentData(sessionId: sessionId, metadata: draft.attachmentMetadata)
+            inputBarState.attachments = await attachmentFiles.read(
+                sessionId: sessionId,
+                metadata: draft.attachmentMetadata
+            )
             lastSavedFingerprints[sessionId] = inputBarState.draftFingerprint
 
             return true
@@ -81,7 +87,7 @@ final class DraftStore {
         } catch {
             logger.warning("Failed to delete draft row for session \(sessionId): \(error.localizedDescription)", category: .database)
         }
-        removeAttachmentFiles(sessionId: sessionId)
+        await attachmentFiles.remove(sessionId: sessionId)
     }
 
     /// Clean up a draft when a session is deleted.
@@ -141,7 +147,10 @@ final class DraftStore {
                 attachmentMetadata: attachmentMetadata
             )
 
-            try writeAttachmentFiles(sessionId: sessionId, attachments: inputBarState.attachments)
+            try await attachmentFiles.write(
+                sessionId: sessionId,
+                attachments: inputBarState.attachments
+            )
 
             lastSavedFingerprints[sessionId] = fingerprint
         } catch {
@@ -149,8 +158,24 @@ final class DraftStore {
         }
     }
 
-    private func writeAttachmentFiles(sessionId: String, attachments: [Attachment]) throws {
-        let dir = draftsDirectory(for: sessionId)
+}
+
+/// Serial file-I/O owner for attachment payloads. Draft metadata remains in
+/// the existing database actor while potentially large binary reads and writes
+/// never block SwiftUI's main actor.
+private actor DraftAttachmentFileStore {
+    private let rootURL: URL
+
+    init(rootURL: URL) {
+        self.rootURL = rootURL
+    }
+
+    private func directory(for sessionId: String) -> URL {
+        rootURL.appendingPathComponent(sessionId, isDirectory: true)
+    }
+
+    func write(sessionId: String, attachments: [Attachment]) throws {
+        let dir = directory(for: sessionId)
         let fm = FileManager.default
 
         if !attachments.isEmpty {
@@ -173,8 +198,11 @@ final class DraftStore {
         }
     }
 
-    private func readAttachmentData(sessionId: String, metadata: [DraftAttachmentMetadata]) -> [Attachment] {
-        let dir = draftsDirectory(for: sessionId)
+    func read(
+        sessionId: String,
+        metadata: [DraftAttachmentMetadata]
+    ) -> [Attachment] {
+        let dir = directory(for: sessionId)
         var attachments: [Attachment] = []
 
         for meta in metadata {
@@ -199,8 +227,8 @@ final class DraftStore {
         return attachments
     }
 
-    private func removeAttachmentFiles(sessionId: String) {
-        let dir = draftsDirectory(for: sessionId)
+    func remove(sessionId: String) {
+        let dir = directory(for: sessionId)
         try? FileManager.default.removeItem(at: dir)
     }
 }

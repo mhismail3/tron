@@ -157,6 +157,16 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
         bundle["properties"]["executionLimits"]["properties"]["maxChildInvocations"]["maximum"],
         256
     );
+    assert_eq!(
+        bundle["properties"]["toolInputSchema"]["type"],
+        json!("object")
+    );
+    assert!(
+        bundle["properties"]["toolInputSchema"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("narrower")
+    );
     assert!(
         bundle["required"]
             .as_array()
@@ -323,6 +333,12 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
         name: "Round-trip worker".to_owned(),
         description: "Proves inspectable canonical bundles remain valid upsert input.".to_owned(),
         tool_name: None,
+        tool_input_schema: Some(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["query"],
+            "properties":{"query":{"type":"string"}}
+        })),
         input_schema: json!({"type":"object"}),
         output_schema: json!({"type":"object"}),
         runner: WorkerRunner::Agent {
@@ -348,6 +364,8 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
         }],
         engine_hooks: Vec::new(),
         client_actions: Vec::new(),
+        client_deliveries: Vec::new(),
+        worker_dispatch_routes: Vec::new(),
         routing: Default::default(),
         execution_limits: Default::default(),
         presentation: None,
@@ -364,6 +382,7 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
         input: json!({}),
     }];
     let serialized = serde_json::to_value(bundle).expect("serialize canonical bundle");
+    assert_eq!(serialized["toolInputSchema"]["required"], json!(["query"]));
     assert!(
         serialized
             .pointer("/provenance/0")

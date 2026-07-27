@@ -12,8 +12,10 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `contract` | Primitive identity plus request, response, and worker-bundle schemas |
+//! | `dispatches` | Closed asynchronous worker-to-worker handoff parsing and limits |
 //! | `handlers` | Model/client operation bindings |
 //! | `host` | Bounded trusted-local filesystem, process, and network primitives |
+//! | `notifications` | Narrow worker-to-client delivery validation and APNs transport |
 //! | `persistence` | Canonical bundles, worker-owned state, verified profile/purge archives, index reconstruction, and durable operational ledgers |
 //! | `core_proposals` | Temporary isolated Git worktrees, durable tested commits, bounded evidence, and recorded conversational approval |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
@@ -104,6 +106,16 @@
 //! enable toggle is not recovery evidence. Resolved errors remain immutable in
 //! run and delivery audit history but are excluded from active Attention and
 //! future agent-context candidates.
+//! Workers may declare the closed `notification_delivery` client-delivery
+//! capability. Their successful top-level output is validated before commit,
+//! and logical delivery intents are inserted in the same SQLite transaction as
+//! terminal invocation evidence. Worker plus deduplication key is the logical
+//! identity. Installations, per-installation targets, append-only APNs
+//! attempts, synchronized read state, and idempotent fixed responses remain
+//! engine-owned; provider acceptance is named `accepted_by_apns`, never
+//! delivered. Missing readiness creates durable Attention without turning a
+//! successfully accepted worker result into failure. Tokens and provider keys
+//! never enter responses, logs, worker bundles, or purge exports.
 //! The Engine Dashboard exposes active hook ownership. `context_summary`,
 //! `inbox_context`, `session_title`, and `worker_relevance` are production
 //! hooks. Context summary, inbox context, and worker relevance retain narrow
@@ -187,16 +199,31 @@
 //! estimation, and compaction all rebuild this projection from durable
 //! evidence. A missing or corrupt fresh association fails before the provider
 //! request and is reported as kernel storage failure rather than worker failure.
-//! Schema v10 stages historical ownership in restart-safe bounded
+//! Schema v10 stages historical result ownership in restart-safe bounded
 //! transactions while leaving schema-v9 rows readable, then atomically swaps
 //! large outputs to internal envelopes, replaces successful inbox copies with
 //! receipts, verifies every owner/hash/blob, and records the version. The
 //! verified pre-migration profile snapshot remains the rollback boundary.
+//! Schema v11 adds notification installations, logical deliveries, targets,
+//! attempts, responses, and quiet-refresh state while preserving that same
+//! snapshot and recovery discipline.
+//! Schema v12 adds fixed asynchronous worker handoffs and split notification
+//! source/producer ownership. Source completion, deduplicated handoff evidence,
+//! and the immutable target invocation commit atomically. Children inherit
+//! trace and origin session, increment causal depth, and identify their source
+//! invocation as parent. A source route may retain fixed client-response
+//! ownership without allowing worker output to choose its response destination.
 //! The fixed invocation envelope and each selected worker's nested input
 //! schema are both transport admission boundaries. A nested schema or secret
 //! violation is returned as an actionable invalid request before any durable
 //! invocation exists; contract-loading and persistence failures remain
 //! internal failures rather than being blamed on caller input.
+//! A bundle may additionally declare a narrower `toolInputSchema` for its
+//! direct model tool. Triggers, events, worker handoffs, and authenticated
+//! generic invocation continue to use the complete `inputSchema`; direct calls
+//! pass both boundaries before durable admission. Internal occurrence,
+//! revision, mutation, and acknowledgement fields therefore need not become
+//! model ceremony.
 //! Every canonical load verifies both `content.sha256` and the full version
 //! tree against its directory name. File and symlink targets participate in
 //! dependency and version hashes. Command, agent, and resident runners execute
@@ -347,8 +374,10 @@ use crate::domains::registration::composition::{
 
 mod contract;
 mod core_proposals;
+mod dispatches;
 mod handlers;
 mod host;
+mod notifications;
 mod persistence;
 mod process;
 mod retrieval;
@@ -393,6 +422,7 @@ pub(crate) use contract::{
     validate_context_summary_narrative,
 };
 
+pub(crate) use notifications::apns::validate_private_key as validate_apns_private_key;
 pub(crate) use runtime::WorkerRuntime;
 #[cfg(test)]
 pub(crate) use surface::{AvailableWorkerToolSnapshot, SurfaceToolSnapshot};

@@ -340,12 +340,7 @@ private final class WorkLedgerMockRepository: WorkerKernelRepository {
         throw EngineConnectionError.invalidResponse
     }
 
-    func pollWorkerEvents(
-        topic: String,
-        cursor: EngineStreamCursor
-    ) async throws -> EngineStreamPage {
-        EngineStreamPage(events: [], hasMore: false, nextCursor: cursor.rawValue)
-    }
+    func ensureWorkerEventSubscriptions() async throws {}
 
     func workerResult(
         invocationId: String,

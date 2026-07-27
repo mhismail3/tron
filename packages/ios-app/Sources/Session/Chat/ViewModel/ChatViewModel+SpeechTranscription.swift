@@ -86,35 +86,46 @@ extension ChatViewModel: ChatSpeechTranscriptionContext {
     func startSpeechTranscriptionMonitoring() {
         guard speechWorkerMonitorTask == nil else { return }
         let repository = services.workerKernel
+        let connection = services.connection
+        speechWorkerMonitorTaskGeneration &+= 1
+        let generation = speechWorkerMonitorTaskGeneration
         speechWorkerMonitorTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await refreshSpeechTranscriptionOwner()
-            var cursor = EngineStreamCursor(rawValue: 0)
-            while !Task.isCancelled && services.connection.connectionState.isConnected {
-                do {
-                    let page = try await repository.pollWorkerEvents(
-                        topic: "worker.lifecycle",
-                        cursor: cursor
-                    )
-                    if let nextCursor = page.nextCursor {
-                        cursor = EngineStreamCursor(rawValue: nextCursor)
-                    }
-                    if !page.events.isEmpty {
-                        await refreshSpeechTranscriptionOwner()
-                    }
-                } catch {
-                    logDebug("Speech worker lifecycle refresh deferred: \(error.localizedDescription)")
+            let invalidations = NotificationCenter.default.notifications(
+                named: .workerLifecycleProjectionInvalidated
+            )
+            await self?.refreshSpeechTranscriptionOwner()
+            do {
+                try await repository.ensureWorkerEventSubscriptions()
+            } catch {
+                self?.logDebug(
+                    "Speech worker lifecycle subscription deferred: \(error.localizedDescription)"
+                )
+                if self?.speechWorkerMonitorTaskGeneration == generation {
+                    self?.speechWorkerMonitorTask = nil
                 }
-                try? await Task.sleep(for: .seconds(1))
+                return
             }
-            if !services.connection.connectionState.isConnected {
-                speechTranscriptionOwner = nil
+            for await _ in invalidations {
+                guard !Task.isCancelled,
+                      connection.connectionState.isConnected else {
+                    break
+                }
+                // Resolve the weak owner per iteration. Unwrapping before the
+                // sequence loop would retain every previously opened chat for
+                // the lifetime of this connection.
+                await self?.refreshSpeechTranscriptionOwner()
             }
-            speechWorkerMonitorTask = nil
+            if !connection.connectionState.isConnected {
+                self?.speechTranscriptionOwner = nil
+            }
+            if self?.speechWorkerMonitorTaskGeneration == generation {
+                self?.speechWorkerMonitorTask = nil
+            }
         }
     }
 
     func stopSpeechTranscriptionMonitoring() {
+        speechWorkerMonitorTaskGeneration &+= 1
         speechWorkerMonitorTask?.cancel()
         speechWorkerMonitorTask = nil
         speechTranscriptionOwner = nil
@@ -127,7 +138,7 @@ extension ChatViewModel: ChatSpeechTranscriptionContext {
         }
         do {
             let snapshot = try await services.workerKernel.engineSurfaceSnapshot(
-                sessionId: sessionId,
+                sessionId: nil,
                 relevanceQuery: nil
             )
             speechTranscriptionOwner = snapshot.activeClientActions.first {

@@ -263,7 +263,11 @@ struct WorkerRunDetailSheet: View {
                 await observeRun()
             }
             .onReceive(NotificationCenter.default.publisher(for: .workerRunProjectionInvalidated)) { _ in
-                refreshRevision += 1
+                if WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(
+                    status: graph?.status
+                ) {
+                    refreshRevision += 1
+                }
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
@@ -532,7 +536,7 @@ private struct WorkerRunTechnicalDetailsSheet: View {
                 )
             }
         }
-        .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronSlate)
     }
 

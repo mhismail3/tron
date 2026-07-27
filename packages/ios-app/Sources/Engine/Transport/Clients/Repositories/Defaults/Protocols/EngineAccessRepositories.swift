@@ -21,6 +21,7 @@ protocol SessionEventRepository: AnyObject {
 
     func events(for sessionId: String?) -> AsyncStream<ParsedEventV2>
     func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws
+    func releaseSessionEventSubscription(sessionId: String, workspaceId: String?) async
 }
 
 // MARK: - Settings Repository
@@ -369,9 +370,10 @@ protocol WorkerKernelRepository: AnyObject {
         triggerId: String,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerWebhookCredentialDTO
-    /// Polls historical worker topic events after an explicit cursor. Topic polling is
-    /// replay, not live subscription, so the transport must never omit the cursor.
-    func pollWorkerEvents(topic: String, cursor: EngineStreamCursor) async throws -> EngineStreamPage
+    /// Starts connection-local worker invalidations at the current durable
+    /// stream tail. Historical evidence remains available through bounded
+    /// `runs` and `inbox` reads.
+    func ensureWorkerEventSubscriptions() async throws
 }
 
 extension WorkerKernelRepository {

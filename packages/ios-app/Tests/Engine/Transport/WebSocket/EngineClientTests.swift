@@ -24,6 +24,76 @@ final class EngineClientErrorTests: XCTestCase {
 
 }
 
+@MainActor
+final class EnginePendingRequestLifecycleTests: XCTestCase {
+    func testCancellationImmediatelyRetiresOnlyTheTargetRequest() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:9847/engine")!
+        )
+        var installed = false
+        let waiter = Task { @MainActor in
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Data, Error>) in
+                connection.pendingRequests["cancel-me"] = continuation
+                connection.timeoutTasks["cancel-me"] = Task {
+                    try? await Task.sleep(for: .seconds(60))
+                }
+                installed = true
+            }
+        }
+        while !installed {
+            await Task.yield()
+        }
+
+        connection.cancelPendingRequest(id: "cancel-me")
+
+        do {
+            _ = try await waiter.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertTrue(connection.pendingRequests.isEmpty)
+        XCTAssertTrue(connection.timeoutTasks.isEmpty)
+    }
+
+    func testInboundResponseRoutingDoesNotMaterializeResultPayload() {
+        let data = Data(
+            #"{"type":"response","id":"response-1","ok":true,"result":{"body":"private"}}"#.utf8
+        )
+
+        switch EngineConnection.parseInboundMessage(data) {
+        case .response(let id):
+            XCTAssertEqual(id, "response-1")
+        default:
+            XCTFail("Expected correlated response routing")
+        }
+    }
+
+    func testInboundEventRoutingDecodesNeutralPayloadOnce() throws {
+        let data = Data(
+            #"{"type":"event","topic":"events.session","subscriptionId":"sub-1","cursor":7,"event":{"type":"agent.ready","sessionId":"session-1","timestamp":"2026-07-26T00:00:00Z"}}"#.utf8
+        )
+
+        switch EngineConnection.parseInboundMessage(data) {
+        case .event(let delivery):
+            XCTAssertEqual(delivery.subscriptionId, "sub-1")
+            XCTAssertEqual(delivery.cursor, EngineStreamCursor(rawValue: 7))
+            XCTAssertEqual(delivery.event.type, "agent.ready")
+            XCTAssertEqual(delivery.event.sessionId, "session-1")
+            let reconstructed = try JSONDecoder().decode(
+                ServerEventPayload.self,
+                from: delivery.eventData
+            )
+            XCTAssertEqual(reconstructed, delivery.event)
+        default:
+            XCTFail("Expected neutral event routing")
+        }
+    }
+}
+
 // MARK: - Connection State Tests
 
 @MainActor

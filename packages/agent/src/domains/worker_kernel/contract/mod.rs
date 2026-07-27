@@ -30,6 +30,7 @@ Canonical authoring protocol: (1) use worker_discover, worker_list, or worker_in
 (3) author and exercise source in a temporary directory with the public host tools, then pass sourceDirectory instead of echoing files into the call; \
 (4) call worker_upsert once to import, validate, dependency-lock, smoke-test, atomically publish, activate, and project the direct tool; \
 (5) use the returned worker id/version and public worker tools to verify behavior. \
+Use inputSchema for the complete runtime contract. When triggers, events, or worker handoffs need internal coordination fields, add a narrower toolInputSchema so the direct model tool exposes only human-facing inputs. \
 This operation description and request schema are the complete authoritative authoring contract. Never inspect or modify Tron databases, auth stores, binaries, runtime files, lock files, or private server endpoints to infer schemas, activate a worker, or discover hidden steps. \
 If a required behavior is absent from the public contract, report a concrete engine-contract gap instead of guessing or probing internals. Inspect external sources and user workspace data only when they are inputs to the worker's useful behavior. \
 Imported source is published as non-executable text: command runners and smoke/health commands use exact argv without shell parsing, start in files/, and must invoke scripts through an explicit interpreter such as python3 or bash. They read typed JSON from stdin and emit JSON on stdout. \
@@ -158,6 +159,86 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         RiskLevel::Medium,
         json!({"type":"object","additionalProperties":false,"required":["url"],"properties":{"url":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":4194304,"default":131072},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":120,"default":30}}}),
         "Fetch one explicit HTTP or HTTPS URL directly and return bounded raw UTF-8 source content, redirect/status metadata, and a retained-content checksum. The context-safe default retains 128 KiB; request a larger ceiling only when needed.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::notification_device_upsert",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Medium,
+        json!({
+            "type":"object","additionalProperties":false,
+            "required":[
+                "installationId","clientServerId","topic","environment",
+                "authorizationStatus"
+            ],
+            "properties":{
+                "installationId":{"type":"string","minLength":1,"maxLength":160},
+                "clientServerId":{"type":"string","minLength":1,"maxLength":160},
+                "topic":{"type":"string","enum":["com.tron.mobile.beta","com.tron.mobile"]},
+                "environment":{"type":"string","enum":["sandbox","production"]},
+                "authorizationStatus":{"type":"string","enum":[
+                    "not_determined","denied","authorized","provisional","ephemeral"
+                ]},
+                "token":{"type":"string","minLength":32,"maxLength":512}
+            }
+        }),
+        "Register this authenticated iOS installation's current APNs readiness. Device tokens are accepted only for delivery and are never returned or logged.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::notification_device_disable",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Medium,
+        json!({
+            "type":"object","additionalProperties":false,
+            "required":["installationId"],
+            "properties":{"installationId":{"type":"string","minLength":1,"maxLength":160}}
+        }),
+        "Disable notification delivery to one authenticated iOS installation.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::notification_deliveries",
+        EffectClass::PureRead,
+        RiskLevel::Low,
+        json!({
+            "type":"object","additionalProperties":false,
+            "properties":{
+                "cursor":{"type":"string","minLength":1,"maxLength":160},
+                "limit":{"type":"integer","minimum":1,"maximum":200},
+                "unreadOnly":{"type":"boolean"}
+            }
+        }),
+        "Synchronize a bounded page of logical notification inbox state and the authoritative unread count.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::notification_delivery_acknowledge",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Medium,
+        json!({
+            "type":"object","additionalProperties":false,
+            "required":[
+                "deliveryId","installationId","clientMutationId","acknowledgement"
+            ],
+            "properties":{
+                "deliveryId":{"type":"string","minLength":1,"maxLength":160},
+                "installationId":{"type":"string","minLength":1,"maxLength":160},
+                "clientMutationId":{"type":"string","minLength":1,"maxLength":160},
+                "acknowledgement":{"type":"string","enum":[
+                    "opened","complete","snooze","clear_unread"
+                ]},
+                "occurredAt":{"type":"string","maxLength":64}
+            }
+        }),
+        "Record one idempotent native notification response. The first terminal response wins; clear_unread never completes worker-owned work.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::notification_delivery_status",
+        EffectClass::PureRead,
+        RiskLevel::Low,
+        json!({
+            "type":"object","additionalProperties":false,
+            "required":["deliveryId"],
+            "properties":{"deliveryId":{"type":"string","minLength":1,"maxLength":160}}
+        }),
+        "Read one logical notification and its sanitized per-installation APNs evidence. APNs acceptance is not represented as human delivery.",
     )?);
     specs.push(spec(
         "worker_kernel::session_set_title",
@@ -372,7 +453,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         .response_schema(json!({
             "type":"object",
             "additionalProperties":false,
-            "required":["dispatchStopped","activeEngineHooks","activeClientActions","fixedTools","surface","workers"],
+            "required":["dispatchStopped","activeEngineHooks","activeClientActions","activeClientDeliveries","fixedTools","surface","workers"],
             "properties":{
                 "dispatchStopped":{"type":"boolean"},
                 "activeEngineHooks":{
@@ -396,6 +477,19 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                         "required":["action","workerId","workerVersion"],
                         "properties":{
                             "action":{"type":"string"},
+                            "workerId":{"type":"string"},
+                            "workerVersion":{"type":"string"}
+                        }
+                    }
+                },
+                "activeClientDeliveries":{
+                    "type":"array",
+                    "items":{
+                        "type":"object",
+                        "additionalProperties":false,
+                        "required":["delivery","workerId","workerVersion"],
+                        "properties":{
+                            "delivery":{"type":"string"},
                             "workerId":{"type":"string"},
                             "workerVersion":{"type":"string"}
                         }
@@ -702,6 +796,9 @@ fn profile_owned_worker_operation(function: &str) -> bool {
     matches!(
         function,
         "worker_kernel::upsert"
+            | "worker_kernel::notification_device_upsert"
+            | "worker_kernel::notification_device_disable"
+            | "worker_kernel::notification_delivery_acknowledge"
             | "worker_kernel::invoke"
             | "worker_kernel::detach"
             | "worker_kernel::cancel"

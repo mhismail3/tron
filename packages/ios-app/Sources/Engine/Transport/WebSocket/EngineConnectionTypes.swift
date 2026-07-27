@@ -96,6 +96,32 @@ enum EngineConnectionError: Error, LocalizedError, Sendable, Equatable {
 /// `EngineConnection` transitions to `ConnectionState.unauthorized`.
 typealias BearerTokenProvider = @MainActor () -> String?
 
+/// Type-erased immutable result crossing the detached decoding boundary.
+final class EngineDecodedResponseBox: @unchecked Sendable {
+    let value: Any
+
+    init(_ value: Any) {
+        self.value = value
+    }
+}
+
+/// Owns the otherwise non-Sendable generic metatype inside one explicitly
+/// audited decoder object. The object is immutable after initialization and
+/// executes its operation on the caller's executor.
+final class EngineResponseDecoder: @unchecked Sendable {
+    private let operation: (Data) throws -> Any
+
+    init<Value: Decodable>(_ type: Value.Type) {
+        operation = { data in
+            try JSONDecoder().decode(type, from: data)
+        }
+    }
+
+    func decode(from data: Data) throws -> EngineDecodedResponseBox {
+        EngineDecodedResponseBox(try operation(data))
+    }
+}
+
 final class SingleResumeContinuationBox: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, Error>?

@@ -106,7 +106,7 @@ pub(super) async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Val
                 "score":rank.relevance_score,
                 "promoted":rank.promoted,
                 "worker":worker,
-                "inputSchema":bundle.input_schema,
+                "inputSchema":bundle.effective_tool_input_schema(),
                 "outputSchema":bundle.output_schema,
                 "routing":bundle.routing,
                 "provenance":bundle.provenance,
@@ -161,6 +161,7 @@ fn project_inspection(mut inspection: Value, detail: &str) -> Result<Value, Stri
                         | "name"
                         | "description"
                         | "toolName"
+                        | "toolInputSchema"
                         | "inputSchema"
                         | "outputSchema"
                         | "runner"
@@ -192,6 +193,7 @@ mod tests {
             "bundle":{
                 "schemaVersion":"worker.bundle.v1",
                 "workerId":"research",
+                "toolInputSchema":{"type":"object","required":["query"]},
                 "inputSchema":{"type":"object"},
                 "outputSchema":{"type":"object"},
                 "runner":{"kind":"command"},
@@ -215,6 +217,10 @@ mod tests {
         assert!(projected.get("healthHistory").is_none());
         assert!(projected["bundle"].get("files").is_none());
         assert!(projected["bundle"].get("smokeTests").is_none());
+        assert_eq!(
+            projected["bundle"]["toolInputSchema"]["required"],
+            json!(["query"])
+        );
         assert_eq!(projected["bundle"]["inputSchema"]["type"], "object");
 
         let full = project_inspection(inspection, "full").unwrap();

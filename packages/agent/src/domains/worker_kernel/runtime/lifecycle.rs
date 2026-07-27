@@ -309,7 +309,7 @@ impl WorkerRuntime {
         )
         .with_risk(RiskLevel::High)
         .with_idempotency(IdempotencyContract::session())
-        .with_request_schema(active.bundle.input_schema.clone())
+        .with_request_schema(active.bundle.effective_tool_input_schema().clone())
         .with_response_schema(json!({
             "anyOf":[
                 active.bundle.output_schema.clone(),

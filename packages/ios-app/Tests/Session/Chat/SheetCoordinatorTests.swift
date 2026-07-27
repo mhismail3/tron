@@ -22,21 +22,20 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertFalse(coordinator.isPresented)
     }
 
-    // MARK: - lastActiveSheet
+    // MARK: - Replacement ownership
 
-    func testLastActiveSheetTrackedOnPresent() {
+    func testReplacementDoesNotRetainPreviousSheetPayload() {
         let coordinator = SheetCoordinator()
         coordinator.present(.settings)
         coordinator.present(.thinkingDetail("details"))
-        XCTAssertEqual(coordinator.lastActiveSheet, .settings)
         XCTAssertEqual(coordinator.activeSheet, .thinkingDetail("details"))
     }
 
-    func testLastActiveSheetTrackedOnDismiss() {
+    func testDismissRetainsNoSheetPayload() {
         let coordinator = SheetCoordinator()
         coordinator.present(.settings)
         coordinator.dismiss()
-        XCTAssertEqual(coordinator.lastActiveSheet, .settings)
+        XCTAssertNil(coordinator.activeSheet)
     }
 
     // MARK: - onDismiss Callback

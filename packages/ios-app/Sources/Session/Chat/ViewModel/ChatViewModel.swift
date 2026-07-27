@@ -183,6 +183,8 @@ final class ChatViewModel {
     var speechTranscriptionTaskGeneration: UInt64 = 0
     @ObservationIgnored
     var speechWorkerMonitorTask: Task<Void, Never>?
+    @ObservationIgnored
+    var speechWorkerMonitorTaskGeneration: UInt64 = 0
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
     /// Message identities for tool invocations in the live current turn.
@@ -270,9 +272,6 @@ final class ChatViewModel {
         }
         setupBindings()
         setupEventProcessingCallbacks()
-        if services.connection.connectionState.isConnected {
-            startSpeechTranscriptionMonitoring()
-        }
     }
 
     @ObservationIgnored
@@ -285,11 +284,8 @@ final class ChatViewModel {
         observationTasks.append(Self.observeLoop({ connection.connectionState }) { [weak self] state in
             guard let self else { return }
 
-            if state.isConnected {
-                startSpeechTranscriptionMonitoring()
-            } else {
+            if !state.isConnected {
                 cancelRecording()
-                stopSpeechTranscriptionMonitoring()
             }
 
             if case .disconnected = state {

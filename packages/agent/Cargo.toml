@@ -71,6 +71,7 @@ hmac = "0.12"
 base64 = "0.22"
 rand = "0.9"
 percent-encoding = "2"
+p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
 
 # Filesystem
 walkdir = "2"

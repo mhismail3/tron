@@ -37,6 +37,7 @@ struct ProductionAppRoot: View {
     // Deep link navigation state
     @State private var deepLinkSessionId: String?
     @State private var deepLinkScrollTarget: ScrollTarget?
+    @State private var notificationDetailRoute: NotificationDetailRoute?
 
     init(container: DependencyContainer = DependencyContainer()) {
         _container = State(initialValue: container)
@@ -63,6 +64,12 @@ struct ProductionAppRoot: View {
             .onChange(of: container.engineClient.connectionState) { oldState, newState in
                 handleConnectionBannerTransition(to: newState)
                 container.clientLogIngestionService.handleConnectionChange(from: oldState, to: newState)
+                if newState.isConnected {
+                    container.notificationCoordinator.connectionDidAuthenticate()
+                }
+            }
+            .onChange(of: container.activeServerSelectionVersion) {
+                container.notificationCoordinator.pairedServersDidChange()
             }
             .onOpenURL { url in
                 // Handle URL scheme deep links
@@ -83,7 +90,15 @@ struct ProductionAppRoot: View {
                 case .share:
                     NotificationCenter.default.post(name: .pendingShareContent, object: nil)
                     TronLogger.shared.info("Deep link to share", category: .notification)
+                case .notification(let serverId, let deliveryId):
+                    openNotificationDetail(serverId: serverId, deliveryId: deliveryId)
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openNotificationDelivery)) { notification in
+                guard let serverId = notification.userInfo?["serverId"] as? String,
+                      let deliveryId = notification.userInfo?["deliveryId"] as? String
+                else { return }
+                openNotificationDetail(serverId: serverId, deliveryId: deliveryId)
             }
             .onChange(of: scenePhase) { oldPhase, newPhase in
                 let isBackground = newPhase != .active
@@ -108,12 +123,22 @@ struct ProductionAppRoot: View {
                 if newPhase == .active && oldPhase != .active {
                     Task {
                         await recoverForegroundConnection()
+                        // Notification registration/outbox/sync must not race a
+                        // stale half-open connection with foreground recovery.
+                        container.notificationCoordinator.foregrounded()
                         // Handle reconnection based on current connection state.
                         // Session-list refresh is requested unconditionally — the central
                         // SessionRefreshService coalesces and defers to reconnect if offline.
                         container.eventStoreManager.requestSessionRefresh(reason: .foreground)
                     }
                 }
+            }
+            .sheet(item: $notificationDetailRoute) { route in
+                NotificationDetailView(
+                    route: route,
+                    coordinator: container.notificationCoordinator,
+                    server: container.pairedServerStore.servers.first { $0.id == route.serverId }
+                )
             }
     }
 
@@ -239,9 +264,36 @@ struct ProductionAppRoot: View {
     // MARK: - Initialization
 
     private func initializeApp() async {
+        container.notificationCoordinator.launch()
         await initializer.initialize {
             try await container.initialize()
         }
+        if container.engineClient.connectionState.isConnected {
+            container.notificationCoordinator.connectionDidAuthenticate()
+        } else {
+            container.notificationCoordinator.attachLifecycle()
+        }
+    }
+
+    private func openNotificationDetail(serverId: String, deliveryId: String) {
+        guard let server = container.pairedServerStore.servers.first(where: { $0.id == serverId })
+        else {
+            notificationDetailRoute = NotificationDetailRoute(
+                serverId: serverId,
+                deliveryId: deliveryId,
+                serverUnavailable: true
+            )
+            return
+        }
+        if container.pairedServerStore.activeServer?.id != serverId {
+            container.selectPairedServer(server, connectAfterSwitch: true)
+        }
+        notificationDetailRoute = NotificationDetailRoute(
+            serverId: serverId,
+            deliveryId: deliveryId,
+            serverUnavailable: false
+        )
+        container.notificationCoordinator.synchronizeNow()
     }
 
     private func handleConnectionBannerTransition(to state: ConnectionState) {

@@ -7,8 +7,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IOS_DIR="$ROOT_DIR/packages/ios-app"
 PROJECT="TronMobile.xcodeproj"
 DERIVED_DATA="build/DerivedData"
-SCHEME="${TRON_IOS_SCHEME:-Tron Beta}"
-CONFIG="${TRON_IOS_CONFIGURATION:-Beta}"
+SCHEME="${TRON_IOS_SCHEME:-Tron}"
+CONFIG="${TRON_IOS_CONFIGURATION:-Prod}"
 DEVICE_ID="${TRON_IOS_DEVICE_ID:-}"
 DEVICE_NAME="${TRON_IOS_DEVICE_NAME:-}"
 LAUNCH_AFTER_INSTALL=1
@@ -18,16 +18,16 @@ REQUIRED_SDK_MAJOR="${TRON_IOS_REQUIRED_SDK_MAJOR:-}"
 usage() {
     cat <<'USAGE'
 Usage:
-  scripts/tron-ios-beta install [--device-id ID] [--device-name NAME] [--no-launch]
-  scripts/tron-ios-beta launch [--device-id ID] [--device-name NAME]
-  scripts/tron-ios-beta stop [--device-id ID] [--device-name NAME]
-  scripts/tron-ios-beta status [--device-id ID] [--device-name NAME]
+  scripts/tron-ios-device install [--device-id ID] [--device-name NAME] [--no-launch]
+  scripts/tron-ios-device launch [--device-id ID] [--device-name NAME]
+  scripts/tron-ios-device stop [--device-id ID] [--device-name NAME]
+  scripts/tron-ios-device status [--device-id ID] [--device-name NAME]
 
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
   TRON_IOS_DEVICE_NAME     Physical iOS device name
-  TRON_IOS_SCHEME          Xcode scheme to build/launch, defaults to Tron Beta
-  TRON_IOS_CONFIGURATION   Xcode configuration, defaults to Beta
+  TRON_IOS_SCHEME          Xcode scheme to build/launch, defaults to Tron
+  TRON_IOS_CONFIGURATION   Xcode configuration, defaults to Prod
   TRON_IOS_REQUIRED_SDK_MAJOR
                            Fail before building unless iphoneos uses this SDK major
   TRON_IOS_LAUNCH_TIMEOUT_SECONDS
@@ -214,6 +214,8 @@ build_install_launch() {
         -resultBundlePath "$xcresult" \
         -allowProvisioningUpdates \
         -allowProvisioningDeviceRegistration \
+        TRON_APNS_ENTITLEMENT_ENVIRONMENT=development \
+        TRON_APNS_ENVIRONMENT=sandbox \
         2>&1 \
         | tee "$log" \
         | pretty_xcode_output
@@ -265,7 +267,7 @@ launch_app_for_device() {
         --timeout "$LAUNCH_TIMEOUT_SECONDS" \
         --terminate-existing \
         "$bundle_id"; then
-        die "launch failed or timed out after ${LAUNCH_TIMEOUT_SECONDS}s. The app may still be installed; check the device or run scripts/tron-ios-beta status."
+        die "launch failed or timed out after ${LAUNCH_TIMEOUT_SECONDS}s. The app may still be installed; check the device or run scripts/tron-ios-device status."
     fi
 }
 
@@ -286,7 +288,13 @@ launch_installed_app() {
 tronmobile_pids() {
     local device_id="$1"
     xcrun devicectl device info processes --device "$device_id" \
-        | awk '$0 ~ /TronMobile\.app\/TronMobile$/ { print $1 }'
+        | tronmobile_pids_from_input
+}
+
+tronmobile_pids_from_input() {
+    # `devicectl` renders a padded table. Match the executable after its
+    # trailing column padding so status/stop stay correct across Xcode widths.
+    awk '$0 ~ /TronMobile\.app\/TronMobile[[:space:]]*$/ { print $1 }'
 }
 
 stop_installed_app() {
@@ -364,4 +372,6 @@ main() {
     esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

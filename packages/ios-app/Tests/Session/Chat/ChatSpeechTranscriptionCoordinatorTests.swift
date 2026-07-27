@@ -185,6 +185,15 @@ final class ChatSpeechTranscriptionCoordinatorTests: XCTestCase {
         smoother.reset()
         XCTAssertEqual(smoother.value, 0)
     }
+
+    func testNeverStartedCaptureCanBeCancelledRepeatedly() {
+        let engine = ComposerMicCaptureEngine()
+
+        engine.cancel()
+        engine.cancel()
+
+        XCTAssertFalse(engine.isRunning)
+    }
 }
 
 @MainActor

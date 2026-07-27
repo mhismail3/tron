@@ -29,6 +29,8 @@
 //! labels; raw child content remains in its canonical audit session.
 //! `client_actions` selects the current healthy worker for narrow native
 //! capture/presentation seams without creating a second execution path.
+//! `notifications` drains the durable worker-to-client outbox through APNs;
+//! provider acceptance is evidence, never a human-delivery receipt.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -66,6 +68,7 @@ mod events;
 mod hooks;
 mod invocation;
 mod lifecycle;
+mod notifications;
 mod resident;
 mod result;
 mod run_projection;
@@ -73,6 +76,7 @@ mod run_projection_format;
 mod secrets;
 mod session;
 mod support;
+mod worker_dispatches;
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::session::event_store::EventStore;
@@ -189,7 +193,10 @@ pub struct WorkerRuntime {
     resident_supervisions: DashSet<String>,
     stopped: AtomicBool,
     shutting_down: AtomicBool,
+    notification_maintenance_ticks: AtomicUsize,
+    notification_configuration_revision: Mutex<Option<String>>,
     http: reqwest::Client,
+    notification_transport: super::notifications::transport::NotificationTransport,
     core_proposals: CoreProposalService,
 }
 
@@ -216,6 +223,8 @@ impl WorkerRuntime {
         }
         let stopped = store.stop_all()?;
         let core_proposals = CoreProposalService::new(store.home(), Arc::clone(&event_store))?;
+        let notification_transport =
+            super::notifications::transport::NotificationTransport::new(store.home())?;
         Ok(Arc::new(Self {
             store,
             host,
@@ -235,10 +244,13 @@ impl WorkerRuntime {
             resident_supervisions: DashSet::new(),
             stopped: AtomicBool::new(stopped),
             shutting_down: AtomicBool::new(false),
+            notification_maintenance_ticks: AtomicUsize::new(0),
+            notification_configuration_revision: Mutex::new(None),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(MAX_INVOCATION_SECONDS))
                 .build()
                 .map_err(|error| format!("build worker HTTP client: {error}"))?,
+            notification_transport,
             core_proposals,
         }))
     }
@@ -268,6 +280,7 @@ impl WorkerRuntime {
             "dispatchStopped": self.store.stop_all()?,
             "activeEngineHooks": self.engine_hook_inventory()?,
             "activeClientActions": self.client_action_inventory()?,
+            "activeClientDeliveries": self.client_delivery_inventory()?,
             "fixedTools": fixed_tools,
             "surface": {
                 "catalogRevision": surface.catalog_revision,

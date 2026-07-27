@@ -193,6 +193,19 @@ User-specific values belong in runtime state outside the repository. Worker-owne
 secrets go through `~/.tron/workspace/vault/`; Tron-owned provider and transport
 credentials live in `~/.tron/auth.json`. Never paste secrets anywhere in the tree.
 
+Notification transport selection and relay HMAC credentials use the typed
+`notification-push` auth entry. Use
+`scripts/tron auth notifications configure-relay`, `status`, `use`, and
+`clear-relay`; the CLI must report only mode/readiness, never the URL or secret.
+Direct APNs provider credentials remain in the typed `apple-push` entry and are
+managed with `scripts/tron auth apns`. Device tokens are runtime transport data
+and must never appear in source, tests, logs, diagnostics, or CLI output.
+
+The Cloudflare relay in `packages/relay` is prepared and validated locally with
+`npm run check` and `npm test`. Its deployment and secret configuration are
+manual operations. Never deploy it, or run any production deployment command,
+as part of automated contributor validation.
+
 Tests that need identity-shaped data must use synthetic, nonpersonal fixtures;
 personal literals are not allowlisted into the repository.
 

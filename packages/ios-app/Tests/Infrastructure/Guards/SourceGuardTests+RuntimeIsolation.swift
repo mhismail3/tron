@@ -62,9 +62,9 @@ extension SourceGuardTests {
 
         #expect(source.contains("startMetricKit: {\n                MetricKitDiagnosticsStore.shared.start()"))
         #expect(source.contains("guard runtimeMode.runsApplicationLifecycle else { return true }"))
-        #expect(occurrences(of: "guard runtimeMode.runsApplicationLifecycle", in: source) == 1)
-        #expect(!source.contains("UNUserNotificationCenter"))
-        #expect(!source.contains("didRegisterForRemoteNotifications"))
+        #expect(occurrences(of: "guard runtimeMode.runsApplicationLifecycle", in: source) == 4)
+        #expect(source.contains("installNotificationLifecycle()"))
+        #expect(source.contains("didRegisterForRemoteNotificationsWithDeviceToken"))
         #expect(!source.contains("let metricKit = MetricKitDiagnosticsStore.shared"))
     }
 

@@ -497,12 +497,33 @@ cmd_auth() {
             # The Rust owner serializes rotation with every other auth writer.
             _run_with_contributor_pair_read _run_tron_auth_owner rotate "$@"
             ;;
+        apns)
+            shift
+            _run_with_contributor_pair_read _run_tron_auth_owner apns "$@"
+            ;;
+        notifications)
+            shift
+            _run_with_contributor_pair_read _run_tron_auth_owner notifications "$@"
+            ;;
         ""|-h|--help)
             echo ""
             echo "Usage: tron auth <action>"
             echo ""
             echo "Actions:"
             echo "  rotate    Generate a fresh WebSocket bearer token (forces iOS re-pair)"
+            echo "  apns      Configure direct APNs delivery credentials"
+            echo "  notifications Configure relay/direct native-notification transport"
+            echo ""
+            echo "APNs:"
+            echo "  tron auth apns configure --team-id ID --key-id ID --private-key-file AuthKey.p8"
+            echo "  tron auth apns status"
+            echo "  tron auth apns clear"
+            echo ""
+            echo "Notifications:"
+            echo "  tron auth notifications configure-relay --url URL --secret-file FILE"
+            echo "  tron auth notifications use relay|direct"
+            echo "  tron auth notifications status"
+            echo "  tron auth notifications clear-relay"
             echo ""
             echo "After rotation every paired iOS device shows the .unauthorized state"
             echo "and must re-pair using the new token. The token lives in"

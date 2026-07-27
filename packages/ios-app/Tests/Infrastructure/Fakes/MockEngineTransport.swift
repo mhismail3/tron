@@ -20,6 +20,7 @@ final class MockEngineTransport: EngineTransport {
     var ensureSessionEventSubscriptionCallCount = 0
     var ensuredSessionEventSubscriptions: [(sessionId: String, workspaceId: String?)] = []
     var ensureSessionEventSubscriptionShouldThrow = false
+    var ensureWorkerEventSubscriptionsCallCount = 0
     var operationOrder: [String] = []
 
     var setModelCallCount = 0
@@ -55,6 +56,12 @@ final class MockEngineTransport: EngineTransport {
             cursor: 100,
             limit: 100
         )
+    }
+
+    func ensureWorkerEventSubscriptions() async throws {
+        _ = try requireConnection()
+        ensureWorkerEventSubscriptionsCallCount += 1
+        operationOrder.append("subscribe:worker-projection")
     }
 
     func setCurrentModel(_ model: String) {

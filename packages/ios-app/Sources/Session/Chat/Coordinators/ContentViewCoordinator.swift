@@ -4,6 +4,20 @@ import Foundation
 /// Keeps ContentView focused on layout and presentation.
 @MainActor
 final class ContentViewCoordinator {
+    enum SessionPublicationError: LocalizedError {
+        case coordinatorUnavailable
+        case sessionNotPublished
+
+        var errorDescription: String? {
+            switch self {
+            case .coordinatorUnavailable:
+                "The session coordinator is not ready. Try again."
+            case .sessionNotPublished:
+                "The session was created, but its local index could not be refreshed."
+            }
+        }
+    }
+
     private let dependencies: DependencyContainer
 
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
@@ -41,6 +55,30 @@ final class ContentViewCoordinator {
     }
 
     // MARK: - Session Operations
+
+    /// Publish a server-created session into the local projection before any
+    /// navigation can construct its ChatView. If the direct cache write fails,
+    /// reconcile from server truth once before reporting a recoverable error.
+    func publishCreatedSession(_ created: NewSessionCreated) async throws -> String {
+        do {
+            try await eventStoreManager.cacheNewSession(
+                sessionId: created.sessionId,
+                workspaceId: created.workspaceId,
+                model: created.model,
+                workingDirectory: created.workingDirectory
+            )
+        } catch {
+            TronLogger.shared.warning(
+                "Direct new-session publication failed; reconciling server truth: \(error.localizedDescription)",
+                category: .session
+            )
+            await eventStoreManager.refreshSessionList()
+        }
+        guard eventStoreManager.sessionExists(created.sessionId) else {
+            throw SessionPublicationError.sessionNotPublished
+        }
+        return created.sessionId
+    }
 
     func deleteSession(_ sessionId: String, isSelected: Bool, onSelectNext: @escaping (String?) -> Void) {
         let manager = eventStoreManager

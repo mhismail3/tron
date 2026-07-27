@@ -38,4 +38,28 @@ impl WorkerRuntime {
         }
         Ok(None)
     }
+
+    pub(super) fn client_delivery_inventory(&self) -> Result<Vec<Value>, String> {
+        let mut inventory = Vec::new();
+        for summary in self.store.list(true)? {
+            if !summary.enabled || summary.retired || summary.health != "healthy" {
+                continue;
+            }
+            let worker = self.store.load_indexed_active(&summary.worker_id)?;
+            for delivery in &worker.bundle.client_deliveries {
+                inventory.push(json!({
+                    "delivery":delivery.as_str(),
+                    "workerId":worker.summary.worker_id,
+                    "workerVersion":worker.summary.active_version,
+                }));
+            }
+        }
+        inventory.sort_by(|left, right| {
+            left["delivery"]
+                .as_str()
+                .cmp(&right["delivery"].as_str())
+                .then_with(|| left["workerId"].as_str().cmp(&right["workerId"].as_str()))
+        });
+        Ok(inventory)
+    }
 }

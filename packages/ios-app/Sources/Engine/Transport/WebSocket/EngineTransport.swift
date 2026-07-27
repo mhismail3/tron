@@ -29,6 +29,11 @@ protocol EngineTransport: AnyObject {
     @discardableResult
     func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws -> EngineSubscription
 
+    /// Ensure connection-local live-tail subscriptions for worker projection
+    /// invalidation. Historical worker evidence is read through bounded kernel
+    /// queries, never replayed into presentation monitoring.
+    func ensureWorkerEventSubscriptions() async throws
+
     /// Update the current model
     func setCurrentModel(_ model: String)
 

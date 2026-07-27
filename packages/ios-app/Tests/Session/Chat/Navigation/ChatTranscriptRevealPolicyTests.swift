@@ -14,6 +14,12 @@ struct ChatTranscriptRevealPolicyTests {
         #expect(ChatTranscriptRevealPolicy.contentOpacity(initialLoadComplete: true) == 1)
     }
 
+    @Test("Transcript reveal and shell loading have hard responsiveness budgets")
+    func initialLoadingBudgetsAreBounded() {
+        #expect(ChatTranscriptRevealPolicy.maximumTranscriptRevealDelayMilliseconds <= 400)
+        #expect(ChatTranscriptRevealPolicy.initialShellLoadingBudgetMilliseconds <= 5_000)
+    }
+
     @Test("Bottom distance uses settled content offset and clamps overscroll")
     func bottomDistanceUsesSettledContentOffset() {
         #expect(ChatTranscriptRevealPolicy.bottomDistance(

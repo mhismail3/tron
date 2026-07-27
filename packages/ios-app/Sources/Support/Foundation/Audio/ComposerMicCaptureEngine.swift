@@ -50,6 +50,10 @@ final class ComposerMicCaptureEngine {
     ]
 
     private var engine: AVAudioEngine?
+    /// True only after this instance successfully activates the shared audio
+    /// session. A never-started recorder must not deactivate process-global
+    /// audio during ordinary chat teardown.
+    private var ownsActiveAudioSession = false
     private let captureBuffer = ComposerMicCaptureBuffer()
     private var simulatorRecordingStartedAt: Date?
 
@@ -98,6 +102,7 @@ final class ComposerMicCaptureEngine {
             try session.setCategory(.playAndRecord, mode: .default, options: Self.sessionOptions)
             try session.setPreferredSampleRate(44_100)
             try session.setActive(true, options: [])
+            ownsActiveAudioSession = true
         } catch {
             throw ComposerMicCaptureError.startFailed(
                 "Failed to configure audio session: \(error.localizedDescription)"
@@ -252,6 +257,8 @@ final class ComposerMicCaptureEngine {
     }
 
     private func deactivateSession() {
+        guard ownsActiveAudioSession else { return }
+        ownsActiveAudioSession = false
         try? AVAudioSession.sharedInstance().setActive(
             false,
             options: [.notifyOthersOnDeactivation]

@@ -26,7 +26,17 @@ extension EventStoreManager {
         )
 
         try await eventDB.sessions.insert(session)
-        loadSessions()
+        cancelPendingSessionLoadForDirectPublication()
+        var publishedSessions = sessions
+        if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+            publishedSessions[index] = session
+        } else {
+            // The creation coordinator may navigate as soon as this method
+            // returns. Publish the exact row synchronously on MainActor instead
+            // of waiting for the debounced database reload lane.
+            publishedSessions.insert(session, at: 0)
+        }
+        setSessions(publishedSessions)
         logger.info("Cached new session: \(sessionId) with origin: \(serverOrigin)", category: .session)
     }
 

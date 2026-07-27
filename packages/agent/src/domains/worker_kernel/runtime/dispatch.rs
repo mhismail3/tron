@@ -19,6 +19,7 @@ impl WorkerRuntime {
                         self.dispatch_queued(&mut runs).await;
                         self.dispatch_schedules(&mut runs).await;
                         self.dispatch_events(&mut runs).await;
+                        self.dispatch_notifications(&mut runs).await;
                     }
                 }
                 Some(_) = runs.join_next(), if !runs.is_empty() => {}

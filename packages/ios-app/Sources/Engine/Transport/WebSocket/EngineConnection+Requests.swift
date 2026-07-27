@@ -81,6 +81,21 @@ extension EngineConnection {
         let _: EmptyParams = try await sendResponseMessage(message, id: message.id, operation: "ack", timeout: nil)
     }
 
+    @discardableResult
+    func unsubscribe(subscriptionId: String) async throws -> Bool {
+        let message = EngineUnsubscribeFrame(
+            id: UUID().uuidString,
+            subscriptionId: subscriptionId
+        )
+        let result: EngineUnsubscribeResult = try await sendResponseMessage(
+            message,
+            id: message.id,
+            operation: "unsubscribe",
+            timeout: nil
+        )
+        return result.unsubscribed
+    }
+
     func invoke<P: Encodable, R: Decodable>(
         functionId: EngineFunctionId,
         payload: P,
@@ -128,8 +143,21 @@ extension EngineConnection {
         timeout: TimeInterval?
     ) async throws -> R {
         let data = try await sendMessage(message, id: id, operation: operation, timeout: timeout)
+        let responseDecoder = EngineResponseDecoder(R.self)
         do {
-            return try JSONDecoder().decode(R.self, from: data)
+            let decoded = try await Task.detached(priority: .userInitiated) {
+                do {
+                    return try responseDecoder.decode(from: data)
+                } catch {
+                    throw EngineConnectionError.decodingError(error.localizedDescription)
+                }
+            }.value
+            guard let response = decoded.value as? R else {
+                throw EngineConnectionError.invalidResponse
+            }
+            return response
+        } catch let error as EngineConnectionError {
+            throw error
         } catch {
             throw EngineConnectionError.decodingError(error.localizedDescription)
         }
@@ -142,8 +170,20 @@ extension EngineConnection {
         timeout: TimeInterval?
     ) async throws -> R {
         let data = try await sendMessage(message, id: id, operation: operation, timeout: timeout)
+        let responseDecoder = EngineResponseDecoder(
+            EngineResponseEnvelope<R>.self
+        )
         do {
-            let response = try JSONDecoder().decode(EngineResponseEnvelope<R>.self, from: data)
+            let decoded = try await Task.detached(priority: .userInitiated) {
+                do {
+                    return try responseDecoder.decode(from: data)
+                } catch {
+                    throw EngineConnectionError.decodingError(error.localizedDescription)
+                }
+            }.value
+            guard let response = decoded.value as? EngineResponseEnvelope<R> else {
+                throw EngineConnectionError.invalidResponse
+            }
             if response.ok, let result = response.result {
                 return result
             }
@@ -183,59 +223,75 @@ extension EngineConnection {
         )
 
         #if DEBUG || BETA
-        logger.logWebSocketMessage(direction: "→ SEND", type: operation, size: data.count, preview: String(data: data, encoding: .utf8))
+        logger.logWebSocketMessage(direction: "→ SEND", type: operation, size: data.count)
         #endif
 
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-            pendingRequests[requestId] = continuation
-            logger.verbose("Registered pending request id=\(requestId), total pending: \(pendingRequests.count)", category: .websocket)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                pendingRequests[requestId] = continuation
+                logger.verbose("Registered pending request id=\(requestId), total pending: \(pendingRequests.count)", category: .websocket)
 
-            let timeoutTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(timeoutInterval))
-                let shouldRecoverConnection = await MainActor.run {
+                let timeoutTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(timeoutInterval))
+                    await MainActor.run {
                     if let pending = self?.pendingRequests.removeValue(forKey: requestId) {
                         logger.error("Request timeout for \(operation) id=\(requestId) after \(timeoutInterval)s", category: .websocket)
                         pending.resume(throwing: EngineConnectionError.timeout)
                         self?.timeoutTasks.removeValue(forKey: requestId)
-                        return true
-                    }
-                    self?.timeoutTasks.removeValue(forKey: requestId)
-                    return false
-                }
-                if shouldRecoverConnection {
-                    await self?.handleDisconnect()
-                }
-            }
-            timeoutTasks[requestId] = timeoutTask
-
-            // Register correlation before sending so an immediate server
-            // response can never arrive ahead of its continuation.
-            let socketMessage = Self.engineTextMessage(from: data)
-            task.send(socketMessage) { [self] error in
-                Task { @MainActor [self] in
-                    guard let error else {
-                        logger.verbose("Message sent successfully for \(operation) id=\(requestId)", category: .websocket)
-                        logger.verbose("Waiting for response to \(operation) id=\(requestId)...", category: .websocket)
                         return
                     }
+                    self?.timeoutTasks.removeValue(forKey: requestId)
+                    }
+                }
+                timeoutTasks[requestId] = timeoutTask
 
-                    logger.error("Failed to send message for \(operation): \(error.localizedDescription)", category: .websocket)
-                    if ConnectionErrorClassifier.requiresConnectionRecovery(error) {
-                        failPendingRequest(
-                            id: requestId,
-                            error: EngineConnectionError.connectionFailed(error.localizedDescription)
-                        )
-                        await handleSendTransportFailure(
-                            error,
-                            operation: operation,
-                            failedTask: task
-                        )
-                    } else {
-                        failPendingRequest(id: requestId, error: error)
+                // Register correlation before sending so an immediate server
+                // response can never arrive ahead of its continuation.
+                let socketMessage = Self.engineTextMessage(from: data)
+                task.send(socketMessage) { [self] error in
+                    Task { @MainActor [self] in
+                        guard let error else {
+                            logger.verbose("Message sent successfully for \(operation) id=\(requestId)", category: .websocket)
+                            logger.verbose("Waiting for response to \(operation) id=\(requestId)...", category: .websocket)
+                            return
+                        }
+
+                        logger.error("Failed to send message for \(operation): \(error.localizedDescription)", category: .websocket)
+                        if ConnectionErrorClassifier.requiresConnectionRecovery(error) {
+                            failPendingRequest(
+                                id: requestId,
+                                error: EngineConnectionError.connectionFailed(error.localizedDescription)
+                            )
+                            await handleSendTransportFailure(
+                                error,
+                                operation: operation,
+                                failedTask: task
+                            )
+                        } else {
+                            failPendingRequest(id: requestId, error: error)
+                        }
                     }
                 }
             }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelPendingRequest(id: requestId)
+            }
         }
+    }
+
+    /// Cancellation retires only the requesting task. It must not wait for the
+    /// ordinary 30-second deadline or disturb unrelated work on the shared
+    /// WebSocket.
+    func cancelPendingRequest(id requestId: String) {
+        timeoutTasks.removeValue(forKey: requestId)?.cancel()
+        pendingRequests.removeValue(forKey: requestId)?.resume(
+            throwing: CancellationError()
+        )
     }
 
     nonisolated static func validateOutboundMessageSize(

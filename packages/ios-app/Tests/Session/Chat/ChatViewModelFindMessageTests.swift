@@ -470,6 +470,7 @@ private final class DeepLinkTestSessionEventRepository: SessionEventRepository {
     }
 
     func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws {}
+    func releaseSessionEventSubscription(sessionId: String, workspaceId: String?) async {}
 }
 
 @MainActor

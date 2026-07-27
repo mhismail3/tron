@@ -29,6 +29,13 @@ pub struct WorkerBundle {
     pub description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
+    /// Optional narrower schema projected to the model-facing direct tool.
+    ///
+    /// `input_schema` remains authoritative for every runtime source,
+    /// including triggers and worker handoffs. This projection keeps
+    /// engine-owned coordination fields out of ordinary model calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_input_schema: Option<Value>,
     #[serde(default = "object_schema")]
     pub input_schema: Value,
     #[serde(default = "object_schema")]
@@ -60,6 +67,18 @@ pub struct WorkerBundle {
     /// typed transformation and all higher-level policy.
     #[serde(default)]
     pub client_actions: Vec<WorkerClientAction>,
+    /// Optional native-client deliveries emitted by this immutable version.
+    ///
+    /// Deliveries flow from a completed worker invocation to authenticated
+    /// clients. They are intentionally separate from client-initiated actions.
+    #[serde(default)]
+    pub client_deliveries: Vec<WorkerClientDelivery>,
+    /// Fixed asynchronous routes that this immutable version may dispatch.
+    ///
+    /// Output chooses only a declared route and stable deduplication key. The
+    /// route binds the target worker identity and response ownership.
+    #[serde(default)]
+    pub worker_dispatch_routes: Vec<WorkerDispatchRoute>,
     #[serde(default)]
     pub routing: WorkerRouting,
     /// Generic execution ceilings selected by this immutable worker version.
@@ -73,6 +92,14 @@ pub struct WorkerBundle {
     /// experience. Unsupported contracts always use the generic console.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presentation: Option<WorkerPresentation>,
+}
+
+impl WorkerBundle {
+    pub(crate) fn effective_tool_input_schema(&self) -> &Value {
+        self.tool_input_schema
+            .as_ref()
+            .unwrap_or(&self.input_schema)
+    }
 }
 
 /// Worker-selected ceilings enforced by the generic agent runner.
@@ -213,6 +240,53 @@ impl WorkerClientAction {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SpeechTranscription => "speech_transcription",
+        }
+    }
+}
+
+/// Stable worker-to-client delivery seams fulfilled by normal workers.
+///
+/// Each delivery kind has one kernel-validated output contract. Workers own
+/// content and reminder semantics; the engine owns durable dispatch evidence,
+/// and clients own native presentation and authenticated responses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerClientDelivery {
+    NotificationDelivery,
+}
+
+impl WorkerClientDelivery {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotificationDelivery => "notification_delivery",
+        }
+    }
+}
+
+/// One closed asynchronous worker-to-worker route.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerDispatchRoute {
+    pub route: String,
+    pub target_worker_id: String,
+    #[serde(default)]
+    pub client_response_owner: WorkerDispatchResponseOwner,
+}
+
+/// Notification response binding selected by the immutable source route.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerDispatchResponseOwner {
+    Source,
+    #[default]
+    Target,
+}
+
+impl WorkerDispatchResponseOwner {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Source => "source",
+            Self::Target => "target",
         }
     }
 }

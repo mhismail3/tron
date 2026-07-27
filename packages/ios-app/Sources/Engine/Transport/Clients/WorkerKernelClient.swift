@@ -266,11 +266,7 @@ final class WorkerKernelClient: EngineDomainClient {
         )
     }
 
-    func pollWorkerEvents(
-        topic: String,
-        cursor: EngineStreamCursor
-    ) async throws -> EngineStreamPage {
-        let connection = try requireTransport().requireConnection()
-        return try await connection.poll(topic: topic, cursor: cursor, limit: 100)
+    func ensureWorkerEventSubscriptions() async throws {
+        try await requireTransport().ensureWorkerEventSubscriptions()
     }
 }

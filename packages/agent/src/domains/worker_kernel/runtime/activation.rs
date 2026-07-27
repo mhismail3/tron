@@ -10,6 +10,7 @@ impl WorkerRuntime {
         predecessor: Option<&str>,
     ) -> Result<UpsertOutcome, String> {
         self.reject_secret_material_in_bundle(&bundle)?;
+        self.validate_worker_dispatch_route_targets(&bundle)?;
         let mut prepared = self.store.prepare(bundle, predecessor)?;
         if let Err(error) = self.prepare_dependencies_and_test(&mut prepared).await {
             self.store.abandon(&prepared);

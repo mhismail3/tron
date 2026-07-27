@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 const ENGINE_HOOK_AUTHORING_CONTRACT: &str = "\
 Optional semantic engine roles activated atomically with this version. No separate binding or grant is required. \
-The bundle inputSchema and outputSchema are the complete worker-facing contracts below; they are authoritative, so do not inspect Tron databases, auth stores, binaries, runtime files, or private server endpoints to discover hook schemas. \
+The bundle inputSchema and outputSchema are the complete worker-facing contracts below; toolInputSchema affects only direct model calls and never changes an engine hook contract. These schemas are authoritative, so do not inspect Tron databases, auth stores, binaries, runtime files, or private server endpoints to discover hook schemas. \
 session_title input is a closed object requiring userPrompt:string(max 4096) and assistantResponse:string(max 4096); output is a closed object requiring title:string(1..160). It runs after the first successful exchange of an untitled ordinary session. \
 context_summary input is a closed object requiring messages:array(max 256) of closed {role:user|assistant|tool,text:string(max 4096)} and permitting originWorkerId:string; output is a closed object requiring narrative:string(1..40000 characters), with authoritative runtime ceilings of 10000 estimated tokens and 40000 UTF-8 bytes. \
 inbox_context input is a closed object requiring query:string and items:array(max 32) of closed {inboxId,invocationId,workerId,workerName,workerDescription,severity,triggerKind,resultPreview,createdAt} strings; output is a closed object requiring consumedInboxIds:unique string array(max 32) and narrative:string. \
@@ -20,6 +20,18 @@ The bundle inputSchema and outputSchema are authoritative; do not inspect Tron d
 speech_transcription input is a closed object requiring audioBase64:string(min 1), mimeType:string(min 1), and fileName:string(min 1). The iOS client supplies a mono PCM WAV recording as base64 with mimeType audio/wav. \
 speech_transcription output is a closed object requiring text:string. It may additionally return language:string, durationSeconds:number(min 0), processingTimeMs:number(min 0), model:string, device:string, computeType:string, and cleanupMode:string. \
 The worker owns decoding, speech recognition, model/dependency choice, text cleanup, and optional metadata. The client owns microphone permission, bounded capture, WAV encoding, durable invocation, and inserting the returned text into the draft.";
+
+const CLIENT_DELIVERY_AUTHORING_CONTRACT: &str = "\
+Optional worker-to-client deliveries activated atomically with this version. They are distinct from client-initiated actions and never grant general device control. \
+notification_delivery reserves the top-level output field notificationDeliveries. When present it is an array(max 32) of closed objects requiring deduplicationKey:string(1..64 UTF-8 bytes), title:string(1..120 characters), body:string(1..512 characters), and expiresAt:future RFC3339 timestamp no later than 30 days. \
+Each item may additionally carry notBefore:RFC3339 timestamp earlier than expiresAt, threadKey:string(1..64 UTF-8 bytes), sourceRecordId:string(1..128 UTF-8 bytes), actions:unique array containing only snooze or complete, and onOpen:complete. \
+The engine generates delivery and routing identity, durably fans out to authenticated installations, and rejects arbitrary URLs, APNs dictionaries, sounds, priorities, media, device identifiers, or action names.";
+
+const WORKER_DISPATCH_AUTHORING_CONTRACT: &str = "\
+Optional fixed asynchronous worker handoffs activated with this immutable version. Each route binds one route name to one targetWorkerId and a clientResponseOwner of source or target. \
+Successful output may include the reserved workerDispatches array only when outputSchema explicitly declares that property. Each item is a closed object requiring route, deduplicationKey, and input. \
+Output cannot choose a worker id, worker version, causal trace, session, device, response destination, or credential. The engine validates target input against the selected immutable target version, then atomically commits source completion, handoff evidence, and the queued child invocation. \
+At most 32 handoffs are accepted per invocation; route and deduplication keys are at most 64 UTF-8 bytes, each input at most 64 KiB, and all inputs together at most 256 KiB. Handoffs are asynchronous only.";
 
 pub(super) fn worker_bundle_schema() -> Value {
     let command = json!({
@@ -62,9 +74,13 @@ pub(super) fn worker_bundle_schema() -> Value {
                 "type":"string",
                 "description":"Optional stable direct tool name. Plain names are normalized to the worker_<name> namespace automatically; omit to retain the predecessor name or derive it from the worker name."
             },
+            "toolInputSchema":{
+                "type":"object",
+                "description":"Optional narrower JSON object schema exposed by this worker's direct model tool. Use it to hide trigger, event, and worker-handoff coordination fields. inputSchema remains authoritative for all runtime inputs, and every direct call is still validated against it before durable admission."
+            },
             "inputSchema":{
                 "type":"object",
-                "description":"JSON object schema for typed worker input."
+                "description":"Complete JSON object schema for every typed runtime input, including direct calls, triggers, events, and worker handoffs."
             },
             "outputSchema":{
                 "type":"object",
@@ -205,6 +221,27 @@ pub(super) fn worker_bundle_schema() -> Value {
                 "uniqueItems":true,
                 "description":CLIENT_ACTION_AUTHORING_CONTRACT,
                 "items":{"type":"string","enum":["speech_transcription"]}
+            },
+            "clientDeliveries":{
+                "type":"array",
+                "uniqueItems":true,
+                "description":CLIENT_DELIVERY_AUTHORING_CONTRACT,
+                "items":{"type":"string","enum":["notification_delivery"]}
+            },
+            "workerDispatchRoutes":{
+                "type":"array",
+                "uniqueItems":true,
+                "description":WORKER_DISPATCH_AUTHORING_CONTRACT,
+                "items":{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["route","targetWorkerId","clientResponseOwner"],
+                    "properties":{
+                        "route":{"type":"string","minLength":1,"maxLength":64},
+                        "targetWorkerId":{"type":"string","minLength":1},
+                        "clientResponseOwner":{"type":"string","enum":["source","target"]}
+                    }
+                }
             },
             "executionLimits":{
                 "type":"object",

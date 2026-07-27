@@ -241,6 +241,14 @@ final class EventStoreManager {
         )
     }
 
+    /// A direct, already-durable publication supersedes any older database
+    /// snapshot currently waiting in the debounced load lane.
+    func cancelPendingSessionLoadForDirectPublication() {
+        loadSessionsTask?.cancel()
+        loadSessionsTask = nil
+        loadSessionsTaskAcceptsServerProcessingState = false
+    }
+
     /// Publish a reconciled server snapshot through the owned load lane.
     /// Returns only after that exact client generation either publishes or retires.
     func loadSessionsAfterRefresh(

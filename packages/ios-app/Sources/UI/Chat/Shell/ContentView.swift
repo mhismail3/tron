@@ -21,6 +21,11 @@ struct CompactSessionRoute: Hashable {
     }
 }
 
+struct ChatSessionPresentationIdentity: Hashable {
+    let sessionId: String
+    let serverSelectionVersion: Int
+}
+
 struct ServerOnboardingLaunchRequest: Equatable {
     let prefill: PairedServer?
 }
@@ -274,19 +279,11 @@ struct ContentView: View {
             defaultWorkspace: dependencies.quickSessionWorkspace,
             eventStoreManager: eventStoreManager,
             onSessionCreated: { created in
-                Task {
-                    do {
-                        try await eventStoreManager.cacheNewSession(
-                            sessionId: created.sessionId,
-                            workspaceId: created.workspaceId,
-                            model: created.model,
-                            workingDirectory: created.workingDirectory
-                        )
-                    } catch {
-                        logger.error("cacheNewSession failed: \(error)", category: .session)
-                    }
+                guard let coordinator else {
+                    throw ContentViewCoordinator.SessionPublicationError.coordinatorUnavailable
                 }
-                presentSession(created.sessionId)
+                let sessionId = try await coordinator.publishCreatedSession(created)
+                presentSession(sessionId)
                 showNewSessionSheet = false
             }
         )
@@ -339,14 +336,20 @@ struct ContentView: View {
                 scrollTarget: $currentScrollTarget,
                 onToggleSidebar: toggleSidebar
             )
-            .id(sessionId)
+            .id(ChatSessionPresentationIdentity(
+                sessionId: sessionId,
+                serverSelectionVersion: dependencies.activeServerSelectionVersion
+            ))
         } else {
             ChatView(
                 services: dependencies.chatSessionServices,
                 sessionId: sessionId,
                 scrollTarget: $currentScrollTarget
             )
-            .id(sessionId)
+            .id(ChatSessionPresentationIdentity(
+                sessionId: sessionId,
+                serverSelectionVersion: dependencies.activeServerSelectionVersion
+            ))
         }
     }
 

@@ -8,16 +8,7 @@ import Observation
 @MainActor
 final class SheetCoordinator {
     /// Currently active sheet (nil = no sheet presented)
-    var activeSheet: ChatSheet? {
-        didSet {
-            if oldValue != activeSheet {
-                lastActiveSheet = oldValue
-            }
-        }
-    }
-
-    /// Last active sheet before dismissal/change (used to infer what was dismissed)
-    var lastActiveSheet: ChatSheet?
+    var activeSheet: ChatSheet?
 
     /// Dismissal callback (called by SwiftUI when sheet dismisses)
     var onDismiss: (() -> Void)?
@@ -43,8 +34,21 @@ final class SheetCoordinator {
     /// Dismiss the current sheet
     func dismiss() {
         activeSheet = nil
-        onDismiss?()
+        finishDismissal()
+    }
+
+    /// SwiftUI calls this after interactive or programmatic dismissal. It is
+    /// idempotent so an explicit dismiss followed by the framework callback
+    /// cannot invoke or retain the payload callback twice.
+    func presentationDidDismiss() {
+        activeSheet = nil
+        finishDismissal()
+    }
+
+    private func finishDismissal() {
+        let callback = onDismiss
         onDismiss = nil
+        callback?()
     }
 
     /// Dismiss only when the requested sheet is currently presented.

@@ -126,6 +126,17 @@ struct WorkerKernelClientTests {
         #expect(requests[2].offset == 10)
     }
 
+    @Test("Worker monitoring delegates to cached transport live subscriptions")
+    func workerMonitoringUsesTransportSubscriptions() async throws {
+        let transport = connectedTransport()
+        let client = WorkerKernelClient(transport: transport)
+
+        try await client.ensureWorkerEventSubscriptions()
+
+        #expect(transport.ensureWorkerEventSubscriptionsCallCount == 1)
+        #expect(transport.operationOrder == ["subscribe:worker-projection"])
+    }
+
     @Test("Exact worker result reads preserve bounded pointer and paging")
     func resultReadUsesBoundedKernelOperation() async throws {
         let transport = connectedTransport()

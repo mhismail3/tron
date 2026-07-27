@@ -37,6 +37,92 @@ struct ChatViewModelLifecycleTests {
         #expect(retainedViewModel == nil)
     }
 
+    @Test("Speech lifecycle monitoring releases dismissed chats and ignores ordinary runs")
+    func testSpeechLifecycleMonitoringReleasesOwner() async throws {
+        let transport = MockEngineTransport()
+        transport.engineConnection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:9847/engine")!
+        )
+        var snapshotReadCount = 0
+        transport.readHandler = { functionId, _, _ in
+            guard functionId.rawValue == "engine::surface_snapshot" else {
+                throw EngineConnectionError.invalidResponse
+            }
+            snapshotReadCount += 1
+            return EngineIntrospectionSnapshotDTO(
+                dispatchStopped: false,
+                activeEngineHooks: [],
+                activeClientActions: [
+                    ClientActionOwnerDTO(
+                        action: "speech_transcription",
+                        workerId: "local-transcription",
+                        workerVersion: "v1"
+                    )
+                ],
+                fixedTools: [],
+                surface: AgentToolSurfaceDTO(
+                    catalogRevision: 1,
+                    surfaceHash: "surface",
+                    fixedToolCount: 0,
+                    projectedWorkerCount: 0,
+                    availableWorkerCount: 0,
+                    availableWorkers: []
+                ),
+                workers: []
+            )
+        }
+        let services = ChatSessionServices(
+            connection: PaginationTestConnectionRepository(),
+            events: PaginationTestSessionEventRepository(),
+            sessions: PaginationTestSessionRepository(),
+            agent: AgentClient(transport: transport),
+            models: DefaultModelRepository(modelClient: ModelClient(transport: transport)),
+            messages: DefaultMessageRepository(messageClient: MessageClient(transport: transport)),
+            workerKernel: DefaultWorkerKernelRepository(
+                client: WorkerKernelClient(transport: transport)
+            )
+        )
+        var viewModel: ChatViewModel? = ChatViewModel(
+            services: services,
+            sessionId: "speech-lifecycle-session"
+        )
+        weak let retainedViewModel = viewModel
+        #expect(snapshotReadCount == 0)
+        #expect(transport.ensureWorkerEventSubscriptionsCallCount == 0)
+        viewModel?.startSpeechTranscriptionMonitoring()
+
+        let installDeadline = ContinuousClock.now + .seconds(1)
+        while transport.ensureWorkerEventSubscriptionsCallCount == 0,
+              ContinuousClock.now < installDeadline {
+            await Task.yield()
+        }
+        #expect(snapshotReadCount == 1)
+        #expect(transport.ensureWorkerEventSubscriptionsCallCount == 1)
+
+        NotificationCenter.default.post(
+            name: .workerRunProjectionInvalidated,
+            object: nil
+        )
+        try await Task.sleep(for: .milliseconds(25))
+        #expect(snapshotReadCount == 1)
+
+        NotificationCenter.default.post(
+            name: .workerLifecycleProjectionInvalidated,
+            object: nil
+        )
+        let refreshDeadline = ContinuousClock.now + .seconds(1)
+        while snapshotReadCount < 2, ContinuousClock.now < refreshDeadline {
+            await Task.yield()
+        }
+        #expect(snapshotReadCount == 2)
+
+        viewModel = nil
+        for _ in 0..<20 where retainedViewModel != nil {
+            await Task.yield()
+        }
+        #expect(retainedViewModel == nil)
+    }
+
     @Test("Suspended photo loading does not retain its owning view model")
     func testSuspendedPhotoLoadingReleasesOwner() async {
         let loadStarted = ManualExpectation()
