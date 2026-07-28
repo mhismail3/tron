@@ -194,11 +194,16 @@ omit a redundant status-icon column, keep the description primary, and begin
 one compact wrapping footer with the active version followed by trigger/run and
 hook/native/connection evidence. The worker's normal overview keeps health and
 purpose primary, then opens one on-demand medium/large technical sheet for
-identity, source, exposure, execution, suite role, calls/called-by edges,
-engine hooks, and native boundaries. Input contract and triggers remain in the
-main Overview tab because they describe how the worker is used, while the
-secondary sheet is limited to additional inspection metadata. Empty
-relationships are omitted instead of rendered as `None` rows. Provenance is
+identity, source, exposure, execution, suite role, engine hooks, native
+boundaries, worker-to-worker relationships, and fixed engine-tool
+dependencies. Worker-to-worker relationships are labeled `Calls workers` and
+`Called by workers`; fixed dependencies are separately labeled `Uses engine
+tools`, so an engine hook or direct chat invocation is not confused with a
+worker caller. Input contract and triggers remain in the main Overview tab
+because they describe how the worker is used, while the secondary sheet is
+limited to additional inspection metadata. Engine hooks and relationship or
+dependency rows render `None` when empty so an absent relationship is not
+mistaken for missing inspection data. Provenance is
 ordinary source metadata inside that bounded technical sheet rather than a
 one-row sheet of its own. Empty trigger state uses the section's single surface
 instead of nesting another card. The client

@@ -36,6 +36,12 @@ struct WorkerTechnicalDetailsSheet: View {
         let boundaries = architecture.map {
             $0.clientActions + $0.clientDeliveries
         } ?? []
+        let workerCalls = architecture?.calls
+            .filter { $0.targetWorkerId != nil }
+            .map(\.label) ?? []
+        let engineTools = architecture?.calls
+            .filter { $0.targetWorkerId == nil }
+            .map(\.label) ?? []
 
         return WorkerConsoleSection(
             title: "Identity & role",
@@ -95,13 +101,11 @@ struct WorkerTechnicalDetailsSheet: View {
                             WorkerConsolePresentation.displayLabel
                         ) ?? "Primary domain owner"
                     )
-                    if !architecture.engineHooks.isEmpty {
-                        WorkerMetadataDivider()
-                        WorkerMetadataRow(
-                            label: "Engine hooks",
-                            value: readableList(architecture.engineHooks)
-                        )
-                    }
+                    WorkerMetadataDivider()
+                    WorkerMetadataRow(
+                        label: "Engine hooks",
+                        value: readableList(architecture.engineHooks)
+                    )
                     if !boundaries.isEmpty {
                         WorkerMetadataDivider()
                         WorkerMetadataRow(
@@ -109,20 +113,21 @@ struct WorkerTechnicalDetailsSheet: View {
                             value: readableList(boundaries)
                         )
                     }
-                    if !architecture.calls.isEmpty {
-                        WorkerMetadataDivider()
-                        WorkerMetadataRow(
-                            label: "Calls",
-                            value: readableList(architecture.calls.map(\.label))
-                        )
-                    }
-                    if !callers.isEmpty {
-                        WorkerMetadataDivider()
-                        WorkerMetadataRow(
-                            label: "Called by",
-                            value: readableList(callers.map(\.name))
-                        )
-                    }
+                    WorkerMetadataDivider()
+                    WorkerMetadataRow(
+                        label: "Calls workers",
+                        value: readableList(workerCalls)
+                    )
+                    WorkerMetadataDivider()
+                    WorkerMetadataRow(
+                        label: "Called by workers",
+                        value: readableList(callers.map(\.name))
+                    )
+                    WorkerMetadataDivider()
+                    WorkerMetadataRow(
+                        label: "Uses engine tools",
+                        value: readableList(engineTools)
+                    )
                     WorkerMetadataDivider()
                     WorkerMetadataRow(
                         label: "Worker ID",
@@ -141,7 +146,8 @@ struct WorkerTechnicalDetailsSheet: View {
     }
 
     private func readableList(_ values: [String]) -> String {
-        values
+        guard !values.isEmpty else { return "None" }
+        return values
             .map(WorkerConsolePresentation.displayLabel)
             .joined(separator: ", ")
     }
