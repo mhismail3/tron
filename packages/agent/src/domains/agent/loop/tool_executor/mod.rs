@@ -25,9 +25,7 @@ use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::{
     InvocationAbortGuard, InvocationAbortRegistry,
 };
-use crate::domains::agent::r#loop::primitive_surface::{
-    PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
-};
+use crate::domains::agent::r#loop::surface::{PrimitiveExecutionTarget, ResolvedPrimitiveSurface};
 use crate::domains::agent::r#loop::types::ToolInvocationExecutionResult;
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EngineHostHandle, FunctionVisibility, Invocation,
@@ -105,17 +103,16 @@ fn direct_tool_idempotency_key(
 }
 
 fn primitive_tool_identity(
-    engine_target: &crate::domains::agent::r#loop::primitive_surface::PrimitiveExecutionTarget,
+    engine_target: &crate::domains::agent::r#loop::surface::PrimitiveExecutionTarget,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) -> ToolEventIdentity {
     ToolEventIdentity {
         trace_id: trace_id.map(|id| id.as_str().to_owned()),
         root_invocation_id: parent_invocation_id.map(|id| id.as_str().to_owned()),
-        presentation_hints:
-            crate::domains::agent::r#loop::primitive_surface::presentation_hints_for_target(
-                engine_target,
-            ),
+        presentation_hints: crate::domains::agent::r#loop::surface::presentation_hints_for_target(
+            engine_target,
+        ),
         ..ToolEventIdentity::default()
     }
 }

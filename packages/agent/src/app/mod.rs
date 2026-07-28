@@ -8,8 +8,8 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | [`cli`] | Terminal argument parsing, current OAuth bridges, and auth subcommand dispatch |
-//! | [`browser_operator`] | Closed Chrome Native Messaging actuator transport |
+//! | [`cli`] | Terminal parsing/dispatch with concern-owned notification-auth, OAuth, and snapshot commands |
+//! | [`browser_operator`] | Closed Chrome Native Messaging actuator with separate protocol and lifecycle owners |
 //! | [`bootstrap`] | Runtime assembly, service initialization, database open, and server bind |
 //! | [`health`] | Health/metrics endpoints and disk checks |
 //! | [`lifecycle`] | Onboarding, bearer-token state, and shutdown coordination |
@@ -36,6 +36,10 @@
 //!   bootstrap must not invent alternate data roots.
 //! - Shutdown is signal-owned and drain-aware so managed worker/runtime tasks
 //!   stop before the process exits.
+//! - CLI concerns share one parser and dispatcher; credential and snapshot
+//!   modules never create a second command registry.
+//! - The browser host has one socket owner. Protocol validation does not start
+//!   lifecycle tasks, and lifecycle helpers do not interpret browser actions.
 //!
 //! ## Test Ownership
 //!

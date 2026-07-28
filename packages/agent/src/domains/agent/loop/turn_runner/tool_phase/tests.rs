@@ -1,7 +1,7 @@
 use super::*;
 use crate::domains::agent::context::types::{CompactionConfig, ContextManagerConfig};
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
-use crate::domains::agent::r#loop::primitive_surface::PrimitiveExecutionTarget;
+use crate::domains::agent::r#loop::surface::PrimitiveExecutionTarget;
 use crate::domains::agent::r#loop::types::ToolInvocationExecutionResult;
 use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};

@@ -8,9 +8,7 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
-use crate::domains::agent::r#loop::primitive_surface::{
-    PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
-};
+use crate::domains::agent::r#loop::surface::{PrimitiveExecutionTarget, ResolvedPrimitiveSurface};
 use crate::engine::{
     EffectClass, FunctionDefinition, FunctionId, FunctionVisibility, RiskLevel, WorkerId,
 };

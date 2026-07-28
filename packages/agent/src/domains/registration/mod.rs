@@ -434,13 +434,12 @@ mod tests {
         }));
         assert!(value["workers"].is_array());
 
-        let surface =
-            crate::domains::agent::r#loop::primitive_surface::resolve_provider_primitive_surface(
-                &ctx.engine_host,
-                "engine-surface-snapshot",
-            )
-            .await
-            .expect("provider surface");
+        let surface = crate::domains::agent::r#loop::surface::resolve_provider_primitive_surface(
+            &ctx.engine_host,
+            "engine-surface-snapshot",
+        )
+        .await
+        .expect("provider surface");
         assert!(
             !surface
                 .targets_by_name

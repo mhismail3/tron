@@ -31,7 +31,7 @@ use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
-use crate::domains::agent::r#loop::primitive_surface::ResolvedPrimitiveSurface;
+use crate::domains::agent::r#loop::surface::ResolvedPrimitiveSurface;
 use crate::domains::agent::r#loop::tool_executor;
 use crate::domains::agent::r#loop::types::{StreamResult, ToolInvocationExecutionResult};
 use crate::domains::session::event_store::EventType;

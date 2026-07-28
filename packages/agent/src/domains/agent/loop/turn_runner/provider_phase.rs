@@ -13,7 +13,7 @@ use tracing::{error, info, trace, warn};
 use crate::domains::agent::context::context_manager::ContextManager;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
-use crate::domains::agent::r#loop::primitive_surface::{self, ResolvedPrimitiveSurface};
+use crate::domains::agent::r#loop::surface::{self, ResolvedPrimitiveSurface};
 use crate::domains::agent::r#loop::types::{RunContext, TurnResult};
 use crate::domains::model::responder::{ModelResponder, ModelResponse, ModelResponseRequest};
 use crate::shared::foundation::retry::RetryConfig;
@@ -159,7 +159,7 @@ pub(super) async fn open_provider_response(
         .map(|id| id.as_str())
         .unwrap_or("none");
     let relevance_query = worker_relevance_query(params.context_manager.messages_slice());
-    let primitive_surface = match primitive_surface::resolve_provider_primitive_surface_for_query(
+    let primitive_surface = match surface::resolve_provider_primitive_surface_for_query(
         params.engine_host,
         params.session_id,
         relevance_query.as_deref(),
@@ -214,7 +214,7 @@ pub(super) async fn open_provider_response(
         "provider primitive surface resolved"
     );
     let (worker_inbox_context, continuity_context) = tokio::join!(
-        primitive_surface::take_worker_inbox_context(
+        surface::take_worker_inbox_context(
             params.engine_host,
             &primitive_surface,
             params.session_id,
@@ -224,7 +224,7 @@ pub(super) async fn open_provider_response(
             params.run_context.engine_trace_id.as_ref(),
             params.run_context.parent_invocation_id.as_ref(),
         ),
-        primitive_surface::take_continuity_context(
+        surface::take_continuity_context(
             params.engine_host,
             params.session_id,
             params.turn,
@@ -281,7 +281,7 @@ pub(super) async fn open_provider_response(
         projection.context,
         params.context_manager.message_audit_sources().to_vec(),
     );
-    let surface_context = primitive_surface::surface_context_primer(&primitive_surface.snapshot);
+    let surface_context = surface::surface_context_primer(&primitive_surface.snapshot);
     assembly.append_system(
         "engine_surface_primer",
         "Engine tool surface",

@@ -62,6 +62,15 @@
 //! Direct-tool results always return to provider context; no tool metadata or
 //! result flag can terminate the agent loop. Only provider completion, limits,
 //! cancellation, and runtime failure own terminal control flow.
+//!
+//! ## Ownership map
+//!
+//! - `surface` adapts the canonical kernel catalog, automatic context, result
+//!   references, and compact provider guidance without owning worker policy.
+//! - `turn_runner` owns one provider/tool turn.
+//! - `orchestrator` owns run admission, child-agent execution, and recovery.
+//! - `tool_executor` invokes one already-resolved immutable function contract.
+//! - `stream_processor` and `stream_state` own provider stream projection.
 
 #![deny(unsafe_code)]
 
@@ -70,10 +79,10 @@ pub mod errors;
 pub mod event_emitter;
 pub mod orchestrator;
 pub(crate) mod pipeline;
-pub mod primitive_surface;
 mod stream_message;
 pub mod stream_processor;
 mod stream_state;
+pub mod surface;
 pub mod tool_executor;
 pub mod tron_agent;
 pub mod turn_runner;

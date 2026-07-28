@@ -11,7 +11,10 @@
 //! over immutable inbox history, excluding only exact bounded timeouts from the
 //! two deterministic-fallback semantic hooks. Error-context eligibility uses
 //! that same actionable-error predicate, while informational context remains
-//! separate. Scenario tests live in `tests`.
+//! separate. Scenario tests live in `tests`, grouped by notification transport,
+//! artifacts/presentation, result custody, durable dispatch/recovery, and
+//! publication/lifecycle. They share only the canonical bundle fixture and do
+//! not add production test hooks.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;

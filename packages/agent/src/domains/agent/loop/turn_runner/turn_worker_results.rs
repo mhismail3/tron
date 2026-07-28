@@ -96,7 +96,7 @@ pub(super) async fn project_messages(
             .filter(|id| fresh_model_tool_invocation_ids.contains(*id))
             .cloned()
             .collect::<Vec<_>>();
-        let items = crate::domains::agent::r#loop::primitive_surface::worker_result_projections(
+        let items = crate::domains::agent::r#loop::surface::worker_result_projections(
             engine_host,
             session_id,
             ids,
