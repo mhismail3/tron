@@ -4,73 +4,77 @@ import SwiftUI
 struct WorkerConsoleRow: View {
     let worker: WorkerSummaryDTO
     let surface: AvailableWorkerToolDTO?
+    let architecture: WorkerArchitectureNodeDTO?
 
     private var status: WorkerConsoleStatus {
         WorkerConsolePresentation.status(for: worker)
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: status.systemImage)
+        VStack(alignment: .leading, spacing: 7) {
+            Text(worker.name)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(status.color)
-                .frame(width: 24, height: 24)
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 7) {
-                    Text(worker.name)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(1)
-                    Text(status.title)
-                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                        .foregroundStyle(status.color)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .glassEffect(.regular.tint(status.color.opacity(0.15)), in: .capsule)
+            Text(worker.description)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronTextSecondary)
+                .lineLimit(2)
+
+            FlowLayout(spacing: 8) {
+                compactMetadataLabel(
+                    "Version \(WorkerConsolePresentation.compactIdentifier(worker.activeVersion, length: 8))",
+                    systemImage: "number"
+                )
+                compactMetadataLabel(
+                    WorkerConsolePresentation.triggerLabel(worker.triggerCount),
+                    systemImage: "alarm"
+                )
+                if let surface {
+                    compactMetadataLabel(
+                        WorkerConsolePresentation.completedRunLabel(surface.completedRuns),
+                        systemImage: "checkmark.circle"
+                    )
                 }
-
-                Text(worker.description)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronTextSecondary)
-                    .lineLimit(2)
-
-                HStack(spacing: 8) {
-                    compactMetadataLabel(
-                        WorkerConsolePresentation.runnerLabel(worker.runnerKind),
-                        systemImage: "cpu"
-                    )
-                    compactMetadataLabel(
-                        WorkerConsolePresentation.triggerLabel(worker.triggerCount),
-                        systemImage: "alarm"
-                    )
-                    if let surface {
+                if let architecture {
+                    if !architecture.engineHooks.isEmpty {
                         compactMetadataLabel(
-                            WorkerConsolePresentation.completedRunLabel(surface.completedRuns),
-                            systemImage: "checkmark.circle"
+                            countLabel(architecture.engineHooks.count, singular: "hook"),
+                            systemImage: "arrow.triangle.branch"
+                        )
+                    }
+                    let boundaryCount = architecture.clientActions.count
+                        + architecture.clientDeliveries.count
+                    if boundaryCount > 0 {
+                        compactMetadataLabel(
+                            countLabel(boundaryCount, singular: "boundary"),
+                            systemImage: "iphone.and.arrow.forward"
+                        )
+                    }
+                    if !architecture.calls.isEmpty {
+                        compactMetadataLabel(
+                            countLabel(architecture.calls.count, singular: "connection"),
+                            systemImage: "point.3.connected.trianglepath.dotted"
                         )
                     }
                 }
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .lineLimit(1)
-
-                HStack(spacing: 7) {
-                    if surface != nil {
-                        workerSurfaceBadge("Available to agents", color: .tronSuccess)
-                    } else if worker.enabled && !worker.retired {
-                        workerSurfaceBadge("Tool unavailable", color: .tronWarning)
-                    }
-                    Text("Version \(WorkerConsolePresentation.compactIdentifier(worker.activeVersion, length: 8))")
-                        .font(TronTypography.code(size: TronTypography.sizeSM))
-                        .foregroundStyle(.tronTextMuted)
-                }
-                .lineLimit(1)
             }
+            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+            .foregroundStyle(.tronTextMuted)
 
-            Spacer(minLength: 0)
+            FlowLayout(spacing: 5) {
+                workerTag(status.title, color: status.color)
+                exposureTag
+                workerTag(
+                    WorkerConsolePresentation.runnerLabel(worker.runnerKind),
+                    color: .tronInfo
+                )
+            }
         }
-        .padding(13)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .sectionFill(status.color, cornerRadius: 12, subtle: true, interactive: true)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -80,13 +84,32 @@ struct WorkerConsoleRow: View {
         )
     }
 
-    private func workerSurfaceBadge(_ title: String, color: Color) -> some View {
+    @ViewBuilder
+    private var exposureTag: some View {
+        if let architecture {
+            workerTag(
+                architecture.modelExposure == "direct"
+                    ? "Direct chat tool"
+                    : "Internal specialist",
+                color: architecture.modelExposure == "direct"
+                    ? .tronSuccess
+                    : .tronPurple
+            )
+        } else if surface != nil {
+            workerTag("Direct chat tool", color: .tronSuccess)
+        } else if worker.enabled && !worker.retired {
+            workerTag("Exposure unavailable", color: .tronWarning)
+        }
+    }
+
+    private func workerTag(_ title: String, color: Color) -> some View {
         Text(title)
             .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
             .foregroundStyle(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .glassEffect(.regular.tint(color.opacity(0.14)), in: .capsule)
+            .lineLimit(1)
     }
 
     private func compactMetadataLabel(_ title: String, systemImage: String) -> some View {
@@ -94,5 +117,9 @@ struct WorkerConsoleRow: View {
             Image(systemName: systemImage)
             Text(title)
         }
+    }
+
+    private func countLabel(_ count: Int, singular: String) -> String {
+        "\(count) \(singular)\(count == 1 ? "" : "s")"
     }
 }

@@ -186,11 +186,25 @@ every published worker's promoted/projected state, selection evidence, and
 canonical worker inventory. The compact `workerArchitecture` projection is
 derived by the server from active immutable bundles and includes exposure,
 runner, hooks, client boundaries, triggers, dispatch routes, `agentTools`,
-suite, health, version, and provenance. The client renders those nodes and
-calls/called-by edges dynamically; it does not hard-code the current worker
-catalog or reconstruct execution policy from raw catalog `[AnyCodable]`
-entries. Exact selected tool contracts remain internal to the provider
-request. The profile dashboard
+suite, health, version, and provenance. The Engine dashboard merges that
+architecture into each canonical worker row and detail: rows identify health,
+direct/internal exposure, and runner kind together in one left-aligned bottom
+tag row,
+omit a redundant status-icon column, keep the description primary, and begin
+one compact wrapping footer with the active version followed by trigger/run and
+hook/native/connection evidence. The worker's normal overview keeps health and
+purpose primary, then opens one on-demand medium/large technical sheet for
+identity, source, exposure, execution, suite role, calls/called-by edges,
+engine hooks, and native boundaries. Input contract and triggers remain in the
+main Overview tab because they describe how the worker is used, while the
+secondary sheet is limited to additional inspection metadata. Empty
+relationships are omitted instead of rendered as `None` rows. Provenance is
+ordinary source metadata inside that bounded technical sheet rather than a
+one-row sheet of its own. Empty trigger state uses the section's single surface
+instead of nesting another card. The client
+does not hard-code the current worker catalog or reconstruct execution policy
+from raw catalog `[AnyCodable]` entries. Exact selected tool contracts remain
+internal to the provider request. The profile dashboard
 renders fixed-function ownership plus global worker publication, health,
 runner, version, trigger, and successful-run evidence. It does not present
 session promotion or query-relevance scores without a named chat and actual
@@ -731,10 +745,10 @@ cache, subscription, or polling service.
 `UI/SessionContext/` keeps that ownership visible in source: the main sheet owns
 only presentation state and navigation; sections render the manifest; loading
 owns the sheet-scoped cancellable tasks; detail/history sheets load bounded
-evidence lazily; the audit formatter projects redacted payloads; and
-`WorkerSystemSheet` renders server-derived architecture. Cross-file extensions
-share the one sheet state rather than manufacturing feature view models or
-copies of provider-request data.
+evidence lazily; and the audit formatter projects redacted payloads. Cross-file
+extensions share the one sheet state rather than manufacturing feature view
+models or copies of provider-request data. Global worker architecture remains
+in the Engine dashboard rather than being loaded again by Session Context.
 
 The sheet initially loads only the latest request. Earlier requests page on
 demand and raw audit text loads only when opened. While an agent is active,
@@ -753,12 +767,11 @@ input, output, and cost using existing session token totals. Advanced detail
 shows session cache reads/writes and manifest-owned stable instruction,
 fixed/dynamic schema, and reference-context byte/digest evidence. No context-
 or cache-specific client store is added. Binary media renders only metadata,
-size, and digest; it is never converted to audit text. The Worker System section uses
-the dynamic architecture projection and a reusable detail sheet to show
-direct/internal exposure, agent/command runners, hooks/native boundaries,
-dispatch and `agentTools` relationships, suite, version, health, and provenance.
-The Engine dashboard opens this same sheet from its Workers section instead of
-maintaining another hierarchy view.
+size, and digest; it is never converted to audit text. Exact selected and
+omitted worker tools remain visible per provider request. Global exposure,
+runner, hook/native-boundary, relationship, suite, version, health, and
+provenance metadata is shown with each worker's canonical Engine inspection
+instead of a duplicate Worker System directory.
 
 The sheet also requests bounded `detail: "graph"` worker runs
 filtered by the durable originating session. Because causal descendants

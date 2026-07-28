@@ -2539,10 +2539,12 @@ in the existing EventDatabase rather than maintaining another cache.
 The sheet presents instructions, conversation/compaction, attachments,
 environment, automatic Continuity and Inbox contributions, exact selected and
 omitted tools with routing evidence, and the advanced redacted provider audit.
-It also embeds the dynamic Worker System graph from
-`engine::surface_snapshot`, including direct/internal and agent/command shape,
+Global worker architecture is inspected in the Engine dashboard, where each
+canonical worker row and detail merges direct/internal and agent/command shape,
 hook/native boundaries, dispatches, and `agentTools` calls/called-by
-relationships. A bounded session-scoped worker section reads
+relationships with that worker's health, activity, versions, and lifecycle.
+Session Context does not load or duplicate that global directory. A bounded
+session-scoped worker section reads
 `worker_runs(originSessionId: ..., detail: "graph")`. The server pages by
 causal root so one coordinator's many descendants cannot crowd later runs out
 of Session Context; exact child and originating model-tool filters reopen the

@@ -34,12 +34,10 @@ struct SessionContextSheet: View {
     @State var contextRequests: [SessionContextRequestSummaryDTO] = []
     @State var contextRequestsNextSequence: Int64?
     @State var latestContextDetail: SessionContextRequestDetailDTO?
-    @State var workerArchitecture: [WorkerArchitectureNodeDTO] = []
     @State var isLoadingInspectableContext = false
     @State var contextLoadError: String?
     @State var selectedContextDetail: SessionContextDetailSelection?
     @State var showContextHistory = false
-    @State var showWorkerSystem = false
 
     var percentage: Int { contextState.contextPercentage }
     var accent: Color { SessionContextPresentation.pressure(for: percentage).color }
@@ -86,7 +84,6 @@ struct SessionContextSheet: View {
                     receivedContextSection
                     automaticContextSection
                     requestToolsSection
-                    workerSystemSection
                     modelSection
                     workerActivitySection
                     sessionActionsSection
@@ -170,12 +167,6 @@ struct SessionContextSheet: View {
                 select: { request in
                     await selectContextRequest(request)
                 }
-            )
-        }
-        .sheet(isPresented: $showWorkerSystem) {
-            WorkerSystemSheet(
-                workers: workerArchitecture,
-                fixedToolCount: fixedToolCount
             )
         }
         .tronErrorAlert(message: $errorMessage)

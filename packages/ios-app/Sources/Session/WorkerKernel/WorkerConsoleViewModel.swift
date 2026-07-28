@@ -36,6 +36,23 @@ final class WorkerConsoleViewModel {
         workers.first { $0.workerId == selectedWorkerId }
     }
 
+    var selectedWorkerArchitecture: WorkerArchitectureNodeDTO? {
+        guard let selectedWorkerId else { return nil }
+        return architecture(for: selectedWorkerId)
+    }
+
+    func architecture(for workerId: String) -> WorkerArchitectureNodeDTO? {
+        engineSnapshot?.workerArchitecture?.first { $0.workerId == workerId }
+    }
+
+    func callers(of workerId: String) -> [WorkerArchitectureNodeDTO] {
+        (engineSnapshot?.workerArchitecture ?? [])
+            .filter { worker in
+                worker.calls.contains { $0.targetWorkerId == workerId }
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
     func workerName(for workerId: String) -> String {
         workers.first { $0.workerId == workerId }?.name
             ?? WorkerConsolePresentation.displayLabel(workerId)

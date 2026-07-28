@@ -299,8 +299,8 @@ struct WorkerConsoleInteractionTests {
         #expect(!dashboard.contains("struct EngineSurfaceCard"))
     }
 
-    @Test("Engine and Session Context reuse the dynamic Worker System sheet")
-    func workerSystemIsDynamicAndShared() throws {
+    @Test("Worker architecture is integrated into normal inventory and detail")
+    func workerArchitectureIsIntegratedIntoWorkerInspection() throws {
         let root = iosAppRoot()
         let engine = try String(
             contentsOf: root.appendingPathComponent(
@@ -308,21 +308,82 @@ struct WorkerConsoleInteractionTests {
             ),
             encoding: .utf8
         )
-        let context = try sessionContextSource(root: root)
-        let details = try String(
+        let row = try String(
             contentsOf: root.appendingPathComponent(
-                "Sources/UI/SessionContext/WorkerSystemSheet.swift"
+                "Sources/UI/WorkerConsole/Overview/WorkerConsoleRow.swift"
             ),
             encoding: .utf8
         )
+        let detail = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Detail/WorkerDetailSheet.swift"
+            ),
+            encoding: .utf8
+        )
+        let technicalDetail = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Detail/WorkerTechnicalDetailsSheet.swift"
+            ),
+            encoding: .utf8
+        )
+        let context = try sessionContextSource(root: root)
+        let standaloneSheet = root.appendingPathComponent(
+            "Sources/UI/SessionContext/WorkerSystemSheet.swift"
+        )
 
-        #expect(engine.contains("WorkerSystemSheet("))
-        #expect(engine.contains("engineSnapshot?.workerArchitecture"))
-        #expect(context.contains("WorkerSystemSheet("))
-        #expect(context.contains("workerArchitecture"))
-        #expect(details.contains("struct WorkerSystemSheet"))
-        #expect(details.contains("worker.calls"))
-        #expect(details.contains("calledBy"))
+        #expect(!FileManager.default.fileExists(atPath: standaloneSheet.path))
+        #expect(!engine.contains("Open Worker System"))
+        #expect(engine.contains("viewModel.architecture(for: worker.workerId)"))
+        #expect(engine.contains("architecture: architecture"))
+        #expect(row.contains("Direct chat tool"))
+        #expect(row.contains("Internal specialist"))
+        #expect(!row.contains("Image(systemName: status.systemImage)"))
+        #expect(row.contains("FlowLayout(spacing: 5)"))
+        #expect(!row.contains("VStack(alignment: .trailing, spacing: 4)"))
+        #expect(row.contains("WorkerConsolePresentation.runnerLabel(worker.runnerKind)"))
+        #expect(row.contains("FlowLayout(spacing: 8)"))
+        #expect(row.contains("\"Version \\(WorkerConsolePresentation.compactIdentifier"))
+        #expect(row.contains("architecture.engineHooks"))
+        #expect(row.contains("architecture.clientActions"))
+        #expect(!detail.contains("Role & connections"))
+        #expect(!detail.contains("private var architecture"))
+        #expect(detail.contains("showTechnicalDetails = true"))
+        #expect(detail.contains(#"Text("View details")"#))
+        #expect(detail.contains("WorkerTechnicalDetailsSheet("))
+        #expect(!detail.contains(#"label: "Agent access""#))
+        #expect(detail.contains(#"title: "Input contract""#))
+        #expect(detail.contains("private func triggers"))
+        #expect(technicalDetail.contains(#"label: "Agent access""#))
+        #expect(technicalDetail.contains(#"label: "Execution""#))
+        #expect(technicalDetail.contains("Engine hooks"))
+        #expect(technicalDetail.contains("Native boundaries"))
+        #expect(technicalDetail.contains("Called by"))
+        #expect(technicalDetail.contains("if !architecture.engineHooks.isEmpty"))
+        #expect(technicalDetail.contains("if !boundaries.isEmpty"))
+        #expect(technicalDetail.contains("if !architecture.calls.isEmpty"))
+        #expect(technicalDetail.contains("if !callers.isEmpty"))
+        #expect(technicalDetail.contains(#"label: provenance.count == 1 ? "Source" : "Sources""#))
+        #expect(!technicalDetail.contains(#"title: "Input contract""#))
+        #expect(!technicalDetail.contains(#"title: "Triggers""#))
+        #expect(technicalDetail.contains(".adaptivePresentationDetents([.medium, .large]"))
+        #expect(!detail.contains("FlowLayout(spacing: 6)"))
+        #expect(!detail.contains("showProvenance"))
+        #expect(!detail.contains("Source Details"))
+        let versionMetadata = try #require(
+            row.range(of: "\"Version \\(WorkerConsolePresentation.compactIdentifier")
+        )
+        let triggerMetadata = try #require(
+            row.range(of: "WorkerConsolePresentation.triggerLabel(worker.triggerCount)")
+        )
+        let tags = try #require(row.range(of: "FlowLayout(spacing: 5)"))
+        #expect(versionMetadata.lowerBound < triggerMetadata.lowerBound)
+        #expect(triggerMetadata.lowerBound < tags.lowerBound)
+        let triggerStart = try #require(detail.range(of: "private func triggers"))
+        let invocationStart = try #require(detail.range(of: "private func invocation"))
+        let triggerSource = detail[triggerStart.lowerBound..<invocationStart.lowerBound]
+        #expect(!triggerSource.contains("WorkerConsoleInlineEmptyState"))
+        #expect(!context.contains("WorkerSystemSheet("))
+        #expect(!context.contains("workerSystemSection"))
     }
 
     @Test("Worker sessions stay read only and inside dashboard sheets")

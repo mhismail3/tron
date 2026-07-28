@@ -65,6 +65,22 @@ struct WorkerConsoleViewModelTests {
         #expect(viewModel.activityAttention.count == 1)
     }
 
+    @Test("Architecture metadata resolves beside canonical worker state")
+    func architectureMetadataResolvesWithWorkerInspection() async throws {
+        let repository = MockWorkerKernelRepository()
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+        let architecture = try #require(viewModel.architecture(for: "research"))
+
+        #expect(architecture.modelExposure == "direct")
+        #expect(architecture.engineHooks == ["research_context"])
+        #expect(viewModel.callers(of: "research").map(\.workerId) == ["research-coordinator"])
+
+        await viewModel.select("research", repository: repository)
+        #expect(viewModel.selectedWorkerArchitecture?.workerId == "research")
+    }
+
     @Test("A retired worker exposes every retained version as a restore action")
     func retiredWorkerCanRestoreItsCurrentVersion() async throws {
         let repository = MockWorkerKernelRepository()
@@ -197,7 +213,58 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
                     )
                 ]
             ),
-            workers: [worker]
+            workers: [worker],
+            workerArchitecture: [
+                WorkerArchitectureNodeDTO(
+                    workerId: "research",
+                    name: "Research",
+                    description: "Recent research worker",
+                    activeVersion: "v1",
+                    health: "healthy",
+                    modelExposure: "direct",
+                    runnerKind: "command",
+                    runnerModel: nil,
+                    engineHooks: ["research_context"],
+                    clientActions: [],
+                    clientDeliveries: [],
+                    triggerKinds: ["schedule"],
+                    calls: [],
+                    presentation: WorkerArchitecturePresentationDTO(
+                        suiteId: "research",
+                        componentRole: "search",
+                        primary: true
+                    ),
+                    provenance: []
+                ),
+                WorkerArchitectureNodeDTO(
+                    workerId: "research-coordinator",
+                    name: "Research Coordinator",
+                    description: "Coordinates research",
+                    activeVersion: "v1",
+                    health: "healthy",
+                    modelExposure: "direct",
+                    runnerKind: "agent",
+                    runnerModel: "test-model",
+                    engineHooks: [],
+                    clientActions: [],
+                    clientDeliveries: [],
+                    triggerKinds: [],
+                    calls: [
+                        WorkerArchitectureEdgeDTO(
+                            kind: "agent_tool",
+                            label: "Research",
+                            targetWorkerId: "research",
+                            responseOwner: nil
+                        ),
+                    ],
+                    presentation: WorkerArchitecturePresentationDTO(
+                        suiteId: "research",
+                        componentRole: "coordinator",
+                        primary: true
+                    ),
+                    provenance: []
+                ),
+            ]
         )
     }
 

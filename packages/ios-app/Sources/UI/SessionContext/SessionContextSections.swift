@@ -348,67 +348,6 @@ extension SessionContextSheet {
         }
     }
 
-    var workerSystemSection: some View {
-        let direct = workerArchitecture.filter { $0.modelExposure == "direct" }.count
-        let agent = workerArchitecture.filter { $0.runnerKind == "agent" }.count
-        let hooks = workerArchitecture.filter { !$0.engineHooks.isEmpty }.count
-        let boundaries = workerArchitecture.filter {
-            !$0.clientActions.isEmpty || !$0.clientDeliveries.isEmpty
-        }.count
-        return VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
-            SettingsSectionHeader(
-                title: "Worker System",
-                bottomPadding: SessionContextPresentation.headerToContentSpacing
-            )
-
-            Button {
-                showWorkerSystem = true
-            } label: {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Label("Live worker architecture", systemImage: "point.3.connected.trianglepath.dotted")
-                            .font(TronTypography.sans(
-                                size: TronTypography.sizeBody,
-                                weight: .semibold
-                            ))
-                            .foregroundStyle(.tronTextPrimary)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundStyle(.tronTextMuted)
-                    }
-                    Text(
-                        "\(workerArchitecture.count) active · \(direct) direct · \(workerArchitecture.count - direct) internal · \(agent) agent · \(hooks) hooks · \(boundaries) native boundaries"
-                    )
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(14)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(workerArchitecture.isEmpty)
-            .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: true)
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Why this shape")
-                    .font(TronTypography.sans(
-                        size: TronTypography.sizeBodySM,
-                        weight: .semibold
-                    ))
-                    .foregroundStyle(.tronTextPrimary)
-                Text(
-                    "Each worker owns one durable domain or reusable policy. Direct workers are intuitive chat tools; internal workers serve hooks and pipelines. Deterministic work uses command runners, semantic work uses bounded agent runners, and the fixed engine keeps only custody, authentication, recovery, and native boundaries."
-                )
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(13)
-            .sectionFill(.tronPurple, cornerRadius: 12, subtle: true, interactive: false)
-        }
-    }
-
     var attachmentMessageCount: Int {
         manifest?.messages.filter {
             $0.contentKinds.contains("image") || $0.contentKinds.contains("document")

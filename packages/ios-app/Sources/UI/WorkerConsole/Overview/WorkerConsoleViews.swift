@@ -116,7 +116,6 @@ struct WorkerConsoleSheet: View {
     @State private var selectedSection: EngineDashboardSection = .workers
     @State private var selectedCoreTool: EngineSurfaceToolDTO?
     @State private var showInboxAudit = false
-    @State private var showWorkerSystem = false
 
     var body: some View {
         NavigationStack {
@@ -201,12 +200,6 @@ struct WorkerConsoleSheet: View {
                         uniqueKeysWithValues: viewModel.workers.map { ($0.workerId, $0.name) }
                     ),
                     repository: repository
-                )
-            }
-            .sheet(isPresented: $showWorkerSystem) {
-                WorkerSystemSheet(
-                    workers: viewModel.engineSnapshot?.workerArchitecture ?? [],
-                    fixedToolCount: UInt64(viewModel.coreToolCount)
                 )
             }
             .task(id: EngineDashboardRefreshKey(
@@ -422,42 +415,20 @@ struct WorkerConsoleSheet: View {
                     detail: "Ask Tron to create a persistent worker. It will appear here once the server activates it."
                 )
             } else {
-                Button {
-                    showWorkerSystem = true
-                } label: {
-                    HStack(spacing: 11) {
-                        Image(systemName: "point.3.connected.trianglepath.dotted")
-                            .foregroundStyle(.tronCyan)
-                            .frame(width: 24)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Open Worker System")
-                                .font(TronTypography.sans(
-                                    size: TronTypography.sizeBodySM,
-                                    weight: .semibold
-                                ))
-                                .foregroundStyle(.tronTextPrimary)
-                            Text("Inspect ownership, exposure, runners, hooks, boundaries, and relationships.")
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextSecondary)
-                        }
-                        Spacer()
-                    }
-                    .padding(12)
-                    .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .disabled(viewModel.engineSnapshot?.workerArchitecture?.isEmpty != false)
-                .sectionFill(.tronCyan, cornerRadius: 11, subtle: true, interactive: true)
-
                 LazyVStack(spacing: 10) {
                     ForEach(viewModel.workers) { worker in
                         let surface = viewModel.availableWorkerTools.first {
                             $0.workerId == worker.workerId
                         }
+                        let architecture = viewModel.architecture(for: worker.workerId)
                         Button {
                             Task { await viewModel.select(worker.workerId, repository: repository) }
                         } label: {
-                            WorkerConsoleRow(worker: worker, surface: surface)
+                            WorkerConsoleRow(
+                                worker: worker,
+                                surface: surface,
+                                architecture: architecture
+                            )
                         }
                         .buttonStyle(.plain)
                     }

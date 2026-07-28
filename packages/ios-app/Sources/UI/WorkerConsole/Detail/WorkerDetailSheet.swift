@@ -21,7 +21,7 @@ struct WorkerDetailSheet: View {
     @State private var confirmRetire = false
     @State private var confirmPurge = false
     @State private var showSchema = false
-    @State private var showProvenance = false
+    @State private var showTechnicalDetails = false
     @State private var showInboxAudit = false
     @State private var selectedSection = WorkerDetailSection.overview
 
@@ -101,14 +101,13 @@ struct WorkerDetailSheet: View {
                     WorkerJSONDetailSheet(title: "Input Schema", value: schema, accent: .tronInfo)
                 }
             }
-            .sheet(isPresented: $showProvenance) {
-                if let inspection = viewModel.inspection {
-                    WorkerTextDetailSheet(
-                        title: "Source Details",
-                        values: WorkerConsolePresentation.provenance(
-                            from: inspection.bundle["provenance"]
-                        ).map(\.fullLabel),
-                        accent: .tronInfo
+            .sheet(isPresented: $showTechnicalDetails) {
+                if let worker = viewModel.selectedWorker,
+                   let inspection = viewModel.inspection {
+                    WorkerTechnicalDetailsSheet(
+                        viewModel: viewModel,
+                        worker: worker,
+                        inspection: inspection
                     )
                 }
             }
@@ -142,11 +141,11 @@ struct WorkerDetailSheet: View {
     ) -> some View {
         switch selectedSection {
         case .overview:
-            overview(worker, inspection: inspection)
-            invocation(worker, inspection: inspection, allowsInvocation: false)
+            overview(worker)
+            inputContract(inspection)
             triggers(inspection)
         case .run:
-            invocation(worker, inspection: inspection, allowsInvocation: true)
+            invocation(inspection)
         case .activity:
             recentRuns
             attention
@@ -158,11 +157,8 @@ struct WorkerDetailSheet: View {
         }
     }
 
-    private func overview(_ worker: WorkerSummaryDTO, inspection: WorkerInspectResultDTO) -> some View {
+    private func overview(_ worker: WorkerSummaryDTO) -> some View {
         let status = WorkerConsolePresentation.status(for: worker)
-        let provenance = WorkerConsolePresentation.provenance(
-            from: inspection.bundle["provenance"]
-        )
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 11) {
@@ -186,49 +182,68 @@ struct WorkerDetailSheet: View {
                 .foregroundStyle(.tronTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            VStack(spacing: 0) {
-                WorkerMetadataRow(label: "Direct tool", value: worker.toolName, isCode: true)
-                WorkerMetadataDivider()
-                WorkerMetadataRow(
-                    label: "Runner",
-                    value: WorkerConsolePresentation.runnerLabel(worker.runnerKind)
-                )
-                WorkerMetadataDivider()
-                WorkerMetadataRow(
-                    label: "Active version",
-                    value: WorkerConsolePresentation.compactIdentifier(worker.activeVersion),
-                    isCode: true
-                )
-                if let updated = WorkerConsolePresentation.timestamp(worker.updatedAt) {
-                    WorkerMetadataDivider()
-                    WorkerMetadataRow(label: "Updated", value: updated)
+            Button { showTechnicalDetails = true } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: "info.circle")
+                    Text("View details")
+                    Spacer(minLength: 0)
                 }
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronInfo)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .sectionFill(.tronInfo, cornerRadius: 10, subtle: true, interactive: true)
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .sectionFill(status.color, cornerRadius: 12, subtle: true, interactive: false)
+    }
 
-            if !provenance.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Provenance")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronTextMuted)
-                    FlowLayout(spacing: 6) {
-                        ForEach(provenance) { item in
-                            Text(item.compactLabel)
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                                .foregroundStyle(.tronInfo)
-                                .lineLimit(1)
-                                .frame(maxWidth: 190)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 5)
-                                .glassEffect(.regular.tint(Color.tronInfo.opacity(0.15)), in: .capsule)
-                                .accessibilityLabel(item.fullLabel)
+    private func inputContract(_ inspection: WorkerInspectResultDTO) -> some View {
+        let schema = inspection.bundle["inputSchema"]
+        let fields = WorkerConsolePresentation.schemaFields(from: schema)
+
+        return WorkerConsoleSection(
+            title: "Input contract",
+            detail: "The immutable typed input accepted by this worker's direct tool.",
+            accent: .tronEmerald
+        ) {
+            VStack(alignment: .leading, spacing: 13) {
+                if fields.isEmpty {
+                    WorkerConsoleInlineEmptyState(
+                        symbol: "curlybraces",
+                        text: "This worker accepts an empty JSON object."
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Input fields")
+                            .font(
+                                TronTypography.sans(
+                                    size: TronTypography.sizeCaption,
+                                    weight: .semibold
+                                )
+                            )
+                            .foregroundStyle(.tronTextMuted)
+                        ForEach(fields) { field in
+                            WorkerSchemaFieldRow(field: field)
                         }
                     }
-                    Button { showProvenance = true } label: {
+                }
+
+                if schema != nil {
+                    Button { showSchema = true } label: {
                         HStack {
-                            Label("Source details", systemImage: "doc.text.magnifyingglass")
+                            Label("Raw input schema", systemImage: "curlybraces.square")
                             Spacer()
                         }
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .font(
+                            TronTypography.sans(
+                                size: TronTypography.sizeBodySM,
+                                weight: .semibold
+                            )
+                        )
                         .foregroundStyle(.tronInfo)
                         .contentShape(Rectangle())
                     }
@@ -236,23 +251,86 @@ struct WorkerDetailSheet: View {
                 }
             }
         }
-        .padding(14)
-        .sectionFill(status.color, cornerRadius: 12, subtle: true, interactive: false)
     }
 
-    private func invocation(
-        _ worker: WorkerSummaryDTO,
-        inspection: WorkerInspectResultDTO,
-        allowsInvocation: Bool
-    ) -> some View {
+    private func triggers(_ inspection: WorkerInspectResultDTO) -> some View {
+        WorkerConsoleSection(
+            title: "Triggers",
+            detail: "Server-owned routes that can dispatch this worker.",
+            accent: .tronInfo
+        ) {
+            if inspection.triggers.isEmpty {
+                Label(
+                    "Manual invocation only. No automatic triggers are enabled.",
+                    systemImage: "hand.tap"
+                )
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronTextSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(inspection.triggers) { trigger in
+                        WorkerTriggerCard(
+                            trigger: trigger,
+                            isMutating: viewModel.isMutating,
+                            rotate: trigger.kind == "webhook" ? {
+                                Task {
+                                    await viewModel.rotateWebhook(
+                                        triggerId: trigger.triggerId,
+                                        repository: repository,
+                                        connectionState: connectionState
+                                    )
+                                }
+                            } : nil
+                        )
+                    }
+
+                    if let credential = viewModel.webhookCredential {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Label("New webhook credential", systemImage: "key.fill")
+                                .font(
+                                    TronTypography.sans(
+                                        size: TronTypography.sizeBodySM,
+                                        weight: .semibold
+                                    )
+                                )
+                                .foregroundStyle(.tronWarning)
+                            Text("Copy this token now. It is shown only from the rotation response.")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextSecondary)
+                            WorkerMetadataRow(
+                                label: "Path",
+                                value: credential.path,
+                                isCode: true
+                            )
+                            WorkerMetadataRow(
+                                label: "Token",
+                                value: credential.token,
+                                isCode: true
+                            )
+                        }
+                        .padding(11)
+                        .sectionFill(
+                            .tronWarning,
+                            cornerRadius: 10,
+                            subtle: true,
+                            interactive: false
+                        )
+                        .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+    }
+
+    private func invocation(_ inspection: WorkerInspectResultDTO) -> some View {
         let schema = inspection.bundle["inputSchema"]
         let fields = WorkerConsolePresentation.schemaFields(from: schema)
 
         return WorkerConsoleSection(
-            title: allowsInvocation ? "New invocation" : "Input contract",
-            detail: allowsInvocation
-                ? "Run this worker with typed input validated by its immutable schema."
-                : "The immutable typed input accepted by this worker's direct tool.",
+            title: "New invocation",
+            detail: "Run this worker with typed input validated by its immutable schema.",
             accent: .tronEmerald
         ) {
             VStack(alignment: .leading, spacing: 13) {
@@ -285,8 +363,7 @@ struct WorkerDetailSheet: View {
                     .buttonStyle(.plain)
                 }
 
-                if allowsInvocation {
-                    VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 7) {
                     HStack {
                         Text("JSON input")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
@@ -323,79 +400,29 @@ struct WorkerDetailSheet: View {
                                     lineWidth: 0.5
                                 )
                         }
-                    }
-
-                    TronPrimaryActionButton(
-                        title: "Run worker",
-                        systemImage: "play.fill",
-                        accent: .tronEmerald,
-                        isBusy: viewModel.isMutating,
-                        isEnabled: viewModel.canInvokeSelectedWorker
-                    ) {
-                        Task {
-                            await viewModel.invoke(
-                                repository: repository,
-                                connectionState: connectionState
-                            )
-                        }
-                    }
-
-                    if let result = viewModel.invocationResult {
-                        VStack(alignment: .leading, spacing: 7) {
-                            Label("Invocation accepted", systemImage: "checkmark.circle.fill")
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                .foregroundStyle(.tronSuccess)
-                            WorkerCodeBlock(text: result, accent: .tronSuccess)
-                        }
-                    }
                 }
-            }
-        }
-    }
 
-    private func triggers(_ inspection: WorkerInspectResultDTO) -> some View {
-        WorkerConsoleSection(
-            title: "Triggers",
-            detail: "Server-owned routes that can dispatch this worker.",
-            accent: .tronInfo
-        ) {
-            if inspection.triggers.isEmpty {
-                WorkerConsoleInlineEmptyState(
-                    symbol: "hand.tap",
-                    text: "Manual invocation only. No automatic triggers are enabled."
-                )
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(inspection.triggers) { trigger in
-                        WorkerTriggerCard(
-                            trigger: trigger,
-                            isMutating: viewModel.isMutating,
-                            rotate: trigger.kind == "webhook" ? {
-                                Task {
-                                    await viewModel.rotateWebhook(
-                                        triggerId: trigger.triggerId,
-                                        repository: repository,
-                                        connectionState: connectionState
-                                    )
-                                }
-                            } : nil
+                TronPrimaryActionButton(
+                    title: "Run worker",
+                    systemImage: "play.fill",
+                    accent: .tronEmerald,
+                    isBusy: viewModel.isMutating,
+                    isEnabled: viewModel.canInvokeSelectedWorker
+                ) {
+                    Task {
+                        await viewModel.invoke(
+                            repository: repository,
+                            connectionState: connectionState
                         )
                     }
+                }
 
-                    if let credential = viewModel.webhookCredential {
-                        VStack(alignment: .leading, spacing: 7) {
-                            Label("New webhook credential", systemImage: "key.fill")
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                .foregroundStyle(.tronWarning)
-                            Text("Copy this token now. It is shown only from the rotation response.")
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextSecondary)
-                            WorkerMetadataRow(label: "Path", value: credential.path, isCode: true)
-                            WorkerMetadataRow(label: "Token", value: credential.token, isCode: true)
-                        }
-                        .padding(11)
-                        .sectionFill(.tronWarning, cornerRadius: 10, subtle: true, interactive: false)
-                        .textSelection(.enabled)
+                if let result = viewModel.invocationResult {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Label("Invocation accepted", systemImage: "checkmark.circle.fill")
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .foregroundStyle(.tronSuccess)
+                        WorkerCodeBlock(text: result, accent: .tronSuccess)
                     }
                 }
             }

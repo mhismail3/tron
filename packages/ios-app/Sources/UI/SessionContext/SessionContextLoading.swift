@@ -30,13 +30,8 @@ extension SessionContextSheet {
                 beforeSequence: nil,
                 limit: 10
             )
-            let snapshot = try await workerRepository.engineSurfaceSnapshot(
-                sessionId: sessionId,
-                relevanceQuery: nil
-            )
             contextRequests = page.requests
             contextRequestsNextSequence = page.nextBeforeSequence
-            workerArchitecture = snapshot.workerArchitecture ?? []
             if let latest = page.requests.first,
                latestContextDetail?.eventId != latest.eventId {
                 latestContextDetail = try await sessionRepository.contextRequestDetail(
