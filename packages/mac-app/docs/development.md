@@ -174,6 +174,7 @@ Tests/
 ├── App/                  # Lifecycle and command-mode tests
 ├── Infrastructure/       # Test fakes such as MockLaunchAgentManager and TestTempDir
 ├── MenuBar/              # Controller and presentation tests
+├── Operator/             # Protocol, actuator, host lifecycle, and socket support
 ├── Server/               # Health, paths, pairing token, and process-control tests
 ├── Support/              # Diagnostics, feedback, foundation, onboarding, pairing tests
 └── Wizard/               # Flow, step ordering, install-stage, and visual layout tests
@@ -190,6 +191,8 @@ cd packages/mac-app
 xcodegen generate
 xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' \
   -only-testing:TronMacTests/MacOperatorProtocolTests \
+  -only-testing:TronMacTests/MacOperatorActuatorTests \
+  -only-testing:TronMacTests/MacOperatorHostBridgeTests \
   -only-testing:TronMacTests/MenuBarItemBuilderTests
 ```
 

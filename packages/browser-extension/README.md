@@ -12,6 +12,22 @@ shows “Tron is controlling this tab.” Clicking the button again stops contro
 Any controlled action is rejected if that tab is no longer foreground. Password
 fields are neither observed nor writable.
 
+## Source ownership
+
+`service-worker.js` is only the Manifest V3 event-registration entry point.
+The imported modules keep one owner per lifecycle:
+
+- `native-connection.js` owns the one native port and serialized request chain;
+- `request-lifecycle.js` owns admitted request state and cancellation cleanup;
+- `consent.js` owns the foreground tab, indicator, and badge;
+- `observation.js` owns the latest per-tab observation and bounded evidence;
+- `actions.js` sequences the closed actuator operations; and
+- `page-actions.js` contains the self-contained functions executed in the page.
+
+There is still one service worker, one native connection, one request map, and
+one observation map. The split does not add polling, storage, permissions, or
+another control authority.
+
 ## Local setup
 
 1. Open `chrome://extensions`, enable Developer mode, and choose **Load
@@ -45,4 +61,5 @@ installed automatically by the server. Production deployment remains manual.
   handlers, consent state, observations, and request state are removed by their
   owning completion, tab-close, consent-disable, or disconnect path.
 
-Run the pure protocol and mocked-Chrome lifecycle tests with `npm test`.
+Run the pure protocol, request-lifecycle, and mocked-Chrome integration tests
+with `npm test`.

@@ -18,6 +18,24 @@ relay never guesses that resending is safe. A request ID with no ledger row is
 the normal first-send path; the lookup therefore uses an optional cursor result
 rather than SQLite's throwing exactly-one-row accessor.
 
+## Source ownership
+
+`src/index.ts` owns only the Cloudflare Worker entry point and handoff to the
+ledger. The closed boundary is separated into:
+
+- `validation.ts` for the two admitted request shapes and topic routes;
+- `authentication.ts` and `crypto.ts` for HMAC verification and bounded
+  cryptographic encodings;
+- `ledger.ts` for the single SQLite Durable Object replay authority;
+- `apns.ts` for payload construction, provider-token caching, transport, and
+  sanitized APNs classification;
+- `contracts.ts` for shared closed types and route limits; and
+- `response.ts` for no-store JSON responses.
+
+No module adds a second ledger, provider retry loop, credential store, endpoint,
+or deployment mode. Tests mirror validation, authentication, APNs projection,
+and durable replay.
+
 ## Validate locally
 
 ```bash

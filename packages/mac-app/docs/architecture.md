@@ -42,7 +42,16 @@ packages/mac-app/
 │   │   ├── MenuBarController.swift # NSStatusItem and window lifecycle
 │   │   ├── Actions/                # Typed menu commands, action handler, and feedback issue action
 │   │   └── Presentation/           # Pure typed-descriptor builder, logs reader, logs window
-│   ├── Operator/                    # Signed, closed Mac Operator actuator boundary
+│   ├── Operator/                    # Signed, closed Mac Operator boundary
+│   │   ├── MacOperatorProtocol.swift
+│   │   ├── MacOperatorActuator.swift # serialized action-dispatch owner
+│   │   ├── MacOperatorObservation*.swift
+│   │   ├── MacOperatorValidation.swift
+│   │   ├── MacOperatorActions.swift
+│   │   ├── MacOperatorScreenshot.swift
+│   │   ├── MacOperatorHostBridge.swift # listener/cancellation lifecycle
+│   │   ├── MacOperatorHostRequestDispatch.swift
+│   │   └── MacOperatorSocketTransport.swift
 │   ├── Resources/                  # tracked icons, fonts, and helper/LaunchAgent metadata
 │   │   ├── Fonts/
 │   │   │   └── Exo2-Variable.ttf   # bundled Google Fonts sans face for wizard typography
@@ -180,6 +189,16 @@ native errors are excluded from native action evidence. Accessibility tree
 traversal is bounded to 256 elements and ten levels. Screenshot bytes are
 returned only to the invoking worker; the native bridge never writes them to
 disk or its logs.
+
+The source split follows those owners without multiplying runtime state.
+`MacOperatorActuator` remains the sole actor and serialized action entry point;
+observation, focus validation, closed actions, and screenshot capture are actor
+extensions over that same state. `MacOperatorHostBridge` remains the sole
+listener/client/action lifecycle owner. `MacOperatorHostRequestDispatch`
+admits and drains one request against that owner, while
+`MacOperatorSocketTransport` provides stateless framing, same-user peer
+validation, and listener construction. There is no second socket, actor,
+operation queue, safety generation, or observation cache.
 
 The menu's **Stop Mac Operator** action increments a native safety generation,
 invalidating pending observations immediately. The host bridge also owns the
