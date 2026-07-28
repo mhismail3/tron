@@ -100,32 +100,27 @@ struct WorkerConsoleInteractionTests {
         let root = iosAppRoot()
         let graphComponents = try String(
             contentsOf: root.appendingPathComponent(
-                "Sources/UI/WorkerConsole/WorkerRunGraphComponents.swift"
+                "Sources/UI/WorkerConsole/RunGraph/WorkerRunGraphComponents.swift"
             ),
             encoding: .utf8
         )
         let graphController = try String(
             contentsOf: root.appendingPathComponent(
-                "Sources/UI/WorkerConsole/WorkerToolRunGraphView.swift"
+                "Sources/UI/WorkerConsole/RunGraph/WorkerToolRunGraphView.swift"
             ),
             encoding: .utf8
         )
         let graph = graphComponents + graphController
         let tool = try String(
             contentsOf: root.appendingPathComponent(
-                "Sources/UI/Tools/ToolInvocationViews.swift"
+                "Sources/UI/Tools/Invocation/ToolInvocationDetailSheet.swift"
             ),
             encoding: .utf8
         )
-        let context = try String(
-            contentsOf: root.appendingPathComponent(
-                "Sources/UI/Chat/Sheets/SessionContextSheet.swift"
-            ),
-            encoding: .utf8
-        )
+        let context = try sessionContextSource(root: root)
         let resultInspector = try String(
             contentsOf: root.appendingPathComponent(
-                "Sources/UI/WorkerConsole/WorkerResultInspectorSheet.swift"
+                "Sources/UI/WorkerConsole/Detail/WorkerResultInspectorSheet.swift"
             ),
             encoding: .utf8
         )
@@ -177,10 +172,7 @@ struct WorkerConsoleInteractionTests {
     @Test("Engine containers do not use trailing navigation chevrons")
     func engineContainersOmitTrailingChevrons() throws {
         let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
-        let files = try FileManager.default.contentsOfDirectory(
-            at: workerRoot,
-            includingPropertiesForKeys: nil
-        ).filter { $0.pathExtension == "swift" }
+        let files = try swiftSourcesRecursively(at: workerRoot)
 
         for file in files {
             let source = try String(contentsOf: file, encoding: .utf8)
@@ -195,10 +187,7 @@ struct WorkerConsoleInteractionTests {
     func unboundedWorkerDetailUsesSheets() throws {
         let root = iosAppRoot()
         let workerRoot = root.appendingPathComponent("Sources/UI/WorkerConsole")
-        let files = try FileManager.default.contentsOfDirectory(
-            at: workerRoot,
-            includingPropertiesForKeys: nil
-        ).filter { $0.pathExtension == "swift" }
+        let files = try swiftSourcesRecursively(at: workerRoot)
 
         for file in files {
             let source = try String(contentsOf: file, encoding: .utf8)
@@ -209,11 +198,11 @@ struct WorkerConsoleInteractionTests {
         }
 
         let detail = try String(
-            contentsOf: workerRoot.appendingPathComponent("WorkerDetailSheet.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Detail/WorkerDetailSheet.swift"),
             encoding: .utf8
         )
         let components = try String(
-            contentsOf: workerRoot.appendingPathComponent("WorkerConsoleComponents.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Shared/WorkerConsoleComponents.swift"),
             encoding: .utf8
         )
         #expect(detail.contains("WorkerJSONDetailSheet(title: \"Input Schema\""))
@@ -221,7 +210,7 @@ struct WorkerConsoleInteractionTests {
         #expect(components.contains("WorkerJSONDetailSheet("))
 
         let resultInspector = try String(
-            contentsOf: workerRoot.appendingPathComponent("WorkerResultInspectorSheet.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Detail/WorkerResultInspectorSheet.swift"),
             encoding: .utf8
         )
         #expect(resultInspector.contains("struct WorkerResultInspectorSheet"))
@@ -233,11 +222,11 @@ struct WorkerConsoleInteractionTests {
         #expect(!resultInspector.contains(#"title: chunk.truncated ? "Result page" : "Result value""#))
         #expect(!resultInspector.contains("assembledResult"))
         let runDetail = try String(
-            contentsOf: workerRoot.appendingPathComponent("WorkerConsoleDetailSheets.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Detail/WorkerConsoleDetailSheets.swift"),
             encoding: .utf8
         )
         let runTechnicalDetail = try String(
-            contentsOf: workerRoot.appendingPathComponent("WorkerRunTechnicalDetailsSheet.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Detail/WorkerRunTechnicalDetailsSheet.swift"),
             encoding: .utf8
         )
         #expect(runDetail.contains("WorkerResultInspectorSheet("))
@@ -248,7 +237,7 @@ struct WorkerConsoleInteractionTests {
         #expect(!runDetail.contains("showOutput"))
 
         let codeBlockSource = try String(
-            contentsOf: workerRoot.appendingPathComponent("WorkerConsoleComponents.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Shared/WorkerConsoleComponents.swift"),
             encoding: .utf8
         )
         #expect(codeBlockSource.contains(".fixedSize(horizontal: true, vertical: true)"))
@@ -270,11 +259,11 @@ struct WorkerConsoleInteractionTests {
             encoding: .utf8
         )
         let workerDetail = try String(
-            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/WorkerDetailSheet.swift"),
+            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/Detail/WorkerDetailSheet.swift"),
             encoding: .utf8
         )
         let delegation = try String(
-            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/DelegationSheet.swift"),
+            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/Domains/DelegationSheet.swift"),
             encoding: .utf8
         )
 
@@ -292,11 +281,11 @@ struct WorkerConsoleInteractionTests {
     func engineSummaryReplacesOverviewTab() throws {
         let root = iosAppRoot()
         let shell = try String(
-            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/WorkerConsoleViews.swift"),
+            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/Overview/WorkerConsoleViews.swift"),
             encoding: .utf8
         )
         let dashboard = try String(
-            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/EngineDashboardViews.swift"),
+            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/Domains/EngineDashboardViews.swift"),
             encoding: .utf8
         )
 
@@ -315,19 +304,14 @@ struct WorkerConsoleInteractionTests {
         let root = iosAppRoot()
         let engine = try String(
             contentsOf: root.appendingPathComponent(
-                "Sources/UI/WorkerConsole/WorkerConsoleViews.swift"
+                "Sources/UI/WorkerConsole/Overview/WorkerConsoleViews.swift"
             ),
             encoding: .utf8
         )
-        let context = try String(
-            contentsOf: root.appendingPathComponent(
-                "Sources/UI/Chat/Sheets/SessionContextSheet.swift"
-            ),
-            encoding: .utf8
-        )
+        let context = try sessionContextSource(root: root)
         let details = try String(
             contentsOf: root.appendingPathComponent(
-                "Sources/UI/Chat/Sheets/SessionContextDetailSheets.swift"
+                "Sources/UI/SessionContext/WorkerSystemSheet.swift"
             ),
             encoding: .utf8
         )
@@ -345,7 +329,7 @@ struct WorkerConsoleInteractionTests {
     func workerSessionsUseReadOnlySheets() throws {
         let root = iosAppRoot()
         let details = try String(
-            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/WorkerConsoleDetailSheets.swift"),
+            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/Detail/WorkerConsoleDetailSheets.swift"),
             encoding: .utf8
         )
         let chat = try String(
@@ -394,15 +378,15 @@ struct WorkerConsoleInteractionTests {
     func activityUsesRunsAttentionAndExplicitAudit() throws {
         let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
         let shell = try String(
-            contentsOf: workerRoot.appendingPathComponent("WorkerConsoleViews.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Overview/WorkerConsoleViews.swift"),
             encoding: .utf8
         )
         let detail = try String(
-            contentsOf: workerRoot.appendingPathComponent("WorkerDetailSheet.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Detail/WorkerDetailSheet.swift"),
             encoding: .utf8
         )
         let audit = try String(
-            contentsOf: workerRoot.appendingPathComponent("WorkerConsoleDetailSheets.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Detail/WorkerConsoleDetailSheets.swift"),
             encoding: .utf8
         )
 
@@ -422,11 +406,11 @@ struct WorkerConsoleInteractionTests {
     func workerActivityCardsUseDeliberateTextAlignment() throws {
         let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
         let components = try String(
-            contentsOf: workerRoot.appendingPathComponent("WorkerConsoleComponents.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Shared/WorkerConsoleComponents.swift"),
             encoding: .utf8
         )
         let delegation = try String(
-            contentsOf: workerRoot.appendingPathComponent("DelegationSheet.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Domains/DelegationSheet.swift"),
             encoding: .utf8
         )
         let workerRunCard = try sourceSlice(
@@ -452,11 +436,11 @@ struct WorkerConsoleInteractionTests {
     func workerExperienceSummariesUseCurrentAttention() throws {
         let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
         let delegation = try String(
-            contentsOf: workerRoot.appendingPathComponent("DelegationSheet.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Domains/DelegationSheet.swift"),
             encoding: .utf8
         )
         let research = try String(
-            contentsOf: workerRoot.appendingPathComponent("ResearchSuiteSheet.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Domains/ResearchSuiteSheet.swift"),
             encoding: .utf8
         )
 
@@ -483,5 +467,35 @@ struct WorkerConsoleInteractionTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func swiftSourcesRecursively(at root: URL) throws -> [URL] {
+        let keys: [URLResourceKey] = [.isRegularFileKey]
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: keys
+        ) else {
+            return []
+        }
+        return try enumerator.compactMap { item in
+            guard
+                let url = item as? URL,
+                url.pathExtension == "swift",
+                try url.resourceValues(forKeys: Set(keys)).isRegularFile == true
+            else {
+                return nil
+            }
+            return url
+        }
+    }
+
+    private func sessionContextSource(root: URL) throws -> String {
+        try swiftSourcesRecursively(
+            at: root.appendingPathComponent("Sources/UI/SessionContext")
+        )
+        .sorted { $0.path < $1.path }
+        .map { try String(contentsOf: $0, encoding: .utf8) }
+        .joined(separator: "\n")
     }
 }

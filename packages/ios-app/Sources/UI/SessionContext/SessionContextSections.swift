@@ -1,370 +1,7 @@
 import SwiftUI
 
-enum SessionContextPressure: Equatable {
-    case normal
-    case elevated
-    case critical
-
-    var color: Color {
-        switch self {
-        case .normal: .tronEmerald
-        case .elevated: .tronAmber
-        case .critical: .tronError
-        }
-    }
-}
-
-/// Pure presentation and action policy for the Session Context surface.
-enum SessionContextPresentation {
-    /// Completed cards separate clearly from the next section, while each
-    /// heading remains visually attached to the content it introduces.
-    static let sectionSpacing: CGFloat = 20
-    static let headerToContentSpacing: CGFloat = 4
-    static let headerToSubheaderSpacing: CGFloat = 0
-
-    static func boundedPercentage(_ percentage: Int) -> Int {
-        min(max(percentage, 0), 100)
-    }
-
-    static func progressFraction(_ percentage: Int) -> Double {
-        Double(boundedPercentage(percentage)) / 100
-    }
-
-    static func pressure(for percentage: Int) -> SessionContextPressure {
-        switch boundedPercentage(percentage) {
-        case 95...: .critical
-        case 80...: .elevated
-        default: .normal
-        }
-    }
-
-    static func canMutate(
-        isConnected: Bool,
-        isAgentActive: Bool,
-        isCompacting: Bool,
-        isBusy: Bool
-    ) -> Bool {
-        isConnected && !isAgentActive && !isCompacting && !isBusy
-    }
-
-    static func mutationUnavailableReason(
-        isConnected: Bool,
-        isAgentActive: Bool,
-        isCompacting: Bool
-    ) -> String? {
-        if !isConnected { return "Reconnect to change the model or fork this session." }
-        if isCompacting { return "Wait for context compaction to finish." }
-        if isAgentActive { return "Wait for the current response to finish." }
-        return nil
-    }
-
-    static func hasSessionUsage(inputTokens: Int, outputTokens: Int, cost: Double) -> Bool {
-        inputTokens > 0 || outputTokens > 0 || cost > 0
-    }
-
-    static func remainingContextText(currentContextWindow: Int, tokensRemaining: Int) -> String {
-        guard currentContextWindow > 0 else { return "Window loading" }
-        return "\(TokenFormatter.format(tokensRemaining, style: .withSuffix)) left"
-    }
-
-    static func causalGroups(_ runs: [WorkerInvocationDTO]) -> [SessionWorkerRunGroup] {
-        let byParent = Dictionary(grouping: runs.compactMap { run -> (String, WorkerInvocationDTO)? in
-            run.parentWorkerInvocationId.map { ($0, run) }
-        }, by: \.0)
-        let known = Set(runs.map(\.invocationId))
-        let roots = runs.filter {
-            $0.parentWorkerInvocationId == nil
-                || !known.contains($0.parentWorkerInvocationId ?? "")
-        }
-
-        func descendants(of invocationId: String) -> [WorkerInvocationDTO] {
-            (byParent[invocationId] ?? []).flatMap { pair in
-                [pair.1] + descendants(of: pair.1.invocationId)
-            }
-        }
-
-        return roots.map {
-            SessionWorkerRunGroup(root: $0, descendants: descendants(of: $0.invocationId))
-        }
-    }
-
-    static func runState(_ run: WorkerInvocationDTO) -> String {
-        if run.detachedAt != nil,
-           run.status == "queued" || run.status == "running" {
-            return "Detached"
-        }
-        return WorkerConsolePresentation.displayLabel(run.status)
-    }
-
-    static func workerSelections(from toolSurface: AnyCodable?) -> [SessionContextWorkerSelection] {
-        guard let surface = toolSurface?.dictionaryValue,
-              let rawWorkers = surface["availableWorkers"] as? [Any] else {
-            return []
-        }
-        return rawWorkers.compactMap { raw in
-            guard let worker = AnyCodable(raw).dictionaryValue,
-                  let workerId = worker["workerId"] as? String,
-                  let modelName = worker["modelName"] as? String else {
-                return nil
-            }
-            return SessionContextWorkerSelection(
-                workerId: workerId,
-                modelName: modelName,
-                workerVersion: worker["workerVersion"] as? String,
-                projected: worker["projected"] as? Bool ?? false,
-                selectionReason: worker["selectionReason"] as? String,
-                omissionReason: worker["omissionReason"] as? String,
-                mechanism: worker["rankingMechanism"] as? String,
-                score: (worker["relevanceScore"] as? Int) ?? 0,
-                explanation: worker["routerExplanation"] as? String
-            )
-        }
-    }
-
-    static func fixedToolSelections(
-        from toolSurface: AnyCodable?
-    ) -> [SessionContextFixedToolSelection] {
-        guard let surface = toolSurface?.dictionaryValue,
-              let rawTools = surface["fixedTools"] as? [Any] else {
-            return []
-        }
-        return rawTools.compactMap { raw in
-            guard let tool = AnyCodable(raw).dictionaryValue,
-                  let functionId = tool["functionId"] as? String,
-                  let modelName = tool["modelName"] as? String else {
-                return nil
-            }
-            return SessionContextFixedToolSelection(
-                functionId: functionId,
-                modelName: modelName,
-                projected: tool["exposed"] as? Bool ?? false,
-                audience: tool["audience"] as? String,
-                accessPath: tool["accessPath"] as? String,
-                selectionReason: tool["selectionReason"] as? String,
-                omissionReason: tool["omissionReason"] as? String
-            )
-        }
-    }
-}
-
-struct SessionContextFixedToolSelection: Identifiable, Equatable {
-    let functionId: String
-    let modelName: String
-    let projected: Bool
-    let audience: String?
-    let accessPath: String?
-    let selectionReason: String?
-    let omissionReason: String?
-
-    var id: String { functionId }
-}
-
-struct SessionContextWorkerSelection: Identifiable, Equatable {
-    let workerId: String
-    let modelName: String
-    let workerVersion: String?
-    let projected: Bool
-    let selectionReason: String?
-    let omissionReason: String?
-    let mechanism: String?
-    let score: Int
-    let explanation: String?
-
-    var id: String { workerId }
-}
-
-struct SessionWorkerRunGroup: Identifiable, Equatable {
-    let root: WorkerInvocationDTO
-    let descendants: [WorkerInvocationDTO]
-
-    var id: String { root.invocationId }
-}
-
-/// Session-scoped context telemetry, worker activity, and controls backed only
-/// by durable engine truth: token records, originating-session worker runs, the
-/// model catalog/switch operation, automatic compaction state, and forking.
-struct SessionContextSheet: View {
-    let sessionId: String
-    let contextState: ContextTrackingState
-    let currentModelId: String
-    let currentModelInfo: ModelInfo?
-    let reasoningLevel: String?
-    let isConnected: Bool
-    let isAgentActive: Bool
-    let isCompacting: Bool
-    let isFork: Bool
-    let modelRepository: any ModelRepository
-    let sessionRepository: any NetworkSessionRepository
-    let workerRepository: any WorkerKernelRepository
-    let cachedProviderRequestEvents: [RawEvent]
-    let onSelectModel: (ModelInfo) -> Void
-    let onFork: () async throws -> String
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var availableModels: [ModelInfo] = []
-    @State private var isLoadingModels = false
-    @State private var isForking = false
-    @State private var showModelPicker = false
-    @State private var showForkConfirmation = false
-    @State private var sessionWorkerRuns: [WorkerInvocationDTO] = []
-    @State private var workerNames: [String: String] = [:]
-    @State private var workerRunsNextOffset: UInt64?
-    @State private var isLoadingWorkerRuns = false
-    @State private var workerLoadError: String?
-    @State private var selectedWorkerRun: WorkerInvocationDTO?
-    @State private var errorMessage: String?
-    @State private var workerRefreshRevision = 0
-    @State private var contextRequests: [SessionContextRequestSummaryDTO] = []
-    @State private var contextRequestsNextSequence: Int64?
-    @State private var latestContextDetail: SessionContextRequestDetailDTO?
-    @State private var workerArchitecture: [WorkerArchitectureNodeDTO] = []
-    @State private var isLoadingInspectableContext = false
-    @State private var contextLoadError: String?
-    @State private var selectedContextDetail: SessionContextDetailSelection?
-    @State private var showContextHistory = false
-    @State private var showWorkerSystem = false
-
-    private var percentage: Int { contextState.contextPercentage }
-    private var accent: Color { SessionContextPresentation.pressure(for: percentage).color }
-    private var totalSessionInputTokens: Int {
-        contextState.accumulatedInputTokens + contextState.accumulatedCacheReadTokens
-    }
-    private var canMutate: Bool {
-        SessionContextPresentation.canMutate(
-            isConnected: isConnected,
-            isAgentActive: isAgentActive,
-            isCompacting: isCompacting,
-            isBusy: isForking
-        )
-    }
-    private var currentModelDisplayName: String {
-        currentModelInfo?.formattedModelName ?? currentModelId.shortModelName
-    }
-    private var workerRunGroups: [SessionWorkerRunGroup] {
-        SessionContextPresentation.causalGroups(sessionWorkerRuns)
-    }
-    private var latestContextSummary: SessionContextRequestSummaryDTO? {
-        contextRequests.first
-    }
-    private var manifest: SessionContextManifestDTO? {
-        latestContextDetail?.contextManifest
-    }
-    private var allSystemContributions: [ContextSystemContributionDTO] {
-        (manifest?.systemContributions ?? []) + (latestContextDetail?.providerAdditions ?? [])
-    }
-    private var requestWorkerSelections: [SessionContextWorkerSelection] {
-        SessionContextPresentation.workerSelections(from: manifest?.toolSurface)
-    }
-
-    private var requestFixedToolSelections: [SessionContextFixedToolSelection] {
-        SessionContextPresentation.fixedToolSelections(from: manifest?.toolSurface)
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: SessionContextPresentation.sectionSpacing) {
-                    sessionSummary
-                    requestSummarySection
-                    receivedContextSection
-                    automaticContextSection
-                    requestToolsSection
-                    workerSystemSection
-                    modelSection
-                    workerActivitySection
-                    sessionActionsSection
-                    providerAuditSection
-
-                    if let reason = SessionContextPresentation.mutationUnavailableReason(
-                        isConnected: isConnected,
-                        isAgentActive: isAgentActive,
-                        isCompacting: isCompacting
-                    ) {
-                        Text(reason)
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextMuted)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 24)
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    SheetPrimaryActionButton(
-                        icon: "clock.arrow.circlepath",
-                        accent: .tronEmerald,
-                        accessibilityLabel: "Model request history"
-                    ) {
-                        showContextHistory = true
-                    }
-                    .disabled(contextRequests.isEmpty)
-                }
-                ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Session Context", color: .tronEmerald)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    SheetDismissButton(color: .tronEmerald)
-                }
-            }
-        }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .tint(.tronEmerald)
-        .task { await loadModels() }
-        .task(id: "\(sessionId):\(isConnected):\(isAgentActive):\(workerRefreshRevision)") {
-            await observeSessionWorkers()
-        }
-        .task(id: "\(sessionId):\(isConnected):\(isAgentActive)") {
-            await observeInspectableContext()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .workerRunProjectionInvalidated)) { _ in
-            workerRefreshRevision += 1
-        }
-        .sheet(isPresented: $showModelPicker) {
-            ModelPickerSheet(
-                models: availableModels,
-                currentModelId: currentModelId,
-                readOnly: !canMutate,
-                reasoningLevel: currentModelInfo?.supportsReasoning == true ? reasoningLevel : nil,
-                onSelect: onSelectModel
-            )
-        }
-        .sheet(isPresented: $showForkConfirmation) {
-            ForkSessionConfirmationSheet(isFork: isFork) {
-                Task { await forkSession() }
-            }
-        }
-        .sheet(item: $selectedWorkerRun) { run in
-            WorkerRunDetailSheet(
-                run: run,
-                workerName: workerNames[run.workerId]
-            )
-        }
-        .sheet(item: $selectedContextDetail) { selection in
-            SessionContextDetailSheet(selection: selection)
-        }
-        .sheet(isPresented: $showContextHistory) {
-            SessionContextHistorySheet(
-                requests: contextRequests,
-                hasMore: contextRequestsNextSequence != nil,
-                loadMore: { await loadOlderContextRequests() },
-                select: { request in
-                    await selectContextRequest(request)
-                }
-            )
-        }
-        .sheet(isPresented: $showWorkerSystem) {
-            WorkerSystemSheet(
-                workers: workerArchitecture,
-                fixedToolCount: fixedToolCount
-            )
-        }
-        .tronErrorAlert(message: $errorMessage)
-    }
-
-    private var sessionSummary: some View {
+extension SessionContextSheet {
+    var sessionSummary: some View {
         VStack(spacing: 12) {
             HStack(spacing: 14) {
                 contextGauge
@@ -419,7 +56,7 @@ struct SessionContextSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private var contextGauge: some View {
+    var contextGauge: some View {
         ZStack {
             Circle()
                 .stroke(Color.tronTextMuted.opacity(0.2), lineWidth: 7)
@@ -437,14 +74,14 @@ struct SessionContextSheet: View {
         .accessibilityValue("\(percentage) percent")
     }
 
-    private var contextWindowDescription: String {
+    var contextWindowDescription: String {
         guard contextState.currentContextWindow > 0 else {
             return "Waiting for the model context-window limit"
         }
         return "\(TokenFormatter.format(contextState.currentContextWindow, style: .withSuffix)) window"
     }
 
-    private var requestSummarySection: some View {
+    var requestSummarySection: some View {
         VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
             SettingsSectionHeader(
                 title: "Latest model request",
@@ -516,7 +153,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    private var receivedContextSection: some View {
+    var receivedContextSection: some View {
         VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
             SettingsSectionHeader(
                 title: "What the agent received",
@@ -584,7 +221,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    private var automaticContextSection: some View {
+    var automaticContextSection: some View {
         VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
             SettingsSectionHeader(
                 title: "Automatic context",
@@ -654,7 +291,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    private var requestToolsSection: some View {
+    var requestToolsSection: some View {
         let selected = requestWorkerSelections.filter(\.projected)
         let omitted = requestWorkerSelections.filter { !$0.projected }
         let omittedFixed = requestFixedToolSelections.filter { !$0.projected }
@@ -711,7 +348,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    private var workerSystemSection: some View {
+    var workerSystemSection: some View {
         let direct = workerArchitecture.filter { $0.modelExposure == "direct" }.count
         let agent = workerArchitecture.filter { $0.runnerKind == "agent" }.count
         let hooks = workerArchitecture.filter { !$0.engineHooks.isEmpty }.count
@@ -772,22 +409,22 @@ struct SessionContextSheet: View {
         }
     }
 
-    private var attachmentMessageCount: Int {
+    var attachmentMessageCount: Int {
         manifest?.messages.filter {
             $0.contentKinds.contains("image") || $0.contentKinds.contains("document")
         }.count ?? 0
     }
 
-    private var providerMessageCount: Int {
+    var providerMessageCount: Int {
         manifest?.messages.count ?? Int(latestContextSummary?.messageCount ?? 0)
     }
 
-    private var fixedToolCount: UInt64 {
+    var fixedToolCount: UInt64 {
         guard let surface = manifest?.toolSurface.dictionaryValue else { return 0 }
         return UInt64(surface["fixedToolCount"] as? Int ?? 0)
     }
 
-    private func automaticContextSummary(_ evaluation: ContextAutomaticEvaluationDTO) -> String {
+    func automaticContextSummary(_ evaluation: ContextAutomaticEvaluationDTO) -> String {
         if let narrative = evaluation.narrative, !narrative.isEmpty {
             return narrative
         }
@@ -795,7 +432,7 @@ struct SessionContextSheet: View {
             ?? "\(WorkerConsolePresentation.displayLabel(evaluation.mechanism)) · \(evaluation.sources.count) sources"
     }
 
-    private func workerSelectionRow(_ worker: SessionContextWorkerSelection) -> some View {
+    func workerSelectionRow(_ worker: SessionContextWorkerSelection) -> some View {
         HStack(spacing: 9) {
             Image(systemName: "bolt.horizontal.circle")
                 .foregroundStyle(.tronEmerald)
@@ -826,7 +463,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    private func contextDisclosureRow(
+    func contextDisclosureRow(
         title: String,
         detail: String,
         symbol: String,
@@ -864,7 +501,7 @@ struct SessionContextSheet: View {
         .buttonStyle(.plain)
     }
 
-    private var modelSection: some View {
+    var modelSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(
                 title: "Model",
@@ -912,7 +549,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    private var usageMetrics: some View {
+    var usageMetrics: some View {
         HStack(spacing: 0) {
             metric(label: "Input", value: TokenFormatter.format(totalSessionInputTokens))
             Divider().frame(height: 32)
@@ -922,7 +559,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    private func metric(label: String, value: String) -> some View {
+    func metric(label: String, value: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
@@ -934,7 +571,7 @@ struct SessionContextSheet: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var workerActivitySection: some View {
+    var workerActivitySection: some View {
         VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
             VStack(alignment: .leading, spacing: SessionContextPresentation.headerToSubheaderSpacing) {
                 HStack(alignment: .firstTextBaseline) {
@@ -1012,7 +649,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    private var sessionActionsSection: some View {
+    var sessionActionsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(
                 title: "Session",
@@ -1058,7 +695,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    private var providerAuditSection: some View {
+    var providerAuditSection: some View {
         VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
             SettingsSectionHeader(
                 title: "Advanced",
@@ -1103,354 +740,4 @@ struct SessionContextSheet: View {
         }
     }
 
-    private func observeInspectableContext() async {
-        await loadInspectableContext()
-        while !Task.isCancelled, isConnected, isAgentActive {
-            do {
-                try await Task.sleep(for: .seconds(1))
-            } catch {
-                return
-            }
-            await loadInspectableContext()
-        }
-        if !Task.isCancelled, isConnected {
-            await loadInspectableContext()
-        }
-    }
-
-    private func loadInspectableContext() async {
-        guard !isLoadingInspectableContext else { return }
-        guard isConnected else {
-            loadCachedInspectableContext()
-            return
-        }
-        isLoadingInspectableContext = true
-        defer { isLoadingInspectableContext = false }
-        do {
-            let page = try await sessionRepository.contextRequests(
-                sessionId: sessionId,
-                beforeSequence: nil,
-                limit: 10
-            )
-            let snapshot = try await workerRepository.engineSurfaceSnapshot(
-                sessionId: sessionId,
-                relevanceQuery: nil
-            )
-            contextRequests = page.requests
-            contextRequestsNextSequence = page.nextBeforeSequence
-            workerArchitecture = snapshot.workerArchitecture ?? []
-            if let latest = page.requests.first,
-               latestContextDetail?.eventId != latest.eventId {
-                latestContextDetail = try await sessionRepository.contextRequestDetail(
-                    sessionId: sessionId,
-                    eventId: latest.eventId
-                )
-            }
-            contextLoadError = nil
-        } catch is CancellationError {
-            return
-        } catch {
-            if contextRequests.isEmpty {
-                loadCachedInspectableContext()
-            }
-            if contextRequests.isEmpty {
-                contextLoadError = "Context audit could not load: \(error.localizedDescription)"
-            }
-        }
-    }
-
-    private func loadCachedInspectableContext() {
-        let events = cachedProviderRequestEvents.sorted { $0.sequence > $1.sequence }
-        guard !events.isEmpty else { return }
-        contextRequests = events.map { event in
-            let format = event.payload.string("format") ?? "unknown"
-            let manifestValue = event.payload["contextManifest"]
-            let automaticCount = manifestValue?
-                .dictionaryValue?["automaticContext"]
-                .flatMap { AnyCodable($0).arrayValue }?
-                .count ?? 0
-            return SessionContextRequestSummaryDTO(
-                eventId: event.id,
-                sequence: Int64(event.sequence),
-                timestamp: event.timestamp,
-                format: format,
-                turn: event.payload.int("turn").map(UInt64.init),
-                providerType: event.payload.string("providerType"),
-                providerName: event.payload.string("providerName"),
-                model: event.payload.string("model"),
-                requestClassification: event.payload.string("requestClassification") ?? "legacy",
-                messageCount: UInt64(max(event.payload.int("messageCount") ?? 0, 0)),
-                toolCount: UInt64(max(event.payload.int("toolCount") ?? 0, 0)),
-                automaticContextCount: UInt64(automaticCount),
-                manifestAvailable: manifestValue?.isNull == false,
-                provenanceAvailability: format == "tron.model_provider_request.v3"
-                    ? "complete"
-                    : "legacy_unavailable"
-            )
-        }
-        contextRequestsNextSequence = nil
-        if let event = events.first {
-            let manifest = event.payload["contextManifest"].flatMap { value in
-                try? JSONDecoder().decode(
-                    SessionContextManifestDTO.self,
-                    from: JSONEncoder().encode(value)
-                )
-            }
-            latestContextDetail = SessionContextRequestDetailDTO(
-                eventId: event.id,
-                sequence: Int64(event.sequence),
-                timestamp: event.timestamp,
-                format: event.payload.string("format") ?? "unknown",
-                contextManifest: manifest,
-                providerAdditions: event.payload["providerAdditions"].flatMap { value in
-                    try? JSONDecoder().decode(
-                        [ContextSystemContributionDTO].self,
-                        from: JSONEncoder().encode(value)
-                    )
-                },
-                providerAudit: AnyCodable(event.payload.mapValues(\.value)),
-                provenanceAvailability: event.payload.string("format")
-                    == "tron.model_provider_request.v3"
-                    ? "complete"
-                    : "legacy_unavailable"
-            )
-        }
-        contextLoadError = nil
-    }
-
-    private func loadOlderContextRequests() async {
-        guard let beforeSequence = contextRequestsNextSequence else { return }
-        do {
-            let page = try await sessionRepository.contextRequests(
-                sessionId: sessionId,
-                beforeSequence: beforeSequence,
-                limit: 10
-            )
-            var identifiers = Set(contextRequests.map(\.eventId))
-            contextRequests.append(contentsOf: page.requests.filter {
-                identifiers.insert($0.eventId).inserted
-            })
-            contextRequestsNextSequence = page.nextBeforeSequence
-        } catch {
-            errorMessage = "Could not load older model requests: \(error.localizedDescription)"
-        }
-    }
-
-    private func selectContextRequest(_ request: SessionContextRequestSummaryDTO) async {
-        do {
-            latestContextDetail = try await sessionRepository.contextRequestDetail(
-                sessionId: sessionId,
-                eventId: request.eventId
-            )
-            if let index = contextRequests.firstIndex(where: { $0.eventId == request.eventId }) {
-                let selected = contextRequests.remove(at: index)
-                contextRequests.insert(selected, at: 0)
-            }
-            showContextHistory = false
-        } catch {
-            errorMessage = "Could not inspect this model request: \(error.localizedDescription)"
-        }
-    }
-
-    private func loadModels() async {
-        availableModels = modelRepository.cachedModels
-        guard availableModels.isEmpty, isConnected else { return }
-
-        isLoadingModels = true
-        defer { isLoadingModels = false }
-        do {
-            availableModels = try await modelRepository.list(forceRefresh: false)
-        } catch {
-            errorMessage = "Could not load models: \(error.localizedDescription)"
-        }
-    }
-
-    private func observeSessionWorkers() async {
-        await loadSessionWorkerRuns(reset: true)
-        while !Task.isCancelled,
-              isAgentActive || sessionWorkerRuns.contains(where: { $0.status == "queued" || $0.status == "running" }) {
-            do {
-                try await Task.sleep(for: .seconds(1))
-            } catch {
-                return
-            }
-            await loadSessionWorkerRuns(reset: true)
-        }
-    }
-
-    private func loadSessionWorkerRuns(reset: Bool) async {
-        guard !isLoadingWorkerRuns else { return }
-        isLoadingWorkerRuns = true
-        defer { isLoadingWorkerRuns = false }
-        do {
-            if workerNames.isEmpty {
-                let workers = try await workerRepository.workers(includeRetired: true).workers
-                workerNames = Dictionary(uniqueKeysWithValues: workers.map { ($0.workerId, $0.name) })
-            }
-            let page = try await workerRepository.workerRunGraphs(
-                originSessionId: sessionId,
-                limit: 10,
-                offset: reset ? nil : workerRunsNextOffset
-            )
-            if reset {
-                sessionWorkerRuns = page.runs
-            } else {
-                var identifiers = Set(sessionWorkerRuns.map(\.invocationId))
-                sessionWorkerRuns.append(contentsOf: page.runs.filter {
-                    identifiers.insert($0.invocationId).inserted
-                })
-            }
-            workerRunsNextOffset = page.nextOffset
-            workerLoadError = nil
-        } catch {
-            workerLoadError = "Worker activity could not load: \(error.localizedDescription)"
-        }
-    }
-
-    private func forkSession() async {
-        guard canMutate else { return }
-        isForking = true
-        defer { isForking = false }
-        do {
-            let newSessionId = try await onFork()
-            dismiss()
-            await Task.yield()
-            NotificationCenter.default.post(name: .switchToSession, object: newSessionId)
-        } catch {
-            errorMessage = "Could not fork session: \(error.localizedDescription)"
-        }
-    }
-}
-
-private struct SessionWorkerRunRow: View {
-    let run: WorkerInvocationDTO
-    let workerName: String
-    let action: () -> Void
-
-    private var color: Color {
-        switch WorkerConsolePresentation.normalized(run.status) {
-        case "completed", "succeeded": .tronSuccess
-        case "failed", "cancelled": .tronError
-        case "running": .tronCyan
-        default: .tronWarning
-        }
-    }
-
-    private var symbol: String {
-        switch WorkerConsolePresentation.normalized(run.status) {
-        case "completed", "succeeded": "checkmark.circle.fill"
-        case "failed": "xmark.octagon.fill"
-        case "cancelled": "stop.circle"
-        case "running": "waveform.path.ecg"
-        default: "clock"
-        }
-    }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: symbol)
-                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                    .foregroundStyle(color)
-                    .frame(width: 28)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(workerName)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(1)
-                    Text(WorkerConsolePresentation.runSummary(run)
-                        ?? WorkerConsolePresentation.displayLabel(run.triggerKind))
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(SessionContextPresentation.runState(run))
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(color)
-                    if let timestamp = WorkerConsolePresentation.timestamp(
-                        run.completedAt ?? run.startedAt ?? run.createdAt
-                    ) {
-                        Text(timestamp)
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextMuted)
-                    }
-                }
-                .lineLimit(1)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .sectionFill(color, cornerRadius: 12, subtle: true, interactive: true)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct ForkSessionConfirmationSheet: View {
-    let isFork: Bool
-    let onConfirm: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 16) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(TronTypography.sans(size: 34, weight: .medium))
-                    .foregroundStyle(.tronEmerald)
-                    .frame(width: 62, height: 62)
-                    .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.14)), in: .circle)
-
-                VStack(spacing: 5) {
-                    Text(isFork ? "Fork again from here?" : "Fork from this point?")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text("A new session branch is created. This session remains unchanged.")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronTextSecondary)
-                        .multilineTextAlignment(.center)
-                }
-
-                HStack(spacing: 10) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
-                    .glassEffect(.regular, in: .capsule)
-
-                    Button {
-                        dismiss()
-                        onConfirm()
-                    } label: {
-                        Label("Create fork", systemImage: "arrow.triangle.branch")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 11)
-                    }
-                    .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.24)), in: .capsule)
-                }
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-            }
-            .padding(20)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Fork Session", color: .tronEmerald)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    SheetDismissButton(color: .tronEmerald)
-                }
-            }
-        }
-        .adaptivePresentationDetents(
-            [.medium],
-            ipadSizing: .compactForm,
-            phoneSizing: .unchanged
-        )
-        .tint(.tronEmerald)
-    }
 }

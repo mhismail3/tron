@@ -1,6 +1,7 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-26 for split-worker native notification delivery.
+> Last verified: 2026-07-27 for the state-owner feature layout, inspectable
+> provider context, and split-worker native notification delivery.
 
 ## Overview
 
@@ -73,7 +74,7 @@ Dashboard.
 Sources/
 ├── App/                         application and scene lifecycle
 ├── Engine/
-│   ├── Protocol/                typed wire DTOs
+│   ├── Protocol/                typed wire DTOs, grouped by domain contract
 │   ├── Transport/               WebSocket, clients, repositories
 │   ├── Events/                  live event registry and plugins
 │   └── Persistence/             bounded local reconstruction cache
@@ -84,10 +85,19 @@ Sources/
 ├── Support/                     composition, diagnostics, pairing, storage
 └── UI/
     ├── Chat/                    session shell and composer
-    ├── WorkerConsole/           engine dashboard and worker detail console
+    ├── SessionContext/          provider-context inspection and worker map
+    ├── WorkerConsole/           overview, detail, run graph, and presentations
+    ├── Tools/Invocation/        fixed/worker invocation presentation
     ├── Settings/                product and server settings
     └── Components/              reusable visual primitives
 ```
+
+Feature directories follow state and lifecycle owners instead of individual
+sheet names. `Engine/Protocol/WorkerKernel/` separates summary/lifecycle,
+invocation, run-graph, result, inbox, artifact, and request DTOs without
+creating another protocol registry. `UI/WorkerConsole/` separates overview,
+detail, run graph, declarative presentation, domain experiences, and shared
+components while retaining one `WorkerConsoleViewModel` and repository truth.
 
 `Assets.xcassets/TronLogoVector.imageset/tron-logo.svg` is the authoritative
 logo. The repository-owned `scripts/generate-ios-icons.mjs` derives app icons
@@ -120,6 +130,12 @@ worker rows, runs, or inbox are retained as current truth.
 response continuations, stream polling, reconnection, and frame-size admission.
 The bearer token comes from pairing and is never logged. Unauthorized state
 requires re-pairing.
+
+`EngineClient` remains the single domain-facing connection authority.
+`EngineClientPolicies.swift` contains only value policies for reconnect
+classification, stream identity and interest, subscription admission, and
+acknowledgement coalescing. It owns no socket, request continuation,
+subscription registry, cache, or background task.
 
 Connection, reconnect, and per-subscription admission are single-flight. Swift
 task cancellation removes exactly one request record; that record owns both
@@ -194,31 +210,39 @@ worker metadata from the client. The server supplies internal causal context.
 
 ### DTOs
 
-`Engine/Protocol/EngineProtocolTypes+WorkerKernel.swift` owns:
+`Engine/Protocol/WorkerKernel/` owns:
 
-- `WorkerSummaryDTO` for identity, tool name, runner, health, active version,
+- `WorkerSummaryDTOs.swift` for identity, tool name, runner, health, active version,
   enabled/retired status, trigger count, immutable presentation/suite binding,
   its optional closed native section descriptor, and update time;
-- `WorkerInspectResultDTO` for the bundle, versions, triggers, audit, and
+- `WorkerSummaryDTOs.swift` also contains `WorkerInspectResultDTO` for the
+  bundle, versions, triggers, audit, and
   canonical version directory;
-- `WorkerInvocationDTO` for queued/running/terminal runs, typed input and an
+- `WorkerInvocationDTOs.swift` for queued/running/terminal runs, typed input and an
   integrity-bound result reference (with decode-only legacy-inline migration
   compatibility),
   idempotency, trace, causal depth, trigger kind, numbered delivery-attempt
   count, foreground/background mode, detachment time, originating model-tool
   invocation, parent/retry linkage, optional child-agent session id, and
   timestamps;
-- `WorkerRunGraphDTO` and its node, timeline, stage, timing, usage, and child
+- `WorkerRunGraphDTOs.swift` for the graph and its node, timeline, stage,
+  timing, usage, and child
   count DTOs for the bounded server-authored causal projection;
-- `WorkerResultReferenceDTO`, `WorkerResultChunkDTO`, and child descriptors for
+- `WorkerResultDTOs.swift` for result references, chunks, and child descriptors for
   integrity-bound, on-demand reads of exact durable results without copying a
   large payload into run history or client state;
-- `WorkerInboxItemDTO` for compact durable result-reference receipts or bounded
+- `WorkerInboxDTOs.swift` for compact durable result-reference receipts or bounded
   failure evidence, trigger provenance, attention classification, and truthful
   agent-context attachment state;
-- request/response DTOs for invocation, exact invocation cancellation,
+- `WorkerRequestDTOs.swift` for invocation and lifecycle request/response
+  contracts, exact invocation cancellation,
   per-worker stop, rollback, stop-all, archive-backed purge, and webhook token
-  rotation.
+  rotation; and
+- `WorkerArtifactDTOs.swift` for bounded artifact metadata, content reads, and
+  deletion contracts.
+
+These files are one wire-contract family. They do not add a second client,
+decoder, cache, or worker authority.
 
 Worker inspection explicitly requests `detail: "full"` because the operator
 detail sheet renders immutable source metadata and audit history; provider tools
@@ -704,6 +728,14 @@ received. While connected the sheet lists bounded summaries through
 events already held by EventDatabase. There is no context-specific database,
 cache, subscription, or polling service.
 
+`UI/SessionContext/` keeps that ownership visible in source: the main sheet owns
+only presentation state and navigation; sections render the manifest; loading
+owns the sheet-scoped cancellable tasks; detail/history sheets load bounded
+evidence lazily; the audit formatter projects redacted payloads; and
+`WorkerSystemSheet` renders server-derived architecture. Cross-file extensions
+share the one sheet state rather than manufacturing feature view models or
+copies of provider-request data.
+
 The sheet initially loads only the latest request. Earlier requests page on
 demand and raw audit text loads only when opened. While an agent is active,
 latest-request reconciliation runs only while the sheet is visible and performs
@@ -832,6 +864,12 @@ reminders; they are not a general device-control surface.
   connection before requesting permission. Denial is never repeatedly
   requested; Settings exposes the system state and an Open System Settings
   action.
+- `NotificationRegistrationPolicy.swift` contains the stateless authorization
+  decision, `NotificationModels.swift` contains readiness/inbox/mutation value
+  types, and `NotificationRouting.swift` contains the one notification
+  navigation event name. These helpers own no task or cache:
+  `NativeNotificationCoordinator` remains the single registration, per-server
+  lane, inbox-sync, mutation-outbox, badge, and lifecycle owner.
 - Every already-authorized launch calls `registerForRemoteNotifications`
   without waiting for engine connectivity. The current APNs
   token lives only in coordinator memory. A stable installation UUID lives in

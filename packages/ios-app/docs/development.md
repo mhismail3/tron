@@ -465,6 +465,24 @@ xcodebuild test -scheme 'Tron Beta' \
   -only-testing:TronMobileTests/SettingsParityTests
 ```
 
+For Session Context, worker protocol layout, invocation presentation,
+notification ownership helpers, or connection-policy moves, run this
+state-owner suite on Beta with parallel testing disabled so one hosted process
+owns teardown:
+
+```bash
+xcodebuild test -project TronMobile.xcodeproj -scheme 'Tron Beta' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -parallel-testing-enabled NO \
+  -only-testing:TronMobileTests/SessionContextPresentationTests \
+  -only-testing:TronMobileTests/WorkerKernelDTOTests \
+  -only-testing:TronMobileTests/WorkerConsoleInteractionTests \
+  -only-testing:TronMobileTests/ToolInvocationDetailViewTests \
+  -only-testing:TronMobileTests/NativeNotificationPolicyTests \
+  -only-testing:TronMobileTests/EngineClientTests \
+  -only-testing:TronMobileTests/EngineConnectionReconnectTests
+```
+
 For the main Settings destination copy or the Engine/Providers sheet hierarchy,
 run the focused ownership and no-summary-hero contracts:
 
@@ -545,11 +563,18 @@ Tests/
 │   └── Transport/     # Clients, Retry, WebSocket, and DeepLinks tests mirror Sources
 ├── Session/           # Chat, timeline, attachment, and parsing tests
 │   ├── Chat/          # Coordinators, Messaging, Navigation, State, ViewModel owner roots
-│   └── WorkerKernel/    # Worker Console state and repository fixtures
-├── UI/                # Chat, settings, onboarding, runtime surface, and component tests
+│   └── WorkerKernel/  # Worker state and repository fixtures
+├── UI/                # Feature presentation and source-ownership contracts
+│   ├── SessionContext/
+│   └── WorkerConsole/
 ├── Support/           # Composition, diagnostics, foundation, pairing, and storage tests
 └── Infrastructure/    # Fakes, fixtures, SourceGuard, cleanup, and project-structure guards
 ```
+
+After moving Swift sources, regenerate `TronMobile.xcodeproj` from
+`project.yml` before building. Source-ownership guards follow the feature
+directories recursively; do not preserve an obsolete path solely to satisfy a
+test, and do not add the same Swift file to more than one build phase.
 
 Active hierarchy and targeted hard-budget enforcement live in
 `SourceGuardTests` and do not depend on point-in-time campaign line counts.

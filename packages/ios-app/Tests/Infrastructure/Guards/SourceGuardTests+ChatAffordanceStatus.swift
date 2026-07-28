@@ -68,7 +68,9 @@ extension SourceGuardTests {
             encoding: .utf8
         )
         let console = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/WorkerConsole/WorkerConsoleViews.swift"),
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Overview/WorkerConsoleViews.swift"
+            ),
             encoding: .utf8
         )
         let viewModel = try String(

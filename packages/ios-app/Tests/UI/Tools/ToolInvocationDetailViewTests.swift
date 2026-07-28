@@ -17,7 +17,7 @@ final class ToolInvocationDetailViewTests: XCTestCase {
     }
 
     func testToolInvocationDetailSourceUsesEvidencePresentationMapper() throws {
-        let source = try source(pathComponents: ["Sources", "UI", "Tools", "ToolInvocationViews.swift"])
+        let source = try source(pathComponents: ["Sources", "UI", "Tools", "Invocation", "ToolInvocationDetailSheet.swift"])
 
         XCTAssertTrue(source.contains("ToolEvidencePresentation(data: data)"))
         XCTAssertTrue(source.contains("ToolInvocationBriefPresentation(data: data)"))
@@ -79,25 +79,25 @@ final class ToolInvocationDetailViewTests: XCTestCase {
             ),
             (
                 try source(pathComponents: [
-                    "Sources", "UI", "Tools", "ToolInvocationViews.swift",
+                    "Sources", "UI", "Tools", "Invocation", "ToolInvocationDetailSheet.swift",
                 ]),
                 1
             ),
             (
                 try source(pathComponents: [
-                    "Sources", "UI", "WorkerConsole", "WorkerRunGraphComponents.swift",
+                    "Sources", "UI", "WorkerConsole", "RunGraph", "WorkerRunGraphComponents.swift",
                 ]),
                 2
             ),
             (
                 try source(pathComponents: [
-                    "Sources", "UI", "WorkerConsole", "WorkerResultInspectorSheet.swift",
+                    "Sources", "UI", "WorkerConsole", "Detail", "WorkerResultInspectorSheet.swift",
                 ]),
                 2
             ),
             (
                 try source(pathComponents: [
-                    "Sources", "UI", "WorkerConsole", "WorkerJSONDetailSheet.swift",
+                    "Sources", "UI", "WorkerConsole", "Detail", "WorkerJSONDetailSheet.swift",
                 ]),
                 1
             ),
@@ -109,7 +109,7 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         }
 
         let workerDetails = try source(pathComponents: [
-            "Sources", "UI", "WorkerConsole", "WorkerConsoleDetailSheets.swift",
+            "Sources", "UI", "WorkerConsole", "Detail", "WorkerConsoleDetailSheets.swift",
         ])
         let auditSheet = try XCTUnwrap(
             workerDetails.components(separatedBy: "struct WorkerAuditSessionSheet").last

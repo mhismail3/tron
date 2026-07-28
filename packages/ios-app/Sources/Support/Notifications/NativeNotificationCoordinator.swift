@@ -3,61 +3,6 @@ import Observation
 import UIKit
 import UserNotifications
 
-enum NativeNotificationPermissionPolicy {
-    static func shouldRequest(
-        hasAuthenticatedConnection: Bool,
-        attemptedThisLaunch: Bool,
-        status: NotificationAuthorizationState
-    ) -> Bool {
-        hasAuthenticatedConnection && !attemptedThisLaunch && status == .notDetermined
-    }
-
-    static func permitsRemoteRegistration(_ status: NotificationAuthorizationState) -> Bool {
-        [.authorized, .provisional, .ephemeral].contains(status)
-    }
-}
-
-struct NotificationServerReadiness: Codable, Equatable, Identifiable, Sendable {
-    let serverId: String
-    var ready: Bool
-    var deviceReady: Bool?
-    var transportMode: NotificationTransportMode?
-    var transportConfigured: Bool?
-    var transportProblem: String?
-    var authorizationStatus: NotificationAuthorizationState
-    var registeredAt: String?
-    var problem: String?
-
-    var id: String { serverId }
-}
-
-struct NotificationInboxItem: Codable, Equatable, Identifiable, Sendable {
-    let serverId: String
-    var delivery: NotificationDeliveryDTO
-
-    var id: String { "\(serverId):\(delivery.deliveryId)" }
-}
-
-struct NotificationMutation: Codable, Equatable, Identifiable, Sendable {
-    let mutationId: String
-    let serverId: String
-    let deliveryId: String
-    let acknowledgement: NotificationAcknowledgement
-    let occurredAt: String
-
-    var id: String { mutationId }
-}
-
-struct NotificationServerWork: Equatable, Sendable {
-    var registration = false
-    var synchronization = false
-
-    mutating func formUnion(_ other: NotificationServerWork) {
-        registration = registration || other.registration
-        synchronization = synchronization || other.synchronization
-    }
-}
-
 @Observable
 @MainActor
 final class NativeNotificationCoordinator {
@@ -855,8 +800,4 @@ final class NativeNotificationCoordinator {
     private static func serverId(from payload: [AnyHashable: Any]) -> String? {
         (payload["tron"] as? [String: Any])?["serverId"] as? String
     }
-}
-
-extension Notification.Name {
-    static let openNotificationDelivery = Notification.Name("tron.openNotificationDelivery")
 }
