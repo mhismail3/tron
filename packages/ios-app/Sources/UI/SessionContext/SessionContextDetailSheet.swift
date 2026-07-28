@@ -12,7 +12,11 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
         raw: AnyCodable?
     )
     case automatic(ContextAutomaticEvaluationDTO)
-    case providerAudit(SessionContextRequestDetailDTO)
+    case providerAudit(
+        SessionContextRequestDetailDTO,
+        cacheReadTokens: Int,
+        cacheWriteTokens: Int
+    )
 
     var id: String {
         switch self {
@@ -22,7 +26,7 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
         case .environment: "environment"
         case .tools: "tools"
         case .automatic(let evaluation): "automatic:\(evaluation.id)"
-        case .providerAudit(let detail): "provider:\(detail.eventId)"
+        case .providerAudit(let detail, _, _): "provider:\(detail.eventId)"
         }
     }
 
@@ -163,6 +167,11 @@ struct SessionContextDetailSheet: View {
                     WorkerConsolePresentation.displayLabel(evaluation.mechanism)
                 )
                 Divider().opacity(0.35)
+                metadataRow(
+                    "Delivered as",
+                    SessionContextPresentation.automaticContextChannel(evaluation)
+                )
+                Divider().opacity(0.35)
                 metadataRow("Policy worker", evaluation.workerId ?? "No worker ran")
                 Divider().opacity(0.35)
                 metadataRow("Version", evaluation.workerVersion ?? "Unavailable", code: true)
@@ -172,7 +181,12 @@ struct SessionContextDetailSheet: View {
             .padding(.horizontal, 13)
             .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
 
-            SettingsSectionHeader(title: "Injected narrative", bottomPadding: 4)
+            SettingsSectionHeader(
+                title: evaluation.deliveryChannel == "reference"
+                    ? "Reference context"
+                    : "Injected narrative",
+                bottomPadding: 4
+            )
             auditText(
                 evaluation.narrative
                     ?? evaluation.detail
@@ -196,7 +210,7 @@ struct SessionContextDetailSheet: View {
                 )
             }
 
-        case .providerAudit(let detail):
+        case .providerAudit(let detail, let cacheReadTokens, let cacheWriteTokens):
             SettingsSectionHeader(title: "Audit identity", bottomPadding: 4)
             VStack(spacing: 0) {
                 metadataRow("Format", detail.format, code: true)
@@ -212,6 +226,58 @@ struct SessionContextDetailSheet: View {
             }
             .padding(.horizontal, 13)
             .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+
+            SettingsSectionHeader(title: "Session cache activity", bottomPadding: 4)
+            VStack(spacing: 0) {
+                metadataRow(
+                    "Read",
+                    "\(TokenFormatter.format(cacheReadTokens)) tokens"
+                )
+                Divider().opacity(0.35)
+                metadataRow(
+                    "Written",
+                    "\(TokenFormatter.format(cacheWriteTokens)) tokens"
+                )
+            }
+            .padding(.horizontal, 13)
+            .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+
+            if let cache = detail.contextManifest?.cacheLayout {
+                SettingsSectionHeader(title: "Cache layout", bottomPadding: 4)
+                VStack(spacing: 0) {
+                    metadataRow(
+                        "Stable instructions",
+                        formattedBytes(cache.stableInstructionBytes)
+                    )
+                    Divider().opacity(0.35)
+                    metadataRow("Instruction digest", cache.stableInstructionSha256, code: true)
+                    Divider().opacity(0.35)
+                    metadataRow(
+                        "Fixed tools",
+                        "\(cache.fixedToolCount) · \(formattedBytes(cache.fixedToolSchemaBytes))"
+                    )
+                    Divider().opacity(0.35)
+                    metadataRow("Fixed prefix digest", cache.fixedToolPrefixSha256, code: true)
+                    Divider().opacity(0.35)
+                    metadataRow(
+                        "Dynamic tools",
+                        "\(cache.dynamicToolCount) · \(formattedBytes(cache.dynamicToolSchemaBytes))"
+                    )
+                    Divider().opacity(0.35)
+                    metadataRow("Dynamic digest", cache.dynamicToolsSha256, code: true)
+                    Divider().opacity(0.35)
+                    metadataRow(
+                        "Reference context",
+                        formattedBytes(cache.requestContextBytes)
+                    )
+                    if let digest = cache.requestContextSha256 {
+                        Divider().opacity(0.35)
+                        metadataRow("Reference digest", digest, code: true)
+                    }
+                }
+                .padding(.horizontal, 13)
+                .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
+            }
 
             SettingsSectionHeader(title: "Redacted provider request", bottomPadding: 4)
             auditText(SessionContextAuditFormatter.projectedJSONString(detail.providerAudit))
@@ -411,5 +477,9 @@ struct SessionContextDetailSheet: View {
         }
         .font(.system(size: TronTypography.sizeCaption, design: .monospaced))
         .foregroundStyle(.tronTextMuted)
+    }
+
+    private func formattedBytes(_ bytes: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory)
     }
 }

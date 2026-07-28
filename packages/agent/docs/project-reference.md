@@ -1244,12 +1244,18 @@ beside the already bounded, redacted provider envelope; it does not introduce
 a context table, retention policy, cache, or registry. The turn runner persists
 this event before opening the provider stream.
 
-A turn-local context assembly is the only writer for automatic system
-contributions. It records, in order, base instructions, the engine-surface
-primer, Continuity Curator output, Inbox Context Curator output, environment
-information, and provider-adapter additions. Finalization verifies that those
-contributions exactly reconstruct the provider-neutral system prompt. It also
-records:
+A turn-local context assembly is the only writer for provider context. Stable
+system content contains base instructions, environment, and one compact
+engine-surface guidance block; it never embeds catalog revisions, hashes,
+worker lists, selection reasons, run counts, or duplicated tool schemas.
+Non-empty Continuity Curator and Inbox Context Curator narratives are encoded
+together in one final engine-authored reference message after durable
+conversation history. The wrapper explicitly treats its JSON values as
+untrusted reference evidence rather than instructions. It is never added to
+the message store or accumulated during replay. Empty, skipped, failed, and
+unavailable evaluations add zero provider-input bytes while remaining
+auditable. Finalization verifies the stable contributions exactly reconstruct
+the provider-neutral system prompt. It also records:
 
 - every provider-visible message in order, including its content kinds,
   redacted preview, byte count, digest, projection state, durable source event
@@ -1263,7 +1269,11 @@ records:
   selected/omitted state, routing mechanism, bounded ranking evidence, and
   schema digests;
 - redacted environment projections and whole-section digests tying the
-  manifest to the final `Context`.
+  manifest to the final `Context`;
+- automatic-context delivery as `reference` or `none`; earlier v3 rows without
+  the field remain truthfully labeled as historical system-level context;
+- stable-instruction bytes/digest, fixed and dynamic tool counts/schema
+  bytes/digests, and request-reference bytes/digest.
 
 Message text remains canonical in the normal session/context pipeline. A
 parallel in-memory sidecar carries only event and invocation identifiers;
@@ -1272,6 +1282,25 @@ marks genuinely synthetic messages as generated rather than inventing
 provenance. Binary/media bytes, credential-shaped values, and hidden provider
 reasoning are never copied into the audit. Media is represented by type, byte
 counts, and digest evidence.
+
+Provider caching consumes the same partition rather than introducing another
+cache owner. OpenAI Platform requests use an opaque 192-bit content-derived
+`prompt_cache_key` over the resolved model, stable instructions, and fixed-tool
+prefix. It contains no session or user identifier; Codex requests omit the
+field, and `prompt_cache_retention` is left unset. Anthropic orders fixed tools
+before dynamic workers and emits exactly three possible breakpoints: `1h` on
+the last fixed tool, `1h` on the final stable system block, and `5m` on the
+last durable conversation block. Request-specific reference context follows
+without a marker. Google, Kimi, MiniMax, and Ollama use the same single
+reference projection without changing their provider cache controls. Metrics
+record bounded context-segment byte histograms, worker/inbox selection
+mechanisms, cache-read/write token counters, and provider cache-read ratios;
+labels never contain request or session identity.
+New session aggregates denormalize the immutable `tokenRecord` into mutually
+exclusive base-input and cache-read buckets, including for providers that
+report cached tokens inside their aggregate input count. Raw provider values
+remain unchanged in the event payload; this keeps cross-provider cache
+percentages truthful without a second accounting store.
 
 Authenticated clients read this same authority with
 `session::context_requests` (reverse-chronological, cursor-paged, limit 1–20)
@@ -1297,8 +1326,10 @@ evidence cannot manufacture semantic relevance. Recent success and recency
 break ties only after a semantic match. The resolver preserves that rank order
 in the provider surface and records the
 exact fixed functions, selected worker versions, selection reasons, and a stable
-surface hash. The model receives a compact revision/count/projected-worker
-primer in addition to native direct tool schemas. A `worker_discover` result
+surface hash. Those volatile values stay in the local audit. The model receives
+only stable guidance to use supplied typed tools, discover omitted workers, use
+Engine Steward for diagnosis, and use Worker Forge for changes, in addition to
+native direct tool schemas. A `worker_discover` result
 returns the declared `toolInputSchema` and promotes
 matching workers into that session's next internal turn without a restart;
 promotions are session-scoped durable engine state and survive server restarts.

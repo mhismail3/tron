@@ -261,6 +261,9 @@ fn build_tools_api_key_has_cache() {
                 extra: serde_json::Map::default(),
             },
         }]),
+        cache_layout: crate::shared::protocol::messages::ContextCacheLayout {
+            fixed_tool_prefix_len: 1,
+        },
         ..Context::default()
     };
     let tools = provider.build_tools(&ctx).unwrap();
@@ -333,13 +336,87 @@ fn build_tools_oauth_last_has_cache() {
                 },
             },
         ]),
+        cache_layout: crate::shared::protocol::messages::ContextCacheLayout {
+            fixed_tool_prefix_len: 1,
+        },
         ..Context::default()
     };
     let tools = provider.build_tools(&ctx).unwrap();
-    assert!(tools[0].cache_control.is_none()); // First tool: no cache
     assert_eq!(
-        tools[1].cache_control.as_ref().unwrap().ttl.as_deref(),
+        tools[0].cache_control.as_ref().unwrap().ttl.as_deref(),
         Some("1h")
+    );
+    assert!(tools[1].cache_control.is_none());
+}
+
+#[test]
+fn request_context_follows_three_ordered_cache_breakpoints() {
+    let provider = AnthropicProvider::new(api_key_config());
+    let mut ctx = context_with_system("Stable instructions");
+    ctx.messages = vec![crate::shared::protocol::messages::Message::user("durable")].into();
+    ctx.tools = Some(vec![
+        crate::shared::protocol::model_tools::ModelTool {
+            name: "fixed".into(),
+            description: "Fixed primitive".into(),
+            parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+                description: None,
+                extra: serde_json::Map::default(),
+            },
+        },
+        crate::shared::protocol::model_tools::ModelTool {
+            name: "dynamic".into(),
+            description: "Selected worker".into(),
+            parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+                description: None,
+                extra: serde_json::Map::default(),
+            },
+        },
+    ]);
+    ctx.cache_layout.fixed_tool_prefix_len = 1;
+    ctx.request_context
+        .push(crate::shared::protocol::messages::RequestContextBlock {
+            kind: crate::shared::protocol::messages::RequestContextKind::Continuity,
+            content: "request-local memory".into(),
+        });
+    let mut messages = convert_messages(&ctx.messages);
+    AnthropicProvider::apply_cache_to_last_user_message(&mut messages);
+    AnthropicProvider::append_request_context(&ctx, &mut messages);
+    let request = provider.build_request(&ctx, &ProviderStreamOptions::default(), messages);
+    let body = serde_json::to_value(request).unwrap();
+
+    assert_eq!(body["tools"][0]["cache_control"]["ttl"], "1h");
+    assert!(body["tools"][1].get("cache_control").is_none());
+    assert_eq!(
+        body["system"].as_array().unwrap().last().unwrap()["cache_control"]["ttl"],
+        "1h"
+    );
+    assert_eq!(
+        body["messages"][0]["content"][0]["cache_control"]["ttl"],
+        "5m"
+    );
+    assert!(
+        body["messages"][1]["content"][0]
+            .get("cache_control")
+            .is_none()
+    );
+    assert!(
+        body["messages"][1]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("[TRON REFERENCE CONTEXT]")
+    );
+    assert_eq!(
+        serde_json::to_string(&body)
+            .unwrap()
+            .matches("\"cache_control\"")
+            .count(),
+        3
     );
 }
 
@@ -588,6 +665,7 @@ fn cache_last_user_message() {
     // Last user message (index 2) should have cache_control
     assert!(messages[2].content[0]["cache_control"].is_object());
     assert_eq!(messages[2].content[0]["cache_control"]["type"], "ephemeral");
+    assert_eq!(messages[2].content[0]["cache_control"]["ttl"], "5m");
 
     // First user message should NOT have cache_control
     assert!(messages[0].content[0].get("cache_control").is_none());

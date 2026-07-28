@@ -2,7 +2,7 @@ use super::*;
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use crate::shared::protocol::model_tools::{ModelTool, ToolParameterSchema};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, json};
 
 fn make_tool(name: &str, desc: &str) -> ModelTool {
     ModelTool {
@@ -12,26 +12,6 @@ fn make_tool(name: &str, desc: &str) -> ModelTool {
             schema_type: "object".into(),
             properties: Some(Map::new()),
             required: Some(vec![]),
-            description: None,
-            extra: Map::new(),
-        },
-    }
-}
-
-fn make_tool_with_required(name: &str, desc: &str, required: Vec<&str>) -> ModelTool {
-    let mut props = Map::new();
-    for r in &required {
-        let mut prop = Map::new();
-        prop.insert("type".into(), json!("string"));
-        props.insert((*r).to_string(), Value::Object(prop));
-    }
-    ModelTool {
-        name: name.into(),
-        description: desc.into(),
-        parameters: ToolParameterSchema {
-            schema_type: "object".into(),
-            properties: Some(props),
-            required: Some(required.into_iter().map(String::from).collect()),
             description: None,
             extra: Map::new(),
         },
@@ -415,58 +395,6 @@ fn convert_tools_v2_json_shape() {
 fn convert_tools_v2_empty_tools() {
     let result = convert_tools_v2(&[]);
     assert!(result.is_empty());
-}
-
-// ── generate_tool_instruction_text ──────────────────────────────
-
-#[test]
-fn direct_guidance_includes_tool_names() {
-    let tools = vec![make_tool_with_required(
-        "worker_list",
-        "List persistent workers",
-        vec!["includeDisabled"],
-    )];
-    let result = generate_tool_instruction_text(&tools);
-
-    assert!(result.contains("worker_list"));
-    assert!(result.contains("List persistent workers"));
-    assert!(result.contains("required params: includeDisabled"));
-}
-
-#[test]
-fn direct_guidance_includes_tron_identity() {
-    let result = generate_tool_instruction_text(&[]);
-    assert!(result.contains("TRON"));
-    assert!(result.contains("AI coding assistant"));
-}
-
-#[test]
-fn direct_guidance_describes_worker_first_execution() {
-    let result = generate_tool_instruction_text(&[]);
-
-    for required in [
-        "Available Direct Tools",
-        "Follow each tool's JSON schema exactly",
-        "worker_discover",
-        "worker_upsert",
-        "becomes callable immediately",
-        "follow that tool's contract",
-    ] {
-        assert!(
-            result.contains(required),
-            "worker-first guidance missing {required:?}"
-        );
-    }
-}
-
-#[test]
-fn direct_guidance_stays_compact() {
-    let result = generate_tool_instruction_text(&[]);
-
-    assert!(
-        result.len() < 1_500,
-        "provider guidance should stay concise"
-    );
 }
 
 // ── normalize_schema_for_openai ──────────────────────────────────

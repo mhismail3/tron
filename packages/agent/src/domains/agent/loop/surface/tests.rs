@@ -735,7 +735,7 @@ async fn promotion_for_an_old_worker_version_does_not_revive_a_recreated_worker(
 }
 
 #[test]
-fn surface_primer_is_compact_and_explains_hidden_workers() {
+fn surface_primer_is_stable_and_omits_volatile_catalog_evidence() {
     let primer = surface_context_primer(&crate::domains::worker_kernel::EngineSurfaceSnapshot {
         catalog_revision: 42,
         surface_hash: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_owned(),
@@ -750,7 +750,7 @@ fn surface_primer_is_compact_and_explains_hidden_workers() {
         router_worker_version: Some("abcdef1234567890".to_owned()),
         router_invocation_id: Some("invocation-1".to_owned()),
         tools: vec![crate::domains::worker_kernel::SurfaceToolSnapshot {
-            model_name: "worker_recent_research".to_owned(),
+            model_name: "worker_discover".to_owned(),
             function_id: "worker_kernel::dynamic_recent".to_owned(),
             function_revision: 2,
             owner_worker: "worker_kernel".to_owned(),
@@ -787,9 +787,14 @@ fn surface_primer_is_compact_and_explains_hidden_workers() {
             completed_runs: 4,
         }],
     });
-    assert!(primer.contains("r42"));
-    assert!(primer.contains("1/7 workers"));
-    assert!(primer.contains("worker_recent_research@abcdef12"));
-    assert!(primer.contains("[relevance; runs=4]"));
-    assert!(!primer.contains("worker_discover"));
+    assert_eq!(
+        primer,
+        "Use only the typed tools supplied in this request. Use worker_discover when a dynamic \
+         capability is omitted. Use Engine Steward for worker diagnosis and Worker Forge for \
+         worker changes; permanent deletion, secret rotation, and engine-wide stop remain \
+         authenticated dashboard actions."
+    );
+    for volatile in ["r42", "1/7 workers", "abcdef12", "runs=4"] {
+        assert!(!primer.contains(volatile));
+    }
 }

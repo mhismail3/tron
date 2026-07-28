@@ -475,6 +475,7 @@ xcodebuild test -project TronMobile.xcodeproj -scheme 'Tron Beta' \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -parallel-testing-enabled NO \
   -only-testing:TronMobileTests/SessionContextPresentationTests \
+  -only-testing:TronMobileTests/SessionContextAuditDecodingTests \
   -only-testing:TronMobileTests/WorkerKernelDTOTests \
   -only-testing:TronMobileTests/WorkerConsoleInteractionTests \
   -only-testing:TronMobileTests/ToolInvocationDetailViewTests \

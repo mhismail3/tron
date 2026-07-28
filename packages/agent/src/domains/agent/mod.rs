@@ -28,10 +28,13 @@
 //! 5. The turn runner builds provider input from session state and supplies
 //!    direct typed kernel tools plus a compact relevant-worker projection. One
 //!    turn-local context assembly records every ordered system contribution,
-//!    message source, automatic-context outcome, environment field, and exact
-//!    selected/omitted tool projection. It finalizes and persists the bounded
-//!    `tron.model_provider_request.v3` audit before any provider stream opens;
-//!    direct prompt mutation outside that assembly fails closed.
+//!    message source, automatic-context outcome, environment field, cache
+//!    segment, and exact selected/omitted tool projection. Non-empty continuity
+//!    and worker-inbox narratives become one ephemeral reference message after
+//!    durable history, never system instructions or replay state. The runner
+//!    finalizes and persists the bounded `tron.model_provider_request.v3` audit
+//!    before any provider stream opens; direct prompt mutation outside that
+//!    assembly fails closed.
 //! 6. Provider adapters may report their own fixed request additions into that
 //!    same audit. Binary media, credential-shaped values, and hidden reasoning
 //!    remain projected or omitted rather than copied into durable context.

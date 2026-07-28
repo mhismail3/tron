@@ -15,7 +15,11 @@
 //! clients never need provider-name heuristics.
 //! Provider request audits redact hidden reasoning and sensitive material before
 //! bounded persistence; normalized reasoning token counts remain part of the
-//! ordinary token-accounting path.
+//! ordinary token-accounting path. Provider-neutral context separates stable
+//! instructions, fixed-tool schemas, dynamic worker schemas, durable history,
+//! and ephemeral reference context. Provider adapters may place cache markers
+//! only at those declared boundaries; automatic context never becomes durable
+//! conversation state.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

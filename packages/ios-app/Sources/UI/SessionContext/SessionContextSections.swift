@@ -426,10 +426,11 @@ extension SessionContextSheet {
 
     func automaticContextSummary(_ evaluation: ContextAutomaticEvaluationDTO) -> String {
         if let narrative = evaluation.narrative, !narrative.isEmpty {
-            return narrative
+            return "\(SessionContextPresentation.automaticContextChannel(evaluation)) · \(narrative)"
         }
-        return evaluation.detail
-            ?? "\(WorkerConsolePresentation.displayLabel(evaluation.mechanism)) · \(evaluation.sources.count) sources"
+        return evaluation.detail.map {
+            "\(SessionContextPresentation.automaticContextChannel(evaluation)) · \($0)"
+        } ?? "\(SessionContextPresentation.automaticContextChannel(evaluation)) · \(WorkerConsolePresentation.displayLabel(evaluation.mechanism)) · \(evaluation.sources.count) sources"
     }
 
     func workerSelectionRow(_ worker: SessionContextWorkerSelection) -> some View {
@@ -550,8 +551,17 @@ extension SessionContextSheet {
     }
 
     var usageMetrics: some View {
-        HStack(spacing: 0) {
+        let cachePercentage = SessionContextPresentation.cacheReadPercentage(
+            cacheReadTokens: contextState.accumulatedCacheReadTokens,
+            totalInputTokens: totalSessionInputTokens
+        )
+        return HStack(spacing: 0) {
             metric(label: "Input", value: TokenFormatter.format(totalSessionInputTokens))
+            Divider().frame(height: 32)
+            metric(label: "Cached", value: "\(cachePercentage)%")
+            .accessibilityValue(
+                "\(contextState.accumulatedCacheReadTokens) cache-read tokens"
+            )
             Divider().frame(height: 32)
             metric(label: "Output", value: TokenFormatter.format(contextState.accumulatedOutputTokens))
             Divider().frame(height: 32)
@@ -704,7 +714,11 @@ extension SessionContextSheet {
 
             Button {
                 if let latestContextDetail {
-                    selectedContextDetail = .providerAudit(latestContextDetail)
+                    selectedContextDetail = .providerAudit(
+                        latestContextDetail,
+                        cacheReadTokens: contextState.accumulatedCacheReadTokens,
+                        cacheWriteTokens: contextState.accumulatedCacheCreationTokens
+                    )
                 }
             } label: {
                 HStack(spacing: 12) {

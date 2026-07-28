@@ -231,6 +231,7 @@ struct ContextAutomaticEvaluationDTO: Decodable, Equatable, Identifiable, Sendab
     let kind: String
     let outcome: String
     let mechanism: String
+    let deliveryChannel: String?
     let narrative: String?
     let workerId: String?
     let workerVersion: String?
@@ -262,12 +263,26 @@ struct ContextEnvironmentManifestDTO: Decodable, Equatable, Sendable {
     let sha256: String
 }
 
+struct ContextCacheLayoutDTO: Decodable, Equatable, Sendable {
+    let stableInstructionBytes: UInt64
+    let stableInstructionSha256: String
+    let fixedToolCount: UInt64
+    let fixedToolSchemaBytes: UInt64
+    let fixedToolPrefixSha256: String
+    let dynamicToolCount: UInt64
+    let dynamicToolSchemaBytes: UInt64
+    let dynamicToolsSha256: String
+    let requestContextBytes: UInt64
+    let requestContextSha256: String?
+}
+
 struct SessionContextManifestDTO: Decodable, Equatable, Sendable {
     let systemContributions: [ContextSystemContributionDTO]
     let messages: [ContextMessageManifestDTO]
     let toolSurface: AnyCodable
     let automaticContext: [ContextAutomaticEvaluationDTO]
     let environment: ContextEnvironmentManifestDTO
+    let cacheLayout: ContextCacheLayoutDTO?
     let systemPromptSha256: String
     let messagesSha256: String
     let toolsSha256: String

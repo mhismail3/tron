@@ -8,6 +8,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
+use metrics::{counter, histogram};
 use tracing::{error, info, trace, warn};
 
 use crate::domains::agent::context::context_manager::ContextManager;
@@ -18,6 +19,7 @@ use crate::domains::agent::r#loop::types::{RunContext, TurnResult};
 use crate::domains::model::responder::{ModelResponder, ModelResponse, ModelResponseRequest};
 use crate::shared::foundation::retry::RetryConfig;
 use crate::shared::protocol::messages::Context;
+use crate::shared::protocol::messages::{RequestContextBlock, RequestContextKind};
 use crate::shared::protocol::model_audit::{
     AutomaticContextEvaluation, ContextManifest, SystemContextContribution,
 };
@@ -60,6 +62,54 @@ struct ProviderContextAssembly {
     message_sources: Vec<crate::domains::agent::context::message_store::MessageAuditSource>,
     system_contributions: Vec<SystemContextContribution>,
     automatic_context: Vec<AutomaticContextEvaluation>,
+}
+
+fn bounded_selection_mechanism(mechanism: &str) -> &'static str {
+    match mechanism {
+        "semantic_hook" => "semantic_hook",
+        "deterministic_trivial" => "deterministic_trivial",
+        "deterministic_within_limit" => "deterministic_within_limit",
+        "deterministic_fallback" => "deterministic_fallback",
+        "engine_projection" => "engine_projection",
+        "continuity_hook" => "continuity_hook",
+        "session_promotion" => "session_promotion",
+        "default" => "default",
+        "child_agent_allowlist" => "child_agent_allowlist",
+        "all_fit" => "all_fit",
+        "none" => "none",
+        _ => "other",
+    }
+}
+
+fn record_context_metrics(
+    manifest: &ContextManifest,
+    surface: &crate::domains::worker_kernel::EngineSurfaceSnapshot,
+) {
+    if let Some(cache) = &manifest.cache_layout {
+        for (segment, bytes) in [
+            ("stable_instructions", cache.stable_instruction_bytes),
+            ("fixed_tools", cache.fixed_tool_schema_bytes),
+            ("dynamic_tools", cache.dynamic_tool_schema_bytes),
+            ("request_context", cache.request_context_bytes),
+        ] {
+            #[allow(clippy::cast_precision_loss)]
+            histogram!("model_context_segment_bytes", "segment" => segment).record(bytes as f64);
+        }
+    }
+    counter!(
+        "worker_surface_selection_total",
+        "mechanism" => bounded_selection_mechanism(&surface.ranking_mechanism)
+    )
+    .increment(1);
+    for evaluation in &manifest.automatic_context {
+        counter!(
+            "automatic_context_selection_total",
+            "kind" => evaluation.kind.clone(),
+            "mechanism" => bounded_selection_mechanism(&evaluation.mechanism),
+            "delivery" => evaluation.delivery_channel.clone().unwrap_or_else(|| "system".to_owned())
+        )
+        .increment(1);
+    }
 }
 
 impl ProviderContextAssembly {
@@ -109,25 +159,24 @@ impl ProviderContextAssembly {
             ));
     }
 
-    fn add_automatic_context(&mut self, evaluation: AutomaticContextEvaluation) {
-        if let Some(narrative) = evaluation.narrative.as_deref() {
-            self.append_system(
-                &format!("{}_context", evaluation.kind),
-                if evaluation.kind == "continuity" {
-                    "Continuity context"
-                } else {
-                    "Worker Inbox context"
-                },
-                narrative,
-                serde_json::json!({
-                    "outcome":evaluation.outcome,
-                    "mechanism":evaluation.mechanism,
-                    "workerId":evaluation.worker_id,
-                    "workerVersion":evaluation.worker_version,
-                    "invocationId":evaluation.invocation_id,
-                    "sources":evaluation.sources,
-                }),
-            );
+    fn add_automatic_context(&mut self, mut evaluation: AutomaticContextEvaluation) {
+        if let Some(narrative) = evaluation
+            .narrative
+            .as_deref()
+            .filter(|narrative| !narrative.is_empty())
+        {
+            let kind = if evaluation.kind == "continuity" {
+                RequestContextKind::Continuity
+            } else {
+                RequestContextKind::WorkerInbox
+            };
+            self.context.request_context.push(RequestContextBlock {
+                kind,
+                content: narrative.to_owned(),
+            });
+            evaluation.delivery_channel = Some("reference".to_owned());
+        } else {
+            evaluation.delivery_channel = Some("none".to_owned());
         }
         self.automatic_context.push(evaluation);
     }
@@ -277,8 +326,11 @@ pub(super) async fn open_provider_response(
             });
         }
     };
+    let mut projected_context = projection.context;
+    projected_context.cache_layout.fixed_tool_prefix_len =
+        primitive_surface.snapshot.fixed_tool_count;
     let mut assembly = ProviderContextAssembly::new(
-        projection.context,
+        projected_context,
         params.context_manager.message_audit_sources().to_vec(),
     );
     let surface_context = surface::surface_context_primer(&primitive_surface.snapshot);
@@ -323,6 +375,7 @@ pub(super) async fn open_provider_response(
             });
         }
     };
+    record_context_metrics(&context_manifest, &primitive_surface.snapshot);
 
     let model_request = ModelResponseRequest {
         context,

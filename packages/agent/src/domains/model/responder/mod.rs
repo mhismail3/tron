@@ -535,7 +535,7 @@ fn build_request_audit(
         info.context_window,
         request.session_id.clone(),
         reasoning_level,
-        request.context.messages.len(),
+        request.context.provider_messages().len(),
         tool_count,
         stream_options,
         provider_request,

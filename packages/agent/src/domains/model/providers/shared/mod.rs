@@ -65,7 +65,9 @@ pub mod sse;
 pub mod stream_common;
 pub mod stream_pipeline;
 
-pub use context_composition::compose_context_parts;
+pub use context_composition::{
+    compose_context_parts, messages_with_request_context, render_request_context,
+};
 pub use health::ProviderHealthTracker;
 pub use retry::{StreamFactory, StreamRetryConfig, with_provider_retry};
 pub use sse::SseParserOptions;

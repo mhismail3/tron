@@ -20,6 +20,7 @@ use crate::domains::model::providers::anthropic::types::{
 use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
+use crate::domains::model::providers::shared::render_request_context;
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
 
@@ -224,6 +225,11 @@ impl MiniMaxProvider {
         // Strip images — MiniMax doesn't support them
         Self::strip_images(&mut messages);
         Self::apply_cache_to_last_user_message(&mut messages);
+        if let Some(reference) = render_request_context(context) {
+            messages.extend(convert_messages(&[
+                crate::shared::protocol::messages::Message::user(reference),
+            ]));
+        }
 
         let request = self.build_request(context, options, messages);
 
@@ -318,6 +324,11 @@ impl Provider for MiniMaxProvider {
         let mut messages = convert_messages(&sanitized);
         Self::strip_images(&mut messages);
         Self::apply_cache_to_last_user_message(&mut messages);
+        if let Some(reference) = render_request_context(context) {
+            messages.extend(convert_messages(&[
+                crate::shared::protocol::messages::Message::user(reference),
+            ]));
+        }
         serde_json::to_value(self.build_request(context, options, messages))
             .map(ProviderAuditPayload::exact_provider_envelope)
             .map_err(ProviderError::Json)
@@ -582,6 +593,32 @@ mod tests {
         assert!(req.system.is_some());
         assert!(req.thinking.is_none());
         assert!(req.output_config.is_none());
+    }
+
+    #[test]
+    fn audit_request_context_is_one_final_uncached_reference_message() {
+        let provider = MiniMaxProvider::new(test_config());
+        let ctx = Context {
+            messages: vec![crate::shared::protocol::messages::Message::user("durable")].into(),
+            request_context: vec![crate::shared::protocol::messages::RequestContextBlock {
+                kind: crate::shared::protocol::messages::RequestContextKind::WorkerInbox,
+                content: "background result".into(),
+            }],
+            ..Context::default()
+        };
+        let payload =
+            Provider::audit_payload(&provider, &ctx, &ProviderStreamOptions::default()).unwrap();
+        let rendered = serde_json::to_string(&payload.body).unwrap();
+        assert_eq!(rendered.matches("[TRON REFERENCE CONTEXT]").count(), 1);
+        assert!(
+            rendered.find("durable").unwrap() < rendered.find("[TRON REFERENCE CONTEXT]").unwrap()
+        );
+        let messages = payload.body["messages"].as_array().unwrap();
+        assert!(
+            messages.last().unwrap()["content"][0]
+                .get("cache_control")
+                .is_none()
+        );
     }
 
     // ── Image stripping ─────────────────────────────────────────────────

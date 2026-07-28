@@ -229,6 +229,7 @@ struct SessionContextAuditDecodingTests {
               "kind":"continuity",
               "outcome":"injected",
               "mechanism":"engine_hook",
+              "deliveryChannel":"reference",
               "narrative":"Remember the device gate.",
               "workerId":"continuity-curator",
               "workerVersion":"version-2",
@@ -240,6 +241,18 @@ struct SessionContextAuditDecodingTests {
               }]
             }],
             "environment":{"sha256":"sha256:environment"},
+            "cacheLayout":{
+              "stableInstructionBytes":1024,
+              "stableInstructionSha256":"sha256:instructions",
+              "fixedToolCount":11,
+              "fixedToolSchemaBytes":4096,
+              "fixedToolPrefixSha256":"sha256:fixed",
+              "dynamicToolCount":3,
+              "dynamicToolSchemaBytes":2048,
+              "dynamicToolsSha256":"sha256:dynamic",
+              "requestContextBytes":512,
+              "requestContextSha256":"sha256:reference"
+            },
             "systemPromptSha256":"sha256:system",
             "messagesSha256":"sha256:messages",
             "toolsSha256":"sha256:tools",
@@ -261,6 +274,9 @@ struct SessionContextAuditDecodingTests {
         let detail = try JSONDecoder().decode(SessionContextRequestDetailDTO.self, from: data)
 
         #expect(detail.contextManifest?.automaticContext.first?.sources.count == 1)
+        #expect(detail.contextManifest?.automaticContext.first?.deliveryChannel == "reference")
+        #expect(detail.contextManifest?.cacheLayout?.fixedToolCount == 11)
+        #expect(detail.contextManifest?.cacheLayout?.requestContextBytes == 512)
         #expect(detail.contextManifest?.messages.first?.sourceKind == "durable_event")
         #expect(detail.contextManifest?.messages.first?.sourceEventIds == ["event-user-1"])
         #expect(detail.providerAdditions?.first?.kind == "provider_system_prefix")

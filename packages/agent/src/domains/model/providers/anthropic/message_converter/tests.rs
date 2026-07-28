@@ -9,6 +9,8 @@ fn simple_context() -> Context {
         system_prompt: Some("You are helpful.".into()),
         messages: vec![Message::user("hello")].into(),
         tools: None,
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: None,
         server_origin: None,
     }

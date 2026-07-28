@@ -13,6 +13,7 @@ use tracing::{debug, error, info, instrument};
 use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
+use crate::domains::model::providers::shared::render_request_context;
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
 
@@ -161,7 +162,7 @@ impl AnthropicProvider {
         super::message_converter::build_system_prompt_for_provider(context, prefix)
     }
 
-    /// Build tool definitions with cache breakpoints.
+    /// Build tool definitions with a stable fixed-prefix cache breakpoint.
     #[allow(clippy::unused_self)]
     fn build_tools(&self, context: &Context) -> Option<Vec<AnthropicTool>> {
         let tools = context.tools.as_ref()?;
@@ -179,9 +180,12 @@ impl AnthropicProvider {
             })
             .collect();
 
-        // Breakpoint 1: Last tool → 1h TTL
-        if let Some(last) = anthropic_tools.last_mut() {
-            last.cache_control = Some(CacheControl {
+        let fixed_len = context
+            .cache_layout
+            .fixed_tool_prefix_len
+            .min(anthropic_tools.len());
+        if fixed_len > 0 {
+            anthropic_tools[fixed_len - 1].cache_control = Some(CacheControl {
                 cache_type: "ephemeral".into(),
                 ttl: Some("1h".into()),
             });
@@ -249,18 +253,31 @@ impl AnthropicProvider {
         })
     }
 
-    /// Apply cache control to the last user message (Breakpoint 4: 5m TTL).
+    /// Apply the final 5-minute breakpoint to durable conversation history.
     fn apply_cache_to_last_user_message(messages: &mut [AnthropicMessageParam]) {
         for msg in messages.iter_mut().rev() {
             if msg.role == "user" && !msg.content.is_empty() {
                 if let Some(last_block) = msg.content.last_mut()
                     && let Some(obj) = last_block.as_object_mut()
                 {
-                    let _ = obj.insert("cache_control".into(), json!({"type": "ephemeral"}));
+                    let _ = obj.insert(
+                        "cache_control".into(),
+                        json!({"type": "ephemeral", "ttl": "5m"}),
+                    );
                 }
                 break;
             }
         }
+    }
+
+    /// Append request-local automatic context after all cache breakpoints.
+    fn append_request_context(context: &Context, messages: &mut Vec<AnthropicMessageParam>) {
+        let Some(reference) = render_request_context(context) else {
+            return;
+        };
+        messages.extend(convert_messages(&[
+            crate::shared::protocol::messages::Message::user(reference),
+        ]));
     }
 
     /// Build the request body.
@@ -311,8 +328,10 @@ impl AnthropicProvider {
             }
         }
 
-        // Breakpoint 4: cache last user message
+        // Final durable-conversation breakpoint. Request reference context is
+        // appended afterward and deliberately receives no cache marker.
         Self::apply_cache_to_last_user_message(&mut messages);
+        Self::append_request_context(context, &mut messages);
 
         let request = self.build_request(context, options, messages);
 
@@ -415,6 +434,7 @@ impl Provider for AnthropicProvider {
             messages = prune_tool_results_for_recache(&messages, DEFAULT_RECENT_TURNS);
         }
         Self::apply_cache_to_last_user_message(&mut messages);
+        Self::append_request_context(context, &mut messages);
         serde_json::to_value(self.build_request(context, options, messages))
             .map(ProviderAuditPayload::exact_provider_envelope)
             .map_err(ProviderError::Json)

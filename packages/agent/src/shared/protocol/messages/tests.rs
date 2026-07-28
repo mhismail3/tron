@@ -215,6 +215,8 @@ fn context_serde_roundtrip() {
         system_prompt: Some("You are a helpful assistant.".into()),
         messages: vec![Message::user("hi")].into(),
         tools: None,
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: Some("/tmp".into()),
         server_origin: None,
     };

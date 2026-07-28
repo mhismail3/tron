@@ -746,8 +746,14 @@ The v3 manifest drives standardized sections for ordered instructions,
 conversation/compaction, attachments and documents, environment, automatic
 Continuity and Inbox evaluations, exact selected/omitted tools, and the advanced
 redacted provider audit. Empty, unavailable, failed, skipped, and deterministic
-fallback outcomes remain visible. Binary media renders only metadata, size,
-and digest; it is never converted to audit text. The Worker System section uses
+fallback outcomes remain visible. Current automatic narratives are labeled
+`Reference context`; older v3 narratives without delivery evidence are labeled
+`System context (historical)`. The summary shows cache-read percentage beside
+input, output, and cost using existing session token totals. Advanced detail
+shows session cache reads/writes and manifest-owned stable instruction,
+fixed/dynamic schema, and reference-context byte/digest evidence. No context-
+or cache-specific client store is added. Binary media renders only metadata,
+size, and digest; it is never converted to audit text. The Worker System section uses
 the dynamic architecture projection and a reusable detail sheet to show
 direct/internal exposure, agent/command runners, hooks/native boundaries,
 dispatch and `agentTools` relationships, suite, version, health, and provenance.

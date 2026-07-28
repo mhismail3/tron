@@ -82,6 +82,35 @@ struct SessionContextPresentationTests {
         ))
     }
 
+    @Test("Cache percentage is bounded and handles zero input")
+    func cachePercentage() {
+        #expect(SessionContextPresentation.cacheReadPercentage(
+            cacheReadTokens: 0,
+            totalInputTokens: 0
+        ) == 0)
+        #expect(SessionContextPresentation.cacheReadPercentage(
+            cacheReadTokens: 250,
+            totalInputTokens: 1_000
+        ) == 25)
+        #expect(SessionContextPresentation.cacheReadPercentage(
+            cacheReadTokens: 2_000,
+            totalInputTokens: 1_000
+        ) == 100)
+    }
+
+    @Test("Automatic context distinguishes reference and historical system delivery")
+    func automaticContextDeliveryLabels() {
+        #expect(SessionContextPresentation.automaticContextChannel(
+            automaticEvaluation(deliveryChannel: "reference", narrative: "memory")
+        ) == "Reference context")
+        #expect(SessionContextPresentation.automaticContextChannel(
+            automaticEvaluation(deliveryChannel: nil, narrative: "legacy memory")
+        ) == "System context (historical)")
+        #expect(SessionContextPresentation.automaticContextChannel(
+            automaticEvaluation(deliveryChannel: "none", narrative: nil)
+        ) == "Not delivered")
+    }
+
     @Test("Remaining context avoids a false zero while the model window loads")
     func remainingContextText() {
         #expect(SessionContextPresentation.remainingContextText(
@@ -223,6 +252,24 @@ struct SessionContextPresentationTests {
             createdAt: "2026-07-24T12:00:00Z",
             startedAt: "2026-07-24T12:00:00Z",
             completedAt: status == "completed" ? "2026-07-24T12:00:01Z" : nil
+        )
+    }
+
+    private func automaticEvaluation(
+        deliveryChannel: String?,
+        narrative: String?
+    ) -> ContextAutomaticEvaluationDTO {
+        ContextAutomaticEvaluationDTO(
+            kind: "continuity",
+            outcome: narrative == nil ? "empty" : "injected",
+            mechanism: "continuity_hook",
+            deliveryChannel: deliveryChannel,
+            narrative: narrative,
+            workerId: "continuity-curator",
+            workerVersion: "v1",
+            invocationId: "invocation",
+            sources: [],
+            detail: nil
         )
     }
 }

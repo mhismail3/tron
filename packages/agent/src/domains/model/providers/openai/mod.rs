@@ -32,10 +32,16 @@
 //!   `model.switch` rejects them so new runs do not select unavailable IDs.
 //!   Non-streaming Pro/preview records stay hidden and are rejected before a
 //!   request is sent.
-//! - Primitive context is compiled into the Responses `instructions` field.
-//!   The `input` array carries conversation items and tool results only;
-//!   it must not receive synthetic developer/user messages for the agent seed,
-//!   environment, or tool-use guidance.
+//! - Stable primitive context is compiled into the Responses `instructions`
+//!   field and authoritative tool contracts travel only in `tools`; tool names
+//!   and schemas are never duplicated into instructions. The `input` array
+//!   carries durable conversation/tool results followed by at most one
+//!   ephemeral request-reference message.
+//! - Public Platform requests carry an opaque content-derived
+//!   `prompt_cache_key` over the model, stable instructions, and fixed-tool
+//!   prefix. It contains no session/user identity, does not vary with history,
+//!   request references, or dynamic workers, and is absent on the private
+//!   Codex endpoint. Provider-default retention remains in force.
 //! - Tool invocations arrive as streaming deltas over multiple SSE events.
 //!   [`stream_handler`] accumulates them until the closing `finish_reason`
 //!   before emitting a single `StreamEvent::ToolInvocationDraft` — the orchestrator

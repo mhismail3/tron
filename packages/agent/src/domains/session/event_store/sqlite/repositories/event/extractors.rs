@@ -37,6 +37,32 @@ pub(crate) fn extract_bool_as_int(val: &Value, key: &str) -> Option<i64> {
 pub(crate) fn extract_tokens(
     payload: &Value,
 ) -> (Option<i64>, Option<i64>, Option<i64>, Option<i64>) {
+    // Prefer the immutable provider-aware token record. Session counters store
+    // mutually exclusive base-input and cache buckets so aggregate cache
+    // percentages remain meaningful across provider switches.
+    if let Some(source) = payload
+        .get("tokenRecord")
+        .and_then(|record| record.get("source"))
+    {
+        let raw_input = source.get("rawInputTokens").and_then(Value::as_i64);
+        let output = source.get("rawOutputTokens").and_then(Value::as_i64);
+        let provider_cache_read = source.get("rawCacheReadTokens").and_then(Value::as_i64);
+        let provider_cached_input = source.get("rawCachedInputTokens").and_then(Value::as_i64);
+        let cache_read = match (provider_cache_read, provider_cached_input) {
+            (Some(read), Some(cached)) => Some(read.max(cached)),
+            (read, cached) => read.or(cached),
+        };
+        let cache_create = source.get("rawCacheCreationTokens").and_then(Value::as_i64);
+        let provider = source.get("provider").and_then(Value::as_str);
+        let base_input = raw_input.map(|input| {
+            if matches!(provider, Some("anthropic" | "minimax")) {
+                input
+            } else {
+                input.saturating_sub(cache_read.unwrap_or(0))
+            }
+        });
+        return (base_input, output, cache_read, cache_create);
+    }
     // Try payload.tokenUsage first (assistant messages)
     if let Some(tu) = payload.get("tokenUsage") {
         return (
@@ -53,4 +79,55 @@ pub(crate) fn extract_tokens(
         extract_i64(payload, "cacheReadTokens"),
         extract_i64(payload, "cacheCreationTokens"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn token_record_normalizes_direct_provider_cache_into_exclusive_buckets() {
+        let payload = json!({
+            "tokenUsage": {
+                "inputTokens": 1_000,
+                "outputTokens": 50,
+                "cacheReadTokens": 600
+            },
+            "tokenRecord": {
+                "source": {
+                    "provider": "openai",
+                    "rawInputTokens": 1_000,
+                    "rawOutputTokens": 50,
+                    "rawCacheReadTokens": 600,
+                    "rawCachedInputTokens": 0,
+                    "rawCacheCreationTokens": 0
+                }
+            }
+        });
+        assert_eq!(
+            extract_tokens(&payload),
+            (Some(400), Some(50), Some(600), Some(0))
+        );
+    }
+
+    #[test]
+    fn token_record_keeps_anthropic_input_and_cache_buckets_exclusive() {
+        let payload = json!({
+            "tokenRecord": {
+                "source": {
+                    "provider": "anthropic",
+                    "rawInputTokens": 400,
+                    "rawOutputTokens": 50,
+                    "rawCacheReadTokens": 600,
+                    "rawCachedInputTokens": 600,
+                    "rawCacheCreationTokens": 100
+                }
+            }
+        });
+        assert_eq!(
+            extract_tokens(&payload),
+            (Some(400), Some(50), Some(600), Some(100))
+        );
+    }
 }

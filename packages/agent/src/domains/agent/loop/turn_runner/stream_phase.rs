@@ -205,6 +205,40 @@ pub(super) async fn process_provider_stream(
             .increment(usage.input_tokens);
         counter!("llm_tokens_total", "provider" => provider_name, "direction" => "output")
             .increment(usage.output_tokens);
+        let cache_read = usage.cache_read_tokens.unwrap_or(0);
+        let cache_write = usage.cache_creation_tokens.unwrap_or_else(|| {
+            usage.cache_creation_5m_tokens.unwrap_or(0)
+                + usage.cache_creation_1h_tokens.unwrap_or(0)
+        });
+        counter!(
+            "provider_prompt_cache_tokens_total",
+            "provider" => provider_name,
+            "operation" => "read"
+        )
+        .increment(cache_read);
+        counter!(
+            "provider_prompt_cache_tokens_total",
+            "provider" => provider_name,
+            "operation" => "write"
+        )
+        .increment(cache_write);
+        let effective_input =
+            if provider_type == crate::shared::protocol::messages::Provider::Anthropic {
+                usage
+                    .input_tokens
+                    .saturating_add(cache_read)
+                    .saturating_add(cache_write)
+            } else {
+                usage.input_tokens
+            };
+        if effective_input > 0 {
+            #[allow(clippy::cast_precision_loss)]
+            histogram!(
+                "provider_prompt_cache_read_ratio",
+                "provider" => provider_name
+            )
+            .record(cache_read as f64 / effective_input as f64);
+        }
     }
 
     if stream_result.interrupted {

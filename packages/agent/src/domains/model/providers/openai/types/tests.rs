@@ -672,6 +672,7 @@ fn responses_request_serde() {
         text: Some(ResponseTextConfig {
             verbosity: "low".into(),
         }),
+        prompt_cache_key: None,
     };
     let json = serde_json::to_value(&req).unwrap();
     assert_eq!(json["model"], "gpt-5.3-codex");

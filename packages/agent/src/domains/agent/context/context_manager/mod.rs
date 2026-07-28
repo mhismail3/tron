@@ -242,6 +242,8 @@ impl ContextManager {
             system_prompt: Some(self.get_system_prompt().to_owned()),
             messages: Arc::default(),
             tools: None,
+            request_context: Vec::new(),
+            cache_layout: Default::default(),
             working_directory: Some(self.get_working_directory().to_owned()),
             server_origin: None,
         }

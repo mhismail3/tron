@@ -148,6 +148,7 @@ pub(crate) async fn take_continuity_context(
         kind: "continuity".to_owned(),
         outcome: "injected".to_owned(),
         mechanism: "semantic_hook".to_owned(),
+        delivery_channel: None,
         narrative: Some(narrative),
         worker_id: value
             .get("workerId")
@@ -319,6 +320,7 @@ pub(crate) async fn take_worker_inbox_context(
             "deterministic_fallback"
         }
         .to_owned(),
+        delivery_channel: None,
         narrative: Some(narrative),
         worker_id: value
             .get("workerId")
@@ -348,6 +350,7 @@ fn automatic_context_outcome(
         kind: kind.to_owned(),
         outcome: outcome.to_owned(),
         mechanism: mechanism.to_owned(),
+        delivery_channel: None,
         narrative,
         worker_id: None,
         worker_version: None,

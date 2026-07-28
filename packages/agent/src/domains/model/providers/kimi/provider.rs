@@ -8,9 +8,11 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tracing::{debug, error, instrument};
 
-use crate::domains::model::providers::shared::compose_context_parts;
 use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
+};
+use crate::domains::model::providers::shared::{
+    compose_context_parts, messages_with_request_context,
 };
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
@@ -107,7 +109,7 @@ impl KimiProvider {
     /// Build the request body for the chat completions API.
     fn build_request_body(&self, context: &Context, options: &ProviderStreamOptions) -> Value {
         let supports_images = self.model_supports_images();
-        let messages = convert_messages(&context.messages, supports_images);
+        let messages = convert_messages(&messages_with_request_context(context), supports_images);
 
         let mut body = json!({
             "model": self.config.model,
@@ -433,6 +435,25 @@ mod tests {
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs[0]["role"], "system");
         assert_eq!(msgs[0]["content"], "You are helpful.");
+    }
+
+    #[test]
+    fn request_context_is_one_final_reference_message() {
+        let provider = KimiProvider::new(test_config());
+        let ctx = Context {
+            messages: vec![crate::shared::protocol::messages::Message::user("durable")].into(),
+            request_context: vec![crate::shared::protocol::messages::RequestContextBlock {
+                kind: crate::shared::protocol::messages::RequestContextKind::Continuity,
+                content: "selected memory".into(),
+            }],
+            ..Context::default()
+        };
+        let body = provider.build_request_body(&ctx, &ProviderStreamOptions::default());
+        let rendered = serde_json::to_string(&body["messages"]).unwrap();
+        assert_eq!(rendered.matches("[TRON REFERENCE CONTEXT]").count(), 1);
+        assert!(
+            rendered.find("durable").unwrap() < rendered.find("[TRON REFERENCE CONTEXT]").unwrap()
+        );
     }
 
     #[test]

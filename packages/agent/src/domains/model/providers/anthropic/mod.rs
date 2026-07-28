@@ -12,15 +12,17 @@
 //! | [`provider`]           | [`AnthropicProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::shared::provider`]); stream orchestration, retry, caching |
 //! | [`message_converter`]  | `Vec<Message>` → `messages`+`system` blocks; Anthropic `tool_use` / `tool_result` provider blocks, thinking blocks, content-block ordering |
 //! | [`stream_handler`]     | Anthropic SSE (`message_start`, `content_block_*`, `message_delta`, `message_stop`) → `StreamEvent` ([`crate::shared::protocol::events`]) |
-//! | [`cache_pruning`]      | Remove the oldest `cache_control` marker(s) when the 4-breakpoint cap is hit; preserves the system prompt marker |
+//! | [`cache_pruning`]      | Remove stale historical tool-result cache markers on a cold request before current boundaries are applied |
 //! | [`message_sanitizer`]  | Drop empty assistant messages and normalise internal tool-result ordering before provider conversion |
 //! | [`types`]              | [`AnthropicAuth`] (ApiKey / Oauth / ClaudeAgentSdk), [`AnthropicConfig`], [`AnthropicProviderSettings`] |
 //!
 //! ## Invariants
 //!
-//! - Cache breakpoints are capped at 4 per request
-//!   (Anthropic API limit); [`cache_pruning`] strips the oldest when the
-//!   cap would be exceeded. The system-prompt marker is permanent.
+//! - Tron emits at most three ordered cache breakpoints: the final fixed tool
+//!   and final stable system block use `1h`, and the last durable conversation
+//!   block uses `5m`. Request-local reference context follows all three without
+//!   a marker. Cold-cache pruning still removes old tool-result bulk before
+//!   those boundaries are rebuilt.
 //! - Provider-wire tool blocks use Anthropic's canonical `tool_use` and
 //!   `tool_result` shape; internal messages keep Tron tool-invocation names.
 //! - v1beta (ApiKey) rejects unknown fields; v1internal (OAuth / SDK)

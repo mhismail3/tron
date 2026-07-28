@@ -149,6 +149,8 @@ fn context_manifest_matches_context_and_retains_message_provenance() {
         system_prompt: Some("base\n\nremember this".to_owned()),
         messages: vec![Message::user("hello")].into(),
         tools: Some(Vec::new()),
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: Some("/workspace/project".to_owned()),
         server_origin: Some("localhost:9847".to_owned()),
     };
@@ -181,6 +183,162 @@ fn context_manifest_matches_context_and_retains_message_provenance() {
     assert_eq!(manifest.messages[0].source_kind, "durable_event");
     assert!(manifest.context_sha256.starts_with("sha256:"));
     assert_eq!(manifest.system_contributions.len(), 2);
+}
+
+#[test]
+fn request_context_changes_only_request_specific_cache_evidence() {
+    let build = |content: &str| {
+        let context = Context {
+            system_prompt: Some("stable instructions".to_owned()),
+            messages: vec![Message::user("durable history")].into(),
+            request_context: vec![crate::shared::protocol::messages::RequestContextBlock {
+                kind: crate::shared::protocol::messages::RequestContextKind::Continuity,
+                content: content.to_owned(),
+            }],
+            ..Context::default()
+        };
+        ContextManifest::build(
+            &context,
+            vec![SystemContextContribution::new(
+                "base_instructions",
+                "Agent instructions",
+                "stable instructions",
+                Value::Null,
+            )],
+            Value::Null,
+            vec![AutomaticContextEvaluation {
+                kind: "continuity".to_owned(),
+                outcome: "injected".to_owned(),
+                mechanism: "continuity_hook".to_owned(),
+                delivery_channel: Some("reference".to_owned()),
+                narrative: Some(content.to_owned()),
+                worker_id: Some("continuity-curator".to_owned()),
+                worker_version: Some("v1".to_owned()),
+                invocation_id: Some("invocation".to_owned()),
+                sources: Vec::new(),
+                detail: None,
+            }],
+            &[MessageAuditSource::events(vec!["event-user".to_owned()])],
+        )
+        .unwrap()
+    };
+
+    let first = build("first memory");
+    let second = build("second memory");
+    let first_cache = first.cache_layout.as_ref().unwrap();
+    let second_cache = second.cache_layout.as_ref().unwrap();
+
+    assert_eq!(
+        first_cache.stable_instruction_sha256,
+        second_cache.stable_instruction_sha256
+    );
+    assert_eq!(
+        first_cache.fixed_tool_prefix_sha256,
+        second_cache.fixed_tool_prefix_sha256
+    );
+    assert_ne!(
+        first_cache.request_context_sha256,
+        second_cache.request_context_sha256
+    );
+    assert_eq!(first.messages.len(), 2);
+    assert_eq!(first.messages[1].source_kind, "generated");
+    assert!(
+        first.messages[1]
+            .preview
+            .as_deref()
+            .is_some_and(|preview| preview.contains("TRON REFERENCE CONTEXT"))
+    );
+}
+
+#[test]
+fn empty_request_context_adds_zero_provider_input_bytes() {
+    let context = Context {
+        system_prompt: Some("stable instructions".to_owned()),
+        messages: vec![Message::user("durable history")].into(),
+        ..Context::default()
+    };
+    let manifest = ContextManifest::build(
+        &context,
+        vec![SystemContextContribution::new(
+            "base_instructions",
+            "Agent instructions",
+            "stable instructions",
+            Value::Null,
+        )],
+        Value::Null,
+        Vec::new(),
+        &[MessageAuditSource::events(vec!["event-user".to_owned()])],
+    )
+    .unwrap();
+
+    assert_eq!(manifest.messages.len(), 1);
+    assert_eq!(
+        manifest
+            .cache_layout
+            .as_ref()
+            .unwrap()
+            .request_context_bytes,
+        0
+    );
+    assert!(
+        manifest
+            .cache_layout
+            .as_ref()
+            .unwrap()
+            .request_context_sha256
+            .is_none()
+    );
+}
+
+#[test]
+fn dynamic_worker_changes_do_not_invalidate_fixed_tool_prefix() {
+    let tool = |name: &str, description: &str| crate::shared::protocol::model_tools::ModelTool {
+        name: name.to_owned(),
+        description: description.to_owned(),
+        parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+            schema_type: "object".to_owned(),
+            properties: None,
+            required: None,
+            description: None,
+            extra: serde_json::Map::new(),
+        },
+    };
+    let build = |dynamic_description: &str| {
+        let context = Context {
+            system_prompt: Some("stable".to_owned()),
+            tools: Some(vec![
+                tool("fixed_read", "Stable primitive"),
+                tool("worker_memory", dynamic_description),
+            ]),
+            cache_layout: crate::shared::protocol::messages::ContextCacheLayout {
+                fixed_tool_prefix_len: 1,
+            },
+            ..Context::default()
+        };
+        ContextManifest::build(
+            &context,
+            vec![SystemContextContribution::new(
+                "base_instructions",
+                "Agent instructions",
+                "stable",
+                Value::Null,
+            )],
+            Value::Null,
+            Vec::new(),
+            &[],
+        )
+        .unwrap()
+    };
+
+    let first = build("First selected worker schema");
+    let second = build("Updated selected worker schema");
+    let first = first.cache_layout.unwrap();
+    let second = second.cache_layout.unwrap();
+    assert_eq!(
+        first.fixed_tool_prefix_sha256,
+        second.fixed_tool_prefix_sha256
+    );
+    assert_ne!(first.dynamic_tools_sha256, second.dynamic_tools_sha256);
 }
 
 #[test]

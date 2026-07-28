@@ -349,7 +349,7 @@ fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value>
     if blocks.len() == prefix_offset && prefix.is_some() {
         blocks[0].cache_control = Some(CacheControl {
             cache_type: "ephemeral".into(),
-            ttl: None,
+            ttl: Some("1h".into()),
         });
     } else if !context_parts.is_empty() {
         if let Some(last) = blocks.last_mut() {

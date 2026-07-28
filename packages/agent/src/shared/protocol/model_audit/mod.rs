@@ -174,6 +174,11 @@ pub struct AutomaticContextEvaluation {
     pub outcome: String,
     /// Selection mechanism used for this request.
     pub mechanism: String,
+    /// Provider-neutral delivery channel. New requests use `reference` when a
+    /// narrative is present and `none` otherwise. Historical v3 rows omit this
+    /// field and are truthfully interpreted as system-level injection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_channel: Option<String>,
     /// Exact redacted narrative when one was injected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub narrative: Option<String>,
@@ -237,6 +242,33 @@ pub struct ContextEnvironmentManifest {
     pub sha256: String,
 }
 
+/// Provider-neutral cache partition evidence for one finalized request.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextCacheLayoutManifest {
+    /// UTF-8 bytes in the stable instruction and environment prefix.
+    pub stable_instruction_bytes: usize,
+    /// Digest of the stable instruction and environment prefix.
+    pub stable_instruction_sha256: String,
+    /// Number of leading fixed primitive schemas.
+    pub fixed_tool_count: usize,
+    /// Serialized bytes in the fixed primitive schema prefix.
+    pub fixed_tool_schema_bytes: usize,
+    /// Digest of the fixed primitive schema prefix.
+    pub fixed_tool_prefix_sha256: String,
+    /// Number of request-selected dynamic worker schemas.
+    pub dynamic_tool_count: usize,
+    /// Serialized bytes in the dynamic worker schema suffix.
+    pub dynamic_tool_schema_bytes: usize,
+    /// Digest of the dynamic worker schema suffix.
+    pub dynamic_tools_sha256: String,
+    /// UTF-8 bytes in the one ephemeral reference-context message.
+    pub request_context_bytes: usize,
+    /// Digest of the ephemeral reference-context message, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_context_sha256: Option<String>,
+}
+
 /// Canonical explanation of one finalized provider request context.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -252,6 +284,9 @@ pub struct ContextManifest {
     pub automatic_context: Vec<AutomaticContextEvaluation>,
     /// Provider-neutral environment contribution.
     pub environment: ContextEnvironmentManifest,
+    /// Cache-stability segment evidence. Historical v3 rows omit this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_layout: Option<ContextCacheLayoutManifest>,
     /// Digest of the unredacted finalized system prompt.
     pub system_prompt_sha256: String,
     /// Digest of the unredacted finalized message sequence.
@@ -291,27 +326,47 @@ impl ContextManifest {
         // every provider-neutral Context field.
         let Context {
             system_prompt: _,
-            messages,
+            messages: _,
             tools,
+            request_context: _,
+            cache_layout,
             working_directory,
             server_origin,
         } = context;
-        let message_manifests = messages
+        let provider_messages = context.provider_messages();
+        let message_manifests = provider_messages
             .iter()
             .enumerate()
             .map(|(ordinal, message)| {
                 message_manifest(ordinal, message, message_sources.get(ordinal))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let messages_json = serde_json::to_vec(messages).map_err(|error| error.to_string())?;
+        let messages_json =
+            serde_json::to_vec(&provider_messages).map_err(|error| error.to_string())?;
         let tools_json = serde_json::to_vec(tools).map_err(|error| error.to_string())?;
+        let tools = tools.as_deref().unwrap_or_default();
+        if cache_layout.fixed_tool_prefix_len > tools.len() {
+            return Err("fixed tool prefix exceeds finalized provider tool surface".to_owned());
+        }
+        let (fixed_tools, dynamic_tools) = tools.split_at(cache_layout.fixed_tool_prefix_len);
+        let fixed_tools_json =
+            serde_json::to_vec(fixed_tools).map_err(|error| error.to_string())?;
+        let dynamic_tools_json =
+            serde_json::to_vec(dynamic_tools).map_err(|error| error.to_string())?;
+        let stable_instruction_text = context.stable_instruction_parts().join("\n\n");
+        let request_context = context.rendered_request_context();
         let environment_value = serde_json::json!({
             "workingDirectory": working_directory,
             "serverOrigin": server_origin,
         });
         let environment_json =
             serde_json::to_vec(&environment_value).map_err(|error| error.to_string())?;
-        let context_json = serde_json::to_vec(context).map_err(|error| error.to_string())?;
+        let context_json = serde_json::to_vec(&serde_json::json!({
+            "stableInstructions": stable_instruction_text,
+            "messages": provider_messages,
+            "tools": tools,
+        }))
+        .map_err(|error| error.to_string())?;
 
         Ok(Self {
             system_contributions,
@@ -323,6 +378,20 @@ impl ContextManifest {
                 server_origin: server_origin.as_deref().map(redact_provider_audit_text),
                 sha256: sha256_label(&environment_json),
             },
+            cache_layout: Some(ContextCacheLayoutManifest {
+                stable_instruction_bytes: stable_instruction_text.len(),
+                stable_instruction_sha256: sha256_label(stable_instruction_text.as_bytes()),
+                fixed_tool_count: fixed_tools.len(),
+                fixed_tool_schema_bytes: fixed_tools_json.len(),
+                fixed_tool_prefix_sha256: sha256_label(&fixed_tools_json),
+                dynamic_tool_count: dynamic_tools.len(),
+                dynamic_tool_schema_bytes: dynamic_tools_json.len(),
+                dynamic_tools_sha256: sha256_label(&dynamic_tools_json),
+                request_context_bytes: request_context.as_deref().map_or(0, str::len),
+                request_context_sha256: request_context
+                    .as_deref()
+                    .map(|request_context| sha256_label(request_context.as_bytes())),
+            }),
             system_prompt_sha256: sha256_label(final_system.as_bytes()),
             messages_sha256: sha256_label(&messages_json),
             tools_sha256: sha256_label(&tools_json),

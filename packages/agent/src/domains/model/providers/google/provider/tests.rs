@@ -265,6 +265,8 @@ fn system_instruction_empty_when_no_context() {
         system_prompt: None,
         messages: vec![].into(),
         tools: None,
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: None,
         server_origin: None,
     };
@@ -278,6 +280,8 @@ fn system_instruction_from_prompt() {
         system_prompt: Some("You are helpful.".into()),
         messages: vec![].into(),
         tools: None,
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: None,
         server_origin: None,
     };
@@ -300,6 +304,8 @@ fn oauth_request_body_standard_gemini() {
         system_prompt: Some("Be helpful".into()),
         messages: vec![].into(),
         tools: None,
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: None,
         server_origin: None,
     };
@@ -324,6 +330,8 @@ fn request_body_same_format_for_oauth_and_api_key() {
         system_prompt: None,
         messages: vec![].into(),
         tools: None,
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: None,
         server_origin: None,
     };
@@ -350,6 +358,8 @@ fn api_key_request_body() {
         system_prompt: None,
         messages: vec![].into(),
         tools: None,
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: None,
         server_origin: None,
     };
@@ -362,6 +372,26 @@ fn api_key_request_body() {
     assert!(body.get("safetySettings").is_some());
     // No model in body (it's in the URL)
     assert!(body.get("model").is_none());
+}
+
+#[test]
+fn request_context_is_one_final_reference_message() {
+    let provider = GoogleProvider::new(api_key_config());
+    let context = Context {
+        messages: vec![crate::shared::protocol::messages::Message::user("durable")].into(),
+        request_context: vec![crate::shared::protocol::messages::RequestContextBlock {
+            kind: crate::shared::protocol::messages::RequestContextKind::WorkerInbox,
+            content: "background result".into(),
+        }],
+        ..Context::default()
+    };
+    let body = provider.build_request_body(
+        &context,
+        &provider.build_generation_config(&ProviderStreamOptions::default()),
+    );
+    let rendered = serde_json::to_string(&body["contents"]).unwrap();
+    assert_eq!(rendered.matches("[TRON REFERENCE CONTEXT]").count(), 1);
+    assert!(rendered.find("durable").unwrap() < rendered.find("[TRON REFERENCE CONTEXT]").unwrap());
 }
 
 // ── Thinking config nesting (regression tests) ─────────────────────
@@ -415,6 +445,8 @@ fn api_key_body_thinking_nested_not_top_level() {
         system_prompt: None,
         messages: vec![].into(),
         tools: None,
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: None,
         server_origin: None,
     };
@@ -446,6 +478,8 @@ fn oauth_body_thinking_nested_not_top_level() {
         system_prompt: None,
         messages: vec![].into(),
         tools: None,
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: None,
         server_origin: None,
     };
@@ -473,6 +507,8 @@ fn api_key_body_uses_thinking_for_gemini3_flash() {
         system_prompt: None,
         messages: vec![].into(),
         tools: None,
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: None,
         server_origin: None,
     };
@@ -499,6 +535,8 @@ fn current_gemini3_request_drops_trailing_model_prefill() {
         ]
         .into(),
         tools: None,
+        request_context: Vec::new(),
+        cache_layout: Default::default(),
         working_directory: None,
         server_origin: None,
     };

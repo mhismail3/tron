@@ -62,6 +62,27 @@ enum SessionContextPresentation {
         inputTokens > 0 || outputTokens > 0 || cost > 0
     }
 
+    static func cacheReadPercentage(cacheReadTokens: Int, totalInputTokens: Int) -> Int {
+        guard cacheReadTokens > 0, totalInputTokens > 0 else { return 0 }
+        let ratio = Double(cacheReadTokens) / Double(totalInputTokens)
+        return min(100, max(0, Int((ratio * 100).rounded())))
+    }
+
+    static func automaticContextChannel(_ evaluation: ContextAutomaticEvaluationDTO) -> String {
+        switch evaluation.deliveryChannel {
+        case "reference":
+            "Reference context"
+        case "none":
+            "Not delivered"
+        case .some(let channel):
+            WorkerConsolePresentation.displayLabel(channel)
+        case nil where evaluation.narrative?.isEmpty == false:
+            "System context (historical)"
+        case nil:
+            "Not delivered"
+        }
+    }
+
     static func remainingContextText(currentContextWindow: Int, tokensRemaining: Int) -> String {
         guard currentContextWindow > 0 else { return "Window loading" }
         return "\(TokenFormatter.format(tokensRemaining, style: .withSuffix)) left"

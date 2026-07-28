@@ -6,6 +6,7 @@
 use crate::domains::model::providers::id_remapping::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
+use crate::domains::model::providers::shared::messages_with_request_context;
 use crate::shared::protocol::content::{AssistantContent, UserContent};
 use crate::shared::protocol::messages::{
     Context, Message, ToolResultMessageContent, UserMessageContent,
@@ -49,21 +50,21 @@ fn collect_invocation_ids(messages: &[Message]) -> Vec<String> {
 /// Builds a tool invocation ID mapping for cross-provider remapping, then converts
 /// each message to `GeminiContent` with appropriate parts.
 pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
-    let messages = &context.messages;
+    let messages = messages_with_request_context(context);
     if messages.is_empty() {
         return vec![];
     }
 
-    let all_invocation_ids = collect_invocation_ids(messages);
+    let all_invocation_ids = collect_invocation_ids(&messages);
     let id_refs: Vec<&str> = all_invocation_ids.iter().map(String::as_str).collect();
     let id_mapping = build_invocation_id_mapping(&id_refs, IdFormat::OpenAi);
 
     let mut contents = Vec::new();
 
-    for message in messages.iter() {
+    for message in &messages {
         match message {
             Message::User { content, .. } => {
-                let parts = convert_user_content(content);
+                let parts = convert_user_content(&content);
                 if !parts.is_empty() {
                     contents.push(GeminiContent {
                         role: "user".into(),
@@ -123,8 +124,8 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
                 content,
                 ..
             } => {
-                let remapped_id = remap_invocation_id(invocation_id, &id_mapping);
-                let result_text = extract_tool_result_text(content);
+                let remapped_id = remap_invocation_id(&invocation_id, &id_mapping);
+                let result_text = extract_tool_result_text(&content);
 
                 contents.push(GeminiContent {
                     role: "user".into(),
@@ -286,6 +287,8 @@ mod tests {
             messages: messages.into(),
             system_prompt: None,
             tools: None,
+            request_context: Vec::new(),
+            cache_layout: Default::default(),
             working_directory: None,
             server_origin: None,
         }

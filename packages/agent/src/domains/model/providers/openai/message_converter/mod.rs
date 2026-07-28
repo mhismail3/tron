@@ -100,53 +100,6 @@ pub fn normalize_schema_for_openai(schema: &serde_json::Value) -> serde_json::Va
     }
 }
 
-/// Generate provider instruction text for the live direct-tool surface.
-///
-/// Since `OpenAI` Codex has its own built-in system instructions that reference
-/// tools we don't use (shell, `apply_patch`, etc.), this text clarifies
-/// the actual available tool surface in the request instructions.
-#[must_use]
-pub fn generate_tool_instruction_text(tools: &[ModelTool]) -> String {
-    let tool_descriptions: Vec<String> = tools
-        .iter()
-        .map(|t| {
-            let required = serde_json::to_value(&t.parameters)
-                .ok()
-                .and_then(|v| v.get("required").cloned())
-                .and_then(|v| {
-                    v.as_array().map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                })
-                .unwrap_or_else(|| "none".into());
-            format!(
-                "- **{}**: {} (required params: {required})",
-                t.name, t.description
-            )
-        })
-        .collect();
-
-    format!(
-        "[TRON CONTEXT]\n\
-        You are Tron, an AI coding assistant running in Tron's primitive loop.\n\
-        \n\
-        ## Available Direct Tools\n\
-        Call the typed tools listed below directly:\n\
-        \n\
-        {tool_list}\n\
-        \n\
-        ## Typed Execution\n\
-        1. Follow each tool's JSON schema exactly and use returned ids and versions verbatim.\n\
-        2. Use `worker_discover` when a relevant persistent worker is not in the live set.\n\
-        3. A successful `worker_upsert` becomes callable immediately; follow that tool's contract \
-        for authoring and activation.",
-        tool_list = tool_descriptions.join("\n"),
-    )
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────

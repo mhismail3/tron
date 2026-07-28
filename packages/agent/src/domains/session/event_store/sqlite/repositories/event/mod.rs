@@ -14,6 +14,11 @@
 //! | `session_queries` | Session-scoped listing and pagination                 |
 //! | `tree_queries`    | Ancestor / child / descendant recursive CTEs          |
 //! | `type_queries`    | Type-filtered, workspace-scoped, and global queries   |
+//!
+//! Token denormalization prefers the immutable provider-aware `tokenRecord`.
+//! Event/session counters store base input and cache reads as mutually
+//! exclusive buckets even when a provider reports cached tokens inside its
+//! aggregate input count. Raw provider values remain unchanged in the payload.
 
 use rusqlite::{Connection, OptionalExtension, params};
 
