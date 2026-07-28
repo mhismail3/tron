@@ -2621,12 +2621,12 @@ real ownership split rather than a budget increase.
 - Worker kernel: `packages/agent/src/domains/worker_kernel/`
 - Worker runtime state owner and concern modules: `packages/agent/src/domains/worker_kernel/runtime/`
 - Canonical worker store and concern modules: `packages/agent/src/domains/worker_kernel/persistence/store/`
-- Provider-neutral tool selection: `packages/agent/src/domains/worker_kernel/surface.rs`
-- Provider schema adaptation: `packages/agent/src/domains/agent/loop/primitive_surface.rs`
+- Provider-neutral tool selection: `packages/agent/src/domains/worker_kernel/surface/`
+- Provider projection and compact guidance: `packages/agent/src/domains/agent/loop/surface/`
 - Trusted-local execution: `packages/agent/src/domains/agent/loop/tool_executor/`
 - Engine settings: `packages/agent/src/domains/settings/config/types/`
 - Transport/auth: `packages/agent/src/transport/` and `packages/agent/src/app/bootstrap/server.rs`
-- iOS engine/worker protocol: `packages/ios-app/Sources/Engine/Protocol/EngineProtocolTypes+Catalog.swift` and `EngineProtocolTypes+WorkerKernel.swift`
+- iOS engine/worker protocol: `packages/ios-app/Sources/Engine/Protocol/EngineProtocolTypes+Catalog.swift` and `packages/ios-app/Sources/Engine/Protocol/WorkerKernel/`
 - iOS Engine Dashboard: `packages/ios-app/Sources/Session/WorkerKernel/` and `Sources/UI/WorkerConsole/`
 
 Nearest `mod.rs` documentation and focused tests are the implementation-level
