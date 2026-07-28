@@ -565,8 +565,7 @@ Tests/
 │   ├── Chat/          # Coordinators, Messaging, Navigation, State, ViewModel owner roots
 │   └── WorkerKernel/  # Worker state and repository fixtures
 ├── UI/                # Feature presentation and source-ownership contracts
-│   ├── SessionContext/
-│   └── WorkerConsole/
+│   └── EngineInspection/ # Session Context and Worker Console contracts
 ├── Support/           # Composition, diagnostics, foundation, pairing, and storage tests
 └── Infrastructure/    # Fakes, fixtures, SourceGuard, cleanup, and project-structure guards
 ```

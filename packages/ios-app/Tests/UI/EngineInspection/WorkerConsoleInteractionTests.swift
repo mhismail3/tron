@@ -202,7 +202,7 @@ struct WorkerConsoleInteractionTests {
             encoding: .utf8
         )
         let components = try String(
-            contentsOf: workerRoot.appendingPathComponent("Shared/WorkerConsoleComponents.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Presentation/WorkerConsoleComponents.swift"),
             encoding: .utf8
         )
         #expect(detail.contains("WorkerJSONDetailSheet(title: \"Input Schema\""))
@@ -237,7 +237,7 @@ struct WorkerConsoleInteractionTests {
         #expect(!runDetail.contains("showOutput"))
 
         let codeBlockSource = try String(
-            contentsOf: workerRoot.appendingPathComponent("Shared/WorkerConsoleComponents.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Presentation/WorkerConsoleComponents.swift"),
             encoding: .utf8
         )
         #expect(codeBlockSource.contains(".fixedSize(horizontal: true, vertical: true)"))
@@ -406,7 +406,7 @@ struct WorkerConsoleInteractionTests {
     func workerActivityCardsUseDeliberateTextAlignment() throws {
         let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
         let components = try String(
-            contentsOf: workerRoot.appendingPathComponent("Shared/WorkerConsoleComponents.swift"),
+            contentsOf: workerRoot.appendingPathComponent("Presentation/WorkerConsoleComponents.swift"),
             encoding: .utf8
         )
         let delegation = try String(
