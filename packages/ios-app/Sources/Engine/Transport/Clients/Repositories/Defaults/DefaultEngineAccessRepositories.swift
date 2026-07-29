@@ -342,13 +342,15 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         invocationId: String,
         pointer: String,
         offset: UInt64,
-        limit: UInt8
+        limit: UInt8,
+        sessionId: String?
     ) async throws -> WorkerResultChunkDTO {
         try await client.workerResult(
             invocationId: invocationId,
             pointer: pointer,
             offset: offset,
-            limit: limit
+            limit: limit,
+            sessionId: sessionId
         )
     }
 

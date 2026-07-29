@@ -299,7 +299,8 @@ protocol WorkerKernelRepository: AnyObject {
         invocationId: String,
         pointer: String,
         offset: UInt64,
-        limit: UInt8
+        limit: UInt8,
+        sessionId: String?
     ) async throws -> WorkerResultChunkDTO
     func workerInbox(
         workerId: String?,
@@ -415,7 +416,14 @@ extension WorkerKernelRepository {
     /// Resolve only a just-completed bounded result needed by a native worker
     /// contract. Historical lists and presentation paths must keep references
     /// and use the explicit inspector instead.
-    func resolvedWorkerResult(_ invocation: WorkerInvocationDTO) async throws -> AnyCodable {
+    ///
+    /// Session-originated native actions must hydrate their result with the
+    /// same durable session identity that admitted the invocation. This keeps
+    /// the server's narrow origin/delivery-grant authorization intact.
+    func resolvedWorkerResult(
+        _ invocation: WorkerInvocationDTO,
+        sessionId: String? = nil
+    ) async throws -> AnyCodable {
         if let legacy = invocation.output?.legacyInline {
             return legacy
         }
@@ -429,7 +437,8 @@ extension WorkerKernelRepository {
             invocationId: reference.invocationId,
             pointer: "",
             offset: 0,
-            limit: 20
+            limit: 20,
+            sessionId: sessionId ?? invocation.originSessionId
         )
         guard chunk.reference == reference,
               chunk.pointer.isEmpty,
@@ -442,12 +451,28 @@ extension WorkerKernelRepository {
     }
 
     func workerResult(
-        invocationId _: String,
-        pointer _: String,
-        offset _: UInt64,
-        limit _: UInt8
+        invocationId: String,
+        pointer: String,
+        offset: UInt64,
+        limit: UInt8,
+        sessionId _: String?
     ) async throws -> WorkerResultChunkDTO {
         throw EngineConnectionError.invalidResponse
+    }
+
+    func workerResult(
+        invocationId: String,
+        pointer: String,
+        offset: UInt64,
+        limit: UInt8
+    ) async throws -> WorkerResultChunkDTO {
+        try await workerResult(
+            invocationId: invocationId,
+            pointer: pointer,
+            offset: offset,
+            limit: limit,
+            sessionId: nil
+        )
     }
 
     func workerRunGraph(

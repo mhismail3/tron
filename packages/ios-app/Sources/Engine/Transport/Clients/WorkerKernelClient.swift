@@ -84,7 +84,8 @@ final class WorkerKernelClient: EngineDomainClient {
         invocationId: String,
         pointer: String = "",
         offset: UInt64 = 0,
-        limit: UInt8 = 20
+        limit: UInt8 = 20,
+        sessionId: String? = nil
     ) async throws -> WorkerResultChunkDTO {
         try await invokeRead(
             "worker_kernel::result_read",
@@ -93,7 +94,8 @@ final class WorkerKernelClient: EngineDomainClient {
                 pointer: pointer,
                 offset: offset,
                 limit: min(max(limit, 1), 20)
-            )
+            ),
+            context: optionalSessionInvocationContext(sessionId)
         )
     }
 

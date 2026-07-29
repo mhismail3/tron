@@ -142,13 +142,14 @@ struct WorkerKernelClientTests {
         let transport = connectedTransport()
         let client = WorkerKernelClient(transport: transport)
 
-        transport.readHandler = { functionId, payload, _ in
+        transport.readHandler = { functionId, payload, options in
             #expect(functionId.rawValue == "worker_kernel::result_read")
             let request = try #require(payload as? WorkerResultReadRequestDTO)
             #expect(request.invocationId == "run-1")
             #expect(request.pointer == "/claims")
             #expect(request.offset == 20)
             #expect(request.limit == 20)
+            #expect(options.context?.sessionId == "session-result-owner")
             return WorkerResultChunkDTO(
                 kind: "worker_result_chunk",
                 reference: WorkerResultReferenceDTO(
@@ -177,11 +178,77 @@ struct WorkerKernelClientTests {
             invocationId: "run-1",
             pointer: "/claims",
             offset: 20,
-            limit: 99
+            limit: 99,
+            sessionId: "session-result-owner"
         )
 
         #expect(result.reference.invocationId == "run-1")
         #expect(result.reference.sizeBytes == 12_000)
+    }
+
+    @Test("Referenced native result hydration reuses its originating session")
+    func referencedNativeResultHydrationReusesOriginSession() async throws {
+        let transport = connectedTransport()
+        let repository = DefaultWorkerKernelRepository(
+            client: WorkerKernelClient(transport: transport)
+        )
+        let hash = "sha256:" + String(repeating: "a", count: 64)
+        let reference = WorkerResultReferenceDTO(
+            kind: "worker_result_reference",
+            invocationId: "run-voice",
+            workerId: "speech-worker",
+            workerVersion: "v1",
+            outputSchemaSha256: hash,
+            contentSha256: hash,
+            sizeBytes: 16,
+            preview: "hello tron",
+            message: "Stored durably"
+        )
+        let invocationData = try JSONSerialization.data(withJSONObject: [
+            "invocationId": "run-voice",
+            "workerId": "speech-worker",
+            "workerVersion": "v1",
+            "status": "completed",
+            "input": [:],
+            "output": reference.dictionary,
+            "error": NSNull(),
+            "idempotencyKey": "voice-test",
+            "traceId": "trace-voice",
+            "causalDepth": 0,
+            "triggerKind": "manual",
+            "originSessionId": "session-fresh",
+            "agentSessionId": NSNull(),
+            "attemptCount": 1,
+            "createdAt": "2026-07-29T19:34:35Z",
+            "startedAt": "2026-07-29T19:34:38Z",
+            "completedAt": "2026-07-29T19:34:40Z",
+        ])
+        let invocation = try JSONDecoder().decode(
+            WorkerInvocationDTO.self,
+            from: invocationData
+        )
+
+        transport.readHandler = { functionId, payload, options in
+            #expect(functionId.rawValue == "worker_kernel::result_read")
+            #expect((payload as? WorkerResultReadRequestDTO)?.invocationId == "run-voice")
+            #expect(options.context?.sessionId == "session-fresh")
+            return WorkerResultChunkDTO(
+                kind: "worker_result_chunk",
+                reference: reference,
+                pointer: "",
+                value: AnyCodable(["text": "hello tron"]),
+                children: [],
+                offset: 0,
+                returned: 1,
+                total: 1,
+                nextOffset: nil,
+                truncated: false
+            )
+        }
+
+        let output = try await repository.resolvedWorkerResult(invocation)
+
+        #expect(output.dictionaryValue?["text"] as? String == "hello tron")
     }
 
     @Test("Artifact inbox uses closed metadata content and delete operations")

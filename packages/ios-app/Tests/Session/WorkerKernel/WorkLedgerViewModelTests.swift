@@ -346,7 +346,8 @@ private final class WorkLedgerMockRepository: WorkerKernelRepository {
         invocationId: String,
         pointer: String,
         offset: UInt64,
-        limit: UInt8
+        limit: UInt8,
+        sessionId _: String?
     ) async throws -> WorkerResultChunkDTO {
         resultReadCount += 1
         let reference = try #require(references[invocationId])

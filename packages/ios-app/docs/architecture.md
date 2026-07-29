@@ -709,11 +709,12 @@ The microphone stack is a narrow native actuator, not a transcription
 subsystem. The engine publishes at most one current healthy owner for the
 kernel-validated `speech_transcription` client action. Only then does the
 composer show its mic. Tapping it records a temporary WAV, invokes that worker
-through the ordinary durable worker API with the originating session, deletes
-the temporary file after loading, and inserts the worker's typed `text` result
-into the draft. The shared live-tail worker subscription refreshes ownership
-only for worker lifecycle changes, not for ordinary scheduled or manual
-invocations. Each mounted chat owns at most one cancellation-aware monitor;
+through the ordinary durable worker API with the originating session, hydrates
+any referenced result with that same session identity, deletes the temporary
+file after loading, and inserts the worker's typed `text` result into the draft.
+The shared live-tail worker subscription refreshes ownership only for worker
+lifecycle changes, not for ordinary scheduled or manual invocations. Each
+mounted chat owns at most one cancellation-aware monitor;
 navigation teardown stops it, and its weak event loop cannot retain a
 previously opened chat. Ownership therefore changes without historical replay,
 per-run engine reads, or reopening the chat. Model choice, recognition
