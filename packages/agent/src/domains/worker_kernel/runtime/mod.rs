@@ -50,6 +50,11 @@
 //! prohibited. Wait reconciliation suppresses or supersedes an unprepared
 //! default passive result and creates one wake delivery, while a result already
 //! prepared for provider context is reused rather than duplicated.
+//! `events` publishes invocation invalidations with the invocation ledger's
+//! durable `origin_session_id`; lifecycle changes remain global and scheduled
+//! or otherwise sessionless work remains unscoped. These lossy stream facts
+//! only accelerate client rereads of authoritative projections and never own
+//! completion, delivery, or wait state.
 //! `notifications` drains the durable worker-to-client outbox through APNs;
 //! provider acceptance is evidence, never a human-delivery receipt.
 //! Closed self-wakeup output queues only the same immutable worker version at

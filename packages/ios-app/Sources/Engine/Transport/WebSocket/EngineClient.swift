@@ -20,7 +20,7 @@ final class EngineClient: EngineTransport {
     private var streamAckTasks: [String: Task<Void, Never>] = [:]
     private var workerEventSubscriptionTask: Task<Void, any Error>?
     private var workerProjectionInvalidationTask: Task<Void, Never>?
-    private var workerLifecycleInvalidationPending = false
+    private var workerProjectionInvalidations = WorkerProjectionInvalidationAccumulator()
     private var connectionAttemptTask: Task<Void, Never>?
     private var connectionAttemptGeneration: UInt64 = 0
     private var currentSessionInterestGeneration: UInt64 = 0
@@ -335,7 +335,10 @@ final class EngineClient: EngineTransport {
         defer { recordAndAck(delivery) }
 
         if EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic(delivery.topic) {
-            scheduleWorkerProjectionInvalidation(topic: delivery.topic)
+            scheduleWorkerProjectionInvalidation(
+                topic: delivery.topic,
+                sessionId: delivery.event.sessionId
+            )
             return
         }
 
@@ -392,10 +395,11 @@ final class EngineClient: EngineTransport {
     /// One worker run emits several adjacent lifecycle facts. Collapse them
     /// into one authoritative projection read so UI observation never creates
     /// a request storm.
-    private func scheduleWorkerProjectionInvalidation(topic: String?) {
-        if EngineClientStreamSubscriptionPolicy.isWorkerLifecycleTopic(topic) {
-            workerLifecycleInvalidationPending = true
-        }
+    private func scheduleWorkerProjectionInvalidation(
+        topic: String?,
+        sessionId: String?
+    ) {
+        workerProjectionInvalidations.record(topic: topic, sessionId: sessionId)
         guard workerProjectionInvalidationTask == nil else { return }
         workerProjectionInvalidationTask = Task { @MainActor [weak self] in
             do {
@@ -405,16 +409,15 @@ final class EngineClient: EngineTransport {
             }
             guard let self, !Task.isCancelled else { return }
             workerProjectionInvalidationTask = nil
-            let lifecycleChanged = workerLifecycleInvalidationPending
-            workerLifecycleInvalidationPending = false
+            let invalidation = workerProjectionInvalidations.take()
             NotificationCenter.default.post(
                 name: .workerRunProjectionInvalidated,
-                object: nil
+                object: invalidation
             )
-            if lifecycleChanged {
+            if invalidation.lifecycleChanged {
                 NotificationCenter.default.post(
                     name: .workerLifecycleProjectionInvalidated,
-                    object: nil
+                    object: invalidation
                 )
             }
         }
@@ -813,7 +816,7 @@ final class EngineClient: EngineTransport {
         workerEventSubscriptionTask = nil
         workerProjectionInvalidationTask?.cancel()
         workerProjectionInvalidationTask = nil
-        workerLifecycleInvalidationPending = false
+        workerProjectionInvalidations = WorkerProjectionInvalidationAccumulator()
         for task in sessionSubscriptionTasks.values {
             task.cancel()
         }

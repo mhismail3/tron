@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SessionContextSheet: View {
     let sessionId: String
+    let serverConnectionId: String
     let contextState: ContextTrackingState
     let currentModelId: String
     let currentModelInfo: ModelInfo?
@@ -18,6 +19,7 @@ struct SessionContextSheet: View {
     let onFork: () async throws -> String
 
     @Environment(\.dismiss) var dismiss
+    @Environment(\.scenePhase) var scenePhase
     @State var availableModels: [ModelInfo] = []
     @State var isLoadingModels = false
     @State var isForking = false
@@ -27,19 +29,25 @@ struct SessionContextSheet: View {
     @State var workerNames: [String: String] = [:]
     @State var workerRunsNextOffset: UInt64?
     @State var isLoadingWorkerRuns = false
+    @State var workerLoadingGeneration: UInt64?
     @State var workerLoadError: String?
     @State var selectedWorkerRun: WorkerInvocationDTO?
     @State var errorMessage: String?
-    @State var workerRefreshRevision = 0
+    @State var refreshCoordinator = SessionContextRefreshCoordinator()
+    @State var workerCatalogRevision: UInt64 = 0
+    @State var loadedWorkerCatalogRevision: UInt64?
+    @State var loadOlderWorkerRunsPending = false
     @State var contextRequests: [SessionContextRequestSummaryDTO] = []
     @State var contextRequestsNextSequence: Int64?
     @State var latestContextDetail: SessionContextRequestDetailDTO?
     @State var isLoadingInspectableContext = false
+    @State var contextLoadingGeneration: UInt64?
     @State var contextLoadError: String?
     @State var agentUpdates: [SessionAgentUpdateDTO] = []
     @State var agentWaits: [SessionAgentWaitDTO] = []
     @State var agentUpdatesLoadError: String?
     @State var isLoadingAgentUpdates = false
+    @State var agentUpdatesLoadingGeneration: UInt64?
     @State var showDeliveryHistorySheet = false
     @State var selectedContextDetail: SessionContextDetailSelection?
     @State var showContextHistory = false
@@ -191,14 +199,28 @@ struct SessionContextSheet: View {
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
         .task { await loadModels() }
-        .task(id: "\(sessionId):\(isConnected):\(isAgentActive):\(workerRefreshRevision)") {
-            await observeSessionWorkers()
+        .task(id: "\(serverConnectionId):\(sessionId):\(isConnected)") {
+            await observeSessionContext()
         }
-        .task(id: "\(sessionId):\(isConnected):\(isAgentActive):\(workerRefreshRevision)") {
-            await observeInspectableContext()
+        .onReceive(NotificationCenter.default.publisher(for: .workerRunProjectionInvalidated)) {
+            notification in
+            if WorkerProjectionInvalidation.affectsSession(
+                notificationObject: notification.object,
+                sessionId: sessionId
+            ) {
+                requestWorkerRefresh()
+                requestAgentUpdatesRefresh()
+            }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .workerRunProjectionInvalidated)) { _ in
-            workerRefreshRevision += 1
+        .onReceive(NotificationCenter.default.publisher(for: .workerLifecycleProjectionInvalidated)) {
+            _ in
+            workerCatalogRevision &+= 1
+            requestWorkerRefresh()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                requestAllSessionContextRefreshes()
+            }
         }
         .sheet(isPresented: $showModelPicker) {
             ModelPickerSheet(

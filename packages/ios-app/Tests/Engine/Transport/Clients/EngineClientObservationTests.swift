@@ -248,6 +248,45 @@ struct EngineClientObservationTests {
         #expect(!EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic(nil))
     }
 
+    @Test("Worker invalidation coalescing preserves every affected session")
+    func testWorkerInvalidationCoalescingPreservesScope() {
+        var accumulator = WorkerProjectionInvalidationAccumulator()
+        accumulator.record(topic: "worker.invocations", sessionId: "session-a")
+        accumulator.record(topic: "worker.invocations", sessionId: "session-b")
+        accumulator.record(topic: "worker.invocations", sessionId: "session-a")
+        accumulator.record(topic: "worker.invocations", sessionId: nil)
+        accumulator.record(topic: "worker.lifecycle", sessionId: nil)
+
+        let invalidation = accumulator.take()
+        #expect(invalidation.affectedSessionIds == ["session-a", "session-b"])
+        #expect(invalidation.includesUnscopedInvocations)
+        #expect(invalidation.lifecycleChanged)
+        #expect(invalidation.affectsSession("session-a"))
+        #expect(!invalidation.affectsSession("session-c"))
+        #expect(accumulator.isEmpty)
+    }
+
+    @Test("Typed worker invalidations do not refresh unrelated sessions")
+    func testWorkerInvalidationSessionPolicy() {
+        let invalidation = WorkerProjectionInvalidation(
+            affectedSessionIds: ["session-a"],
+            includesUnscopedInvocations: true,
+            lifecycleChanged: false
+        )
+        #expect(WorkerProjectionInvalidation.affectsSession(
+            notificationObject: invalidation,
+            sessionId: "session-a"
+        ))
+        #expect(!WorkerProjectionInvalidation.affectsSession(
+            notificationObject: invalidation,
+            sessionId: "session-b"
+        ))
+        #expect(WorkerProjectionInvalidation.affectsSession(
+            notificationObject: nil,
+            sessionId: "legacy-session"
+        ))
+    }
+
     @Test("Profile surface reads are single-flight across concurrent consumers")
     func testSurfaceSnapshotLoaderCoalescesConcurrentReads() async throws {
         let loader = EngineSurfaceSnapshotLoader()

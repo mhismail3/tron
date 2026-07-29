@@ -2316,7 +2316,13 @@ these bullets as one tool apiece.
 - **Session organization:** the kernel durably enqueues a `session_title`
   worker after eligible completed exchanges without awaiting it and retains the
   conditionally projected explicit `session_set_title` actuator plus
-  compare-and-set custody.
+  compare-and-set custody. Admission uses one closed receipt:
+  `handled`, `queued`, and `updated` are always present; a queued hook reports
+  `true`, `true`, and `false` plus its immutable invocation, worker, and version
+  identifiers. The receipt confirms durable admission, not synchronous title
+  application. Replay retains the same invocation, the compare-and-set cannot
+  overwrite an explicit title, and the Session Organizer handoff is committed
+  exactly once with terminal worker effects.
   The actual title policy worker, and later grouping, labeling, or archival
   policy, must still be authored and improved through real conversation use.
 - **Goals:** create, list, inspect, update, complete, and cancel durable goals;
@@ -2563,6 +2569,14 @@ Worker live topics are:
 - `worker.lifecycle` — activation, per-worker stop, enablement, disablement,
   rollback, retirement, purge, engine stop/resume, failure, and related state;
 - `worker.invocations` — started/completed/failed/cancelled invocation summaries.
+
+Invocation stream envelopes carry the invocation ledger's durable
+`origin_session_id`. Descendants therefore invalidate the originating user
+session, while scheduled and otherwise sessionless work remains unscoped.
+Lifecycle facts stay global because they invalidate catalog metadata. Both
+topics are lossy observation hints: clients coalesce them and reread durable
+worker/session projections; delivery, wait, and completion correctness never
+depends on receiving an event.
 
 The durable session log has **13 event variants**. Live-only deltas, progress,
 context notices, and errors remain transport events and are not duplicated as

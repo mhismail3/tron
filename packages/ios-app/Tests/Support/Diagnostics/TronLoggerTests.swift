@@ -194,6 +194,28 @@ struct TronLoggerSensitiveDataTests {
         #expect(!message.contains("Project"))
     }
 
+    @Test("Local engine cancellation is diagnostic rather than an error")
+    func engineCancellationUsesDebugSeverity() {
+        let logger = TronLogger.shared
+        let originalLevel = logger.minimumLevel
+        defer {
+            logger.minimumLevel = originalLevel
+            logger.clearBufferForCategory(.engine)
+        }
+
+        logger.minimumLevel = .verbose
+        logger.clearBufferForCategory(.engine)
+        logger.logEngineCancellation(
+            functionId: "worker_kernel::runs",
+            id: "cancelled-request",
+            duration: 0.25
+        )
+
+        let entry = logger.getRecentLogs(category: .engine).last
+        #expect(entry?.2 == .debug)
+        #expect(entry?.3.contains("cancelled locally") == true)
+    }
+
     @Test("WebSocket message logging never buffers JSON previews")
     func websocketMessageLoggingOmitsPreview() {
         let logger = TronLogger.shared

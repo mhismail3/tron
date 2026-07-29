@@ -327,7 +327,10 @@ attention concurrently if it still exists. A
 disconnected refresh clears server-owned rows. Monitoring subscribes from each
 worker topic's current durable tail, coalesces the adjacent facts produced by
 one run, and then reloads authoritative state. It never replays historical
-worker events into UI invalidation. Refreshes are single-flight; a full request
+worker events into UI invalidation. Invocation invalidations retain every
+durable originating-session identifier seen during the 200 ms coalescing
+window; lifecycle invalidations stay global and sessionless invocations do not
+refresh an unrelated Session Context. Refreshes are single-flight; a full request
 arriving during a summary read is preserved and runs next. Mutations serialize
 through the view model's mutation state, call one repository operation, and
 reload canonical server truth.
@@ -794,9 +797,17 @@ demand. Provider Request and Tool Surface show bounded structured evidence
 first. Their exact JSON formats off the main actor only after the user opens a
 subordinate sheet, then stays inside one internally scrolling selectable text
 view rather than expanding the parent scroll by hundreds of kilobytes. While
-an agent is active, latest-request reconciliation runs only while the sheet is
-visible and performs one final refresh after the run stops. Cancellation and
-view teardown own every task. Manifest provenance arrays omitted by the server
+visible, a view-scoped coordinator owns independent worker, delivery/wait, and
+provider-audit lanes. Each lane allows one read in flight and retains a dirty
+bit so an invalidation during that read guarantees a follow-up without
+cancelling authoritative work. A session/server generation prevents stale
+responses from applying after switches or disconnects. The sheet reads all
+lanes on open, reconnect, and foreground resume, polls once per second only
+while agent/worker/wait/wake activity is known, and performs one final settled
+read. It retains prior snapshots during refresh; cancellation is silent control
+flow, while a genuine refresh failure either offers retry for an empty lane or
+labels the retained snapshot as the last successful update. View teardown owns
+and cancels the coordinator. Manifest provenance arrays omitted by the server
 when empty decode as empty collections, preserving the rest of the audit
 instead of collapsing the visible sections to summary-only counts.
 

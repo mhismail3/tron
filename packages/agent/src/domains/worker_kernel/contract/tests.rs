@@ -332,6 +332,14 @@ fn session_title_is_an_internal_automatic_hook_not_a_model_primitive() {
         hook.request_schema.as_ref().expect("request schema")["required"],
         json!(["userPrompt", "assistantResponse"])
     );
+    let response = hook.response_schema.as_ref().expect("response schema");
+    assert_eq!(
+        response["required"],
+        json!(["handled", "queued", "updated"])
+    );
+    assert_eq!(response["additionalProperties"], false);
+    assert!(response["properties"]["invocationId"].is_object());
+    assert!(response["properties"].get("title").is_none());
     assert!(hook.model_tool.is_none());
 }
 

@@ -109,8 +109,8 @@ impl WorkerRuntime {
             self.store
                 .complete_invocation(invocation_id, &current.worker_id, Err(&redacted))?
         };
-        self.publish_event(
-            "worker.invocations",
+        self.publish_invocation_event(
+            &terminal,
             json!({
                 "action":terminal.status,
                 "invocationId":terminal.invocation_id,
@@ -119,7 +119,6 @@ impl WorkerRuntime {
                 "causalDepth":terminal.causal_depth,
                 "recoveredOwnership":true,
             }),
-            TraceId::new(terminal.trace_id.clone()).ok(),
         )
         .await;
         Ok(terminal)
@@ -178,8 +177,8 @@ impl WorkerRuntime {
         let mut finalization_guard =
             ClaimedInvocationFinalizer::new(self.store.clone(), queued.invocation_id.clone());
 
-        self.publish_event(
-            "worker.invocations",
+        self.publish_invocation_event(
+            &queued,
             json!({
                 "action": "started",
                 "invocationId": queued.invocation_id,
@@ -188,7 +187,6 @@ impl WorkerRuntime {
                 "triggerKind": queued.trigger_kind,
                 "causalDepth": queued.causal_depth,
             }),
-            TraceId::new(queued.trace_id.clone()).ok(),
         )
         .await;
         let worker_name = worker.summary.name.clone();
@@ -397,8 +395,8 @@ impl WorkerRuntime {
             }
         };
         finalization_guard.disarm();
-        self.publish_event(
-            "worker.invocations",
+        self.publish_invocation_event(
+            &completed,
             json!({
                 "action": completed.status,
                 "invocationId": completed.invocation_id,
@@ -406,7 +404,6 @@ impl WorkerRuntime {
                 "error": completed.error,
                 "causalDepth": completed.causal_depth,
             }),
-            TraceId::new(completed.trace_id.clone()).ok(),
         )
         .await;
         if let Some(dispatch) = self
@@ -509,8 +506,8 @@ impl WorkerRuntime {
             TraceId::new(queued.trace_id.clone()).ok(),
         )
         .await;
-        self.publish_event(
-            "worker.invocations",
+        self.publish_invocation_event(
+            &completed,
             json!({
                 "action":completed.status,
                 "invocationId":completed.invocation_id,
@@ -518,7 +515,6 @@ impl WorkerRuntime {
                 "error":completed.error,
                 "causalDepth":completed.causal_depth,
             }),
-            TraceId::new(completed.trace_id.clone()).ok(),
         )
         .await;
         Ok(completed)

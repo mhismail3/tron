@@ -235,6 +235,14 @@ final class TronLogger: @unchecked Sendable {
         }
     }
 
+    func logEngineCancellation(functionId: String, id: String, duration: TimeInterval) {
+        let durationMs = String(format: "%.1fms", duration * 1000)
+        debug(
+            "← Engine Request [\(id)] \(functionId) cancelled locally (\(durationMs))",
+            category: .engine
+        )
+    }
+
     func logWebSocketState(_ state: String, details: String? = nil) {
         let msg = details.map { "\(state): \($0)" } ?? state
         info(msg, category: .websocket)

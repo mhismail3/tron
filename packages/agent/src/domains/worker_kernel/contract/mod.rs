@@ -814,17 +814,18 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         .response_schema(json!({
             "type":"object",
             "additionalProperties":false,
-            "required":["handled","updated"],
+            "required":["handled","queued","updated"],
             "properties":{
                 "handled":{"type":"boolean"},
+                "queued":{"type":"boolean"},
                 "updated":{"type":"boolean"},
+                "invocationId":{"type":"string"},
                 "workerId":{"type":"string"},
-                "workerVersion":{"type":"string"},
-                "title":{"type":"string","minLength":1,"maxLength":160}
+                "workerVersion":{"type":"string"}
             }
         }))
         .idempotency(IdempotencyContract::session())
-        .description("Name an untitled ordinary user session through the active worker-owned title policy after its first successful exchange. Explicit titles and worker audit sessions are never eligible.")
+        .description("Durably enqueue the active worker-owned title policy after the first successful exchange of an untitled ordinary session. The admission receipt never waits for execution; explicit titles and worker audit sessions are never eligible.")
         .build()?,
     );
     specs.push(

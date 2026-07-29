@@ -126,6 +126,81 @@ async fn await_queued_title(runtime: &Arc<WorkerRuntime>, result: &Value) -> Inv
 }
 
 #[tokio::test]
+async fn session_title_admission_receipts_satisfy_the_engine_contract() {
+    let (runtime, _home) = test_runtime(None);
+    let unhandled_session = runtime
+        .event_store
+        .create_session("mock", "/tmp", None, None)
+        .unwrap()
+        .session;
+    let unhandled = runtime
+        .host()
+        .invoke(session_title_invocation(
+            &unhandled_session.id,
+            "title-contract-unhandled",
+        ))
+        .await;
+    assert!(unhandled.error.is_none(), "{:?}", unhandled.error);
+    assert_eq!(
+        unhandled.value,
+        Some(json!({"handled":false,"queued":false,"updated":false}))
+    );
+
+    runtime
+        .upsert(
+            session_title_bundle(
+                "session-title-policy",
+                json!({"title":"Contract-Checked Title"}),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let handled_session = runtime
+        .event_store
+        .create_session("mock", "/tmp", None, None)
+        .unwrap()
+        .session;
+    let handled = runtime
+        .host()
+        .invoke(session_title_invocation(
+            &handled_session.id,
+            "title-contract-handled",
+        ))
+        .await;
+    assert!(handled.error.is_none(), "{:?}", handled.error);
+    let receipt = handled.value.expect("session-title admission receipt");
+    assert_eq!(receipt["handled"], true);
+    assert_eq!(receipt["queued"], true);
+    assert_eq!(receipt["updated"], false);
+    assert!(receipt["invocationId"].is_string());
+    assert_eq!(receipt["workerId"], "session-title-policy");
+    assert!(receipt["workerVersion"].is_string());
+    let completed = await_queued_title(&runtime, &receipt).await;
+    let events = runtime
+        .host()
+        .poll_stream_topic(
+            "worker.invocations",
+            StreamCursor(0),
+            100,
+            &StreamActorScope::all(),
+        )
+        .await
+        .unwrap()
+        .events
+        .into_iter()
+        .filter(|event| event.payload["invocationId"] == completed.invocation_id)
+        .collect::<Vec<_>>();
+    assert!(!events.is_empty());
+    assert!(
+        events
+            .iter()
+            .all(|event| event.session_id.as_deref() == Some(handled_session.id.as_str())),
+        "engine hooks must invalidate only their durable origin session"
+    );
+}
+
+#[tokio::test]
 async fn explicit_session_rename_persists_and_broadcasts() {
     let (runtime, _home) = test_runtime(None);
     let created = runtime
@@ -195,6 +270,7 @@ async fn session_title_hook_names_the_original_untitled_session_once() {
         .unwrap();
     assert_eq!(first["handled"], true);
     assert_eq!(first["queued"], true);
+    assert_eq!(first["updated"], false);
     assert_eq!(first["workerId"], worker.worker.worker_id);
     let completed_title = await_queued_title(&runtime, &first).await;
     assert_eq!(completed_title.status, "completed");
@@ -225,7 +301,10 @@ async fn session_title_hook_names_the_original_untitled_session_once() {
         .enqueue_session_title_hook(&session_title_invocation(&session.id, "title-second"))
         .await
         .unwrap();
-    assert_eq!(second, json!({"handled":false,"updated":false}));
+    assert_eq!(
+        second,
+        json!({"handled":false,"queued":false,"updated":false})
+    );
     assert_eq!(
         runtime
             .store()
@@ -320,6 +399,153 @@ async fn session_title_hook_returns_after_durable_admission_and_cannot_overwrite
 }
 
 #[tokio::test]
+async fn session_title_replay_after_apply_before_terminal_is_safe_and_dispatches_organizer_once() {
+    let (runtime, home) = test_runtime(None);
+    runtime
+        .upsert(session_organization_bundle(), None)
+        .await
+        .unwrap();
+    let title_worker = runtime
+        .upsert(
+            session_title_bundle(
+                "session-title-policy",
+                json!({"title":"Restart-Safe Session Title"}),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let session = runtime
+        .event_store
+        .create_session("mock", "/tmp", None, None)
+        .unwrap()
+        .session;
+    let input = json!({
+        "userPrompt":"Prove the title replay boundary.",
+        "assistantResponse":"The title should survive a restart."
+    });
+    let (running, replayed) = runtime
+        .store()
+        .begin_invocation_with_context(
+            &title_worker.worker.worker_id,
+            &title_worker.version,
+            &input,
+            "title-crash-window",
+            "trace-title-crash-window",
+            0,
+            "engine_hook:session_title",
+            Some(&session.id),
+            WorkerInteractionMode::Background,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(!replayed);
+    assert!(
+        runtime
+            .store()
+            .claim_running(&running.invocation_id)
+            .unwrap()
+    );
+
+    // Simulate a crash in the intentional window after tron.sqlite accepted
+    // the compare-and-set but before workers.sqlite committed terminal effects.
+    let prepared_before_crash = runtime
+        .apply_session_title_result(&running, &json!({"title":"Restart-Safe Session Title"}))
+        .await
+        .unwrap();
+    assert!(prepared_before_crash.is_some());
+    assert_eq!(
+        runtime
+            .event_store
+            .get_session(&session.id)
+            .unwrap()
+            .unwrap()
+            .title
+            .as_deref(),
+        Some("Restart-Safe Session Title")
+    );
+    let host = runtime.host.clone();
+    let orchestrator = runtime.orchestrator.clone();
+    let session_manager = runtime.session_manager.clone();
+    let event_store = runtime.event_store.clone();
+    let settings_runtime = runtime.settings_runtime.clone();
+    runtime.shutdown().await;
+    drop(runtime);
+
+    let restarted = WorkerRuntime::new(
+        WorkerStore::open(home.path().to_path_buf()).unwrap(),
+        host,
+        orchestrator,
+        session_manager,
+        event_store,
+        settings_runtime,
+    )
+    .unwrap();
+    restarted.reconcile_orphaned_invocations(true).await;
+    let completed = restarted
+        .invoke(InvokeRequest {
+            worker_id: title_worker.worker.worker_id.clone(),
+            input,
+            idempotency_key: "title-crash-window".to_owned(),
+            trace_id: "trace-title-crash-window".to_owned(),
+            causal_depth: 0,
+            trigger_kind: "engine_hook:session_title".to_owned(),
+            origin_session_id: Some(session.id.clone()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(completed.invocation_id, running.invocation_id);
+    assert_eq!(completed.status, "completed", "{:?}", completed.error);
+    assert_eq!(completed.attempt_count, 2);
+    assert_eq!(
+        restarted
+            .event_store
+            .get_session(&session.id)
+            .unwrap()
+            .unwrap()
+            .title
+            .as_deref(),
+        Some("Restart-Safe Session Title")
+    );
+
+    let replay = restarted
+        .invoke(InvokeRequest {
+            worker_id: title_worker.worker.worker_id,
+            input: completed.input.clone(),
+            idempotency_key: "title-crash-window".to_owned(),
+            trace_id: "trace-title-crash-window".to_owned(),
+            causal_depth: 0,
+            trigger_kind: "engine_hook:session_title".to_owned(),
+            origin_session_id: Some(session.id),
+        })
+        .await
+        .unwrap();
+    assert_eq!(replay.invocation_id, completed.invocation_id);
+    assert_eq!(
+        restarted
+            .store()
+            .worker_dispatches_for_source(&completed.invocation_id)
+            .unwrap()
+            .len(),
+        1,
+        "replay must retain one immutable Session Organizer handoff"
+    );
+    assert_eq!(
+        restarted
+            .store()
+            .runs_filtered(Some("session-organizer"), None, 10)
+            .unwrap()
+            .len(),
+        1,
+        "replay must not queue a second Session Organizer invocation"
+    );
+}
+
+#[tokio::test]
 async fn absent_session_title_policy_leaves_the_session_untitled() {
     let (runtime, _home) = test_runtime(None);
     let session = runtime
@@ -333,7 +559,10 @@ async fn absent_session_title_policy_leaves_the_session_untitled() {
         .await
         .unwrap();
 
-    assert_eq!(result, json!({"handled":false,"updated":false}));
+    assert_eq!(
+        result,
+        json!({"handled":false,"queued":false,"updated":false})
+    );
     assert!(
         runtime
             .event_store
@@ -385,7 +614,7 @@ async fn session_title_hook_preserves_explicit_and_worker_session_titles() {
                 .enqueue_session_title_hook(&session_title_invocation(session_id, key))
                 .await
                 .unwrap(),
-            json!({"handled":false,"updated":false})
+            json!({"handled":false,"queued":false,"updated":false})
         );
     }
     assert_eq!(

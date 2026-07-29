@@ -9,8 +9,8 @@ impl WorkerRuntime {
         if record.interaction_mode == WorkerInteractionMode::Background
             && matches!(record.status.as_str(), "queued" | "running")
         {
-            self.publish_event(
-                "worker.invocations",
+            self.publish_invocation_event(
+                &record,
                 json!({
                     "action":"detached",
                     "invocationId":record.invocation_id,
@@ -18,7 +18,6 @@ impl WorkerRuntime {
                     "status":record.status,
                     "causalDepth":record.causal_depth,
                 }),
-                TraceId::new(record.trace_id.clone()).ok(),
             )
             .await;
         }
@@ -48,8 +47,8 @@ impl WorkerRuntime {
                 .store
                 .cancel_invocation_with_reason(&descendant_id, reason)?;
             let _ = self.invocation_stops.remove(&descendant_id);
-            self.publish_event(
-                "worker.invocations",
+            self.publish_invocation_event(
+                &record,
                 json!({
                     "action":"cancelled",
                     "invocationId":record.invocation_id,
@@ -57,7 +56,6 @@ impl WorkerRuntime {
                     "causalDepth":record.causal_depth,
                     "causalRootInvocationId":invocation_id,
                 }),
-                TraceId::new(record.trace_id.clone()).ok(),
             )
             .await;
             if descendant_id == invocation_id {
@@ -86,8 +84,8 @@ impl WorkerRuntime {
             let record = self.store.invocation(&invocation_id)?.ok_or_else(|| {
                 format!("cancelled worker invocation '{invocation_id}' disappeared")
             })?;
-            self.publish_event(
-                "worker.invocations",
+            self.publish_invocation_event(
+                &record,
                 json!({
                     "action":"cancelled",
                     "invocationId":record.invocation_id,
@@ -95,7 +93,6 @@ impl WorkerRuntime {
                     "causalDepth":record.causal_depth,
                     "reason":reason,
                 }),
-                TraceId::new(record.trace_id.clone()).ok(),
             )
             .await;
         }

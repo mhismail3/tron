@@ -45,7 +45,7 @@ impl WorkerRuntime {
         .map_err(|error| error.to_string())?;
 
         if session.is_worker_session() || session_title_is_present(session.title.as_deref()) {
-            return Ok(json!({"handled":false,"updated":false}));
+            return Ok(json!({"handled":false,"queued":false,"updated":false}));
         }
 
         let Some((worker, queued)) = self.enqueue_engine_hook(
@@ -62,12 +62,13 @@ impl WorkerRuntime {
             invocation,
         )?
         else {
-            return Ok(json!({"handled":false,"updated":false}));
+            return Ok(json!({"handled":false,"queued":false,"updated":false}));
         };
 
         Ok(json!({
             "handled":true,
             "queued":true,
+            "updated":false,
             "invocationId":queued.invocation_id,
             "workerId":worker.summary.worker_id,
             "workerVersion":worker.summary.active_version,

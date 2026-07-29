@@ -77,8 +77,8 @@ impl WorkerRuntime {
                     );
                 }
             }
-            self.publish_event(
-                "worker.invocations",
+            self.publish_invocation_event(
+                &requeued,
                 json!({
                     "action":"queued",
                     "invocationId":requeued.invocation_id,
@@ -86,7 +86,6 @@ impl WorkerRuntime {
                     "causalDepth":requeued.causal_depth,
                     "recoveredOwnership":true,
                 }),
-                TraceId::new(requeued.trace_id.clone()).ok(),
             )
             .await;
         }

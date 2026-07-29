@@ -140,27 +140,55 @@ extension SessionContextSheet {
                 .buttonStyle(.plain)
                 .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: true)
                 .accessibilityHint("Shows model request history")
+                if let contextLoadError {
+                    Label(contextLoadError, systemImage: "exclamationmark.triangle")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronAmber)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .sectionFill(
+                            .tronAmber,
+                            cornerRadius: 10,
+                            subtle: true,
+                            interactive: false
+                        )
+                }
             } else if isLoadingInspectableContext {
                 ProgressView("Loading model context…")
                     .frame(maxWidth: .infinity)
                     .padding(14)
                     .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
             } else {
-                Label(
-                    contextLoadError ?? "No provider request has been recorded yet.",
-                    systemImage: contextLoadError == nil
-                        ? "text.page.badge.magnifyingglass"
-                        : "exclamationmark.triangle"
-                )
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(contextLoadError == nil ? .tronTextMuted : .tronError)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    if contextLoadError != nil {
+                        requestProviderContextRefresh()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Label(
+                            contextLoadError ?? "No provider request has been recorded yet.",
+                            systemImage: contextLoadError == nil
+                                ? "text.page.badge.magnifyingglass"
+                                : "exclamationmark.triangle"
+                        )
+                        Spacer(minLength: 0)
+                        if contextLoadError != nil {
+                            Text("Retry")
+                                .font(TronTypography.pillValue)
+                        }
+                    }
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(contextLoadError == nil ? .tronTextMuted : .tronError)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 .sectionFill(
                     contextLoadError == nil ? .tronEmerald : .tronError,
                     cornerRadius: 12,
                     subtle: true,
-                    interactive: false
+                    interactive: contextLoadError != nil
                 )
             }
         }
@@ -258,25 +286,55 @@ extension SessionContextSheet {
                activeAgentWaits.isEmpty,
                historicalAgentUpdates.isEmpty,
                historicalAgentWaits.isEmpty {
-                Label(
-                    agentUpdatesLoadError
-                        ?? (isLoadingAgentUpdates
-                            ? "Loading durable update state…"
-                            : "No deliveries or waits are recorded."),
-                    systemImage: agentUpdatesLoadError == nil ? "bell.slash" : "exclamationmark.triangle"
-                )
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(agentUpdatesLoadError == nil ? .tronTextMuted : .tronError)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    if agentUpdatesLoadError != nil {
+                        requestAgentUpdatesRefresh()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Label(
+                            agentUpdatesLoadError
+                                ?? (isLoadingAgentUpdates
+                                    ? "Loading durable update state…"
+                                    : "No deliveries or waits are recorded."),
+                            systemImage: agentUpdatesLoadError == nil
+                                ? "bell.slash"
+                                : "exclamationmark.triangle"
+                        )
+                        Spacer(minLength: 0)
+                        if agentUpdatesLoadError != nil {
+                            Text("Retry")
+                                .font(TronTypography.pillValue)
+                        }
+                    }
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(agentUpdatesLoadError == nil ? .tronTextMuted : .tronError)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 .sectionFill(
                     agentUpdatesLoadError == nil ? .tronEmerald : .tronError,
                     cornerRadius: 12,
                     subtle: true,
-                    interactive: false
+                    interactive: agentUpdatesLoadError != nil
                 )
             } else {
                 VStack(spacing: 8) {
+                    if let agentUpdatesLoadError {
+                        Label(agentUpdatesLoadError, systemImage: "exclamationmark.triangle")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronAmber)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .sectionFill(
+                                .tronAmber,
+                                cornerRadius: 10,
+                                subtle: true,
+                                interactive: false
+                            )
+                    }
                     ForEach(activeAgentWaits) { wait in
                         agentWaitCard(wait)
                     }
@@ -616,13 +674,24 @@ extension SessionContextSheet {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let workerLoadError {
-                Text(workerLoadError)
+            if let workerLoadError, sessionWorkerRuns.isEmpty {
+                Button {
+                    requestWorkerRefresh()
+                } label: {
+                    HStack(spacing: 8) {
+                        Label(workerLoadError, systemImage: "exclamationmark.triangle")
+                        Spacer(minLength: 0)
+                        Text("Retry")
+                            .font(TronTypography.pillValue)
+                    }
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronError)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .sectionFill(.tronError, cornerRadius: 10, subtle: true, interactive: false)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .sectionFill(.tronError, cornerRadius: 10, subtle: true, interactive: true)
             } else if sessionWorkerRuns.isEmpty, !isLoadingWorkerRuns {
                 Label("No workers have run in this session.", systemImage: "bolt.horizontal.circle")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -631,24 +700,39 @@ extension SessionContextSheet {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .sectionFill(.tronCyan, cornerRadius: 10, subtle: true, interactive: false)
             } else {
-                LazyVStack(spacing: 7) {
-                    ForEach(workerRunGroups) { group in
-                        SessionWorkerRunRow(
-                            run: group.root,
-                            workerName: workerNames[group.root.workerId]
-                                ?? WorkerConsolePresentation.displayLabel(group.root.workerId)
-                        ) {
-                            selectedWorkerRun = group.root
-                        }
-                        ForEach(group.descendants) { child in
+                VStack(spacing: 7) {
+                    if let workerLoadError {
+                        Label(workerLoadError, systemImage: "exclamationmark.triangle")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronAmber)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .sectionFill(
+                                .tronAmber,
+                                cornerRadius: 10,
+                                subtle: true,
+                                interactive: false
+                            )
+                    }
+                    LazyVStack(spacing: 7) {
+                        ForEach(workerRunGroups) { group in
                             SessionWorkerRunRow(
-                                run: child,
-                                workerName: workerNames[child.workerId]
-                                    ?? WorkerConsolePresentation.displayLabel(child.workerId)
+                                run: group.root,
+                                workerName: workerNames[group.root.workerId]
+                                    ?? WorkerConsolePresentation.displayLabel(group.root.workerId)
                             ) {
-                                selectedWorkerRun = child
+                                selectedWorkerRun = group.root
                             }
-                            .padding(.leading, 18)
+                            ForEach(group.descendants) { child in
+                                SessionWorkerRunRow(
+                                    run: child,
+                                    workerName: workerNames[child.workerId]
+                                        ?? WorkerConsolePresentation.displayLabel(child.workerId)
+                                ) {
+                                    selectedWorkerRun = child
+                                }
+                                .padding(.leading, 18)
+                            }
                         }
                     }
                 }
@@ -656,7 +740,7 @@ extension SessionContextSheet {
 
             if workerRunsNextOffset != nil, !isLoadingWorkerRuns {
                 Button {
-                    Task { await loadSessionWorkerRuns(reset: false) }
+                    loadOlderSessionWorkerRuns()
                 } label: {
                     Label("Load older worker runs", systemImage: "clock.arrow.circlepath")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))

@@ -124,14 +124,23 @@ extension EngineConnection {
             return value
         } catch {
             let duration = CFAbsoluteTimeGetCurrent() - startTime
-            let detail = (error as? EngineProtocolError)?.diagnosticSummary ?? error.localizedDescription
-            logger.logEngineResponse(
-                functionId: functionId.rawValue,
-                id: requestId,
-                success: false,
-                duration: duration,
-                error: detail
-            )
+            if error is CancellationError {
+                logger.logEngineCancellation(
+                    functionId: functionId.rawValue,
+                    id: requestId,
+                    duration: duration
+                )
+            } else {
+                let detail = (error as? EngineProtocolError)?.diagnosticSummary
+                    ?? error.localizedDescription
+                logger.logEngineResponse(
+                    functionId: functionId.rawValue,
+                    id: requestId,
+                    success: false,
+                    duration: duration,
+                    error: detail
+                )
+            }
             throw error
         }
     }

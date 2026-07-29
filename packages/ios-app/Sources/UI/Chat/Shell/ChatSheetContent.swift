@@ -31,6 +31,7 @@ struct ChatSheetContent: View {
         case .sessionContext:
             SessionContextSheet(
                 sessionId: sessionId,
+                serverConnectionId: dependencies.pairedServerStore.activeServer?.id ?? "unpaired",
                 contextState: viewModel.contextState,
                 currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel),
                 currentModelInfo: viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel),

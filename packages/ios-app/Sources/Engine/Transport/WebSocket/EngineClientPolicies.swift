@@ -59,6 +59,61 @@ enum EngineClientStreamSubscriptionPolicy {
     }
 }
 
+/// App-local invalidation metadata for canonical worker projection reads.
+///
+/// Stream events are hints only. Consumers use these identifiers to avoid
+/// refreshing unrelated sessions, then re-read durable server state.
+struct WorkerProjectionInvalidation: Equatable, Sendable {
+    let affectedSessionIds: Set<String>
+    let includesUnscopedInvocations: Bool
+    let lifecycleChanged: Bool
+
+    func affectsSession(_ sessionId: String) -> Bool {
+        affectedSessionIds.contains(sessionId)
+    }
+
+    static func affectsSession(notificationObject: Any?, sessionId: String) -> Bool {
+        guard let invalidation = notificationObject as? WorkerProjectionInvalidation else {
+            // App-local legacy/test notifications without typed metadata are
+            // intentionally treated as global invalidations.
+            return true
+        }
+        return invalidation.affectsSession(sessionId)
+    }
+}
+
+struct WorkerProjectionInvalidationAccumulator: Equatable, Sendable {
+    private(set) var affectedSessionIds: Set<String> = []
+    private(set) var includesUnscopedInvocations = false
+    private(set) var lifecycleChanged = false
+
+    var isEmpty: Bool {
+        affectedSessionIds.isEmpty
+            && !includesUnscopedInvocations
+            && !lifecycleChanged
+    }
+
+    mutating func record(topic: String?, sessionId: String?) {
+        if EngineClientStreamSubscriptionPolicy.isWorkerLifecycleTopic(topic) {
+            lifecycleChanged = true
+        } else if let sessionId, !sessionId.isEmpty {
+            affectedSessionIds.insert(sessionId)
+        } else {
+            includesUnscopedInvocations = true
+        }
+    }
+
+    mutating func take() -> WorkerProjectionInvalidation {
+        let invalidation = WorkerProjectionInvalidation(
+            affectedSessionIds: affectedSessionIds,
+            includesUnscopedInvocations: includesUnscopedInvocations,
+            lifecycleChanged: lifecycleChanged
+        )
+        self = WorkerProjectionInvalidationAccumulator()
+        return invalidation
+    }
+}
+
 struct EngineStreamSubscriptionKey: Hashable {
     let topic: String
     let sessionId: String?

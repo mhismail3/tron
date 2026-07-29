@@ -1384,6 +1384,70 @@ async fn every_worker_console_lifecycle_mutation_emits_live_refresh_evidence() {
             "missing {expected}: {actions:?}"
         );
     }
+    assert!(
+        events.events.iter().all(|event| event.session_id.is_none()),
+        "worker lifecycle invalidations remain global"
+    );
+}
+
+#[tokio::test]
+async fn worker_invocation_invalidations_carry_only_the_durable_origin_session() {
+    let (runtime, _home) = test_runtime(None);
+    let outcome = runtime
+        .upsert(
+            command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]),
+            None,
+        )
+        .await
+        .unwrap();
+    let mut scoped_request = request(
+        &outcome.worker.worker_id,
+        json!({"scope":"session"}),
+        "scoped-invalidation",
+    );
+    scoped_request.origin_session_id = Some("session-invalidation".to_owned());
+    let scoped = runtime.invoke(scoped_request).await.unwrap();
+    let unscoped = runtime
+        .invoke(request(
+            &outcome.worker.worker_id,
+            json!({"scope":"global"}),
+            "unscoped-invalidation",
+        ))
+        .await
+        .unwrap();
+
+    let page = runtime
+        .host()
+        .poll_stream_topic(
+            "worker.invocations",
+            StreamCursor(0),
+            100,
+            &StreamActorScope::all(),
+        )
+        .await
+        .unwrap();
+    let scoped_events = page
+        .events
+        .iter()
+        .filter(|event| event.payload["invocationId"] == scoped.invocation_id)
+        .collect::<Vec<_>>();
+    let unscoped_events = page
+        .events
+        .iter()
+        .filter(|event| event.payload["invocationId"] == unscoped.invocation_id)
+        .collect::<Vec<_>>();
+    assert!(!scoped_events.is_empty());
+    assert!(
+        scoped_events
+            .iter()
+            .all(|event| event.session_id.as_deref() == Some("session-invalidation"))
+    );
+    assert!(!unscoped_events.is_empty());
+    assert!(
+        unscoped_events
+            .iter()
+            .all(|event| event.session_id.is_none())
+    );
 }
 
 #[tokio::test]

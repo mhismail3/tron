@@ -1,75 +1,138 @@
 import Foundation
 
 extension SessionContextSheet {
-    func observeInspectableContext() async {
-        await loadInspectableContext()
-        await loadAgentUpdates()
-        while !Task.isCancelled, isConnected, shouldContinueObservingDeliveryState {
+    func observeSessionContext() async {
+        refreshCoordinator.reset()
+        defer { refreshCoordinator.reset() }
+        guard isConnected else {
+            loadCachedInspectableContext()
+            return
+        }
+
+        requestAllSessionContextRefreshes()
+        // The three stores are intentionally independent. Force one settled
+        // reread after the initial parallel snapshot so a terminal worker and
+        // its subsequently imported delivery cannot straddle sheet opening.
+        var wasActive = true
+        while !Task.isCancelled, isConnected {
             do {
                 try await Task.sleep(for: .seconds(1))
             } catch {
                 return
             }
-            await loadInspectableContext()
-            await loadAgentUpdates()
-        }
-        if !Task.isCancelled, isConnected {
-            await loadInspectableContext()
-            await loadAgentUpdates()
+            let isActive = shouldContinueObservingDeliveryState
+            if isActive || wasActive {
+                requestAllSessionContextRefreshes()
+            }
+            wasActive = isActive
         }
     }
 
-    func loadAgentUpdates() async {
-        guard !isLoadingAgentUpdates, isConnected else { return }
+    func requestAllSessionContextRefreshes() {
+        guard isConnected else { return }
+        requestWorkerRefresh()
+        requestAgentUpdatesRefresh()
+        requestProviderContextRefresh()
+    }
+
+    func requestAgentUpdatesRefresh() {
+        guard isConnected else { return }
+        refreshCoordinator.request(.agentUpdates) { generation in
+            await loadAgentUpdates(generation: generation)
+        }
+    }
+
+    func requestProviderContextRefresh() {
+        guard isConnected else { return }
+        refreshCoordinator.request(.providerContext) { generation in
+            await loadInspectableContext(generation: generation)
+        }
+    }
+
+    func requestWorkerRefresh(loadOlder: Bool = false) {
+        guard isConnected else { return }
+        if loadOlder {
+            loadOlderWorkerRunsPending = true
+        }
+        refreshCoordinator.request(.workers) { generation in
+            let shouldLoadOlder = loadOlderWorkerRunsPending
+            loadOlderWorkerRunsPending = false
+            await loadSessionWorkerRuns(
+                reset: !shouldLoadOlder,
+                generation: generation
+            )
+        }
+    }
+
+    func loadAgentUpdates(generation: UInt64) async {
+        guard refreshCoordinator.isCurrent(generation), isConnected else { return }
+        agentUpdatesLoadingGeneration = generation
         isLoadingAgentUpdates = true
-        defer { isLoadingAgentUpdates = false }
+        defer {
+            if agentUpdatesLoadingGeneration == generation {
+                agentUpdatesLoadingGeneration = nil
+                isLoadingAgentUpdates = false
+            }
+        }
         do {
             let result = try await sessionRepository.agentUpdates(
                 sessionId: sessionId,
                 limit: 100
             )
+            guard refreshCoordinator.isCurrent(generation) else { return }
             agentUpdates = result.updates
             agentWaits = result.waits
             agentUpdatesLoadError = nil
         } catch is CancellationError {
             return
         } catch {
-            agentUpdatesLoadError = "Delivery and wait status could not load: \(error.localizedDescription)"
+            guard refreshCoordinator.isCurrent(generation) else { return }
+            agentUpdatesLoadError = agentUpdates.isEmpty && agentWaits.isEmpty
+                ? "Delivery and wait status could not load: \(error.localizedDescription)"
+                : "Couldn’t refresh delivery and wait status; showing the last update."
         }
     }
 
-    func loadInspectableContext() async {
-        guard !isLoadingInspectableContext else { return }
-        guard isConnected else {
-            loadCachedInspectableContext()
-            return
-        }
+    func loadInspectableContext(generation: UInt64) async {
+        guard refreshCoordinator.isCurrent(generation), isConnected else { return }
+        contextLoadingGeneration = generation
         isLoadingInspectableContext = true
-        defer { isLoadingInspectableContext = false }
+        defer {
+            if contextLoadingGeneration == generation {
+                contextLoadingGeneration = nil
+                isLoadingInspectableContext = false
+            }
+        }
         do {
             let page = try await sessionRepository.contextRequests(
                 sessionId: sessionId,
                 beforeSequence: nil,
                 limit: 10
             )
-            contextRequests = page.requests
-            contextRequestsNextSequence = page.nextBeforeSequence
+            var detail = latestContextDetail
             if let latest = page.requests.first,
                latestContextDetail?.eventId != latest.eventId {
-                latestContextDetail = try await sessionRepository.contextRequestDetail(
+                detail = try await sessionRepository.contextRequestDetail(
                     sessionId: sessionId,
                     eventId: latest.eventId
                 )
             }
+            guard refreshCoordinator.isCurrent(generation) else { return }
+            contextRequests = page.requests
+            contextRequestsNextSequence = page.nextBeforeSequence
+            latestContextDetail = detail
             contextLoadError = nil
         } catch is CancellationError {
             return
         } catch {
+            guard refreshCoordinator.isCurrent(generation) else { return }
             if contextRequests.isEmpty {
                 loadCachedInspectableContext()
             }
             if contextRequests.isEmpty {
                 contextLoadError = "Context audit could not load: \(error.localizedDescription)"
+            } else {
+                contextLoadError = "Couldn’t refresh model context; showing the last update."
             }
         }
     }
@@ -151,6 +214,8 @@ extension SessionContextSheet {
                 identifiers.insert($0.eventId).inserted
             })
             contextRequestsNextSequence = page.nextBeforeSequence
+        } catch is CancellationError {
+            return
         } catch {
             errorMessage = "Could not load older model requests: \(error.localizedDescription)"
         }
@@ -167,6 +232,8 @@ extension SessionContextSheet {
                 contextRequests.insert(selected, at: 0)
             }
             showContextHistory = false
+        } catch is CancellationError {
+            return
         } catch {
             errorMessage = "Could not inspect this model request: \(error.localizedDescription)"
         }
@@ -180,38 +247,40 @@ extension SessionContextSheet {
         defer { isLoadingModels = false }
         do {
             availableModels = try await modelRepository.list(forceRefresh: false)
+        } catch is CancellationError {
+            return
         } catch {
             errorMessage = "Could not load models: \(error.localizedDescription)"
         }
     }
 
-    func observeSessionWorkers() async {
-        await loadSessionWorkerRuns(reset: true)
-        while !Task.isCancelled,
-              isAgentActive || sessionWorkerRuns.contains(where: { $0.status == "queued" || $0.status == "running" }) {
-            do {
-                try await Task.sleep(for: .seconds(1))
-            } catch {
-                return
-            }
-            await loadSessionWorkerRuns(reset: true)
-        }
-    }
-
-    func loadSessionWorkerRuns(reset: Bool) async {
-        guard !isLoadingWorkerRuns else { return }
+    func loadSessionWorkerRuns(reset: Bool, generation: UInt64) async {
+        guard refreshCoordinator.isCurrent(generation), isConnected else { return }
+        workerLoadingGeneration = generation
         isLoadingWorkerRuns = true
-        defer { isLoadingWorkerRuns = false }
+        defer {
+            if workerLoadingGeneration == generation {
+                workerLoadingGeneration = nil
+                isLoadingWorkerRuns = false
+            }
+        }
         do {
-            if workerNames.isEmpty {
+            var refreshedWorkerNames = workerNames
+            let catalogRevision = workerCatalogRevision
+            if workerNames.isEmpty || loadedWorkerCatalogRevision != catalogRevision {
                 let workers = try await workerRepository.workers(includeRetired: true).workers
-                workerNames = Dictionary(uniqueKeysWithValues: workers.map { ($0.workerId, $0.name) })
+                refreshedWorkerNames = Dictionary(
+                    uniqueKeysWithValues: workers.map { ($0.workerId, $0.name) }
+                )
             }
             let page = try await workerRepository.workerRunGraphs(
                 originSessionId: sessionId,
                 limit: 10,
                 offset: reset ? nil : workerRunsNextOffset
             )
+            guard refreshCoordinator.isCurrent(generation) else { return }
+            workerNames = refreshedWorkerNames
+            loadedWorkerCatalogRevision = catalogRevision
             if reset {
                 sessionWorkerRuns = page.runs
             } else {
@@ -222,9 +291,18 @@ extension SessionContextSheet {
             }
             workerRunsNextOffset = page.nextOffset
             workerLoadError = nil
+        } catch is CancellationError {
+            return
         } catch {
-            workerLoadError = "Worker activity could not load: \(error.localizedDescription)"
+            guard refreshCoordinator.isCurrent(generation) else { return }
+            workerLoadError = sessionWorkerRuns.isEmpty
+                ? "Worker activity could not load: \(error.localizedDescription)"
+                : "Couldn’t refresh worker activity; showing the last update."
         }
+    }
+
+    func loadOlderSessionWorkerRuns() {
+        requestWorkerRefresh(loadOlder: true)
     }
 
     func forkSession() async {
@@ -236,6 +314,8 @@ extension SessionContextSheet {
             dismiss()
             await Task.yield()
             NotificationCenter.default.post(name: .switchToSession, object: newSessionId)
+        } catch is CancellationError {
+            return
         } catch {
             errorMessage = "Could not fork session: \(error.localizedDescription)"
         }
