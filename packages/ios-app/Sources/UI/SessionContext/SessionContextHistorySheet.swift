@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SessionContextHistorySheet: View {
     let requests: [SessionContextRequestSummaryDTO]
+    let models: [ModelInfo]
     let hasMore: Bool
     let loadMore: () async -> Void
     let select: (SessionContextRequestSummaryDTO) async -> Void
@@ -25,7 +26,11 @@ struct SessionContextHistorySheet: View {
                                         : .tronAmber)
                                     .frame(width: 28)
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(request.model ?? "Model request")
+                                    Text(SessionContextPresentation.modelDisplayName(
+                                        request.model,
+                                        models: models,
+                                        fallback: "Model request"
+                                    ))
                                         .font(TronTypography.sans(
                                             size: TronTypography.sizeBody,
                                             weight: .semibold

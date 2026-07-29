@@ -299,6 +299,42 @@ struct WorkerConsoleInteractionTests {
         #expect(!dashboard.contains("struct EngineSurfaceCard"))
     }
 
+    @Test("Session Context keeps model switching visible and raw JSON subordinate")
+    func sessionContextSheetHierarchy() throws {
+        let root = iosAppRoot()
+        let context = try sessionContextSource(root: root)
+        let mainSheet = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/SessionContext/SessionContextSheet.swift"
+            ),
+            encoding: .utf8
+        )
+        let detailSheet = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/SessionContext/SessionContextDetailSheet.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(context.contains("label: currentModelId.shortModelName"))
+        #expect(!context.contains("var modelSection: some View"))
+        #expect(context.contains("showContextHistory = true"))
+        #expect(!mainSheet.contains("requestToolsSection"))
+        #expect(detailSheet.contains(#"title: "Tools available for this request""#))
+        #expect(detailSheet.contains("destination: .toolSurface(raw)"))
+        #expect(detailSheet.contains("LazyVStack(alignment: .leading, spacing: 18)"))
+        #expect(context.contains("SessionContextRawJSONSheet(selection: selection)"))
+        #expect(!detailSheet.contains(
+            "auditText(SessionContextAuditFormatter.projectedJSONString(detail.providerAudit))"
+        ))
+        #expect(!detailSheet.contains(
+            "auditText(SessionContextAuditFormatter.projectedJSONString(raw))"
+        ))
+        #expect(context.contains("Task.detached(priority: .userInitiated)"))
+        #expect(context.contains("textView.isScrollEnabled = true"))
+        #expect(!context.contains("chevron.right"))
+    }
+
     @Test("Worker architecture is integrated into normal inventory and detail")
     func workerArchitectureIsIntegratedIntoWorkerInspection() throws {
         let root = iosAppRoot()

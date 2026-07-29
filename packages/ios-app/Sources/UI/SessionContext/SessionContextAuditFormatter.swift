@@ -1,6 +1,24 @@
 import Foundation
 
+struct SessionContextProviderAuditOverview: Equatable, Sendable {
+    let requestKind: String
+    let messageCount: Int?
+    let toolCount: Int?
+}
+
 enum SessionContextAuditFormatter {
+    static func providerRequestOverview(
+        _ value: AnyCodable
+    ) -> SessionContextProviderAuditOverview {
+        let root = value.dictionaryValue ?? [:]
+        let providerRequest = AnyCodable(root["providerRequest"]).dictionaryValue ?? [:]
+        return SessionContextProviderAuditOverview(
+            requestKind: providerRequest["kind"] as? String ?? "redacted_request",
+            messageCount: integer(root["messageCount"]),
+            toolCount: integer(root["toolCount"])
+        )
+    }
+
     static func projectedJSONString(_ value: AnyCodable) -> String {
         let projected = project(value.value, key: nil)
         guard JSONSerialization.isValidJSONObject(projected),
@@ -43,5 +61,16 @@ enum SessionContextAuditFormatter {
     private static func isMediaKey(_ key: String?) -> Bool {
         guard let key = key?.lowercased() else { return false }
         return key == "data" || key == "image_url" || key == "imageurl"
+    }
+
+    private static func integer(_ value: Any?) -> Int? {
+        if let value = value as? Int {
+            return value
+        }
+        if let value = value as? Double,
+           value.isFinite {
+            return Int(exactly: value.rounded(.towardZero))
+        }
+        return nil
     }
 }

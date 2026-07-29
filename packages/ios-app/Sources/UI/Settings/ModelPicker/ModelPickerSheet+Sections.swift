@@ -7,6 +7,8 @@ enum ModelPickerReasoningVisibility {
 }
 
 enum ModelPickerPresentation {
+    static let primaryAccent: Color = .tronEmerald
+
     static func usesHighContrastNeutral(providerId: String, isDark: Bool) -> Bool {
         isDark && providerId == "openai-codex"
     }

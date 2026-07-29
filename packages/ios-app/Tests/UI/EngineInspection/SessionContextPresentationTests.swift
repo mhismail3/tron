@@ -111,6 +111,37 @@ struct SessionContextPresentationTests {
         ) == "Not delivered")
     }
 
+    @Test("Request audits use the catalog's friendly model name")
+    func requestAuditModelDisplayName() {
+        let model = ModelInfo(
+            id: "openai/gpt-5.6-sol",
+            name: "GPT-5.6 Sol",
+            provider: "openai",
+            contextWindow: 272_000,
+            supportsThinking: true,
+            supportsImages: true,
+            supportsDocuments: true,
+            tier: "sol",
+            isRetiredGeneration: false
+        )
+
+        #expect(SessionContextPresentation.modelDisplayName(
+            "gpt-5.6-sol",
+            models: [model],
+            fallback: "Current Model"
+        ) == "GPT-5.6 Sol")
+        #expect(SessionContextPresentation.modelDisplayName(
+            "gpt-5.6-sol",
+            models: [],
+            fallback: "Current Model"
+        ) == "GPT-5.6 Sol")
+        #expect(SessionContextPresentation.modelDisplayName(
+            nil,
+            models: [model],
+            fallback: "Current Model"
+        ) == "Current Model")
+    }
+
     @Test("Remaining context avoids a false zero while the model window loads")
     func remainingContextText() {
         #expect(SessionContextPresentation.remainingContextText(
@@ -196,6 +227,10 @@ struct SessionContextPresentationTests {
 
         let workers = SessionContextPresentation.workerSelections(from: surface)
         let fixed = SessionContextPresentation.fixedToolSelections(from: surface)
+        let summary = SessionContextPresentation.toolSummary(
+            fixed: fixed,
+            workers: workers
+        )
 
         #expect(workers.count == 2)
         #expect(workers[0].projected)
@@ -209,6 +244,9 @@ struct SessionContextPresentationTests {
         #expect(fixed[0].audience == "ordinary")
         #expect(!fixed[1].projected)
         #expect(fixed[1].omissionReason == "specialist_only")
+        #expect(summary.fixedAvailable == 1)
+        #expect(summary.workersAvailable == 1)
+        #expect(summary.omitted == 2)
     }
 
     @Test("Provider audit formatter never renders inline media bytes")
@@ -223,6 +261,24 @@ struct SessionContextPresentationTests {
         #expect(rendered.contains("[media omitted:"))
         #expect(rendered.contains("visible"))
         #expect(!rendered.contains(String(repeating: "a", count: 128)))
+    }
+
+    @Test("Provider audit overview avoids formatting the full request body")
+    func providerAuditOverview() {
+        let audit = AnyCodable([
+            "messageCount": 3,
+            "toolCount": 16,
+            "providerRequest": [
+                "kind": "exact_provider_envelope",
+                "body": ["tools": Array(repeating: ["schema": "large"], count: 16)],
+            ] as [String: Any],
+        ] as [String: Any])
+
+        let overview = SessionContextAuditFormatter.providerRequestOverview(audit)
+
+        #expect(overview.requestKind == "exact_provider_envelope")
+        #expect(overview.messageCount == 3)
+        #expect(overview.toolCount == 16)
     }
 
     private func workerRun(

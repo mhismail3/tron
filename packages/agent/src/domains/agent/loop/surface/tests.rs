@@ -158,17 +158,8 @@ async fn non_model_functions_are_not_projected() {
 }
 
 #[tokio::test]
-async fn engine_owned_inbox_attachment_crosses_internal_visibility_for_trusted_runtime() {
+async fn engine_owned_inbox_attachment_is_independent_of_the_model_tool_surface() {
     let host = EngineHostHandle::new_in_memory().expect("host");
-    register_worker_primitive(
-        &host,
-        "inbox",
-        "worker_inbox",
-        "Read durable worker results",
-        false,
-        "kernel",
-        serde_json::json!({}),
-    );
     let attach = FunctionDefinition::new(
         FunctionId::new("worker_kernel::inbox_attach").expect("function id"),
         WorkerId::new("worker_kernel").expect("worker id"),
@@ -185,17 +176,10 @@ async fn engine_owned_inbox_attachment_crosses_internal_visibility_for_trusted_r
     let surface = resolve_provider_primitive_surface(&host, "session-a")
         .await
         .expect("surface");
-    let primer = take_worker_inbox_context(
-        &host,
-        &surface,
-        "session-a",
-        1,
-        Some("background"),
-        None,
-        None,
-        None,
-    )
-    .await;
+    assert!(!surface.targets_by_name.contains_key("worker_inbox"));
+    let primer =
+        take_worker_inbox_context(&host, "session-a", 1, Some("background"), None, None, None)
+            .await;
 
     assert_eq!(
         primer.narrative.as_deref(),
@@ -263,9 +247,6 @@ async fn empty_or_unhandled_continuity_has_no_deterministic_fallback_text() {
 #[tokio::test]
 async fn worker_agent_sessions_skip_all_automatic_context_hooks() {
     let host = EngineHostHandle::new_in_memory().expect("host");
-    let surface = resolve_provider_primitive_surface(&host, "worker-session")
-        .await
-        .expect("empty surface");
 
     assert!(
         take_continuity_context(
@@ -285,7 +266,6 @@ async fn worker_agent_sessions_skip_all_automatic_context_hooks() {
     assert!(
         take_worker_inbox_context(
             &host,
-            &surface,
             "worker-session",
             1,
             Some("bounded worker input"),

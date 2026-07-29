@@ -1511,7 +1511,9 @@ ranking, recovery, and audit.
 
 Attaching pending worker inbox results is an engine-owned session projection,
 not an agent action. It runs under the internal runtime identity while retaining
-the session and parent trace as provenance.
+the session and parent trace as provenance. It calls the internal attachment
+operation independently of whether the separate specialist inbox inspection
+tool is selected for the model-visible surface.
 
 The remaining boundaries are practical:
 

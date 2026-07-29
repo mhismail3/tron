@@ -632,14 +632,16 @@ server evidence without inventing authorization state or retry policy.
 
 Reasoning-like content retains its server-declared source contract through
 streaming, persistence, replay, compact chat, and the detail sheet.
-Append-only provider thinking is labeled `Thinking`; provider-authored
-summaries are labeled `Reasoning Summary` and are never represented as hidden
-chain-of-thought. Compact previews preserve separate source paragraphs instead
-of joining status headings onto one line. Reasoning text uses regular-weight
-provider-neutral typography: whole-line Markdown heading/emphasis wrappers are
-treated as transport decoration, while line breaks, list depth, punctuation,
-and literal content remain intact. The detail sheet receives the tapped
-block's kind directly rather than inferring it from the active model.
+Append-only provider thinking and provider-authored reasoning summaries retain
+distinct typed contracts and are never represented as hidden chain-of-thought.
+Compact chat blocks render only their grey reasoning text, without repeating a
+`Thinking` or `Reasoning Summary` header above every preview. The detail sheet
+labels the source kind explicitly and receives the tapped block's kind directly
+rather than inferring it from the active model. Compact previews preserve
+separate source paragraphs instead of joining status headings onto one line.
+Reasoning text uses regular-weight provider-neutral typography: whole-line
+Markdown heading/emphasis wrappers are treated as transport decoration, while
+line breaks, list depth, punctuation, and literal content remain intact.
 
 Transcript geometry has one explicit alignment rule. Content that fits inside
 the available viewport is top-aligned and rejects automatic bottom-positioning
@@ -753,13 +755,31 @@ owns the sheet-scoped cancellable tasks; detail/history sheets load bounded
 evidence lazily; and the audit formatter projects redacted payloads. Cross-file
 extensions share the one sheet state rather than manufacturing feature view
 models or copies of provider-request data. Global worker architecture remains
-in the Engine dashboard rather than being loaded again by Session Context.
+in the Engine dashboard rather than being loaded again by Session Context. The
+toolbar shows the current short model name and opens the model picker; the
+latest-request card is the request-history entry point, so model switching does
+not consume a long body section. Request summaries and history resolve each
+audit's stored model identifier through the loaded catalog so they show the
+friendly model name while retaining the exact identifier in durable evidence.
+The main context inventory has one Tool Surface disclosure row. Its
+available/omitted counts, relevance scores, and exact selected/omitted lists
+live together in the Tool Surface detail rather than being duplicated in
+another main-sheet summary card. Detail rows use lazy vertical layout so a
+large omitted-tool inventory does not mount all cards when the sheet opens.
+Navigation rows across the Session Context surface remain fully tappable
+without trailing chevrons; their leading icon, title, supporting text, and
+interactive glass treatment carry the affordance.
 
 The sheet initially loads only the latest request. Earlier requests page on
-demand and raw audit text loads only when opened. While an agent is active,
-latest-request reconciliation runs only while the sheet is visible and performs
-one final refresh after the run stops. Cancellation and view teardown own every
-task.
+demand. Provider Request and Tool Surface show bounded structured evidence
+first. Their exact JSON formats off the main actor only after the user opens a
+subordinate sheet, then stays inside one internally scrolling selectable text
+view rather than expanding the parent scroll by hundreds of kilobytes. While
+an agent is active, latest-request reconciliation runs only while the sheet is
+visible and performs one final refresh after the run stops. Cancellation and
+view teardown own every task. Manifest provenance arrays omitted by the server
+when empty decode as empty collections, preserving the rest of the audit
+instead of collapsing the visible sections to summary-only counts.
 
 The v3 manifest drives standardized sections for ordered instructions,
 conversation/compaction, attachments and documents, environment, automatic
@@ -838,7 +858,10 @@ existing appearance. Explicit clear or unchanged presentation surfaces, such
 as immersive camera and onboarding flows, remain intentional opt-outs.
 
 The model picker additionally resolves the OpenAI neutral accent to the
-standard high-contrast secondary-text token in dark mode.
+standard high-contrast secondary-text token in dark mode. Model-entry chrome,
+the picker title and confirmation action, and the reasoning control share the
+emerald product accent; provider and model cards retain their provider-specific
+colors.
 
 Provider cards share one leading-icon and trailing-action column contract.
 Provider names and row labels therefore remain left-aligned across differing

@@ -265,7 +265,6 @@ pub(super) async fn open_provider_response(
     let (worker_inbox_context, continuity_context) = tokio::join!(
         surface::take_worker_inbox_context(
             params.engine_host,
-            &primitive_surface,
             params.session_id,
             params.turn,
             relevance_query.as_deref(),

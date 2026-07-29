@@ -61,9 +61,7 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
         VStack(alignment: .leading, spacing: 16) {
             ThinkingContentView(
                 content: "Checking the available operation before responding.",
-                isExpanded: false,
-                isStreaming: false,
-                kind: .reasoningSummary
+                isExpanded: false
             )
 
             StreamingContentView(text: "Streaming response text without a leading rail.")

@@ -94,6 +94,9 @@ final class ChatMessagePresentationTests: XCTestCase {
         XCTAssertFalse(streamingSource.contains("accentLine"))
         XCTAssertFalse(streamingSource.contains(".frame(width: 2)"))
         XCTAssertFalse(thinkingSource.contains(".frame(width: 2)"))
+        XCTAssertFalse(thinkingSource.contains("Text(kind.title)"))
+        XCTAssertFalse(thinkingSource.contains("PulsingIcon("))
+        XCTAssertFalse(thinkingSource.contains("TronIconView("))
     }
 
     func testThinkingPresentationPreservesSeparateSummaryParagraphsWithoutBoldMarkup() {

@@ -83,6 +83,24 @@ enum SessionContextPresentation {
         }
     }
 
+    static func modelDisplayName(
+        _ modelId: String?,
+        models: [ModelInfo],
+        fallback: String
+    ) -> String {
+        guard let modelId, !modelId.isEmpty else { return fallback }
+        let normalizedId = modelId.split(separator: "/", maxSplits: 1).last.map(String.init)
+            ?? modelId
+        if let model = models.first(where: {
+            let candidateId = $0.id.split(separator: "/", maxSplits: 1).last.map(String.init)
+                ?? $0.id
+            return $0.id == modelId || candidateId == normalizedId
+        }) {
+            return model.formattedModelName
+        }
+        return formatModelDisplayName(modelId)
+    }
+
     static func remainingContextText(currentContextWindow: Int, tokensRemaining: Int) -> String {
         guard currentContextWindow > 0 else { return "Window loading" }
         return "\(TokenFormatter.format(tokensRemaining, style: .withSuffix)) left"
@@ -166,6 +184,25 @@ enum SessionContextPresentation {
             )
         }
     }
+
+    static func toolSummary(
+        fixed: [SessionContextFixedToolSelection],
+        workers: [SessionContextWorkerSelection]
+    ) -> SessionContextToolSummary {
+        let fixedAvailable = fixed.filter(\.projected).count
+        let workersAvailable = workers.filter(\.projected).count
+        return SessionContextToolSummary(
+            fixedAvailable: fixedAvailable,
+            workersAvailable: workersAvailable,
+            omitted: fixed.count - fixedAvailable + workers.count - workersAvailable
+        )
+    }
+}
+
+struct SessionContextToolSummary: Equatable, Sendable {
+    let fixedAvailable: Int
+    let workersAvailable: Int
+    let omitted: Int
 }
 
 struct SessionContextFixedToolSelection: Identifiable, Equatable {

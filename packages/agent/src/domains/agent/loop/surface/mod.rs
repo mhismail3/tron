@@ -178,7 +178,6 @@ pub(crate) async fn take_continuity_context(
 /// bounded transient primer for the next relevant model turn.
 pub(crate) async fn take_worker_inbox_context(
     host: &EngineHostHandle,
-    surface: &ResolvedPrimitiveSurface,
     session_id: &str,
     turn: u32,
     relevance_query: Option<&str>,
@@ -195,19 +194,12 @@ pub(crate) async fn take_worker_inbox_context(
             None,
         );
     }
-    if !surface.targets_by_name.contains_key("worker_inbox") {
-        return automatic_context_outcome(
-            "worker_inbox",
-            "unavailable",
-            "fixed_surface_missing",
-            None,
-            None,
-        );
-    }
     // INVARIANT: inbox attachment is an engine-owned projection step, not a
-    // model tool call. Attribute the observation to the session while using an
-    // internal runtime actor so the hidden operation satisfies its visibility
-    // boundary without pretending to be a model tool call.
+    // model tool call and therefore must not depend on whether the separate
+    // specialist `worker_inbox` inspection tool was selected for the provider.
+    // Attribute the observation to the session while using an internal runtime
+    // actor so the hidden operation satisfies its visibility boundary without
+    // pretending to be a model tool call.
     let mut context = CausalContext::new(
         match ActorId::new("system:agent-runtime") {
             Ok(actor) => actor,

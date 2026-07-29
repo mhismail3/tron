@@ -30,14 +30,17 @@
 //! revision and surface hash; the prompt receives a compact revision/count
 //! primer rather than another catalog-inspection workflow.
 //! Provider admission concurrently asks the worker-owned inbox and continuity
-//! hooks for bounded context. Continuity receives only the latest user-task
-//! query and canonical working directory; missing, empty, or failed recall
-//! contributes no fallback text. The kernel redacts and bounds the returned
-//! narrative before placing it in the system prompt, while the worker retains
-//! all memory and retrieval policy. Agent-runner worker sessions skip every
-//! automatic relevance, inbox, and continuity hook: their immutable worker
-//! contract already owns context, and cross-hook context would permit recursive
-//! policy workers and unrelated semantic influence on an internal protocol.
+//! hooks for bounded context. Inbox attachment is an engine-owned internal
+//! projection and never depends on whether the separate specialist inbox
+//! inspection tool was selected for the provider. Continuity receives only the
+//! latest user-task query and canonical working directory; missing, empty, or
+//! failed recall contributes no fallback text. The kernel redacts and bounds
+//! the returned narrative before placing it in the system prompt, while the
+//! worker retains all memory and retrieval policy. Agent-runner worker sessions
+//! skip every automatic relevance, inbox, and continuity hook: their immutable
+//! worker contract already owns context, and cross-hook context would permit
+//! recursive policy workers and unrelated semantic influence on an internal
+//! protocol.
 //! Tool lifecycle events carry the exact function contract's immutable
 //! fixed-core or dynamic-worker classification (including worker runner
 //! identity) as presentation evidence. Clients can therefore render useful

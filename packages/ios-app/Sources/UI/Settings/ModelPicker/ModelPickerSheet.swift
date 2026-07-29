@@ -41,16 +41,6 @@ struct ModelPickerSheet: View {
         selectedModelInfo?.reasoningLevels ?? ["minimal", "low", "medium", "high", "xhigh"]
     }
 
-    /// Provider color for the currently selected model
-    private var selectedProviderColor: Color {
-        guard let model = selectedModelInfo else { return .tronEmerald }
-        for group in providerGroups {
-            let contains = group.families.contains { $0.models.contains { $0.id == model.id } }
-            if contains { return displayColor(for: group) }
-        }
-        return .tronEmerald
-    }
-
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
@@ -100,18 +90,19 @@ struct ModelPickerSheet: View {
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Models", color: .tronPurple)
+                    SheetTitle(title: "Models", color: ModelPickerPresentation.primaryAccent)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { commitSelection(); dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronPurple)
+                            .foregroundStyle(ModelPickerPresentation.primaryAccent)
                     }
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .tint(ModelPickerPresentation.primaryAccent)
         .onDisappear {
             commitSelection()
         }
@@ -148,13 +139,13 @@ struct ModelPickerSheet: View {
                 Text(reasoningLevelLabel(currentReasoningLevel))
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
             }
-            .foregroundStyle(selectedProviderColor)
+            .foregroundStyle(ModelPickerPresentation.primaryAccent)
         }
         .popover(isPresented: $showReasoningPopover, arrowEdge: .top) {
             ReasoningLevelPopover(
                 levels: availableReasoningLevels,
                 currentLevel: currentReasoningLevel,
-                accentColor: selectedProviderColor,
+                accentColor: ModelPickerPresentation.primaryAccent,
                 onSelect: { level in
                     showReasoningPopover = false
                     NotificationCenter.default.post(name: .reasoningLevelAction, object: level)

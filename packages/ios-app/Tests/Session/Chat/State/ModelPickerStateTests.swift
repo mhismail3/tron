@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import Observation
+import SwiftUI
 @testable import TronMobile
 
 /// Tests for ModelPickerState
@@ -73,6 +74,11 @@ struct ModelPickerStateTests {
     }
 
     // MARK: - Presentation Policy Tests
+
+    @Test("Model picker chrome uses the emerald product accent")
+    func modelPickerChromeUsesEmeraldAccent() {
+        #expect(ModelPickerPresentation.primaryAccent == Color.tronEmerald)
+    }
 
     @Test("OpenAI uses a readable neutral accent only in dark mode")
     func openAIUsesReadableNeutralAccentOnlyInDarkMode() {

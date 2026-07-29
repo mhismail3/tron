@@ -83,8 +83,6 @@ struct SessionContextSheet: View {
                     requestSummarySection
                     receivedContextSection
                     automaticContextSection
-                    requestToolsSection
-                    modelSection
                     workerActivitySection
                     sessionActionsSection
                     providerAuditSection
@@ -107,14 +105,16 @@ struct SessionContextSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    SheetPrimaryActionButton(
-                        icon: "clock.arrow.circlepath",
-                        accent: .tronEmerald,
-                        accessibilityLabel: "Model request history"
+                    LoadingToolbarButton(
+                        label: currentModelId.shortModelName,
+                        icon: "cpu",
+                        color: ModelPickerPresentation.primaryAccent,
+                        isLoading: isLoadingModels,
+                        isEnabled: canMutate && !availableModels.isEmpty
                     ) {
-                        showContextHistory = true
+                        showModelPicker = true
                     }
-                    .disabled(contextRequests.isEmpty)
+                    .accessibilityLabel("Model, \(currentModelDisplayName)")
                 }
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: "Session Context", color: .tronEmerald)
@@ -162,6 +162,7 @@ struct SessionContextSheet: View {
         .sheet(isPresented: $showContextHistory) {
             SessionContextHistorySheet(
                 requests: contextRequests,
+                models: availableModels,
                 hasMore: contextRequestsNextSequence != nil,
                 loadMore: { await loadOlderContextRequests() },
                 select: { request in

@@ -89,44 +89,57 @@ extension SessionContextSheet {
             )
 
             if let summary = latestContextSummary {
-                VStack(spacing: 9) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(summary.model ?? currentModelDisplayName)
-                            .font(TronTypography.sans(
-                                size: TronTypography.sizeBody,
-                                weight: .semibold
+                Button {
+                    showContextHistory = true
+                } label: {
+                    VStack(spacing: 9) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(SessionContextPresentation.modelDisplayName(
+                                summary.model,
+                                models: availableModels,
+                                fallback: currentModelDisplayName
                             ))
-                            .foregroundStyle(.tronTextPrimary)
-                        Spacer()
-                        Text(summary.turn.map { "Turn \($0)" } ?? "Legacy")
-                            .font(TronTypography.pillValue)
-                            .foregroundStyle(.tronEmerald)
-                    }
+                                .font(TronTypography.sans(
+                                    size: TronTypography.sizeBody,
+                                    weight: .semibold
+                                ))
+                                .foregroundStyle(.tronTextPrimary)
+                            Spacer()
+                            Text(summary.turn.map { "Turn \($0)" } ?? "Legacy")
+                                .font(TronTypography.pillValue)
+                                .foregroundStyle(.tronEmerald)
+                        }
 
-                    HStack(spacing: 8) {
-                        Label(
-                            summary.providerName ?? summary.providerType ?? "Provider",
-                            systemImage: "network"
-                        )
-                        Spacer()
-                        Text(WorkerConsolePresentation.timestamp(summary.timestamp) ?? summary.timestamp)
-                    }
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-
-                    if summary.provenanceAvailability != "complete" {
-                        Label(
-                            "Legacy audit: exact request remains available, but source provenance was not recorded.",
-                            systemImage: "clock.badge.exclamationmark"
-                        )
+                        HStack(spacing: 8) {
+                            Label(
+                                summary.providerName ?? summary.providerType ?? "Provider",
+                                systemImage: "network"
+                            )
+                            Spacer()
+                            Text(
+                                WorkerConsolePresentation.timestamp(summary.timestamp)
+                                    ?? summary.timestamp
+                            )
+                        }
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronAmber)
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
+                        .foregroundStyle(.tronTextSecondary)
 
+                        if summary.provenanceAvailability != "complete" {
+                            Label(
+                                "Legacy audit: exact request remains available, but source provenance was not recorded.",
+                                systemImage: "clock.badge.exclamationmark"
+                            )
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronAmber)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(14)
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
-                .padding(14)
-                .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+                .buttonStyle(.plain)
+                .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: true)
+                .accessibilityHint("Shows model request history")
             } else if isLoadingInspectableContext {
                 ProgressView("Loading model context…")
                     .frame(maxWidth: .infinity)
@@ -291,63 +304,6 @@ extension SessionContextSheet {
         }
     }
 
-    var requestToolsSection: some View {
-        let selected = requestWorkerSelections.filter(\.projected)
-        let omitted = requestWorkerSelections.filter { !$0.projected }
-        let omittedFixed = requestFixedToolSelections.filter { !$0.projected }
-        return VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
-            SettingsSectionHeader(
-                title: "Tools available for this request",
-                bottomPadding: SessionContextPresentation.headerToContentSpacing
-            )
-
-            VStack(spacing: 9) {
-                HStack {
-                    metric(label: "Fixed", value: "\(fixedToolCount)")
-                    Divider().frame(height: 32)
-                    metric(label: "Workers", value: "\(selected.count)")
-                    Divider().frame(height: 32)
-                    metric(label: "Omitted", value: "\(omitted.count + omittedFixed.count)")
-                }
-
-                if !selected.isEmpty {
-                    Divider().opacity(0.35)
-                    ForEach(selected.prefix(6)) { worker in
-                        workerSelectionRow(worker)
-                    }
-                }
-
-                if !omitted.isEmpty || !omittedFixed.isEmpty {
-                    Button {
-                        selectedContextDetail = .tools(
-                            fixed: requestFixedToolSelections,
-                            workers: requestWorkerSelections,
-                            raw: manifest?.toolSurface
-                        )
-                    } label: {
-                        HStack {
-                            Label(
-                                "See exact tool access and omissions",
-                                systemImage: "eye.slash"
-                            )
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                        }
-                        .font(TronTypography.sans(
-                            size: TronTypography.sizeCaption,
-                            weight: .semibold
-                        ))
-                        .foregroundStyle(.tronTextSecondary)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(13)
-            .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
-        }
-    }
-
     var attachmentMessageCount: Int {
         manifest?.messages.filter {
             $0.contentKinds.contains("image") || $0.contentKinds.contains("document")
@@ -358,11 +314,6 @@ extension SessionContextSheet {
         manifest?.messages.count ?? Int(latestContextSummary?.messageCount ?? 0)
     }
 
-    var fixedToolCount: UInt64 {
-        guard let surface = manifest?.toolSurface.dictionaryValue else { return 0 }
-        return UInt64(surface["fixedToolCount"] as? Int ?? 0)
-    }
-
     func automaticContextSummary(_ evaluation: ContextAutomaticEvaluationDTO) -> String {
         if let narrative = evaluation.narrative, !narrative.isEmpty {
             return "\(SessionContextPresentation.automaticContextChannel(evaluation)) · \(narrative)"
@@ -370,37 +321,6 @@ extension SessionContextSheet {
         return evaluation.detail.map {
             "\(SessionContextPresentation.automaticContextChannel(evaluation)) · \($0)"
         } ?? "\(SessionContextPresentation.automaticContextChannel(evaluation)) · \(WorkerConsolePresentation.displayLabel(evaluation.mechanism)) · \(evaluation.sources.count) sources"
-    }
-
-    func workerSelectionRow(_ worker: SessionContextWorkerSelection) -> some View {
-        HStack(spacing: 9) {
-            Image(systemName: "bolt.horizontal.circle")
-                .foregroundStyle(.tronEmerald)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(WorkerConsolePresentation.displayLabel(worker.modelName))
-                    .font(TronTypography.sans(
-                        size: TronTypography.sizeCaption,
-                        weight: .semibold
-                    ))
-                    .foregroundStyle(.tronTextPrimary)
-                Text(
-                    WorkerConsolePresentation.displayLabel(
-                        worker.explanation
-                            ?? worker.selectionReason
-                            ?? worker.mechanism
-                            ?? "selected"
-                    )
-                )
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-            }
-            Spacer()
-            if worker.score > 0 {
-                Text("\(worker.score)")
-                    .font(TronTypography.pillValue)
-                    .foregroundStyle(.tronEmerald)
-            }
-        }
     }
 
     func contextDisclosureRow(
@@ -427,66 +347,12 @@ extension SessionContextSheet {
                         .foregroundStyle(.tronTextMuted)
                 }
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(
-                        size: TronTypography.sizeCaption,
-                        weight: .semibold
-                    ))
-                    .foregroundStyle(.tronTextMuted)
             }
             .padding(.horizontal, 13)
             .padding(.vertical, 11)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    var modelSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(
-                title: "Model",
-                bottomPadding: SessionContextPresentation.headerToContentSpacing
-            )
-
-            Button {
-                showModelPicker = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "cpu")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronPurple)
-                        .frame(width: 28)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(currentModelDisplayName)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(.tronTextPrimary)
-                            .lineLimit(1)
-
-                        Text(currentModelInfo?.formattedContextWindow ?? "Current session model")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextMuted)
-                    }
-
-                    Spacer()
-
-                    if isLoadingModels {
-                        ProgressView().controlSize(.small).tint(.tronPurple)
-                    } else {
-                        Image(systemName: "chevron.right")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                            .foregroundStyle(.tronTextMuted)
-                    }
-                }
-                .padding(14)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .sectionFill(.tronPurple, cornerRadius: 12, subtle: true, interactive: canMutate)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .disabled(!canMutate || availableModels.isEmpty)
-            .accessibilityIdentifier("session-context-model-picker")
-        }
     }
 
     var usageMetrics: some View {
@@ -627,10 +493,6 @@ extension SessionContextSheet {
 
                     if isForking {
                         ProgressView().controlSize(.small).tint(.tronEmerald)
-                    } else {
-                        Image(systemName: "chevron.right")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                            .foregroundStyle(.tronTextMuted)
                     }
                 }
                 .padding(14)
@@ -676,8 +538,6 @@ extension SessionContextSheet {
                             .foregroundStyle(.tronTextMuted)
                     }
                     Spacer()
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.tronTextMuted)
                 }
                 .padding(14)
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

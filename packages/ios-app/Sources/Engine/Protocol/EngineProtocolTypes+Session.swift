@@ -242,6 +242,35 @@ struct ContextAutomaticEvaluationDTO: Decodable, Equatable, Identifiable, Sendab
     var id: String { "\(kind):\(invocationId ?? outcome)" }
 }
 
+extension ContextAutomaticEvaluationDTO {
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case outcome
+        case mechanism
+        case deliveryChannel
+        case narrative
+        case workerId
+        case workerVersion
+        case invocationId
+        case sources
+        case detail
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(String.self, forKey: .kind)
+        outcome = try container.decode(String.self, forKey: .outcome)
+        mechanism = try container.decode(String.self, forKey: .mechanism)
+        deliveryChannel = try container.decodeIfPresent(String.self, forKey: .deliveryChannel)
+        narrative = try container.decodeIfPresent(String.self, forKey: .narrative)
+        workerId = try container.decodeIfPresent(String.self, forKey: .workerId)
+        workerVersion = try container.decodeIfPresent(String.self, forKey: .workerVersion)
+        invocationId = try container.decodeIfPresent(String.self, forKey: .invocationId)
+        sources = try container.decodeIfPresent([AnyCodable].self, forKey: .sources) ?? []
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
+    }
+}
+
 struct ContextMessageManifestDTO: Decodable, Equatable, Identifiable, Sendable {
     let ordinal: UInt64
     let role: String
@@ -255,6 +284,38 @@ struct ContextMessageManifestDTO: Decodable, Equatable, Identifiable, Sendable {
     let invocationId: String?
 
     var id: String { "\(ordinal):\(sha256)" }
+}
+
+extension ContextMessageManifestDTO {
+    private enum CodingKeys: String, CodingKey {
+        case ordinal
+        case role
+        case contentKinds
+        case byteCount
+        case sha256
+        case preview
+        case projection
+        case sourceKind
+        case sourceEventIds
+        case invocationId
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ordinal = try container.decode(UInt64.self, forKey: .ordinal)
+        role = try container.decode(String.self, forKey: .role)
+        contentKinds = try container.decode([String].self, forKey: .contentKinds)
+        byteCount = try container.decode(UInt64.self, forKey: .byteCount)
+        sha256 = try container.decode(String.self, forKey: .sha256)
+        preview = try container.decodeIfPresent(String.self, forKey: .preview)
+        projection = try container.decode(String.self, forKey: .projection)
+        sourceKind = try container.decodeIfPresent(String.self, forKey: .sourceKind)
+        sourceEventIds = try container.decodeIfPresent(
+            [String].self,
+            forKey: .sourceEventIds
+        ) ?? []
+        invocationId = try container.decodeIfPresent(String.self, forKey: .invocationId)
+    }
 }
 
 struct ContextEnvironmentManifestDTO: Decodable, Equatable, Sendable {

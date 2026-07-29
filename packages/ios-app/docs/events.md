@@ -134,10 +134,11 @@ delta-accumulated text with that final snapshot and marks the block
 non-streaming so live display converges with `message.assistant` replay.
 Providers that expose append-only extended thinking use the default `thinking`
 contract. Provider-authored reasoning summaries use `reasoning_summary`; those
-summaries may be compressed or non-verbatim and must be labeled separately in
-the UI rather than presented as raw chain-of-thought. Every persisted thinking
-block carries its explicit `kind`; missing values use the ordinary thinking
-presentation.
+summaries may be compressed or non-verbatim and are labeled separately in the
+detail UI rather than presented as raw chain-of-thought. Compact chat previews
+show only the reasoning text and omit both kind headers. Every persisted
+thinking block carries its explicit `kind`; missing values use the ordinary
+thinking presentation.
 
 ## Replay manifest/event parity
 

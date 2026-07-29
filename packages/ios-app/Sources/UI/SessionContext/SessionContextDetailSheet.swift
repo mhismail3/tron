@@ -47,10 +47,12 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
 struct SessionContextDetailSheet: View {
     let selection: SessionContextDetailSelection
 
+    @State private var rawJSONSelection: SessionContextRawJSONSelection?
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     detailContent
                 }
                 .padding(.horizontal, 20)
@@ -69,6 +71,9 @@ struct SessionContextDetailSheet: View {
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
+        .sheet(item: $rawJSONSelection) { selection in
+            SessionContextRawJSONSheet(selection: selection)
+        }
     }
 
     @ViewBuilder
@@ -135,6 +140,21 @@ struct SessionContextDetailSheet: View {
             let omittedFixed = fixed.filter { !$0.projected }
             let selected = workers.filter(\.projected)
             let omitted = workers.filter { !$0.projected }
+            let summary = SessionContextPresentation.toolSummary(
+                fixed: fixed,
+                workers: workers
+            )
+            SettingsSectionHeader(title: "Tools available for this request", bottomPadding: 4)
+            HStack(spacing: 0) {
+                toolMetric(label: "Fixed", value: summary.fixedAvailable)
+                Divider().frame(height: 32)
+                toolMetric(label: "Workers", value: summary.workersAvailable)
+                Divider().frame(height: 32)
+                toolMetric(label: "Omitted", value: summary.omitted)
+            }
+            .padding(13)
+            .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+
             SettingsSectionHeader(title: "Selected fixed tools", bottomPadding: 4)
             fixedToolSelectionCards(
                 selectedFixed,
@@ -151,7 +171,11 @@ struct SessionContextDetailSheet: View {
             workerSelectionCards(omitted, empty: "No direct workers were omitted.")
             if let raw {
                 SettingsSectionHeader(title: "Exact surface evidence", bottomPadding: 4)
-                auditText(SessionContextAuditFormatter.projectedJSONString(raw))
+                rawJSONButton(
+                    title: "View exact surface JSON",
+                    subtitle: "Formatted only when opened",
+                    destination: .toolSurface(raw)
+                )
             }
 
         case .automatic(let evaluation):
@@ -211,6 +235,9 @@ struct SessionContextDetailSheet: View {
             }
 
         case .providerAudit(let detail, let cacheReadTokens, let cacheWriteTokens):
+            let auditOverview = SessionContextAuditFormatter.providerRequestOverview(
+                detail.providerAudit
+            )
             SettingsSectionHeader(title: "Audit identity", bottomPadding: 4)
             VStack(spacing: 0) {
                 metadataRow("Format", detail.format, code: true)
@@ -280,7 +307,30 @@ struct SessionContextDetailSheet: View {
             }
 
             SettingsSectionHeader(title: "Redacted provider request", bottomPadding: 4)
-            auditText(SessionContextAuditFormatter.projectedJSONString(detail.providerAudit))
+            VStack(spacing: 0) {
+                metadataRow(
+                    "Envelope",
+                    WorkerConsolePresentation.displayLabel(auditOverview.requestKind)
+                )
+                Divider().opacity(0.35)
+                metadataRow(
+                    "Messages",
+                    auditOverview.messageCount.map(String.init) ?? "Unavailable"
+                )
+                Divider().opacity(0.35)
+                metadataRow(
+                    "Tools",
+                    auditOverview.toolCount.map(String.init) ?? "Unavailable"
+                )
+            }
+            .padding(.horizontal, 13)
+            .sectionFill(.tronTextMuted, cornerRadius: 12, subtle: true, interactive: false)
+
+            rawJSONButton(
+                title: "View redacted JSON",
+                subtitle: "Formatted only when opened",
+                destination: .providerAudit(detail.providerAudit)
+            )
         }
     }
 
@@ -404,6 +454,14 @@ struct SessionContextDetailSheet: View {
                                 weight: .semibold
                             ))
                         Spacer()
+                        if worker.score > 0 {
+                            Text("\(worker.score)")
+                                .font(TronTypography.pillValue)
+                                .foregroundStyle(worker.projected
+                                    ? .tronEmerald
+                                    : .tronTextMuted)
+                                .accessibilityLabel("Relevance score \(worker.score)")
+                        }
                         Text(worker.projected ? "Selected" : "Omitted")
                             .font(TronTypography.pillValue)
                             .foregroundStyle(worker.projected ? .tronEmerald : .tronTextMuted)
@@ -430,6 +488,53 @@ struct SessionContextDetailSheet: View {
                 )
             }
         }
+    }
+
+    private func toolMetric(label: String, value: Int) -> some View {
+        VStack(spacing: 2) {
+            Text("\(value)")
+                .font(TronTypography.sans(
+                    size: TronTypography.sizeBodySM,
+                    weight: .semibold
+                ))
+                .foregroundStyle(.tronTextPrimary)
+            Text(label)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func rawJSONButton(
+        title: String,
+        subtitle: String,
+        destination: SessionContextRawJSONSelection
+    ) -> some View {
+        Button {
+            rawJSONSelection = destination
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "curlybraces.square")
+                    .foregroundStyle(.tronTextMuted)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(TronTypography.sans(
+                            size: TronTypography.sizeBody,
+                            weight: .semibold
+                        ))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(subtitle)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                }
+                Spacer()
+            }
+            .padding(13)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .sectionFill(.tronTextMuted, cornerRadius: 12, subtle: true, interactive: true)
     }
 
     private func emptyState(_ text: String) -> some View {

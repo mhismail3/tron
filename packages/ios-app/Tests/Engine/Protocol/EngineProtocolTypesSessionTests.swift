@@ -283,6 +283,61 @@ struct SessionContextAuditDecodingTests {
         #expect(detail.provenanceAvailability == "complete")
     }
 
+    @Test("V3 manifest accepts omitted empty provenance arrays")
+    func v3ManifestAcceptsOmittedEmptyProvenance() throws {
+        let data = Data("""
+        {
+          "eventId":"event-request-empty-provenance",
+          "sequence":43,
+          "timestamp":"2026-07-28T07:19:34Z",
+          "format":"tron.model_provider_request.v3",
+          "contextManifest":{
+            "systemContributions":[{
+              "kind":"base_instructions",
+              "label":"Agent instructions",
+              "content":"Follow the request.",
+              "byteCount":19,
+              "sha256":"sha256:system"
+            }],
+            "messages":[{
+              "ordinal":0,
+              "role":"user",
+              "contentKinds":["text"],
+              "byteCount":27,
+              "sha256":"sha256:message",
+              "preview":"Tell me what you can do",
+              "projection":"provider_visible",
+              "sourceKind":"generated"
+            }],
+            "toolSurface":{"fixedTools":[],"availableWorkers":[]},
+            "automaticContext":[{
+              "kind":"continuity",
+              "outcome":"empty",
+              "mechanism":"continuity_hook",
+              "deliveryChannel":"none"
+            }],
+            "environment":{"sha256":"sha256:environment"},
+            "systemPromptSha256":"sha256:system",
+            "messagesSha256":"sha256:messages",
+            "toolsSha256":"sha256:tools",
+            "contextSha256":"sha256:context"
+          },
+          "providerAudit":{
+            "messageCount":1,
+            "toolCount":11,
+            "providerRequest":{"kind":"exact_provider_envelope"}
+          },
+          "provenanceAvailability":"complete"
+        }
+        """.utf8)
+
+        let detail = try JSONDecoder().decode(SessionContextRequestDetailDTO.self, from: data)
+
+        #expect(detail.contextManifest?.systemContributions.count == 1)
+        #expect(detail.contextManifest?.messages.first?.sourceEventIds == [])
+        #expect(detail.contextManifest?.automaticContext.first?.sources == [])
+    }
+
     @Test("Legacy summaries remain readable without a manifest")
     func legacySummaryDecodes() throws {
         let data = Data("""
