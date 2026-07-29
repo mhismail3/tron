@@ -38,7 +38,7 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
         case .messages: "Conversation"
         case .attachments: "Attachments"
         case .environment: "Environment"
-        case .deliveries: "Agent Updates"
+        case .deliveries: "Updates Included"
         case .tools: "Tool Surface"
         case .automatic(let evaluation):
             evaluation.kind == "continuity" ? "Continuity" : "Worker Results"
@@ -51,6 +51,7 @@ struct SessionContextDetailSheet: View {
     let selection: SessionContextDetailSelection
 
     @State private var rawJSONSelection: SessionContextRawJSONSelection?
+    @State private var expandedDeliveryIds: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -140,25 +141,30 @@ struct SessionContextDetailSheet: View {
 
         case .deliveries(let deliveries):
             if deliveries.isEmpty {
-                emptyState("No durable agent updates were included in this provider request.")
+                emptyState("No durable updates were included in this provider request.")
             } else {
                 ForEach(deliveries) { delivery in
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text(WorkerConsolePresentation.displayLabel(delivery.sourceKind))
+                            Text(SessionContextPresentation.includedDeliveryTitle(
+                                sourceKind: delivery.sourceKind,
+                                content: delivery.content
+                            ))
                                 .font(TronTypography.sans(
                                     size: TronTypography.sizeBodySM,
                                     weight: .semibold
                                 ))
                             Spacer()
-                            Text(delivery.redelivery ? "Redelivery" : "Prepared")
+                            Text(delivery.redelivery ? "Redelivery" : "In request")
                                 .font(TronTypography.pillValue)
                                 .foregroundStyle(.tronEmerald)
                         }
-                        Text(delivery.content)
+                        Text(SessionContextPresentation.includedDeliverySummary(
+                            sourceKind: delivery.sourceKind,
+                            content: delivery.content
+                        ))
                             .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                             .foregroundStyle(.tronTextSecondary)
-                            .textSelection(.enabled)
                         Text(
                             [
                                 delivery.intent.map(WorkerConsolePresentation.displayLabel),
@@ -170,6 +176,31 @@ struct SessionContextDetailSheet: View {
                         )
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
+                        DisclosureGroup(
+                            isExpanded: Binding(
+                                get: { expandedDeliveryIds.contains(delivery.deliveryId) },
+                                set: { expanded in
+                                    if expanded {
+                                        expandedDeliveryIds.insert(delivery.deliveryId)
+                                    } else {
+                                        expandedDeliveryIds.remove(delivery.deliveryId)
+                                    }
+                                }
+                            )
+                        ) {
+                            Text(delivery.content)
+                                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextSecondary)
+                                .textSelection(.enabled)
+                                .padding(.top, 6)
+                        } label: {
+                            Text("Exact model-visible content")
+                                .font(TronTypography.sans(
+                                    size: TronTypography.sizeCaption,
+                                    weight: .semibold
+                                ))
+                        }
+                        .tint(.tronEmerald)
                         auditIdentifier("Delivery", delivery.deliveryId)
                         auditText(
                             SessionContextAuditFormatter.projectedJSONString(
@@ -191,38 +222,66 @@ struct SessionContextDetailSheet: View {
                 fixed: fixed,
                 workers: workers
             )
-            SettingsSectionHeader(title: "Tools available for this request", bottomPadding: 4)
-            HStack(spacing: 0) {
-                toolMetric(label: "Fixed", value: summary.fixedAvailable)
-                Divider().frame(height: 32)
-                toolMetric(label: "Workers", value: summary.workersAvailable)
-                Divider().frame(height: 32)
-                toolMetric(label: "Omitted", value: summary.omitted)
-            }
-            .padding(13)
-            .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+            VStack(alignment: .leading, spacing: 14) {
+                toolSurfaceSection(title: "Tools available for this request") {
+                    HStack(spacing: 0) {
+                        toolMetric(label: "Fixed", value: summary.fixedAvailable)
+                        Divider().frame(height: 32)
+                        toolMetric(label: "Workers", value: summary.workersAvailable)
+                        Divider().frame(height: 32)
+                        toolMetric(label: "Omitted", value: summary.omitted)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .sectionFill(
+                        .tronEmerald,
+                        cornerRadius: 12,
+                        subtle: true,
+                        interactive: false
+                    )
+                }
 
-            SettingsSectionHeader(title: "Selected fixed tools", bottomPadding: 4)
-            fixedToolSelectionCards(
-                selectedFixed,
-                empty: "No fixed tools were selected for this request."
-            )
-            SettingsSectionHeader(title: "Other fixed tools", bottomPadding: 4)
-            fixedToolSelectionCards(
-                omittedFixed,
-                empty: "No fixed tools were omitted."
-            )
-            SettingsSectionHeader(title: "Selected direct workers", bottomPadding: 4)
-            workerSelectionCards(selected, empty: "No direct workers were selected.")
-            SettingsSectionHeader(title: "Omitted direct workers", bottomPadding: 4)
-            workerSelectionCards(omitted, empty: "No direct workers were omitted.")
-            if let raw {
-                SettingsSectionHeader(title: "Exact surface evidence", bottomPadding: 4)
-                rawJSONButton(
-                    title: "View exact surface JSON",
-                    subtitle: "Formatted only when opened",
-                    destination: .toolSurface(raw)
-                )
+                toolSurfaceSection(title: "Selected fixed tools") {
+                    LazyVStack(spacing: 8) {
+                        fixedToolSelectionCards(
+                            selectedFixed,
+                            empty: "No fixed tools were selected for this request."
+                        )
+                    }
+                }
+                toolSurfaceSection(title: "Selected direct workers") {
+                    LazyVStack(spacing: 8) {
+                        workerSelectionCards(
+                            selected,
+                            empty: "No direct workers were selected."
+                        )
+                    }
+                }
+                toolSurfaceSection(title: "Other fixed tools") {
+                    LazyVStack(spacing: 8) {
+                        fixedToolSelectionCards(
+                            omittedFixed,
+                            empty: "No fixed tools were omitted."
+                        )
+                    }
+                }
+                toolSurfaceSection(title: "Omitted direct workers") {
+                    LazyVStack(spacing: 8) {
+                        workerSelectionCards(
+                            omitted,
+                            empty: "No direct workers were omitted."
+                        )
+                    }
+                }
+                if let raw {
+                    toolSurfaceSection(title: "Exact surface evidence") {
+                        rawJSONButton(
+                            title: "View exact surface JSON",
+                            subtitle: "Formatted only when opened",
+                            destination: .toolSurface(raw)
+                        )
+                    }
+                }
             }
 
         case .automatic(let evaluation):
@@ -439,6 +498,17 @@ struct SessionContextDetailSheet: View {
     }
 
     @ViewBuilder
+    private func toolSurfaceSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SettingsSectionHeader(title: title, bottomPadding: 0)
+            content()
+        }
+    }
+
+    @ViewBuilder
     private func fixedToolSelectionCards(
         _ tools: [SessionContextFixedToolSelection],
         empty: String
@@ -473,7 +543,8 @@ struct SessionContextDetailSheet: View {
                     .foregroundStyle(.tronTextSecondary)
                     auditIdentifier("Function", tool.functionId)
                 }
-                .padding(13)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
                 .sectionFill(
                     tool.projected ? .tronEmerald : .tronTextMuted,
                     cornerRadius: 12,
@@ -526,7 +597,8 @@ struct SessionContextDetailSheet: View {
                     .foregroundStyle(.tronTextSecondary)
                     auditIdentifier("Worker", worker.workerId)
                 }
-                .padding(13)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
                 .sectionFill(
                     worker.projected ? .tronEmerald : .tronTextMuted,
                     cornerRadius: 12,

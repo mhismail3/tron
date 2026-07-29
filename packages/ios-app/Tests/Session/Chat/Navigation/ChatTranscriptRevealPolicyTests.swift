@@ -111,6 +111,25 @@ struct ChatTranscriptRevealPolicyTests {
         #expect(!ChatTranscriptRevealPolicy.isNearBottomForAutoscroll(distanceFromBottom: 100))
     }
 
+    @Test("A newly visible transient tail follows only after initial load")
+    func transientTailFollowPolicy() {
+        #expect(ChatTranscriptRevealPolicy.shouldFollowTransientTail(
+            wasVisible: false,
+            isVisible: true,
+            initialLoadComplete: true
+        ))
+        #expect(!ChatTranscriptRevealPolicy.shouldFollowTransientTail(
+            wasVisible: true,
+            isVisible: true,
+            initialLoadComplete: true
+        ))
+        #expect(!ChatTranscriptRevealPolicy.shouldFollowTransientTail(
+            wasVisible: false,
+            isVisible: true,
+            initialLoadComplete: false
+        ))
+    }
+
     @Test("Undersized transcripts reveal at top and reject bottom positioning")
     func undersizedTranscriptStaysTopAligned() {
         let hasOverflow = ChatTranscriptRevealPolicy.hasScrollableOverflow(

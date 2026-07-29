@@ -392,6 +392,18 @@ async fn delivery_wake_reaches_provider_without_fabricating_a_user_message() {
         "agent_message"
     );
     assert_eq!(
+        assistant_payload["agentDeliveryContinuation"]["deliveries"][0]["wakePolicy"],
+        "wake"
+    );
+    assert_eq!(
+        assistant_payload["agentDeliveryContinuation"]["deliveries"][0]["boundary"],
+        "next_run"
+    );
+    assert_eq!(
+        assistant_payload["agentDeliveryContinuation"]["deliveries"][0]["triggeredWake"],
+        true
+    );
+    assert_eq!(
         harness
             .event_store
             .agent_delivery(
@@ -408,6 +420,99 @@ async fn delivery_wake_reaches_provider_without_fabricating_a_user_message() {
         std::iter::from_fn(|| outcome.events.try_recv().ok())
             .all(|event| event.event_type() != "message_user"),
         "delivery-only execution must not emit a user bubble"
+    );
+}
+
+#[tokio::test]
+async fn passive_delivery_joins_a_natural_turn_without_claiming_it_resumed_the_task() {
+    let harness = PromptFailureHarness::new();
+    let provider_started = Arc::new(tokio::sync::Semaphore::new(0));
+    let provider_release = Arc::new(tokio::sync::Semaphore::new(1));
+    let session = harness
+        .event_store
+        .get_session(&harness.session_id)
+        .unwrap()
+        .unwrap();
+    let delivery = harness
+        .event_store
+        .create_agent_delivery(&NewAgentDelivery {
+            idempotency_key: "delivery-natural:worker-result".to_owned(),
+            source_kind: AgentDeliverySourceKind::WorkerResult,
+            intent: Some(AgentDeliveryIntent::Information),
+            source_session_id: Some(session.id.clone()),
+            source_workspace_id: session.workspace_id,
+            source_invocation_id: Some("worker-natural".to_owned()),
+            source_trace_id: Some("trace-natural-delivery".to_owned()),
+            source_root_invocation_id: None,
+            causal_depth: 1,
+            target: AgentDeliveryTarget::Session {
+                session_id: session.id,
+            },
+            wake_policy: AgentDeliveryWakePolicy::Passive,
+            boundary: AgentDeliveryBoundary::NextTurn,
+            originating_run_id: None,
+            arrived_during_run_id: None,
+            defer_until_run_id: None,
+            result_invocation_id: None,
+            content: serde_json::json!({
+                "kind":"worker_result",
+                "workerId":"natural-update-worker",
+                "workerName":"Natural Update Worker",
+                "status":"completed",
+                "evidence":{"preview":"Natural update is ready."}
+            })
+            .to_string(),
+            not_before: None,
+            expires_at: None,
+        })
+        .unwrap();
+
+    harness
+        .execute_trigger_with_factory(
+            "run-natural-delivery",
+            crate::domains::agent::r#loop::types::AgentRunTrigger::UserPrompt {
+                prompt: "Continue naturally.".to_owned(),
+            },
+            Arc::new(LatchFactory {
+                responder: Arc::new(LatchResponder {
+                    started: provider_started.clone(),
+                    release: provider_release,
+                }),
+            }),
+        )
+        .await;
+
+    assert_eq!(provider_started.available_permits(), 1);
+    let rows = harness
+        .event_store
+        .get_events_by_session(&harness.session_id, &ListEventsOptions::default())
+        .unwrap();
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.event_type == "message.user")
+            .count(),
+        1
+    );
+    let assistant = rows
+        .iter()
+        .find(|row| row.event_type == "message.assistant")
+        .expect("natural assistant response");
+    let assistant_payload: Value = serde_json::from_str(&assistant.payload).unwrap();
+    assert_eq!(
+        assistant_payload["agentDeliveryContinuation"]["deliveries"][0]["deliveryId"],
+        delivery.delivery_id
+    );
+    assert_eq!(
+        assistant_payload["agentDeliveryContinuation"]["deliveries"][0]["sourceWorkerId"],
+        "natural-update-worker"
+    );
+    assert_eq!(
+        assistant_payload["agentDeliveryContinuation"]["deliveries"][0]["sourceWorkerName"],
+        "Natural Update Worker"
+    );
+    assert_eq!(
+        assistant_payload["agentDeliveryContinuation"]["deliveries"][0]["triggeredWake"],
+        false
     );
 }
 

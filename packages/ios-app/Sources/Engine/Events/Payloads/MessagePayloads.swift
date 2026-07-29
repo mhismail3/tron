@@ -207,8 +207,13 @@ struct AssistantMessagePayload {
                 return AgentDeliveryMessageProvenance(
                     deliveryId: deliveryId,
                     sourceKind: sourceKind,
+                    sourceWorkerId: object["sourceWorkerId"] as? String,
+                    sourceWorkerName: object["sourceWorkerName"] as? String,
                     sourceSessionId: object["sourceSessionId"] as? String,
                     sourceInvocationId: object["sourceInvocationId"] as? String,
+                    wakePolicy: object["wakePolicy"] as? String,
+                    boundary: object["boundary"] as? String,
+                    triggeredWake: object["triggeredWake"] as? Bool,
                     redelivery: object["redelivery"] as? Bool ?? false
                 )
             } ?? []

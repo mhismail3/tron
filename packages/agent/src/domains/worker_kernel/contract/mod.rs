@@ -55,6 +55,16 @@ pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
 pub(super) const DEFAULT_TEXT_SEARCH_WALK_ENTRIES: usize = 20_000;
 pub(super) const MAX_TEXT_SEARCH_WALK_ENTRIES: usize = 100_000;
 
+pub(crate) fn background_worker_receipt_message(invocation_id: &str) -> String {
+    format!(
+        "The durable worker run is continuing in the background. \
+Do not poll it or call worker_await. If this task should resume automatically \
+when the worker finishes, call agent_wait_for_workers now with \
+{{\"invocationIds\":[\"{invocation_id}\"],\"mode\":\"all\"}}. Otherwise report \
+that it is running; its passive result will appear in Delivery & Wait Status."
+    )
+}
+
 pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefinition>> {
     let mut specs = Vec::new();
     specs.push(model_spec(

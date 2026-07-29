@@ -56,6 +56,14 @@ enum ChatTranscriptRevealPolicy {
         distanceFromBottom < autoscrollBottomTolerance
     }
 
+    static func shouldFollowTransientTail(
+        wasVisible: Bool,
+        isVisible: Bool,
+        initialLoadComplete: Bool
+    ) -> Bool {
+        initialLoadComplete && !wasVisible && isVisible
+    }
+
     /// Whether the transcript has a real scroll range after accounting for the
     /// composer's effective bottom inset. Bottom positioning an undersized
     /// transcript can move the entire stack instead of scrolling content.

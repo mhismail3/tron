@@ -426,6 +426,8 @@ struct SessionAgentUpdateDTO: Decodable, Equatable, Identifiable, Sendable {
     let deliveryId: String
     let status: String
     let sourceKind: String
+    let sourceWorkerId: String?
+    let sourceWorkerName: String?
     let intent: String?
     let sourceSessionId: String?
     let sourceInvocationId: String?

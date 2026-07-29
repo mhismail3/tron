@@ -264,9 +264,12 @@ impl WorkerStore {
                 "parentWorkerInvocationId":&parent_worker_invocation_id,
                 "triggerKind":&trigger_kind,
                 "automaticDeliveryEligible":
-                    origin_session_id.is_some()
-                    && interaction_mode == "background"
-                    && parent_worker_invocation_id.is_none(),
+                    super::agent_delivery_outbox::automatic_agent_delivery_eligible(
+                        origin_session_id.as_deref(),
+                        &interaction_mode,
+                        parent_worker_invocation_id.as_deref(),
+                        &trigger_kind,
+                    ),
             }),
             &completed_at,
         )?;

@@ -73,8 +73,20 @@ impl WorkerRuntime {
                 "terminal signal identity does not match its outbox envelope".to_owned(),
             ));
         }
-        let evidence = serde_json::to_string(&signal.evidence)
-            .map_err(|error| ImportFailure::Permanent(error.to_string()))?;
+        let worker_name = self
+            .store
+            .summary(&signal.worker_id)
+            .ok()
+            .flatten()
+            .map(|summary| summary.name);
+        let evidence = serde_json::to_string(&json!({
+            "workerId":&signal.worker_id,
+            "workerName":&worker_name,
+            "invocationId":&signal.invocation_id,
+            "status":&signal.status,
+            "evidence":&signal.evidence,
+        }))
+        .map_err(|error| ImportFailure::Permanent(error.to_string()))?;
         self.event_store
             .reconcile_agent_waits(&[WorkerTerminalEvidence {
                 invocation_id: signal.invocation_id.clone(),
@@ -83,7 +95,11 @@ impl WorkerRuntime {
             }])
             .map_err(classify_event_store_error)?;
 
-        if !signal.automatic_delivery_eligible {
+        let is_wait_member = self
+            .event_store
+            .has_agent_wait_member(&signal.invocation_id)
+            .map_err(classify_event_store_error)?;
+        if !signal.automatic_delivery_eligible || is_wait_member {
             return Ok(());
         }
         let origin_session_id = signal.origin_session_id.ok_or_else(|| {
@@ -109,6 +125,7 @@ impl WorkerRuntime {
             "kind":"worker_result",
             "invocationId":signal.invocation_id,
             "workerId":signal.worker_id,
+            "workerName":worker_name,
             "status":signal.status,
             "evidence":signal.evidence,
         }))

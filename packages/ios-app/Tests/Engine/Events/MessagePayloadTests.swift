@@ -43,8 +43,13 @@ final class AssistantMessagePayloadTests: XCTestCase {
                 [
                     "deliveryId": "delivery-1",
                     "sourceKind": "worker_result",
+                    "sourceWorkerId": "research-worker",
+                    "sourceWorkerName": "Research Specialist",
                     "sourceSessionId": "session-source",
                     "sourceInvocationId": "worker-run-1",
+                    "wakePolicy": "wake",
+                    "boundary": "next_run",
+                    "triggeredWake": true,
                     "redelivery": true
                 ] as [String: Any]
             ]
@@ -55,8 +60,39 @@ final class AssistantMessagePayloadTests: XCTestCase {
         XCTAssertEqual(parsed?.agentDeliveryProvenance.count, 1)
         XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.deliveryId, "delivery-1")
         XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.sourceKind, "worker_result")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.sourceWorkerId, "research-worker")
+        XCTAssertEqual(
+            parsed?.agentDeliveryProvenance.first?.sourceWorkerName,
+            "Research Specialist"
+        )
         XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.sourceInvocationId, "worker-run-1")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.wakePolicy, "wake")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.boundary, "next_run")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.triggeredWake, true)
         XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.redelivery, true)
+    }
+
+    func testLegacyDeliveryContinuationStillDecodesWithoutNewPresentationMetadata() {
+        var payload = validPayload(content: AnyCodable([
+            ["type": "text", "text": "A prior update was included."] as [String: Any]
+        ] as [[String: Any]]))
+        payload["agentDeliveryContinuation"] = AnyCodable([
+            "deliveries": [[
+                "deliveryId": "delivery-legacy",
+                "sourceKind": "worker_result",
+                "redelivery": false
+            ] as [String: Any]]
+        ] as [String: Any])
+
+        let parsed = AssistantMessagePayload(from: payload)
+        let provenance = parsed?.agentDeliveryProvenance.first
+
+        XCTAssertEqual(provenance?.deliveryId, "delivery-legacy")
+        XCTAssertNil(provenance?.sourceWorkerId)
+        XCTAssertNil(provenance?.sourceWorkerName)
+        XCTAssertNil(provenance?.wakePolicy)
+        XCTAssertNil(provenance?.boundary)
+        XCTAssertNil(provenance?.triggeredWake)
     }
 
     func testTextWithoutToolsIsEligibleForFinalResponsePresentation() {

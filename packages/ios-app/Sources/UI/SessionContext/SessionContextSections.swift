@@ -193,8 +193,8 @@ extension SessionContextSheet {
                 }
                 Divider().opacity(0.35)
                 contextDisclosureRow(
-                    title: "Agent updates",
-                    detail: "\(manifest?.agentDeliveries.count ?? 0) prepared for this request",
+                    title: "Updates included",
+                    detail: "\(manifest?.agentDeliveries.count ?? 0) included in this model request.",
                     symbol: "bell.and.waves.left.and.right",
                     accent: .tronEmerald
                 ) {
@@ -246,16 +246,23 @@ extension SessionContextSheet {
     var agentUpdatesSection: some View {
         VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
             SettingsSectionHeader(
-                title: "Agent Updates",
-                bottomPadding: SessionContextPresentation.headerToContentSpacing
+                title: "Delivery & wait status",
+                bottomPadding: 0
             )
+            Text("Live session state. Available does not mean included. Only In request or Seen updates entered model context.")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+                .padding(.bottom, SessionContextPresentation.headerToContentSpacing)
 
-            if agentUpdates.isEmpty, agentWaits.isEmpty {
+            if activeAgentUpdates.isEmpty,
+               activeAgentWaits.isEmpty,
+               historicalAgentUpdates.isEmpty,
+               historicalAgentWaits.isEmpty {
                 Label(
                     agentUpdatesLoadError
                         ?? (isLoadingAgentUpdates
                             ? "Loading durable update state…"
-                            : "No agent updates or waits are recorded."),
+                            : "No deliveries or waits are recorded."),
                     systemImage: agentUpdatesLoadError == nil ? "bell.slash" : "exclamationmark.triangle"
                 )
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -270,72 +277,129 @@ extension SessionContextSheet {
                 )
             } else {
                 VStack(spacing: 8) {
-                    ForEach(agentWaits) { wait in
-                        HStack(alignment: .top, spacing: 11) {
-                            Image(systemName: wait.status == "pending" ? "hourglass" : "checkmark.circle")
-                                .foregroundStyle(wait.status == "pending" ? .tronAmber : .tronEmerald)
-                                .frame(width: 24)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Worker wait · \(WorkerConsolePresentation.displayLabel(wait.mode))")
-                                    .font(TronTypography.sans(
-                                        size: TronTypography.sizeBodySM,
-                                        weight: .semibold
-                                    ))
-                                Text(WorkerConsolePresentation.displayLabel(wait.status))
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronTextSecondary)
-                            }
-                            Spacer()
-                        }
-                        .padding(12)
-                        .sectionFill(.tronAmber, cornerRadius: 12, subtle: true, interactive: false)
+                    ForEach(activeAgentWaits) { wait in
+                        agentWaitCard(wait)
                     }
-
-                    ForEach(agentUpdates) { update in
-                        HStack(alignment: .top, spacing: 11) {
-                            Image(systemName: agentUpdateSymbol(update.status))
-                                .foregroundStyle(agentUpdateColor(update.status))
-                                .frame(width: 24)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(WorkerConsolePresentation.displayLabel(update.sourceKind))
-                                    .font(TronTypography.sans(
-                                        size: TronTypography.sizeBodySM,
-                                        weight: .semibold
-                                    ))
-                                Text(update.preview)
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronTextSecondary)
-                                    .lineLimit(3)
-                                if let error = update.lastError, !error.isEmpty {
-                                    Text(error)
-                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                        .foregroundStyle(.tronError)
-                                        .lineLimit(2)
+                    ForEach(activeAgentUpdates) { update in
+                        agentUpdateCard(update)
+                    }
+                    let historyCount = historicalAgentWaits.count
+                        + historicalAgentUpdates.count
+                    if historyCount > 0 {
+                        DisclosureGroup(isExpanded: $showDeliveryHistory) {
+                            VStack(spacing: 8) {
+                                ForEach(historicalAgentWaits) { wait in
+                                    agentWaitCard(wait)
                                 }
-                                if let timestamp = WorkerConsolePresentation.timestamp(
-                                    update.observedAt ?? update.cancelledAt ?? update.createdAt
-                                ) {
-                                    Text(timestamp)
-                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                        .foregroundStyle(.tronTextMuted)
+                                ForEach(historicalAgentUpdates) { update in
+                                    agentUpdateCard(update)
                                 }
                             }
-                            Spacer()
-                            Text(WorkerConsolePresentation.displayLabel(update.status))
-                                .font(TronTypography.pillValue)
-                                .foregroundStyle(agentUpdateColor(update.status))
+                            .padding(.top, 8)
+                        } label: {
+                            Text("Recent delivery history (\(historyCount))")
+                                .font(TronTypography.sans(
+                                    size: TronTypography.sizeBodySM,
+                                    weight: .semibold
+                                ))
+                                .foregroundStyle(.tronTextSecondary)
                         }
                         .padding(12)
-                        .sectionFill(
-                            agentUpdateColor(update.status),
-                            cornerRadius: 12,
-                            subtle: true,
-                            interactive: false
-                        )
+                        .sectionFill(.tronTextMuted, cornerRadius: 12, subtle: true, interactive: false)
+                        .tint(.tronEmerald)
                     }
                 }
             }
         }
+    }
+
+    func agentWaitCard(_ wait: SessionAgentWaitDTO) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: wait.status == "pending" ? "hourglass" : "checkmark.circle")
+                .foregroundStyle(wait.status == "pending" ? .tronAmber : .tronEmerald)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(SessionContextPresentation.agentWaitTitle(status: wait.status))
+                    .font(TronTypography.sans(
+                        size: TronTypography.sizeBodySM,
+                        weight: .semibold
+                    ))
+                Text(SessionContextPresentation.agentWaitDescription(
+                    status: wait.status,
+                    mode: wait.mode
+                ))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+            }
+            Spacer()
+            Text(SessionContextPresentation.agentWaitStatusLabel(status: wait.status))
+                .font(TronTypography.pillValue)
+                .foregroundStyle(wait.status == "pending" ? .tronAmber : .tronEmerald)
+        }
+        .padding(12)
+        .sectionFill(
+            wait.status == "pending" ? .tronAmber : .tronEmerald,
+            cornerRadius: 12,
+            subtle: true,
+            interactive: false
+        )
+    }
+
+    func agentUpdateCard(_ update: SessionAgentUpdateDTO) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: agentUpdateSymbol(update.status))
+                .foregroundStyle(agentUpdateColor(update.status))
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(SessionContextPresentation.agentUpdateTitle(
+                    sourceKind: update.sourceKind,
+                    sourceWorkerId: update.sourceWorkerId,
+                    sourceWorkerName: update.sourceWorkerName
+                ))
+                    .font(TronTypography.sans(
+                        size: TronTypography.sizeBodySM,
+                        weight: .semibold
+                    ))
+                Text(SessionContextPresentation.agentUpdateStateDescription(
+                    status: update.status,
+                    wakePolicy: update.wakePolicy,
+                    boundary: update.boundary
+                ))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(agentUpdateColor(update.status))
+                Text(update.preview)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(3)
+                if let error = update.lastError, !error.isEmpty {
+                    Text(error)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronError)
+                        .lineLimit(2)
+                }
+                if let timestamp = WorkerConsolePresentation.timestamp(
+                    update.observedAt ?? update.cancelledAt ?? update.createdAt
+                ) {
+                    Text(timestamp)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                }
+            }
+            Spacer()
+            Text(SessionContextPresentation.agentUpdateStatusLabel(
+                status: update.status,
+                wakePolicy: update.wakePolicy
+            ))
+                .font(TronTypography.pillValue)
+                .foregroundStyle(agentUpdateColor(update.status))
+        }
+        .padding(12)
+        .sectionFill(
+            agentUpdateColor(update.status),
+            cornerRadius: 12,
+            subtle: true,
+            interactive: false
+        )
     }
 
     func agentUpdateColor(_ status: String) -> Color {

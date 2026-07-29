@@ -17,6 +17,7 @@ final class ChatViewTaskCoordinator {
         case deepLinkScroll
         case historyAutoload
         case keyboardScroll
+        case liveTailScroll
     }
 
     private let sessionId: String

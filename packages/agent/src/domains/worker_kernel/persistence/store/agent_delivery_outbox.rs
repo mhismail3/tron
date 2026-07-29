@@ -17,6 +17,18 @@ use crate::domains::worker_kernel::agent_delivery_effects::{
 
 const MAX_OUTBOX_ERROR_BYTES: usize = 1_024;
 
+pub(super) fn automatic_agent_delivery_eligible(
+    origin_session_id: Option<&str>,
+    interaction_mode: &str,
+    parent_worker_invocation_id: Option<&str>,
+    trigger_kind: &str,
+) -> bool {
+    origin_session_id.is_some()
+        && interaction_mode == "background"
+        && parent_worker_invocation_id.is_none()
+        && !trigger_kind.starts_with("engine_hook:")
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::domains::worker_kernel) struct AgentDeliveryOutboxRecord {

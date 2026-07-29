@@ -122,7 +122,6 @@ extension ChatView {
                             .frame(height: viewModel.shouldShowBreathingLine ? nil : 0, alignment: .top)
                             .clipped()
                             .opacity(viewModel.shouldShowBreathingLine ? 1 : 0)
-                            .animation(viewModel.shouldShowBreathingLine ? .easeInOut(duration: 0.3) : nil, value: viewModel.shouldShowBreathingLine)
                             .id("processing")
 
                         // Bottom anchor for scrolling
@@ -324,6 +323,28 @@ extension ChatView {
                         animation: .easeOut(duration: 0.2),
                         reason: "processing state"
                     )
+                }
+                // The lightweight thinking row can reappear between tool calls
+                // while `isProcessing` remains true and message count is stable.
+                // Follow that real tail insertion after layout so it cannot settle
+                // beneath the composer's safe-area inset.
+                .onChange(of: viewModel.shouldShowBreathingLine) { wasVisible, isVisible in
+                    guard ChatTranscriptRevealPolicy.shouldFollowTransientTail(
+                        wasVisible: wasVisible,
+                        isVisible: isVisible,
+                        initialLoadComplete: initialLoadComplete
+                    ) else { return }
+                    scrollCoordinator.contentDidArrive()
+                    taskCoordinator.replaceTask(.liveTailScroll) { ticket in
+                        await Task.yield()
+                        try? await Task.sleep(for: .milliseconds(20))
+                        guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+                        scrollToBottomIfAllowed(
+                            animated: true,
+                            animation: .easeOut(duration: 0.2),
+                            reason: "thinking row appeared"
+                        )
+                    }
                 }
                 // Re-anchor scroll position after live session pruning
                 .onChange(of: viewModel.prunedVersion) { _, _ in

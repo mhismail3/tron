@@ -2,6 +2,32 @@ import Testing
 import Foundation
 
 extension SourceGuardTests {
+    @Test("Chat composer owns one bottom inset and transient thinking follows without layout animation")
+    func testChatComposerAndTransientTailHaveSingleLayoutOwners() throws {
+        let iosRoot = iosAppRoot()
+        let shell = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/UI/Chat/Shell/ChatView.swift"
+            ),
+            encoding: .utf8
+        )
+        let messages = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/UI/Chat/Shell/ChatView+MessageList.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(
+            shell.components(separatedBy: ".safeAreaInset(edge: .bottom").count - 1 == 1
+        )
+        #expect(!messages.contains(
+            ".animation(viewModel.shouldShowBreathingLine"
+        ))
+        #expect(messages.contains(".onChange(of: viewModel.shouldShowBreathingLine)"))
+        #expect(messages.contains("replaceTask(.liveTailScroll)"))
+    }
+
     @Test("Composer attachment menu stays functional-only")
     func testComposerAttachmentMenuStaysFunctionalOnly() throws {
         let iosRoot = iosAppRoot()

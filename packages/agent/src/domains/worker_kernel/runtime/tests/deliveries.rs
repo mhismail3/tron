@@ -1,5 +1,211 @@
 use super::*;
 
+struct DeliveryWaitResponder {
+    contexts: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl ModelResponder for DeliveryWaitResponder {
+    fn info(&self) -> ModelResponderInfo {
+        ModelResponderInfo {
+            provider_type: crate::shared::protocol::messages::Provider::OpenAi,
+            provider_name: "delivery-wait-test",
+            model: "mock".to_owned(),
+            context_window: 200_000,
+        }
+    }
+
+    async fn respond(
+        &self,
+        request: ModelResponseRequest,
+    ) -> Result<ModelResponse, ModelResponseError> {
+        self.contexts
+            .lock()
+            .unwrap()
+            .push(serde_json::to_string(&request.context).unwrap());
+        let text = "Resumed from the durable worker result.";
+        Ok(ModelResponse {
+            info: self.info(),
+            stream: Box::pin(stream::iter(vec![
+                Ok(StreamEvent::Start),
+                Ok(StreamEvent::TextDelta {
+                    delta: text.to_owned(),
+                }),
+                Ok(StreamEvent::Done {
+                    message: AssistantMessage {
+                        content: vec![AssistantContent::text(text)],
+                        token_usage: None,
+                    },
+                    stop_reason: "end_turn".to_owned(),
+                }),
+            ])) as ModelResponseStream,
+        })
+    }
+}
+
+struct DeliveryWaitResponderFactory {
+    contexts: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl ModelResponderFactory for DeliveryWaitResponderFactory {
+    async fn create_for_model(
+        &self,
+        _model: &str,
+        _settings: &crate::domains::settings::ApiSettings,
+    ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
+        Ok(Arc::new(DeliveryWaitResponder {
+            contexts: self.contexts.clone(),
+        }))
+    }
+}
+
+#[tokio::test]
+async fn registered_wait_resumes_once_from_terminal_outbox_without_a_user_message() {
+    let contexts = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (runtime, _home) = test_runtime(Some(Arc::new(DeliveryWaitResponderFactory {
+        contexts: contexts.clone(),
+    })));
+    let published = runtime
+        .upsert(
+            command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]),
+            None,
+        )
+        .await
+        .unwrap();
+    let session = runtime
+        .event_store
+        .create_session("mock", "/tmp/project", Some("Wait target"), None)
+        .unwrap()
+        .session;
+    let trace_id = "trace-durable-wait-resume";
+    let (worker_run, _) = runtime
+        .store
+        .begin_invocation_with_context(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({"message":"finish later"}),
+            "durable-wait-worker",
+            trace_id,
+            0,
+            "manual",
+            Some(&session.id),
+            WorkerInteractionMode::Background,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let wait_call = Invocation::new_sync(
+        FunctionId::new("worker_kernel::agent_wait_for_workers").unwrap(),
+        json!({"invocationIds":[worker_run.invocation_id.clone()],"mode":"all"}),
+        CausalContext::new(
+            ActorId::new("agent:wait-test").unwrap(),
+            ActorKind::Agent,
+            TraceId::new(trace_id).unwrap(),
+        )
+        .with_session_id(session.id.clone())
+        .with_workspace_id(session.workspace_id.clone()),
+    );
+    let registered = runtime.agent_wait_for_workers(&wait_call).await.unwrap();
+    assert_eq!(registered["status"], "pending");
+    assert!(
+        runtime
+            .store
+            .claim_running(&worker_run.invocation_id)
+            .unwrap()
+    );
+    runtime
+        .store
+        .complete_invocation(
+            &worker_run.invocation_id,
+            &published.worker.worker_id,
+            Ok(&json!({
+                "message":"Background worker finished successfully.",
+                "completed":true
+            })),
+        )
+        .unwrap();
+
+    runtime.import_agent_delivery_outbox().await;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let deliveries = runtime
+                .event_store
+                .list_agent_deliveries_for_session(&session.id, 10)
+                .unwrap();
+            if deliveries
+                .iter()
+                .any(|delivery| delivery.projection_status() == "observed")
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("delivery-only continuation should complete");
+
+    let waits = runtime
+        .event_store
+        .list_agent_waits_for_session(&session.id, 10)
+        .unwrap();
+    assert_eq!(waits.len(), 1);
+    assert_eq!(waits[0].disposition, "satisfied");
+    let replay = runtime.agent_wait_for_workers(&wait_call).await.unwrap();
+    assert_eq!(replay["waitId"], registered["waitId"]);
+    assert_eq!(replay["status"], "satisfied");
+    assert_eq!(
+        replay["deliveryIds"][0],
+        waits[0].delivery_id.as_deref().unwrap()
+    );
+    let deliveries = runtime
+        .event_store
+        .list_agent_deliveries_for_session(&session.id, 10)
+        .unwrap();
+    assert_eq!(
+        deliveries.len(),
+        1,
+        "the explicit wait must replace the default passive worker delivery"
+    );
+    assert_eq!(
+        deliveries[0].wake_policy,
+        crate::domains::session::event_store::AgentDeliveryWakePolicy::Wake
+    );
+    assert_eq!(deliveries[0].projection_status(), "observed");
+    let rows = runtime
+        .event_store
+        .get_events_by_session(
+            &session.id,
+            &crate::domains::session::event_store::ListEventsOptions::default(),
+        )
+        .unwrap();
+    assert!(rows.iter().all(|row| row.event_type != "message.user"));
+    let assistant = rows
+        .iter()
+        .find(|row| row.event_type == "message.assistant")
+        .expect("delivery-only assistant continuation");
+    let payload: Value = serde_json::from_str(&assistant.payload).unwrap();
+    assert_eq!(
+        payload["agentDeliveryContinuation"]["deliveries"][0]["sourceWorkerId"],
+        published.worker.worker_id
+    );
+    assert_eq!(
+        payload["agentDeliveryContinuation"]["deliveries"][0]["sourceWorkerName"],
+        "Echo Worker"
+    );
+    assert_eq!(
+        payload["agentDeliveryContinuation"]["deliveries"][0]["triggeredWake"],
+        true
+    );
+    let contexts = contexts.lock().unwrap();
+    assert_eq!(contexts.len(), 1);
+    assert!(contexts[0].contains("worker_wait"));
+    assert!(contexts[0].contains("Background worker finished successfully."));
+}
+
 #[tokio::test]
 async fn poison_outbox_rejection_does_not_block_a_later_terminal_import() {
     let (runtime, _home) = test_runtime(None);

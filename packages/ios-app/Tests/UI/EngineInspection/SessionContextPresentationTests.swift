@@ -249,6 +249,134 @@ struct SessionContextPresentationTests {
         #expect(summary.omitted == 2)
     }
 
+    @Test("Agent updates name their worker and use user-facing delivery states")
+    func agentUpdatePresentation() {
+        #expect(SessionContextPresentation.agentUpdateTitle(
+            sourceKind: "worker_result",
+            sourceWorkerId: "continuity-curator",
+            sourceWorkerName: "Continuity Memory Curator"
+        ) == "Continuity Memory Curator")
+        #expect(SessionContextPresentation.agentUpdateTitle(
+            sourceKind: "agent_message",
+            sourceWorkerId: nil
+        ) == "Agent Message")
+        #expect(SessionContextPresentation.agentUpdateStatusLabel(
+            status: "pending",
+            wakePolicy: "passive"
+        ) == "Available")
+        #expect(SessionContextPresentation.agentUpdateStatusLabel(
+            status: "pending",
+            wakePolicy: "wake"
+        ) == "Will resume")
+        #expect(SessionContextPresentation.agentUpdateStatusLabel(
+            status: "observed",
+            wakePolicy: "passive"
+        ) == "Seen")
+        #expect(SessionContextPresentation.agentUpdateStatusLabel(
+            status: "prepared",
+            wakePolicy: "passive"
+        ) == "In request")
+        #expect(
+            SessionContextPresentation.agentUpdateStatusLabel(
+                status: "retry_exhausted",
+                wakePolicy: "passive"
+            )
+                == "Resume failed"
+        )
+        #expect(SessionContextPresentation.agentUpdateStateDescription(
+            status: "pending",
+            wakePolicy: "passive",
+            boundary: "next_turn"
+        ).contains("will not resume"))
+        #expect(SessionContextPresentation.agentUpdateStateDescription(
+            status: "pending",
+            wakePolicy: "wake",
+            boundary: "next_run"
+        ).contains("resume this task"))
+        #expect(
+            SessionContextPresentation.agentWaitStatusLabel(status: "pending")
+                == "Auto-resume"
+        )
+        #expect(SessionContextPresentation.agentWaitDescription(
+            status: "pending",
+            mode: "all"
+        ).contains("all selected workers"))
+        #expect(SessionContextPresentation.isActiveAgentUpdate(status: "pending"))
+        #expect(!SessionContextPresentation.isActiveAgentUpdate(status: "observed"))
+        #expect(SessionContextPresentation.isActiveAgentWait(status: "pending"))
+        #expect(!SessionContextPresentation.isActiveAgentWait(status: "satisfied"))
+    }
+
+    @Test("Included worker updates have a friendly summary while retaining exact content")
+    func includedDeliveryPresentation() {
+        let content = """
+        {"kind":"worker_result","workerId":"wait-ux-smoke","workerName":"Wait UX Smoke Test","status":"completed","evidence":{"preview":"Background worker finished successfully."}}
+        """
+
+        #expect(SessionContextPresentation.includedDeliveryTitle(
+            sourceKind: "worker_result",
+            content: content
+        ) == "Wait UX Smoke Test")
+        #expect(SessionContextPresentation.includedDeliverySummary(
+            sourceKind: "worker_result",
+            content: content
+        ) == "Background worker finished successfully.")
+        #expect(SessionContextPresentation.includedDeliverySummary(
+            sourceKind: "worker_result",
+            content: """
+            {"kind":"worker_result","status":"completed","evidence":{"preview":"empty"}}
+            """
+        ) == "Completed without a user-facing result summary.")
+        #expect(SessionContextPresentation.includedDeliverySummary(
+            sourceKind: "worker_result",
+            content: """
+            {"kind":"worker_result","status":"failed","evidence":{"error":"provider setup failed"}}
+            """
+        ) == "Failed: provider setup failed")
+        #expect(SessionContextPresentation.includedDeliveryTitle(
+            sourceKind: "worker_result",
+            content: #"{"unexpected":"bounded technical evidence"}"#
+        ) == "Worker update")
+        #expect(SessionContextPresentation.includedDeliverySummary(
+            sourceKind: "worker_result",
+            content: #"{"unexpected":"bounded technical evidence"}"#
+        ) == "A durable worker result was included in this model request.")
+    }
+
+    @Test("Delivery observation runs only while useful live state can change")
+    func deliveryObservationPolicy() {
+        #expect(SessionContextPresentation.shouldContinueObservingDeliveryState(
+            isAgentActive: true,
+            hasRunningWorker: false,
+            updates: [],
+            waitStatuses: []
+        ))
+        #expect(SessionContextPresentation.shouldContinueObservingDeliveryState(
+            isAgentActive: false,
+            hasRunningWorker: true,
+            updates: [],
+            waitStatuses: []
+        ))
+        #expect(SessionContextPresentation.shouldContinueObservingDeliveryState(
+            isAgentActive: false,
+            hasRunningWorker: false,
+            updates: [(status: "pending", wakePolicy: "wake")],
+            waitStatuses: []
+        ))
+        #expect(SessionContextPresentation.shouldContinueObservingDeliveryState(
+            isAgentActive: false,
+            hasRunningWorker: false,
+            updates: [],
+            waitStatuses: ["pending"]
+        ))
+        #expect(!SessionContextPresentation.shouldContinueObservingDeliveryState(
+            isAgentActive: false,
+            hasRunningWorker: false,
+            updates: [(status: "pending", wakePolicy: "passive")],
+            waitStatuses: ["satisfied"]
+        ))
+    }
+
     @Test("Provider audit formatter never renders inline media bytes")
     func providerAuditMediaProjection() {
         let audit = AnyCodable([

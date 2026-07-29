@@ -335,6 +335,24 @@ struct WorkerConsoleInteractionTests {
         #expect(detailSheet.contains(#"title: "Tools available for this request""#))
         #expect(detailSheet.contains("destination: .toolSurface(raw)"))
         #expect(detailSheet.contains("LazyVStack(alignment: .leading, spacing: 18)"))
+        #expect(detailSheet.contains("VStack(alignment: .leading, spacing: 14)"))
+        #expect(detailSheet.contains("VStack(alignment: .leading, spacing: 6)"))
+        #expect(detailSheet.contains("LazyVStack(spacing: 8)"))
+        let selectedFixed = try #require(
+            detailSheet.range(of: #"toolSurfaceSection(title: "Selected fixed tools")"#)
+        )
+        let selectedWorkers = try #require(
+            detailSheet.range(of: #"toolSurfaceSection(title: "Selected direct workers")"#)
+        )
+        let otherFixed = try #require(
+            detailSheet.range(of: #"toolSurfaceSection(title: "Other fixed tools")"#)
+        )
+        let omittedWorkers = try #require(
+            detailSheet.range(of: #"toolSurfaceSection(title: "Omitted direct workers")"#)
+        )
+        #expect(selectedFixed.lowerBound < selectedWorkers.lowerBound)
+        #expect(selectedWorkers.lowerBound < otherFixed.lowerBound)
+        #expect(otherFixed.lowerBound < omittedWorkers.lowerBound)
         #expect(context.contains("SessionContextRawJSONSheet(selection: selection)"))
         #expect(!detailSheet.contains(
             "auditText(SessionContextAuditFormatter.projectedJSONString(detail.providerAudit))"
@@ -345,6 +363,11 @@ struct WorkerConsoleInteractionTests {
         #expect(context.contains("Task.detached(priority: .userInitiated)"))
         #expect(context.contains("textView.isScrollEnabled = true"))
         #expect(!context.contains("chevron.right"))
+        #expect(context.contains(#"title: "Updates included""#))
+        #expect(context.contains(#"title: "Delivery & wait status""#))
+        #expect(context.contains("Recent delivery history"))
+        #expect(detailSheet.contains("Exact model-visible content"))
+        #expect(detailSheet.contains("includedDeliverySummary"))
     }
 
     @Test("Worker architecture is integrated into normal inventory and detail")

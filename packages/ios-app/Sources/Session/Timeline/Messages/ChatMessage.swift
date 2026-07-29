@@ -5,9 +5,35 @@ import Foundation
 struct AgentDeliveryMessageProvenance: Decodable, Equatable, Sendable {
     let deliveryId: String
     let sourceKind: String
+    let sourceWorkerId: String?
+    let sourceWorkerName: String?
     let sourceSessionId: String?
     let sourceInvocationId: String?
+    let wakePolicy: String?
+    let boundary: String?
+    let triggeredWake: Bool?
     let redelivery: Bool
+}
+
+enum AgentDeliveryContinuationPresentation {
+    static func label(_ deliveries: [AgentDeliveryMessageProvenance]) -> String {
+        guard !deliveries.isEmpty else { return "Agent update included" }
+        let resumed = deliveries.contains(where: { $0.triggeredWake == true })
+        if deliveries.count > 1 {
+            return resumed
+                ? "Resumed with \(deliveries.count) updates"
+                : "\(deliveries.count) updates included"
+        }
+        let sources = Array(Set(deliveries.map {
+            $0.sourceWorkerName
+                ?? WorkerConsolePresentation.displayLabel($0.sourceWorkerId ?? $0.sourceKind)
+        })).sorted()
+        let source = sources.isEmpty ? "agent update" : sources.joined(separator: " + ")
+        if resumed {
+            return "Resumed from \(source)"
+        }
+        return "Update included · \(source)"
+    }
 }
 
 struct ChatMessage: Identifiable, Equatable {

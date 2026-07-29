@@ -178,8 +178,13 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let provenance = AgentDeliveryMessageProvenance(
             deliveryId: "delivery-1",
             sourceKind: "worker_result",
+            sourceWorkerId: "research-worker",
+            sourceWorkerName: "Research Specialist",
             sourceSessionId: "source-session",
             sourceInvocationId: "worker-run-1",
+            wakePolicy: "wake",
+            boundary: "next_run",
+            triggeredWake: true,
             redelivery: false
         )
 
@@ -190,6 +195,30 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(mockContext.messages[0].agentDeliveryProvenance, [provenance])
+        XCTAssertEqual(
+            AgentDeliveryContinuationPresentation.label([provenance]),
+            "Resumed from Research Specialist"
+        )
+        XCTAssertEqual(
+            AgentDeliveryContinuationPresentation.label([provenance, provenance]),
+            "Resumed with 2 updates"
+        )
+        let natural = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-2",
+            sourceKind: "agent_message",
+            sourceWorkerId: nil,
+            sourceWorkerName: nil,
+            sourceSessionId: "source-session",
+            sourceInvocationId: nil,
+            wakePolicy: "passive",
+            boundary: "next_turn",
+            triggeredWake: false,
+            redelivery: false
+        )
+        XCTAssertEqual(
+            AgentDeliveryContinuationPresentation.label([natural]),
+            "Update included · Agent Message"
+        )
     }
 
     func testTurnEndUsesFirstTextMessageIdWhenStreamingFinalizedEarly() {

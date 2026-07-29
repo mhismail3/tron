@@ -43,7 +43,13 @@
 //! wakeups; `agent_delivery_import` projects closed terminal/effect envelopes
 //! without holding both databases. Terminal completion
 //! notifies that same dispatcher for low-latency import while its one-second
-//! tick remains the lost-signal and restart reconciliation fallback.
+//! tick remains the lost-signal and restart reconciliation fallback. Every
+//! background invocation receipt uses one model-facing contract: the invocation
+//! stays nonblocking and passive unless the model immediately registers
+//! `agent_wait_for_workers`; polling and `worker_await` are explicitly
+//! prohibited. Wait reconciliation suppresses or supersedes an unprepared
+//! default passive result and creates one wake delivery, while a result already
+//! prepared for provider context is reused rather than duplicated.
 //! `notifications` drains the durable worker-to-client outbox through APNs;
 //! provider acceptance is evidence, never a human-delivery receipt.
 //! Closed self-wakeup output queues only the same immutable worker version at

@@ -37,19 +37,18 @@ struct MessageBubble: View {
     // MARK: - Content
 
     private var agentDeliveryProvenance: some View {
-        let sourceKinds = Array(Set(
-            message.agentDeliveryProvenance.map {
-                WorkerConsolePresentation.displayLabel($0.sourceKind)
-            }
-        )).sorted()
-        let source = sourceKinds.isEmpty
-            ? "Agent update"
-            : sourceKinds.joined(separator: " + ")
-        return Label(source, systemImage: "bell.and.waves.left.and.right")
+        Label(
+            AgentDeliveryContinuationPresentation.label(message.agentDeliveryProvenance),
+            systemImage: message.agentDeliveryProvenance.contains {
+                $0.triggeredWake == true
+            } ? "arrow.clockwise.circle.fill" : "tray.and.arrow.down.fill"
+        )
             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
             .foregroundStyle(.tronEmerald)
             .accessibilityHint(
-                "\(message.agentDeliveryProvenance.count) durable agent update(s)"
+                message.agentDeliveryProvenance.contains { $0.triggeredWake == true }
+                    ? "The task resumed automatically from a durable update."
+                    : "A durable update was included in this model turn."
             )
     }
 

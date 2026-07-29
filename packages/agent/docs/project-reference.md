@@ -302,7 +302,28 @@ validated in-workspace override exists. Wait registration commits members
 first, immediately reconciles exact worker states, reconciles again on terminal
 outbox import, and repeats pending reconciliation at startup. Resolution and
 its wake delivery share one Tron transaction, closing completion-before,
-during, and after registration races.
+during, and after registration races. Every background invocation and replay
+receipt gives the same contract: do not poll or call `worker_await`; call
+`agent_wait_for_workers` immediately with the returned invocation ID when the
+task should resume automatically. Otherwise the completion stays passive until
+a natural turn. If a wait is registered after the default passive result has
+already arrived, reconciliation cancels an unprepared duplicate and creates one
+wake; a result already leased into provider context is reused.
+
+Automatic worker-result delivery is deliberately narrower than “all
+background invocations.” It applies only to detached, top-level, background,
+session-originated agent work. Every `engine_hook:*` invocation is excluded:
+Continuity and semantic ranking remain scoped to their originating run, Session
+Title applies directly, and mailbox curation uses its explicit claim path. The
+same predicate governs success, failure, cancellation, subtree cancellation,
+lifecycle interruption, and integrity failure.
+
+Assistant continuation presentation metadata is optional and
+backward-compatible. It carries the engine-owned worker ID and presentation
+name when available, plus wake policy, safe boundary, and whether that specific
+turn was delivery-triggered. Clients can therefore distinguish `Resumed from`
+from a passive `Update included` without inferring lifecycle state from message
+text.
 
 The `session_title` hook receives only the bounded user prompt and assistant
 response from one successfully completed ordinary user exchange and returns
@@ -2625,7 +2646,7 @@ exact detail. While connected it uses `session::context_requests` and
 in the existing EventDatabase rather than maintaining another cache.
 
 The sheet presents instructions, conversation/compaction, attachments,
-environment, automatic Continuity and Inbox contributions, exact selected and
+environment, request-specific Agent Delivery contributions, exact selected and
 omitted tools with routing evidence, and the advanced redacted provider audit.
 Global worker architecture is inspected in the Engine dashboard, where each
 canonical worker row and detail merges direct/internal and agent/command shape,

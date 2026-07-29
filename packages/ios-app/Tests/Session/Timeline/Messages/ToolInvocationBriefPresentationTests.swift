@@ -255,6 +255,54 @@ final class ToolInvocationBriefPresentationTests: XCTestCase {
         XCTAssertFalse(brief.narrative.contains("completed"))
     }
 
+    func testPendingDurableWaitPresentsSuccessfulAutoResumeRegistration() {
+        let invocation = testToolInvocation(
+            status: .success,
+            arguments: #"{"invocationIds":["worker-one","worker-two"],"mode":"all"}"#,
+            result: #"""
+            {
+              "waitId": "wait-one",
+              "mode": "all",
+              "invocationIds": ["worker-one", "worker-two"],
+              "status": "pending",
+              "deliveryIds": []
+            }
+            """#,
+            identity: ToolIdentity(toolName: "agent_wait_for_workers")
+        )
+
+        let brief = ToolInvocationBriefPresentation(data: invocation)
+
+        XCTAssertEqual(brief.title, "Auto-resume registered")
+        XCTAssertEqual(brief.durableWait?.status, "pending")
+        XCTAssertEqual(brief.durableWait?.workerCount, 2)
+        XCTAssertTrue(brief.narrative.contains("resume automatically"))
+        XCTAssertFalse(brief.narrative.contains("workers completed"))
+    }
+
+    func testAlreadySatisfiedDurableWaitIsNotShownAsActivelyWaiting() {
+        let invocation = testToolInvocation(
+            status: .success,
+            arguments: #"{"invocationIds":["worker-one"],"mode":"any"}"#,
+            result: #"""
+            {
+              "waitId": "wait-one",
+              "mode": "any",
+              "invocationIds": ["worker-one"],
+              "status": "satisfied",
+              "deliveryIds": ["delivery-one"]
+            }
+            """#,
+            identity: ToolIdentity(toolName: "worker_kernel::agent_wait_for_workers")
+        )
+
+        let brief = ToolInvocationBriefPresentation(data: invocation)
+
+        XCTAssertEqual(brief.title, "Worker wait satisfied")
+        XCTAssertEqual(brief.durableWait?.isPending, false)
+        XCTAssertTrue(brief.narrative.contains("already satisfied"))
+    }
+
     func testActivityLogSplitsBoundsAndDeduplicatesUpdates() {
         var log: [String] = []
         log = ToolActivityLog.appending("Started Search\nFinished Search", to: log)

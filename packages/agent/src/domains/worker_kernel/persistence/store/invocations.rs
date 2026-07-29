@@ -590,9 +590,12 @@ impl WorkerStore {
                     "parentWorkerInvocationId":current.7,
                     "triggerKind":current.8,
                     "automaticDeliveryEligible":
-                        current.3.is_some()
-                        && current.6 == "background"
-                        && current.7.is_none(),
+                        super::agent_delivery_outbox::automatic_agent_delivery_eligible(
+                            current.3.as_deref(),
+                            &current.6,
+                            current.7.as_deref(),
+                            &current.8,
+                        ),
                 }),
                 &completed_at,
             )?;
@@ -911,9 +914,12 @@ pub(super) fn cancel_worker_invocations_in_tx(
                 "parentWorkerInvocationId":parent_worker_invocation_id,
                 "triggerKind":trigger_kind,
                 "automaticDeliveryEligible":
-                    origin_session_id.is_some()
-                    && interaction_mode == "background"
-                    && parent_worker_invocation_id.is_none(),
+                    super::agent_delivery_outbox::automatic_agent_delivery_eligible(
+                        origin_session_id.as_deref(),
+                        &interaction_mode,
+                        parent_worker_invocation_id.as_deref(),
+                        &trigger_kind,
+                    ),
             }),
             &completed_at,
         )?;

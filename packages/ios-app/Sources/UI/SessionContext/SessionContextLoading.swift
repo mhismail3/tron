@@ -4,7 +4,7 @@ extension SessionContextSheet {
     func observeInspectableContext() async {
         await loadInspectableContext()
         await loadAgentUpdates()
-        while !Task.isCancelled, isConnected, isAgentActive {
+        while !Task.isCancelled, isConnected, shouldContinueObservingDeliveryState {
             do {
                 try await Task.sleep(for: .seconds(1))
             } catch {
@@ -34,7 +34,7 @@ extension SessionContextSheet {
         } catch is CancellationError {
             return
         } catch {
-            agentUpdatesLoadError = "Agent updates could not load: \(error.localizedDescription)"
+            agentUpdatesLoadError = "Delivery and wait status could not load: \(error.localizedDescription)"
         }
     }
 

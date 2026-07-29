@@ -675,3 +675,104 @@ fn all_wait_records_mixed_terminal_evidence_once() {
             .is_empty()
     );
 }
+
+#[test]
+fn explicit_wait_replaces_an_unprepared_automatic_worker_delivery() {
+    let store = setup();
+    let session = store
+        .create_session("gpt-5.6-sol", "/tmp/project", None, None)
+        .unwrap()
+        .session;
+    let mut automatic = session_delivery(
+        &session,
+        "worker-terminal:worker-before-wait",
+        "passive worker completion",
+    );
+    automatic.source_kind = AgentDeliverySourceKind::WorkerResult;
+    automatic.result_invocation_id = Some("worker-before-wait".to_owned());
+    let passive = store.create_agent_delivery(&automatic).unwrap();
+    store
+        .create_agent_wait(&NewAgentWait {
+            idempotency_key: "wait:after-completion".to_owned(),
+            session_id: session.id.clone(),
+            source_invocation_id: "agent-call".to_owned(),
+            source_trace_id: "trace".to_owned(),
+            source_root_invocation_id: None,
+            causal_depth: 1,
+            mode: AgentWaitMode::All,
+            invocation_ids: vec!["worker-before-wait".to_owned()],
+        })
+        .unwrap();
+
+    let resolved = store
+        .reconcile_agent_waits(&[WorkerTerminalEvidence {
+            invocation_id: "worker-before-wait".to_owned(),
+            status: "completed".to_owned(),
+            evidence: r#"{"workerId":"waited-worker","status":"completed"}"#.to_owned(),
+        }])
+        .unwrap();
+
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].wake_policy, AgentDeliveryWakePolicy::Wake);
+    assert_ne!(resolved[0].delivery_id, passive.delivery_id);
+    assert_eq!(
+        store
+            .agent_delivery(&passive.delivery_id)
+            .unwrap()
+            .unwrap()
+            .projection_status(),
+        "cancelled"
+    );
+    assert!(store.has_agent_wait_member("worker-before-wait").unwrap());
+}
+
+#[test]
+fn explicit_wait_reuses_an_automatic_delivery_already_in_provider_context() {
+    let store = setup();
+    let session = store
+        .create_session("gpt-5.6-sol", "/tmp/project", None, None)
+        .unwrap()
+        .session;
+    let mut automatic = session_delivery(
+        &session,
+        "worker-terminal:worker-already-prepared",
+        "prepared worker completion",
+    );
+    automatic.source_kind = AgentDeliverySourceKind::WorkerResult;
+    automatic.result_invocation_id = Some("worker-already-prepared".to_owned());
+    let passive = store.create_agent_delivery(&automatic).unwrap();
+    let leased = store
+        .lease_agent_deliveries(&session.id, "active-run", 1, None)
+        .unwrap();
+    assert_eq!(leased[0].delivery_id, passive.delivery_id);
+    store
+        .create_agent_wait(&NewAgentWait {
+            idempotency_key: "wait:after-preparation".to_owned(),
+            session_id: session.id,
+            source_invocation_id: "agent-call".to_owned(),
+            source_trace_id: "trace".to_owned(),
+            source_root_invocation_id: None,
+            causal_depth: 1,
+            mode: AgentWaitMode::All,
+            invocation_ids: vec!["worker-already-prepared".to_owned()],
+        })
+        .unwrap();
+
+    let resolved = store
+        .reconcile_agent_waits(&[WorkerTerminalEvidence {
+            invocation_id: "worker-already-prepared".to_owned(),
+            status: "completed".to_owned(),
+            evidence: r#"{"workerId":"waited-worker","status":"completed"}"#.to_owned(),
+        }])
+        .unwrap();
+
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].delivery_id, passive.delivery_id);
+    assert_eq!(
+        store
+            .list_agent_deliveries_for_session(&resolved[0].target_session_id.clone().unwrap(), 10)
+            .unwrap()
+            .len(),
+        1
+    );
+}

@@ -565,6 +565,10 @@ async fn top_level_agent_worker_returns_a_tagged_background_receipt_immediately(
         Some("queued" | "running")
     ));
     let invocation_id = receipt["invocationId"].as_str().unwrap();
+    let message = receipt["message"].as_str().unwrap();
+    assert!(message.contains("agent_wait_for_workers"));
+    assert!(message.contains(invocation_id));
+    assert!(message.contains("Do not poll"));
     let durable = runtime.store().invocation(invocation_id).unwrap().unwrap();
     assert_eq!(durable.interaction_mode, WorkerInteractionMode::Background);
     assert_eq!(

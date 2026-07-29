@@ -398,6 +398,48 @@ struct SessionContextAuditDecodingTests {
         #expect(provenance["sourceInvocationId"] as? String == "worker-run-one")
     }
 
+    @Test("Agent update summaries decode their optional worker identity")
+    func agentUpdateSummaryDecodes() throws {
+        let data = Data("""
+        {
+          "updates":[{
+            "deliveryId":"delivery-one",
+            "status":"pending",
+            "sourceKind":"worker_result",
+            "sourceWorkerId":"research-curator",
+            "sourceWorkerName":"Research Curator",
+            "intent":"information",
+            "sourceSessionId":"session-one",
+            "sourceInvocationId":"worker-run-one",
+            "sourceTraceId":"trace-one",
+            "resultInvocationId":"worker-run-one",
+            "wakePolicy":"passive",
+            "boundary":"next_turn",
+            "causalDepth":1,
+            "redelivery":false,
+            "leaseCount":0,
+            "wakeAttempts":0,
+            "lastError":null,
+            "preview":"Three findings are ready.",
+            "createdAt":"2026-07-28T07:20:00Z",
+            "preparedRunId":null,
+            "preparedTurn":null,
+            "observedAt":null,
+            "cancelledAt":null,
+            "expiresAt":null
+          }],
+          "waits":[]
+        }
+        """.utf8)
+
+        let result = try JSONDecoder().decode(SessionAgentUpdatesResultDTO.self, from: data)
+        let update = try #require(result.updates.first)
+
+        #expect(update.sourceWorkerId == "research-curator")
+        #expect(update.sourceWorkerName == "Research Curator")
+        #expect(update.preview == "Three findings are ready.")
+    }
+
     @Test("Legacy summaries remain readable without a manifest")
     func legacySummaryDecodes() throws {
         let data = Data("""

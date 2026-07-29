@@ -6,6 +6,17 @@ use crate::engine::DedupeScope;
 use serde_json::Value;
 
 #[test]
+fn background_receipt_points_to_the_non_blocking_resume_primitive() {
+    let message = background_worker_receipt_message("worker-run-one");
+
+    assert!(message.contains("agent_wait_for_workers"));
+    assert!(message.contains(r#""invocationIds":["worker-run-one"]"#));
+    assert!(message.contains(r#""mode":"all""#));
+    assert!(message.contains("Do not poll"));
+    assert!(message.contains("worker_await"));
+}
+
+#[test]
 fn engine_surface_snapshot_is_client_introspection_not_model_vocabulary() {
     let definitions = function_definitions().expect("worker-kernel contracts");
     let surface = definitions

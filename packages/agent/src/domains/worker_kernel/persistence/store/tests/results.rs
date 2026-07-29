@@ -294,6 +294,143 @@ fn detached_terminal_signal_is_eligible_and_rejection_does_not_block_later_rows(
 }
 
 #[test]
+fn engine_hooks_never_create_generic_detached_result_deliveries() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let (run, _) = store
+        .begin_invocation_with_context(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({}),
+            "continuity-hook-delivery-boundary",
+            "trace-continuity-hook-delivery-boundary",
+            0,
+            "engine_hook:continuity_context",
+            Some("session-continuity-hook"),
+            WorkerInteractionMode::Background,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(store.claim_running(&run.invocation_id).unwrap());
+    store
+        .complete_invocation(
+            &run.invocation_id,
+            &published.worker.worker_id,
+            Ok(&json!({"status":"empty"})),
+        )
+        .unwrap();
+
+    let rows = store.pending_agent_delivery_outbox(10).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].payload["triggerKind"],
+        "engine_hook:continuity_context"
+    );
+    assert_eq!(
+        rows[0].payload["automaticDeliveryEligible"], false,
+        "engine-owned hook integration must not be duplicated as a generic Worker Result"
+    );
+}
+
+#[test]
+fn engine_hook_cancellations_never_create_generic_result_deliveries() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let begin_hook = |key: &str, hook: &str| {
+        store
+            .begin_invocation_with_context(
+                &published.worker.worker_id,
+                &published.version,
+                &json!({}),
+                key,
+                &format!("trace-{key}"),
+                0,
+                hook,
+                Some("session-engine-hook"),
+                WorkerInteractionMode::Background,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+            .0
+    };
+    let direct = begin_hook("cancel-continuity-hook", "engine_hook:continuity_context");
+    store
+        .cancel_invocation_with_reason(&direct.invocation_id, "test direct cancellation")
+        .unwrap();
+    let lifecycle = begin_hook("cancel-title-hook", "engine_hook:session_title");
+    let cancelled = store
+        .cancel_worker_invocations_with_reason(
+            &published.worker.worker_id,
+            "test lifecycle cancellation",
+        )
+        .unwrap();
+    assert_eq!(cancelled, vec![lifecycle.invocation_id]);
+
+    let rows = store.pending_agent_delivery_outbox(10).unwrap();
+    assert_eq!(rows.len(), 2);
+    for row in rows {
+        assert_eq!(row.payload["status"], "cancelled");
+        assert_eq!(row.payload["automaticDeliveryEligible"], false);
+    }
+}
+
+#[test]
+fn automatic_delivery_eligibility_is_limited_to_detached_agent_facing_work() {
+    use super::agent_delivery_outbox::automatic_agent_delivery_eligible;
+
+    assert!(automatic_agent_delivery_eligible(
+        Some("session"),
+        "background",
+        None,
+        "manual",
+    ));
+    assert!(!automatic_agent_delivery_eligible(
+        Some("session"),
+        "background",
+        None,
+        "engine_hook:session_title",
+    ));
+    assert!(!automatic_agent_delivery_eligible(
+        Some("session"),
+        "background",
+        None,
+        "engine_hook:continuity_context",
+    ));
+    assert!(!automatic_agent_delivery_eligible(
+        Some("session"),
+        "foreground",
+        None,
+        "manual",
+    ));
+    assert!(!automatic_agent_delivery_eligible(
+        Some("session"),
+        "background",
+        Some("parent"),
+        "manual",
+    ));
+    assert!(!automatic_agent_delivery_eligible(
+        None,
+        "background",
+        None,
+        "manual",
+    ));
+}
+
+#[test]
 fn invocation_queue_waits_for_an_existing_writer_before_reading_trace_state() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();

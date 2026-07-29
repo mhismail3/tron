@@ -40,6 +40,7 @@ struct SessionContextSheet: View {
     @State var agentWaits: [SessionAgentWaitDTO] = []
     @State var agentUpdatesLoadError: String?
     @State var isLoadingAgentUpdates = false
+    @State var showDeliveryHistory = false
     @State var selectedContextDetail: SessionContextDetailSelection?
     @State var showContextHistory = false
 
@@ -77,6 +78,39 @@ struct SessionContextSheet: View {
 
     var requestFixedToolSelections: [SessionContextFixedToolSelection] {
         SessionContextPresentation.fixedToolSelections(from: manifest?.toolSurface)
+    }
+    var activeAgentUpdates: [SessionAgentUpdateDTO] {
+        agentUpdates.filter {
+            SessionContextPresentation.isActiveAgentUpdate(status: $0.status)
+        }
+    }
+    var historicalAgentUpdates: [SessionAgentUpdateDTO] {
+        agentUpdates.filter {
+            !SessionContextPresentation.isActiveAgentUpdate(status: $0.status)
+        }
+    }
+    var activeAgentWaits: [SessionAgentWaitDTO] {
+        agentWaits.filter {
+            SessionContextPresentation.isActiveAgentWait(status: $0.status)
+        }
+    }
+    var historicalAgentWaits: [SessionAgentWaitDTO] {
+        agentWaits.filter {
+            !SessionContextPresentation.isActiveAgentWait(status: $0.status)
+        }
+    }
+    var hasRunningSessionWorker: Bool {
+        sessionWorkerRuns.contains { $0.status == "queued" || $0.status == "running" }
+    }
+    var shouldContinueObservingDeliveryState: Bool {
+        SessionContextPresentation.shouldContinueObservingDeliveryState(
+            isAgentActive: isAgentActive,
+            hasRunningWorker: hasRunningSessionWorker,
+            updates: agentUpdates.map {
+                (status: $0.status, wakePolicy: $0.wakePolicy)
+            },
+            waitStatuses: agentWaits.map(\.status)
+        )
     }
 
     var body: some View {
@@ -137,7 +171,7 @@ struct SessionContextSheet: View {
         .task(id: "\(sessionId):\(isConnected):\(isAgentActive):\(workerRefreshRevision)") {
             await observeSessionWorkers()
         }
-        .task(id: "\(sessionId):\(isConnected):\(isAgentActive)") {
+        .task(id: "\(sessionId):\(isConnected):\(isAgentActive):\(workerRefreshRevision)") {
             await observeInspectableContext()
         }
         .onReceive(NotificationCenter.default.publisher(for: .workerRunProjectionInvalidated)) { _ in

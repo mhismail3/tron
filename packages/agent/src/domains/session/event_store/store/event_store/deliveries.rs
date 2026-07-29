@@ -1565,6 +1565,19 @@ impl EventStore {
             .map_err(EventStoreError::from)
     }
 
+    pub(crate) fn has_agent_wait_member(&self, invocation_id: &str) -> Result<bool> {
+        let connection = self.conn()?;
+        connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM agent_wait_members WHERE invocation_id=?1
+                 )",
+                [invocation_id],
+                |row| row.get(0),
+            )
+            .map_err(EventStoreError::from)
+    }
+
     pub(crate) fn reconcile_agent_waits(
         &self,
         terminals: &[WorkerTerminalEvidence],
@@ -1649,6 +1662,55 @@ impl EventStore {
                 };
                 let session = SessionRepo::get_by_id(&transaction, &wait.session_id)?
                     .ok_or_else(|| EventStoreError::SessionNotFound(wait.session_id.clone()))?;
+                let member_invocation_ids = evidence
+                    .iter()
+                    .filter_map(|item| item.get("invocationId").and_then(serde_json::Value::as_str))
+                    .collect::<Vec<_>>();
+                let automatic_deliveries = member_invocation_ids
+                    .iter()
+                    .map(|invocation_id| {
+                        delivery_by_idempotency_key_in_tx(
+                            &transaction,
+                            &format!("worker-terminal:{invocation_id}"),
+                        )
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let all_results_already_in_context = !automatic_deliveries.is_empty()
+                    && automatic_deliveries.iter().all(|delivery| {
+                        delivery.as_ref().is_some_and(|delivery| {
+                            delivery.disposition == AgentDeliveryDisposition::Observed
+                                || (delivery.disposition == AgentDeliveryDisposition::Pending
+                                    && delivery.leased_run_id.is_some())
+                        })
+                    });
+                if all_results_already_in_context {
+                    let delivery = automatic_deliveries
+                        .into_iter()
+                        .flatten()
+                        .next()
+                        .ok_or_else(|| {
+                            EventStoreError::Internal(
+                                "prepared automatic worker delivery disappeared".to_owned(),
+                            )
+                        })?;
+                    transaction.execute(
+                        "UPDATE agent_waits
+                         SET disposition='satisfied',delivery_id=?2,resolved_at=?3
+                         WHERE wait_id=?1 AND disposition='pending'",
+                        params![wait.wait_id, delivery.delivery_id, now],
+                    )?;
+                    deliveries.push(delivery);
+                    continue;
+                }
+                for invocation_id in &member_invocation_ids {
+                    transaction.execute(
+                        "UPDATE agent_deliveries
+                         SET disposition='cancelled',cancelled_at=?2
+                         WHERE idempotency_key=?1 AND disposition='pending'
+                           AND leased_run_id IS NULL",
+                        params![format!("worker-terminal:{invocation_id}"), now],
+                    )?;
+                }
                 let content = serde_json::to_string(&serde_json::json!({
                     "kind":"worker_wait",
                     "waitId":wait.wait_id,

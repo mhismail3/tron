@@ -11,7 +11,10 @@ struct ToolInvocationChip: View {
     private var evidence: ToolEvidencePresentation { ToolEvidencePresentation(data: data) }
     private var brief: ToolInvocationBriefPresentation { ToolInvocationBriefPresentation(data: data) }
     private var accent: Color {
-        ToolPresentation.statusColor(
+        if brief.durableWait?.isPending == true {
+            return .tronAmber
+        }
+        return ToolPresentation.statusColor(
             for: data.status,
             identity: data.identity,
             targetId: display.targetId
@@ -25,7 +28,7 @@ struct ToolInvocationChip: View {
             HStack(spacing: 7) {
                 leadingAccessory
 
-                Text(evidence.chipText)
+                Text(brief.durableWait == nil ? evidence.chipText : brief.title)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
                     .foregroundStyle(textColor)
                     .lineLimit(1)
@@ -64,6 +67,11 @@ struct ToolInvocationChip: View {
                 .controlSize(.small)
                 .tint(textColor.opacity(0.72))
                 .frame(width: 18, height: 18)
+        } else if brief.durableWait?.isPending == true {
+            Image(systemName: "hourglass")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(textColor)
+                .frame(width: 18, height: 18)
         } else if brief.isBackgroundHandoff {
             Image(systemName: "arrow.up.forward.circle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
@@ -92,6 +100,8 @@ struct ToolInvocationChip: View {
                     inlineStatusText(elapsed)
                 }
             }
+        } else if let wait = brief.durableWait {
+            inlineStatusText(wait.isPending ? "auto-resume" : "satisfied")
         } else if brief.isBackgroundHandoff {
             inlineStatusText("background")
         } else if let duration = data.formattedDuration {
@@ -132,8 +142,8 @@ struct ToolInvocationChip: View {
 
     private var accessibilityLabel: String {
         [
-            evidence.title,
-            evidence.qualifier,
+            brief.durableWait == nil ? evidence.title : brief.title,
+            brief.durableWait?.subtitle ?? evidence.qualifier,
             evidence.statusLabel,
             evidence.duration
         ]

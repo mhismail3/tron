@@ -654,7 +654,11 @@ scrollable overflow, the existing bottom-follow state machine takes ownership.
 Initial restoration measures this boundary while content is hidden, revealing a
 short transcript at the top and a long transcript at its latest content. This
 prevents repeated streaming scroll requests from moving an undersized message
-stack between incompatible anchors.
+stack between incompatible anchors. The composer's `safeAreaInset` is the sole
+bottom-inset owner. If the transient thinking tail appears after initial load,
+one cancellable next-layout follow request keeps it above the composer only
+while the user still owns bottom-follow; its visibility does not animate layout
+height or override an intentional upward scroll.
 
 Assistant Markdown lists use the message edge as the marker origin: a root
 bullet or ordered marker is itself flush with neighboring paragraph text, not
@@ -770,6 +774,10 @@ available/omitted counts, relevance scores, and exact selected/omitted lists
 live together in the Tool Surface detail rather than being duplicated in
 another main-sheet summary card. Detail rows use lazy vertical layout so a
 large omitted-tool inventory does not mount all cards when the sheet opens.
+That detail orders the summary, selected fixed tools, selected direct workers,
+other fixed tools, omitted direct workers, and finally lazy exact evidence;
+headers remain visually attached to compact cards rather than sharing the
+inter-group spacing.
 Navigation rows across the Session Context surface remain fully tappable
 without trailing chevrons; their leading icon, title, supporting text, and
 interactive glass treatment carry the affordance.
@@ -791,10 +799,25 @@ selected/omitted tools, durable Agent Deliveries, and the advanced redacted
 provider audit. V2/v3 remain readable; historical automatic-context outcomes
 stay visible and older v3 narratives without delivery evidence are labeled
 `System context (historical)`. The sheet also loads one bounded
-`session::agent_updates` projection and renders pending, prepared, observed,
-stale, cancelled, and retry-exhausted deliveries plus waits. Exact v4 content
-and provenance remain request-specific evidence in the detail sheet.
-Delivery-only assistant continuations render without a fabricated user bubble.
+`session::agent_updates` projection. Request-specific evidence is named
+`Updates included` and counts only deliveries in the selected model request;
+its friendly summary leads to a lazy disclosure containing the unmodified
+model-visible v4 content. Live durable state is separately named `Delivery &
+wait status`, with active entries first and resolved history collapsed.
+Passive results are `Available` and never called waits; pending wakes say `Will
+resume`, prepared entries say `In request`, observed entries say `Seen`, and
+retry-exhausted wakes say `Resume failed · Available passively`.
+
+The sheet reuses its bounded visible observer while an agent or session worker
+is active, a wait is pending, or a wake is pending/prepared, then performs one
+terminal refresh. Passive-only and historical state stop observation. Exact v4
+content and provenance remain request-specific evidence in the detail sheet.
+Delivery-only assistant continuations render without a fabricated user bubble
+and say `Resumed from …`; a natural turn says `Update included · …`. The
+`agent_wait_for_workers` chip says `Auto-resume registered` while pending and
+does not imply that the worker has completed. Optional continuation metadata is
+backward-compatible and records source worker identity and presentation name,
+wake policy, safe boundary, and whether the continuation was wake-triggered.
 The summary shows cache-read percentage beside
 input, output, and cost using existing session token totals. Advanced detail
 shows session cache reads/writes and manifest-owned stable instruction,

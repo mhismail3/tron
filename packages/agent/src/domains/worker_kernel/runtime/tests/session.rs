@@ -417,7 +417,7 @@ async fn session_title_hook_preserves_explicit_and_worker_session_titles() {
 }
 
 #[tokio::test]
-async fn invalid_session_title_policy_output_is_rejected_without_mutating_the_session() {
+async fn invalid_session_title_policy_output_is_rejected_without_disabling_the_worker() {
     let (runtime, _home) = test_runtime(None);
     runtime
         .upsert(
@@ -459,6 +459,9 @@ async fn invalid_session_title_policy_output_is_rejected_without_mutating_the_se
         .summary("session-title-policy")
         .unwrap()
         .unwrap();
-    assert!(!summary.enabled);
-    assert_eq!(summary.health, "failed");
+    assert!(
+        summary.enabled,
+        "a request-specific optional hook failure must not disable its reusable owner"
+    );
+    assert_eq!(summary.health, "healthy");
 }

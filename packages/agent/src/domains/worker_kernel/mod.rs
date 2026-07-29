@@ -109,9 +109,15 @@
 //! Inbox Attention is derived rather than stored: only unresolved error and
 //! setup-blocker evidence is active. Successful informational outcomes remain
 //! immutable history even when they came from schedules, dispatches, or
-//! background work. Detached top-level results are delivered exactly once
-//! through the transactional Agent Delivery outbox; foreground and nested
-//! results return to their caller unless an explicit wait references them. A
+//! background work. Detached top-level background results originating from an
+//! ordinary agent session are delivered exactly once through the transactional
+//! Agent Delivery outbox. Internal `engine_hook:*` invocations never enter that
+//! generic result path: Continuity and relevance remain run-scoped, Session
+//! Title applies directly, and mailbox curation uses its explicit claim path.
+//! Foreground and nested results return to their caller unless an explicit
+//! wait references them. Registering that wait supersedes an unprepared
+//! default passive delivery, so one terminal result cannot produce both a
+//! passive update and an automatic-resume wake. A
 //! later successfully verified activation or rollback resolves
 //! older errors for that worker, while a plain enable toggle is not recovery
 //! evidence. Resolved errors remain immutable in run and delivery audit history

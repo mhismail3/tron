@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::domains::session::Deps;
-use crate::domains::session::event_store::{ListSessionsOptions, session_organization_from_tags};
+use crate::domains::session::event_store::{
+    AgentDeliverySourceKind, ListSessionsOptions, session_organization_from_tags,
+};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, ToolError};
 
@@ -21,6 +23,139 @@ pub(crate) struct SessionQueryService;
 
 const SESSION_LIST_DEFAULT_LIMIT: usize = 50;
 const SESSION_LIST_MAX_LIMIT: usize = 200;
+const AGENT_UPDATE_PREVIEW_MAX_CHARS: usize = 1_024;
+
+fn worker_evidence_text(value: &Value) -> Option<&str> {
+    ["preview", "summary", "message"]
+        .into_iter()
+        .find_map(|key| value.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+fn worker_evidence_error(value: &Value) -> Option<&str> {
+    ["error", "reason"]
+        .into_iter()
+        .find_map(|key| value.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+fn readable_worker_evidence(status: &str, evidence: &Value) -> String {
+    match status {
+        "failed" => worker_evidence_error(evidence)
+            .map(|detail| format!("Failed: {detail}"))
+            .unwrap_or_else(|| "Worker execution failed.".to_owned()),
+        "cancelled" => worker_evidence_error(evidence)
+            .map(|detail| format!("Cancelled: {detail}"))
+            .unwrap_or_else(|| "Worker execution was cancelled.".to_owned()),
+        _ => match worker_evidence_text(evidence) {
+            Some(preview) if preview.eq_ignore_ascii_case("empty") => {
+                "Completed without a user-facing result summary.".to_owned()
+            }
+            Some(preview) => preview.to_owned(),
+            None => "Worker completed. Open its result for full details.".to_owned(),
+        },
+    }
+}
+
+fn parsed_wait_evidence(value: &Value) -> Vec<Value> {
+    value
+        .get("results")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|result| {
+            result
+                .get("evidence")
+                .and_then(Value::as_str)
+                .and_then(|evidence| serde_json::from_str::<Value>(evidence).ok())
+        })
+        .collect()
+}
+
+fn agent_update_preview(
+    is_worker_result: bool,
+    content: &str,
+) -> (String, Option<String>, Option<String>) {
+    let parsed = is_worker_result
+        .then(|| serde_json::from_str::<Value>(content).ok())
+        .flatten();
+    let wait_evidence = parsed
+        .as_ref()
+        .filter(|value| value.get("kind").and_then(Value::as_str) == Some("worker_wait"))
+        .map(parsed_wait_evidence)
+        .unwrap_or_default();
+    let source_worker_ids = parsed
+        .as_ref()
+        .and_then(|value| value.get("workerId"))
+        .and_then(Value::as_str)
+        .into_iter()
+        .chain(
+            wait_evidence
+                .iter()
+                .filter_map(|value| value.get("workerId").and_then(Value::as_str)),
+        )
+        .collect::<std::collections::BTreeSet<_>>();
+    let source_worker_id = (source_worker_ids.len() == 1)
+        .then(|| source_worker_ids.first().copied().map(ToOwned::to_owned))
+        .flatten();
+    let source_worker_names = parsed
+        .as_ref()
+        .and_then(|value| value.get("workerName"))
+        .and_then(Value::as_str)
+        .into_iter()
+        .chain(
+            wait_evidence
+                .iter()
+                .filter_map(|value| value.get("workerName").and_then(Value::as_str)),
+        )
+        .collect::<std::collections::BTreeSet<_>>();
+    let source_worker_name = (source_worker_names.len() == 1)
+        .then(|| source_worker_names.first().copied().map(ToOwned::to_owned))
+        .flatten();
+    let readable = match parsed.as_ref().and_then(|value| value.get("kind")) {
+        Some(Value::String(kind)) if kind == "worker_result" => {
+            let value = parsed.as_ref().expect("parsed worker result");
+            let status = value
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("completed");
+            readable_worker_evidence(status, value.get("evidence").unwrap_or(&Value::Null))
+        }
+        Some(Value::String(kind)) if kind == "worker_wait" => {
+            let result_count = wait_evidence.len();
+            let failed = wait_evidence
+                .iter()
+                .filter(|evidence| evidence.get("status").and_then(Value::as_str) == Some("failed"))
+                .count();
+            let first = wait_evidence.first().map(|evidence| {
+                let status = evidence
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("completed");
+                readable_worker_evidence(status, evidence.get("evidence").unwrap_or(evidence))
+            });
+            if result_count <= 1 {
+                first.unwrap_or_else(|| "The requested worker wait completed.".to_owned())
+            } else {
+                let outcome = if failed == 0 {
+                    format!("{result_count} worker results are ready.")
+                } else {
+                    format!("{result_count} worker results are ready; {failed} failed.")
+                };
+                first.map_or(outcome.clone(), |first| format!("{outcome} {first}"))
+            }
+        }
+        _ if is_worker_result => "A worker completed. Open its result for full details.".to_owned(),
+        _ => content.to_owned(),
+    };
+    let preview = crate::shared::foundation::redaction::redact_sensitive_content(&readable)
+        .chars()
+        .take(AGENT_UPDATE_PREVIEW_MAX_CHARS)
+        .collect();
+    (preview, source_worker_id, source_worker_name)
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,16 +207,16 @@ impl SessionQueryService {
             let updates = deliveries
                 .into_iter()
                 .map(|delivery| {
-                    let preview = crate::shared::foundation::redaction::redact_sensitive_content(
+                    let (preview, source_worker_id, source_worker_name) = agent_update_preview(
+                        delivery.source_kind == AgentDeliverySourceKind::WorkerResult,
                         &delivery.content,
-                    )
-                    .chars()
-                    .take(1_024)
-                    .collect::<String>();
+                    );
                     json!({
                         "deliveryId":delivery.delivery_id,
                         "status":delivery.projection_status(),
                         "sourceKind":delivery.source_kind,
+                        "sourceWorkerId":source_worker_id,
+                        "sourceWorkerName":source_worker_name,
                         "intent":delivery.intent,
                         "sourceSessionId":delivery.source_session_id,
                         "sourceInvocationId":delivery.source_invocation_id,
@@ -618,6 +753,114 @@ mod tests {
     use super::*;
     use crate::domains::session::event_store::{AppendOptions, EventType};
     use crate::shared::server::test_support::make_test_context;
+
+    #[test]
+    fn agent_update_preview_projects_worker_result_evidence_without_raw_json() {
+        let content = json!({
+            "kind":"worker_result",
+            "invocationId":"worker-run",
+            "workerId":"research-curator",
+            "status":"completed",
+            "evidence":{
+                "preview":"Three relevant findings are ready.",
+                "reference":{"contentSha256":"sha256:secret-technical-evidence"}
+            }
+        })
+        .to_string();
+
+        let (preview, worker_id, worker_name) = agent_update_preview(true, &content);
+
+        assert_eq!(preview, "Three relevant findings are ready.");
+        assert_eq!(worker_id.as_deref(), Some("research-curator"));
+        assert!(worker_name.is_none());
+        assert!(!preview.contains("contentSha256"));
+    }
+
+    #[test]
+    fn agent_update_preview_explains_empty_and_failed_worker_results() {
+        let (empty, _, _) = agent_update_preview(
+            true,
+            &json!({
+                "kind":"worker_result",
+                "workerId":"continuity-curator",
+                "status":"completed",
+                "evidence":{"preview":"empty"}
+            })
+            .to_string(),
+        );
+        let (failed, _, _) = agent_update_preview(
+            true,
+            &json!({
+                "kind":"worker_result",
+                "workerId":"research-curator",
+                "status":"failed",
+                "evidence":{"error":"provider setup failed"}
+            })
+            .to_string(),
+        );
+
+        assert_eq!(empty, "Completed without a user-facing result summary.");
+        assert_eq!(failed, "Failed: provider setup failed");
+    }
+
+    #[test]
+    fn agent_update_preview_preserves_plain_delivery_content_and_bounds_it() {
+        let content = "Useful peer update. ".repeat(100);
+        let (preview, worker_id, worker_name) = agent_update_preview(false, &content);
+
+        assert_eq!(preview.chars().count(), AGENT_UPDATE_PREVIEW_MAX_CHARS);
+        assert!(worker_id.is_none());
+        assert!(worker_name.is_none());
+        assert!(preview.starts_with("Useful peer update."));
+    }
+
+    #[test]
+    fn agent_update_preview_does_not_expose_unknown_worker_payload_shapes() {
+        let content = json!({
+            "unexpected":"internal payload",
+            "reference":{"contentSha256":"sha256:technical-evidence"}
+        })
+        .to_string();
+
+        let (preview, worker_id, worker_name) = agent_update_preview(true, &content);
+
+        assert_eq!(
+            preview,
+            "A worker completed. Open its result for full details."
+        );
+        assert!(worker_id.is_none());
+        assert!(worker_name.is_none());
+        assert!(!preview.contains("contentSha256"));
+    }
+
+    #[test]
+    fn agent_update_preview_projects_wait_evidence_and_worker_identity() {
+        let content = json!({
+            "kind":"worker_wait",
+            "waitId":"wait-one",
+            "mode":"all",
+            "results":[{
+                "invocationId":"worker-run",
+                "status":"completed",
+                "evidence":json!({
+                    "workerId":"wait-ux-smoke",
+                    "workerName":"Wait UX Smoke Test",
+                    "status":"completed",
+                    "evidence":{
+                        "preview":"Background worker finished successfully."
+                    }
+                }).to_string()
+            }]
+        })
+        .to_string();
+
+        let (preview, worker_id, worker_name) = agent_update_preview(true, &content);
+
+        assert_eq!(preview, "Background worker finished successfully.");
+        assert_eq!(worker_id.as_deref(), Some("wait-ux-smoke"));
+        assert_eq!(worker_name.as_deref(), Some("Wait UX Smoke Test"));
+        assert!(!preview.contains("waitId"));
+    }
 
     /// A freshly-created session always has exactly one event — the
     /// `session.start` event inserted inside the create transaction.

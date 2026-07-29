@@ -73,6 +73,13 @@ extension SourceGuardTests {
             ),
             encoding: .utf8
         )
+        let consoleRow = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Overview/WorkerConsoleRow.swift"
+            ),
+            encoding: .utf8
+        )
+        let consoleSurface = console + consoleRow
         let viewModel = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/Session/WorkerKernel/WorkerConsoleViewModel.swift"),
             encoding: .utf8
@@ -89,13 +96,14 @@ extension SourceGuardTests {
         #expect(!sidebar.contains("sessionId: selectedSessionId"))
         #expect(viewModel.contains("sessionId: nil"))
         #expect(!viewModel.contains("currentSessionId"))
-        #expect(console.contains("Available to agents"))
-        #expect(console.contains("runnerLabel(worker.runnerKind)"))
-        #expect(console.contains("private func compactMetadataLabel"))
-        #expect(console.contains("HStack(spacing: 3)"))
-        #expect(!console.contains("\"This session\""))
-        #expect(!console.contains("\"Promoted\""))
-        #expect(!console.contains("routingEvidence"))
+        #expect(consoleSurface.contains("Direct chat tool"))
+        #expect(consoleSurface.contains("Internal specialist"))
+        #expect(consoleSurface.contains("runnerLabel(worker.runnerKind)"))
+        #expect(consoleSurface.contains("private func compactMetadataLabel"))
+        #expect(consoleSurface.contains("HStack(spacing: 3)"))
+        #expect(!consoleSurface.contains("\"This session\""))
+        #expect(!consoleSurface.contains("\"Promoted\""))
+        #expect(!consoleSurface.contains("routingEvidence"))
         #expect(sidebar.contains("await workerConsole.monitorSummary("))
         #expect(console.contains("await viewModel.monitor("))
         #expect(console.contains("await viewModel.monitorSummary("))

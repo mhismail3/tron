@@ -19,6 +19,7 @@ use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister
 use crate::domains::agent::r#loop::surface::{self, ResolvedPrimitiveSurface};
 use crate::domains::agent::r#loop::types::{RunContext, TurnResult};
 use crate::domains::model::responder::{ModelResponder, ModelResponse, ModelResponseRequest};
+use crate::domains::session::event_store::AgentDeliverySourceKind;
 use crate::shared::foundation::retry::RetryConfig;
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::messages::{RequestContextBlock, RequestContextKind};
@@ -56,6 +57,58 @@ pub(super) struct PreparedProviderResponse {
     pub response: ModelResponse,
     pub leased_delivery_ids: Vec<String>,
     pub leased_delivery_provenance: Vec<Value>,
+}
+
+fn worker_identity_from_delivery_content(content: &str) -> (Option<String>, Option<String>) {
+    let Ok(value) = serde_json::from_str::<Value>(content) else {
+        return (None, None);
+    };
+    if let Some(worker_id) = value.get("workerId").and_then(Value::as_str) {
+        return (
+            Some(worker_id.to_owned()),
+            value
+                .get("workerName")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+        );
+    }
+    let workers = value
+        .get("results")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|result| {
+            result
+                .get("evidence")
+                .and_then(Value::as_str)
+                .and_then(|evidence| serde_json::from_str::<Value>(evidence).ok())
+                .and_then(|evidence| {
+                    let worker_id = evidence.get("workerId").and_then(Value::as_str)?;
+                    let worker_name = evidence
+                        .get("workerName")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned);
+                    Some((worker_id.to_owned(), worker_name))
+                })
+        })
+        .collect::<Vec<_>>();
+    let worker_ids = workers
+        .iter()
+        .map(|(worker_id, _)| worker_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    if worker_ids.len() != 1 {
+        return (None, None);
+    }
+    let worker_names = workers
+        .into_iter()
+        .filter_map(|(_, worker_name)| worker_name)
+        .collect::<std::collections::BTreeSet<_>>();
+    (
+        worker_ids.first().cloned(),
+        (worker_names.len() == 1)
+            .then(|| worker_names.first().cloned())
+            .flatten(),
+    )
 }
 
 /// Turn-local owner of the provider-neutral context and its inspection
@@ -684,11 +737,23 @@ pub(super) async fn open_provider_response(
     let leased_delivery_provenance = leased_deliveries
         .iter()
         .map(|delivery| {
+            let (source_worker_id, source_worker_name) =
+                if delivery.source_kind == AgentDeliverySourceKind::WorkerResult {
+                    worker_identity_from_delivery_content(&delivery.content)
+                } else {
+                    (None, None)
+                };
             json!({
                 "deliveryId":delivery.delivery_id,
                 "sourceKind":delivery.source_kind,
+                "sourceWorkerId":source_worker_id,
+                "sourceWorkerName":source_worker_name,
                 "sourceSessionId":delivery.source_session_id,
                 "sourceInvocationId":delivery.source_invocation_id,
+                "wakePolicy":delivery.wake_policy,
+                "boundary":delivery.boundary,
+                "triggeredWake":trigger_delivery_ids
+                    .is_some_and(|ids| ids.contains(&delivery.delivery_id)),
                 "redelivery":delivery.is_redelivery(),
             })
         })

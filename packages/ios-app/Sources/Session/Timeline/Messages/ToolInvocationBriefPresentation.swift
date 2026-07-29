@@ -8,6 +8,30 @@ struct ToolInvocationBriefPresentation: Equatable {
         let rows: [ToolDisplayRow]
     }
 
+    struct DurableWait: Equatable {
+        let status: String
+        let mode: String
+        let workerCount: Int
+
+        var isPending: Bool { status == "pending" }
+        var title: String {
+            isPending ? "Auto-resume registered" : "Worker wait satisfied"
+        }
+        var subtitle: String {
+            let scope = mode == "any" ? "any" : "all"
+            let workers = workerCount == 1 ? "worker" : "workers"
+            return "\(scope) of \(workerCount) \(workers)"
+        }
+        var narrative: String {
+            if isPending {
+                return mode == "any"
+                    ? "This task will resume automatically when any selected worker finishes."
+                    : "This task will resume automatically when all selected workers finish."
+            }
+            return "The selected worker completion condition was already satisfied."
+        }
+    }
+
     let title: String
     let subtitle: String?
     let headline: String
@@ -23,40 +47,56 @@ struct ToolInvocationBriefPresentation: Equatable {
     let rawResult: String?
     let rawPayload: String?
     let backgroundInvocationId: String?
+    let durableWait: DurableWait?
 
     var isBackgroundHandoff: Bool { backgroundInvocationId != nil }
 
     init(data: ToolInvocationData) {
         let display = data.display
         let evidence = ToolEvidencePresentation(data: data)
-        let title = evidence.title
+        let durableWait = Self.durableWait(from: data)
+        let title = durableWait?.title ?? evidence.title
         let issue = Self.issue(from: data, display: display, title: title)
         let resultBody = Self.resultBody(from: data, display: display)
         let requestRows = Self.requestRows(from: data, display: display)
         let resultRows = Self.resultRows(from: display)
         let evidenceRows = Self.evidenceRows(from: data, display: display)
-        let subtitle = Self.subtitle(from: evidence, issue: issue, resultBody: resultBody)
+        let subtitle = durableWait?.subtitle
+            ?? Self.subtitle(from: evidence, issue: issue, resultBody: resultBody)
         let backgroundInvocationId = Self.backgroundInvocationId(from: data.result)
 
         self.title = title
         self.subtitle = subtitle
-        self.headline = Self.headline(
-            for: data.status,
-            title: title,
-            issue: issue,
-            backgroundInvocationId: backgroundInvocationId
-        )
-        self.narrative = Self.narrative(
-            for: data,
-            title: title,
-            issue: issue,
-            backgroundInvocationId: backgroundInvocationId
-        )
-        self.factRows = Self.factRows(
+        self.headline = durableWait?.title
+            ?? Self.headline(
+                for: data.status,
+                title: title,
+                issue: issue,
+                backgroundInvocationId: backgroundInvocationId
+            )
+        self.narrative = durableWait?.narrative
+            ?? Self.narrative(
+                for: data,
+                title: title,
+                issue: issue,
+                backgroundInvocationId: backgroundInvocationId
+            )
+        var factRows = Self.factRows(
             from: data,
             display: display,
             backgroundInvocationId: backgroundInvocationId
         )
+        if let durableWait {
+            factRows.append(ToolDisplayRow(
+                label: "Completion",
+                value: durableWait.mode == "any" ? "Any worker" : "All workers"
+            ))
+            factRows.append(ToolDisplayRow(
+                label: "Workers",
+                value: "\(durableWait.workerCount)"
+            ))
+        }
+        self.factRows = factRows
         self.requestRows = requestRows
         self.resultRows = resultRows
         self.resultBody = resultBody
@@ -70,6 +110,7 @@ struct ToolInvocationBriefPresentation: Equatable {
             .joined(separator: "\n\n")
             .nilIfEmpty
         self.backgroundInvocationId = backgroundInvocationId
+        self.durableWait = durableWait
     }
 
     static func redactSensitiveIdentifiers(_ text: String) -> String {
@@ -220,6 +261,23 @@ struct ToolInvocationBriefPresentation: Equatable {
             return nil
         }
         return (object["invocationId"] as? String)?.nilIfEmpty
+    }
+
+    private static func durableWait(from data: ToolInvocationData) -> DurableWait? {
+        guard data.identity.toolName?
+            .lowercased()
+            .hasSuffix("agent_wait_for_workers") == true,
+            let result = data.result,
+            let bytes = result.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+            let status = object["status"] as? String,
+            status == "pending" || status == "satisfied"
+        else {
+            return nil
+        }
+        let mode = (object["mode"] as? String) == "any" ? "any" : "all"
+        let count = (object["invocationIds"] as? [Any])?.count ?? 0
+        return DurableWait(status: status, mode: mode, workerCount: count)
     }
 
     private static func abbreviatedIdentifier(_ value: String) -> String {

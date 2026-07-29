@@ -22,7 +22,12 @@
 //! Lifecycle transitions terminalize affected work with that evidence, and
 //! purge rechecks nonterminal/outbox custody under SQLite writer intent.
 //! Permanent rejection and its deterministic operator Attention row commit in
-//! one transaction so neither can survive without the other.
+//! one transaction so neither can survive without the other. One shared
+//! eligibility predicate governs every completion, cancellation, interruption,
+//! integrity-failure, and lifecycle terminal path: only detached top-level
+//! background work with an ordinary origin session receives an automatic Agent
+//! Delivery. Every `engine_hook:*` invocation is excluded because each hook has
+//! a dedicated result-integration owner.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;

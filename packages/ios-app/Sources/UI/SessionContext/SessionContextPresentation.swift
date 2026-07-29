@@ -197,6 +197,191 @@ enum SessionContextPresentation {
             omitted: fixed.count - fixedAvailable + workers.count - workersAvailable
         )
     }
+
+    static func agentUpdateTitle(
+        sourceKind: String,
+        sourceWorkerId: String?,
+        sourceWorkerName: String? = nil
+    ) -> String {
+        sourceWorkerName
+            ?? WorkerConsolePresentation.displayLabel(sourceWorkerId ?? sourceKind)
+    }
+
+    static func includedDeliveryTitle(sourceKind: String, content: String) -> String {
+        guard sourceKind == "worker_result",
+              let object = jsonObject(content)
+        else {
+            return WorkerConsolePresentation.displayLabel(sourceKind)
+        }
+        if let workerName = object["workerName"] as? String {
+            return workerName
+        }
+        let waitEvidence = waitEvidence(in: object)
+        let workerNames = waitEvidence
+            .compactMap { $0["workerName"] as? String }
+        if Set(workerNames).count == 1, let workerName = workerNames.first {
+            return workerName
+        }
+        if let workerId = object["workerId"] as? String {
+            return WorkerConsolePresentation.displayLabel(workerId)
+        }
+        let workerIds = waitEvidence
+            .compactMap { $0["workerId"] as? String }
+        if Set(workerIds).count == 1, let workerId = workerIds.first {
+            return WorkerConsolePresentation.displayLabel(workerId)
+        }
+        return "Worker update"
+    }
+
+    static func includedDeliverySummary(sourceKind: String, content: String) -> String {
+        guard sourceKind == "worker_result",
+              let object = jsonObject(content)
+        else {
+            return content.truncated(to: 320)
+        }
+        switch object["kind"] as? String {
+        case "worker_result":
+            let status = object["status"] as? String ?? "completed"
+            let evidence = object["evidence"] as? [String: Any] ?? [:]
+            return readableWorkerEvidence(status: status, evidence: evidence)
+        case "worker_wait":
+            let evidence = waitEvidence(in: object)
+            guard let first = evidence.first else {
+                return "The requested worker wait completed."
+            }
+            let summary = readableWorkerEvidence(
+                status: first["status"] as? String ?? "completed",
+                evidence: first["evidence"] as? [String: Any] ?? first
+            )
+            if evidence.count == 1 {
+                return summary
+            }
+            return "\(evidence.count) worker results are ready. \(summary)"
+                .truncated(to: 320)
+        default:
+            return "A durable worker result was included in this model request."
+        }
+    }
+
+    static func agentUpdateStatusLabel(status: String, wakePolicy: String) -> String {
+        switch status {
+        case "pending" where wakePolicy == "wake": "Will resume"
+        case "pending": "Available"
+        case "prepared": "In request"
+        case "observed": "Seen"
+        case "retry_exhausted": "Resume failed"
+        default: WorkerConsolePresentation.displayLabel(status)
+        }
+    }
+
+    static func agentUpdateStateDescription(
+        status: String,
+        wakePolicy: String,
+        boundary: String
+    ) -> String {
+        switch status {
+        case "pending" where wakePolicy == "wake" && boundary == "next_run":
+            "Ready to resume this task in a new continuation."
+        case "pending" where wakePolicy == "wake":
+            "Ready to resume automatically at the next safe turn."
+        case "pending":
+            "Available for the next natural turn; it will not resume this task."
+        case "prepared":
+            "Included in an active model request."
+        case "observed":
+            "Included in a completed model turn."
+        case "stale":
+            "Retained for audit; it will not enter a future turn."
+        case "cancelled":
+            "Cancelled before it entered a model turn."
+        case "retry_exhausted":
+            "Automatic resume failed; the update remains available passively."
+        default:
+            WorkerConsolePresentation.displayLabel(status)
+        }
+    }
+
+    static func agentWaitTitle(status: String) -> String {
+        status == "pending" ? "Waiting for workers" : "Worker wait resolved"
+    }
+
+    static func agentWaitStatusLabel(status: String) -> String {
+        status == "pending" ? "Auto-resume" : WorkerConsolePresentation.displayLabel(status)
+    }
+
+    static func agentWaitDescription(status: String, mode: String) -> String {
+        guard status == "pending" else {
+            return "The completion update is ready for delivery."
+        }
+        return mode == "any"
+            ? "This task resumes when any selected worker finishes."
+            : "This task resumes when all selected workers finish."
+    }
+
+    static func isActiveAgentUpdate(status: String) -> Bool {
+        ["pending", "prepared", "retry_exhausted"].contains(status)
+    }
+
+    static func isActiveAgentWait(status: String) -> Bool {
+        status == "pending"
+    }
+
+    static func shouldContinueObservingDeliveryState(
+        isAgentActive: Bool,
+        hasRunningWorker: Bool,
+        updates: [(status: String, wakePolicy: String)],
+        waitStatuses: [String]
+    ) -> Bool {
+        isAgentActive
+            || hasRunningWorker
+            || updates.contains {
+                $0.status == "prepared"
+                    || ($0.status == "pending" && $0.wakePolicy == "wake")
+            }
+            || waitStatuses.contains { isActiveAgentWait(status: $0) }
+    }
+
+    private static func jsonObject(_ content: String) -> [String: Any]? {
+        guard let data = content.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private static func waitEvidence(in object: [String: Any]) -> [[String: Any]] {
+        (object["results"] as? [[String: Any]] ?? []).compactMap { result in
+            guard let content = result["evidence"] as? String,
+                  let evidence = jsonObject(content)
+            else {
+                return nil
+            }
+            return evidence
+        }
+    }
+
+    private static func readableWorkerEvidence(
+        status: String,
+        evidence: [String: Any]
+    ) -> String {
+        let text = ["preview", "summary", "message"]
+            .compactMap { evidence[$0] as? String }
+            .first?
+            .trimmed
+        let error = ["error", "reason"]
+            .compactMap { evidence[$0] as? String }
+            .first?
+            .trimmed
+        switch status {
+        case "failed":
+            return error.map { "Failed: \($0)" } ?? "Worker execution failed."
+        case "cancelled":
+            return error.map { "Cancelled: \($0)" } ?? "Worker execution was cancelled."
+        default:
+            if text?.lowercased() == "empty" {
+                return "Completed without a user-facing result summary."
+            }
+            return text?.nilIfEmpty
+                ?? "Worker completed. Open the exact content for technical details."
+        }
+    }
 }
 
 struct SessionContextToolSummary: Equatable, Sendable {

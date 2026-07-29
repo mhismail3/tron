@@ -503,12 +503,21 @@ impl WorkerRuntime {
                     .await;
             }
         }
+        let satisfied = wait.disposition == "satisfied" || !deliveries.is_empty();
+        let delivery_ids = if deliveries.is_empty() {
+            wait.delivery_id.into_iter().collect::<Vec<_>>()
+        } else {
+            deliveries
+                .into_iter()
+                .map(|delivery| delivery.delivery_id)
+                .collect::<Vec<_>>()
+        };
         Ok(json!({
             "waitId":wait.wait_id,
             "mode":if mode == AgentWaitMode::All {"all"} else {"any"},
             "invocationIds":invocation_ids,
-            "status":if deliveries.is_empty() {"pending"} else {"satisfied"},
-            "deliveryIds":deliveries.into_iter().map(|delivery| delivery.delivery_id).collect::<Vec<_>>(),
+            "status":if satisfied {"satisfied"} else {"pending"},
+            "deliveryIds":delivery_ids,
         }))
     }
 

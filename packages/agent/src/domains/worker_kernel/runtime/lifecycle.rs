@@ -387,7 +387,7 @@ impl WorkerRuntime {
             })
             .collect::<Vec<_>>();
         let model_description = format!(
-            "{}\nPersistent worker: activeVersion={}; provenance={}. Agent-runner work begins durably in the background. Command/service work uses exact-version latency evidence and a bounded 10-second interaction budget; crossing the budget detaches the same invocation. Do not poll a background receipt. Nested worker calls still await their typed result.",
+            "{}\nPersistent worker: activeVersion={}; provenance={}. Agent-runner work begins durably in the background. Command/service work uses exact-version latency evidence and a bounded 10-second interaction budget; crossing the budget detaches the same invocation. Do not poll a background receipt or call worker_await; register agent_wait_for_workers when the current task must resume on completion. Nested worker calls still await their typed result.",
             active.summary.description,
             active.summary.active_version,
             provenance.join(", "),
