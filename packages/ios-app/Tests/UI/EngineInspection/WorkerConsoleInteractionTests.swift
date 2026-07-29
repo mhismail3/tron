@@ -327,6 +327,12 @@ struct WorkerConsoleInteractionTests {
             ),
             encoding: .utf8
         )
+        let deliveryHistorySheet = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/SessionContext/SessionContextDeliveryHistorySheet.swift"
+            ),
+            encoding: .utf8
+        )
 
         #expect(context.contains("label: currentModelId.shortModelName"))
         #expect(mainSheet.contains("ScrollView(.vertical, showsIndicators: true)"))
@@ -370,6 +376,12 @@ struct WorkerConsoleInteractionTests {
         #expect(context.contains(#"title: "Updates included""#))
         #expect(context.contains(#"title: "Delivery & wait status""#))
         #expect(context.contains("Recent delivery history"))
+        #expect(context.contains("showDeliveryHistorySheet = true"))
+        #expect(context.contains("SessionContextDeliveryHistorySheet"))
+        #expect(context.contains(#"SheetTitle(title: "Recent Delivery History""#))
+        #expect(!context.contains("DisclosureGroup(isExpanded: $showDeliveryHistory"))
+        #expect(deliveryHistorySheet.contains("ScrollView(.vertical, showsIndicators: true)"))
+        #expect(deliveryHistorySheet.contains(".containerRelativeFrame(.horizontal)"))
         #expect(detailSheet.contains("Exact model-visible content"))
         #expect(detailSheet.contains("includedDeliverySummary"))
     }

@@ -40,7 +40,7 @@ struct SessionContextSheet: View {
     @State var agentWaits: [SessionAgentWaitDTO] = []
     @State var agentUpdatesLoadError: String?
     @State var isLoadingAgentUpdates = false
-    @State var showDeliveryHistory = false
+    @State var showDeliveryHistorySheet = false
     @State var selectedContextDetail: SessionContextDetailSelection?
     @State var showContextHistory = false
 
@@ -115,6 +115,9 @@ struct SessionContextSheet: View {
         agentWaits.filter {
             !SessionContextPresentation.isActiveAgentWait(status: $0.status)
         }
+    }
+    var deliveryHistoryCount: Int {
+        historicalAgentWaits.count + historicalAgentUpdates.count
     }
     var hasRunningSessionWorker: Bool {
         sessionWorkerRuns.contains { $0.status == "queued" || $0.status == "running" }
@@ -219,6 +222,16 @@ struct SessionContextSheet: View {
         }
         .sheet(item: $selectedContextDetail) { selection in
             SessionContextDetailSheet(selection: selection)
+        }
+        .sheet(isPresented: $showDeliveryHistorySheet) {
+            SessionContextDeliveryHistorySheet {
+                ForEach(historicalAgentWaits) { wait in
+                    agentWaitCard(wait)
+                }
+                ForEach(historicalAgentUpdates) { update in
+                    agentUpdateCard(update)
+                }
+            }
         }
         .sheet(isPresented: $showContextHistory) {
             SessionContextHistorySheet(

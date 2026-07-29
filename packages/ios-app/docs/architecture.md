@@ -809,7 +809,10 @@ stay visible and older v3 narratives without delivery evidence are labeled
 `Updates included` and counts only deliveries in the selected model request;
 its friendly summary leads to a lazy disclosure containing the unmodified
 model-visible v4 content. Live durable state is separately named `Delivery &
-wait status`, with active entries first and resolved history collapsed.
+wait status`, with active entries first. Resolved deliveries and waits remain
+behind one compact `Recent delivery history` button that opens a standard,
+width-bounded history sheet; nested history cards never expand inside the main
+Session Context scroll.
 Passive results are `Available` and never called waits; pending wakes say `Will
 resume`, prepared entries say `In request`, observed entries say `Seen`, and
 retry-exhausted wakes say `Resume failed · Available passively`.

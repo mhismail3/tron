@@ -283,30 +283,41 @@ extension SessionContextSheet {
                     ForEach(activeAgentUpdates) { update in
                         agentUpdateCard(update)
                     }
-                    let historyCount = historicalAgentWaits.count
-                        + historicalAgentUpdates.count
-                    if historyCount > 0 {
-                        DisclosureGroup(isExpanded: $showDeliveryHistory) {
-                            VStack(spacing: 8) {
-                                ForEach(historicalAgentWaits) { wait in
-                                    agentWaitCard(wait)
-                                }
-                                ForEach(historicalAgentUpdates) { update in
-                                    agentUpdateCard(update)
-                                }
-                            }
-                            .padding(.top, 8)
+                    if deliveryHistoryCount > 0 {
+                        Button {
+                            showDeliveryHistorySheet = true
                         } label: {
-                            Text("Recent delivery history (\(historyCount))")
-                                .font(TronTypography.sans(
-                                    size: TronTypography.sizeBodySM,
-                                    weight: .semibold
-                                ))
-                                .foregroundStyle(.tronTextSecondary)
+                            HStack(spacing: 12) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .foregroundStyle(.tronTextSecondary)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Recent delivery history (\(deliveryHistoryCount))")
+                                        .font(TronTypography.sans(
+                                            size: TronTypography.sizeBodySM,
+                                            weight: .semibold
+                                        ))
+                                        .foregroundStyle(.tronTextPrimary)
+                                    Text("View resolved deliveries and waits")
+                                        .font(TronTypography.sans(
+                                            size: TronTypography.sizeCaption
+                                        ))
+                                        .foregroundStyle(.tronTextMuted)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 11)
+                            .contentShape(Rectangle())
                         }
-                        .padding(12)
-                        .sectionFill(.tronTextMuted, cornerRadius: 12, subtle: true, interactive: false)
-                        .tint(.tronEmerald)
+                        .buttonStyle(.plain)
+                        .sectionFill(
+                            .tronTextMuted,
+                            cornerRadius: 12,
+                            subtle: true,
+                            interactive: true
+                        )
+                        .accessibilityHint("Opens recent delivery history")
                     }
                 }
             }
