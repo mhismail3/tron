@@ -14,7 +14,10 @@
 //! separate. Scenario tests live in `tests`, grouped by notification transport,
 //! artifacts/presentation, result custody, durable dispatch/recovery, and
 //! publication/lifecycle. They share only the canonical bundle fixture and do
-//! not add production test hooks.
+//! not add production test hooks. Invocation queue admission acquires SQLite
+//! writer intent before reading causal lineage, so concurrent engine hooks wait
+//! at the transaction boundary instead of failing a deferred read-to-write
+//! upgrade.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;

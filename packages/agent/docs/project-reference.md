@@ -703,6 +703,9 @@ to persist either an invocation or suppression retains the cursor for retry. If
 the typed engine-event projection itself violates the worker input schema or
 secret-isolation contract, Tron disables the worker, its route, and its
 triggers, records the inbox failure, and advances past that terminal event.
+Queue admission acquires SQLite writer intent before reading causal lineage, so
+concurrent hook and worker admissions wait for one another instead of failing a
+deferred transaction upgrade with `database is locked`.
 
 Successful and failed results enter the durable inbox and emit
 `worker.invocations`. Notable pending background results are atomically attached
@@ -711,10 +714,13 @@ tool activation, trigger materialization, and resident supervision participate
 in the same one-time attachment path even though they have no invocation row;
 foreground manual results remain explicitly inspectable, while a detached or
 predicted-background manual result is notable because no foreground caller
-received its typed output. A successful semantic engine hook
-is consumed by the engine boundary that invoked it, so its immutable inbox row
-is created with `contextAttached=true` and cannot later reappear as unrelated
-background context. Hook failures remain unattached Attention until resolved.
+received its typed output. Candidate reads, policy-selected claims, and
+deterministic recovery enforce that same eligibility rule, preventing a
+successful foreground result from being delivered twice. A successful semantic
+engine hook is consumed by the engine boundary that invoked it, so its immutable
+inbox row is created with `contextAttached=true` and cannot later reappear as
+unrelated background context. Hook failures remain unattached Attention until
+resolved.
 
 `worker_runs` and `worker_inbox` return compact observations by default: pages
 contain at most 20 records. Inputs use bounded previews; every successful

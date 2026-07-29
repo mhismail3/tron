@@ -1092,15 +1092,43 @@ fn inbox_context_candidates_are_bounded_previews_and_claim_atomically() {
     let mut prepared = store.prepare(bundle(), None).unwrap();
     store.finalize(&mut prepared).unwrap();
     let outcome = store.publish(prepared).unwrap();
+    let (foreground, _) = store
+        .begin_invocation(
+            &outcome.worker.worker_id,
+            &outcome.version,
+            &json!({}),
+            "foreground-context-candidate",
+            "trace-foreground-context-candidate",
+            0,
+            "manual",
+            None,
+        )
+        .unwrap();
+    assert!(store.claim_running(&foreground.invocation_id).unwrap());
+    store
+        .complete_invocation(
+            &foreground.invocation_id,
+            &outcome.worker.worker_id,
+            Ok(&json!({"report":"x".repeat(8_000)})),
+        )
+        .unwrap();
+    assert!(
+        store
+            .pending_inbox_context_candidates(64)
+            .unwrap()
+            .is_empty(),
+        "a successful foreground manual result already reached its caller"
+    );
+
     let (run, _) = store
         .begin_invocation(
             &outcome.worker.worker_id,
             &outcome.version,
             &json!({}),
-            "context-candidate",
-            "trace-context-candidate",
+            "scheduled-context-candidate",
+            "trace-scheduled-context-candidate",
             0,
-            "manual",
+            "schedule",
             None,
         )
         .unwrap();

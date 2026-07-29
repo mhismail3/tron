@@ -3,6 +3,46 @@
 use super::*;
 
 #[test]
+fn invocation_queue_waits_for_an_existing_writer_before_reading_trace_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+
+    let mut blocking_connection = store.connection().unwrap();
+    let blocking_transaction = blocking_connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let queued_store = store.clone();
+    let queued_barrier = barrier.clone();
+    let worker_id = published.worker.worker_id.clone();
+    let version = published.version.clone();
+    let queued = std::thread::spawn(move || {
+        queued_barrier.wait();
+        queued_store.begin_invocation(
+            &worker_id,
+            &version,
+            &json!({"topic":"concurrent admission"}),
+            "concurrent-admission",
+            "trace-concurrent-admission",
+            0,
+            "engine_hook:continuity_context",
+            Some("session-concurrent-admission"),
+        )
+    });
+
+    barrier.wait();
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    blocking_transaction.commit().unwrap();
+
+    let (run, replayed) = queued.join().unwrap().unwrap();
+    assert!(!replayed);
+    assert_eq!(run.status, "queued");
+}
+
+#[test]
 fn canonical_results_keep_small_json_inline_and_deduplicate_large_blobs() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();

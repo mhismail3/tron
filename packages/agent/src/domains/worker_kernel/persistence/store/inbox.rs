@@ -4,6 +4,18 @@ use super::*;
 
 const MAX_INBOX_CONTEXT_CANDIDATES: u32 = 200;
 
+// Successful foreground manual calls already return their typed result to the
+// caller. They remain immutable inbox history but are not eligible for a second
+// delivery through automatic model context. Background manual work, non-manual
+// results, and every actionable error remain eligible.
+const INBOX_CONTEXT_ELIGIBLE_SQL: &str = "
+    (
+        i.severity!='info'
+        OR COALESCE(r.trigger_kind,'system')!='manual'
+        OR COALESCE(r.interaction_mode,'foreground')='background'
+    )
+";
+
 // INVARIANT: Attention is a live projection of unresolved error evidence, not
 // a second delivery state for successful background work. A successful
 // activation or rollback is verified recovery; merely toggling an existing
@@ -182,6 +194,7 @@ impl WorkerStore {
     pub fn pending_inbox_context_candidates(&self, limit: u32) -> Result<Vec<Value>, String> {
         let connection = self.connection()?;
         let actionable_error_sql = actionable_inbox_error_sql();
+        let eligible_context_sql = INBOX_CONTEXT_ELIGIBLE_SQL;
         let mut statement = connection
             .prepare(&format!(
                 "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
@@ -190,6 +203,7 @@ impl WorkerStore {
                  LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
                  JOIN workers w ON w.worker_id=i.worker_id
                  WHERE i.context_attached=0
+                   AND ({eligible_context_sql})
                    AND (i.severity!='error' OR ({actionable_error_sql}))
                  ORDER BY i.created_at DESC LIMIT ?1"
             ))
@@ -212,6 +226,7 @@ impl WorkerStore {
             .transaction()
             .map_err(|error| error.to_string())?;
         let actionable_error_sql = actionable_inbox_error_sql();
+        let eligible_context_sql = INBOX_CONTEXT_ELIGIBLE_SQL;
         let mut candidates = Vec::new();
         for inbox_id in inbox_ids {
             let candidate = transaction
@@ -224,6 +239,7 @@ impl WorkerStore {
                      JOIN workers w ON w.worker_id=i.worker_id
                      WHERE i.inbox_id=?1
                        AND i.context_attached=0
+                       AND ({eligible_context_sql})
                        AND (i.severity!='error' OR ({actionable_error_sql}))"
                     ),
                     [inbox_id],
@@ -268,6 +284,7 @@ impl WorkerStore {
             .transaction()
             .map_err(|error| error.to_string())?;
         let actionable_error_sql = actionable_inbox_error_sql();
+        let eligible_context_sql = INBOX_CONTEXT_ELIGIBLE_SQL;
         let query_terms = relevance_query.map(terms).unwrap_or_default();
         let candidates = {
             let mut statement = transaction
@@ -278,11 +295,7 @@ impl WorkerStore {
                      LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
                      JOIN workers w ON w.worker_id=i.worker_id
                      WHERE i.context_attached=0
-                        AND (
-                            i.severity!='info'
-                            OR COALESCE(r.trigger_kind,'system')!='manual'
-                            OR COALESCE(r.interaction_mode,'foreground')='background'
-                        )
+                        AND ({eligible_context_sql})
                         AND (i.severity!='error' OR ({actionable_error_sql}))
                      ORDER BY i.created_at DESC LIMIT 200"
                 ))

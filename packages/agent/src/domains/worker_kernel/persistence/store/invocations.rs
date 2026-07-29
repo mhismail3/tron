@@ -1,6 +1,7 @@
 //! Durable invocation, attempt, trace, success, and audit ledgers.
 
 use super::*;
+use rusqlite::TransactionBehavior;
 
 impl WorkerStore {
     #[cfg(test)]
@@ -96,7 +97,7 @@ impl WorkerStore {
         let created_at = chrono::Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let transaction = connection
-            .transaction()
+            .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| format!("start worker invocation queue transaction: {error}"))?;
         // INVARIANT: a causal trace keeps the root session that admitted it.
         // Nested agent workers execute in child sessions, but they must remain
