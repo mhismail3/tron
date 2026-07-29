@@ -147,6 +147,20 @@ final class SessionClient: EngineDomainClient {
         )
     }
 
+    func agentUpdates(
+        sessionId: String,
+        limit: Int = 100
+    ) async throws -> SessionAgentUpdatesResultDTO {
+        try await invokeRead(
+            "session::agent_updates",
+            SessionAgentUpdatesParams(
+                sessionId: sessionId,
+                limit: min(max(limit, 1), 200)
+            ),
+            context: sessionContext(sessionId)
+        )
+    }
+
     // MARK: - Reconstruction
 
     /// Reconstruct full session state for reconnection.

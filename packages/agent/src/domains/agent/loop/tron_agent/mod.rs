@@ -13,7 +13,7 @@ use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::r#loop::turn_runner;
-use crate::domains::agent::r#loop::types::{AgentConfig, RunContext, RunResult};
+use crate::domains::agent::r#loop::types::{AgentConfig, AgentRunTrigger, RunContext, RunResult};
 use crate::domains::model::responder::ModelResponder;
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::protocol::messages::{Message, TokenUsage, UserMessageContent};
@@ -90,9 +90,25 @@ impl TronAgent {
         }
     }
 
+    /// Run an ordinary user-prompt turn.
+    #[cfg(test)]
+    pub async fn run(&mut self, content: &str, ctx: RunContext) -> RunResult {
+        self.run_trigger(
+            AgentRunTrigger::UserPrompt {
+                prompt: content.to_owned(),
+            },
+            ctx,
+        )
+        .await
+    }
+
     #[allow(clippy::too_many_lines)]
-    #[instrument(skip(self, ctx), fields(session_id = %self.session_id, model = %self.config.model))]
-    pub async fn run(&mut self, content: &str, mut ctx: RunContext) -> RunResult {
+    #[instrument(skip(self, trigger, ctx), fields(session_id = %self.session_id, model = %self.config.model))]
+    pub(crate) async fn run_trigger(
+        &mut self,
+        trigger: AgentRunTrigger,
+        mut ctx: RunContext,
+    ) -> RunResult {
         let Some(_guard) = RunGuard::new(&self.is_running) else {
             warn!(
                 component = "agent.loop",
@@ -118,28 +134,39 @@ impl TronAgent {
         let mut interrupted = false;
         let mut error: Option<String> = None;
 
-        let user_content = ctx
-            .user_content_override
-            .take()
-            .unwrap_or_else(|| UserMessageContent::Text(content.to_owned()));
-        let user_content_kind = match &user_content {
-            UserMessageContent::Text(_) => "text",
-            UserMessageContent::Blocks(_) => "blocks",
+        let trigger_kind = match trigger {
+            AgentRunTrigger::UserPrompt { prompt } => {
+                let user_content = ctx
+                    .user_content_override
+                    .take()
+                    .unwrap_or_else(|| UserMessageContent::Text(prompt));
+                let content_kind = match &user_content {
+                    UserMessageContent::Text(_) => "text",
+                    UserMessageContent::Blocks(_) => "blocks",
+                };
+                self.context_manager.add_message_with_source(
+                    Message::User {
+                        content: user_content,
+                        timestamp: None,
+                    },
+                    ctx.user_event_id.as_ref().map_or_else(
+                        crate::domains::agent::context::message_store::MessageAuditSource::generated,
+                        |event_id| {
+                            crate::domains::agent::context::message_store::MessageAuditSource::events(
+                                vec![event_id.clone()],
+                            )
+                        },
+                    ),
+                );
+                content_kind
+            }
+            AgentRunTrigger::DeliveryWake { delivery_ids } => {
+                ctx.user_content_override = None;
+                ctx.user_event_id = None;
+                ctx.delivery_wake_ids = Some(delivery_ids);
+                "delivery_wake"
+            }
         };
-        self.context_manager.add_message_with_source(
-            Message::User {
-                content: user_content,
-                timestamp: None,
-            },
-            ctx.user_event_id.as_ref().map_or_else(
-                crate::domains::agent::context::message_store::MessageAuditSource::generated,
-                |event_id| {
-                    crate::domains::agent::context::message_store::MessageAuditSource::events(vec![
-                        event_id.clone(),
-                    ])
-                },
-            ),
-        );
 
         let run_base = |session_id: &str| {
             BaseEvent::now(session_id).with_trace_context(
@@ -169,12 +196,15 @@ impl TronAgent {
             parent_invocation_id = ctx.parent_invocation_id.as_ref().map(|id| id.as_str()).unwrap_or("none"),
             model = %self.config.model,
             max_turns = self.config.max_turns,
-            user_content_kind,
+            trigger_kind,
             "agent run started"
         );
 
         let max_turns = self.config.max_turns;
         let turn_offset = self.turn_offset.load(Ordering::Relaxed);
+        if ctx.delivery_wake_ids.is_some() {
+            ctx.delivery_wake_turn = turn_offset.checked_add(1);
+        }
         let mut run_turn = 0u32;
         let mut exited_via_break = false;
         let mut previous_context_baseline =

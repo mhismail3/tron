@@ -6,6 +6,7 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
     case messages([ContextMessageManifestDTO])
     case attachments([ContextMessageManifestDTO])
     case environment(ContextEnvironmentManifestDTO?)
+    case deliveries([ContextAgentDeliveryDTO])
     case tools(
         fixed: [SessionContextFixedToolSelection],
         workers: [SessionContextWorkerSelection],
@@ -24,6 +25,7 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
         case .messages: "messages"
         case .attachments: "attachments"
         case .environment: "environment"
+        case .deliveries: "deliveries"
         case .tools: "tools"
         case .automatic(let evaluation): "automatic:\(evaluation.id)"
         case .providerAudit(let detail, _, _): "provider:\(detail.eventId)"
@@ -36,9 +38,10 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
         case .messages: "Conversation"
         case .attachments: "Attachments"
         case .environment: "Environment"
+        case .deliveries: "Agent Updates"
         case .tools: "Tool Surface"
         case .automatic(let evaluation):
-            evaluation.kind == "continuity" ? "Continuity" : "Worker Inbox"
+            evaluation.kind == "continuity" ? "Continuity" : "Worker Results"
         case .providerAudit: "Provider Request"
         }
     }
@@ -133,6 +136,50 @@ struct SessionContextDetailSheet: View {
                 .sectionFill(.tronAmber, cornerRadius: 12, subtle: true, interactive: false)
             } else {
                 emptyState("Environment provenance is unavailable for this request.")
+            }
+
+        case .deliveries(let deliveries):
+            if deliveries.isEmpty {
+                emptyState("No durable agent updates were included in this provider request.")
+            } else {
+                ForEach(deliveries) { delivery in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(WorkerConsolePresentation.displayLabel(delivery.sourceKind))
+                                .font(TronTypography.sans(
+                                    size: TronTypography.sizeBodySM,
+                                    weight: .semibold
+                                ))
+                            Spacer()
+                            Text(delivery.redelivery ? "Redelivery" : "Prepared")
+                                .font(TronTypography.pillValue)
+                                .foregroundStyle(.tronEmerald)
+                        }
+                        Text(delivery.content)
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                            .foregroundStyle(.tronTextSecondary)
+                            .textSelection(.enabled)
+                        Text(
+                            [
+                                delivery.intent.map(WorkerConsolePresentation.displayLabel),
+                                WorkerConsolePresentation.displayLabel(delivery.wakePolicy),
+                                WorkerConsolePresentation.displayLabel(delivery.boundary),
+                            ]
+                            .compactMap { $0 }
+                            .joined(separator: " · ")
+                        )
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                        auditIdentifier("Delivery", delivery.deliveryId)
+                        auditText(
+                            SessionContextAuditFormatter.projectedJSONString(
+                                delivery.provenance
+                            )
+                        )
+                    }
+                    .padding(13)
+                    .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+                }
             }
 
         case .tools(let fixed, let workers, let raw):

@@ -118,6 +118,7 @@ struct AssistantMessagePayload {
     let model: String
     let hasThinking: Bool?
     let interrupted: Bool?
+    let agentDeliveryProvenance: [AgentDeliveryMessageProvenance]
 
     /// Whether the provider response contains tool invocations. Their
     /// presence makes the response ineligible for a final textual-response
@@ -194,6 +195,23 @@ struct AssistantMessagePayload {
         self.latencyMs = payload.int("latency") ?? payload.int("latencyMs")
         self.hasThinking = payload.bool("hasThinking")
         self.interrupted = payload.bool("interrupted")
+        self.agentDeliveryProvenance = payload
+            .dict("agentDeliveryContinuation")?["deliveries"]
+            .flatMap { AnyCodable($0).arrayValue }?
+            .compactMap { value -> AgentDeliveryMessageProvenance? in
+                guard let object = value as? [String: Any],
+                      let deliveryId = object["deliveryId"] as? String,
+                      let sourceKind = object["sourceKind"] as? String else {
+                    return nil
+                }
+                return AgentDeliveryMessageProvenance(
+                    deliveryId: deliveryId,
+                    sourceKind: sourceKind,
+                    sourceSessionId: object["sourceSessionId"] as? String,
+                    sourceInvocationId: object["sourceInvocationId"] as? String,
+                    redelivery: object["redelivery"] as? Bool ?? false
+                )
+            } ?? []
     }
 }
 

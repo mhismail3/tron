@@ -566,6 +566,7 @@ async fn persisted_completed_response_is_not_duplicated_as_in_flight_text() {
             tool_invocation_count: 0,
             token_record: None,
             model: Some("model".into()),
+            agent_delivery_continuation: None,
         });
 
     let result = SessionReconstructionService::reconstruct(

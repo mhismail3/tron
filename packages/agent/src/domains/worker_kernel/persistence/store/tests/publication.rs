@@ -536,6 +536,13 @@ fn versions_are_immutable_rollback_restores_triggers_and_purge_leaves_audit() {
             .as_bool()
             .unwrap_or(true)
     );
+    for row in store.pending_agent_delivery_outbox(100).unwrap() {
+        assert!(
+            store
+                .mark_agent_delivery_outbox_imported(&row.outbox_id)
+                .unwrap()
+        );
+    }
     let purge = store.purge("recent-research", &[]).unwrap();
     assert!(purge.purged);
     assert!(std::path::Path::new(&purge.archive_path).is_file());

@@ -219,7 +219,7 @@ fn engine_hook_invocation_key(
 ) -> String {
     if matches!(
         hook,
-        WorkerEngineHook::WorkerRelevance | WorkerEngineHook::InboxContext
+        WorkerEngineHook::WorkerRelevance | WorkerEngineHook::MailboxCuration
     ) {
         return engine_hook_cache_key(hook, worker_version, input, unix_seconds);
     }

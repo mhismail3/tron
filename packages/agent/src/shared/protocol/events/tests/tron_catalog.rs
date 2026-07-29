@@ -57,6 +57,7 @@ fn tron_event_all_event_types() {
             tool_invocation_count: 0,
             token_record: None,
             model: None,
+            agent_delivery_continuation: None,
         },
         TronEvent::MessageUpdate {
             base: base.clone(),

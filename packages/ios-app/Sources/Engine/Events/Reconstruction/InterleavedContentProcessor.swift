@@ -97,6 +97,14 @@ enum InterleavedContentProcessor {
             // Other block types (redacted, etc.) are skipped
         }
 
+        if !parsed.agentDeliveryProvenance.isEmpty,
+           let continuationIndex = messages.firstIndex(where: {
+               $0.content.isAssistantResponseText
+           }) {
+            messages[continuationIndex].agentDeliveryProvenance =
+                parsed.agentDeliveryProvenance
+        }
+
         // Provider stop reasons do not identify finality: `end_turn` can arrive
         // with tool drafts. Only completed no-tool text is
         // guaranteed to be the final response and eligible for a stats row.

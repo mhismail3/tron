@@ -28,6 +28,9 @@
 //! - Runtime sequence assignment stays synchronized with durable event-store
 //!   sequence truth; one active run owns sequenced completion through the final
 //!   session metadata event.
+//! - Agent Delivery boundary capture executes under the same active-run mutex
+//!   as admission and release, so persisted next-run exclusions cannot race a
+//!   run transition.
 //!
 //! ## Test Ownership
 //!
@@ -515,6 +518,31 @@ impl Orchestrator {
             .active_runs
             .lock()
             .contains_key(session_id)
+    }
+
+    /// Return the active run identity for safe delivery-boundary projection.
+    pub(crate) fn active_run_id(&self, session_id: &str) -> Option<String> {
+        self.run_registry
+            .active_runs
+            .lock()
+            .get(session_id)
+            .map(|run| run.run_id.clone())
+    }
+
+    /// Execute one delivery admission decision while the target session's run
+    /// identity is stable.
+    ///
+    /// `begin_run` and [`StartedRun`] release use this same registry mutex. A
+    /// caller that persists `arrived_during_run_id` and `defer_until_run_id`
+    /// inside this callback therefore cannot race a run boundary and
+    /// accidentally admit a `next_run` delivery into the excluded run.
+    pub(crate) fn with_stable_active_run<R>(
+        &self,
+        session_id: &str,
+        callback: impl FnOnce(Option<&str>) -> R,
+    ) -> R {
+        let runs = self.run_registry.active_runs.lock();
+        callback(runs.get(session_id).map(|run| run.run_id.as_str()))
     }
 
     /// Number of active runs.

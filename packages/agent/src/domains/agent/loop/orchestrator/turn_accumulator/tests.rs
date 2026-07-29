@@ -388,6 +388,7 @@ fn response_complete_is_part_of_atomic_turn_snapshot() {
         tool_invocation_count: 0,
         token_record: None,
         model: None,
+        agent_delivery_continuation: None,
     });
 
     let snapshot = map.reconstruction_snapshot("s1", "run-1").unwrap();

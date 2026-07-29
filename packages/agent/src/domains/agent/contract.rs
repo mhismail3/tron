@@ -61,6 +61,31 @@ fn internal_function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
         .response_schema(agent_prompt_response_schema())
         .idempotency(IdempotencyContract::session())
         .build()?,
+        FunctionContract::new(
+            "agent::delivery_wake",
+            "agent",
+            EffectClass::ExternalSideEffect,
+            RiskLevel::High,
+        )
+        .visibility(FunctionVisibility::Internal)
+        .request_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["sessionId"],
+            "properties":{"sessionId":{"type":"string"}}
+        }))
+        .response_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["acknowledged"],
+            "properties":{
+                "acknowledged":{"type":"boolean"},
+                "runId":{"type":"string"},
+                "reason":{"type":"string"}
+            }
+        }))
+        .idempotency(IdempotencyContract::session())
+        .build()?,
     ])
 }
 
@@ -111,6 +136,7 @@ mod tests {
                 "agent::status",
                 "agent::prompt_apply",
                 "agent::run_turn",
+                "agent::delivery_wake",
             ]
         );
     }
@@ -166,6 +192,7 @@ mod tests {
                     "sessionId",
                 ],
             ),
+            ("agent::delivery_wake", vec!["sessionId"]),
         ];
         for (function_id, expected_properties) in expected {
             let schema = specs

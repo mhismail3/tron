@@ -68,6 +68,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             tool_invocation_count,
             token_record,
             model,
+            agent_delivery_continuation,
             ..
         } => {
             let mut data = json!({
@@ -81,6 +82,11 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 data["tokenRecord"] = record.clone();
             }
             set_opt(&mut data, "model", model);
+            set_opt(
+                &mut data,
+                "agentDeliveryContinuation",
+                agent_delivery_continuation,
+            );
             Some(session_scoped(event, "agent.response_complete", Some(data)))
         }
         TronEvent::AgentInterrupted {

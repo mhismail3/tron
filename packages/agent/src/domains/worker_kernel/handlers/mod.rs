@@ -12,7 +12,7 @@
 //! - `discovery` owns list, inspect, and relevance-backed promotion.
 //! - `invocation` owns manual dispatch, nested worker-input admission errors,
 //!   lifecycle controls, and bounded durable-result reads.
-//! - `inbox` owns durable result projection and adaptive inbox context.
+//! - `inbox` owns durable result and run-history projection.
 //! - `notifications` owns authenticated installation, inbox, and fixed-response operations.
 //! - `webhook` owns credential rotation and authenticated ingress materialization.
 //! - `support` owns shared payload admission and response translation.
@@ -24,6 +24,7 @@ use crate::domains::registration::bindings::operation_bindings;
 use super::host;
 use super::runtime::WorkerRuntime;
 
+mod agent_deliveries;
 mod artifacts;
 mod authoring;
 mod core;
@@ -65,6 +66,11 @@ operation_bindings! {
         "invoke" => |invocation, deps| { invocation::invoke_worker(invocation, deps).await },
         "await" => |invocation, deps| { support::response(invocation, invocation::await_worker(invocation, deps).await) },
         "result_read" => |invocation, deps| { support::response(invocation, invocation::read_worker_result(invocation, deps).await) },
+        "agent_send" => |invocation, deps| { support::response(invocation, agent_deliveries::send(invocation, deps).await) },
+        "agent_wait_for_workers" => |invocation, deps| { support::response(invocation, agent_deliveries::wait_for_workers(invocation, deps).await) },
+        "agent_mailbox_list" => |invocation, deps| { support::response(invocation, agent_deliveries::mailbox_list(invocation, deps).await) },
+        "agent_mailbox_claim" => |invocation, deps| { support::response(invocation, agent_deliveries::mailbox_claim(invocation, deps).await) },
+        "mailbox_curate" => |invocation, deps| { support::response(invocation, agent_deliveries::mailbox_curate(invocation, deps).await) },
         "result_projection" => |invocation, deps| { support::response(invocation, invocation::project_worker_results(invocation, deps).await) },
         "detach" => |invocation, deps| { support::response(invocation, invocation::detach_worker_invocation(invocation, deps).await) },
         "cancel" => |invocation, deps| { support::response(invocation, invocation::cancel_worker_invocation(invocation, deps).await) },
@@ -75,7 +81,6 @@ operation_bindings! {
         "retire" => |invocation, deps| { support::response(invocation, invocation::retire(invocation, deps).await) },
         "purge" => |invocation, deps| { support::response(invocation, invocation::purge(invocation, deps).await) },
         "inbox" => |invocation, deps| { support::response(invocation, inbox::inbox(invocation, deps).await) },
-        "inbox_attach" => |invocation, deps| { support::response(invocation, inbox::inbox_attach(invocation, deps).await) },
         "runs" => |invocation, deps| { support::response(invocation, inbox::runs(invocation, deps).await) },
         "webhook_rotate" => |invocation, deps| { support::response(invocation, webhook::rotate_webhook(invocation, deps).await) },
         "stop_all" => |invocation, deps| { support::response(invocation, invocation::stop_all(invocation, deps).await) },

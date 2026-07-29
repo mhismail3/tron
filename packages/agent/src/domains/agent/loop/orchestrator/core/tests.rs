@@ -116,6 +116,73 @@ fn terminal_callback_serializes_replacement_admission() {
 }
 
 #[test]
+fn stable_delivery_boundary_serializes_run_admission_and_release() {
+    let orchestrator = Arc::new(make_orchestrator());
+    let run = orchestrator.begin_run("s1", "run-1").unwrap();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let stable_orchestrator = orchestrator.clone();
+    let stable = std::thread::spawn(move || {
+        stable_orchestrator.with_stable_active_run("s1", |active_run_id| {
+            assert_eq!(active_run_id, Some("run-1"));
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+    });
+    entered_rx.recv().unwrap();
+
+    let (dropped_tx, dropped_rx) = std::sync::mpsc::channel();
+    let dropping = std::thread::spawn(move || {
+        drop(run);
+        dropped_tx.send(()).unwrap();
+    });
+    assert!(
+        dropped_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err(),
+        "run release must wait while a delivery persists its stable boundary"
+    );
+    release_tx.send(()).unwrap();
+    dropped_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap();
+    stable.join().unwrap();
+    dropping.join().unwrap();
+
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let stable_orchestrator = orchestrator.clone();
+    let stable = std::thread::spawn(move || {
+        stable_orchestrator.with_stable_active_run("s1", |active_run_id| {
+            assert_eq!(active_run_id, None);
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+    });
+    entered_rx.recv().unwrap();
+
+    let (admitted_tx, admitted_rx) = std::sync::mpsc::channel();
+    let admission_orchestrator = orchestrator.clone();
+    let admission = std::thread::spawn(move || {
+        let admitted = admission_orchestrator.begin_run("s1", "run-2").unwrap();
+        admitted_tx.send(admitted).unwrap();
+    });
+    assert!(
+        admitted_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err(),
+        "run admission must wait while a delivery persists its stable boundary"
+    );
+    release_tx.send(()).unwrap();
+    let replacement = admitted_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap();
+    stable.join().unwrap();
+    admission.join().unwrap();
+    drop(replacement);
+}
+
+#[test]
 fn replacement_run_never_inherits_stale_reconstruction_projection() {
     let orch = make_orchestrator();
     let run_one = orch.begin_run("s1", "run-1").unwrap();

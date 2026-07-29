@@ -77,6 +77,13 @@ pub struct WorkerBundle {
     /// binding or permission transition.
     #[serde(default)]
     pub engine_hooks: Vec<WorkerEngineHook>,
+    /// Engine-owned delivery effects this immutable worker may request.
+    ///
+    /// A declared capability authorizes only the closed `agentDeliveries`
+    /// output shape. The kernel still derives sender identity, workspace,
+    /// trace, causal depth, and result authority from the invocation.
+    #[serde(default)]
+    pub engine_deliveries: Vec<WorkerEngineDelivery>,
     /// Optional native-client actions implemented by this immutable version.
     /// The client owns only capture/presentation; the selected worker owns the
     /// typed transformation and all higher-level policy.
@@ -297,6 +304,7 @@ pub enum WorkerEngineHook {
     ContinuityContext,
     ContextSummary,
     InboxContext,
+    MailboxCuration,
     SessionOrganization,
     SessionTitle,
     WorkerRelevance,
@@ -307,7 +315,7 @@ impl WorkerEngineHook {
         &[
             Self::ContinuityContext,
             Self::ContextSummary,
-            Self::InboxContext,
+            Self::MailboxCuration,
             Self::SessionOrganization,
             Self::SessionTitle,
             Self::WorkerRelevance,
@@ -319,9 +327,28 @@ impl WorkerEngineHook {
             Self::ContinuityContext => "continuity_context",
             Self::ContextSummary => "context_summary",
             Self::InboxContext => "inbox_context",
+            Self::MailboxCuration => "mailbox_curation",
             Self::SessionOrganization => "session_organization",
             Self::SessionTitle => "session_title",
             Self::WorkerRelevance => "worker_relevance",
+        }
+    }
+}
+
+/// Stable worker-to-agent delivery capabilities fulfilled by the engine.
+///
+/// This is deliberately narrower than an engine hook: it grants one closed
+/// durable effect, not a callback into provider preparation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerEngineDelivery {
+    AgentDelivery,
+}
+
+impl WorkerEngineDelivery {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AgentDelivery => "agent_delivery",
         }
     }
 }

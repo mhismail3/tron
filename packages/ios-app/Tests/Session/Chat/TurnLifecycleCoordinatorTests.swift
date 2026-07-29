@@ -169,6 +169,29 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(msg.turnNumber, 2)
     }
 
+    func testResponseCompleteAttachesDeliveryContinuationProvenance() {
+        let messageId = UUID()
+        mockContext.streamingMessageId = messageId
+        mockContext.messages = [
+            ChatMessage(id: messageId, role: .assistant, content: .text("Worker finished."))
+        ]
+        let provenance = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-1",
+            sourceKind: "worker_result",
+            sourceSessionId: "source-session",
+            sourceInvocationId: "worker-run-1",
+            redelivery: false
+        )
+
+        markResponseComplete(
+            turnNumber: 2,
+            hasToolInvocations: false,
+            agentDeliveryProvenance: [provenance]
+        )
+
+        XCTAssertEqual(mockContext.messages[0].agentDeliveryProvenance, [provenance])
+    }
+
     func testTurnEndUsesFirstTextMessageIdWhenStreamingFinalizedEarly() {
         // Given - streaming was finalized before turn end (e.g., before tool invocation)
         let firstTextId = UUID()
@@ -462,13 +485,15 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
     private func markResponseComplete(
         turnNumber: Int,
         hasToolInvocations: Bool,
-        toolInvocationCount: Int? = nil
+        toolInvocationCount: Int? = nil,
+        agentDeliveryProvenance: [AgentDeliveryMessageProvenance] = []
     ) {
         coordinator.handleResponseComplete(
             AgentResponseCompletePlugin.Result(
                 turnNumber: turnNumber,
                 hasToolInvocations: hasToolInvocations,
-                toolInvocationCount: toolInvocationCount ?? (hasToolInvocations ? 1 : 0)
+                toolInvocationCount: toolInvocationCount ?? (hasToolInvocations ? 1 : 0),
+                agentDeliveryProvenance: agentDeliveryProvenance
             ),
             context: mockContext
         )

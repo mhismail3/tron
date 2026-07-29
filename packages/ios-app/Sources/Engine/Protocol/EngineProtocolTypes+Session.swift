@@ -337,17 +337,71 @@ struct ContextCacheLayoutDTO: Decodable, Equatable, Sendable {
     let requestContextSha256: String?
 }
 
+struct ContextAgentDeliveryDTO: Decodable, Equatable, Identifiable, Sendable {
+    let deliveryId: String
+    let sourceKind: String
+    let intent: String?
+    let wakePolicy: String
+    let boundary: String
+    let redelivery: Bool
+    let provenance: AnyCodable
+    let content: String
+
+    var id: String { deliveryId }
+}
+
 struct SessionContextManifestDTO: Decodable, Equatable, Sendable {
     let systemContributions: [ContextSystemContributionDTO]
     let messages: [ContextMessageManifestDTO]
     let toolSurface: AnyCodable
     let automaticContext: [ContextAutomaticEvaluationDTO]
+    let agentDeliveries: [ContextAgentDeliveryDTO]
     let environment: ContextEnvironmentManifestDTO
     let cacheLayout: ContextCacheLayoutDTO?
     let systemPromptSha256: String
     let messagesSha256: String
     let toolsSha256: String
     let contextSha256: String
+}
+
+extension SessionContextManifestDTO {
+    private enum CodingKeys: String, CodingKey {
+        case systemContributions
+        case messages
+        case toolSurface
+        case automaticContext
+        case agentDeliveries
+        case environment
+        case cacheLayout
+        case systemPromptSha256
+        case messagesSha256
+        case toolsSha256
+        case contextSha256
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        systemContributions = try container.decode(
+            [ContextSystemContributionDTO].self,
+            forKey: .systemContributions
+        )
+        messages = try container.decode([ContextMessageManifestDTO].self, forKey: .messages)
+        toolSurface = try container.decode(AnyCodable.self, forKey: .toolSurface)
+        automaticContext = try container.decodeIfPresent(
+            [ContextAutomaticEvaluationDTO].self,
+            forKey: .automaticContext
+        ) ?? []
+        agentDeliveries = try container.decodeIfPresent(
+            [ContextAgentDeliveryDTO].self,
+            forKey: .agentDeliveries
+        ) ?? []
+        environment = try container.decode(ContextEnvironmentManifestDTO.self, forKey: .environment)
+        cacheLayout = try container.decodeIfPresent(ContextCacheLayoutDTO.self, forKey: .cacheLayout)
+        systemPromptSha256 = try container.decode(String.self, forKey: .systemPromptSha256)
+        messagesSha256 = try container.decode(String.self, forKey: .messagesSha256)
+        toolsSha256 = try container.decode(String.self, forKey: .toolsSha256)
+        contextSha256 = try container.decode(String.self, forKey: .contextSha256)
+    }
 }
 
 struct SessionContextRequestDetailDTO: Decodable, Equatable, Sendable {
@@ -359,6 +413,56 @@ struct SessionContextRequestDetailDTO: Decodable, Equatable, Sendable {
     let providerAdditions: [ContextSystemContributionDTO]?
     let providerAudit: AnyCodable
     let provenanceAvailability: String
+}
+
+// MARK: - Durable Agent Updates
+
+struct SessionAgentUpdatesParams: Encodable, Equatable {
+    let sessionId: String
+    let limit: Int
+}
+
+struct SessionAgentUpdateDTO: Decodable, Equatable, Identifiable, Sendable {
+    let deliveryId: String
+    let status: String
+    let sourceKind: String
+    let intent: String?
+    let sourceSessionId: String?
+    let sourceInvocationId: String?
+    let sourceTraceId: String?
+    let resultInvocationId: String?
+    let wakePolicy: String
+    let boundary: String
+    let causalDepth: UInt64
+    let redelivery: Bool
+    let leaseCount: UInt64
+    let wakeAttempts: UInt64
+    let lastError: String?
+    let preview: String
+    let createdAt: String
+    let preparedRunId: String?
+    let preparedTurn: UInt64?
+    let observedAt: String?
+    let cancelledAt: String?
+    let expiresAt: String?
+
+    var id: String { deliveryId }
+}
+
+struct SessionAgentWaitDTO: Decodable, Equatable, Identifiable, Sendable {
+    let waitId: String
+    let mode: String
+    let status: String
+    let deliveryId: String?
+    let createdAt: String
+    let resolvedAt: String?
+
+    var id: String { waitId }
+}
+
+struct SessionAgentUpdatesResultDTO: Decodable, Equatable, Sendable {
+    let updates: [SessionAgentUpdateDTO]
+    let waits: [SessionAgentWaitDTO]
 }
 
 // MARK: - Session Fork

@@ -26,6 +26,15 @@ impl WorkerRuntime {
     }
 
     pub async fn cancel_invocation(&self, invocation_id: &str) -> Result<InvocationRecord, String> {
+        self.cancel_invocation_with_reason(invocation_id, "worker invocation cancelled explicitly")
+            .await
+    }
+
+    async fn cancel_invocation_with_reason(
+        &self,
+        invocation_id: &str,
+        reason: &str,
+    ) -> Result<InvocationRecord, String> {
         let subtree = self.store.invocation_subtree_ids(invocation_id)?;
         if subtree.is_empty() {
             return Err(format!("worker invocation '{invocation_id}' was not found"));
@@ -35,7 +44,9 @@ impl WorkerRuntime {
         }
         let mut root = None;
         for descendant_id in subtree {
-            let record = self.store.cancel_invocation(&descendant_id)?;
+            let record = self
+                .store
+                .cancel_invocation_with_reason(&descendant_id, reason)?;
             let _ = self.invocation_stops.remove(&descendant_id);
             self.publish_event(
                 "worker.invocations",
@@ -54,6 +65,42 @@ impl WorkerRuntime {
             }
         }
         root.ok_or_else(|| format!("worker invocation '{invocation_id}' disappeared"))
+    }
+
+    async fn terminalize_worker_invocations(
+        &self,
+        worker_id: &str,
+        reason: &str,
+    ) -> Result<(), String> {
+        let pending = self
+            .store
+            .nonterminal_invocation_ids_for_worker(worker_id)?;
+        for invocation_id in &pending {
+            self.invocation_stop(invocation_id).cancel();
+        }
+        let cancelled = self
+            .store
+            .cancel_worker_invocations_with_reason(worker_id, reason)?;
+        for invocation_id in cancelled {
+            let _ = self.invocation_stops.remove(&invocation_id);
+            let record = self.store.invocation(&invocation_id)?.ok_or_else(|| {
+                format!("cancelled worker invocation '{invocation_id}' disappeared")
+            })?;
+            self.publish_event(
+                "worker.invocations",
+                json!({
+                    "action":"cancelled",
+                    "invocationId":record.invocation_id,
+                    "workerId":record.worker_id,
+                    "causalDepth":record.causal_depth,
+                    "reason":reason,
+                }),
+                TraceId::new(record.trace_id.clone()).ok(),
+            )
+            .await;
+        }
+        self.delivery_maintenance.notify_one();
+        Ok(())
     }
 
     pub async fn set_enabled(
@@ -76,6 +123,11 @@ impl WorkerRuntime {
             }
         } else {
             self.cancel_worker(worker_id);
+            self.terminalize_worker_invocations(
+                worker_id,
+                "worker invocation cancelled because the worker was disabled",
+            )
+            .await?;
             self.unregister_dynamic_tool(worker_id).await;
             self.stop_residents(Some(worker_id)).await;
         }
@@ -104,6 +156,11 @@ impl WorkerRuntime {
         self.store
             .record_stopped(worker_id, &worker.active_version)?;
         self.cancel_worker(worker_id);
+        self.terminalize_worker_invocations(
+            worker_id,
+            "worker invocation cancelled because the worker was stopped",
+        )
+        .await?;
         self.stop_residents(Some(worker_id)).await;
         if worker.enabled && !worker.retired {
             self.reset_worker_stop(worker_id);
@@ -152,6 +209,11 @@ impl WorkerRuntime {
     pub async fn retire(self: &Arc<Self>, worker_id: &str) -> Result<Value, String> {
         let worker = self.store.retire(worker_id)?;
         self.cancel_worker(worker_id);
+        self.terminalize_worker_invocations(
+            worker_id,
+            "worker invocation cancelled because the worker was retired",
+        )
+        .await?;
         self.stop_residents(Some(worker_id)).await;
         self.unregister_dynamic_tool(worker_id).await;
         self.publish_event(
@@ -169,7 +231,28 @@ impl WorkerRuntime {
 
     pub async fn purge(self: &Arc<Self>, worker_id: &str) -> Result<PurgeOutcome, String> {
         self.cancel_worker(worker_id);
+        self.terminalize_worker_invocations(
+            worker_id,
+            "worker invocation cancelled before permanent worker purge",
+        )
+        .await?;
         self.stop_residents(Some(worker_id)).await;
+        if self.store.has_pending_agent_outbox_for_worker(worker_id)? {
+            return Err(
+                "worker cannot be purged while agent-delivery outbox rows are pending".to_owned(),
+            );
+        }
+        for invocation_id in self.store.invocation_ids_for_worker(worker_id)? {
+            if self
+                .event_store
+                .has_agent_result_grant(&invocation_id)
+                .map_err(|error| error.to_string())?
+            {
+                return Err(format!(
+                    "worker cannot be purged while result '{invocation_id}' is granted to an agent delivery"
+                ));
+            }
+        }
         self.unregister_dynamic_tool(worker_id).await;
         let secrets = self
             .load_all_runtime_secrets()?

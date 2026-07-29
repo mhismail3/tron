@@ -321,6 +321,7 @@ pub(super) fn emit_response_complete(
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
+    agent_delivery_continuation: Option<Value>,
 ) {
     let response_token_usage = stream_result.token_usage.as_ref().map(|u| TokenUsage {
         input_tokens: u.input_tokens,
@@ -348,6 +349,7 @@ pub(super) fn emit_response_complete(
             tool_invocation_count: stream_result.tool_invocations.len() as u32,
             token_record: token_record_json,
             model: Some(model_name.to_owned()),
+            agent_delivery_continuation,
         },
         sequence_counter,
     );

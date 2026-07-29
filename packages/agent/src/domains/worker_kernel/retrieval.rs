@@ -100,7 +100,7 @@ pub(crate) struct WorkerRankingOutcome {
 }
 
 impl WorkerRankingOutcome {
-    fn deterministic(ranks: Vec<WorkerRetrievalRank>, mechanism: &str) -> Self {
+    pub(crate) fn deterministic(ranks: Vec<WorkerRetrievalRank>, mechanism: &str) -> Self {
         Self {
             ranks,
             mechanism: mechanism.to_owned(),

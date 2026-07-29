@@ -1,14 +1,16 @@
 //! Live tool-surface resolution and audited provider-stream admission.
 //!
-//! This phase resolves the exact model-tool surface, claims relevant worker
-//! inbox context, builds the provider request from durable conversation state,
-//! persists the provider-neutral request audit, and only then opens the model
-//! stream. It owns no stream processing or turn completion.
+//! This phase resolves the exact model-tool surface, leases eligible durable
+//! Agent Deliveries, builds the provider request from durable conversation
+//! state, persists the provider-neutral v4 request audit, and only then opens
+//! the model stream. It performs no optional worker execution and owns no
+//! stream processing or turn completion.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicI64;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use metrics::{counter, histogram};
+use serde_json::{Value, json};
 use tracing::{error, info, trace, warn};
 
 use crate::domains::agent::context::context_manager::ContextManager;
@@ -21,7 +23,7 @@ use crate::shared::foundation::retry::RetryConfig;
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::messages::{RequestContextBlock, RequestContextKind};
 use crate::shared::protocol::model_audit::{
-    AutomaticContextEvaluation, ContextManifest, SystemContextContribution,
+    AgentDeliveryManifest, AutomaticContextEvaluation, ContextManifest, SystemContextContribution,
 };
 use crate::shared::server::failure::{
     ENGINE_TOOL_SURFACE_FAILED, FailureCategory, FailureEnvelope, FailureOrigin,
@@ -52,6 +54,8 @@ pub(super) struct ProviderPhaseParams<'a> {
 pub(super) struct PreparedProviderResponse {
     pub primitive_surface: ResolvedPrimitiveSurface,
     pub response: ModelResponse,
+    pub leased_delivery_ids: Vec<String>,
+    pub leased_delivery_provenance: Vec<Value>,
 }
 
 /// Turn-local owner of the provider-neutral context and its inspection
@@ -62,6 +66,7 @@ struct ProviderContextAssembly {
     message_sources: Vec<crate::domains::agent::context::message_store::MessageAuditSource>,
     system_contributions: Vec<SystemContextContribution>,
     automatic_context: Vec<AutomaticContextEvaluation>,
+    agent_deliveries: Vec<AgentDeliveryManifest>,
 }
 
 fn bounded_selection_mechanism(mechanism: &str) -> &'static str {
@@ -135,6 +140,7 @@ impl ProviderContextAssembly {
             message_sources,
             system_contributions,
             automatic_context: Vec::new(),
+            agent_deliveries: Vec::new(),
         }
     }
 
@@ -159,26 +165,58 @@ impl ProviderContextAssembly {
             ));
     }
 
-    fn add_automatic_context(&mut self, mut evaluation: AutomaticContextEvaluation) {
-        if let Some(narrative) = evaluation
-            .narrative
-            .as_deref()
-            .filter(|narrative| !narrative.is_empty())
-        {
-            let kind = if evaluation.kind == "continuity" {
-                RequestContextKind::Continuity
-            } else {
-                RequestContextKind::WorkerInbox
-            };
-            self.context.request_context.push(RequestContextBlock {
-                kind,
-                content: narrative.to_owned(),
-            });
-            evaluation.delivery_channel = Some("reference".to_owned());
-        } else {
-            evaluation.delivery_channel = Some("none".to_owned());
-        }
-        self.automatic_context.push(evaluation);
+    fn add_agent_delivery(
+        &mut self,
+        delivery: &crate::domains::session::event_store::AgentDeliveryRecord,
+    ) -> Result<(), String> {
+        let source_kind = serde_json::to_value(delivery.source_kind)
+            .ok()
+            .and_then(|value| value.as_str().map(ToOwned::to_owned))
+            .ok_or_else(|| "serialize agent delivery source kind".to_owned())?;
+        let intent = delivery.intent.and_then(|intent| {
+            serde_json::to_value(intent)
+                .ok()
+                .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        });
+        let wake_policy = serde_json::to_value(delivery.wake_policy)
+            .ok()
+            .and_then(|value| value.as_str().map(ToOwned::to_owned))
+            .ok_or_else(|| "serialize agent delivery wake policy".to_owned())?;
+        let boundary = serde_json::to_value(delivery.boundary)
+            .ok()
+            .and_then(|value| value.as_str().map(ToOwned::to_owned))
+            .ok_or_else(|| "serialize agent delivery boundary".to_owned())?;
+        let content = serde_json::to_string(&serde_json::json!({
+            "deliveryId":delivery.delivery_id,
+            "sourceKind":source_kind,
+            "intent":intent,
+            "redelivery":delivery.is_redelivery(),
+            "content":delivery.content,
+        }))
+        .map_err(|error| error.to_string())?;
+        self.context.request_context.push(RequestContextBlock {
+            kind: RequestContextKind::AgentDelivery,
+            content,
+        });
+        self.agent_deliveries.push(AgentDeliveryManifest {
+            delivery_id: delivery.delivery_id.clone(),
+            source_kind,
+            intent,
+            wake_policy,
+            boundary,
+            redelivery: delivery.is_redelivery(),
+            provenance: serde_json::json!({
+                "sourceSessionId":delivery.source_session_id,
+                "sourceInvocationId":delivery.source_invocation_id,
+                "traceId":delivery.source_trace_id,
+                "rootInvocationId":delivery.source_root_invocation_id,
+                "causalDepth":delivery.causal_depth,
+                "resultInvocationId":delivery.result_invocation_id,
+                "arrivedDuringRunId":delivery.arrived_during_run_id,
+            }),
+            content: delivery.content.clone(),
+        });
+        Ok(())
     }
 
     fn finalize(
@@ -191,6 +229,7 @@ impl ProviderContextAssembly {
             self.system_contributions,
             tool_surface,
             self.automatic_context,
+            self.agent_deliveries,
             &self.message_sources,
         )?;
         Ok((self.context, manifest))
@@ -208,12 +247,13 @@ pub(super) async fn open_provider_response(
         .map(|id| id.as_str())
         .unwrap_or("none");
     let relevance_query = worker_relevance_query(params.context_manager.messages_slice());
-    let primitive_surface = match surface::resolve_provider_primitive_surface_for_query(
+    let primitive_surface = match surface::resolve_provider_primitive_surface_for_run(
         params.engine_host,
         params.session_id,
         relevance_query.as_deref(),
         params.run_context.origin_worker_id.as_deref(),
         params.run_context.worker_agent_tools.as_deref(),
+        params.run_context.run_id.as_deref(),
     )
     .await
     {
@@ -262,27 +302,80 @@ pub(super) async fn open_provider_response(
         available_worker_count = primitive_surface.snapshot.available_worker_count,
         "provider primitive surface resolved"
     );
-    let (worker_inbox_context, continuity_context) = tokio::join!(
-        surface::take_worker_inbox_context(
-            params.engine_host,
+    let event_store = params
+        .persister
+        .map(|persister| Arc::clone(persister.event_store()));
+    let trigger_delivery_ids = (params.run_context.delivery_wake_turn == Some(params.turn))
+        .then_some(params.run_context.delivery_wake_ids.as_deref())
+        .flatten();
+    let leased_deliveries = if let Some(event_store) = event_store.as_ref() {
+        match event_store.lease_agent_deliveries(
+            params.session_id,
+            run_id,
+            params.turn,
+            trigger_delivery_ids,
+        ) {
+            Ok(deliveries) => deliveries,
+            Err(error) => {
+                let error_msg = format!("failed to lease agent deliveries: {error}");
+                let failure = FailureEnvelope::new(
+                    RUNTIME_PERSISTENCE_ERROR,
+                    FailureCategory::Persistence,
+                    error_msg.clone(),
+                    false,
+                    false,
+                    FailureOrigin::AgentRuntime,
+                );
+                emit_turn_failure(
+                    params.emitter,
+                    params.persister,
+                    params.session_id,
+                    params.turn,
+                    params.run_context,
+                    params.sequence_counter,
+                    &failure,
+                    None,
+                );
+                return Err(TurnResult {
+                    success: false,
+                    error: Some(error_msg),
+                    stop_reason: Some(crate::domains::agent::r#loop::errors::StopReason::Error),
+                    ..Default::default()
+                });
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let mut lease_rollback = ProviderLeaseRollback::new(event_store, run_id);
+    if trigger_delivery_ids.is_some_and(|ids| !ids.is_empty()) && leased_deliveries.is_empty() {
+        let error_msg =
+            "delivery-only run could not lease any of its durable trigger deliveries".to_owned();
+        let failure = FailureEnvelope::new(
+            RUNTIME_PERSISTENCE_ERROR,
+            FailureCategory::Persistence,
+            error_msg.clone(),
+            true,
+            true,
+            FailureOrigin::AgentRuntime,
+        );
+        emit_turn_failure(
+            params.emitter,
+            params.persister,
             params.session_id,
             params.turn,
-            relevance_query.as_deref(),
-            params.run_context.origin_worker_id.as_deref(),
-            params.run_context.engine_trace_id.as_ref(),
-            params.run_context.parent_invocation_id.as_ref(),
-        ),
-        surface::take_continuity_context(
-            params.engine_host,
-            params.session_id,
-            params.turn,
-            relevance_query.as_deref(),
-            Some(params.context_manager.get_working_directory()),
-            params.run_context.origin_worker_id.as_deref(),
-            params.run_context.engine_trace_id.as_ref(),
-            params.run_context.parent_invocation_id.as_ref(),
-        )
-    );
+            params.run_context,
+            params.sequence_counter,
+            &failure,
+            None,
+        );
+        return Err(TurnResult {
+            success: false,
+            error: Some(error_msg),
+            stop_reason: Some(crate::domains::agent::r#loop::errors::StopReason::Error),
+            ..Default::default()
+        });
+    }
 
     let projection = match build_turn_context(
         params.context_manager,
@@ -342,8 +435,35 @@ pub(super) async fn open_provider_response(
             "surfaceHash":primitive_surface.snapshot.surface_hash,
         }),
     );
-    assembly.add_automatic_context(continuity_context);
-    assembly.add_automatic_context(worker_inbox_context);
+    for delivery in &leased_deliveries {
+        if let Err(error) = assembly.add_agent_delivery(delivery) {
+            let error_msg = format!("failed to project agent delivery: {error}");
+            let failure = FailureEnvelope::new(
+                RUNTIME_PERSISTENCE_ERROR,
+                FailureCategory::Persistence,
+                error_msg.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            );
+            emit_turn_failure(
+                params.emitter,
+                params.persister,
+                params.session_id,
+                params.turn,
+                params.run_context,
+                params.sequence_counter,
+                &failure,
+                None,
+            );
+            return Err(TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(crate::domains::agent::r#loop::errors::StopReason::Error),
+                ..Default::default()
+            });
+        }
+    }
     let (context, context_manifest) = match assembly.finalize(&primitive_surface.snapshot) {
         Ok(finalized) => finalized,
         Err(error) => {
@@ -491,6 +611,22 @@ pub(super) async fn open_provider_response(
         model = %params.responder.model(),
         "model response requested"
     );
+    if let Some(started_at) = params.run_context.prompt_run_started_at
+        && !params
+            .run_context
+            .prompt_to_provider_metric_recorded
+            .swap(true, Ordering::SeqCst)
+    {
+        histogram!(
+            "agent_prompt_to_provider_start_seconds",
+            "trigger" => if params.run_context.delivery_wake_ids.is_some() {
+                "delivery_wake"
+            } else {
+                "user_prompt"
+            }
+        )
+        .record(started_at.elapsed().as_secs_f64());
+    }
     let response = match params.responder.respond(model_request).await {
         Ok(response) => response,
         Err(error) => {
@@ -545,8 +681,56 @@ pub(super) async fn open_provider_response(
         .context_manager
         .set_messages(projection.retained_messages);
 
+    let leased_delivery_provenance = leased_deliveries
+        .iter()
+        .map(|delivery| {
+            json!({
+                "deliveryId":delivery.delivery_id,
+                "sourceKind":delivery.source_kind,
+                "sourceSessionId":delivery.source_session_id,
+                "sourceInvocationId":delivery.source_invocation_id,
+                "redelivery":delivery.is_redelivery(),
+            })
+        })
+        .collect();
+    let leased_delivery_ids = leased_deliveries
+        .into_iter()
+        .map(|delivery| delivery.delivery_id)
+        .collect();
+    lease_rollback.disarm();
     Ok(PreparedProviderResponse {
         primitive_surface,
         response,
+        leased_delivery_ids,
+        leased_delivery_provenance,
     })
+}
+
+struct ProviderLeaseRollback {
+    event_store: Option<Arc<crate::domains::session::event_store::EventStore>>,
+    run_id: String,
+}
+
+impl ProviderLeaseRollback {
+    fn new(
+        event_store: Option<Arc<crate::domains::session::event_store::EventStore>>,
+        run_id: &str,
+    ) -> Self {
+        Self {
+            event_store,
+            run_id: run_id.to_owned(),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.event_store = None;
+    }
+}
+
+impl Drop for ProviderLeaseRollback {
+    fn drop(&mut self) {
+        if let Some(event_store) = self.event_store.take() {
+            let _ = event_store.release_agent_delivery_leases(&self.run_id);
+        }
+    }
 }

@@ -1,20 +1,6 @@
-//! Durable worker inbox history, Attention, and transient-context claims.
+//! Durable worker inbox history and operator Attention.
 
 use super::*;
-
-const MAX_INBOX_CONTEXT_CANDIDATES: u32 = 200;
-
-// Successful foreground manual calls already return their typed result to the
-// caller. They remain immutable inbox history but are not eligible for a second
-// delivery through automatic model context. Background manual work, non-manual
-// results, and every actionable error remain eligible.
-const INBOX_CONTEXT_ELIGIBLE_SQL: &str = "
-    (
-        i.severity!='info'
-        OR COALESCE(r.trigger_kind,'system')!='manual'
-        OR COALESCE(r.interaction_mode,'foreground')='background'
-    )
-";
 
 // INVARIANT: Attention is a live projection of unresolved error evidence, not
 // a second delivery state for successful background work. A successful
@@ -43,10 +29,11 @@ const UNRESOLVED_INBOX_ERROR_SQL: &str = "
     )
 ";
 
-// Optional relevance and inbox policies have deterministic, caller-owned
-// fallback behavior. Only the exact immutable-version invocation timeout is
-// non-actionable; malformed output and every other failure stay in Attention.
-// This is transport/state evidence, not semantic ranking policy.
+// Relevance timeout and historical inbox-context timeout evidence had
+// deterministic, caller-owned fallback behavior. Only that exact
+// immutable-version timeout is non-actionable; malformed output and every
+// other failure stay in Attention. `inbox_context` remains here solely so
+// historical rows retain their original Attention semantics.
 const OPTIONAL_FALLBACK_HOOK_TIMEOUT_SQL: &str = "
     r.status='failed'
     AND r.trigger_kind IN (
@@ -189,180 +176,30 @@ impl WorkerStore {
         Ok(())
     }
 
-    /// Return a bounded newest-first projection for worker-owned transient
-    /// context policy. Reading candidates never changes delivery state.
-    pub fn pending_inbox_context_candidates(&self, limit: u32) -> Result<Vec<Value>, String> {
-        let connection = self.connection()?;
-        let actionable_error_sql = actionable_inbox_error_sql();
-        let eligible_context_sql = INBOX_CONTEXT_ELIGIBLE_SQL;
-        let mut statement = connection
-            .prepare(&format!(
-                "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
-                        i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
-                 FROM worker_inbox i
-                 LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
-                 JOIN workers w ON w.worker_id=i.worker_id
-                 WHERE i.context_attached=0
-                   AND ({eligible_context_sql})
-                   AND (i.severity!='error' OR ({actionable_error_sql}))
-                 ORDER BY i.created_at DESC LIMIT ?1"
-            ))
-            .map_err(|error| error.to_string())?;
-        statement
-            .query_map(
-                [limit.min(MAX_INBOX_CONTEXT_CANDIDATES)],
-                inbox_context_candidate,
-            )
-            .map_err(|error| error.to_string())?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|error| error.to_string())
-    }
-
-    /// Atomically attach still-pending policy-selected observations and return
-    /// only rows this claimant actually won. Input order is preserved.
-    pub fn attach_pending_inbox_context(&self, inbox_ids: &[String]) -> Result<Vec<Value>, String> {
-        let mut connection = self.connection()?;
-        let transaction = connection
-            .transaction()
-            .map_err(|error| error.to_string())?;
-        let actionable_error_sql = actionable_inbox_error_sql();
-        let eligible_context_sql = INBOX_CONTEXT_ELIGIBLE_SQL;
-        let mut candidates = Vec::new();
-        for inbox_id in inbox_ids {
-            let candidate = transaction
-                .query_row(
-                    &format!(
-                        "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
-                            i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
-                     FROM worker_inbox i
-                     LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
-                     JOIN workers w ON w.worker_id=i.worker_id
-                     WHERE i.inbox_id=?1
-                       AND i.context_attached=0
-                       AND ({eligible_context_sql})
-                       AND (i.severity!='error' OR ({actionable_error_sql}))"
-                    ),
-                    [inbox_id],
-                    inbox_context_candidate,
-                )
-                .optional()
-                .map_err(|error| error.to_string())?;
-            let Some(candidate) = candidate else {
-                return Ok(Vec::new());
-            };
-            candidates.push(candidate);
-        }
-        for inbox_id in inbox_ids {
-            let updated = transaction
-                .execute(
-                    "UPDATE worker_inbox SET context_attached=1
-                     WHERE inbox_id=?1 AND context_attached=0",
-                    [inbox_id],
-                )
-                .map_err(|error| format!("claim worker inbox context: {error}"))?;
-            if updated != 1 {
-                return Ok(Vec::new());
-            }
-        }
-        transaction.commit().map_err(|error| error.to_string())?;
-        Ok(candidates)
-    }
-
-    /// Claim notable pending background results for transient prompt attachment.
-    /// Unresolved errors are always notable; verified recovery removes them
-    /// from transient context without deleting their audit evidence. Successful
-    /// foreground manual calls are already visible to their caller and are
-    /// intentionally omitted. Detached or predicted-background manual results
-    /// remain notable because no foreground caller received the typed output.
-    pub fn take_notable_pending(
+    pub fn record_system_inbox_once(
         &self,
-        relevance_query: Option<&str>,
-        limit: u32,
-    ) -> Result<Vec<Value>, String> {
-        let mut connection = self.connection()?;
-        let transaction = connection
-            .transaction()
-            .map_err(|error| error.to_string())?;
-        let actionable_error_sql = actionable_inbox_error_sql();
-        let eligible_context_sql = INBOX_CONTEXT_ELIGIBLE_SQL;
-        let query_terms = relevance_query.map(terms).unwrap_or_default();
-        let candidates = {
-            let mut statement = transaction
-                .prepare(&format!(
-                    "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
-                            i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
-                     FROM worker_inbox i
-                     LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
-                     JOIN workers w ON w.worker_id=i.worker_id
-                     WHERE i.context_attached=0
-                        AND ({eligible_context_sql})
-                        AND (i.severity!='error' OR ({actionable_error_sql}))
-                     ORDER BY i.created_at DESC LIMIT 200"
-                ))
-                .map_err(|error| error.to_string())?;
-            statement
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, String>(6)?,
-                        row.get::<_, String>(7)?,
-                        row.get::<_, String>(8)?,
-                    ))
-                })
-                .map_err(|error| error.to_string())?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(|error| error.to_string())?
-        };
-        let mut selected = Vec::new();
-        for (
-            inbox_id,
-            invocation_id,
-            worker_id,
-            severity,
-            result,
-            created_at,
-            trigger,
-            name,
-            description,
-        ) in candidates
-        {
-            let worker_terms = terms(&format!("{name} {description}"));
-            let relevant = severity == "error"
-                || query_terms.is_empty()
-                || !query_terms.is_disjoint(&worker_terms);
-            if !relevant {
-                continue;
-            }
-            selected.push(json!({
-                "inboxId":inbox_id,
-                "invocationId":invocation_id,
-                "workerId":worker_id,
-                "workerName":name,
-                "severity":severity,
-                "triggerKind":trigger,
-                "result":serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),
-                "contextAttached":false,
-                "createdAt":created_at,
-            }));
-            if selected.len() >= limit.min(32) as usize {
-                break;
-            }
-        }
-        for item in &selected {
-            transaction
-                .execute(
-                    "UPDATE worker_inbox SET context_attached=1
-                     WHERE inbox_id=?1 AND context_attached=0",
-                    [item["inboxId"].as_str().unwrap_or_default()],
-                )
-                .map_err(|error| format!("mark worker inbox context attached: {error}"))?;
-        }
-        transaction.commit().map_err(|error| error.to_string())?;
-        Ok(selected)
+        inbox_id: &str,
+        worker_id: &str,
+        phase: &str,
+        result: &Value,
+    ) -> Result<bool, String> {
+        validate_runtime_identifier(inbox_id, "system inbox id", 256)?;
+        validate_runtime_identifier(worker_id, "system inbox worker id", 256)?;
+        validate_runtime_identifier(phase, "system inbox phase", 64)?;
+        self.connection()?
+            .execute(
+                "INSERT OR IGNORE INTO worker_inbox(
+                    inbox_id,invocation_id,worker_id,severity,result_json,created_at
+                 ) VALUES (?1,?2,?3,'error',?4,?5)",
+                params![
+                    inbox_id,
+                    format!("worker_system_{phase}_{inbox_id}"),
+                    worker_id,
+                    serde_json::to_string(result).map_err(|error| error.to_string())?,
+                    chrono::Utc::now().to_rfc3339(),
+                ],
+            )
+            .map(|changed| changed == 1)
+            .map_err(|error| format!("record idempotent worker system inbox result: {error}"))
     }
 }

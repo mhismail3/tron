@@ -4,24 +4,28 @@
 //! ordering. Provider projection and introspection derive from those
 //! definitions; no parallel primitive manifest is retained. `response` owns
 //! output schemas, `bundle` owns the complete atomic worker-authoring schema,
-//! and `introspection` owns the closed authenticated architecture projection.
-//! Contract tests live beside those owners.
+//! `introspection` owns the closed authenticated architecture projection, and
+//! `support` owns shared builders and bounded validation. Contract tests live
+//! beside those owners.
 
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::domains::registration::contract::FunctionContract;
 use crate::engine::{
     EffectClass, FunctionDefinition, FunctionVisibility, IdempotencyContract, ModelToolAudience,
-    ModelToolContract, RiskLevel,
+    RiskLevel,
 };
 
 mod bundle;
 mod introspection;
 mod response;
+mod support;
 
 use introspection::worker_architecture_response_schema;
 pub(crate) use response::worker_result_reference_schema;
-use response::{open_response, response_schema, worker_id_schema};
+use response::{open_response, worker_id_schema};
+pub(crate) use support::{estimate_context_summary_tokens, validate_context_summary_narrative};
+use support::{expected_sha256_schema, model_spec, spec};
 
 const WORKER: &str = "worker_kernel";
 const WORKER_UPSERT_DESCRIPTION: &str = "\
@@ -50,34 +54,6 @@ pub(super) const DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 5;
 pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
 pub(super) const DEFAULT_TEXT_SEARCH_WALK_ENTRIES: usize = 20_000;
 pub(super) const MAX_TEXT_SEARCH_WALK_ENTRIES: usize = 100_000;
-
-/// Estimate semantic-summary tokens with the same cheap pre-call heuristic
-/// used by the agent context budget. Provider-reported usage remains the
-/// source of truth for completed model calls.
-#[must_use]
-pub(crate) fn estimate_context_summary_tokens(narrative: &str) -> usize {
-    narrative.len().div_ceil(4)
-}
-
-pub(crate) fn validate_context_summary_narrative(narrative: &str) -> Result<(), String> {
-    if narrative.trim().is_empty() {
-        return Err("context-summary narrative must not be empty".to_owned());
-    }
-    let estimated_tokens = estimate_context_summary_tokens(narrative);
-    if estimated_tokens > CONTEXT_SUMMARY_MAX_ESTIMATED_TOKENS {
-        return Err(format!(
-            "context-summary narrative is estimated at {estimated_tokens} tokens; the ceiling is {CONTEXT_SUMMARY_MAX_ESTIMATED_TOKENS} tokens"
-        ));
-    }
-    if narrative.len() > CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES {
-        return Err(format!(
-            "context-summary narrative is {} UTF-8 bytes; the storage ceiling is {} bytes",
-            narrative.len(),
-            CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES
-        ));
-    }
-    Ok(())
-}
 
 pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefinition>> {
     let mut specs = Vec::new();
@@ -398,6 +374,99 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         ModelToolAudience::Ordinary,
         145,
         "worker_interaction",
+    )?);
+    specs.push(model_spec(
+        "worker_kernel::agent_send",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Medium,
+        json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["target","content"],
+            "properties":{
+                "target":{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["kind"],
+                    "properties":{
+                        "kind":{"type":"string","enum":["session","new_task","mailbox"]},
+                        "sessionId":{"type":"string"},
+                        "title":{"type":"string","maxLength":120},
+                        "model":{"type":"string","minLength":1},
+                        "workingDirectory":{"type":"string","minLength":1},
+                        "scope":{"type":"string","enum":["workspace","profile"]},
+                        "name":{"type":"string","maxLength":64}
+                    }
+                },
+                "content":{"type":"string","minLength":1,"maxLength":40000},
+                "intent":{"type":"string","enum":["information","request"],"default":"information"},
+                "wakePolicy":{"type":"string","enum":["passive","wake"],"default":"passive"},
+                "boundary":{"type":"string","enum":["next_turn","next_run"],"default":"next_turn"},
+                "expiresAt":{"type":"string"}
+            }
+        }),
+        "Send bounded untrusted reference context to a same-workspace task, atomically create and seed a visible task, or place it in a workspace/profile mailbox. Mailboxes are passive; wake requests start only at safe run boundaries.",
+        "agent_send",
+        ModelToolAudience::Ordinary,
+        130,
+        "agent_coordination",
+    )?);
+    specs.push(model_spec(
+        "worker_kernel::agent_wait_for_workers",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Low,
+        json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["invocationIds"],
+            "properties":{
+                "invocationIds":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"string"}},
+                "mode":{"type":"string","enum":["all","any"],"default":"all"}
+            }
+        }),
+        "Register a durable non-blocking wait for top-level worker invocations owned by this session and causal trace. Completion, failure, or cancellation resumes through an agent delivery.",
+        "agent_wait_for_workers",
+        ModelToolAudience::Ordinary,
+        131,
+        "agent_coordination",
+    )?);
+    specs.push(model_spec(
+        "worker_kernel::agent_mailbox_list",
+        EffectClass::PureRead,
+        RiskLevel::Low,
+        json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["scope","name"],
+            "properties":{
+                "scope":{"type":"string","enum":["workspace","profile"]},
+                "name":{"type":"string","maxLength":64},
+                "limit":{"type":"integer","minimum":1,"maximum":100,"default":20}
+            }
+        }),
+        "List bounded redacted summaries and opaque IDs from a workspace or profile mailbox without claiming or semantically interpreting them.",
+        "agent_mailbox_list",
+        ModelToolAudience::Ordinary,
+        132,
+        "agent_coordination",
+    )?);
+    specs.push(model_spec(
+        "worker_kernel::agent_mailbox_claim",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Low,
+        json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["deliveryIds"],
+            "properties":{
+                "deliveryIds":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"string"}}
+            }
+        }),
+        "Atomically claim explicitly listed mailbox deliveries into this session as passive next-turn reference context. Concurrent claims have exactly one winner.",
+        "agent_mailbox_claim",
+        ModelToolAudience::Ordinary,
+        133,
+        "agent_coordination",
     )?);
     specs.push(model_spec(
         "worker_kernel::result_read",
@@ -808,33 +877,34 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
     );
     specs.push(
         FunctionContract::new(
-            "worker_kernel::inbox_attach",
+            "worker_kernel::mailbox_curate",
             WORKER,
-            EffectClass::ExternalSideEffect,
-            RiskLevel::Medium)
+            EffectClass::IdempotentWrite,
+            RiskLevel::Medium,
+        )
         .visibility(FunctionVisibility::Internal)
         .request_schema(json!({
             "type":"object","additionalProperties":false,
-            "properties":{
-                "limit":{"type":"integer","minimum":1,"maximum":32},
-                "relevanceQuery":{"type":"string","maxLength":12000},
-                "originWorkerId":{"type":"string"}
-            }
+            "required":["sessionId"],
+            "properties":{"sessionId":{"type":"string","minLength":1}}
         }))
         .response_schema(json!({
             "type":"object","additionalProperties":false,
-            "required":["handled","items","narrative"],
+            "required":["handled","candidateCount","claimedDeliveryIds"],
             "properties":{
                 "handled":{"type":"boolean"},
+                "candidateCount":{"type":"integer","minimum":0,"maximum":32},
                 "workerId":{"type":"string"},
                 "workerVersion":{"type":"string"},
                 "invocationId":{"type":"string"},
-                "narrative":{"type":"string","maxLength":12000},
-                "items":{"type":"array","maxItems":32,"items":{"type":"object"}}
+                "claimedDeliveryIds":{
+                    "type":"array","maxItems":8,"uniqueItems":true,
+                    "items":{"type":"string"}
+                }
             }
         }))
         .idempotency(IdempotencyContract::session())
-        .description("Invoke worker-owned pending-result context policy, atomically attach its selected observations, and retain deterministic recovery when no hook is active.")
+        .description("Asynchronously curate eligible workspace/profile mailbox candidates for one newly created visible session. No candidates or no healthy policy worker is a successful no-op.")
         .build()?,
     );
     specs.push(
@@ -912,86 +982,6 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         .build()?,
     );
     Ok(specs)
-}
-
-fn expected_sha256_schema(allow_absent: bool) -> Value {
-    let (pattern, description) = if allow_absent {
-        (
-            "^(?:absent|(?:sha256:)?[0-9A-Fa-f]{64})$",
-            "Optional compare-and-swap precondition. Omit for an unconditional write, use the exact string `absent` to require a new file, or supply sha256:<hex> / raw 64-digit hex after reading an existing file.",
-        )
-    } else {
-        (
-            "^(?:sha256:)?[0-9A-Fa-f]{64}$",
-            "Optional compare-and-swap precondition from filesystem_read or a prior mutation. Omit it instead of sending an empty string.",
-        )
-    };
-    json!({"type":"string","pattern":pattern,"description":description})
-}
-
-fn spec(
-    function: &'static str,
-    effect: EffectClass,
-    risk: RiskLevel,
-    request: Value,
-    description: &'static str,
-) -> crate::engine::Result<FunctionDefinition> {
-    let mut contract = FunctionContract::new(function, WORKER, effect, risk)
-        .request_schema(request)
-        .response_schema(response_schema(function))
-        .description(description);
-    if effect.requires_idempotency() {
-        contract = contract.idempotency(if profile_owned_worker_operation(function) {
-            IdempotencyContract::profile()
-        } else {
-            IdempotencyContract::session()
-        });
-    }
-    contract.build()
-}
-
-#[allow(clippy::too_many_arguments)]
-fn model_spec(
-    function: &'static str,
-    effect: EffectClass,
-    risk: RiskLevel,
-    request: Value,
-    description: &'static str,
-    model_name: &'static str,
-    audience: ModelToolAudience,
-    order: u16,
-    group: &'static str,
-) -> crate::engine::Result<FunctionDefinition> {
-    spec(function, effect, risk, request, description).map(|definition| {
-        definition.with_model_tool(ModelToolContract {
-            name: model_name.to_owned(),
-            audience,
-            order: Some(order),
-            group: Some(group.to_owned()),
-            worker: None,
-        })
-    })
-}
-
-fn profile_owned_worker_operation(function: &str) -> bool {
-    matches!(
-        function,
-        "worker_kernel::upsert"
-            | "worker_kernel::notification_device_upsert"
-            | "worker_kernel::notification_device_disable"
-            | "worker_kernel::notification_delivery_acknowledge"
-            | "worker_kernel::invoke"
-            | "worker_kernel::detach"
-            | "worker_kernel::cancel"
-            | "worker_kernel::stop"
-            | "worker_kernel::disable"
-            | "worker_kernel::enable"
-            | "worker_kernel::retire"
-            | "worker_kernel::purge"
-            | "worker_kernel::rollback"
-            | "worker_kernel::webhook_rotate"
-            | "worker_kernel::stop_all"
-    )
 }
 
 #[cfg(test)]

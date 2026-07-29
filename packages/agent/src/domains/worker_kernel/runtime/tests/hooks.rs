@@ -526,7 +526,7 @@ async fn failed_current_hook_does_not_silently_reactivate_an_older_owner() {
 }
 
 #[tokio::test]
-async fn inbox_context_worker_selects_and_attaches_pending_results() {
+async fn worker_result_and_run_history_surfaces_remain_available() {
     let context = crate::shared::server::test_support::make_test_context();
     let actor = || {
         CausalContext::new(
@@ -595,7 +595,7 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
         inbox.value.as_ref().unwrap()["items"][0]["result"]["reference"]["kind"],
         "worker_result_reference"
     );
-    let inbox_id = inbox.value.unwrap()["items"][0]["inboxId"]
+    let _inbox_id = inbox.value.unwrap()["items"][0]["inboxId"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -715,163 +715,6 @@ async fn inbox_context_worker_selects_and_attaches_pending_results() {
             .unwrap()
             .is_empty()
     );
-
-    let second_pending = context
-        .engine_host
-        .invoke(Invocation::new_sync(
-            FunctionId::new("worker_kernel::invoke").unwrap(),
-            json!({
-                "workerId":"background-report",
-                "input":{},
-                "mode":"wait",
-                "idempotencyKey":"background-report-second-pending"
-            }),
-            actor().with_idempotency_key("invoke-inbox-source-second-pending"),
-        ))
-        .await;
-    assert_eq!(second_pending.error, None);
-
-    let hook_output = serde_json::to_string(&json!({
-        "consumedInboxIds":[inbox_id.clone()],
-        "narrative":"The background report is ready."
-    }))
-    .unwrap();
-    let mut hook_bundle = json!({
-        "schemaVersion":"tron.worker_bundle.v1",
-        "workerId":"inbox-narrator",
-        "name":"Inbox Narrator",
-        "description":"Selects pending worker results and creates transient context",
-        "modelExposure":"internal",
-        "inputSchema":{
-            "type":"object","additionalProperties":false,"required":["query","items"],
-            "properties":{
-                "query":{"type":"string"},
-                "items":{"type":"array","items":{
-                    "type":"object","additionalProperties":false,
-                    "required":["inboxId","invocationId","workerId","severity","resultPreview","createdAt","triggerKind","workerName","workerDescription"],
-                    "properties":{
-                        "inboxId":{"type":"string"},"invocationId":{"type":"string"},
-                        "workerId":{"type":"string"},"severity":{"type":"string"},
-                        "resultPreview":{"type":"string"},"createdAt":{"type":"string"},
-                        "triggerKind":{"type":"string"},"workerName":{"type":"string"},
-                        "workerDescription":{"type":"string"}
-                    }
-                }}
-            }
-        },
-        "outputSchema":{
-            "type":"object","additionalProperties":false,
-            "required":["consumedInboxIds","narrative"],
-            "properties":{
-                "consumedInboxIds":{"type":"array","maxItems":32,"uniqueItems":true,"items":{"type":"string","minLength":1}},
-                "narrative":{"type":"string"}
-            }
-        },
-        "runner":{"kind":"command","command":["printf",hook_output]},
-        "engineHooks":["inbox_context"],
-        "provenance":[{"source":"test:inbox-narrator"}]
-    });
-    let hook = context
-        .engine_host
-        .invoke(Invocation::new_sync(
-            FunctionId::new("worker_kernel::upsert").unwrap(),
-            json!({"bundle":hook_bundle.clone()}),
-            actor().with_idempotency_key("upsert-inbox-hook"),
-        ))
-        .await;
-    assert_eq!(hook.error, None);
-
-    let attached = context
-        .engine_host
-        .invoke(Invocation::new_sync(
-            FunctionId::new("worker_kernel::inbox_attach").unwrap(),
-            json!({"relevanceQuery":"background report","limit":1}),
-            CausalContext::new(
-                ActorId::new("system:inbox-hook-test").unwrap(),
-                ActorKind::System,
-                TraceId::generate(),
-            )
-            .with_session_id("inbox-hook-test")
-            .with_idempotency_key("attach-inbox-context"),
-        ))
-        .await;
-    assert_eq!(attached.error, None);
-    let attached = attached.value.unwrap();
-    assert_eq!(attached["handled"], true);
-    assert_eq!(attached["narrative"], "The background report is ready.");
-    assert_eq!(attached["items"].as_array().unwrap().len(), 1);
-
-    let inbox = context
-        .engine_host
-        .invoke(Invocation::new_sync(
-            FunctionId::new("worker_kernel::inbox").unwrap(),
-            json!({"workerId":"background-report","limit":10}),
-            actor().with_idempotency_key("read-claimed-inbox-source"),
-        ))
-        .await;
-    let inbox = inbox.value.unwrap();
-    let claimed = inbox["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["inboxId"] == inbox_id)
-        .expect("selected inbox observation remains auditable");
-    assert_eq!(claimed["contextAttached"], true);
-
-    let invoked = context
-        .engine_host
-        .invoke(Invocation::new_sync(
-            FunctionId::new("worker_kernel::invoke").unwrap(),
-            json!({
-                "workerId":"background-report",
-                "input":{},
-                "mode":"wait",
-                "idempotencyKey":"background-report-run-invalid"
-            }),
-            actor().with_idempotency_key("invoke-inbox-source-invalid"),
-        ))
-        .await;
-    assert_eq!(invoked.error, None);
-    hook_bundle["runner"]["command"] = json!([
-        "printf",
-        "{\"consumedInboxIds\":[\"not-a-candidate\"],\"narrative\":\"invalid\"}"
-    ]);
-    let hook = context
-        .engine_host
-        .invoke(Invocation::new_sync(
-            FunctionId::new("worker_kernel::upsert").unwrap(),
-            json!({"bundle":hook_bundle}),
-            actor().with_idempotency_key("update-inbox-hook-invalid"),
-        ))
-        .await;
-    assert_eq!(hook.error, None);
-    let rejected = context
-        .engine_host
-        .invoke(Invocation::new_sync(
-            FunctionId::new("worker_kernel::inbox_attach").unwrap(),
-            json!({"relevanceQuery":"background report","limit":1}),
-            CausalContext::new(
-                ActorId::new("system:inbox-hook-test").unwrap(),
-                ActorKind::System,
-                TraceId::generate(),
-            )
-            .with_session_id("inbox-hook-test")
-            .with_idempotency_key("attach-invalid-inbox-context"),
-        ))
-        .await;
-    assert!(rejected.error.is_some());
-    let inspection = context
-        .engine_host
-        .invoke(Invocation::new_sync(
-            FunctionId::new("worker_kernel::inspect").unwrap(),
-            json!({"workerId":"inbox-narrator","detail":"full"}),
-            actor().with_idempotency_key("inspect-invalid-inbox-hook"),
-        ))
-        .await
-        .value
-        .unwrap();
-    assert_eq!(inspection["worker"]["enabled"], false);
-    assert_eq!(inspection["healthHistory"][0]["status"], "failed");
 }
 
 #[tokio::test]

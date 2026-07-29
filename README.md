@@ -18,6 +18,9 @@ engine-global worker through one atomic operation.
 - Agent, command, and lazy resident-service workers share one durable runtime.
 - Manual calls, schedules, engine events, and authenticated local webhooks share
   one at-least-once dispatcher.
+- Worker completions, peer-agent messages, and explicit waits share
+  one durable Agent Delivery path. Optional policy workers never block a model
+  request; delivery-only wakeups resume a task without inventing a user message.
 - Runtime-managed scheduler, reminder, and notification-policy workers divide
   time calculation, occurrence lifecycle, and delivery relevance. The engine
   durably hands work between them and transports narrow notification intents;
@@ -45,7 +48,8 @@ engine-global worker through one atomic operation.
 ```
 
 The Rust server owns model execution, authenticated transport, durable session
-truth, atomic worker handoffs, worker storage, and provider-acceptance evidence.
+truth, atomic worker handoffs, Agent Delivery admission and recovery, worker
+storage, and provider-acceptance evidence.
 The iOS app is a thin client with a Worker Console for health, versions,
 triggers, typed invocation, runs, inbox, rollback, retirement, cancellation,
 and stop controls, plus synchronized native notification and Artifact Inboxes.
@@ -72,8 +76,8 @@ archives live under `~/.tron/internal/backups/`.
 Each version contains its schemas, runner, source or instructions, dependency
 lock, provenance, triggers, secret-binding names, smoke tests, health checks,
 and sealed verification evidence. SQLite holds rebuildable routes and trigger
-indexes plus durable attempts, causal traces, inbox results, health, and audit
-history.
+indexes plus durable attempts, causal traces, worker results, delivery outbox
+evidence, health, and audit history.
 
 ## Install
 

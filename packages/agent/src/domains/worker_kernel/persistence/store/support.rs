@@ -336,36 +336,6 @@ pub(super) fn row_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerSum
     })
 }
 
-pub(super) fn inbox_context_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    const MAX_RESULT_PREVIEW_BYTES: usize = 4_096;
-    let result_json = row.get::<_, String>(4)?;
-    let result_preview = serde_json::from_str::<Value>(&result_json)
-        .ok()
-        .and_then(|result| {
-            result
-                .get("preview")
-                .or_else(|| result.get("error"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-        .unwrap_or_else(|| result_json.clone());
-    Ok(json!({
-        "inboxId":row.get::<_, String>(0)?,
-        "invocationId":row.get::<_, String>(1)?,
-        "workerId":row.get::<_, String>(2)?,
-        "severity":row.get::<_, String>(3)?,
-        "resultPreview":crate::shared::foundation::text::truncate_with_suffix(
-            &result_preview,
-            MAX_RESULT_PREVIEW_BYTES,
-            "...",
-        ),
-        "createdAt":row.get::<_, String>(5)?,
-        "triggerKind":row.get::<_, String>(6)?,
-        "workerName":row.get::<_, String>(7)?,
-        "workerDescription":row.get::<_, String>(8)?,
-    }))
-}
-
 pub(super) fn invocation_select(condition: &str) -> String {
     format!("{} {condition}", invocation_select_base())
 }

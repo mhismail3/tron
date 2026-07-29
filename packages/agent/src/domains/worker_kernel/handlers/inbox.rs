@@ -1,4 +1,4 @@
-//! Durable worker results, run evidence, and adaptive inbox context.
+//! Durable worker results and run evidence.
 
 use std::collections::BTreeSet;
 
@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::engine::Invocation;
 
-use super::super::types::{InvocationRecord, WorkerEngineHook};
+use super::super::types::InvocationRecord;
 use super::Deps;
 
 const DEFAULT_HISTORY_LIMIT: u32 = 20;
@@ -15,7 +15,6 @@ const MAX_FULL_HISTORY_LIMIT: u32 = 20;
 const MAX_GRAPH_HISTORY_LIMIT: u32 = 10;
 const SUMMARY_VALUE_BYTES: usize = 512;
 const FULL_VALUE_BYTES: usize = 8_192;
-const MAX_INBOX_CONTEXT_CANDIDATES: u32 = 32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HistoryDetail {
@@ -122,137 +121,6 @@ pub(super) async fn inbox(invocation: &Invocation, deps: &Deps) -> Result<Value,
         "nextOffset":next_offset,
         "contentTruncated":content_truncated,
     }))
-}
-
-pub(super) async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    let limit = invocation
-        .payload
-        .get("limit")
-        .and_then(Value::as_u64)
-        .unwrap_or(8)
-        .min(32) as u32;
-    let query = invocation
-        .payload
-        .get("relevanceQuery")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let candidates = deps
-        .runtime
-        .store()
-        .pending_inbox_context_candidates(MAX_INBOX_CONTEXT_CANDIDATES)?;
-    if candidates.is_empty() {
-        return Ok(json!({"handled":false,"items":[],"narrative":""}));
-    }
-    if !inbox_hook_input_requires_selection(query, candidates.len(), limit as usize) {
-        let items = deps
-            .runtime
-            .store()
-            .take_notable_pending(Some(query), limit)?;
-        let narrative = deterministic_inbox_context(&items);
-        return Ok(json!({"handled":false,"items":items,"narrative":narrative}));
-    }
-    let candidate_ids = candidates
-        .iter()
-        .filter_map(|candidate| candidate.get("inboxId").and_then(Value::as_str))
-        .collect::<BTreeSet<_>>();
-    let execution = deps
-        .runtime
-        .execute_engine_hook(
-            WorkerEngineHook::InboxContext,
-            json!({"query":query,"items":candidates}),
-            invocation
-                .payload
-                .get("originWorkerId")
-                .and_then(Value::as_str),
-            invocation,
-        )
-        .await?;
-    let Some(execution) = execution else {
-        let items = deps
-            .runtime
-            .store()
-            .take_notable_pending(Some(query), limit)?;
-        let narrative = deterministic_inbox_context(&items);
-        return Ok(json!({"handled":false,"items":items,"narrative":narrative}));
-    };
-    let Some(consumed) = execution.output["consumedInboxIds"].as_array() else {
-        let reason = deps
-            .runtime
-            .reject_engine_hook_output(
-                &execution,
-                WorkerEngineHook::InboxContext,
-                "consumedInboxIds must be an array",
-            )
-            .await;
-        return Err(reason);
-    };
-    let mut selected = BTreeSet::new();
-    let mut consumed_ids = Vec::new();
-    for inbox_id in consumed {
-        let inbox_id = inbox_id.as_str().unwrap_or_default();
-        if consumed_ids.len() >= limit as usize
-            || !candidate_ids.contains(inbox_id)
-            || !selected.insert(inbox_id)
-        {
-            let reason = deps
-                .runtime
-                .reject_engine_hook_output(
-                    &execution,
-                    WorkerEngineHook::InboxContext,
-                    "consumedInboxIds must contain at most limit unique IDs from the supplied candidate set",
-                )
-                .await;
-            return Err(reason);
-        }
-        consumed_ids.push(inbox_id.to_owned());
-    }
-    let Some(narrative) = execution.output["narrative"].as_str() else {
-        let reason = deps
-            .runtime
-            .reject_engine_hook_output(
-                &execution,
-                WorkerEngineHook::InboxContext,
-                "narrative must be a string",
-            )
-            .await;
-        return Err(reason);
-    };
-    let narrative = narrative.trim().to_owned();
-    let items = deps
-        .runtime
-        .store()
-        .attach_pending_inbox_context(&consumed_ids)?;
-    let narrative = if consumed_ids.is_empty() || items.is_empty() {
-        String::new()
-    } else {
-        narrative
-    };
-    Ok(json!({
-        "handled":true,
-        "workerId":execution.worker_id,
-        "workerVersion":execution.worker_version,
-        "invocationId":execution.invocation_id,
-        "items":items,
-        "narrative":narrative,
-    }))
-}
-
-fn inbox_hook_input_requires_selection(
-    query: &str,
-    candidate_count: usize,
-    injection_limit: usize,
-) -> bool {
-    candidate_count > injection_limit && !super::super::retrieval::query_is_empty(Some(query))
-}
-
-fn deterministic_inbox_context(items: &[Value]) -> String {
-    if items.is_empty() {
-        return String::new();
-    }
-    let body = serde_json::to_string_pretty(items).unwrap_or_else(|_| "[]".to_owned());
-    format!(
-        "Persistent worker inbox updates (durable observations newly attached to this context):\n{body}\nUse these results when relevant. Failures are evidence for deliberate improvement, rollback, disablement, or retirement."
-    )
 }
 
 pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
@@ -426,32 +294,6 @@ fn optional_enum<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn inbox_semantic_hook_runs_only_when_candidates_exceed_the_injection_bound() {
-        assert!(!inbox_hook_input_requires_selection(
-            "background report",
-            0,
-            8
-        ));
-        assert!(!inbox_hook_input_requires_selection("", 12, 8));
-        assert!(!inbox_hook_input_requires_selection(
-            "user: use a worker\nassistant: tool result",
-            12,
-            8,
-        ));
-        assert!(!inbox_hook_input_requires_selection(
-            "background report",
-            8,
-            8
-        ));
-        assert!(inbox_hook_input_requires_selection(
-            "background report",
-            9,
-            8
-        ));
-        assert_eq!(MAX_INBOX_CONTEXT_CANDIDATES, 32);
-    }
 
     #[test]
     fn summary_values_are_compact_observations_and_full_values_have_a_hard_ceiling() {

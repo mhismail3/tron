@@ -781,17 +781,21 @@ view teardown own every task. Manifest provenance arrays omitted by the server
 when empty decode as empty collections, preserving the rest of the audit
 instead of collapsing the visible sections to summary-only counts.
 
-The v3 manifest drives standardized sections for ordered instructions,
-conversation/compaction, attachments and documents, environment, automatic
-Continuity and Inbox evaluations, exact selected/omitted tools, and the advanced
-redacted provider audit. Empty, unavailable, failed, skipped, and deterministic
-fallback outcomes remain visible. Current automatic narratives are labeled
-`Reference context`; older v3 narratives without delivery evidence are labeled
-`System context (historical)`. The summary shows cache-read percentage beside
+The v4 manifest drives standardized sections for ordered instructions,
+conversation/compaction, attachments and documents, environment, exact
+selected/omitted tools, durable Agent Deliveries, and the advanced redacted
+provider audit. V2/v3 remain readable; historical automatic-context outcomes
+stay visible and older v3 narratives without delivery evidence are labeled
+`System context (historical)`. The sheet also loads one bounded
+`session::agent_updates` projection and renders pending, prepared, observed,
+stale, cancelled, and retry-exhausted deliveries plus waits. Exact v4 content
+and provenance remain request-specific evidence in the detail sheet.
+Delivery-only assistant continuations render without a fabricated user bubble.
+The summary shows cache-read percentage beside
 input, output, and cost using existing session token totals. Advanced detail
 shows session cache reads/writes and manifest-owned stable instruction,
 fixed/dynamic schema, and reference-context byte/digest evidence. No context-
-or cache-specific client store is added. Binary media renders only metadata,
+or delivery-specific client store is added. Binary media renders only metadata,
 size, and digest; it is never converted to audit text. Exact selected and
 omitted worker tools remain visible per provider request. Global exposure,
 runner, hook/native-boundary, relationship, suite, version, health, and

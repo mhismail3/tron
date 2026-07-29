@@ -380,6 +380,8 @@ pub enum RequestContextKind {
     Continuity,
     /// Relevant background evidence selected from the worker inbox.
     WorkerInbox,
+    /// Durable agent update addressed to this session.
+    AgentDelivery,
 }
 
 /// One bounded request-local reference contribution.

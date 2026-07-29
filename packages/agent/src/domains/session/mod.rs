@@ -10,7 +10,7 @@
 //! |--------|----------------|
 //! | `contract` | Canonical function schemas and invocation contracts. |
 //! | `lifecycle` | Create, delete, fork, archive, and lifecycle operation wrappers. |
-//! | `query` | Resume, list, head/state/history, provider-context audit, export, and replay manifest operation wrappers. |
+//! | `query` | Resume, list, head/state/history, provider-context audit, Agent Updates, export, and replay manifest operation wrappers. |
 //! | `reconstruction` | Server-owned session reconstruction and in-flight reconciliation. |
 //! | `replay` | Canonical `tron.replay.v2` manifest export, hashing, idempotency refs, and offline roundtrip harness. |
 //! | `title` | Explicit title replacement, automatic compare-and-set, and live projection. |
@@ -32,6 +32,9 @@
 //!   `model.provider_request` events. They do not invoke a model, hook, worker,
 //!   or routing calculation and create no second context store or retention
 //!   policy. V2 rows remain readable with provenance labeled unavailable.
+//! - `session::agent_updates` is a bounded read projection over durable
+//!   deliveries and waits. It does not claim mailboxes, run policy workers, or
+//!   alter wake state.
 //! `session::list` is the server-owned session-list query for clients and
 //! supports bounded `(created_at, id)` keyset pagination beneath one opaque
 //! server-issued `snapshotAsOf` boundary (with offset retained for older
@@ -102,8 +105,9 @@ use lifecycle::{
     session_delete_value, session_fork_value, session_unarchive_value,
 };
 use query::{
-    session_context_request_detail_value, session_context_requests_value, session_export_value,
-    session_get_head_value, session_get_history_value, session_get_state_value, session_list_value,
+    session_agent_updates_value, session_context_request_detail_value,
+    session_context_requests_value, session_export_value, session_get_head_value,
+    session_get_history_value, session_get_state_value, session_list_value,
     session_replay_manifest_value, session_resume_value,
 };
 use reconstruction::session_reconstruct_value;
@@ -142,6 +146,9 @@ operation_bindings! {
         },
         "context_request_detail" => |invocation, deps| {
             session_context_request_detail_value(Some(&invocation.payload), deps).await
+        },
+        "agent_updates" => |invocation, deps| {
+            session_agent_updates_value(Some(&invocation.payload), deps).await
         },
         "set_title" => |invocation, deps| {
             session_set_title_value(invocation, deps).await

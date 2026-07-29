@@ -59,6 +59,13 @@ impl WorkerStore {
                     params![worker_id, i64::from(enabled)],
                 )
                 .map_err(|error| format!("update worker trigger enablement: {error}"))?;
+            if !enabled {
+                let _ = super::invocations::cancel_worker_invocations_in_tx(
+                    &transaction,
+                    worker_id,
+                    "worker invocation cancelled because the worker was disabled",
+                )?;
+            }
             insert_health(
                 &transaction,
                 worker_id,
@@ -121,6 +128,11 @@ impl WorkerStore {
                     [worker_id],
                 )
                 .map_err(|db_error| format!("disable failed worker triggers: {db_error}"))?;
+            let _ = super::invocations::cancel_worker_invocations_in_tx(
+                &transaction,
+                worker_id,
+                "worker invocation cancelled because the worker entered a failed state",
+            )?;
             insert_health(
                 &transaction,
                 worker_id,
@@ -286,6 +298,11 @@ impl WorkerStore {
                     params![worker_id, state.updated_at],
                 )
                 .map_err(|error| format!("retire worker route: {error}"))?;
+            let _ = super::invocations::cancel_worker_invocations_in_tx(
+                &transaction,
+                worker_id,
+                "worker invocation cancelled because the worker was retired",
+            )?;
             insert_audit(
                 &transaction,
                 worker_id,
@@ -335,8 +352,38 @@ impl WorkerStore {
         )?;
         let mut connection = self.connection()?;
         let transaction = connection
-            .transaction()
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
+        let has_nonterminal = transaction
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM worker_invocations
+                    WHERE worker_id=?1 AND status IN ('queued','running')
+                 )",
+                [worker_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| format!("check worker purge nonterminal runs: {error}"))?;
+        if has_nonterminal {
+            return Err(
+                "worker cannot be purged while invocations are queued or running".to_owned(),
+            );
+        }
+        let has_pending_outbox = transaction
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM agent_delivery_outbox
+                    WHERE worker_id=?1 AND disposition='pending'
+                 )",
+                [worker_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| format!("check worker purge agent outbox: {error}"))?;
+        if has_pending_outbox {
+            return Err(
+                "worker cannot be purged while agent-delivery outbox rows are pending".to_owned(),
+            );
+        }
         let purging_root = self.root.join(".purging");
         fs::create_dir_all(&purging_root).map_err(|error| error.to_string())?;
         let staged = purging_root.join(format!("{worker_id}-{}", uuid::Uuid::now_v7()));

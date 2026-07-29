@@ -63,7 +63,7 @@ impl WorkerRuntime {
             .store
             .invocation(invocation_id)?
             .ok_or_else(|| format!("worker invocation '{invocation_id}' was not found"))?;
-        authorize_result_read(invocation, &record)?;
+        self.authorize_result_read(invocation, &record)?;
         if record.status != "completed" {
             return Err(format!(
                 "worker invocation '{invocation_id}' is not completed"
@@ -109,6 +109,31 @@ impl WorkerRuntime {
                     record.invocation_id
                 )
             })
+    }
+
+    fn authorize_result_read(
+        &self,
+        invocation: &Invocation,
+        record: &InvocationRecord,
+    ) -> Result<(), String> {
+        let Some(session_id) = invocation.causal_context.session_id.as_deref() else {
+            return Err(format!(
+                "worker result '{}' requires an originating-session or delivery-granted session",
+                record.invocation_id
+            ));
+        };
+        if record.origin_session_id.as_deref() == Some(session_id)
+            || self
+                .event_store
+                .session_has_agent_result_grant(session_id, &record.invocation_id)
+                .unwrap_or(false)
+        {
+            return Ok(());
+        }
+        Err(format!(
+            "worker result '{}' is outside the caller's originating session or delivery grant",
+            record.invocation_id
+        ))
     }
 }
 
@@ -237,26 +262,6 @@ fn child_descriptor(pointer: &str, key: &str, value: &Value) -> Result<Value, St
         "sizeBytes":serialized_size(value)?,
         "preview":run_projection_format::preview_result(value),
     }))
-}
-
-fn authorize_result_read(invocation: &Invocation, record: &InvocationRecord) -> Result<(), String> {
-    if matches!(
-        invocation.causal_context.actor_kind,
-        ActorKind::Client | ActorKind::System
-    ) || invocation.causal_context.trace_id.as_str() == record.trace_id
-        || invocation
-            .causal_context
-            .session_id
-            .as_deref()
-            .zip(record.origin_session_id.as_deref())
-            .is_some_and(|(current, origin)| current == origin)
-    {
-        return Ok(());
-    }
-    Err(format!(
-        "worker result '{}' is outside the caller's causal trace or originating session",
-        record.invocation_id
-    ))
 }
 
 fn validate_pointer(pointer: &str) -> Result<(), String> {

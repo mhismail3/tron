@@ -557,7 +557,7 @@ fn provider_projection_value(
             "workerId":row.worker_id,
             "workerName":row.worker_name,
             "originSessionId":row.origin_session_id,
-            "message":"The durable worker run is continuing in the background. Do not poll or wait; report that it is running. Its result will appear in Session Context and the worker inbox.",
+        "message":"The durable worker run is continuing in the background. Do not poll or wait; report that it is running. Its result will appear in Session Context and Agent Updates.",
         }),
         _ => json!({
             "kind":"worker_invocation_failure",

@@ -36,12 +36,92 @@ pub(crate) struct SessionListCursor {
 mod operations;
 
 pub(crate) use operations::{
-    session_context_request_detail_value, session_context_requests_value, session_export_value,
-    session_get_head_value, session_get_history_value, session_get_state_value, session_list_value,
+    session_agent_updates_value, session_context_request_detail_value,
+    session_context_requests_value, session_export_value, session_get_head_value,
+    session_get_history_value, session_get_state_value, session_list_value,
     session_replay_manifest_value, session_resume_value,
 };
 
 impl SessionQueryService {
+    pub(crate) async fn agent_updates(
+        deps: &Deps,
+        session_id: String,
+        limit: Option<usize>,
+    ) -> Result<Value, ToolError> {
+        let event_store = deps.event_store.clone();
+        run_blocking_task("session.agent_updates", move || {
+            let limit = limit.unwrap_or(100).clamp(1, 200);
+            let deliveries = event_store
+                .list_agent_deliveries_for_session(&session_id, limit)
+                .map_err(|error| match error {
+                    crate::domains::session::event_store::EventStoreError::SessionNotFound(_) => {
+                        ToolError::NotFound {
+                            code: errors::SESSION_NOT_FOUND.into(),
+                            message: format!("Session '{session_id}' not found"),
+                        }
+                    }
+                    other => ToolError::Internal {
+                        message: other.to_string(),
+                    },
+                })?;
+            let waits = event_store
+                .list_agent_waits_for_session(&session_id, limit)
+                .map_err(|error| ToolError::Internal {
+                    message: error.to_string(),
+                })?;
+            let updates = deliveries
+                .into_iter()
+                .map(|delivery| {
+                    let preview = crate::shared::foundation::redaction::redact_sensitive_content(
+                        &delivery.content,
+                    )
+                    .chars()
+                    .take(1_024)
+                    .collect::<String>();
+                    json!({
+                        "deliveryId":delivery.delivery_id,
+                        "status":delivery.projection_status(),
+                        "sourceKind":delivery.source_kind,
+                        "intent":delivery.intent,
+                        "sourceSessionId":delivery.source_session_id,
+                        "sourceInvocationId":delivery.source_invocation_id,
+                        "sourceTraceId":delivery.source_trace_id,
+                        "resultInvocationId":delivery.result_invocation_id,
+                        "wakePolicy":delivery.wake_policy,
+                        "boundary":delivery.boundary,
+                        "causalDepth":delivery.causal_depth,
+                        "redelivery":delivery.is_redelivery(),
+                        "leaseCount":delivery.lease_count,
+                        "wakeAttempts":delivery.wake_attempts,
+                        "lastError":delivery.last_error,
+                        "preview":preview,
+                        "createdAt":delivery.created_at,
+                        "preparedRunId":delivery.leased_run_id,
+                        "preparedTurn":delivery.leased_turn,
+                        "observedAt":delivery.observed_at,
+                        "cancelledAt":delivery.cancelled_at,
+                        "expiresAt":delivery.expires_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let waits = waits
+                .into_iter()
+                .map(|wait| {
+                    json!({
+                        "waitId":wait.wait_id,
+                        "mode":wait.mode,
+                        "status":wait.disposition,
+                        "deliveryId":wait.delivery_id,
+                        "createdAt":wait.created_at,
+                        "resolvedAt":wait.resolved_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok(json!({"updates":updates,"waits":waits}))
+        })
+        .await
+    }
+
     pub(crate) async fn context_requests(
         deps: &Deps,
         session_id: String,
@@ -96,7 +176,7 @@ impl SessionQueryService {
                             .and_then(Value::as_array)
                             .map_or(0, Vec::len),
                         "manifestAvailable":manifest.is_some(),
-                        "provenanceAvailability":if format == crate::shared::protocol::model_audit::MODEL_PROVIDER_REQUEST_AUDIT_FORMAT {
+                        "provenanceAvailability":if crate::shared::protocol::model_audit::provider_audit_has_complete_provenance(format) {
                             "complete"
                         } else {
                             "legacy_unavailable"
@@ -143,7 +223,7 @@ impl SessionQueryService {
                 "contextManifest":payload.get("contextManifest").cloned().unwrap_or(Value::Null),
                 "providerAdditions":payload.get("providerAdditions").cloned().unwrap_or_else(|| json!([])),
                 "providerAudit":payload,
-                "provenanceAvailability":if format == crate::shared::protocol::model_audit::MODEL_PROVIDER_REQUEST_AUDIT_FORMAT {
+                "provenanceAvailability":if crate::shared::protocol::model_audit::provider_audit_has_complete_provenance(format) {
                     "complete"
                 } else {
                     "legacy_unavailable"

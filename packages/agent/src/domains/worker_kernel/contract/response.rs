@@ -179,6 +179,64 @@ pub(super) fn response_schema(function: &str) -> Value {
             "type":"object","additionalProperties":false,"required":["invocation","timedOut"],
             "properties":{"invocation":invocation_response_schema(),"timedOut":{"type":"boolean"}}
         }),
+        "worker_kernel::agent_send" => json!({
+            "type":"object","additionalProperties":false,
+            "required":[
+                "deliveryId","targetSessionId","createdSession","wakePolicy",
+                "boundary","wakeSuppressedByCausalDepth"
+            ],
+            "properties":{
+                "deliveryId":{"type":"string"},
+                "targetSessionId":{"oneOf":[{"type":"string"},{"type":"null"}]},
+                "createdSession":{"type":"boolean"},
+                "wakePolicy":{"type":"string","enum":["passive","wake"]},
+                "boundary":{"type":"string","enum":["next_turn","next_run"]},
+                "wakeSuppressedByCausalDepth":{"type":"boolean"}
+            }
+        }),
+        "worker_kernel::agent_wait_for_workers" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["waitId","mode","invocationIds","status","deliveryIds"],
+            "properties":{
+                "waitId":{"type":"string"},
+                "mode":{"type":"string","enum":["all","any"]},
+                "invocationIds":{"type":"array","items":{"type":"string"}},
+                "status":{"type":"string","enum":["pending","satisfied"]},
+                "deliveryIds":{"type":"array","items":{"type":"string"}}
+            }
+        }),
+        "worker_kernel::agent_mailbox_list" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["items","returned"],
+            "properties":{
+                "items":{"type":"array","items":{
+                    "type":"object","additionalProperties":false,
+                    "required":[
+                        "deliveryId","sourceKind","intent","createdAt",
+                        "expiresAt","preview"
+                    ],
+                    "properties":{
+                        "deliveryId":{"type":"string"},
+                        "sourceKind":{"type":"string"},
+                        "intent":{"oneOf":[{"type":"string"},{"type":"null"}]},
+                        "createdAt":{"type":"string"},
+                        "expiresAt":{"oneOf":[{"type":"string"},{"type":"null"}]},
+                        "preview":{"type":"string","maxLength":512}
+                    }
+                }},
+                "returned":{"type":"integer","minimum":0,"maximum":100}
+            }
+        }),
+        "worker_kernel::agent_mailbox_claim" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["claimed","deliveryIds","boundary","wakePolicy"],
+            "properties":{
+                "claimed":{"type":"integer","minimum":1,"maximum":8},
+                "deliveryIds":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":8},
+                "boundary":{"const":"next_turn"},
+                "wakePolicy":{"const":"passive"}
+            }
+        }),
         "worker_kernel::stop"
         | "worker_kernel::disable"
         | "worker_kernel::enable"

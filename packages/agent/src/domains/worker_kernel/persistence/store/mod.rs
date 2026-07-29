@@ -18,6 +18,11 @@
 //! writer intent before reading causal lineage, so concurrent engine hooks wait
 //! at the transaction boundary instead of failing a deferred read-to-write
 //! upgrade.
+//! Worker schema v16 adds the immutable worker-to-agent terminal/effect outbox.
+//! Lifecycle transitions terminalize affected work with that evidence, and
+//! purge rechecks nonterminal/outbox custody under SQLite writer intent.
+//! Permanent rejection and its deterministic operator Attention row commit in
+//! one transaction so neither can survive without the other.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -29,19 +34,21 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use super::super::agent_delivery_effects::PreparedAgentDeliveryEffect;
 use super::super::artifacts::ArtifactIntent;
 use super::super::dispatches::PreparedWorkerDispatch;
 use super::super::types::{
     ActiveWorker, BUNDLE_SCHEMA, InvocationRecord, MAX_INVOCATION_SECONDS, PreparedWorker,
     UpsertOutcome, WebhookCredential, WorkerBundle, WorkerClientAction, WorkerClientDelivery,
-    WorkerCommand, WorkerEngineHook, WorkerInteractionMode, WorkerPresentation,
-    WorkerPresentationSection, WorkerPresentationSectionKind, WorkerRunEvent, WorkerRunStage,
-    WorkerRunner, WorkerState, WorkerSummary, WorkerTrigger,
+    WorkerCommand, WorkerEngineDelivery, WorkerEngineHook, WorkerInteractionMode,
+    WorkerPresentation, WorkerPresentationSection, WorkerPresentationSectionKind, WorkerRunEvent,
+    WorkerRunStage, WorkerRunner, WorkerState, WorkerSummary, WorkerTrigger,
 };
 use super::super::wakeups::PreparedWorkerWakeup;
 pub(super) use state::validate_bundle;
 use support::*;
 
+mod agent_delivery_outbox;
 mod artifacts;
 mod dispatches;
 mod history;
@@ -54,6 +61,7 @@ mod notification_attention;
 mod notification_clients;
 mod notification_validation;
 mod notifications;
+pub(in crate::domains::worker_kernel) use agent_delivery_outbox::AgentDeliveryOutboxRecord;
 use notification_attention::insert_notification_attention;
 pub(in crate::domains::worker_kernel) use notifications::{
     NotificationDispatchOutcome, NotificationRefreshDispatch, NotificationTargetDispatch,
@@ -100,7 +108,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 15)?;
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 16)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
@@ -348,6 +356,26 @@ impl WorkerStore {
                     context_attached INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS agent_delivery_outbox (
+                    outbox_id TEXT PRIMARY KEY,
+                    deduplication_key TEXT NOT NULL UNIQUE,
+                    kind TEXT NOT NULL CHECK(kind IN ('terminal','delivery')),
+                    invocation_id TEXT NOT NULL,
+                    worker_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    disposition TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(disposition IN ('pending','imported','rejected')),
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    processed_at TEXT,
+                    FOREIGN KEY(invocation_id)
+                        REFERENCES worker_invocations(invocation_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS agent_delivery_outbox_pending
+                    ON agent_delivery_outbox(disposition, created_at, outbox_id);
+                CREATE INDEX IF NOT EXISTS agent_delivery_outbox_worker
+                    ON agent_delivery_outbox(worker_id, disposition, created_at);
                 CREATE TABLE IF NOT EXISTS worker_audit (
                     audit_id TEXT PRIMARY KEY,
                     worker_id TEXT NOT NULL,
@@ -828,6 +856,13 @@ impl WorkerStore {
                 ",
             )
             .map_err(|error| format!("initialize session organization schema v15: {error}"))?;
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                 VALUES (16, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                [],
+            )
+            .map_err(|error| format!("record agent-delivery outbox schema v16: {error}"))?;
         if !table_has_column(
             &connection,
             "worker_session_organization_intents",
@@ -868,6 +903,26 @@ impl WorkerStore {
         let transaction = connection
             .transaction()
             .map_err(|error| format!("start interrupted worker recovery: {error}"))?;
+        let inactive_workers = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT worker_id FROM workers
+                     WHERE enabled=0 OR retired=1 ORDER BY worker_id",
+                )
+                .map_err(|error| format!("prepare inactive worker recovery: {error}"))?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|error| format!("query inactive worker recovery: {error}"))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| format!("decode inactive worker recovery: {error}"))?
+        };
+        for worker_id in inactive_workers {
+            let _ = invocations::cancel_worker_invocations_in_tx(
+                &transaction,
+                &worker_id,
+                "worker invocation cancelled during inactive-worker recovery",
+            )?;
+        }
         let interrupted_ids = {
             let mut statement = transaction
                 .prepare(

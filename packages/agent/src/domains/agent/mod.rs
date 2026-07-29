@@ -29,12 +29,12 @@
 //!    direct typed kernel tools plus a compact relevant-worker projection. One
 //!    turn-local context assembly records every ordered system contribution,
 //!    message source, automatic-context outcome, environment field, cache
-//!    segment, and exact selected/omitted tool projection. Non-empty continuity
-//!    and worker-inbox narratives become one ephemeral reference message after
-//!    durable history, never system instructions or replay state. The runner
-//!    finalizes and persists the bounded `tron.model_provider_request.v3` audit
-//!    before any provider stream opens; direct prompt mutation outside that
-//!    assembly fails closed.
+//!    segment, durable Agent Delivery, and exact selected/omitted tool
+//!    projection. Eligible deliveries become one bounded ephemeral reference
+//!    message after durable history, never system instructions or replay
+//!    state. The runner finalizes and persists the bounded
+//!    `tron.model_provider_request.v4` audit before any provider stream opens;
+//!    direct prompt mutation outside that assembly fails closed.
 //! 6. Provider adapters may report their own fixed request additions into that
 //!    same audit. Binary media, credential-shaped values, and hidden reasoning
 //!    remain projected or omitted rather than copied into durable context.
@@ -42,9 +42,12 @@
 //!    engine invocations with Agent identity. An agent-runner child also
 //!    inherits its parent worker's causal depth, and the executor copies that
 //!    depth onto nested direct tools so composition cannot reset loop limits.
-//! 8. `/engine` subscriptions deliver prompt/runtime stream records to clients;
+//! 8. Optional Continuity and semantic-ranking workers run after prompt
+//!    admission. They may affect only a later safe turn in their originating
+//!    run; mailbox curation is similarly asynchronous at session creation.
+//! 9. `/engine` subscriptions deliver prompt/runtime stream records to clients;
 //!    transport code does not own agent behavior.
-//! 9. The backend emits structured `component` + `agent_event` logs across
+//! 10. The backend emits structured `component` + `agent_event` logs across
 //!    runtime, loop, turn, provider stream, and tool-execution
 //!    phases. Those logs carry durable IDs and lifecycle metadata for agent and
 //!    operator inspection, while prompt text, streamed text, and tool arguments

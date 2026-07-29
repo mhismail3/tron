@@ -13,8 +13,14 @@ continuity_context input is a closed object requiring action:continuity_context 
 session_organization input is a closed object requiring action:session_organization, one closed canonical session projection, and the completed userPrompt/assistantResponse strings(max 4096 each). Output requires one bounded proposal and may include the explicitly declared reserved sessionOrganizationMutations array(max 16). Each closed mutation names sessionId and only preserve, archive, or restore; replacement labels(max 12 strings of max 64 characters) and one nullable group(max 80) are optional. Omitted labels or group preserve canonical state, while explicit null clears the group. The engine preserves system tags and applies the exact batch durably after successful completion; delete and arbitrary tags are not expressible. \
 session_title input is a closed object requiring userPrompt:string(max 4096) and assistantResponse:string(max 4096); output is a closed object requiring title:string(1..160). It runs after the first successful exchange of an untitled ordinary session. \
 context_summary input is a closed object requiring messages:array(max 256) of closed {role:user|assistant|tool,text:string(max 4096)} and permitting originWorkerId:string; output is a closed object requiring narrative:string(1..40000 characters), with authoritative runtime ceilings of 10000 estimated tokens and 40000 UTF-8 bytes. \
-inbox_context input is a closed object requiring query:string and items:array(max 32) of closed {inboxId,invocationId,workerId,workerName,workerDescription,severity,triggerKind,resultPreview,createdAt} strings; output is a closed object requiring consumedInboxIds:unique string array(max 32) and narrative:string. \
+mailbox_curation input is a closed object requiring sessionId:string and candidates:array(max 32) of closed {deliveryId,sourceKind,intent,preview,createdAt,expiresAt?} records; output is a closed object requiring selectedDeliveryIds:unique string array(max 8). The engine revalidates the selected subset and atomically claims all selected deliveries or none. \
 worker_relevance input is a closed object requiring query:string(max 12000) and candidates:array(max 256) of closed worker summaries with workerId,name,description,intents,examples,provenance,completedRuns,updatedAt, and permitting originWorkerId:string; output is a closed object requiring rankings:array(max 256) of closed {workerId:string(min 1),score:integer(0..1000000000),reason?:string}.";
+
+const ENGINE_DELIVERY_AUTHORING_CONTRACT: &str = "\
+Optional worker-to-agent delivery effects activated atomically with this version. \
+agent_delivery reserves the top-level output field agentDeliveries, which outputSchema must explicitly declare. When present it is an array(max 16) of closed objects requiring deduplicationKey:string(1..64 UTF-8 bytes without whitespace), target, and content:string(1..40000 UTF-8 bytes). \
+target is either closed {kind:session,sessionId} or {kind:mailbox,scope:workspace|profile,name}. Optional policy is intent:information|request, wakePolicy:passive|wake, boundary:next_turn|next_run, and expiresAt:RFC3339. Mailboxes are always passive. \
+The engine derives sender session, workspace, invocation, trace, root, causal depth, and result authority; same-workspace and mailbox-scope validation occurs again during durable import. Completion and immutable outbox effects are one workers transaction.";
 
 const CLIENT_ACTION_AUTHORING_CONTRACT: &str = "\
 Optional native-client actions activated atomically with this version. No separate binding, private endpoint, or client-specific installation is required. \
@@ -377,7 +383,7 @@ pub(super) fn worker_bundle_schema() -> Value {
                 "type":"array",
                 "uniqueItems":true,
                 "description":ENGINE_HOOK_AUTHORING_CONTRACT,
-                "items":{"type":"string","enum":["continuity_context","context_summary","inbox_context","session_organization","session_title","worker_relevance"]}
+                "items":{"type":"string","enum":["continuity_context","context_summary","mailbox_curation","session_organization","session_title","worker_relevance"]}
             },
             "clientActions":{
                 "type":"array",
@@ -439,5 +445,11 @@ pub(super) fn worker_bundle_schema() -> Value {
         }
     });
     schema["properties"]["agentTools"] = agent_tools_schema();
+    schema["properties"]["engineDeliveries"] = json!({
+        "type":"array",
+        "uniqueItems":true,
+        "description":ENGINE_DELIVERY_AUTHORING_CONTRACT,
+        "items":{"type":"string","enum":["agent_delivery"]}
+    });
     schema
 }

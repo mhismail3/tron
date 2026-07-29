@@ -13,6 +13,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | `agent_delivery_effects` | Closed worker-declared Agent Delivery effect parsing and bounds |
 //! | `artifacts` | Closed self-result artifact admission for native custody |
 //! | `contract` | Function-owned model audiences plus request, response, and worker-bundle schemas |
 //! | `dispatches` | Closed asynchronous worker-to-worker handoff parsing and limits |
@@ -97,10 +98,10 @@
 //! missing public behavior is reported as an engine-contract gap rather than
 //! inferred through database, credential, binary, lock-file, runtime-file, or
 //! private-endpoint inspection.
-//! Inbox policy sees only bounded redacted previews. Its selected ids are
-//! validated against the candidate set and claimed all-or-none before its
-//! narrative enters provider context, so concurrent sessions cannot inject a
-//! narrative for observations they did not consume.
+//! Creation-time mailbox policy sees only bounded redacted previews and runs
+//! asynchronously. Its selected IDs are validated against the candidate set
+//! and claimed all-or-none. It cannot delay or wake the initial prompt;
+//! subsequent mailbox consumption is explicit through list/claim tools.
 //! Model-facing run and inbox reads are compact and bounded by default. An
 //! explicit operator detail request expands at most twenty records and still
 //! caps each retained input, output, or result, preventing durable history from
@@ -108,8 +109,10 @@
 //! Inbox Attention is derived rather than stored: only unresolved error and
 //! setup-blocker evidence is active. Successful informational outcomes remain
 //! immutable history even when they came from schedules, dispatches, or
-//! background work; one-time agent-context eligibility is a separate
-//! projection. A later successfully verified activation or rollback resolves
+//! background work. Detached top-level results are delivered exactly once
+//! through the transactional Agent Delivery outbox; foreground and nested
+//! results return to their caller unless an explicit wait references them. A
+//! later successfully verified activation or rollback resolves
 //! older errors for that worker, while a plain enable toggle is not recovery
 //! evidence. Resolved errors remain immutable in run and delivery audit history
 //! but are excluded from active Attention and future agent-context candidates.
@@ -132,14 +135,19 @@
 //! draft mutations. Whole-worker-database pressure crosses into one
 //! transition-aware Attention record; it never silently evicts user artifacts
 //! or produces one error per retry.
+//! Workers may declare the closed `agent_delivery` engine capability and a
+//! bounded `agentDeliveries` result. Completion validates effects and commits
+//! them beside terminal truth in `workers.sqlite`; import derives sender,
+//! workspace, trace, root, depth, and authority rather than trusting worker
+//! output. A rejected poison row remains durable evidence and never blocks
+//! later rows.
 //! The Engine Dashboard exposes active hook ownership. `continuity_context`,
-//! `context_summary`, `inbox_context`, `session_organization`, `session_title`, and `worker_relevance`
-//! are production hooks. Context summary, inbox context, and worker relevance
-//! retain narrow deterministic recovery paths in the kernel so compaction,
-//! background context, and tool projection cannot depend recursively on their
-//! own policy worker. Continuity and session naming deliberately have no
-//! generated fallback: unavailable policy contributes no memory context and
-//! leaves a completed session untitled.
+//! `context_summary`, `mailbox_curation`, `session_organization`,
+//! `session_title`, and `worker_relevance` are production hooks. Context
+//! summary retains deterministic recovery because compaction is required for
+//! the provider bound. Continuity and semantic relevance run asynchronously
+//! and may affect only a later safe turn in their originating run. Session
+//! naming deliberately has no generated fallback.
 //! `continuity_context` is a minimal fixed projection seam for one production
 //! Continuity Curator worker. The worker exclusively owns records, retention,
 //! project/global scope, retrieval, ranking, correction, promotion, and
@@ -149,24 +157,16 @@
 //! engine-owned and cannot be mutated safely from a worker process; that
 //! custody is the reason for the seam. It cannot select records, inspect worker
 //! state, choose retention, or manufacture fallback memory.
-//! Synchronous hook calls have a sixty-second default policy ceiling, and an
+//! Worker calls have a sixty-second default policy ceiling, and an
 //! immutable bundle may tighten the same generic invocation ceiling for every
-//! runner kind. A timed-out optional relevance or inbox policy is cancelled and
-//! recorded while its caller uses deterministic recovery; invalid output still
-//! disables the owner. Other hook failures use the ordinary worker-failure path.
-//! Exact canonical relevance and
-//! inbox-context inputs reuse the ordinary durable invocation ledger within a
-//! thirty-second window; owner version, hook identity, input bytes, and window
-//! all participate in the idempotency key, so there is no second cache
-//! subsystem. Session-title, compaction, and continuity hooks retain causal
-//! idempotency because their outputs may be bound to a specific session or
-//! trace.
-//! Successful hook results remain in the durable inbox as already-consumed
-//! audit evidence because their engine caller used them synchronously. Exact
-//! immutable-version timeouts from the fallback-backed `worker_relevance` and
-//! `inbox_context` hooks remain failed run/inbox history without becoming
-//! current operator Attention or future agent context; malformed output and all
-//! other hook failures remain actionable.
+//! runner kind. Optional policy timeout/failure is recorded outside the
+//! provider critical path. Exact canonical relevance input may reuse the
+//! ordinary durable invocation ledger within a thirty-second window; owner
+//! version, hook identity, input bytes, and window all participate in the
+//! idempotency key, so there is no second cache subsystem. Session-title,
+//! compaction, continuity, and mailbox-curation hooks retain causal
+//! idempotency. Successful hook results remain durable audit evidence;
+//! malformed output and ordinary hook failures remain actionable.
 //! The authenticated `engine::surface_snapshot` read returns the selected
 //! surface revision/hash/counts, every published worker's projection status,
 //! active engine-hook and native-client-action ownership, the complete
@@ -193,9 +193,9 @@
 //! local recovery scorer uses exact field-weighted tokens and bounded adjacent
 //! phrases, so conversation framing and substring collisions cannot manufacture
 //! relevance when the hook is absent, unhealthy, or any agent-runner worker is
-//! resolving its own surface. Automatic relevance, inbox, and continuity hooks
-//! are user-session context only; this prevents cross-hook recursion and keeps
-//! internal worker protocols isolated. Mutable
+//! resolving its own surface. Optional relevance, mailbox curation, and
+//! continuity hooks are user-session context only; this prevents cross-hook
+//! recursion and keeps internal worker protocols isolated. Mutable
 //! run/health evidence is a rebuildable engine-state overlay, not
 //! function-contract text; successful work therefore cannot churn catalog
 //! revisions. Fixed invocation and public/internal worker tools share one durable
@@ -492,6 +492,7 @@ use crate::domains::registration::composition::{
     DomainFunctionRegistration, DomainRegistrationContext,
 };
 
+mod agent_delivery_effects;
 mod artifacts;
 mod contract;
 mod dispatches;
@@ -548,7 +549,10 @@ pub(crate) use notifications::apns::validate_private_key as validate_apns_privat
 pub(crate) use runtime::WorkerRuntime;
 #[cfg(test)]
 pub(crate) use surface::{AvailableWorkerToolSnapshot, SurfaceToolSnapshot};
-pub(crate) use surface::{EngineSurfaceSnapshot, promote_worker_for_session, resolve_tool_surface};
+pub(crate) use surface::{
+    EngineSurfaceSnapshot, ResolvedToolSurface, promote_worker_for_session, resolve_tool_surface,
+    resolve_tool_surface_semantic,
+};
 
 pub(crate) struct Registration {
     pub(crate) functions: Vec<DomainFunctionRegistration>,

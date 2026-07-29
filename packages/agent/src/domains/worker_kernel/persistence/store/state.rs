@@ -106,6 +106,26 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
         }
         validate_engine_hook_contract(*hook, bundle)?;
     }
+    let mut engine_deliveries = BTreeSet::new();
+    for delivery in &bundle.engine_deliveries {
+        if !engine_deliveries.insert(*delivery) {
+            return Err(format!("duplicate engine delivery '{}'", delivery.as_str()));
+        }
+    }
+    if bundle
+        .engine_deliveries
+        .contains(&WorkerEngineDelivery::AgentDelivery)
+        && bundle
+            .output_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .is_none_or(|properties| !properties.contains_key("agentDeliveries"))
+    {
+        return Err(
+            "outputSchema must explicitly declare the reserved agentDeliveries property when engineDeliveries contains agent_delivery"
+                .to_owned(),
+        );
+    }
     let mut client_actions = BTreeSet::new();
     for action in &bundle.client_actions {
         if !client_actions.insert(*action) {
@@ -622,6 +642,25 @@ fn validate_engine_hook_contract(
                 json!({"consumedInboxIds":[""],"narrative":"invalid id"}),
                 json!({"consumedInboxIds":"invalid","narrative":"invalid list"}),
                 json!({"consumedInboxIds":[],"narrative":7}),
+            ],
+        ),
+        WorkerEngineHook::MailboxCuration => (
+            json!({
+                "sessionId":"session_test",
+                "candidates":[{
+                    "deliveryId":"delivery_test",
+                    "sourceKind":"worker_result",
+                    "intent":"information",
+                    "preview":"The requested report is ready.",
+                    "createdAt":"2026-07-21T00:00:00Z"
+                }]
+            }),
+            json!({"selectedDeliveryIds":["delivery_test"]}),
+            vec![json!({}), json!({"sessionId":"session_test"})],
+            vec![
+                json!({}),
+                json!({"selectedDeliveryIds":[""]}),
+                json!({"selectedDeliveryIds":"delivery_test"}),
             ],
         ),
         WorkerEngineHook::SessionOrganization => (

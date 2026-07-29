@@ -979,7 +979,7 @@ async fn disabling_a_worker_stops_its_active_invocation() {
 
     runtime.set_enabled(&worker_id, false).await.unwrap();
     let result = invoking.await.unwrap().unwrap();
-    assert_eq!(result.status, "failed");
+    assert_eq!(result.status, "cancelled");
     assert!(result.error.unwrap().contains("disabled"));
     assert!(
         !runtime
@@ -1125,8 +1125,8 @@ async fn stopping_one_worker_cancels_current_work_without_disabling_future_dispa
     assert_eq!(stopped["enabled"], true);
     assert_eq!(stopped["retired"], false);
     let result = invoking.await.unwrap().unwrap();
-    assert_eq!(result.status, "failed");
-    assert!(result.error.unwrap().contains("per-worker stop"));
+    assert_eq!(result.status, "cancelled");
+    assert!(result.error.unwrap().contains("stopped"));
     let inspection = runtime.store().inspect(&worker_id).unwrap();
     assert_eq!(inspection["worker"]["enabled"], true);
     assert_eq!(inspection["worker"]["health"], "healthy");

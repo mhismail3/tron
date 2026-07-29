@@ -3,6 +3,7 @@ import Foundation
 extension SessionContextSheet {
     func observeInspectableContext() async {
         await loadInspectableContext()
+        await loadAgentUpdates()
         while !Task.isCancelled, isConnected, isAgentActive {
             do {
                 try await Task.sleep(for: .seconds(1))
@@ -10,9 +11,30 @@ extension SessionContextSheet {
                 return
             }
             await loadInspectableContext()
+            await loadAgentUpdates()
         }
         if !Task.isCancelled, isConnected {
             await loadInspectableContext()
+            await loadAgentUpdates()
+        }
+    }
+
+    func loadAgentUpdates() async {
+        guard !isLoadingAgentUpdates, isConnected else { return }
+        isLoadingAgentUpdates = true
+        defer { isLoadingAgentUpdates = false }
+        do {
+            let result = try await sessionRepository.agentUpdates(
+                sessionId: sessionId,
+                limit: 100
+            )
+            agentUpdates = result.updates
+            agentWaits = result.waits
+            agentUpdatesLoadError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            agentUpdatesLoadError = "Agent updates could not load: \(error.localizedDescription)"
         }
     }
 
@@ -76,7 +98,10 @@ extension SessionContextSheet {
                 toolCount: UInt64(max(event.payload.int("toolCount") ?? 0, 0)),
                 automaticContextCount: UInt64(automaticCount),
                 manifestAvailable: manifestValue?.isNull == false,
-                provenanceAvailability: format == "tron.model_provider_request.v3"
+                provenanceAvailability: [
+                    "tron.model_provider_request.v3",
+                    "tron.model_provider_request.v4",
+                ].contains(format)
                     ? "complete"
                     : "legacy_unavailable"
             )
@@ -102,8 +127,10 @@ extension SessionContextSheet {
                     )
                 },
                 providerAudit: AnyCodable(event.payload.mapValues(\.value)),
-                provenanceAvailability: event.payload.string("format")
-                    == "tron.model_provider_request.v3"
+                provenanceAvailability: [
+                    "tron.model_provider_request.v3",
+                    "tron.model_provider_request.v4",
+                ].contains(event.payload.string("format") ?? "")
                     ? "complete"
                     : "legacy_unavailable"
             )

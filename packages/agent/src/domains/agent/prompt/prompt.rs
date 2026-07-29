@@ -114,7 +114,9 @@ pub(crate) async fn run_turn_value(
         run_id.clone(),
         PromptRequest {
             session_id: submission.session_id,
-            prompt: submission.prompt,
+            trigger: crate::domains::agent::r#loop::types::AgentRunTrigger::UserPrompt {
+                prompt: submission.prompt,
+            },
             reasoning_level: submission.reasoning_level,
             attachments: submission.attachments,
             engine_causality: Some(PromptEngineCausality::from_invocation(invocation)),
@@ -124,6 +126,90 @@ pub(crate) async fn run_turn_value(
     Ok(json!({
         "acknowledged": true,
         "runId": run_id,
+    }))
+}
+
+pub(crate) async fn delivery_wake_value(
+    params: Option<&Value>,
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, ToolError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    if deps.orchestrator.has_active_run(&session_id) {
+        return Ok(json!({
+            "acknowledged":false,
+            "reason":"session_busy",
+        }));
+    }
+    let event_store = deps.event_store.clone();
+    let wake_session_id = session_id.clone();
+    let delivery_ids = crate::shared::server::context::run_blocking_task(
+        "agent.delivery_wake.pending",
+        move || {
+            event_store
+                .pending_agent_wakes_for_session(
+                    &wake_session_id,
+                    crate::domains::session::event_store::MAX_DELIVERIES_PER_TURN,
+                )
+                .map_err(crate::shared::server::error_mapping::map_event_store_error)
+        },
+    )
+    .await?;
+    if delivery_ids.is_empty() {
+        return Ok(json!({
+            "acknowledged":false,
+            "reason":"no_pending_wake",
+        }));
+    }
+    let session = AgentCommandService::load_prompt_session(deps, &session_id).await?;
+    if session.ended_at.is_some() {
+        return Ok(json!({
+            "acknowledged":false,
+            "reason":"session_archived",
+        }));
+    }
+    let responder_factory =
+        deps.responder_factory
+            .clone()
+            .ok_or_else(|| ToolError::NotAvailable {
+                message: "Agent execution dependencies are not configured".into(),
+            })?;
+    let run_id = uuid::Uuid::now_v7().to_string();
+    let started_run = match deps.orchestrator.begin_run(&session_id, &run_id) {
+        Ok(started) => started,
+        Err(crate::domains::agent::r#loop::errors::RuntimeError::SessionBusy(_)) => {
+            return Ok(json!({
+                "acknowledged":false,
+                "reason":"session_busy",
+            }));
+        }
+        Err(error) => {
+            return Err(ToolError::Custom {
+                code: error.category().to_uppercase(),
+                message: error.to_string(),
+                details: None,
+            });
+        }
+    };
+    spawn_prompt_run(
+        &deps.prompt_runtime(),
+        responder_factory,
+        &session,
+        started_run,
+        run_id.clone(),
+        PromptRequest {
+            session_id,
+            trigger: crate::domains::agent::r#loop::types::AgentRunTrigger::DeliveryWake {
+                delivery_ids,
+            },
+            reasoning_level: None,
+            attachments: None,
+            engine_causality: Some(PromptEngineCausality::from_invocation(invocation)),
+        },
+    );
+    Ok(json!({
+        "acknowledged":true,
+        "runId":run_id,
     }))
 }
 

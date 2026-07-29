@@ -175,6 +175,7 @@ fn context_manifest_matches_context_and_retains_message_provenance() {
         contributions,
         json!({"fixedToolCount":0}),
         Vec::new(),
+        Vec::new(),
         &[source],
     )
     .expect("matching manifest");
@@ -183,6 +184,89 @@ fn context_manifest_matches_context_and_retains_message_provenance() {
     assert_eq!(manifest.messages[0].source_kind, "durable_event");
     assert!(manifest.context_sha256.starts_with("sha256:"));
     assert_eq!(manifest.system_contributions.len(), 2);
+}
+
+#[test]
+fn v4_records_exact_delivery_context_and_v3_remains_decodable() {
+    let context = Context {
+        messages: vec![Message::user("durable history")].into(),
+        request_context: vec![crate::shared::protocol::messages::RequestContextBlock {
+            kind: crate::shared::protocol::messages::RequestContextKind::AgentDelivery,
+            content: "peer result for this turn".to_owned(),
+        }],
+        ..Context::default()
+    };
+    let manifest = ContextManifest::build(
+        &context,
+        Vec::new(),
+        Value::Null,
+        Vec::new(),
+        vec![AgentDeliveryManifest {
+            delivery_id: "delivery-one".to_owned(),
+            source_kind: "agent_message".to_owned(),
+            intent: Some("information".to_owned()),
+            wake_policy: "passive".to_owned(),
+            boundary: "next_turn".to_owned(),
+            redelivery: true,
+            provenance: json!({
+                "sourceSessionId":"session-source",
+                "debugPath":"/tmp/private/source.json"
+            }),
+            content: "peer result for this turn".to_owned(),
+        }],
+        &[MessageAuditSource::events(vec!["event-user".to_owned()])],
+    )
+    .unwrap();
+    assert_eq!(manifest.agent_deliveries.len(), 1);
+    assert_eq!(
+        manifest.agent_deliveries[0].content,
+        "peer result for this turn"
+    );
+    assert_eq!(
+        manifest.agent_deliveries[0].provenance["debugPath"],
+        "[redacted-path]"
+    );
+
+    let mut audit = ModelProviderRequestAudit::new(
+        Provider::OpenAi,
+        "openai",
+        "gpt-5.6-sol",
+        272_000,
+        "session-target",
+        None,
+        2,
+        0,
+        Value::Null,
+        ProviderAuditPayload::provider_independent_snapshot(Value::Null),
+    );
+    audit.context_manifest = Some(manifest);
+    let encoded = serde_json::to_value(&audit).unwrap();
+    assert_eq!(encoded["format"], MODEL_PROVIDER_REQUEST_AUDIT_FORMAT);
+    assert_eq!(
+        encoded["contextManifest"]["agentDeliveries"][0]["deliveryId"],
+        "delivery-one"
+    );
+
+    let mut previous = encoded;
+    previous["format"] = Value::String(PREVIOUS_MODEL_PROVIDER_REQUEST_AUDIT_FORMAT.to_owned());
+    previous["contextManifest"]
+        .as_object_mut()
+        .unwrap()
+        .remove("agentDeliveries");
+    let decoded: ModelProviderRequestAudit = serde_json::from_value(previous).unwrap();
+    assert!(
+        decoded
+            .context_manifest
+            .unwrap()
+            .agent_deliveries
+            .is_empty()
+    );
+    assert!(provider_audit_has_complete_provenance(
+        PREVIOUS_MODEL_PROVIDER_REQUEST_AUDIT_FORMAT
+    ));
+    assert!(!provider_audit_has_complete_provenance(
+        LEGACY_MODEL_PROVIDER_REQUEST_AUDIT_FORMAT
+    ));
 }
 
 #[test]
@@ -218,6 +302,7 @@ fn request_context_changes_only_request_specific_cache_evidence() {
                 sources: Vec::new(),
                 detail: None,
             }],
+            Vec::new(),
             &[MessageAuditSource::events(vec!["event-user".to_owned()])],
         )
         .unwrap()
@@ -266,6 +351,7 @@ fn empty_request_context_adds_zero_provider_input_bytes() {
             Value::Null,
         )],
         Value::Null,
+        Vec::new(),
         Vec::new(),
         &[MessageAuditSource::events(vec!["event-user".to_owned()])],
     )
@@ -325,6 +411,7 @@ fn dynamic_worker_changes_do_not_invalidate_fixed_tool_prefix() {
             )],
             Value::Null,
             Vec::new(),
+            Vec::new(),
             &[],
         )
         .unwrap()
@@ -357,6 +444,7 @@ fn context_manifest_rejects_unrecorded_system_mutation() {
             Value::Null,
         )],
         Value::Null,
+        Vec::new(),
         Vec::new(),
         &[],
     )

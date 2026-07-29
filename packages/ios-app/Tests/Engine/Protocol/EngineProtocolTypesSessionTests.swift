@@ -336,6 +336,66 @@ struct SessionContextAuditDecodingTests {
         #expect(detail.contextManifest?.systemContributions.count == 1)
         #expect(detail.contextManifest?.messages.first?.sourceEventIds == [])
         #expect(detail.contextManifest?.automaticContext.first?.sources == [])
+        #expect(detail.contextManifest?.agentDeliveries == [])
+    }
+
+    @Test("V4 detail decodes exact agent delivery evidence")
+    func v4AgentDeliveryDecodes() throws {
+        let data = Data("""
+        {
+          "eventId":"event-request-delivery",
+          "sequence":44,
+          "timestamp":"2026-07-28T07:20:00Z",
+          "format":"tron.model_provider_request.v4",
+          "contextManifest":{
+            "systemContributions":[],
+            "messages":[{
+              "ordinal":0,
+              "role":"user",
+              "contentKinds":["text"],
+              "byteCount":20,
+              "sha256":"sha256:message",
+              "preview":"Durable user history",
+              "projection":"provider_visible",
+              "sourceKind":"durable_event",
+              "sourceEventIds":["event-user"]
+            }],
+            "toolSurface":{},
+            "automaticContext":[],
+            "agentDeliveries":[{
+              "deliveryId":"delivery-one",
+              "sourceKind":"worker_result",
+              "intent":"information",
+              "wakePolicy":"wake",
+              "boundary":"next_turn",
+              "redelivery":true,
+              "provenance":{
+                "sourceInvocationId":"worker-run-one",
+                "sourceTraceId":"trace-one"
+              },
+              "content":"The detached worker completed."
+            }],
+            "environment":{"sha256":"sha256:environment"},
+            "systemPromptSha256":"sha256:system",
+            "messagesSha256":"sha256:messages",
+            "toolsSha256":"sha256:tools",
+            "contextSha256":"sha256:context"
+          },
+          "providerAudit":{"providerRequest":{"kind":"exact_provider_envelope"}},
+          "provenanceAvailability":"complete"
+        }
+        """.utf8)
+
+        let detail = try JSONDecoder().decode(SessionContextRequestDetailDTO.self, from: data)
+        let delivery = try #require(detail.contextManifest?.agentDeliveries.first)
+
+        #expect(detail.format == "tron.model_provider_request.v4")
+        #expect(delivery.deliveryId == "delivery-one")
+        #expect(delivery.sourceKind == "worker_result")
+        #expect(delivery.redelivery)
+        #expect(delivery.content == "The detached worker completed.")
+        let provenance = try #require(delivery.provenance.value as? [String: Any])
+        #expect(provenance["sourceInvocationId"] as? String == "worker-run-one")
     }
 
     @Test("Legacy summaries remain readable without a manifest")

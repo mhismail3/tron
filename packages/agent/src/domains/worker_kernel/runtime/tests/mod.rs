@@ -16,6 +16,7 @@ mod agent;
 mod client_actions;
 mod command;
 mod coordination;
+mod deliveries;
 mod hooks;
 mod projection;
 mod resident;
@@ -53,6 +54,7 @@ fn command_bundle(command: Vec<String>) -> WorkerBundle {
             checksum: None,
         }],
         engine_hooks: Vec::new(),
+        engine_deliveries: Vec::new(),
         client_actions: Vec::new(),
         client_deliveries: Vec::new(),
         worker_dispatch_routes: Vec::new(),
@@ -191,6 +193,7 @@ print(json.dumps({
                 checksum: None,
             }],
             engine_hooks: Vec::new(),
+            engine_deliveries: Vec::new(),
             client_actions: Vec::new(),
             client_deliveries: Vec::new(),
             worker_dispatch_routes: Vec::new(),

@@ -95,6 +95,7 @@ final class TurnLifecycleCoordinator {
         context.updateMessage(at: index) { message in
             message.isFinalAssistantResponse = true
             message.turnNumber = pluginResult.turnNumber
+            message.agentDeliveryProvenance = pluginResult.agentDeliveryProvenance
         }
         context.logDebug(
             "Marked textual response for turn \(pluginResult.turnNumber) as final"

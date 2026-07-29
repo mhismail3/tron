@@ -28,7 +28,9 @@ pub(super) struct PromptRunCompletion<'a> {
     pub(super) run_id: String,
     pub(super) provider_type: String,
     pub(super) model_for_error: String,
-    pub(super) prompt: String,
+    pub(super) user_prompt: Option<String>,
+    pub(super) delivery_wake_ids: Vec<String>,
+    pub(super) shutdown_requested: bool,
     pub(super) sequence_counter: Option<Arc<AtomicI64>>,
 }
 
@@ -44,7 +46,9 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         run_id,
         provider_type,
         model_for_error,
-        prompt,
+        user_prompt,
+        delivery_wake_ids,
+        shutdown_requested,
         sequence_counter,
     } = args;
 
@@ -60,21 +64,66 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         has_error = result.error.is_some(),
         "agent prompt run finalizing"
     );
+    if result.interrupted && !shutdown_requested {
+        let demotion = event_store
+            .demote_leased_agent_wakes(&session_id, &run_id)
+            .and_then(|_| event_store.demote_agent_wakes(&session_id, &delivery_wake_ids));
+        if let Err(error) = demotion {
+            warn!(
+                session_id,
+                error = %error,
+                "failed to demote delivery wakes owned by the cancelled run"
+            );
+        }
+    } else if result.error.is_some()
+        && !delivery_wake_ids.is_empty()
+        && event_store
+            .record_agent_wake_failure(
+                &session_id,
+                &delivery_wake_ids,
+                result
+                    .error
+                    .as_deref()
+                    .unwrap_or("delivery-only run failed"),
+            )
+            .unwrap_or(false)
+    {
+        tracing::error!(
+            session_id,
+            "agent delivery wake exhausted retries and was demoted to passive"
+        );
+    }
+    if let Err(error) = event_store.stale_run_scoped_deliveries(
+        crate::domains::session::event_store::AgentDeliverySourceKind::Continuity,
+        &run_id,
+    ) {
+        warn!(
+            session_id,
+            run_id,
+            error = %error,
+            "failed to stale late run-scoped continuity delivery"
+        );
+    }
+    crate::domains::agent::r#loop::surface::clear_semantic_surface(&session_id, &run_id);
     // INVARIANT: the active-run slot owns every event that consumes its shared
     // sequence counter. Publish the final session metadata first. Terminal
     // error/idle/ready events and matching run release then share one registry
     // boundary, so event-triggered prompt admission cannot observe SessionBusy
     // and no old terminal event can race a replacement run.
-    let title_exchange = load_title_exchange_if_eligible(
-        &result,
-        engine_causality
-            .as_ref()
-            .and_then(|causality| causality.context.origin_worker_id()),
-        event_store.clone(),
-        &session_id,
-        prompt,
-    )
-    .await;
+    let title_exchange = if let Some(prompt) = user_prompt {
+        load_title_exchange_if_eligible(
+            &result,
+            engine_causality
+                .as_ref()
+                .and_then(|causality| causality.context.origin_worker_id()),
+            event_store.clone(),
+            &session_id,
+            prompt,
+        )
+        .await
+    } else {
+        None
+    };
     emit_session_update(
         &event_store,
         &broadcast,
@@ -84,7 +133,7 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
     .await;
     let terminal_failure =
         run_error_event_if_needed(&session_id, &provider_type, &model_for_error, &result);
-    let _ = run_cleanup.release_with_terminal(|| {
+    let released = run_cleanup.release_with_terminal(|| {
         publish_terminal_lifecycle(
             &broadcast,
             &session_id,
@@ -93,6 +142,9 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
             terminal_failure,
         );
     });
+    if released && !shutdown_requested {
+        invoke_pending_delivery_wake(&engine_host, &session_id).await;
+    }
 
     info!(
         component = "agent.runtime",
@@ -129,6 +181,38 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
             assistant_response,
         )
         .await;
+    }
+}
+
+async fn invoke_pending_delivery_wake(
+    engine_host: &crate::engine::EngineHostHandle,
+    session_id: &str,
+) {
+    let Ok(actor_id) = ActorId::new("system:agent-delivery-release") else {
+        return;
+    };
+    let Ok(function_id) = FunctionId::new("agent::delivery_wake") else {
+        return;
+    };
+    let causal = CausalContext::new(actor_id, ActorKind::System, TraceId::generate())
+        .with_session_id(session_id.to_owned())
+        .with_idempotency_key(format!(
+            "agent-delivery-release:{session_id}:{}",
+            uuid::Uuid::now_v7()
+        ));
+    let outcome = engine_host
+        .invoke(Invocation::new_sync(
+            function_id,
+            serde_json::json!({"sessionId":session_id}),
+            causal,
+        ))
+        .await;
+    if let Some(error) = outcome.error {
+        warn!(
+            session_id,
+            error = %error,
+            "failed to reconsider pending agent wake after run release"
+        );
     }
 }
 

@@ -646,11 +646,12 @@ mod tests {
                 .with_idempotency_key(format!("webhook-http-result:{}", uuid::Uuid::now_v7())),
             ))
             .await;
-        assert!(exact.error.is_none(), "{:?}", exact.error);
-        let exact = exact.value.unwrap();
-        assert_eq!(exact["value"]["configured"], true);
-        assert_eq!(exact["value"]["requestValue"], 7);
-        assert!(exact["value"].get("webhook").is_none());
+        let exact_error = format!("{:?}", exact.error);
+        assert!(
+            exact_error.contains("originating-session or delivery-granted session"),
+            "sessionless webhook results must retain the narrow delivery grant: {:?}",
+            exact.error
+        );
 
         let mut wrong = Request::builder()
             .method("POST")

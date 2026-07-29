@@ -30,7 +30,7 @@ fn model_facing_contracts_own_unique_names_and_order() {
             .iter()
             .filter(|tool| matches!(tool.audience, ModelToolAudience::Ordinary))
             .count(),
-        11
+        15
     );
     assert_eq!(
         tools

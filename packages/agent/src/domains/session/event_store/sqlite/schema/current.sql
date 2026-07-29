@@ -45,6 +45,124 @@ CREATE INDEX IF NOT EXISTS idx_sessions_parent    ON sessions(parent_session_id)
 CREATE INDEX IF NOT EXISTS idx_sessions_ended     ON sessions(ended_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_created   ON sessions(created_at DESC);
 
+-- Agent deliveries are durable reference context addressed to either one
+-- session or one logical mailbox. They deliberately live beside session truth:
+-- the EventStore can create a visible session and seed its first delivery in
+-- one transaction, and session deletion can revoke every associated grant.
+CREATE TABLE IF NOT EXISTS agent_deliveries (
+  delivery_id                TEXT    PRIMARY KEY,
+  idempotency_key            TEXT    NOT NULL UNIQUE,
+  source_kind                TEXT    NOT NULL
+    CHECK (source_kind IN ('worker_result','agent_message','continuity')),
+  intent                     TEXT
+    CHECK (intent IS NULL OR intent IN ('information','request')),
+  source_session_id          TEXT    REFERENCES sessions(id) ON DELETE SET NULL,
+  source_workspace_id        TEXT    NOT NULL,
+  source_invocation_id       TEXT,
+  source_trace_id            TEXT,
+  source_root_invocation_id  TEXT,
+  causal_depth               INTEGER NOT NULL DEFAULT 0 CHECK (causal_depth >= 0),
+  target_kind                TEXT    NOT NULL CHECK (target_kind IN ('session','mailbox')),
+  target_session_id          TEXT    REFERENCES sessions(id) ON DELETE CASCADE,
+  mailbox_scope              TEXT
+    CHECK (mailbox_scope IS NULL OR mailbox_scope IN ('workspace','profile')),
+  mailbox_workspace_id       TEXT    REFERENCES workspaces(id) ON DELETE CASCADE,
+  mailbox_name               TEXT,
+  wake_policy                TEXT    NOT NULL CHECK (wake_policy IN ('passive','wake')),
+  boundary                   TEXT    NOT NULL CHECK (boundary IN ('next_turn','next_run')),
+  originating_run_id         TEXT,
+  arrived_during_run_id      TEXT,
+  defer_until_run_id         TEXT,
+  result_invocation_id       TEXT,
+  content                    TEXT    NOT NULL,
+  not_before                 TEXT,
+  expires_at                 TEXT,
+  disposition                TEXT    NOT NULL DEFAULT 'pending'
+    CHECK (disposition IN ('pending','observed','cancelled','stale')),
+  leased_run_id              TEXT,
+  leased_turn                INTEGER,
+  lease_count                INTEGER NOT NULL DEFAULT 0 CHECK (lease_count >= 0),
+  wake_attempts              INTEGER NOT NULL DEFAULT 0 CHECK (wake_attempts >= 0),
+  next_wake_at               TEXT,
+  last_error                 TEXT,
+  created_at                 TEXT    NOT NULL,
+  claimed_at                 TEXT,
+  observed_at                TEXT,
+  cancelled_at               TEXT,
+  CHECK (
+    (target_kind='session' AND target_session_id IS NOT NULL
+      AND mailbox_scope IS NULL AND mailbox_workspace_id IS NULL
+      AND mailbox_name IS NULL)
+    OR
+    (target_kind='mailbox' AND target_session_id IS NULL
+      AND mailbox_scope IS NOT NULL AND mailbox_name IS NOT NULL)
+  ),
+  CHECK (
+    (mailbox_scope='workspace' AND mailbox_workspace_id IS NOT NULL)
+    OR (mailbox_scope='profile' AND mailbox_workspace_id IS NULL)
+    OR mailbox_scope IS NULL
+  ),
+  CHECK (target_kind!='mailbox' OR wake_policy='passive'),
+  CHECK (
+    (leased_run_id IS NULL AND leased_turn IS NULL)
+    OR (leased_run_id IS NOT NULL AND leased_turn IS NOT NULL
+      AND disposition='pending')
+  ),
+  CHECK (length(CAST(content AS BLOB)) BETWEEN 1 AND 40000)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_deliveries_session_pending
+  ON agent_deliveries(target_session_id, disposition, not_before, created_at, delivery_id);
+CREATE INDEX IF NOT EXISTS idx_agent_deliveries_wake_due
+  ON agent_deliveries(wake_policy, disposition, next_wake_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_deliveries_mailbox
+  ON agent_deliveries(
+    mailbox_scope,
+    mailbox_workspace_id,
+    mailbox_name,
+    disposition,
+    created_at
+  );
+CREATE INDEX IF NOT EXISTS idx_agent_deliveries_result_grant
+  ON agent_deliveries(result_invocation_id, target_session_id, disposition);
+CREATE INDEX IF NOT EXISTS idx_agent_deliveries_lease
+  ON agent_deliveries(leased_run_id, disposition);
+
+CREATE TABLE IF NOT EXISTS agent_waits (
+  wait_id          TEXT PRIMARY KEY,
+  idempotency_key  TEXT NOT NULL UNIQUE,
+  session_id       TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  source_invocation_id TEXT NOT NULL,
+  source_trace_id  TEXT NOT NULL,
+  source_root_invocation_id TEXT,
+  causal_depth     INTEGER NOT NULL CHECK (causal_depth >= 0 AND causal_depth <= 4294967295),
+  mode             TEXT NOT NULL CHECK (mode IN ('all','any')),
+  disposition      TEXT NOT NULL DEFAULT 'pending'
+    CHECK (disposition IN ('pending','satisfied','cancelled')),
+  delivery_id      TEXT REFERENCES agent_deliveries(delivery_id) ON DELETE SET NULL,
+  created_at       TEXT NOT NULL,
+  resolved_at      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_waits_pending
+  ON agent_waits(disposition, session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS agent_wait_members (
+  wait_id              TEXT NOT NULL REFERENCES agent_waits(wait_id) ON DELETE CASCADE,
+  invocation_id        TEXT NOT NULL,
+  ordinal              INTEGER NOT NULL,
+  disposition          TEXT NOT NULL DEFAULT 'pending'
+    CHECK (disposition IN ('pending','satisfied','ignored')),
+  terminal_status      TEXT,
+  terminal_evidence    TEXT,
+  resolved_at          TEXT,
+  PRIMARY KEY(wait_id, invocation_id),
+  UNIQUE(wait_id, ordinal)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_wait_members_invocation
+  ON agent_wait_members(invocation_id, disposition, wait_id);
+
 CREATE TABLE IF NOT EXISTS events (
   id                    TEXT    PRIMARY KEY,
   session_id            TEXT    NOT NULL REFERENCES sessions(id),

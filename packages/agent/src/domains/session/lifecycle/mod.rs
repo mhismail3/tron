@@ -13,7 +13,7 @@
 //! | Module | Responsibility |
 //! |--------|----------------|
 //! | `archive` | Archive, unarchive, and batch archive stale sessions through `ended_at`. |
-//! | `create` | Normalize working directories, create durable sessions, and initialize runtime sequence counters. |
+//! | `create` | Normalize working directories, create durable sessions, project first creation, initialize sequence counters, and start optional mailbox curation. |
 //! | `delete` | Delete a session through the session manager and clear session-scoped runtime projections. |
 //! | `fork` | Fork from an explicit event or session head and initialize the child runtime sequence counter. |
 //! | `operations` | JSON parameter parsing for lifecycle tool entry points. |
@@ -33,6 +33,9 @@
 //!   sequence counter so unarchive cannot reuse a provider-visible sequence.
 //!   Permanent delete clears both projections; shutdown clears all remaining
 //!   process-local projections.
+//! - Ordinary and agent-created visible tasks share the same post-commit
+//!   `session.created` projection and asynchronous mailbox-curation entry
+//!   point; idempotent task replay does not duplicate that projection.
 
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 
@@ -52,6 +55,7 @@ mod delete;
 mod fork;
 mod operations;
 
+pub(crate) use create::project_created_session;
 pub(crate) use operations::{
     session_archive_older_than_value, session_archive_value, session_create_value,
     session_delete_value, session_fork_value, session_unarchive_value,

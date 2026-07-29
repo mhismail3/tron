@@ -16,6 +16,10 @@ struct MessageBubble: View {
                 AttachedFileThumbnails(attachments: attachments)
             }
 
+            if !message.agentDeliveryProvenance.isEmpty {
+                agentDeliveryProvenance
+            }
+
             contentView
 
             if let metadata = message.finalAssistantResponseMetadata {
@@ -31,6 +35,23 @@ struct MessageBubble: View {
     }
 
     // MARK: - Content
+
+    private var agentDeliveryProvenance: some View {
+        let sourceKinds = Array(Set(
+            message.agentDeliveryProvenance.map {
+                WorkerConsolePresentation.displayLabel($0.sourceKind)
+            }
+        )).sorted()
+        let source = sourceKinds.isEmpty
+            ? "Agent update"
+            : sourceKinds.joined(separator: " + ")
+        return Label(source, systemImage: "bell.and.waves.left.and.right")
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            .foregroundStyle(.tronEmerald)
+            .accessibilityHint(
+                "\(message.agentDeliveryProvenance.count) durable agent update(s)"
+            )
+    }
 
     @ViewBuilder
     private var contentView: some View {

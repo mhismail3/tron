@@ -1,7 +1,9 @@
 //! Runtime configuration and result types.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::domains::agent::context::types::CompactionConfig;
 pub use crate::domains::model::responder::ModelReasoningLevel as ReasoningLevel;
@@ -112,6 +114,15 @@ impl Default for AgentConfig {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunContext {
+    /// Monotonic admission-start timestamp used once for the existing metrics
+    /// pipeline. It is process-local and never enters durable context.
+    #[serde(skip)]
+    pub prompt_run_started_at: Option<Instant>,
+    /// Shared one-shot guard because `RunContext` is cloned between loop
+    /// layers and only the first provider turn measures prompt-to-provider
+    /// admission latency.
+    #[serde(skip)]
+    pub prompt_to_provider_metric_recorded: Arc<AtomicBool>,
     /// Stable runtime run id for causal/idempotency metadata. This is assigned
     /// by the prompt runtime and is intentionally not serialized into prompt
     /// context snapshots.
@@ -120,6 +131,18 @@ pub struct RunContext {
     /// Durable `message.user` event admitted before this run started.
     #[serde(skip)]
     pub user_event_id: Option<String>,
+    /// Delivery IDs that caused a delivery-only run. Only the first provider
+    /// turn of that run may lease this exact set.
+    #[serde(skip)]
+    pub delivery_wake_ids: Option<Vec<String>>,
+    /// Session turn ordinal on which `delivery_wake_ids` are admissible.
+    #[serde(skip)]
+    pub delivery_wake_turn: Option<u32>,
+    /// Delivery provenance retained until the first assistant turn that does
+    /// not hand control to tools. This lets a tool-first delivery wake render
+    /// its eventual visible assistant continuation with the same provenance.
+    #[serde(skip)]
+    pub pending_delivery_provenance: Arc<parking_lot::Mutex<Vec<serde_json::Value>>>,
     /// Engine trace inherited from the hidden `agent::run_turn` invocation.
     #[serde(skip)]
     pub engine_trace_id: Option<crate::engine::TraceId>,
@@ -156,6 +179,24 @@ pub struct RunContext {
     /// When set, `run()` uses this instead of creating a text-only message.
     #[serde(skip)]
     pub user_content_override: Option<crate::shared::protocol::messages::UserMessageContent>,
+}
+
+/// Closed trigger for one agent run.
+///
+/// Only `UserPrompt` is allowed to create provider-visible conversation
+/// history. `DeliveryWake` starts from already-durable delivery rows.
+#[derive(Clone, Debug)]
+pub enum AgentRunTrigger {
+    /// A user-authored prompt already admitted as a durable user event.
+    UserPrompt {
+        /// Plain-text prompt used when no multimodal override is present.
+        prompt: String,
+    },
+    /// A delivery-only continuation with no synthetic user message.
+    DeliveryWake {
+        /// Exact durable deliveries that won wake admission.
+        delivery_ids: Vec<String>,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

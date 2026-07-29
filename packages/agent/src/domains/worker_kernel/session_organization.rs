@@ -282,6 +282,7 @@ mod tests {
             health_checks: Vec::new(),
             provenance: Vec::new(),
             engine_hooks: vec![WorkerEngineHook::SessionOrganization],
+            engine_deliveries: Vec::new(),
             client_actions: Vec::new(),
             client_deliveries: Vec::new(),
             worker_dispatch_routes: Vec::new(),

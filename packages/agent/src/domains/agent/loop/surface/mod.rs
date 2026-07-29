@@ -6,7 +6,8 @@
 //! keeps only request-local projections; durable selection and promotion state
 //! remains owned by the Worker Kernel.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{LazyLock, Mutex};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -15,6 +16,7 @@ use crate::engine::{
     ActorId, ActorKind, CausalContext, EngineHostHandle, FunctionDefinition, FunctionId,
     Invocation, InvocationId, TraceId,
 };
+#[cfg(test)]
 use crate::shared::protocol::model_audit::AutomaticContextEvaluation;
 use crate::shared::protocol::model_tools::{ModelTool, ToolParameterSchema};
 
@@ -39,6 +41,7 @@ pub(crate) async fn promote_worker_for_session(
 /// record matches, or recall fails. It never substitutes engine-owned memory
 /// policy or adds a deterministic narrative of its own.
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(crate) async fn take_continuity_context(
     host: &EngineHostHandle,
     session_id: &str,
@@ -174,163 +177,7 @@ pub(crate) async fn take_continuity_context(
     }
 }
 
-/// Atomically claims notable unseen background-worker results and formats a
-/// bounded transient primer for the next relevant model turn.
-pub(crate) async fn take_worker_inbox_context(
-    host: &EngineHostHandle,
-    session_id: &str,
-    turn: u32,
-    relevance_query: Option<&str>,
-    origin_worker_id: Option<&str>,
-    trace_id: Option<&TraceId>,
-    parent_invocation_id: Option<&InvocationId>,
-) -> AutomaticContextEvaluation {
-    if origin_worker_id.is_some() {
-        return automatic_context_outcome(
-            "worker_inbox",
-            "skipped",
-            "child_agent_boundary",
-            None,
-            None,
-        );
-    }
-    // INVARIANT: inbox attachment is an engine-owned projection step, not a
-    // model tool call and therefore must not depend on whether the separate
-    // specialist `worker_inbox` inspection tool was selected for the provider.
-    // Attribute the observation to the session while using an internal runtime
-    // actor so the hidden operation satisfies its visibility boundary without
-    // pretending to be a model tool call.
-    let mut context = CausalContext::new(
-        match ActorId::new("system:agent-runtime") {
-            Ok(actor) => actor,
-            Err(error) => {
-                return automatic_context_outcome(
-                    "worker_inbox",
-                    "failed",
-                    "engine_projection",
-                    None,
-                    Some(error.to_string()),
-                );
-            }
-        },
-        ActorKind::System,
-        trace_id.cloned().unwrap_or_else(TraceId::generate),
-    )
-    .with_session_id(session_id.to_owned())
-    .with_idempotency_key(format!("worker-inbox-attach:{session_id}:{turn}"));
-    if let Some(parent) = parent_invocation_id {
-        context = context.with_parent_invocation(parent.clone());
-    }
-    let mut payload = serde_json::json!({
-        "limit": 8,
-        "relevanceQuery": relevance_query.unwrap_or_default(),
-    });
-    if let Some(worker_id) = origin_worker_id {
-        payload["originWorkerId"] = serde_json::json!(worker_id);
-    }
-    let outcome = host
-        .invoke(Invocation::new_sync(
-            match FunctionId::new("worker_kernel::inbox_attach") {
-                Ok(function) => function,
-                Err(error) => {
-                    return automatic_context_outcome(
-                        "worker_inbox",
-                        "failed",
-                        "engine_projection",
-                        None,
-                        Some(error.to_string()),
-                    );
-                }
-            },
-            payload,
-            context,
-        ))
-        .await;
-    if let Some(error) = outcome.error {
-        return automatic_context_outcome(
-            "worker_inbox",
-            "failed",
-            "engine_projection",
-            None,
-            Some(error.to_string()),
-        );
-    }
-    let Some(value) = outcome.value else {
-        return automatic_context_outcome(
-            "worker_inbox",
-            "unavailable",
-            "engine_projection",
-            None,
-            Some("worker inbox projection returned no value".to_owned()),
-        );
-    };
-    let items = value
-        .get("items")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if items.is_empty() {
-        return automatic_context_outcome(
-            "worker_inbox",
-            "empty",
-            if value.get("handled").and_then(Value::as_bool) == Some(true) {
-                "semantic_hook"
-            } else {
-                "deterministic_trivial"
-            },
-            None,
-            None,
-        );
-    }
-    let narrative = value
-        .get("narrative")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|narrative| !narrative.is_empty())
-        .map(ToOwned::to_owned);
-    let Some(narrative) = narrative else {
-        return automatic_context_outcome(
-            "worker_inbox",
-            "empty",
-            "engine_projection",
-            None,
-            Some("selected inbox items produced no narrative".to_owned()),
-        );
-    };
-    let handled = value.get("handled").and_then(Value::as_bool) == Some(true);
-    AutomaticContextEvaluation {
-        kind: "worker_inbox".to_owned(),
-        outcome: if handled {
-            "injected"
-        } else {
-            "deterministic_fallback"
-        }
-        .to_owned(),
-        mechanism: if handled {
-            "semantic_hook"
-        } else {
-            "deterministic_fallback"
-        }
-        .to_owned(),
-        delivery_channel: None,
-        narrative: Some(narrative),
-        worker_id: value
-            .get("workerId")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned),
-        worker_version: value
-            .get("workerVersion")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned),
-        invocation_id: value
-            .get("invocationId")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned),
-        sources: items,
-        detail: None,
-    }
-}
-
+#[cfg(test)]
 fn automatic_context_outcome(
     kind: &str,
     outcome: &str,
@@ -424,6 +271,10 @@ pub struct ResolvedPrimitiveSurface {
     pub snapshot: crate::domains::worker_kernel::EngineSurfaceSnapshot,
 }
 
+static SEMANTIC_SURFACES: LazyLock<
+    Mutex<HashMap<(String, String, String), ResolvedPrimitiveSurface>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
 impl ResolvedPrimitiveSurface {
     /// Immutable presentation classification for one exact advertised tool.
     ///
@@ -461,6 +312,7 @@ pub(crate) async fn resolve_provider_primitive_surface(
     resolve_provider_primitive_surface_for_query(host, session_id, None, None, None).await
 }
 
+#[cfg(test)]
 pub(crate) async fn resolve_provider_primitive_surface_for_query(
     host: &EngineHostHandle,
     session_id: &str,
@@ -468,6 +320,31 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
     origin_worker_id: Option<&str>,
     worker_agent_tools: Option<&[String]>,
 ) -> Result<ResolvedPrimitiveSurface, String> {
+    resolve_provider_primitive_surface_for_run(
+        host,
+        session_id,
+        relevance_query,
+        origin_worker_id,
+        worker_agent_tools,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn resolve_provider_primitive_surface_for_run(
+    host: &EngineHostHandle,
+    session_id: &str,
+    relevance_query: Option<&str>,
+    origin_worker_id: Option<&str>,
+    worker_agent_tools: Option<&[String]>,
+    run_id: Option<&str>,
+) -> Result<ResolvedPrimitiveSurface, String> {
+    if origin_worker_id.is_none()
+        && let Some(run_id) = run_id
+        && let Some(surface) = cached_semantic_surface(session_id, run_id, relevance_query)
+    {
+        return Ok(surface);
+    }
     let resolved = crate::domains::worker_kernel::resolve_tool_surface(
         host,
         session_id,
@@ -476,6 +353,69 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
         worker_agent_tools,
     )
     .await?;
+    adapt_resolved_surface(resolved)
+}
+
+pub(crate) async fn prepare_semantic_surface(
+    host: &EngineHostHandle,
+    session_id: &str,
+    run_id: &str,
+    relevance_query: Option<&str>,
+) -> Result<(), String> {
+    let resolved = crate::domains::worker_kernel::resolve_tool_surface_semantic(
+        host,
+        session_id,
+        relevance_query,
+    )
+    .await?;
+    let surface = adapt_resolved_surface(resolved)?;
+    SEMANTIC_SURFACES
+        .lock()
+        .map_err(|_| "semantic surface cache lock poisoned".to_owned())?
+        .insert(
+            (
+                session_id.to_owned(),
+                run_id.to_owned(),
+                relevance_query_digest(relevance_query),
+            ),
+            surface,
+        );
+    Ok(())
+}
+
+pub(crate) fn clear_semantic_surface(session_id: &str, run_id: &str) {
+    if let Ok(mut surfaces) = SEMANTIC_SURFACES.lock() {
+        surfaces.retain(|(stored_session, stored_run, _), _| {
+            stored_session != session_id || stored_run != run_id
+        });
+    }
+}
+
+fn cached_semantic_surface(
+    session_id: &str,
+    run_id: &str,
+    relevance_query: Option<&str>,
+) -> Option<ResolvedPrimitiveSurface> {
+    SEMANTIC_SURFACES
+        .lock()
+        .ok()?
+        .get(&(
+            session_id.to_owned(),
+            run_id.to_owned(),
+            relevance_query_digest(relevance_query),
+        ))
+        .cloned()
+}
+
+fn relevance_query_digest(relevance_query: Option<&str>) -> String {
+    hex::encode(Sha256::digest(
+        relevance_query.unwrap_or_default().as_bytes(),
+    ))
+}
+
+fn adapt_resolved_surface(
+    resolved: crate::domains::worker_kernel::ResolvedToolSurface,
+) -> Result<ResolvedPrimitiveSurface, String> {
     let mut tools = Vec::new();
     let mut targets_by_name = BTreeMap::new();
 

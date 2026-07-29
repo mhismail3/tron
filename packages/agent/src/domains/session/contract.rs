@@ -110,6 +110,26 @@ pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
             }))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
+        FunctionContract::new("session::agent_updates", "session", EffectClass::PureRead, RiskLevel::Low)
+            .request_schema(json!({
+                "additionalProperties":false,
+                "properties":{
+                    "sessionId":{"type":"string","minLength":1},
+                    "limit":{"type":"integer","minimum":1,"maximum":200}
+                },
+                "required":["sessionId"],
+                "type":"object"
+            }))
+            .response_schema(json!({
+                "additionalProperties":false,
+                "properties":{
+                    "updates":{"type":"array","maxItems":200,"items":{"type":"object"}},
+                    "waits":{"type":"array","maxItems":200,"items":{"type":"object"}}
+                },
+                "required":["updates","waits"],
+                "type":"object"
+            }))
+            .build()?,
         FunctionContract::new("session::set_title", "session", EffectClass::IdempotentWrite, RiskLevel::Medium)
             .request_schema(json!({"type":"object","additionalProperties":false,"required":["title"],"properties":{"title":{"type":"string","minLength":1,"maxLength":160}}}))
             .response_schema(json!({"type":"object","additionalProperties":false,"required":["sessionId","title","updated"],"properties":{"sessionId":{"type":"string"},"title":{"type":"string"},"updated":{"type":"boolean"}}}))
@@ -198,6 +218,7 @@ mod tests {
                 "session::context_request_detail",
                 &["eventId", "sessionId"][..],
             ),
+            ("session::agent_updates", &["limit", "sessionId"][..]),
             ("session::set_title", &["title"][..]),
             (
                 "session::reconstruct",

@@ -69,9 +69,20 @@ impl MessageAuditSource {
 }
 
 /// Canonical format marker for provider request audit events.
-pub const MODEL_PROVIDER_REQUEST_AUDIT_FORMAT: &str = "tron.model_provider_request.v3";
-/// Previous provider-request audit format retained for read compatibility.
+pub const MODEL_PROVIDER_REQUEST_AUDIT_FORMAT: &str = "tron.model_provider_request.v4";
+/// Previous complete-provenance format retained for read compatibility.
+pub const PREVIOUS_MODEL_PROVIDER_REQUEST_AUDIT_FORMAT: &str = "tron.model_provider_request.v3";
+/// Legacy provider-request audit format retained for read compatibility.
 pub const LEGACY_MODEL_PROVIDER_REQUEST_AUDIT_FORMAT: &str = "tron.model_provider_request.v2";
+
+/// Whether a provider-audit format includes complete context provenance.
+#[must_use]
+pub fn provider_audit_has_complete_provenance(format: &str) -> bool {
+    matches!(
+        format,
+        MODEL_PROVIDER_REQUEST_AUDIT_FORMAT | PREVIOUS_MODEL_PROVIDER_REQUEST_AUDIT_FORMAT
+    )
+}
 /// Maximum serialized JSON size accepted for a single provider request audit body.
 ///
 /// Provider audit rows are durable replay inputs, but they are not a bulk blob
@@ -199,6 +210,30 @@ pub struct AutomaticContextEvaluation {
     pub detail: Option<String>,
 }
 
+/// One durable agent delivery projected into an exact provider request.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDeliveryManifest {
+    /// Durable delivery identity.
+    pub delivery_id: String,
+    /// `worker_result`, `agent_message`, or `continuity`.
+    pub source_kind: String,
+    /// Information/request intent when applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent: Option<String>,
+    /// Passive or wake admission policy.
+    pub wake_policy: String,
+    /// Next-turn or next-run boundary.
+    pub boundary: String,
+    /// Whether the delivery has previously been prepared for a provider turn.
+    pub redelivery: bool,
+    /// Bounded source identity and causal evidence.
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub provenance: Value,
+    /// Exact provider-visible reference content.
+    pub content: String,
+}
+
 /// Provider-visible message inventory entry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -282,6 +317,9 @@ pub struct ContextManifest {
     pub tool_surface: Value,
     /// Outcomes from every automatic context source evaluated for the request.
     pub automatic_context: Vec<AutomaticContextEvaluation>,
+    /// Durable agent deliveries projected into this exact request.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_deliveries: Vec<AgentDeliveryManifest>,
     /// Provider-neutral environment contribution.
     pub environment: ContextEnvironmentManifest,
     /// Cache-stability segment evidence. Historical v3 rows omit this field.
@@ -307,6 +345,7 @@ impl ContextManifest {
         system_contributions: Vec<SystemContextContribution>,
         tool_surface: Value,
         automatic_context: Vec<AutomaticContextEvaluation>,
+        agent_deliveries: Vec<AgentDeliveryManifest>,
         message_sources: &[MessageAuditSource],
     ) -> Result<Self, String> {
         let joined_system = system_contributions
@@ -373,6 +412,14 @@ impl ContextManifest {
             messages: message_manifests,
             tool_surface: redact_sensitive_json(tool_surface),
             automatic_context,
+            agent_deliveries: agent_deliveries
+                .into_iter()
+                .map(|delivery| AgentDeliveryManifest {
+                    content: redact_provider_audit_text(&delivery.content),
+                    provenance: redact_sensitive_json(delivery.provenance),
+                    ..delivery
+                })
+                .collect(),
             environment: ContextEnvironmentManifest {
                 working_directory: working_directory.as_deref().map(redact_provider_audit_text),
                 server_origin: server_origin.as_deref().map(redact_provider_audit_text),

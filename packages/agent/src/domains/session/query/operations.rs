@@ -130,6 +130,19 @@ pub(crate) async fn session_context_request_detail_value(
     )
     .await
 }
+
+pub(crate) async fn session_agent_updates_value(
+    params: Option<&Value>,
+    deps: &Deps,
+) -> Result<Value, ToolError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let limit = params
+        .and_then(|payload| payload.get("limit"))
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok());
+    crate::domains::session::query::SessionQueryService::agent_updates(deps, session_id, limit)
+        .await
+}
 pub(crate) async fn session_export_value(
     params: Option<&Value>,
     deps: &Deps,

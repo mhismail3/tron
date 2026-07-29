@@ -9,9 +9,11 @@
 //! - **Event store**: High-level API for session creation, event append, ancestor walk, fork
 //! - **`SQLite` backend**: `rusqlite` facade with repository pattern
 //! - **Replay identities**: Explicit IDs/timestamps for deterministic replay/import tests
-//! - **Provider request audits**: bounded `tron.model_provider_request.v3`
+//! - **Provider request audits**: bounded `tron.model_provider_request.v4`
 //!   manifests plus redacted request evidence persisted before model streams
 //!   without duplicating bulk media or message bodies
+//! - **Agent deliveries and waits**: session/mailbox addressing, result grants,
+//!   safe-turn leasing, observation, wake retries, and crash recovery
 //! - **Logs**: bounded operational log queries
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
 //!   history, preserving separate client display text and model-facing tool result text
@@ -56,10 +58,17 @@
 //! - Persisted event rows are decoded through the owning SQLite connection so
 //!   inline and blob-backed payloads share one resolution path.
 //! - `model.provider_request` is written before any provider stream opens.
-//! - The append-only event is the sole durable request-context ledger. V3
+//! - The append-only event is the sole durable request-context ledger. V4
 //!   records ordered instructions, automatic-context provenance, message
-//!   source sidecars, environment, and exact tool selection; no context table
-//!   or parallel cache is installed.
+//!   source sidecars, Agent Deliveries, environment, and exact tool selection;
+//!   v2/v3 remain readable and no parallel context cache is installed.
+//! - `agent_deliveries`, waits, and wait members remain EventStore-owned state.
+//!   A delivery lease is preparation, not observation; only durable assistant
+//!   completion observes it, while setup failure or restart clears the lease
+//!   for at-least-once redelivery.
+//! - Sender expiry is durably reconciled before delivery, mailbox, wake, and
+//!   result-grant reads. Expired rows remain audit evidence but confer no
+//!   result authority.
 //! - Provider audit events project bulk strings to byte-count and digest
 //!   evidence; provider request bytes remain owned by the model boundary.
 //! - Log query filters are applied in the storage owner so diagnostics callers
@@ -119,7 +128,12 @@ pub use sqlite::{
     ConnectionConfig, ConnectionPool, DatabaseLock, LockError, PooledConnection,
     acquire_database_lock, check_integrity, ensure_schema, new_file, new_in_memory,
 };
-pub(crate) use store::AppendBatchItem;
+pub(crate) use store::{
+    AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliveryRecord, AgentDeliverySourceKind,
+    AgentDeliveryTarget, AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode,
+    AppendBatchItem, MAX_DELIVERIES_PER_TURN, NewAgentDelivery, NewAgentTaskDelivery, NewAgentWait,
+    WorkerTerminalEvidence,
+};
 pub use store::{
     AppendOptions, ClientLogEntry, ClientLogIngestResult, CreateSessionResult, EventStore,
     ForkOptions, ForkResult, LogEntry, LogSessionFilter, RecentLogQuery,

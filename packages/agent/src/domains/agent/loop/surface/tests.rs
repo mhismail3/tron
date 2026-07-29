@@ -5,10 +5,10 @@ use std::sync::Arc;
 use super::*;
 use crate::engine::{EffectClass, FunctionDefinition, WorkerId};
 
-struct InboxAttachHandler;
+struct StubHandler;
 
 #[async_trait::async_trait]
-impl crate::engine::InProcessFunctionHandler for InboxAttachHandler {
+impl crate::engine::InProcessFunctionHandler for StubHandler {
     async fn invoke(&self, _invocation: crate::engine::Invocation) -> crate::engine::Result<Value> {
         Ok(serde_json::json!({
             "handled":true,
@@ -134,7 +134,7 @@ fn register_worker_primitive_with_visibility(
             provenance: vec!["test fixture".to_owned()],
         }),
     });
-    host.register_function_for_setup(definition, Arc::new(InboxAttachHandler))
+    host.register_function_for_setup(definition, Arc::new(StubHandler))
         .expect("worker function");
 }
 
@@ -148,44 +148,13 @@ async fn non_model_functions_are_not_projected() {
         crate::engine::FunctionVisibility::Public,
         EffectClass::PureRead,
     );
-    host.register_function_for_setup(old_builtin_like_function, Arc::new(InboxAttachHandler))
+    host.register_function_for_setup(old_builtin_like_function, Arc::new(StubHandler))
         .expect("nonprimitive function");
 
     let surface = resolve_provider_primitive_surface(&host, "session-a")
         .await
         .expect("surface");
     assert!(surface.tools.is_empty());
-}
-
-#[tokio::test]
-async fn engine_owned_inbox_attachment_is_independent_of_the_model_tool_surface() {
-    let host = EngineHostHandle::new_in_memory().expect("host");
-    let attach = FunctionDefinition::new(
-        FunctionId::new("worker_kernel::inbox_attach").expect("function id"),
-        WorkerId::new("worker_kernel").expect("worker id"),
-        "Attach unseen inbox results",
-        crate::engine::FunctionVisibility::Internal,
-        EffectClass::IdempotentWrite,
-    )
-    .with_idempotency(crate::engine::IdempotencyContract::profile())
-    .with_request_schema(serde_json::json!({"type":"object"}))
-    .with_response_schema(serde_json::json!({"type":"object"}));
-    host.register_function_for_setup(attach, Arc::new(InboxAttachHandler))
-        .expect("internal inbox attachment");
-
-    let surface = resolve_provider_primitive_surface(&host, "session-a")
-        .await
-        .expect("surface");
-    assert!(!surface.targets_by_name.contains_key("worker_inbox"));
-    let primer =
-        take_worker_inbox_context(&host, "session-a", 1, Some("background"), None, None, None)
-            .await;
-
-    assert_eq!(
-        primer.narrative.as_deref(),
-        Some("Background worker is ready.")
-    );
-    assert_eq!(primer.outcome, "injected");
 }
 
 #[tokio::test]
@@ -255,20 +224,6 @@ async fn worker_agent_sessions_skip_all_automatic_context_hooks() {
             1,
             Some("bounded worker input"),
             Some("/workspace/example"),
-            Some("worker-a"),
-            None,
-            None,
-        )
-        .await
-        .narrative
-        .is_none()
-    );
-    assert!(
-        take_worker_inbox_context(
-            &host,
-            "worker-session",
-            1,
-            Some("bounded worker input"),
             Some("worker-a"),
             None,
             None,

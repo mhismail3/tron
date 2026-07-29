@@ -32,10 +32,14 @@
 //! `client_actions` selects the current healthy worker for narrow native
 //! capture/presentation seams without creating a second execution path.
 //! `hooks` selects one immutable healthy owner and joins the ordinary durable
-//! invocation. Pure relevance/inbox selection derives short-lived exact-input
-//! idempotency from canonical JSON; session- and trace-bound hooks preserve
-//! their causal key. It owns neither a result cache nor a second execution
-//! path.
+//! invocation. Pure relevance derives short-lived exact-input idempotency from
+//! canonical JSON; session- and trace-bound hooks preserve their causal key. It
+//! owns neither a result cache nor a second execution path. `agent_deliveries`
+//! owns coordination tools, import ordering, waits, and safe delivery-only
+//! wakeups; `agent_delivery_import` projects closed terminal/effect envelopes
+//! without holding both databases. Terminal completion
+//! notifies that same dispatcher for low-latency import while its one-second
+//! tick remains the lost-signal and restart reconciliation fallback.
 //! `notifications` drains the durable worker-to-client outbox through APNs;
 //! provider acceptance is evidence, never a human-delivery receipt.
 //! Closed self-wakeup output queues only the same immutable worker version at
@@ -53,11 +57,11 @@ use dashmap::{DashMap, DashSet};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::{Mutex, Notify, Semaphore};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-use super::persistence::WorkerStore;
+use super::persistence::{AgentDeliveryOutboxRecord, WorkerStore};
 use super::process::{MAX_PROCESS_CAPTURE_BYTES, ProcessTree};
 use super::types::{
     ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_ENGINE_CONCURRENCY,
@@ -70,6 +74,8 @@ use support::*;
 
 mod activation;
 mod admission;
+mod agent_deliveries;
+mod agent_delivery_import;
 mod artifacts;
 pub(super) use admission::ModelToolInvocationOutcome;
 pub(crate) use admission::WorkerInputContractError;
@@ -207,6 +213,7 @@ pub struct WorkerRuntime {
     shutting_down: AtomicBool,
     notification_maintenance_ticks: AtomicUsize,
     session_organization_maintenance_ticks: AtomicUsize,
+    delivery_maintenance: Arc<Notify>,
     notification_configuration_revision: Mutex<Option<String>>,
     http: reqwest::Client,
     notification_transport: super::notifications::transport::NotificationTransport,
@@ -234,6 +241,16 @@ impl WorkerRuntime {
             }
         }
         let stopped = store.stop_all()?;
+        let _ = event_store
+            .expire_agent_deliveries()
+            .map_err(|error| format!("reconcile expired agent deliveries: {error}"))?;
+        let recovered_leases = event_store
+            .clear_agent_delivery_leases()
+            .map_err(|error| format!("clear stale agent-delivery leases: {error}"))?;
+        if recovered_leases > 0 {
+            metrics::counter!("agent_delivery_lease_recoveries_total")
+                .increment(recovered_leases as u64);
+        }
         let notification_transport =
             super::notifications::transport::NotificationTransport::new(store.home())?;
         Ok(Arc::new(Self {
@@ -257,6 +274,7 @@ impl WorkerRuntime {
             shutting_down: AtomicBool::new(false),
             notification_maintenance_ticks: AtomicUsize::new(0),
             session_organization_maintenance_ticks: AtomicUsize::new(0),
+            delivery_maintenance: Arc::new(Notify::new()),
             notification_configuration_revision: Mutex::new(None),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(MAX_INVOCATION_SECONDS))

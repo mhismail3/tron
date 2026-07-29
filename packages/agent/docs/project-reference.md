@@ -174,15 +174,16 @@ Token-window selection, cancellation, checkpoint restoration, durable
 compact-boundary proof, and provider context mutation remain irreducible
 kernel custody.
 
-The `continuity_context` hook is the narrow provider-context seam for an
-ordinary Continuity Curator worker. The worker owns capture, project/global
-scope, correction, promotion, tombstones, explicit clear, expiry retention,
-retrieval, ranking, and the selected narrative. The engine supplies only the
-bounded current-task query and canonical working-directory identity, excludes
-the owner from recursively recalling itself, redacts credential-shaped text,
-and bounds the returned narrative before provider admission. Empty output, no
-healthy owner, or a failed invocation contributes no replacement text. The
-fixed code never chooses a memory or invents fallback continuity.
+The `continuity_context` hook is the narrow semantic seam for an ordinary
+Continuity Curator worker. The worker owns capture, project/global scope,
+correction, promotion, tombstones, explicit clear, expiry retention, retrieval,
+ranking, and the selected narrative. The engine supplies only the bounded
+current-task query and canonical working-directory identity, excludes the owner
+from recursively recalling itself, and runs the hook asynchronously after
+prompt admission. A result may enter only a later natural turn in its
+originating run; if that run has ended, the result becomes stale audit evidence.
+Empty output, no healthy owner, or failure contributes no replacement text and
+never delays a provider request.
 
 The initial worker contract uses deterministic hybrid retrieval and returns
 matching project records before global records. SQLite FTS5 supplies exact and
@@ -199,32 +200,103 @@ The `worker_relevance` hook accepts the latest user task query plus only the
 bounded canonical candidate summaries that the local scorer found meaningful,
 and returns typed worker ids and scores. Sending zero-score catalog entries
 would add prompt latency without improving the policy decision.
-Automatic provider projection and explicit `worker_discover` call this same
-hook; there is no parallel semantic-discovery policy. The engine validates that
-rankings contain only unique candidates, preserves version-bound explicit
-promotion precedence, and disables an owner that returns invalid semantic
-output. Every agent-runner worker turn uses the exact local weighted scorer
-instead of invoking semantic routing; worker sessions also skip automatic Inbox
-and Continuity context. This prevents cross-hook recursion and keeps unrelated
-semantic context out of immutable internal worker protocols. If no healthy
-owner exists, the same scorer provides deterministic recovery.
-An empty/trivial query or fewer than two locally meaningful candidates is
-resolved without admitting a semantic invocation.
+Every provider turn has an immediately available deterministic surface.
+Semantic ranking begins only after admission and may alter a later safe turn in
+the same run; a late result becomes stale. Explicit `worker_discover` may still
+request the same worker-owned ranking policy. The engine validates unique
+candidate IDs, preserves version-bound promotion precedence, and disables an
+owner that returns invalid output. Agent-runner worker turns use only the local
+weighted scorer and skip optional continuity and mailbox curation, preventing
+cross-hook recursion.
 
-The `inbox_context` hook receives the current task query and a bounded,
-redacted, newest-first set of pending worker-result previews. It returns the
-observation ids to attach and the transient narrative to place in the next
-provider turn. The kernel validates that every id is unique and came from the
-supplied candidate set, atomically claims the complete selection so concurrent
-sessions cannot split it, and injects only a bounded narrative. The policy may
-attach irrelevant observations without narrating them. Without a healthy
-owner—or for any agent-runner worker turn—the exact
-error/relevance selector and JSON projection provide deterministic recovery.
-Candidate reads never mark observations attached, invalid selections disable the
-hook owner, and a lost concurrent claim injects no stale narrative. The hook
-receives at most the schema's 32 candidates. Empty/trivial queries and sets with
-fewer than two pending observations use the same deterministic selector without
-crossing an agent-runner boundary.
+Worker results, peer-agent messages, and explicit waits use
+the durable Agent Delivery primitive. Core code owns addressing, workspace and
+profile-mailbox scope, provenance, persistence, safe-turn leasing, observation,
+wake admission, retry, and crash recovery. Deliveries always enter the provider
+request as labeled untrusted reference context. Optional workers own semantic
+choices but never execute on the provider critical path.
+
+At session creation, core code performs a cheap mailbox candidate check. When
+candidates exist, the `mailbox_curation` hook receives bounded IDs and redacted
+previews asynchronously and returns only selected IDs. Core code revalidates and
+atomically claims the complete subset. A ready result may join the first natural
+turn; a later result waits for another natural turn and never wakes or delays
+the initial response. After this one creation-time scan, mailbox list and claim
+are explicit model tools.
+
+### Durable Agent Delivery and resumable sessions
+
+`tron.sqlite` owns `agent_deliveries`, `agent_waits`, and
+`agent_wait_members`. Delivery provenance and authority are engine-derived:
+model/worker payloads cannot select a sender identity, workspace, causal trace,
+root, depth, or result grant. Existing-session and newly created task sends stay
+inside the normalized source workspace; a profile mailbox is the sole
+intentional cross-workspace seam. A delivery referencing a worker result grants
+that full result only to its origin session or claimed target session.
+
+Worker terminal transitions and validated delivery effects enter an immutable
+`workers.sqlite` outbox in the same transaction as terminal truth. Import reads
+pending rows, releases the worker transaction, commits idempotently to
+`tron.sqlite`, then acknowledges the source row. Transient errors retry;
+malformed effects, scope violations, deleted targets, and other permanent
+failures become rejected evidence plus deterministic Attention in one
+`workers.sqlite` transaction. If either write fails, both remain pending for
+retry; poison rows still cannot block later rows.
+Startup resumes import and exact wait reconciliation even while worker
+execution is stopped. Purge is rejected while an outbox row is pending or a
+surviving delivery grants result access.
+
+Disabling, stopping, retiring, or failing a worker terminalizes its affected
+queued/running invocations as cancelled evidence in the same worker transaction,
+including one terminal outbox row per invocation. Startup performs the same
+reconciliation for inactive workers. Permanent purge takes SQLite writer intent
+and rechecks both nonterminal work and pending outbox rows before removing
+canonical state, closing completion-versus-purge races.
+
+The closed internal run trigger is either `UserPrompt` or `DeliveryWake`. Only a
+user prompt validates, persists, broadcasts, or displays a user message. A wake
+reloads durable delivery IDs and competes for the ordinary session run guard.
+Passive deliveries never create a run. Wake deliveries arriving during a run
+wait for the requested next-turn/next-run boundary; run release scans again so
+arrival cannot be lost in the release race. Delivery insertion reads and
+persists the target's active-run identity while holding the same registry mutex
+used by run admission and release, so a `next_run` exclusion cannot straddle
+that boundary.
+
+Provider preparation leases FIFO at most eight deliveries and remains inside
+the existing aggregate request-context byte bound. A persisted v4 provider
+audit proves preparation before the stream opens. Only durable assistant-turn
+completion marks the lease observed. Setup/provider failure, clean run release,
+and startup make unobserved leases pending again for explicit at-least-once
+redelivery. No wall-clock lease expiry can race a provider request. User
+cancellation demotes wake deliveries to passive; shutdown and ordinary
+busy/archive deferrals do not consume attempts. Three true delivery-only
+failures demote a wake to passive after bounded retry delays and create one
+idempotent operator Attention record. Sender expiry is reconciled to durable
+cancellation before mailbox, wake, or grant reads, and an expired delivery
+cannot retain result authority. Autonomous wake
+propagation deeper than the existing causal limit of 16 is similarly retained
+as passive evidence.
+
+The fixed model tools are:
+
+- `agent_send`: same-workspace existing task send, atomic visible
+  task-plus-initial-delivery creation, or passive workspace/profile mailbox
+  send;
+- `agent_wait_for_workers`: non-blocking all/any wait over 1–32 eligible
+  top-level invocations; success, failure, cancellation, and interruption all
+  satisfy with evidence;
+- `agent_mailbox_list`: bounded redacted workspace/profile summaries with
+  opaque delivery IDs and no relevance policy;
+- `agent_mailbox_claim`: atomic all-or-none claim of explicitly listed IDs,
+  with exactly one winner under concurrent claims.
+
+New visible tasks inherit the source model and working directory unless a
+validated in-workspace override exists. Wait registration commits members
+first, immediately reconciles exact worker states, reconciles again on terminal
+outbox import, and repeats pending reconciliation at startup. Resolution and
+its wake delivery share one Tron transaction, closing completion-before,
+during, and after registration races.
 
 The `session_title` hook receives only the bounded user prompt and assistant
 response from one successfully completed ordinary user exchange and returns
@@ -285,24 +357,19 @@ endpoint inspection are never contract-discovery or activation steps. If the
 public schema cannot express required behavior, the agent reports a concrete
 engine-contract gap instead of guessing or probing for hidden machinery.
 
-Synchronous semantic hooks have a sixty-second default lifecycle ceiling. An
+Worker hooks have a sixty-second default lifecycle ceiling. An
 immutable worker may tighten that boundary with the generic
-`executionLimits.maxInvocationSeconds` field. The relevance-router and
-inbox-curator restorations use GPT-5.6 Luna with no extended reasoning and a
-three-second hard boundary; a slower cold path is deliberately abandoned in
-favor of deterministic fallback instead of delaying the active session.
-A timeout cancels and records the invocation, then the caller uses its
-deterministic recovery result without disabling these optional policy owners;
-invalid typed output still disables the owner. Agent-runner bundles can declare
-one canonical provider-neutral `reasoningLevel`; these small production policy
-workers select `none`, and the existing authenticated model path projects it
-without embedding policy or credentials in the kernel. Exact canonical hook input
-reuses the existing durable invocation ledger inside one aligned 30-second
-window only for the pure `worker_relevance` and `inbox_context` policies. Hook
-identity, owner version, input, and window form the key, so a worker update or
-expired window never replays stale policy and no separate cache subsystem
-exists. Session title, context compaction, and continuity preserve their causal
-idempotency because their result may be bound to a particular session or trace.
+`executionLimits.maxInvocationSeconds` field. Timeout and failure of continuity,
+semantic ranking, or mailbox curation remain ordinary durable worker evidence
+outside provider latency. Invalid typed output still disables the owner.
+Agent-runner bundles can declare one canonical provider-neutral
+`reasoningLevel`, projected through the existing authenticated model path.
+Exact canonical relevance input may reuse the durable invocation ledger inside
+one aligned 30-second window. Hook identity, owner version, input, and window
+form the key, so an update or expired window never replays stale policy and no
+separate cache subsystem exists. Session title, compaction, continuity, and
+mailbox curation preserve causal idempotency because their result may be bound
+to a session or trace.
 
 ## Worker-First Execution
 
@@ -753,19 +820,20 @@ The Engine Activity UI treats runs as the primary execution ledger. Its
 Attention projection contains only unresolved failures and setup blockers.
 Successful informational outcomes never become current Attention, including
 completed schedule, dispatch, reminder-reconciliation, or other background
-history. Those outcomes can remain separately eligible for one-time relevant
-agent context. An exact immutable-version invocation timeout from the
-deterministic-fallback `worker_relevance` or `inbox_context` hook also remains
-failed run/inbox history without becoming current operator Attention or future
-agent context. This exception is derived from the hook trigger, failed
-invocation, inbox error, and declared version timeout; invalid typed output,
-command failure, and every other hook error remain actionable. A later verified healthy activation or rollback
+history. Detached top-level results may separately produce durable Agent
+Deliveries. An exact immutable-version invocation timeout from
+`worker_relevance`, or from the removed historical `inbox_context` hook, remains
+failed run/result history without becoming current operator Attention. This
+exception is derived from the hook trigger, failed invocation, result error,
+and declared version timeout; invalid typed output, command failure, and every
+other hook error remain actionable. A later verified healthy activation or rollback
 resolves every older failure for that worker in the live Attention and
 agent-context projections. Merely enabling the failed version is not recovery evidence.
 Resolution never edits or deletes the failed run or delivery record: both
 remain in the complete inbox available through an explicit audit sheet, where
-`contextAttached` truthfully describes whether a result was attached to a later
-agent context—not whether a human opened the record. Both ledgers page on
+historical `contextAttached` truthfully describes whether an old result was
+attached by the removed synchronous path—not whether a human opened the
+record. Both ledgers page on
 demand, so they remain inspectable without one unbounded transport response.
 Durable state remains complete in canonical storage—these are bounded read
 projections, not retention limits.
@@ -1245,17 +1313,18 @@ bias relevance.
 
 Every model request is explained by the existing append-only
 `model.provider_request` session event. Format
-`tron.model_provider_request.v3` adds a provider-neutral `contextManifest`
-beside the already bounded, redacted provider envelope; it does not introduce
-a context table, retention policy, cache, or registry. The turn runner persists
-this event before opening the provider stream.
+`tron.model_provider_request.v4` adds durable Agent Delivery evidence to the
+provider-neutral `contextManifest` beside the already bounded, redacted
+provider envelope. V2 and v3 remain readable. This does not introduce a second
+context table, retention policy, cache, or registry; the turn runner persists
+the event before opening the provider stream.
 
 A turn-local context assembly is the only writer for provider context. Stable
 system content contains base instructions, environment, and one compact
 engine-surface guidance block; it never embeds catalog revisions, hashes,
 worker lists, selection reasons, run counts, or duplicated tool schemas.
-Non-empty Continuity Curator and Inbox Context Curator narratives are encoded
-together in one final engine-authored reference message after durable
+Eligible durable deliveries and any ready asynchronous continuity output are
+encoded together in one final engine-authored reference message after durable
 conversation history. The wrapper explicitly treats its JSON values as
 untrusted reference evidence rather than instructions. It is never added to
 the message store or accumulated during replay. Empty, skipped, failed, and
@@ -1266,8 +1335,8 @@ the provider-neutral system prompt. It also records:
 - every provider-visible message in order, including its content kinds,
   redacted preview, byte count, digest, projection state, durable source event
   IDs, and worker invocation when one exists;
-- continuity and inbox evaluations even when they were empty, unavailable,
-  failed, skipped, or supplied by deterministic fallback;
+- asynchronous continuity evaluation when one was available for this exact
+  turn, without claiming a synchronous policy ran;
 - continuity memory ID, revision, and scope evidence returned by compatible
   Continuity Curator versions, without injecting those identifiers into the
   prompt;
@@ -1278,6 +1347,8 @@ the provider-neutral system prompt. It also records:
   manifest to the final `Context`;
 - automatic-context delivery as `reference` or `none`; earlier v3 rows without
   the field remain truthfully labeled as historical system-level context;
+- every included delivery ID, source kind, intent, wake policy, boundary,
+  redelivery state, bounded provenance, and exact provider-visible content;
 - stable-instruction bytes/digest, fixed and dynamic tool counts/schema
   bytes/digests, and request-reference bytes/digest.
 
@@ -1299,7 +1370,7 @@ the last fixed tool, `1h` on the final stable system block, and `5m` on the
 last durable conversation block. Request-specific reference context follows
 without a marker. Google, Kimi, MiniMax, and Ollama use the same single
 reference projection without changing their provider cache controls. Metrics
-record bounded context-segment byte histograms, worker/inbox selection
+record bounded context-segment byte histograms, worker selection
 mechanisms, cache-read/write token counters, and provider cache-read ratios;
 labels never contain request or session identity.
 New session aggregates denormalize the immutable `tokenRecord` into mutually
@@ -1398,7 +1469,7 @@ agent runners and 12 deterministic command runners.
 
 | Family | Workers |
 |---|---|
-| Core policy | Compaction Worker (internal/agent), Continuity Curator (direct/command), Inbox Context Curator (internal/agent), Session Organizer (direct/command), Session Title Curator (internal/agent), Worker Relevance Router (internal/agent) |
+| Core policy | Compaction Worker (internal/agent), Continuity Curator (direct/command), Mailbox Curator (internal/agent), Session Organizer (direct/command), Session Title Curator (internal/agent), Worker Relevance Router (internal/agent) |
 | Automation | Automation Schedules (internal/command), Automation Reminders (direct/command), Notification Policy (direct/command), Automation Workflows (direct/command) |
 | Native boundary | Local Transcription (internal/command), Artifact Studio (direct/command), Browser Operator (direct/agent), Mac Operator (direct/agent) |
 | Research | Research Search (direct/command), Research Source Review (internal/agent), Research Citation (internal/agent), Research Coordinator (direct/agent) |
@@ -1483,16 +1554,11 @@ background-result narrative are projected from live typed surfaces or
 worker-owned hooks on every turn instead of being duplicated in a second
 hardcoded instruction set.
 
-Automatic worker projection and `worker_discover` share the active
-`worker_relevance` worker. Its input contains the latest user task query and
-bounded, locally meaningful candidate metadata; its output is a typed ranking.
-The engine retains one exact weighted-term and adjacent-phrase scorer as
-recovery when no hook is active, the hook fails, or the hook's own agent-runner
-turn resolves its surface. Deterministic ranking runs first. The semantic
-router is invoked only when meaningful candidates exceed the caller's result
-bound and ranking can therefore change which workers are admitted. Session
-promotions remain version-bound and outrank both paths, so routing never
-depends exclusively on another worker being healthy.
+Automatic worker projection begins from the exact weighted-term and
+adjacent-phrase scorer, so provider setup never waits for a policy worker. The
+active `worker_relevance` worker may asynchronously refine a later safe turn in
+the same run, while explicit `worker_discover` can request its typed ranking
+directly. Session promotions remain version-bound and outrank both paths.
 
 Three unrelated runtime boundaries use three deliberately separate closed
 types:
@@ -1515,11 +1581,12 @@ becoming another synthetic authorization model.
 Executable worker bundles retain source revisions and checksums for inspection,
 ranking, recovery, and audit.
 
-Attaching pending worker inbox results is an engine-owned session projection,
-not an agent action. It runs under the internal runtime identity while retaining
-the session and parent trace as provenance. It calls the internal attachment
-operation independently of whether the separate specialist inbox inspection
-tool is selected for the model-visible surface.
+Agent Delivery admission is an engine-owned session projection, not a fabricated
+user action. A `DeliveryWake` reloads durable delivery IDs under the internal
+runtime identity, acquires ordinary session admission, and enters provider
+preparation without persisting or broadcasting a user message. Passive
+deliveries wait for a natural safe turn. Mailbox discovery and claim remain
+explicit bounded tools after the asynchronous creation-time scan.
 
 The remaining boundaries are practical:
 
@@ -2358,6 +2425,9 @@ indexes and durable operational history.
 
 | Table | Ownership |
 |---|---|
+| `agent_deliveries` | durable session/mailbox updates, safe-boundary leases, wake policy, result grants, and observation state |
+| `agent_wait_members` | exact top-level worker members and terminal evidence for durable waits |
+| `agent_waits` | durable current-session all/any wait state |
 | `blobs` | content-addressed durable payloads |
 | `engine_catalog_revision` | current typed-function surface revision |
 | `engine_idempotency_entries` | engine invocation idempotency ledger |
@@ -2379,7 +2449,7 @@ operational evidence:
 
 | Table | Ownership |
 |---|---|
-| `worker_schema` | worker index schema version; v12 adds atomic worker handoffs and split notification ownership; v13 adds self-only delayed invocation custody; v14 adds artifact custody and storage attention; v15 adds the exact session-organization mutation outbox |
+| `worker_schema` | worker index schema version; v12 adds atomic worker handoffs and split notification ownership; v13 adds self-only delayed invocation custody; v14 adds artifact custody and storage attention; v15 adds the exact session-organization mutation outbox; v16 adds the immutable worker-to-agent terminal/effect outbox |
 | `blobs` | generic content-addressed compressed result bodies larger than 8 KiB |
 | `storage_payload_refs` | one generic ownership/integrity row for every successful invocation output |
 | `workers` | rebuildable current catalog |
@@ -2393,6 +2463,7 @@ operational evidence:
 | `worker_causal_traces` | trace roots, depth, delivery, and suppression counters |
 | `worker_trace_deliveries` | unique worker/trigger/idempotency combinations per trace |
 | `worker_inbox` | durable compact result-reference receipts, failure records, and agent-context attachment state |
+| `agent_delivery_outbox` | immutable pending/imported/rejected terminal and worker-declared Agent Delivery effects |
 | `worker_audit` | lifecycle and mutation evidence |
 | `worker_health` | versioned activation/lifecycle/execution health history |
 | `worker_runtime_settings` | durable engine stop-all state |

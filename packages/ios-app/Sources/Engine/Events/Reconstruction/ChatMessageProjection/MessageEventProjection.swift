@@ -57,6 +57,7 @@ enum MessageEventProjection {
             timestamp: timestamp,
             turnNumber: parsed.turn,
             hasThinking: parsed.hasThinking,
+            agentDeliveryProvenance: parsed.agentDeliveryProvenance,
             isFinalAssistantResponse: parsed.isFinalAssistantResponse
         )
         message.applyFinalAssistantResponseMetadata(

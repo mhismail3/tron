@@ -36,6 +36,7 @@ fn bundle() -> WorkerBundle {
             checksum: None,
         }],
         engine_hooks: Vec::new(),
+        engine_deliveries: Vec::new(),
         client_actions: Vec::new(),
         client_deliveries: Vec::new(),
         worker_dispatch_routes: Vec::new(),

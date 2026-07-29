@@ -34,6 +34,31 @@ final class AssistantMessagePayloadTests: XCTestCase {
         XCTAssertEqual(parsed?.contentBlocks[0]["text"] as? String, "Hello world")
     }
 
+    func testParsesDeliveryOnlyContinuationProvenance() {
+        var payload = validPayload(content: AnyCodable([
+            ["type": "text", "text": "The worker finished."] as [String: Any]
+        ] as [[String: Any]]))
+        payload["agentDeliveryContinuation"] = AnyCodable([
+            "deliveries": [
+                [
+                    "deliveryId": "delivery-1",
+                    "sourceKind": "worker_result",
+                    "sourceSessionId": "session-source",
+                    "sourceInvocationId": "worker-run-1",
+                    "redelivery": true
+                ] as [String: Any]
+            ]
+        ] as [String: Any])
+
+        let parsed = AssistantMessagePayload(from: payload)
+
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.count, 1)
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.deliveryId, "delivery-1")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.sourceKind, "worker_result")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.sourceInvocationId, "worker-run-1")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.redelivery, true)
+    }
+
     func testTextWithoutToolsIsEligibleForFinalResponsePresentation() {
         let payload = validPayload(content: AnyCodable([
             ["type": "text", "text": "Final response"] as [String: Any]

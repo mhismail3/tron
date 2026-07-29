@@ -36,6 +36,10 @@ struct SessionContextSheet: View {
     @State var latestContextDetail: SessionContextRequestDetailDTO?
     @State var isLoadingInspectableContext = false
     @State var contextLoadError: String?
+    @State var agentUpdates: [SessionAgentUpdateDTO] = []
+    @State var agentWaits: [SessionAgentWaitDTO] = []
+    @State var agentUpdatesLoadError: String?
+    @State var isLoadingAgentUpdates = false
     @State var selectedContextDetail: SessionContextDetailSelection?
     @State var showContextHistory = false
 
@@ -82,7 +86,10 @@ struct SessionContextSheet: View {
                     sessionSummary
                     requestSummarySection
                     receivedContextSection
-                    automaticContextSection
+                    agentUpdatesSection
+                    if manifest?.automaticContext.isEmpty == false {
+                        automaticContextSection
+                    }
                     workerActivitySection
                     sessionActionsSection
                     providerAuditSection

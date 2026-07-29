@@ -131,4 +131,23 @@ struct SessionClientTests {
             eventId: "event-1"
         )
     }
+
+    @Test("Agent updates use the session scope and clamp their bounded limit")
+    func testAgentUpdatesRead() async throws {
+        let transport = makeConnectedTransport()
+        let client = SessionClient(transport: transport)
+        transport.readHandler = { functionId, payload, options in
+            #expect(functionId.rawValue == "session::agent_updates")
+            #expect(options.context?.sessionId == "session-123")
+            let params = try #require(payload as? SessionAgentUpdatesParams)
+            #expect(params.sessionId == "session-123")
+            #expect(params.limit == 200)
+            return SessionAgentUpdatesResultDTO(updates: [], waits: [])
+        }
+
+        let result = try await client.agentUpdates(sessionId: "session-123", limit: 500)
+
+        #expect(result.updates.isEmpty)
+        #expect(result.waits.isEmpty)
+    }
 }

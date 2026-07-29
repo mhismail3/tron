@@ -21,7 +21,7 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `provider_phase` | Resolve the live surface, concurrently evaluate bounded worker inbox and continuity context, finalize the typed context manifest, persist the v3 request audit, and only then open the provider stream |
+//! | `provider_phase` | Resolve the deterministic live surface, lease bounded durable deliveries, finalize the typed context manifest, persist the v4 request audit, and only then open the provider stream |
 //! | `stream_phase` | Journal and consume the provider stream, including durable failure and cancellation terminalization |
 //! | `tool_phase` | Execute a provider-requested tool batch and persist its lifecycle |
 //! | `persistence` | Build and commit assistant/turn protocol rows |
@@ -72,6 +72,54 @@ use crate::domains::agent::r#loop::errors::StopReason;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::types::TurnResult;
 use crate::shared::protocol::messages::TokenUsage;
+
+struct DeliveryLeaseGuard {
+    event_store: Option<Arc<crate::domains::session::event_store::EventStore>>,
+    run_id: String,
+}
+
+impl DeliveryLeaseGuard {
+    fn new(
+        persister: Option<
+            &crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister,
+        >,
+        run_id: &str,
+        leased_delivery_ids: &[String],
+    ) -> Self {
+        Self {
+            event_store: (!leased_delivery_ids.is_empty())
+                .then(|| persister.map(|persister| Arc::clone(persister.event_store())))
+                .flatten(),
+            run_id: run_id.to_owned(),
+        }
+    }
+
+    fn observe(
+        &mut self,
+        session_id: &str,
+        turn: u32,
+    ) -> Result<(), crate::domains::agent::r#loop::errors::RuntimeError> {
+        if let Some(event_store) = self.event_store.as_ref() {
+            event_store
+                .observe_agent_deliveries(session_id, &self.run_id, turn)
+                .map_err(|error| {
+                    crate::domains::agent::r#loop::errors::RuntimeError::Persistence(format!(
+                        "failed to mark agent deliveries observed: {error}"
+                    ))
+                })?;
+            self.event_store = None;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for DeliveryLeaseGuard {
+    fn drop(&mut self) {
+        if let Some(event_store) = self.event_store.take() {
+            let _ = event_store.release_agent_delivery_leases(&self.run_id);
+        }
+    }
+}
 
 fn cancellation_failure(session_id: &str) -> FailureEnvelope {
     FailureEnvelope::new(
@@ -399,6 +447,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     };
     let primitive_surface = prepared_provider.primitive_surface;
     let response = prepared_provider.response;
+    let mut delivery_lease_guard =
+        DeliveryLeaseGuard::new(persister, run_id, &prepared_provider.leased_delivery_ids);
     let processed_stream = match process_provider_stream(StreamPhaseParams {
         turn,
         response,
@@ -445,7 +495,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         content_has_thinking
     };
 
-    let assistant_payload = build_completed_assistant_payload(
+    let mut assistant_payload = build_completed_assistant_payload(
         &stream_result,
         turn,
         &model_name,
@@ -455,6 +505,26 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         token_record_json.as_ref(),
         cost,
     );
+    let agent_delivery_continuation = {
+        let mut pending = run_context.pending_delivery_provenance.lock();
+        for delivery in &prepared_provider.leased_delivery_provenance {
+            let delivery_id = delivery.get("deliveryId");
+            if !pending
+                .iter()
+                .any(|existing| existing.get("deliveryId") == delivery_id)
+            {
+                pending.push(delivery.clone());
+            }
+        }
+        (!pending.is_empty()).then(|| {
+            serde_json::json!({
+                "deliveries":pending.clone(),
+            })
+        })
+    };
+    if let Some(continuation) = agent_delivery_continuation.as_ref() {
+        assistant_payload["agentDeliveryContinuation"] = continuation.clone();
+    }
 
     let assistant_event = match persist_completed_assistant_message(
         persister,
@@ -492,6 +562,9 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             };
         }
     };
+    if stream_result.tool_invocations.is_empty() {
+        run_context.pending_delivery_provenance.lock().clear();
+    }
     info!(
         component = "agent.turn",
         agent_event = "assistant_message_persisted",
@@ -528,6 +601,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),
+        agent_delivery_continuation,
     );
 
     let invocation_phase = tool_phase::execute_tool_phase(ToolPhaseParams {
@@ -650,6 +724,19 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         return TurnResult {
             success: false,
             error: Some(error_msg),
+            stop_reason: Some(StopReason::Error),
+            token_usage: stream_result.token_usage,
+            ..Default::default()
+        };
+    }
+
+    // Prepared delivery context becomes observed only after the assistant,
+    // tools, and terminal turn row are all durable. Every earlier return drops
+    // the guard and restores the leases to pending.
+    if let Err(error) = delivery_lease_guard.observe(session_id, turn) {
+        return TurnResult {
+            success: false,
+            error: Some(error.to_string()),
             stop_reason: Some(StopReason::Error),
             token_usage: stream_result.token_usage,
             ..Default::default()

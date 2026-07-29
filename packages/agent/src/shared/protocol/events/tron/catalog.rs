@@ -174,6 +174,11 @@ tron_events! {
         token_record: Option<Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        #[serde(
+            rename = "agentDeliveryContinuation",
+            skip_serializing_if = "Option::is_none"
+        )]
+        agent_delivery_continuation: Option<Value>,
     } => "response_complete",
 
     // -- Message --

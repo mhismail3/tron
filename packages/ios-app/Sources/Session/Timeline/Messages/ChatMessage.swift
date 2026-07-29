@@ -2,6 +2,14 @@ import Foundation
 
 // MARK: - Chat Message Model
 
+struct AgentDeliveryMessageProvenance: Decodable, Equatable, Sendable {
+    let deliveryId: String
+    let sourceKind: String
+    let sourceSessionId: String?
+    let sourceInvocationId: String?
+    let redelivery: Bool
+}
+
 struct ChatMessage: Identifiable, Equatable {
     let id: UUID
     let role: MessageRole
@@ -29,6 +37,11 @@ struct ChatMessage: Identifiable, Equatable {
     /// Whether extended thinking was used
     var hasThinking: Bool?
 
+    /// Minimal durable provenance for a delivery-only assistant continuation.
+    /// Content remains inspectable through Session Context; chat carries only
+    /// enough identity to explain why the assistant resumed without a user row.
+    var agentDeliveryProvenance: [AgentDeliveryMessageProvenance]
+
     /// Server-backed finality for the textual response that ends a prompt
     /// cycle. Live events set this from `agent.response_complete`; replay sets
     /// it from the persisted assistant payload's tool blocks.
@@ -50,6 +63,7 @@ struct ChatMessage: Identifiable, Equatable {
         latencyMs: Int? = nil,
         turnNumber: Int? = nil,
         hasThinking: Bool? = nil,
+        agentDeliveryProvenance: [AgentDeliveryMessageProvenance] = [],
         isFinalAssistantResponse: Bool = false,
         eventId: String? = nil
     ) {
@@ -65,6 +79,7 @@ struct ChatMessage: Identifiable, Equatable {
         self.latencyMs = latencyMs
         self.turnNumber = turnNumber
         self.hasThinking = hasThinking
+        self.agentDeliveryProvenance = agentDeliveryProvenance
         self.isFinalAssistantResponse = isFinalAssistantResponse
         self.eventId = eventId
     }

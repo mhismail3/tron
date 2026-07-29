@@ -277,7 +277,7 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
                         .flatten()
                         .map_or_else(|| self.worker_id.clone(), |worker| worker.name),
                     "originSessionId":record.origin_session_id,
-                    "message":"The durable worker run is continuing in the background. Do not poll or wait; report that it is running. Its result will appear in Session Context and the worker inbox.",
+                    "message":"The durable worker run is continuing in the background. Do not poll or wait; report that it is running. Its result will appear in Session Context and Agent Updates.",
                 }));
             }
         };

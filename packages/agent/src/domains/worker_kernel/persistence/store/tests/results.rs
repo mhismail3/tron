@@ -3,6 +3,297 @@
 use super::*;
 
 #[test]
+fn terminal_worker_truth_and_agent_outbox_signal_commit_together() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let (run, _) = store
+        .begin_invocation(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({}),
+            "agent-outbox-terminal",
+            "trace-agent-outbox-terminal",
+            0,
+            "manual",
+            Some("session-agent-outbox"),
+        )
+        .unwrap();
+    assert!(store.claim_running(&run.invocation_id).unwrap());
+    store
+        .complete_invocation(
+            &run.invocation_id,
+            &published.worker.worker_id,
+            Ok(&json!({"summary":"complete"})),
+        )
+        .unwrap();
+
+    let rows = store.pending_agent_delivery_outbox(10).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].invocation_id, run.invocation_id);
+    assert_eq!(rows[0].payload["status"], "completed");
+    assert_eq!(
+        rows[0].payload["automaticDeliveryEligible"], false,
+        "a foreground result already reached its caller"
+    );
+    assert!(
+        store
+            .mark_agent_delivery_outbox_imported(&rows[0].outbox_id)
+            .unwrap()
+    );
+    assert!(store.pending_agent_delivery_outbox(10).unwrap().is_empty());
+}
+
+#[test]
+fn outbox_rejection_and_operator_attention_commit_atomically() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let (run, _) = store
+        .begin_invocation(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({}),
+            "atomic-rejection",
+            "trace-atomic-rejection",
+            0,
+            "manual",
+            Some("deleted-session"),
+        )
+        .unwrap();
+    assert!(store.claim_running(&run.invocation_id).unwrap());
+    store
+        .complete_invocation(
+            &run.invocation_id,
+            &published.worker.worker_id,
+            Ok(&json!({"summary":"cannot import"})),
+        )
+        .unwrap();
+    let pending = store.pending_agent_delivery_outbox(10).unwrap();
+    assert_eq!(pending.len(), 1);
+    let outbox_id = pending[0].outbox_id.clone();
+    let attention_id = format!("agent_delivery_outbox_attention_{outbox_id}");
+    store
+        .connection()
+        .unwrap()
+        .execute_batch(&format!(
+            "CREATE TRIGGER fail_agent_delivery_attention
+             BEFORE INSERT ON worker_inbox
+             WHEN NEW.inbox_id='{attention_id}'
+             BEGIN SELECT RAISE(ABORT,'forced attention failure'); END;"
+        ))
+        .unwrap();
+
+    assert!(
+        store
+            .reject_agent_delivery_outbox(&outbox_id, "deleted target")
+            .is_err()
+    );
+    assert_eq!(
+        store
+            .agent_delivery_outbox(&outbox_id)
+            .unwrap()
+            .unwrap()
+            .disposition,
+        "pending",
+        "a failed Attention insert must roll back permanent rejection"
+    );
+
+    store
+        .connection()
+        .unwrap()
+        .execute_batch("DROP TRIGGER fail_agent_delivery_attention")
+        .unwrap();
+    assert!(
+        store
+            .reject_agent_delivery_outbox(&outbox_id, "deleted target")
+            .unwrap()
+    );
+    assert!(
+        !store
+            .reject_agent_delivery_outbox(&outbox_id, "deleted target")
+            .unwrap()
+    );
+    assert_eq!(
+        store
+            .agent_delivery_outbox(&outbox_id)
+            .unwrap()
+            .unwrap()
+            .disposition,
+        "rejected"
+    );
+    let attention = store
+        .inbox_filtered(Some(&published.worker.worker_id), None, Some("error"), 10)
+        .unwrap();
+    assert_eq!(
+        attention
+            .iter()
+            .filter(|item| item["inboxId"] == attention_id)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn declared_delivery_effect_and_terminal_truth_share_one_completion_transaction() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut source_bundle = bundle();
+    source_bundle.engine_deliveries =
+        vec![crate::domains::worker_kernel::types::WorkerEngineDelivery::AgentDelivery];
+    source_bundle.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["summary","agentDeliveries"],
+        "properties":{
+            "summary":{"type":"string"},
+            "agentDeliveries":{
+                "type":"array",
+                "maxItems":16,
+                "items":{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["deduplicationKey","target","content"],
+                    "properties":{
+                        "deduplicationKey":{"type":"string"},
+                        "target":{"type":"object"},
+                        "content":{"type":"string"},
+                        "intent":{"type":"string"},
+                        "wakePolicy":{"type":"string"},
+                        "boundary":{"type":"string"},
+                        "expiresAt":{"type":"string"}
+                    }
+                }
+            }
+        }
+    });
+    let mut prepared = store.prepare(source_bundle.clone(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let (run, _) = store
+        .begin_invocation_with_context(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({}),
+            "agent-outbox-effect",
+            "trace-agent-outbox-effect",
+            2,
+            "manual",
+            Some("session-agent-outbox"),
+            WorkerInteractionMode::Foreground,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(store.claim_running(&run.invocation_id).unwrap());
+    let output = json!({
+        "summary":"complete",
+        "agentDeliveries":[{
+            "deduplicationKey":"peer-update",
+            "target":{"kind":"session","sessionId":"session-agent-outbox"},
+            "content":"A bounded peer update.",
+            "intent":"information",
+            "wakePolicy":"passive",
+            "boundary":"next_turn"
+        }]
+    });
+    let effects =
+        crate::domains::worker_kernel::agent_delivery_effects::parse_agent_delivery_effects(
+            &source_bundle,
+            &output,
+        )
+        .unwrap();
+    store
+        .complete_invocation_with_effects_and_session_organization(
+            &run.invocation_id,
+            &published.worker.worker_id,
+            &output,
+            &[],
+            &[],
+            &effects,
+            &[],
+            None,
+            None,
+        )
+        .unwrap();
+
+    let rows = store.pending_agent_delivery_outbox(10).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows.iter().map(|row| row.kind.as_str()).collect::<Vec<_>>(),
+        ["terminal", "delivery"],
+        "stable outbox ordering does not change their shared-transaction truth"
+    );
+    assert_eq!(rows[0].payload["status"], "completed");
+    assert_eq!(rows[1].payload["deduplicationKey"], "peer-update");
+}
+
+#[test]
+fn detached_terminal_signal_is_eligible_and_rejection_does_not_block_later_rows() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+
+    for ordinal in 0..2 {
+        let (run, _) = store
+            .begin_invocation_with_context(
+                &published.worker.worker_id,
+                &published.version,
+                &json!({}),
+                &format!("agent-outbox-background-{ordinal}"),
+                &format!("trace-agent-outbox-background-{ordinal}"),
+                0,
+                "manual",
+                Some("session-agent-outbox"),
+                WorkerInteractionMode::Background,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(store.claim_running(&run.invocation_id).unwrap());
+        store
+            .complete_invocation(
+                &run.invocation_id,
+                &published.worker.worker_id,
+                Ok(&json!({"summary":ordinal})),
+            )
+            .unwrap();
+    }
+
+    let rows = store.pending_agent_delivery_outbox(10).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].payload["automaticDeliveryEligible"], true);
+    assert!(
+        store
+            .reject_agent_delivery_outbox(&rows[0].outbox_id, "invalid target")
+            .unwrap()
+    );
+    let rejected = store
+        .agent_delivery_outbox(&rows[0].outbox_id)
+        .unwrap()
+        .expect("rejected outbox row remains as durable evidence");
+    assert_eq!(rejected.disposition, "rejected");
+    assert_eq!(rejected.attempts, 1);
+    assert_eq!(rejected.last_error.as_deref(), Some("invalid target"));
+    assert!(rejected.processed_at.is_some());
+    let remaining = store.pending_agent_delivery_outbox(10).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].outbox_id, rows[1].outbox_id);
+}
+
+#[test]
 fn invocation_queue_waits_for_an_existing_writer_before_reading_trace_state() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
@@ -613,7 +904,7 @@ fn schema_v10_result_migration_is_resumable_and_idempotent() {
 }
 
 #[test]
-fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
+fn worker_inbox_keeps_background_manual_and_system_history() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
     let mut prepared = store.prepare(bundle(), None).unwrap();
@@ -694,20 +985,6 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
             && item["severity"] == "info"
             && item["requiresAttention"] == false
     }));
-    let first = store
-        .take_notable_pending(Some("recent research"), 10)
-        .unwrap();
-    assert_eq!(first.len(), 3);
-    assert!(first.iter().any(|item| item["triggerKind"] == "schedule"));
-    assert!(first.iter().any(|item| {
-        item["triggerKind"] == "system" && item["result"]["phase"] == "resident_supervision"
-    }));
-    assert!(
-        store
-            .take_notable_pending(Some("recent research"), 10)
-            .unwrap()
-            .is_empty()
-    );
     assert_eq!(
         store
             .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
@@ -715,7 +992,7 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
             .iter()
             .filter(|item| item["contextAttached"] == false)
             .count(),
-        1
+        4
     );
     store
         .rollback(&outcome.worker.worker_id, &outcome.version)
@@ -809,14 +1086,4 @@ fn successful_engine_hook_results_are_audited_without_reentering_context() {
         .unwrap();
     assert_eq!(failed_hook["contextAttached"], false);
     assert_eq!(failed_hook["requiresAttention"], true);
-
-    let pending = store.pending_inbox_context_candidates(10).unwrap();
-    assert_eq!(pending.len(), 2);
-    assert!(pending.iter().any(|item| {
-        item["triggerKind"] == "engine_hook:session_title" && item["severity"] == "error"
-    }));
-    assert!(pending.iter().any(|item| item["triggerKind"] == "schedule"));
-    assert!(!pending.iter().any(|item| {
-        item["triggerKind"] == "engine_hook:session_title" && item["severity"] == "info"
-    }));
 }

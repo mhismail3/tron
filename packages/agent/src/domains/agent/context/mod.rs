@@ -24,8 +24,9 @@
 //! current direct-tool surface. The seed owns only durable behavioral intent;
 //! live tool identity belongs to provider schemas, and exact authoring
 //! mechanics belong to each tool contract. Durable worker state reaches the
-//! model only through explicit worker results and inbox context; the context
-//! manager does not maintain a parallel generic state-prompt channel.
+//! model only through explicit tool results and bounded durable Agent
+//! Deliveries; the context manager does not maintain a parallel generic
+//! state-prompt channel.
 //! Compaction uses token pressure to decide when to compact context, and only
 //! commits when an older message window can be summarized and the result
 //! reduces the durable context. Runtime compaction also requires the loop

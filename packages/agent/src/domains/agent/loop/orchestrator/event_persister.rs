@@ -24,6 +24,11 @@ impl EventPersister {
         Self { event_store }
     }
 
+    /// Borrow the authoritative store for turn-scoped delivery transitions.
+    pub(crate) fn event_store(&self) -> &Arc<EventStore> {
+        &self.event_store
+    }
+
     /// Persist an event through the event store's per-session transaction.
     pub(crate) fn append(
         &self,

@@ -21,6 +21,11 @@ enum AgentResponseCompletePlugin: DispatchableEventPlugin {
             let turn: Int
             let hasToolInvocations: Bool
             let toolInvocationCount: Int
+            let agentDeliveryContinuation: AgentDeliveryContinuation?
+
+            struct AgentDeliveryContinuation: Decodable, Sendable {
+                let deliveries: [AgentDeliveryMessageProvenance]
+            }
         }
     }
 
@@ -28,6 +33,19 @@ enum AgentResponseCompletePlugin: DispatchableEventPlugin {
         let turnNumber: Int
         let hasToolInvocations: Bool
         let toolInvocationCount: Int
+        let agentDeliveryProvenance: [AgentDeliveryMessageProvenance]
+
+        init(
+            turnNumber: Int,
+            hasToolInvocations: Bool,
+            toolInvocationCount: Int,
+            agentDeliveryProvenance: [AgentDeliveryMessageProvenance] = []
+        ) {
+            self.turnNumber = turnNumber
+            self.hasToolInvocations = hasToolInvocations
+            self.toolInvocationCount = toolInvocationCount
+            self.agentDeliveryProvenance = agentDeliveryProvenance
+        }
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
@@ -42,7 +60,9 @@ enum AgentResponseCompletePlugin: DispatchableEventPlugin {
         return Result(
             turnNumber: data.turn,
             hasToolInvocations: data.hasToolInvocations,
-            toolInvocationCount: data.toolInvocationCount
+            toolInvocationCount: data.toolInvocationCount,
+            agentDeliveryProvenance:
+                data.agentDeliveryContinuation?.deliveries ?? []
         )
     }
 

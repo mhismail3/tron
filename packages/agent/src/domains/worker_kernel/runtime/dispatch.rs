@@ -10,23 +10,29 @@ impl WorkerRuntime {
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut runs = JoinSet::new();
         loop {
-            tokio::select! {
+            let maintain = tokio::select! {
                 () = cancellation.cancelled() => break,
-                _ = ticker.tick() => {
-                    if !self.stopped.load(Ordering::SeqCst) {
-                        if self.execution_stop.lock().await.is_cancelled() {
-                            *self.execution_stop.lock().await = CancellationToken::new();
-                        }
-                        self.reconcile_orphaned_invocations(true).await;
-                        self.dispatch_resident_supervision(&mut runs);
-                        self.dispatch_queued(&mut runs).await;
-                        self.dispatch_schedules(&mut runs).await;
-                        self.dispatch_events(&mut runs).await;
-                        self.dispatch_notifications(&mut runs).await;
-                        self.dispatch_session_organization(&mut runs).await;
+                _ = ticker.tick() => true,
+                () = self.delivery_maintenance.notified() => true,
+                Some(_) = runs.join_next(), if !runs.is_empty() => false,
+            };
+            if maintain {
+                // Durability plumbing continues while stop-all suppresses
+                // worker execution. Notify provides the fast path; the ticker
+                // remains the crash/lost-signal reconciliation fallback.
+                self.import_agent_delivery_outbox().await;
+                if !self.stopped.load(Ordering::SeqCst) {
+                    if self.execution_stop.lock().await.is_cancelled() {
+                        *self.execution_stop.lock().await = CancellationToken::new();
                     }
+                    self.reconcile_orphaned_invocations(true).await;
+                    self.dispatch_resident_supervision(&mut runs);
+                    self.dispatch_queued(&mut runs).await;
+                    self.dispatch_schedules(&mut runs).await;
+                    self.dispatch_events(&mut runs).await;
+                    self.dispatch_notifications(&mut runs).await;
+                    self.dispatch_session_organization(&mut runs).await;
                 }
-                Some(_) = runs.join_next(), if !runs.is_empty() => {}
             }
         }
         self.shutdown().await;

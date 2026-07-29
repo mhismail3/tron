@@ -611,7 +611,7 @@ fn restart_records_interruption_and_retry_without_replacing_the_invocation() {
 }
 
 #[test]
-fn index_reconstruction_recovers_canonical_bundle_and_interrupted_queue() {
+fn index_reconstruction_terminalizes_interrupted_queue_for_inactive_rebuilt_worker() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
     let mut prepared = store.prepare(bundle(), None).unwrap();
@@ -669,7 +669,7 @@ fn index_reconstruction_recovers_canonical_bundle_and_interrupted_queue() {
             .unwrap()
             .unwrap()
             .status,
-        "queued"
+        "cancelled"
     );
     assert_eq!(
         reopened
@@ -683,30 +683,12 @@ fn index_reconstruction_recovers_canonical_bundle_and_interrupted_queue() {
     let recovered_attempts = reopened.attempts(&queued.invocation_id).unwrap();
     assert_eq!(recovered_attempts.len(), 1);
     assert_eq!(recovered_attempts[0]["status"], "interrupted");
-    assert!(reopened.claim_running(&queued.invocation_id).unwrap());
-    reopened
-        .set_agent_session_id(&queued.invocation_id, "sess_recovered")
-        .unwrap();
+    assert!(!reopened.claim_running(&queued.invocation_id).unwrap());
     assert_eq!(
-        reopened
-            .invocation(&queued.invocation_id)
-            .unwrap()
-            .unwrap()
-            .agent_session_id
-            .as_deref(),
-        Some("sess_recovered")
+        reopened.pending_agent_delivery_outbox(10).unwrap().len(),
+        1,
+        "terminal recovery must retain durable cancellation evidence"
     );
-    let completed = reopened
-        .complete_invocation(
-            &queued.invocation_id,
-            &outcome.worker.worker_id,
-            Ok(&json!({"recovered":true})),
-        )
-        .unwrap();
-    assert_eq!(completed.attempt_count, 2);
-    let attempts = reopened.attempts(&queued.invocation_id).unwrap();
-    assert_eq!(attempts.len(), 2);
-    assert_eq!(attempts[1]["status"], "completed");
     let trace = reopened.trace("trace-recovery").unwrap().unwrap();
     assert_eq!(trace["invocationCount"], 1);
     assert_eq!(trace["maxCausalDepth"], 0);
@@ -880,44 +862,6 @@ fn optional_fallback_hook_timeouts_are_history_while_other_hook_failures_need_at
             .unwrap();
         assert_eq!(timeout["requiresAttention"], false);
     }
-    let pending = store.pending_inbox_context_candidates(10).unwrap();
-    assert_eq!(pending.len(), 2);
-    assert!(pending.iter().all(|item| {
-        item["workerId"] != "worker-relevance-timeout"
-            && item["workerId"] != "inbox-context-timeout"
-    }));
-    let relevance_timeout_id = history
-        .iter()
-        .find(|item| item["workerId"] == "worker-relevance-timeout")
-        .unwrap()["inboxId"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert!(
-        store
-            .attach_pending_inbox_context(&[relevance_timeout_id])
-            .unwrap()
-            .is_empty(),
-        "an expected fallback timeout cannot be injected into later agent context"
-    );
-    let invalid_output_id = history
-        .iter()
-        .find(|item| item["workerId"] == "worker-relevance-invalid")
-        .unwrap()["inboxId"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert_eq!(
-        store
-            .attach_pending_inbox_context(&[invalid_output_id])
-            .unwrap()
-            .len(),
-        1,
-        "invalid typed output remains actionable context"
-    );
-    let notable = store.take_notable_pending(None, 10).unwrap();
-    assert_eq!(notable.len(), 1);
-    assert_eq!(notable[0]["workerId"], "context-summary-timeout");
     let attention = store
         .inbox_filtered_page(None, None, None, true, 10, 0)
         .unwrap();
@@ -954,17 +898,17 @@ fn verified_recovery_resolves_invocation_errors_without_erasing_history() {
         .unwrap();
     assert!(store.claim_running(&failed.invocation_id).unwrap());
     store
-        .mark_failed(
-            &initial.worker.worker_id,
-            "execution",
-            "invalid typed output",
-        )
-        .unwrap();
-    store
         .complete_invocation(
             &failed.invocation_id,
             &initial.worker.worker_id,
             Err("invalid typed output"),
+        )
+        .unwrap();
+    store
+        .mark_failed(
+            &initial.worker.worker_id,
+            "execution",
+            "invalid typed output",
         )
         .unwrap();
 
@@ -973,8 +917,6 @@ fn verified_recovery_resolves_invocation_errors_without_erasing_history() {
         .unwrap();
     assert_eq!(attention.len(), 1);
     assert_eq!(attention[0]["requiresAttention"], true);
-    assert_eq!(store.pending_inbox_context_candidates(10).unwrap().len(), 1);
-
     store.set_enabled(&initial.worker.worker_id, true).unwrap();
     assert_eq!(
         store
@@ -996,18 +938,6 @@ fn verified_recovery_resolves_invocation_errors_without_erasing_history() {
     assert!(
         store
             .inbox_filtered_page(Some(&initial.worker.worker_id), None, None, true, 10, 0,)
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        store
-            .pending_inbox_context_candidates(10)
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        store
-            .take_notable_pending(Some("recent research"), 10)
             .unwrap()
             .is_empty()
     );
@@ -1044,17 +974,17 @@ fn verified_recovery_resolves_invocation_errors_without_erasing_history() {
             .unwrap()
     );
     store
-        .mark_failed(
-            &activated.worker.worker_id,
-            "execution",
-            "regressed typed output",
-        )
-        .unwrap();
-    store
         .complete_invocation(
             &failed_after_update.invocation_id,
             &activated.worker.worker_id,
             Err("regressed typed output"),
+        )
+        .unwrap();
+    store
+        .mark_failed(
+            &activated.worker.worker_id,
+            "execution",
+            "regressed typed output",
         )
         .unwrap();
     assert_eq!(
@@ -1082,88 +1012,6 @@ fn verified_recovery_resolves_invocation_errors_without_erasing_history() {
         retained
             .iter()
             .all(|item| item["requiresAttention"] == false)
-    );
-}
-
-#[test]
-fn inbox_context_candidates_are_bounded_previews_and_claim_atomically() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
-    let mut prepared = store.prepare(bundle(), None).unwrap();
-    store.finalize(&mut prepared).unwrap();
-    let outcome = store.publish(prepared).unwrap();
-    let (foreground, _) = store
-        .begin_invocation(
-            &outcome.worker.worker_id,
-            &outcome.version,
-            &json!({}),
-            "foreground-context-candidate",
-            "trace-foreground-context-candidate",
-            0,
-            "manual",
-            None,
-        )
-        .unwrap();
-    assert!(store.claim_running(&foreground.invocation_id).unwrap());
-    store
-        .complete_invocation(
-            &foreground.invocation_id,
-            &outcome.worker.worker_id,
-            Ok(&json!({"report":"x".repeat(8_000)})),
-        )
-        .unwrap();
-    assert!(
-        store
-            .pending_inbox_context_candidates(64)
-            .unwrap()
-            .is_empty(),
-        "a successful foreground manual result already reached its caller"
-    );
-
-    let (run, _) = store
-        .begin_invocation(
-            &outcome.worker.worker_id,
-            &outcome.version,
-            &json!({}),
-            "scheduled-context-candidate",
-            "trace-scheduled-context-candidate",
-            0,
-            "schedule",
-            None,
-        )
-        .unwrap();
-    assert!(store.claim_running(&run.invocation_id).unwrap());
-    store
-        .complete_invocation(
-            &run.invocation_id,
-            &outcome.worker.worker_id,
-            Ok(&json!({"report":"x".repeat(8_000)})),
-        )
-        .unwrap();
-
-    let candidates = store.pending_inbox_context_candidates(64).unwrap();
-    assert_eq!(candidates.len(), 1);
-    assert!(candidates[0]["resultPreview"].as_str().unwrap().len() <= 4_096);
-    let inbox_id = candidates[0]["inboxId"].as_str().unwrap().to_owned();
-    assert!(
-        store
-            .attach_pending_inbox_context(&[inbox_id.clone(), "missing".to_owned()])
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(store.pending_inbox_context_candidates(64).unwrap().len(), 1);
-    assert_eq!(
-        store
-            .attach_pending_inbox_context(std::slice::from_ref(&inbox_id))
-            .unwrap()
-            .len(),
-        1
-    );
-    assert!(
-        store
-            .pending_inbox_context_candidates(64)
-            .unwrap()
-            .is_empty()
     );
 }
 
@@ -1278,6 +1126,7 @@ fn session_organization_outbox_is_atomic_due_bounded_and_recovers_stale_claims()
             &[],
             &[],
             &[],
+            &[],
             None,
             Some(&intent),
         )
@@ -1352,7 +1201,7 @@ fn session_organization_outbox_is_atomic_due_bounded_and_recovers_stale_claims()
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        15
+        16
     );
     connection
         .execute(
@@ -1372,4 +1221,41 @@ fn session_organization_outbox_is_atomic_due_bounded_and_recovers_stale_claims()
         Some("queued"),
         "startup must recover an interrupted canonical apply claim"
     );
+}
+
+#[test]
+fn schema_v15_upgrades_to_agent_delivery_outbox_v16() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let connection = store.connection().unwrap();
+    connection
+        .execute_batch(
+            "DROP TABLE agent_delivery_outbox;
+             DELETE FROM worker_schema WHERE version=16;",
+        )
+        .unwrap();
+    drop(connection);
+    drop(store);
+
+    let reopened = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let connection = reopened.connection().unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT MAX(version) FROM worker_schema", [], |row| {
+                row.get::<_, u32>(0)
+            })
+            .unwrap(),
+        16
+    );
+    let outbox_exists = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_schema
+                WHERE type='table' AND name='agent_delivery_outbox'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap();
+    assert!(outbox_exists);
 }

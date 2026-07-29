@@ -31,6 +31,7 @@ impl WorkerStore {
                 &[],
                 &[],
                 &[],
+                &[],
                 None,
                 None,
             ),
@@ -72,6 +73,7 @@ impl WorkerStore {
             output,
             notification_intents,
             artifact_intents,
+            &[],
             worker_dispatches,
             worker_wakeup,
             None,
@@ -85,6 +87,7 @@ impl WorkerStore {
         output: &Value,
         notification_intents: &[crate::domains::worker_kernel::notifications::NotificationIntent],
         artifact_intents: &[ArtifactIntent],
+        agent_delivery_effects: &[PreparedAgentDeliveryEffect],
         worker_dispatches: &[PreparedWorkerDispatch],
         worker_wakeup: Option<&PreparedWorkerWakeup>,
         session_organization: Option<&PreparedSessionOrganizationIntent>,
@@ -95,6 +98,7 @@ impl WorkerStore {
             Ok(output),
             notification_intents,
             artifact_intents,
+            agent_delivery_effects,
             worker_dispatches,
             worker_wakeup,
             session_organization,
@@ -108,6 +112,7 @@ impl WorkerStore {
         result: Result<&Value, &str>,
         notification_intents: &[crate::domains::worker_kernel::notifications::NotificationIntent],
         artifact_intents: &[ArtifactIntent],
+        agent_delivery_effects: &[PreparedAgentDeliveryEffect],
         worker_dispatches: &[PreparedWorkerDispatch],
         worker_wakeup: Option<&PreparedWorkerWakeup>,
         session_organization: Option<&PreparedSessionOrganizationIntent>,
@@ -116,18 +121,45 @@ impl WorkerStore {
         let tx = connection
             .transaction()
             .map_err(|error| error.to_string())?;
-        let (trace_id, origin_session_id, worker_version, causal_depth): (
+        let (
+            trace_id,
+            origin_session_id,
+            worker_version,
+            causal_depth,
+            interaction_mode,
+            parent_worker_invocation_id,
+            trigger_kind,
+            root_invocation_id,
+        ): (
             String,
             Option<String>,
             String,
             u32,
+            String,
+            Option<String>,
+            String,
+            Option<String>,
         ) = tx
             .query_row(
-                "SELECT trace_id,origin_session_id,worker_version,causal_depth
+                "SELECT trace_id,origin_session_id,worker_version,causal_depth,
+                        interaction_mode,parent_worker_invocation_id,trigger_kind,
+                        (SELECT root_invocation_id FROM worker_causal_traces
+                         WHERE trace_id=worker_invocations.trace_id)
                  FROM worker_invocations
                  WHERE invocation_id=?1 AND worker_id=?2 AND status='running'",
                 params![invocation_id, worker_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
             )
             .map_err(|error| format!("load completing worker invocation: {error}"))?;
         let (status, output, error, severity, inbox_result) = match result {
@@ -214,7 +246,42 @@ impl WorkerStore {
             ],
         )
         .map_err(|error| format!("record worker inbox result: {error}"))?;
+        super::agent_delivery_outbox::insert_terminal_outbox(
+            &tx,
+            invocation_id,
+            worker_id,
+            &json!({
+                "invocationId":invocation_id,
+                "workerId":worker_id,
+                "workerVersion":&worker_version,
+                "status":status,
+                "evidence":&inbox_result,
+                "originSessionId":&origin_session_id,
+                "traceId":&trace_id,
+                "rootInvocationId":&root_invocation_id,
+                "causalDepth":causal_depth,
+                "interactionMode":&interaction_mode,
+                "parentWorkerInvocationId":&parent_worker_invocation_id,
+                "triggerKind":&trigger_kind,
+                "automaticDeliveryEligible":
+                    origin_session_id.is_some()
+                    && interaction_mode == "background"
+                    && parent_worker_invocation_id.is_none(),
+            }),
+            &completed_at,
+        )?;
         if status == "completed" {
+            super::agent_delivery_outbox::insert_effect_outbox(
+                &tx,
+                invocation_id,
+                worker_id,
+                &origin_session_id,
+                &trace_id,
+                root_invocation_id.as_deref(),
+                causal_depth,
+                agent_delivery_effects,
+                &completed_at,
+            )?;
             Self::insert_notification_deliveries(
                 &tx,
                 invocation_id,

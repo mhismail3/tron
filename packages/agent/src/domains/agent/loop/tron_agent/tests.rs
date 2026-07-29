@@ -103,7 +103,7 @@ impl ModelResponder for OrdinarySurfaceResponder {
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>();
         assert_eq!(self.calls.fetch_add(1, Ordering::SeqCst), 0);
-        assert_eq!(names.len(), 11, "{names:?}");
+        assert_eq!(names.len(), 15, "{names:?}");
         assert!(names.contains(&"worker_discover"), "{names:?}");
         for hidden in [
             "worker_upsert",

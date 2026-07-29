@@ -73,7 +73,9 @@ impl WorkerRuntime {
         let result = self
             .execute_queued_inner(queued, invocation_stop.clone())
             .await;
-        self.finalize_claimed_delivery(&invocation_id, result).await
+        let result = self.finalize_claimed_delivery(&invocation_id, result).await;
+        self.delivery_maintenance.notify_one();
+        result
     }
 
     /// Ensure that losing an execution future cannot leave a claimed attempt
@@ -265,6 +267,11 @@ impl WorkerRuntime {
                     &queued.invocation_id,
                     &output,
                 )?;
+            let agent_delivery_effects =
+                crate::domains::worker_kernel::agent_delivery_effects::parse_agent_delivery_effects(
+                    &worker.bundle,
+                    &output,
+                )?;
             let worker_dispatches = self.prepare_worker_dispatches(&worker.bundle, &output)?;
             let worker_wakeup = crate::domains::worker_kernel::wakeups::parse_worker_wakeup(
                 &worker.bundle,
@@ -291,6 +298,7 @@ impl WorkerRuntime {
                 output,
                 notification_intents,
                 artifact_intents,
+                agent_delivery_effects,
                 worker_dispatches,
                 worker_wakeup,
                 session_organization,
@@ -301,6 +309,7 @@ impl WorkerRuntime {
                 output,
                 notification_intents,
                 artifact_intents,
+                agent_delivery_effects,
                 worker_dispatches,
                 worker_wakeup,
                 session_organization,
@@ -324,6 +333,7 @@ impl WorkerRuntime {
                         output,
                         notification_intents,
                         artifact_intents,
+                        agent_delivery_effects,
                         worker_dispatches,
                         worker_wakeup,
                         session_organization,
@@ -336,6 +346,7 @@ impl WorkerRuntime {
                 output,
                 notification_intents,
                 artifact_intents,
+                agent_delivery_effects,
                 worker_dispatches,
                 worker_wakeup,
                 session_organization,
@@ -347,6 +358,7 @@ impl WorkerRuntime {
                     &output,
                     &notification_intents,
                     &artifact_intents,
+                    &agent_delivery_effects,
                     &worker_dispatches,
                     worker_wakeup.as_ref(),
                     session_organization.as_ref(),
@@ -354,6 +366,11 @@ impl WorkerRuntime {
             Err(error) => {
                 let secrets = self.load_all_runtime_secrets().unwrap_or_default();
                 let redacted = redact_known_secrets(&error, &secrets);
+                let completed = self.store.complete_invocation(
+                    &queued.invocation_id,
+                    &queued.worker_id,
+                    Err(&redacted),
+                )?;
                 if !was_stopped && execution_failure_disables_worker(&queued.trigger_kind) {
                     self.store
                         .mark_failed(&queued.worker_id, "execution", &redacted)?;
@@ -376,11 +393,7 @@ impl WorkerRuntime {
                     )
                     .await;
                 }
-                self.store.complete_invocation(
-                    &queued.invocation_id,
-                    &queued.worker_id,
-                    Err(&redacted),
-                )?
+                completed
             }
         };
         finalization_guard.disarm();
@@ -470,6 +483,11 @@ impl WorkerRuntime {
             &format!("worker immutable-version integrity check failed: {error}"),
             &secrets,
         );
+        let completed = self.store.complete_invocation(
+            &queued.invocation_id,
+            &queued.worker_id,
+            Err(&reason),
+        )?;
         self.store
             .mark_failed(&queued.worker_id, "integrity", &reason)?;
         let _ = self
@@ -478,11 +496,6 @@ impl WorkerRuntime {
         self.cancel_worker(&queued.worker_id);
         self.unregister_dynamic_tool(&queued.worker_id).await;
         self.stop_residents(Some(&queued.worker_id)).await;
-        let completed = self.store.complete_invocation(
-            &queued.invocation_id,
-            &queued.worker_id,
-            Err(&reason),
-        )?;
         self.publish_event(
             "worker.lifecycle",
             json!({

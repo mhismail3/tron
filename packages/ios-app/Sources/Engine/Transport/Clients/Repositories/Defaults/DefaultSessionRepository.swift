@@ -85,4 +85,11 @@ final class DefaultSessionRepository: NetworkSessionRepository {
             eventId: eventId
         )
     }
+
+    func agentUpdates(
+        sessionId: String,
+        limit: Int
+    ) async throws -> SessionAgentUpdatesResultDTO {
+        try await sessionClient.agentUpdates(sessionId: sessionId, limit: limit)
+    }
 }

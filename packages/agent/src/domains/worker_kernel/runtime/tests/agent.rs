@@ -611,7 +611,7 @@ async fn disabling_agent_worker_aborts_its_spawned_child_session() {
         .await
         .expect("disabled agent worker invocation did not terminate")
         .unwrap();
-    assert_eq!(record.status, "failed", "{record:?}");
+    assert_eq!(record.status, "cancelled", "{record:?}");
     assert!(
         record
             .error

@@ -42,7 +42,6 @@
 //! exhausted counters never wrap or reuse identity.
 
 use crate::domains::agent::r#loop::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
-use crate::domains::agent::r#loop::orchestrator::agent_runner::run_agent;
 use crate::domains::agent::r#loop::orchestrator::core::StartedRun;
 use crate::domains::agent::r#loop::types::{AgentConfig, RunContext};
 
@@ -60,6 +59,7 @@ mod events;
 mod execute;
 mod plan;
 mod request;
+mod semantic;
 mod spawn;
 
 pub use deps::{PromptEngineCausality, PromptRuntimeDeps};
@@ -67,4 +67,5 @@ pub(super) use events::publish_prompt_runtime_stream;
 pub(super) use execute::execute_prompt_run;
 pub(super) use plan::PromptRunPlan;
 pub use request::PromptRequest;
+use semantic::{OptionalContextPreparation, spawn_optional_context_preparation};
 pub use spawn::spawn_prompt_run;

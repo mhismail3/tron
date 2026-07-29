@@ -22,6 +22,9 @@ fn fresh_schema_contains_only_primitive_tables() {
     assert_eq!(
         tables,
         vec![
+            "agent_deliveries",
+            "agent_wait_members",
+            "agent_waits",
             "blobs",
             "events",
             "logs",

@@ -3,6 +3,7 @@ use crate::domains::worker_kernel::types::{
     BUNDLE_SCHEMA, SourceProvenance, WorkerBundle, WorkerDependency, WorkerRunner, WorkerTrigger,
 };
 use crate::engine::DedupeScope;
+use serde_json::Value;
 
 #[test]
 fn engine_surface_snapshot_is_client_introspection_not_model_vocabulary() {
@@ -230,7 +231,7 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
         json!([
             "continuity_context",
             "context_summary",
-            "inbox_context",
+            "mailbox_curation",
             "session_organization",
             "session_title",
             "worker_relevance"
@@ -251,7 +252,7 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
         "context_summary input is a closed object",
         "narrative:string(1..40000 characters)",
         "authoritative runtime ceilings of 10000 estimated tokens and 40000 UTF-8 bytes",
-        "inbox_context input is a closed object",
+        "mailbox_curation input is a closed object",
         "worker_relevance input is a closed object",
         "do not inspect Tron databases, auth stores, binaries, runtime files, or private server endpoints",
     ] {
@@ -335,14 +336,13 @@ fn worker_relevance_is_internal_policy_not_provider_ceremony() {
 }
 
 #[test]
-fn inbox_context_is_worker_owned_policy_behind_an_internal_claim_boundary() {
+fn legacy_inbox_context_has_no_runtime_claim_boundary() {
     let definitions = function_definitions().expect("worker-kernel contracts");
-    let attach = definitions
-        .iter()
-        .find(|definition| definition.id.as_str() == "worker_kernel::inbox_attach")
-        .expect("inbox attachment contract");
-    assert_eq!(attach.visibility, FunctionVisibility::Internal);
-    assert!(attach.model_tool.is_none());
+    assert!(
+        definitions
+            .iter()
+            .all(|definition| definition.id.as_str() != "worker_kernel::inbox_attach")
+    );
 }
 
 #[test]
@@ -386,6 +386,7 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
             checksum: None,
         }],
         engine_hooks: Vec::new(),
+        engine_deliveries: Vec::new(),
         client_actions: Vec::new(),
         client_deliveries: Vec::new(),
         worker_dispatch_routes: Vec::new(),

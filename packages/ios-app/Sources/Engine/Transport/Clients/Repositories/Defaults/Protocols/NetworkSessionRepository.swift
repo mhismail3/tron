@@ -70,6 +70,12 @@ protocol NetworkSessionRepository: AnyObject {
         sessionId: String,
         eventId: String
     ) async throws -> SessionContextRequestDetailDTO
+
+    /// Read durable delivery and non-blocking worker-wait state.
+    func agentUpdates(
+        sessionId: String,
+        limit: Int
+    ) async throws -> SessionAgentUpdatesResultDTO
 }
 
 extension NetworkSessionRepository {
@@ -85,6 +91,13 @@ extension NetworkSessionRepository {
         sessionId _: String,
         eventId _: String
     ) async throws -> SessionContextRequestDetailDTO {
+        throw URLError(.unsupportedURL)
+    }
+
+    func agentUpdates(
+        sessionId _: String,
+        limit _: Int
+    ) async throws -> SessionAgentUpdatesResultDTO {
         throw URLError(.unsupportedURL)
     }
 }

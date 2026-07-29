@@ -26,7 +26,7 @@ enum EngineDashboardPresentation {
         case "worker_rollback": "Roll Back Worker"
         case "worker_retire": "Retire Worker"
         case "worker_purge": "Delete Worker"
-        case "worker_inbox": "View Worker Inbox"
+        case "worker_inbox": "View Worker Results"
         case "worker_runs": "View Worker Runs"
         case "worker_webhook_rotate": "Rotate Webhook Token"
         case "worker_stop_all": "Stop All Workers"
