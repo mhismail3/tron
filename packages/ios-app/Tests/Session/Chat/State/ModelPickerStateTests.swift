@@ -170,6 +170,19 @@ struct ModelPickerStateTests {
         #expect(result == nil)
     }
 
+    @Test("Current model info resolves a provider-local restored identifier")
+    func testCurrentModelInfo_resolvesProviderLocalIdentifier() {
+        let repository = MockModelRepository()
+        let state = ModelPickerState(modelRepository: repository)
+        repository.cachedModels = [
+            Self.makeModelInfo(id: "openai/gpt-5.6-sol", name: "GPT-5.6 Sol")
+        ]
+
+        let result = state.currentModelInfo(current: "gpt-5.6-sol")
+
+        #expect(result?.contextWindow == 200_000)
+    }
+
     @Test("Repository catalog observation flows through picker metadata lookup")
     func testRepositoryCatalogObservationFlowsThroughPicker() {
         let repository = MockModelRepository()

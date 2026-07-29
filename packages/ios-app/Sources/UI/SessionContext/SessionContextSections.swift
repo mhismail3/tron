@@ -8,8 +8,8 @@ extension SessionContextSheet {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(SessionContextPresentation.remainingContextText(
-                        currentContextWindow: contextState.currentContextWindow,
-                        tokensRemaining: contextState.tokensRemaining
+                        currentContextWindow: effectiveContextWindow,
+                        tokensRemaining: effectiveTokensRemaining
                     ))
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(accent)
@@ -75,10 +75,10 @@ extension SessionContextSheet {
     }
 
     var contextWindowDescription: String {
-        guard contextState.currentContextWindow > 0 else {
-            return "Waiting for the model context-window limit"
+        guard effectiveContextWindow > 0 else {
+            return "Model window unavailable"
         }
-        return "\(TokenFormatter.format(contextState.currentContextWindow, style: .withSuffix)) window"
+        return "\(TokenFormatter.format(effectiveContextWindow, style: .withSuffix)) window"
     }
 
     var requestSummarySection: some View {
@@ -330,11 +330,13 @@ extension SessionContextSheet {
                 ))
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
             Text(SessionContextPresentation.agentWaitStatusLabel(status: wait.status))
                 .font(TronTypography.pillValue)
                 .foregroundStyle(wait.status == "pending" ? .tronAmber : .tronEmerald)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .padding(12)
         .sectionFill(
@@ -367,6 +369,7 @@ extension SessionContextSheet {
                 ))
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(agentUpdateColor(update.status))
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(update.preview)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
@@ -385,13 +388,14 @@ extension SessionContextSheet {
                         .foregroundStyle(.tronTextMuted)
                 }
             }
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
             Text(SessionContextPresentation.agentUpdateStatusLabel(
                 status: update.status,
                 wakePolicy: update.wakePolicy
             ))
                 .font(TronTypography.pillValue)
                 .foregroundStyle(agentUpdateColor(update.status))
+                .fixedSize(horizontal: true, vertical: false)
         }
         .padding(12)
         .sectionFill(

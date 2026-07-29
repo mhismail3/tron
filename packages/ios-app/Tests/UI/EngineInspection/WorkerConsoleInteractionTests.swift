@@ -329,6 +329,10 @@ struct WorkerConsoleInteractionTests {
         )
 
         #expect(context.contains("label: currentModelId.shortModelName"))
+        #expect(mainSheet.contains("ScrollView(.vertical, showsIndicators: true)"))
+        #expect(mainSheet.contains(".containerRelativeFrame(.horizontal)"))
+        #expect(mainSheet.contains(".scrollBounceBehavior(.basedOnSize, axes: .vertical)"))
+        #expect(!context.contains("Window loading"))
         #expect(!context.contains("var modelSection: some View"))
         #expect(context.contains("showContextHistory = true"))
         #expect(!mainSheet.contains("requestToolsSection"))

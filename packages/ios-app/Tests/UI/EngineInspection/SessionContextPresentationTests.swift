@@ -142,16 +142,32 @@ struct SessionContextPresentationTests {
         ) == "Current Model")
     }
 
-    @Test("Remaining context avoids a false zero while the model window loads")
+    @Test("Remaining context does not claim a restored model window is loading")
     func remainingContextText() {
         #expect(SessionContextPresentation.remainingContextText(
             currentContextWindow: 0,
             tokensRemaining: 0
-        ) == "Window loading")
+        ) == "Context usage")
         #expect(SessionContextPresentation.remainingContextText(
             currentContextWindow: 100_000,
             tokensRemaining: 75_000
         ) == "75.0K tokens left")
+    }
+
+    @Test("Catalog window repairs restored zero-window presentation")
+    func catalogWindowFallback() {
+        #expect(SessionContextPresentation.resolvedContextWindow(
+            trackedWindow: 0,
+            modelWindow: 272_000
+        ) == 272_000)
+        #expect(SessionContextPresentation.resolvedContextWindow(
+            trackedWindow: 200_000,
+            modelWindow: nil
+        ) == 200_000)
+        #expect(SessionContextPresentation.contextPercentage(
+            tokensUsed: 14_100,
+            contextWindow: 272_000
+        ) == 5)
     }
 
     @Test("Worker runs group by durable causal root and retain server ordering")

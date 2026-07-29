@@ -578,7 +578,7 @@ final class ChatViewModel {
 
     /// Updates the context window from the model catalog loaded by ChatView.
     func updateContextWindow(from models: [ModelInfo]) {
-        if let model = models.first(where: { $0.id == currentModel }) {
+        if let model = ModelInfo.matching(currentModel, in: models) {
             contextState.currentContextWindow = model.contextWindow
         }
     }

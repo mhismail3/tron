@@ -762,8 +762,14 @@ only presentation state and navigation; sections render the manifest; loading
 owns the sheet-scoped cancellable tasks; detail/history sheets load bounded
 evidence lazily; and the audit formatter projects redacted payloads. Cross-file
 extensions share the one sheet state rather than manufacturing feature view
-models or copies of provider-request data. Global worker architecture remains
-in the Engine dashboard rather than being loaded again by Session Context. The
+models or copies of provider-request data. Model metadata resolution accepts
+the engine's qualified, canonical, and alias identifiers, so a restored
+provider-local model id still recovers its catalog-owned context window instead
+of presenting a transient loading state. The main sheet constrains its content
+to the presentation width and owns only a vertical scroll axis; long live-state
+labels wrap within their cards rather than widening the scroll content. Global
+worker architecture remains in the Engine dashboard rather than being loaded
+again by Session Context. The
 toolbar shows the current short model name and opens the model picker; the
 latest-request card is the request-history entry point, so model switching does
 not consume a long body section. Request summaries and history resolve each

@@ -233,6 +233,21 @@ final class ContextStateTests: XCTestCase {
         XCTAssertEqual(state.currentContextWindow, initialWindow)
     }
 
+    func testUpdateFromModelsResolvesProviderLocalIdentifier() {
+        let state = ContextTrackingState()
+        let models = [
+            createTestModelInfo(
+                id: "openai/gpt-5.6-sol",
+                name: "GPT-5.6 Sol",
+                contextWindow: 272_000
+            )
+        ]
+
+        state.updateContextWindow(from: models, currentModel: "gpt-5.6-sol")
+
+        XCTAssertEqual(state.currentContextWindow, 272_000)
+    }
+
     // MARK: - setAccumulatedTokens Tests
 
     func testSetAccumulatedTokens() {

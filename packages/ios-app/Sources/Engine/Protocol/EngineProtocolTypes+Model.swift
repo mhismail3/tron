@@ -252,6 +252,40 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.quantizationLevel = quantizationLevel
     }
 
+    // MARK: - Identifier Resolution
+
+    /// Finds a catalog model from an engine identifier.
+    ///
+    /// Session state can carry either a provider-qualified identifier
+    /// (`openai/gpt-5.6-sol`) or its provider-local form (`gpt-5.6-sol`).
+    /// Resolve exact canonical and alias identifiers first, then allow the
+    /// provider prefix to differ so restored sessions retain their metadata.
+    static func matching(_ identifier: String, in models: [ModelInfo]) -> ModelInfo? {
+        let requested = identifier.lowercased()
+
+        if let exact = models.first(where: { model in
+            model.knownIdentifiers.contains { $0.lowercased() == requested }
+        }) {
+            return exact
+        }
+
+        let localIdentifier = Self.providerLocalIdentifier(identifier)
+        return models.first { model in
+            model.knownIdentifiers.contains {
+                Self.providerLocalIdentifier($0) == localIdentifier
+            }
+        }
+    }
+
+    private var knownIdentifiers: [String] {
+        [id, canonicalModelId].compactMap { $0 } + (aliasIds ?? [])
+    }
+
+    private static func providerLocalIdentifier(_ identifier: String) -> String {
+        (identifier.split(separator: "/", maxSplits: 1).last.map(String.init) ?? identifier)
+            .lowercased()
+    }
+
     // MARK: - Formatted Display Helpers
 
     /// Formatted pricing string, e.g. "$3/M in · $15/M out"

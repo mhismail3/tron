@@ -89,21 +89,29 @@ enum SessionContextPresentation {
         fallback: String
     ) -> String {
         guard let modelId, !modelId.isEmpty else { return fallback }
-        let normalizedId = modelId.split(separator: "/", maxSplits: 1).last.map(String.init)
-            ?? modelId
-        if let model = models.first(where: {
-            let candidateId = $0.id.split(separator: "/", maxSplits: 1).last.map(String.init)
-                ?? $0.id
-            return $0.id == modelId || candidateId == normalizedId
-        }) {
+        if let model = ModelInfo.matching(modelId, in: models) {
             return model.formattedModelName
         }
         return formatModelDisplayName(modelId)
     }
 
     static func remainingContextText(currentContextWindow: Int, tokensRemaining: Int) -> String {
-        guard currentContextWindow > 0 else { return "Window loading" }
+        guard currentContextWindow > 0 else { return "Context usage" }
         return "\(TokenFormatter.format(tokensRemaining, style: .withSuffix)) left"
+    }
+
+    static func resolvedContextWindow(trackedWindow: Int, modelWindow: Int?) -> Int {
+        if let modelWindow, modelWindow > 0 {
+            return modelWindow
+        }
+        return max(0, trackedWindow)
+    }
+
+    static func contextPercentage(tokensUsed: Int, contextWindow: Int) -> Int {
+        guard tokensUsed > 0, contextWindow > 0 else { return 0 }
+        return boundedPercentage(
+            Int((Double(tokensUsed) / Double(contextWindow) * 100).rounded())
+        )
     }
 
     static func causalGroups(_ runs: [WorkerInvocationDTO]) -> [SessionWorkerRunGroup] {

@@ -9,6 +9,8 @@ struct ModelInfoComputedTests {
 
     private func makeModel(
         id: String = "claude-sonnet-4-6-20250514",
+        canonicalModelId: String? = nil,
+        aliasIds: [String]? = nil,
         name: String = "Sonnet 4.6",
         provider: String = "anthropic",
         contextWindow: Int = 200_000,
@@ -29,8 +31,10 @@ struct ModelInfoComputedTests {
         // The fixture enforces the same contract.
         ModelInfo(
             id: id,
+            canonicalModelId: canonicalModelId,
             name: name,
             provider: provider,
+            aliasIds: aliasIds,
             contextWindow: contextWindow,
             supportsThinking: supportsThinking,
             supportsImages: supportsImages,
@@ -177,6 +181,22 @@ struct ModelInfoComputedTests {
     }
 
     // MARK: - Display Names
+
+    @Test("Catalog lookup resolves qualified, canonical, and alias identifiers")
+    func catalogIdentifierMatching() {
+        let model = makeModel(
+            id: "openai/gpt-5.6-sol",
+            canonicalModelId: "gpt-5.6-sol",
+            aliasIds: ["openai/gpt-5.6-latest"],
+            name: "GPT-5.6 Sol",
+            provider: "openai"
+        )
+
+        #expect(ModelInfo.matching("gpt-5.6-sol", in: [model])?.id == model.id)
+        #expect(ModelInfo.matching("openai/gpt-5.6-sol", in: [model])?.id == model.id)
+        #expect(ModelInfo.matching("gpt-5.6-latest", in: [model])?.id == model.id)
+        #expect(ModelInfo.matching("missing", in: [model]) == nil)
+    }
 
     @Test("displayName for Anthropic model")
     func displayNameAnthropic() {

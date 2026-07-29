@@ -44,7 +44,24 @@ struct SessionContextSheet: View {
     @State var selectedContextDetail: SessionContextDetailSelection?
     @State var showContextHistory = false
 
-    var percentage: Int { contextState.contextPercentage }
+    var resolvedModelInfo: ModelInfo? {
+        currentModelInfo ?? ModelInfo.matching(currentModelId, in: availableModels)
+    }
+    var effectiveContextWindow: Int {
+        SessionContextPresentation.resolvedContextWindow(
+            trackedWindow: contextState.currentContextWindow,
+            modelWindow: resolvedModelInfo?.contextWindow
+        )
+    }
+    var effectiveTokensRemaining: Int {
+        max(0, effectiveContextWindow - contextState.contextWindowTokens)
+    }
+    var percentage: Int {
+        SessionContextPresentation.contextPercentage(
+            tokensUsed: contextState.contextWindowTokens,
+            contextWindow: effectiveContextWindow
+        )
+    }
     var accent: Color { SessionContextPresentation.pressure(for: percentage).color }
     var totalSessionInputTokens: Int {
         contextState.accumulatedInputTokens + contextState.accumulatedCacheReadTokens
@@ -58,7 +75,7 @@ struct SessionContextSheet: View {
         )
     }
     var currentModelDisplayName: String {
-        currentModelInfo?.formattedModelName ?? currentModelId.shortModelName
+        resolvedModelInfo?.formattedModelName ?? currentModelId.shortModelName
     }
     var workerRunGroups: [SessionWorkerRunGroup] {
         SessionContextPresentation.causalGroups(sessionWorkerRuns)
@@ -142,7 +159,10 @@ struct SessionContextSheet: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .padding(.bottom, 24)
+                .containerRelativeFrame(.horizontal)
+                .clipped()
             }
+            .scrollBounceBehavior(.basedOnSize, axes: .vertical)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -182,7 +202,7 @@ struct SessionContextSheet: View {
                 models: availableModels,
                 currentModelId: currentModelId,
                 readOnly: !canMutate,
-                reasoningLevel: currentModelInfo?.supportsReasoning == true ? reasoningLevel : nil,
+                reasoningLevel: resolvedModelInfo?.supportsReasoning == true ? reasoningLevel : nil,
                 onSelect: onSelectModel
             )
         }
