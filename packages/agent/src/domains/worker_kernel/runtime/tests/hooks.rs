@@ -141,6 +141,74 @@ async fn atomic_upsert_activates_continuity_context_without_a_binding_step() {
 }
 
 #[tokio::test]
+async fn continuity_schema_must_admit_the_full_engine_query_boundary() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = continuity_context_bundle("continuity-short-query", "valid");
+    bundle.input_schema["properties"]["query"]["maxLength"] = json!(4_000);
+
+    let error = runtime.upsert(bundle, None).await.unwrap_err();
+
+    assert!(
+        error.contains("engine hook 'continuity_context' input"),
+        "{error}"
+    );
+    assert!(runtime.store().list(true).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn continuity_request_failure_does_not_disable_its_worker() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = continuity_context_bundle("continuity-request-failure", "unused");
+    bundle.runner = WorkerRunner::Command {
+        command: vec![
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "printf 'request-specific failure' >&2; exit 1".to_owned(),
+        ],
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+
+    let error = match runtime
+        .execute_engine_hook(
+            WorkerEngineHook::ContinuityContext,
+            json!({
+                "action":"continuity_context",
+                "query":"release acceptance",
+                "project":"/workspace/example",
+                "limit":6
+            }),
+            None,
+            &Invocation::new_sync(
+                FunctionId::new(super::super::super::CONTINUITY_CONTEXT_FUNCTION).unwrap(),
+                json!({"query":"release acceptance"}),
+                CausalContext::new(
+                    ActorId::new("agent:continuity-failure-test").unwrap(),
+                    ActorKind::Agent,
+                    TraceId::new("trace-continuity-failure").unwrap(),
+                )
+                .with_session_id("continuity-failure-test")
+                .with_idempotency_key("continuity-failure"),
+            ),
+        )
+        .await
+    {
+        Ok(_) => panic!("request-specific Continuity failure must fail its invocation"),
+        Err(error) => error,
+    };
+
+    assert!(error.contains("request-specific failure"), "{error}");
+    let summary = runtime
+        .store()
+        .list(true)
+        .unwrap()
+        .into_iter()
+        .find(|summary| summary.worker_id == outcome.worker.worker_id)
+        .expect("continuity worker");
+    assert!(summary.enabled);
+    assert_eq!(summary.health, "healthy");
+}
+
+#[tokio::test]
 async fn continuity_schema_must_reject_unbounded_narrative_before_activation() {
     let (runtime, _home) = test_runtime(None);
     let mut bundle = continuity_context_bundle("continuity-unbounded", "valid");

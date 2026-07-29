@@ -582,7 +582,7 @@ fn validate_engine_hook_contract(
         WorkerEngineHook::ContinuityContext => (
             json!({
                 "action":"continuity_context",
-                "query":"notification testing preferences",
+                "query":"x".repeat(12_000),
                 "project":"/workspace/example",
                 "limit":6
             }),
@@ -593,6 +593,7 @@ fn validate_engine_hook_contract(
                 json!({}),
                 json!({"action":"continuity_context","query":""}),
                 json!({"action":"continuity_context","query":"x","limit":9}),
+                json!({"action":"continuity_context","query":"x".repeat(12_001)}),
             ],
             vec![
                 json!({}),

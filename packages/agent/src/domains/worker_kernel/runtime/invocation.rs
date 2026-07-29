@@ -890,10 +890,15 @@ impl WorkerRuntime {
     }
 }
 
-fn execution_failure_disables_worker(trigger_kind: &str) -> bool {
+pub(super) fn execution_failure_disables_worker(trigger_kind: &str) -> bool {
     !matches!(
         trigger_kind,
-        "engine_hook:worker_relevance" | "engine_hook:inbox_context"
+        "engine_hook:continuity_context"
+            | "engine_hook:inbox_context"
+            | "engine_hook:mailbox_curation"
+            | "engine_hook:session_organization"
+            | "engine_hook:session_title"
+            | "engine_hook:worker_relevance"
     )
 }
 
@@ -902,13 +907,20 @@ mod failure_policy_tests {
     use super::execution_failure_disables_worker;
 
     #[test]
-    fn optional_semantic_hook_failure_preserves_deterministic_recovery_owner() {
-        assert!(!execution_failure_disables_worker(
-            "engine_hook:worker_relevance"
-        ));
-        assert!(!execution_failure_disables_worker(
-            "engine_hook:inbox_context"
-        ));
+    fn optional_semantic_hook_failure_is_isolated_to_its_invocation() {
+        for hook in [
+            "continuity_context",
+            "inbox_context",
+            "mailbox_curation",
+            "session_organization",
+            "session_title",
+            "worker_relevance",
+        ] {
+            assert!(
+                !execution_failure_disables_worker(&format!("engine_hook:{hook}")),
+                "{hook} is optional semantic work and must not globally disable its owner"
+            );
+        }
         assert!(execution_failure_disables_worker(
             "engine_hook:context_summary"
         ));

@@ -294,22 +294,22 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     let persister = Arc::new(EventPersister::new(event_store.clone()));
 
     let working_dir = state.working_directory.clone().unwrap_or(working_dir);
-    let resolved_workspace_id = event_store
-        .get_session(&session_id)
-        .ok()
-        .flatten()
-        .map(|session| session.workspace_id)
+    let resolved_session = event_store.get_session(&session_id).ok().flatten();
+    let resolved_workspace_id = resolved_session
+        .as_ref()
+        .map(|session| session.workspace_id.clone())
         .filter(|id| !id.is_empty());
-    if let (Some(prompt), Some(workspace_id)) =
-        (user_prompt.as_ref(), resolved_workspace_id.as_ref())
-    {
+    let optional_context_session = resolved_session
+        .as_ref()
+        .filter(|session| optional_context_is_eligible(session));
+    if let (Some(prompt), Some(session)) = (user_prompt.as_ref(), optional_context_session) {
         spawn_optional_context_preparation(OptionalContextPreparation {
             host: engine_host.clone(),
             event_store: event_store.clone(),
             orchestrator: orchestrator.clone(),
             shutdown_token: shutdown_token.clone(),
             session_id: session_id.clone(),
-            workspace_id: workspace_id.clone(),
+            workspace_id: session.workspace_id.clone(),
             run_id: run_id.clone(),
             query: prompt.clone(),
             project: state.working_directory.clone(),
@@ -481,6 +481,15 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         sequence_counter,
     })
     .await;
+}
+
+fn optional_context_is_eligible(
+    session: &crate::domains::session::event_store::SessionRow,
+) -> bool {
+    // INVARIANT: Worker audit sessions contain kernel-authored execution
+    // prompts, not user-authored task queries. Feeding those prompts back into
+    // Continuity or semantic ranking creates recursive, irrelevant work.
+    !session.workspace_id.is_empty() && !session.is_worker_session()
 }
 
 fn terminate_prompt_failure(

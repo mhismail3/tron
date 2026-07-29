@@ -212,7 +212,13 @@ struct WorkerRunDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Worker Run", color: color)
+                    SheetTitle(
+                        title: WorkerRunGraphPresentation.runTitle(
+                            workerName: graph?.workerName ?? workerName,
+                            workerId: currentRun.workerId
+                        ),
+                        color: color
+                    )
                 }
                 ToolbarItemGroup(placement: .topBarLeading) {
                     if let sessionId = currentRun.agentSessionId {

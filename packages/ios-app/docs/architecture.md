@@ -410,7 +410,11 @@ provides:
   result retains the recovery archive path and checksum.
 
 The canonical run detail and chat-embedded run graph also reuse one generic
-declarative renderer for presentation contract version 1. It supports only
+declarative renderer for presentation contract version 1. The run sheet names
+the canonical worker prominently and keeps the bounded request preview
+separately labeled, so an internal semantic query containing another worker's
+text cannot be mistaken for the identity of the run being inspected. The
+renderer supports only
 native text, status, progress, bounded table/list, public HTTPS link, durable-result
 artifact, native confirmation, and fixed same-worker action sections. Bound
 values are loaded concurrently from distinct RFC 6901 paths through

@@ -532,6 +532,27 @@ async fn initial_provider_call_does_not_wait_for_optional_policy_workers() {
     assert!(!orchestrator.has_active_run(&session_id));
 }
 
+#[test]
+fn worker_audit_sessions_are_ineligible_for_optional_semantic_preparation() {
+    let pool = new_in_memory(&ConnectionConfig::default()).unwrap();
+    ensure_schema(&pool.get().unwrap()).unwrap();
+    let event_store = EventStore::new(pool);
+    let ordinary = event_store
+        .create_session("mock", "/tmp/project", Some("Ordinary"), None)
+        .unwrap()
+        .session;
+    let worker = event_store
+        .create_worker_session("mock", "/tmp/worker", Some("Worker audit"), None)
+        .unwrap()
+        .session;
+
+    assert!(optional_context_is_eligible(&ordinary));
+    assert!(
+        !optional_context_is_eligible(&worker),
+        "kernel-authored worker prompts must never launch Continuity or semantic ranking"
+    );
+}
+
 fn terminal_error_code(events: &mut tokio::sync::broadcast::Receiver<TronEvent>) -> String {
     let terminal_error = std::iter::from_fn(|| events.try_recv().ok())
         .find(|event| event.event_type() == "error")

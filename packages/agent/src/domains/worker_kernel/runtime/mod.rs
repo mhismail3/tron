@@ -34,7 +34,11 @@
 //! `hooks` selects one immutable healthy owner and joins the ordinary durable
 //! invocation. Pure relevance derives short-lived exact-input idempotency from
 //! canonical JSON; session- and trace-bound hooks preserve their causal key. It
-//! owns neither a result cache nor a second execution path. `agent_deliveries`
+//! owns neither a result cache nor a second execution path. Request-scoped
+//! failures from optional semantic hooks remain terminal evidence on that
+//! invocation without globally disabling their worker; structural activation,
+//! integrity, and invalid-output failures still quarantine broken versions.
+//! `agent_deliveries`
 //! owns coordination tools, import ordering, waits, and safe delivery-only
 //! wakeups; `agent_delivery_import` projects closed terminal/effect envelopes
 //! without holding both databases. Terminal completion

@@ -19,6 +19,9 @@
 //! result is validated and compare-and-set before the worker run commits, so
 //! restart recovery can redeliver safely and hook failure remains operational
 //! evidence rather than rewriting the successful chat.
+//! Optional Continuity and semantic ranking also exclude durable worker audit
+//! sessions: their kernel-authored execution prompts are not user task queries
+//! and must never recursively enter semantic preparation.
 //! Before durable history is reconstructed, prompt admission atomically closes
 //! any terminal prior turn's unmatched tool starts and broadcasts those
 //! row-backed repairs to live clients. A repair failure rejects the prompt

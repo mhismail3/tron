@@ -152,7 +152,10 @@
 //! Continuity Curator worker. The worker exclusively owns records, retention,
 //! project/global scope, retrieval, ranking, correction, promotion, and
 //! deletion. The provider runtime supplies only the bounded current request
-//! and canonical working-directory identity, then redacts credential-shaped
+//! and canonical working-directory identity. Publication proves that every
+//! owner schema accepts the complete 12,000-character engine query boundary
+//! before activation; the Continuity bundle's smoke and health checks exercise
+//! that same executable boundary. The runtime then redacts credential-shaped
 //! text and injects at most one bounded narrative. Provider context is
 //! engine-owned and cannot be mutated safely from a worker process; that
 //! custody is the reason for the seam. It cannot select records, inspect worker

@@ -111,17 +111,22 @@ impl WorkerRuntime {
             .await?;
         if timed_out {
             let _ = self.cancel_invocation(&queued.invocation_id).await;
-            let reason = self
-                .handle_worker_runtime_failure(
+            let error = format!(
+                "engine hook '{}' exceeded its {MAX_ENGINE_HOOK_SECONDS}-second policy ceiling",
+                hook.as_str()
+            );
+            let trigger_kind = format!("engine_hook:{}", hook.as_str());
+            let reason = if super::invocation::execution_failure_disables_worker(&trigger_kind) {
+                self.handle_worker_runtime_failure(
                     &worker.summary.worker_id,
                     &worker.summary.active_version,
                     "engine_hook",
-                    &format!(
-                        "engine hook '{}' exceeded its {MAX_ENGINE_HOOK_SECONDS}-second policy ceiling",
-                        hook.as_str()
-                    ),
+                    &error,
                 )
-                .await;
+                .await
+            } else {
+                error
+            };
             return Err(reason);
         }
         if record.status != "completed" {

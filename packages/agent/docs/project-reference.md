@@ -183,7 +183,10 @@ from recursively recalling itself, and runs the hook asynchronously after
 prompt admission. A result may enter only a later natural turn in its
 originating run; if that run has ended, the result becomes stale audit evidence.
 Empty output, no healthy owner, or failure contributes no replacement text and
-never delays a provider request.
+never delays a provider request. Durable worker audit sessions are ineligible
+for optional semantic preparation: their kernel-authored execution prompts are
+not user task queries and must never recursively launch Continuity or relevance
+work.
 
 The initial worker contract uses deterministic hybrid retrieval and returns
 matching project records before global records. SQLite FTS5 supplies exact and
@@ -194,7 +197,10 @@ lazily on search, revision-bound in the worker's SQLite state, and scan at most
 direct Memory tool exposes only capture, search, inspect, correct, promote,
 delete, and explicit clear outcomes.
 `continuity_context` and its project/query bounds remain in the complete
-internal schema and do not enter the direct model tool.
+internal schema and do not enter the direct model tool. Publication validates
+the complete 12,000-character engine query boundary against the bundle schema,
+and the active worker's own smoke test exercises that boundary so its executable
+cannot accept less than it advertises.
 
 The `worker_relevance` hook accepts the latest user task query plus only the
 bounded canonical candidate summaries that the local scorer found meaningful,
@@ -361,7 +367,10 @@ Worker hooks have a sixty-second default lifecycle ceiling. An
 immutable worker may tighten that boundary with the generic
 `executionLimits.maxInvocationSeconds` field. Timeout and failure of continuity,
 semantic ranking, or mailbox curation remain ordinary durable worker evidence
-outside provider latency. Invalid typed output still disables the owner.
+outside provider latency. A request-scoped execution failure from an optional
+semantic hook fails only that invocation and does not globally disable its
+worker. Activation, artifact integrity, and invalid typed output remain
+structural failures and still quarantine the broken version.
 Agent-runner bundles can declare one canonical provider-neutral
 `reasoningLevel`, projected through the existing authenticated model path.
 Exact canonical relevance input may reuse the durable invocation ledger inside

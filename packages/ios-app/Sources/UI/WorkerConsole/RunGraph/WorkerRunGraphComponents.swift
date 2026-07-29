@@ -12,6 +12,14 @@ struct WorkerRunResultPresentation: Equatable, Sendable {
 /// summaries are protocol truth. This type only maps that truth to labels,
 /// colors, and generic action availability.
 enum WorkerRunGraphPresentation {
+    static func runTitle(workerName: String?, workerId: String) -> String {
+        if let workerName = workerName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !workerName.isEmpty {
+            return workerName
+        }
+        return WorkerConsolePresentation.displayLabel(workerId)
+    }
+
     static func requestSummary(_ preview: String) -> String {
         let trimmed = preview.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "Worker request" }

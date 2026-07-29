@@ -5,6 +5,18 @@ import Testing
 struct WorkerConsoleInteractionTests {
     @Test("Worker summaries turn protocol previews into readable user-facing text")
     func readableWorkerSummaryPresentation() {
+        #expect(
+            WorkerRunGraphPresentation.runTitle(
+                workerName: "Continuity Curator",
+                workerId: "continuity-curator"
+            ) == "Continuity Curator"
+        )
+        #expect(
+            WorkerRunGraphPresentation.runTitle(
+                workerName: "  ",
+                workerId: "continuity-curator"
+            ) == "Continuity Curator"
+        )
         let request = #"{"budget":"high","question":"Compare the reporting across six sources.","depth":"deep"}"#
         #expect(
             WorkerRunGraphPresentation.requestSummary(request)
