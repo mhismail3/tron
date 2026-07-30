@@ -1273,16 +1273,17 @@ the same result without copying it or rewriting history.
 
 `worker_result_read` retrieves one RFC 6901 JSON pointer from that exact result.
 Array/object pages are limited to twenty entries and each response is bounded
-to 32 KiB; oversized objects return child pointers before content. Agent reads
-must remain in the originating session or causal trace, while paired operator
-clients and system recovery can inspect profile-local results. A worker may
-accept and forward a result reference in its own input schema so a coordinator
-does not have to copy one specialist's complete output into every later child
-and model turn. That schema can constrain downstream reads to explicit RFC
-6901 paths; the receiving worker verifies the returned reference identity and
-uses only those pages. Missing, unauthorized, truncated, or mismatched pages
-remain actionable worker outcomes without causing a root read. The complete
-bounded page is available to the immediately
+to 32 KiB; oversized objects return child pointers before content. Agent and
+worker reads must remain in the originating session or carry an explicit Agent
+Delivery grant, while authenticated paired operator clients and system recovery
+can inspect profile-local results without fabricating a chat-session context. A
+worker may accept and forward a result reference in its own input schema so a
+coordinator does not have to copy one specialist's complete output into every
+later child and model turn. That schema can constrain downstream reads to
+explicit RFC 6901 paths; the receiving worker verifies the returned reference
+identity and uses only those pages. Missing, unauthorized, truncated, or
+mismatched pages remain actionable worker outcomes without causing a root read.
+The complete bounded page is available to the immediately
 following model turn. On later turns the provider transcript carries only its
 integrity-bound result reference and exact pointer/page coordinates; a worker
 can explicitly re-read that page if it still needs the bytes. This projection

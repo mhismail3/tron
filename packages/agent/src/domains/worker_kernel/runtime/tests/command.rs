@@ -82,6 +82,34 @@ async fn large_results_stay_exact_and_cross_provider_turns_by_reference() {
         .await;
     assert!(denied.error.is_some());
 
+    for (actor_id, actor_kind) in [
+        ("client:paired-operator", ActorKind::Client),
+        ("system:result-recovery", ActorKind::System),
+    ] {
+        let inspection = runtime
+            .host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("worker_kernel::result_read").unwrap(),
+                json!({"invocationId":invocation_id,"pointer":"/summary"}),
+                CausalContext::new(
+                    ActorId::new(actor_id).unwrap(),
+                    actor_kind,
+                    TraceId::generate(),
+                ),
+            ))
+            .await;
+        assert!(
+            inspection.error.is_none(),
+            "{actor_id} inspection error: {:?}",
+            inspection.error
+        );
+        assert_eq!(
+            inspection.value.unwrap()["value"],
+            "large durable result",
+            "{actor_id} must read the exact bounded result"
+        );
+    }
+
     let fixed = runtime
         .host
         .invoke(Invocation::new_sync(

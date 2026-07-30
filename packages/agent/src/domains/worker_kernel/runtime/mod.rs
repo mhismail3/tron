@@ -25,8 +25,10 @@
 //! release its process-local owner while its durable status is still running;
 //! shutdown and orphan recovery interrupt and requeue the same invocation.
 //! `result` owns generic artifact-style references for large validated worker
-//! outputs plus bounded, causally authorized JSON reads. Task-specific result
-//! interpretation remains in workers.
+//! outputs plus bounded JSON reads. Authenticated operator clients and
+//! engine-owned recovery may inspect profile-local results; agent and worker
+//! callers require the originating session or an explicit Agent Delivery
+//! grant. Task-specific result interpretation remains in workers.
 //! Agent child-session activity is projected only as bounded, redacted stage
 //! labels; raw child content remains in its canonical audit session.
 //! `client_actions` selects the current healthy worker for narrow native

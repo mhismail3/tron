@@ -237,9 +237,10 @@
 //! copying the typed value. Exact hydration is limited to synchronous/nested
 //! delivery, engine-hook application, explicit bounded result reads, recovery,
 //! and purge export. `worker_result_read` returns only one bounded RFC 6901
-//! path/page (at most 32 KiB and twenty items), authorized to the same causal
-//! trace or originating session; paired clients and system recovery may inspect
-//! profile-local results. That page is present in full for the immediately
+//! path/page (at most 32 KiB and twenty items). Agent and worker callers require
+//! the originating session or an explicit Agent Delivery grant; authenticated
+//! paired clients and system recovery may inspect profile-local results. That
+//! page is present in full for the immediately
 //! following provider turn, then the agent context keeps only its reference
 //! and pointer coordinates; a worker explicitly re-reads it if later reasoning
 //! needs the bytes. References preserve worker version, output-schema

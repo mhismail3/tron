@@ -661,12 +661,15 @@ follows server-authored child pointers. Primitive values wrap vertically as
 content rather than entering a code container. Raw JSON plus the immutable
 version and content/schema digests live in subordinate technical sheets; an
 empty collection receives an explicit empty state rather than a blank surface.
-The client never assembles an unbounded result copy. Raw run projections,
-schemas, trace identifiers, and technical process/filesystem entries likewise
-live in subordinate detail sheets. One-second polling is only a live/reconnect
-fallback; every refresh re-reads server truth. The client never reads worker
-storage, infers a worker stage from tool names, or owns a second execution
-state.
+The authenticated paired-client actor may inspect profile-local results from
+the engine-global Worker Console without inventing an originating session;
+agent and worker reads still require server-validated session or delivery-grant
+authority. The client never assembles an unbounded result copy. Raw run
+projections, schemas, trace identifiers, and technical process/filesystem
+entries likewise live in subordinate detail sheets. One-second polling is only
+a live/reconnect fallback; every refresh re-reads server truth. The client never
+reads worker storage, infers a worker stage from tool names, or owns a second
+execution state.
 Failure presentation classifies current schema and policy errors from their
 server evidence without inventing authorization state or retry policy.
 
