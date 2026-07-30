@@ -328,6 +328,122 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.messages[1].agentDeliveryProvenance.isEmpty)
     }
 
+    func testDeliveryContinuationAppearsOnceAcrossResumedProviderTurns() {
+        let wake = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-wake",
+            sourceKind: "worker_result",
+            sourceWorkerId: "wait-ux-smoke",
+            sourceWorkerName: "Wait UX Smoke Test",
+            sourceSessionId: nil,
+            sourceInvocationId: "worker-run-1",
+            wakePolicy: "wake",
+            boundary: "next_run",
+            triggeredWake: true,
+            redelivery: false
+        )
+
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 4,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [wake]
+            ),
+            context: mockContext
+        )
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 5,
+                agentPhase: "processing"
+            ),
+            context: mockContext
+        )
+        let responseId = UUID()
+        mockContext.streamingMessageId = responseId
+        mockContext.messages.append(
+            ChatMessage(
+                id: responseId,
+                role: .assistant,
+                content: .text("The worker completed.")
+            )
+        )
+
+        markResponseComplete(
+            turnNumber: 5,
+            hasToolInvocations: false,
+            agentDeliveryProvenance: [wake]
+        )
+
+        XCTAssertEqual(
+            mockContext.messages.filter {
+                !$0.agentDeliveryProvenance.isEmpty
+            }.count,
+            1
+        )
+        XCTAssertTrue(
+            mockContext.messages.last?.agentDeliveryProvenance.isEmpty == true
+        )
+
+        coordinator.handleComplete(streamingText: "", context: mockContext)
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 6,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [wake]
+            ),
+            context: mockContext
+        )
+        XCTAssertEqual(
+            mockContext.messages.filter {
+                !$0.agentDeliveryProvenance.isEmpty
+            }.count,
+            2,
+            "A later run may present the same durable delivery again."
+        )
+    }
+
+    func testActiveReconstructionSeedsDeliveryPresentationState() {
+        let wake = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-wake",
+            sourceKind: "worker_result",
+            sourceWorkerId: "wait-ux-smoke",
+            sourceWorkerName: "Wait UX Smoke Test",
+            sourceSessionId: nil,
+            sourceInvocationId: "worker-run-1",
+            wakePolicy: "wake",
+            boundary: "next_run",
+            triggeredWake: true,
+            redelivery: false
+        )
+        coordinator.restoreDeliveryPresentationState(
+            from: [.deliveryContinuation([wake])],
+            runIsActive: true
+        )
+
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 5,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [wake]
+            ),
+            context: mockContext
+        )
+        XCTAssertTrue(mockContext.messages.isEmpty)
+
+        coordinator.restoreDeliveryPresentationState(
+            from: [.deliveryContinuation([wake])],
+            runIsActive: false
+        )
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 6,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [wake]
+            ),
+            context: mockContext
+        )
+        XCTAssertEqual(mockContext.messages.count, 1)
+    }
+
     func testTurnEndUsesFirstTextMessageIdWhenStreamingFinalizedEarly() {
         // Given - streaming was finalized before turn end (e.g., before tool invocation)
         let firstTextId = UUID()

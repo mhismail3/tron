@@ -23,7 +23,7 @@ struct WorkerJSONDetailSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(accent)
     }
 }

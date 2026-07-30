@@ -6,6 +6,13 @@ private enum ResearchSuiteSection: String, CaseIterable {
     case activity = "Activity"
 }
 
+private struct ResearchSuiteRefreshKey: Equatable {
+    let isConnected: Bool
+    let workerProjection: String
+    let runProjection: String
+    let isCovered: Bool
+}
+
 struct ResearchSuiteSheet: View {
     @Bindable var consoleViewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
@@ -21,7 +28,7 @@ struct ResearchSuiteSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     summaryCard
                     TronSegmentedControl(
                         options: ResearchSuiteSection.allCases.map { ($0.rawValue, $0) },
@@ -75,15 +82,12 @@ struct ResearchSuiteSheet: View {
                     accent: .tronInfo
                 )
             }
-            .task { await refresh() }
-            .onChange(of: consoleViewModel.workers) { _, _ in
-                Task { await refresh() }
-            }
-            .onChange(of: consoleViewModel.activityRuns) { _, _ in
-                Task { await refresh() }
+            .task(id: refreshKey) {
+                guard !isPresentingChildSheet else { return }
+                await refresh()
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronCyan)
     }
 
@@ -296,14 +300,39 @@ struct ResearchSuiteSheet: View {
         )
     }
 
-    private func openTechnicalDetails(_ worker: WorkerSummaryDTO) async {
-        await technicalViewModel.refresh(
-            repository: repository,
-            connectionState: connectionState
+    private var isPresentingChildSheet: Bool {
+        selectedReport != nil || selectedTechnicalWorker != nil || showReportHistoryWarnings
+    }
+
+    private var refreshKey: ResearchSuiteRefreshKey {
+        if isPresentingChildSheet {
+            return ResearchSuiteRefreshKey(
+                isConnected: connectionState.isConnected,
+                workerProjection: "covered",
+                runProjection: "covered",
+                isCovered: true
+            )
+        }
+        let workers = ResearchSuiteContract.suiteWorkers(from: consoleViewModel.workers)
+            .map { "\($0.workerId):\($0.activeVersion):\($0.health):\($0.enabled):\($0.updatedAt)" }
+            .joined(separator: "|")
+        let workerIds = Set(ResearchSuiteContract.suiteWorkers(from: consoleViewModel.workers).map(\.workerId))
+        let runs = consoleViewModel.activityRuns
+            .filter { workerIds.contains($0.workerId) }
+            .map { "\($0.invocationId):\($0.status):\($0.completedAt ?? "")" }
+            .joined(separator: "|")
+        return ResearchSuiteRefreshKey(
+            isConnected: connectionState.isConnected,
+            workerProjection: workers,
+            runProjection: runs,
+            isCovered: false
         )
-        await technicalViewModel.select(worker.workerId, repository: repository)
-        guard technicalViewModel.selectedWorkerId == worker.workerId else { return }
+    }
+
+    private func openTechnicalDetails(_ worker: WorkerSummaryDTO) async {
+        technicalViewModel.prepareSelection(worker)
         selectedTechnicalWorker = worker
+        await technicalViewModel.select(worker.workerId, repository: repository)
     }
 }
 

@@ -19,6 +19,18 @@ struct WorkerConsoleSection<Content: View>: View {
     }
 }
 
+extension View {
+    /// Standard presentation policy for worker-console sheets.
+    ///
+    /// Worker detail surfaces can contain dozens of nested cards. First-level
+    /// containers retain Liquid Glass, while nested containers use static
+    /// tinted fills to avoid glass-on-glass compositing.
+    func workerConsoleSheetPresentation() -> some View {
+        firstLevelGlassSectionFills()
+            .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+    }
+}
+
 struct WorkerConsoleSectionHeader: View {
     let title: String
     let detail: String
@@ -85,7 +97,9 @@ struct WorkerSchemaFieldRow: View {
                     .foregroundStyle(.tronInfo)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
-                    .glassEffect(.regular.tint(Color.tronInfo.opacity(0.15)), in: .capsule)
+                    .background {
+                        Capsule().fill(Color.tronInfo.opacity(0.12))
+                    }
                 if field.isRequired {
                     Text("required")
                         .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
@@ -203,10 +217,13 @@ struct WorkerVersionRow: View {
                     .foregroundStyle(versionAction == .restore ? .tronEmerald : .tronPurple)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 6)
-                    .glassEffect(
-                        .regular.tint((versionAction == .restore ? Color.tronEmerald : .tronPurple).opacity(0.16)).interactive(),
-                        in: .capsule
-                    )
+                    .background {
+                        Capsule().fill(
+                            (versionAction == .restore ? Color.tronEmerald : .tronPurple)
+                                .opacity(0.13)
+                        )
+                    }
+                    .contentShape(Capsule())
                     .buttonStyle(.plain)
                     .disabled(isMutating)
             } else {

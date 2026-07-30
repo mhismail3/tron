@@ -9,36 +9,48 @@ struct TronSegmentedControl<T: Hashable>: View {
     @Binding var selection: T
     var accent: Color = .tronEmerald
     var animatesSelection: Bool = true
+    @Environment(\.usesLiquidGlassForControls) private var usesLiquidGlass
 
     var body: some View {
-        GlassEffectContainer(spacing: 4) {
-            HStack(spacing: 4) {
-                ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                    let isSelected = selection == option.value
-                    Button {
-                        select(option.value)
-                    } label: {
-                        Text(option.label)
-                            .font(
-                                TronTypography.sans(
-                                    size: TronTypography.sizeBody3,
-                                    weight: isSelected ? .semibold : .medium
-                                )
-                            )
-                            .foregroundStyle(accent)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 7)
-                            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-                    .buttonStyle(
-                        TronGlassSelectionButtonStyle(
-                            isSelected: isSelected,
-                            accent: accent,
-                            shape: .roundedRectangle(radius: 8)
-                        )
-                    )
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+        Group {
+            if usesLiquidGlass {
+                GlassEffectContainer(spacing: 4) {
+                    optionsView(usesLiquidGlass: true)
                 }
+            } else {
+                optionsView(usesLiquidGlass: false)
+            }
+        }
+    }
+
+    private func optionsView(usesLiquidGlass: Bool) -> some View {
+        HStack(spacing: 4) {
+            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                let isSelected = selection == option.value
+                Button {
+                    select(option.value)
+                } label: {
+                    Text(option.label)
+                        .font(
+                            TronTypography.sans(
+                                size: TronTypography.sizeBody3,
+                                weight: isSelected ? .semibold : .medium
+                            )
+                        )
+                        .foregroundStyle(accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(
+                    TronGlassSelectionButtonStyle(
+                        isSelected: isSelected,
+                        accent: accent,
+                        shape: .roundedRectangle(radius: 8),
+                        usesLiquidGlass: usesLiquidGlass
+                    )
+                )
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
     }

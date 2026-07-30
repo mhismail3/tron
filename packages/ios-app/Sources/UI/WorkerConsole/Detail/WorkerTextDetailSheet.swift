@@ -37,7 +37,7 @@ struct WorkerTextDetailSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(accent)
     }
 }

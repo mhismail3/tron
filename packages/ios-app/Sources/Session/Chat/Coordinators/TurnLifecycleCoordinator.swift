@@ -14,10 +14,30 @@ import SwiftUI
 /// making it independently testable while maintaining the same behavior.
 @MainActor
 final class TurnLifecycleCoordinator {
+    private var deliveryPresentationTracker =
+        AgentDeliveryContinuationPresentationTracker()
 
     // MARK: - Initialization
 
     init() {}
+
+    /// Reconstruction is authoritative across reconnect. Seed presentation
+    /// state only for an active run so later live frames cannot repeat a
+    /// provenance prelude already restored from durable history.
+    func restoreDeliveryPresentationState(
+        from messages: [ChatMessage],
+        runIsActive: Bool
+    ) {
+        deliveryPresentationTracker.reset()
+        guard runIsActive else { return }
+        let currentRunStart = messages.lastIndex(where: { $0.role == .user })
+            .map { messages.index(after: $0) }
+            ?? messages.startIndex
+        let provenance = messages[currentRunStart...].flatMap(
+            \.agentDeliveryProvenance
+        )
+        _ = deliveryPresentationTracker.takeUnpresented(provenance)
+    }
 
     // MARK: - Turn Start Handling
 
@@ -63,10 +83,13 @@ final class TurnLifecycleCoordinator {
         // Track turn boundary for multi-turn metadata assignment
         context.turnStartMessageIndex = context.messages.count
         context.firstTextMessageIdForTurn = nil
-        if !pluginResult.agentDeliveryProvenance.isEmpty {
+        let unpresentedProvenance = deliveryPresentationTracker.takeUnpresented(
+            pluginResult.agentDeliveryProvenance
+        )
+        if !unpresentedProvenance.isEmpty {
             context.appendToMessages(
                 .deliveryContinuation(
-                    pluginResult.agentDeliveryProvenance,
+                    unpresentedProvenance,
                     turnNumber: pluginResult.turnNumber
                 )
             )
@@ -277,14 +300,19 @@ final class TurnLifecycleCoordinator {
         context: TurnLifecycleContext
     ) {
         let startIndex = context.turnStartMessageIndex ?? 0
-        guard !provenance.isEmpty, startIndex < context.messages.count else {
+        let unpresentedProvenance =
+            deliveryPresentationTracker.takeUnpresented(provenance)
+        guard !unpresentedProvenance.isEmpty,
+              startIndex < context.messages.count else {
             return
         }
         if let existingIndex = (startIndex..<context.messages.count).first(where: {
             !context.messages[$0].agentDeliveryProvenance.isEmpty
         }) {
             context.updateMessage(at: existingIndex) { message in
-                message.agentDeliveryProvenance = provenance
+                message.agentDeliveryProvenance.append(
+                    contentsOf: unpresentedProvenance
+                )
             }
             return
         }
@@ -295,7 +323,7 @@ final class TurnLifecycleCoordinator {
             return
         }
         context.updateMessage(at: firstAssistantIndex) { message in
-            message.agentDeliveryProvenance = provenance
+            message.agentDeliveryProvenance = unpresentedProvenance
         }
     }
 
@@ -339,6 +367,7 @@ final class TurnLifecycleCoordinator {
         )
 
         context.currentTurnToolMessageIds.removeAll()
+        deliveryPresentationTracker.reset()
 
         // Reset all manager states
         context.resetUIUpdateQueue()

@@ -42,7 +42,7 @@ struct WorkerInboxAuditSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: 14) {
                     WorkerConsoleSectionHeader(
                         title: "Delivery records",
                         detail: "Complete terminal outcomes and system records. Context status describes later agent-context attachment, not whether you opened this sheet."
@@ -97,7 +97,7 @@ struct WorkerInboxAuditSheet: View {
             }
             .task { await load(reset: true) }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronInfo)
     }
 
@@ -165,7 +165,7 @@ struct WorkerRunDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if let graph {
                         WorkerRunGraphSummaryView(graph: graph)
                         if let loadError {
@@ -272,18 +272,20 @@ struct WorkerRunDetailSheet: View {
             } message: {
                 Text("Only this invocation will stop. Other work and the worker route remain active.")
             }
-            .task(id: "\(currentRun.invocationId):\(refreshRevision)") {
+            .task(id: "\(currentRun.invocationId):\(refreshRevision):\(isPresentingChildSheet)") {
+                guard !isPresentingChildSheet else { return }
                 await observeRun()
             }
             .onReceive(NotificationCenter.default.publisher(for: .workerRunProjectionInvalidated)) { _ in
-                if WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(
+                if !isPresentingChildSheet,
+                   WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(
                     status: graph?.status
-                ) {
+                   ) {
                     refreshRevision += 1
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(color)
     }
 
@@ -316,6 +318,14 @@ struct WorkerRunDetailSheet: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .sectionFill(color, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private var isPresentingChildSheet: Bool {
+        selectedSession != nil
+            || selectedResult != nil
+            || showRunTree
+            || showTimeline
+            || showTechnicalDetails
     }
 
     private var technicalControls: some View {
@@ -435,7 +445,7 @@ struct WorkerAuditSessionSheet: View {
             )
             .id(sessionId)
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronEmerald)
     }
 }

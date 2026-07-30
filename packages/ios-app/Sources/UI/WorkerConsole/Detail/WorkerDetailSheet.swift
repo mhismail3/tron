@@ -28,7 +28,7 @@ struct WorkerDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                LazyVStack(alignment: .leading, spacing: 20) {
                     if viewModel.isLoadingSelection {
                         WorkerConsoleLoadingState(title: "Loading worker")
                     } else if let worker = viewModel.selectedWorker,
@@ -121,7 +121,7 @@ struct WorkerDetailSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronEmerald)
     }
 

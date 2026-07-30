@@ -27,6 +27,7 @@ private enum EngineDashboardSection: String, CaseIterable {
 private struct EngineDashboardRefreshKey: Equatable {
     let isConnected: Bool
     let section: EngineDashboardSection
+    let isCovered: Bool
 }
 
 struct WorkerConsoleDashboardBand: View {
@@ -120,7 +121,7 @@ struct WorkerConsoleSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     summaryCard
                     TronSegmentedControl(
                         options: EngineDashboardSection.allCases.map { ($0.rawValue, $0) },
@@ -204,8 +205,10 @@ struct WorkerConsoleSheet: View {
             }
             .task(id: EngineDashboardRefreshKey(
                 isConnected: connectionState.isConnected,
-                section: selectedSection
+                section: selectedSection,
+                isCovered: isPresentingChildSheet
             )) {
+                guard !isPresentingChildSheet else { return }
                 await refresh()
                 if selectedSection == .activity {
                     await viewModel.monitor(
@@ -220,7 +223,7 @@ struct WorkerConsoleSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronEmerald)
     }
 
@@ -442,6 +445,10 @@ struct WorkerConsoleSheet: View {
             get: { viewModel.selectedWorkerId != nil },
             set: { if !$0 { viewModel.selectedWorkerId = nil } }
         )
+    }
+
+    private var isPresentingChildSheet: Bool {
+        viewModel.selectedWorkerId != nil || selectedCoreTool != nil || showInboxAudit
     }
 
     private var consoleStatus: (title: String, detail: String, symbol: String, color: Color) {

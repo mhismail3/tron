@@ -27,6 +27,10 @@ extension ChatViewModel {
         // 1. Reconstruct the transient chat projection (messages + config + tokens)
         //    Uses reconstructSessionState() as single source of truth.
         let state = UnifiedEventTransformer.reconstructSessionState(from: mergedEvents, presorted: true)
+        turnLifecycleCoordinator.restoreDeliveryPresentationState(
+            from: state.messages,
+            runIsActive: result.isRunning
+        )
 
         // 2. Rebuild the full timeline before selecting the visible slice.
         allReconstructedMessages = state.messages

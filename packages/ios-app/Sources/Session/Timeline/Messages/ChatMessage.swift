@@ -19,6 +19,11 @@ struct AgentDeliveryContinuationPayload: Decodable, Sendable {
     let deliveries: [AgentDeliveryMessageProvenance]
 }
 
+fileprivate struct AgentDeliveryContinuationPresentationKey: Hashable {
+    let deliveryId: String
+    let redelivery: Bool
+}
+
 enum AgentDeliveryContinuationPresentation {
     static func label(_ deliveries: [AgentDeliveryMessageProvenance]) -> String {
         guard !deliveries.isEmpty else { return "Agent update included" }
@@ -37,6 +42,59 @@ enum AgentDeliveryContinuationPresentation {
             return "Resumed from \(source)"
         }
         return "Update included · \(source)"
+    }
+
+    /// Persisted assistant events retain delivery metadata on every provider
+    /// turn that belongs to one resumed run. Chat presents that durable
+    /// evidence once per logical run while preserving a later explicit
+    /// redelivery of the same delivery ID.
+    static func deduplicatingTranscript(_ messages: [ChatMessage]) -> [ChatMessage] {
+        var tracker = AgentDeliveryContinuationPresentationTracker()
+        return messages.compactMap { original in
+            if original.role == .user {
+                tracker.reset()
+                return original
+            }
+            guard !original.agentDeliveryProvenance.isEmpty else {
+                return original
+            }
+            var message = original
+            message.agentDeliveryProvenance = tracker.takeUnpresented(
+                original.agentDeliveryProvenance
+            )
+            if message.agentDeliveryProvenance.isEmpty,
+               message.isDeliveryProvenanceOnly {
+                return nil
+            }
+            return message
+        }
+    }
+
+    fileprivate static func presentationKey(
+        _ provenance: AgentDeliveryMessageProvenance
+    ) -> AgentDeliveryContinuationPresentationKey {
+        AgentDeliveryContinuationPresentationKey(
+            deliveryId: provenance.deliveryId,
+            redelivery: provenance.redelivery
+        )
+    }
+}
+
+struct AgentDeliveryContinuationPresentationTracker {
+    private var presented = Set<AgentDeliveryContinuationPresentationKey>()
+
+    mutating func takeUnpresented(
+        _ deliveries: [AgentDeliveryMessageProvenance]
+    ) -> [AgentDeliveryMessageProvenance] {
+        deliveries.filter {
+            presented.insert(
+                AgentDeliveryContinuationPresentation.presentationKey($0)
+            ).inserted
+        }
+    }
+
+    mutating func reset() {
+        presented.removeAll(keepingCapacity: true)
     }
 }
 

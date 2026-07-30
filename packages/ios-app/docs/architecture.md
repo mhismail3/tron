@@ -441,6 +441,21 @@ confirmation; ordinary stop/disable controls explain their durable-state
 semantics. Webhook credentials are shown only from the mutation response that
 created or rotated them. Every Worker Console sheet offers medium height first
 and can expand to large; worker subtype does not alter the initial detent.
+Worker sheets keep Liquid Glass on sheet chrome, top-level controls, and
+first-level content containers. A section fill increments an environment-owned
+container depth, so any card or shared control nested inside another card
+automatically uses a static semantic tint instead of another glass layer. Each
+presented sheet resets that depth, preserving one glass level without
+glass-on-glass compositing. Top-level scroll stacks are lazy so opening or
+scrolling a detail does not construct every offscreen card.
+
+Only the frontmost worker sheet observes live worker state. Presenting a run,
+technical detail, result, timeline, or other child sheet freezes the covered
+parent's polling and invalidation-triggered refreshes. Closing the child starts
+one authoritative catch-up read. This does not lose worker state: stream events
+are invalidation hints, while repository snapshots remain the source of truth.
+An in-flight read may finish during presentation, but it cannot start a
+repeated hidden refresh cycle; the catch-up snapshot on return supersedes it.
 
 ### Native worker experiences
 
@@ -548,6 +563,10 @@ trigger, causal depth, trace, timestamps, model/token/cost evidence, and child
 session ID. Technical worker detail
 remains available from the sheet; malformed outputs and unsupported bindings
 remain visible and fall back safely instead of becoming client-owned truth.
+The technical sheet is presented from the already loaded immutable worker,
+inspection, runs, and Attention projection, then refreshes only supplemental
+architecture metadata. It does not repeat the parent sheet's complete set of
+repository reads before becoming visible.
 The Delegation summary follows the same current-state rule: worker health,
 unresolved Attention, or a present refresh failure can require review, while
 completed, failed, and cancelled historical runs remain visible without
@@ -840,8 +859,11 @@ Delivery-only assistant continuations render without a fabricated user bubble
 and say `Resumed from …`; a natural turn says `Update included · …`. Wake
 provenance is persisted and broadcast on the first turn-start, before thinking,
 tools, or assistant text, while the completed assistant event retains the same
-metadata for replay. Older servers that supply it only at response completion
-retain a bounded fallback. The
+metadata for replay. Live and reconstructed chat deduplicate that audit metadata
+by delivery identity within one resumed run, so a multi-turn tool exchange shows
+one compact provenance prelude with an eight-point gap before the resumed
+content. A later explicit redelivery remains presentable. Older servers that
+supply provenance only at response completion retain a bounded fallback. The
 `agent_wait_for_workers` chip says `Auto-resume registered` while pending and
 does not imply that the worker has completed. Optional continuation metadata is
 backward-compatible and records source worker identity and presentation name,

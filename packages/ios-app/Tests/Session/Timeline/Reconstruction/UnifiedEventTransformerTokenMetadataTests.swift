@@ -4,6 +4,67 @@ import XCTest
 final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTestCase {
     // MARK: - Final Response Metadata
 
+    func testRepeatedDeliveryMetadataProducesOneResumePrelude() {
+        let continuation = AnyCodable([
+            "deliveries": [
+                [
+                    "deliveryId": "delivery-1",
+                    "sourceKind": "worker_result",
+                    "sourceWorkerId": "wait-ux-smoke",
+                    "sourceWorkerName": "Wait UX Smoke Test",
+                    "sourceInvocationId": "worker-run-1",
+                    "wakePolicy": "wake",
+                    "boundary": "next_run",
+                    "triggeredWake": true,
+                    "redelivery": false
+                ] as [String: Any]
+            ]
+        ] as [String: Any])
+        let events = [
+            sessionEvent(
+                type: "message.assistant",
+                payload: [
+                    "content": AnyCodable([
+                        ["type": "text", "text": "Reading the exact result."]
+                    ]),
+                    "turn": AnyCodable(4),
+                    "agentDeliveryContinuation": continuation
+                ],
+                timestamp: timestamp(0),
+                sequence: 1
+            ),
+            sessionEvent(
+                type: "message.assistant",
+                payload: [
+                    "content": AnyCodable([
+                        ["type": "text", "text": "The worker completed."]
+                    ]),
+                    "turn": AnyCodable(5),
+                    "agentDeliveryContinuation": continuation
+                ],
+                timestamp: timestamp(1),
+                sequence: 2
+            )
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+
+        XCTAssertEqual(
+            messages.filter(\.isDeliveryProvenanceOnly).count,
+            1
+        )
+        XCTAssertEqual(
+            state.messages.filter(\.isDeliveryProvenanceOnly).count,
+            1
+        )
+        XCTAssertEqual(
+            messages.first(where: \.isDeliveryProvenanceOnly)?
+                .agentDeliveryProvenance.first?.deliveryId,
+            "delivery-1"
+        )
+    }
+
     func testTextOnlyResponseAttachesExactlyOneMetadataRow() {
         let tokenRecordPayload = makeTokenRecordPayload(
             inputTokens: 100,

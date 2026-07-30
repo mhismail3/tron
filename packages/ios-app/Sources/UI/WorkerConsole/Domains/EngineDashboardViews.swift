@@ -71,7 +71,7 @@ struct EngineCoreToolDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(tool.description)
                             .font(TronTypography.sans(size: TronTypography.sizeBody))
@@ -123,7 +123,7 @@ struct EngineCoreToolDetailSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(color)
     }
 

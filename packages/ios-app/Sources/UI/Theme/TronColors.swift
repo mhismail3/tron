@@ -246,6 +246,11 @@ extension View {
 
 // MARK: - Adaptive Section Fill
 
+private enum SectionFillGlassPolicy {
+    case allLevels
+    case firstLevelOnly
+}
+
 private struct SectionFillModifier: ViewModifier {
     let color: Color
     let cornerRadius: CGFloat
@@ -253,6 +258,8 @@ private struct SectionFillModifier: ViewModifier {
     let compact: Bool
     let interactive: Bool
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.sectionFillGlassPolicy) private var glassPolicy
+    @Environment(\.sectionFillDepth) private var sectionFillDepth
 
     private var opacity: Double {
         if subtle {
@@ -266,11 +273,22 @@ private struct SectionFillModifier: ViewModifier {
         subtle ? 0.12 : 0.2
     }
 
+    private var usesLiquidGlass: Bool {
+        guard compact else { return false }
+        switch glassPolicy {
+        case .allLevels:
+            return true
+        case .firstLevelOnly:
+            return sectionFillDepth == 0
+        }
+    }
+
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        if compact {
+        if usesLiquidGlass {
             if interactive {
                 content
+                    .environment(\.sectionFillDepth, sectionFillDepth + 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .glassEffect(
                         .regular.tint(color.opacity(glassOpacity)).interactive(),
@@ -279,6 +297,7 @@ private struct SectionFillModifier: ViewModifier {
                     .contentShape(shape)
             } else {
                 content
+                    .environment(\.sectionFillDepth, sectionFillDepth + 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .glassEffect(
                         .regular.tint(color.opacity(glassOpacity)),
@@ -287,11 +306,43 @@ private struct SectionFillModifier: ViewModifier {
             }
         } else {
             content
+                .environment(\.sectionFillDepth, sectionFillDepth + 1)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background {
                     shape.fill(color.opacity(opacity))
                 }
                 .contentShape(shape)
+        }
+    }
+}
+
+private struct SectionFillGlassPolicyKey: EnvironmentKey {
+    static let defaultValue = SectionFillGlassPolicy.allLevels
+}
+
+private struct SectionFillDepthKey: EnvironmentKey {
+    static let defaultValue = 0
+}
+
+extension EnvironmentValues {
+    fileprivate var sectionFillGlassPolicy: SectionFillGlassPolicy {
+        get { self[SectionFillGlassPolicyKey.self] }
+        set { self[SectionFillGlassPolicyKey.self] = newValue }
+    }
+
+    fileprivate var sectionFillDepth: Int {
+        get { self[SectionFillDepthKey.self] }
+        set { self[SectionFillDepthKey.self] = newValue }
+    }
+
+    /// Shared controls follow the active section-fill depth so a glass control
+    /// never composites on top of a first-level glass container.
+    var usesLiquidGlassForControls: Bool {
+        switch sectionFillGlassPolicy {
+        case .allLevels:
+            return true
+        case .firstLevelOnly:
+            return sectionFillDepth == 0
         }
     }
 }
@@ -304,6 +355,12 @@ extension View {
         self.modifier(SectionFillModifier(color: color, cornerRadius: cornerRadius, subtle: subtle, compact: compact, interactive: interactive))
     }
 
+    /// Uses Liquid Glass for first-level containers and static tinted fills
+    /// for every container nested inside another section fill.
+    func firstLevelGlassSectionFills() -> some View {
+        environment(\.sectionFillGlassPolicy, .firstLevelOnly)
+            .environment(\.sectionFillDepth, 0)
+    }
 }
 
 // MARK: - Adaptive Count Badge

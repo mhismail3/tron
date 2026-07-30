@@ -16,7 +16,7 @@ struct DelegationRunDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     summaryCard
                     if let result { resultContent(result) }
                     requestContent
@@ -72,7 +72,7 @@ struct DelegationRunDetailSheet: View {
                 Text("Only invocation \(WorkerConsolePresentation.compactIdentifier(run.invocationId)) will stop. Other delegated work and the worker remain active.")
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronPurple)
     }
 

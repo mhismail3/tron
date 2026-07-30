@@ -296,6 +296,51 @@ final class WorkerConsoleViewModel {
         }
     }
 
+    /// Presents already-read authoritative worker projections without issuing
+    /// another round of inspection, run, and attention requests.
+    func useLoadedSelection(
+        worker: WorkerSummaryDTO,
+        inspection: WorkerInspectResultDTO,
+        runs: [WorkerInvocationDTO],
+        attention: [WorkerInboxItemDTO]
+    ) {
+        if let index = workers.firstIndex(where: { $0.workerId == worker.workerId }) {
+            workers[index] = worker
+        } else {
+            workers.append(worker)
+        }
+        selectedWorkerId = worker.workerId
+        self.inspection = inspection
+        self.runs = runs
+        self.attention = attention
+        invocationInput = WorkerConsolePresentation.invocationTemplate(
+            from: inspection.bundle["inputSchema"]
+        )
+        invocationResult = nil
+        webhookCredential = nil
+        isLoadingSelection = false
+        lastError = nil
+    }
+
+    /// Makes a known worker visible immediately while its detailed projection
+    /// loads. This avoids blocking sheet presentation on an unrelated global
+    /// dashboard refresh.
+    func prepareSelection(_ worker: WorkerSummaryDTO) {
+        if let index = workers.firstIndex(where: { $0.workerId == worker.workerId }) {
+            workers[index] = worker
+        } else {
+            workers.append(worker)
+        }
+        selectedWorkerId = worker.workerId
+        inspection = nil
+        runs = []
+        attention = []
+        invocationResult = nil
+        webhookCredential = nil
+        isLoadingSelection = true
+        lastError = nil
+    }
+
     func monitor(
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState

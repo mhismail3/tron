@@ -21,7 +21,7 @@ struct WorkLedgerGoalDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if let error = viewModel.lastError {
                         WorkerConsoleErrorBanner(message: error)
                     }
@@ -74,7 +74,7 @@ struct WorkLedgerGoalDetailSheet: View {
             .onAppear { syncFields() }
             .onChange(of: goal) { _, _ in syncFields() }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronEmerald)
     }
 
@@ -281,7 +281,7 @@ struct WorkLedgerQuestionDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if let error = viewModel.lastError {
                         WorkerConsoleErrorBanner(message: error)
                     }
@@ -322,7 +322,7 @@ struct WorkLedgerQuestionDetailSheet: View {
             .onAppear { answer = question?.answer ?? "" }
             .onChange(of: question) { _, newValue in answer = newValue?.answer ?? answer }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronCyan)
     }
 
@@ -437,7 +437,7 @@ struct WorkLedgerDecisionDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if let decision {
                         VStack(alignment: .leading, spacing: 12) {
                             Label(decision.title, systemImage: "signpost.right.and.left")
@@ -485,7 +485,7 @@ struct WorkLedgerDecisionDetailSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronPurple)
     }
 

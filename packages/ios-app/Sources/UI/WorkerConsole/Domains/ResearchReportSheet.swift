@@ -14,7 +14,7 @@ struct ResearchReportSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     summaryCard
                     TronSegmentedControl(
                         options: ResearchReportSection.allCases.map { ($0.rawValue, $0) },
@@ -44,7 +44,7 @@ struct ResearchReportSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronCyan)
     }
 
@@ -330,7 +330,7 @@ private struct ResearchClaimDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     Text(claim.text)
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
@@ -371,7 +371,7 @@ private struct ResearchClaimDetailSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(accent)
     }
 }
@@ -383,7 +383,7 @@ private struct ResearchSourceDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     Text(source.title)
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
@@ -423,7 +423,7 @@ private struct ResearchSourceDetailSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronCyan)
     }
 }

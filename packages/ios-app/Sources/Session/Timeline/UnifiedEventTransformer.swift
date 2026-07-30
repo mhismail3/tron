@@ -136,7 +136,9 @@ struct UnifiedEventTransformer {
             }
         }
 
-        return messages
+        return AgentDeliveryContinuationPresentation.deduplicatingTranscript(
+            messages
+        )
     }
 
     /// Transform a single event to a ChatMessage.
@@ -329,6 +331,10 @@ extension UnifiedEventTransformer {
             }
         }
 
+        state.messages =
+            AgentDeliveryContinuationPresentation.deduplicatingTranscript(
+                state.messages
+            )
         return state
     }
 }

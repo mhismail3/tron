@@ -137,6 +137,21 @@ final class ChatMessagePresentationTests: XCTestCase {
         XCTAssertFalse(source.contains("else if let record = message.tokenRecord"))
     }
 
+    func testDeliveryPreludeUsesCompactSpacingBeforeTurnContent() {
+        XCTAssertEqual(
+            ChatMessageLayout.bottomSpacingAdjustment(
+                isDeliveryProvenanceOnly: true
+            ),
+            -4
+        )
+        XCTAssertEqual(
+            ChatMessageLayout.bottomSpacingAdjustment(
+                isDeliveryProvenanceOnly: false
+            ),
+            0
+        )
+    }
+
     func testStreamingRevealFadesOnlyTheNewCharacterTailAndConverges() {
         let stableOpacity = StreamingTextRevealPolicy.opacity(
             forCharacterAt: 99,

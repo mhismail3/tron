@@ -21,7 +21,7 @@ struct WorkerRunTechnicalDetailsSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     WorkerConsoleSection(
                         title: "Protocol values",
                         detail: "Raw worker values are available only on demand.",
@@ -136,7 +136,7 @@ struct WorkerRunTechnicalDetailsSheet: View {
                 )
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronSlate)
     }
 

@@ -195,6 +195,7 @@ final class DelegationViewModel {
     var hasLoaded = false
     var lastError: String?
     var lastSubmittedInvocationId: String?
+    private var refreshGeneration = 0
 
     var activeRunCount: Int { runs.count { ["queued", "running"].contains($0.status) } }
     var completedRunCount: Int { runs.count { $0.status == "completed" } }
@@ -219,6 +220,9 @@ final class DelegationViewModel {
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState
     ) async {
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
+
         guard connectionState.isConnected else {
             worker = nil
             inspection = nil
@@ -242,32 +246,54 @@ final class DelegationViewModel {
 
         isLoading = true
         defer {
-            isLoading = false
-            hasLoaded = true
+            if generation == refreshGeneration {
+                isLoading = false
+                hasLoaded = true
+            }
+        }
+
+        if worker?.workerId != selected.workerId {
+            inspection = nil
+            runs = []
+            attention = []
+            resultsByInvocation = [:]
         }
         worker = selected
+
         var errors: [String] = []
         do {
-            inspection = try await repository.inspectWorker(selected.workerId)
+            let loadedInspection = try await repository.inspectWorker(selected.workerId)
+            guard !Task.isCancelled, generation == refreshGeneration else { return }
+            inspection = loadedInspection
+        } catch is CancellationError {
+            return
         } catch {
-            inspection = nil
+            guard generation == refreshGeneration else { return }
             errors.append("Contract: \(error.localizedDescription)")
         }
+
         do {
-            runs = try await repository.workerRuns(workerId: selected.workerId, limit: 20).runs
-                .sorted { $0.createdAt > $1.createdAt }
+            let page = try await repository.workerRuns(workerId: selected.workerId, limit: 20)
+            guard !Task.isCancelled, generation == refreshGeneration else { return }
+            runs = page.runs.sorted { $0.createdAt > $1.createdAt }
+        } catch is CancellationError {
+            return
         } catch {
-            runs = []
+            guard generation == refreshGeneration else { return }
             errors.append("Runs: \(error.localizedDescription)")
         }
+
         do {
-            attention = try await repository.workerAttention(
+            let page = try await repository.workerAttention(
                 workerId: selected.workerId,
                 limit: 20
-            ).items
-                .sorted { $0.createdAt > $1.createdAt }
+            )
+            guard !Task.isCancelled, generation == refreshGeneration else { return }
+            attention = page.items.sorted { $0.createdAt > $1.createdAt }
+        } catch is CancellationError {
+            return
         } catch {
-            attention = []
+            guard generation == refreshGeneration else { return }
             errors.append("Attention: \(error.localizedDescription)")
         }
 

@@ -107,6 +107,17 @@ struct MessageBubble: View {
 
 }
 
+enum ChatMessageLayout {
+    /// The transcript stack contributes 12 points between ordinary rows.
+    /// Provenance is a compact prelude to the resumed turn, so it uses an
+    /// eight-point effective gap before the following thinking/tool/text row.
+    static func bottomSpacingAdjustment(
+        isDeliveryProvenanceOnly: Bool
+    ) -> CGFloat {
+        isDeliveryProvenanceOnly ? -4 : 0
+    }
+}
+
 // MARK: - Confirmed Action Chip View
 
 struct ConfirmedActionChipView: View {

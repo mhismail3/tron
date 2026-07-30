@@ -65,7 +65,7 @@ struct ArtifactInboxView: View {
                 await viewModel.refresh(repository: repository)
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronEmerald)
         .task {
             await viewModel.refresh(repository: repository)
@@ -203,7 +203,7 @@ private struct ArtifactDetailView: View {
                 actionsCard
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .task(id: artifact.id) {
             await viewModel.load(artifact, repository: repository)
         }

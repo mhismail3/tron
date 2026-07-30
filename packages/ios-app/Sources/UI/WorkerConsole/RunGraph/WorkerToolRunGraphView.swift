@@ -54,9 +54,10 @@ struct WorkerRunActionBar: View {
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 .padding(.horizontal, 11)
                 .padding(.vertical, 8)
-                .glassEffect(.regular.tint(color.opacity(0.16)).interactive(), in: .capsule)
+                .background(color.opacity(0.12), in: Capsule())
         }
         .buttonStyle(.plain)
+        .contentShape(Capsule())
         .foregroundStyle(color)
     }
 }
@@ -121,13 +122,17 @@ struct WorkerToolRunGraphView: View {
                 .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
             }
         }
-        .task(id: "\(invocationId ?? ""):\(modelToolInvocationId):\(refreshRevision)") {
+        .task(
+            id: "\(invocationId ?? ""):\(modelToolInvocationId):\(refreshRevision):\(isPresentingChildSheet)"
+        ) {
+            guard !isPresentingChildSheet else { return }
             await observe()
         }
         .onReceive(NotificationCenter.default.publisher(for: .workerRunProjectionInvalidated)) { _ in
-            if WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(
+            if !isPresentingChildSheet,
+               WorkerRunGraphPresentation.shouldRefreshAfterInvalidation(
                 status: graph?.status
-            ) {
+               ) {
                 refreshRevision += 1
             }
         }
@@ -158,6 +163,10 @@ struct WorkerToolRunGraphView: View {
             Text("Only this invocation and its causal descendants will stop.")
         }
         .accessibilityIdentifier("worker-tool-authoritative-graph")
+    }
+
+    private var isPresentingChildSheet: Bool {
+        selectedResult != nil || showRunTree || showTimeline
     }
 
     private func observe() async {

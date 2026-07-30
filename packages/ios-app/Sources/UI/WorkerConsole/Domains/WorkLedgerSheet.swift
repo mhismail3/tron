@@ -51,7 +51,7 @@ struct WorkLedgerSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     summaryCard
                     TronSegmentedControl(
                         options: WorkLedgerSection.allCases.map { ($0.rawValue, $0) },
@@ -165,9 +165,12 @@ struct WorkLedgerSheet: View {
                     )
                 }
             }
-            .task { await refresh() }
+            .task(id: isPresentingChildSheet) {
+                guard !isPresentingChildSheet else { return }
+                await refresh()
+            }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronEmerald)
     }
 
@@ -405,6 +408,14 @@ struct WorkLedgerSheet: View {
             connectionState: connectionState
         )
     }
+
+    private var isPresentingChildSheet: Bool {
+        createKind != nil
+            || selectedGoalId != nil
+            || selectedQuestionId != nil
+            || selectedDecisionId != nil
+            || showTechnicalDetails
+    }
 }
 
 struct WorkLedgerCreateSheet: View {
@@ -423,7 +434,7 @@ struct WorkLedgerCreateSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if let error = viewModel.lastError {
                         WorkerConsoleErrorBanner(message: error)
                     }
@@ -449,7 +460,7 @@ struct WorkLedgerCreateSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronEmerald)
     }
 

@@ -108,7 +108,7 @@ struct WorkerConsoleRow: View {
             .foregroundStyle(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
-            .glassEffect(.regular.tint(color.opacity(0.14)), in: .capsule)
+            .background(color.opacity(0.12), in: Capsule())
             .lineLimit(1)
     }
 

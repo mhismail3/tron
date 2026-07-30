@@ -421,7 +421,7 @@ struct WorkerRunTreeSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: 14) {
                     Text(WorkerRunGraphPresentation.workBreakdown(graph))
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                         .foregroundStyle(.tronTextSecondary)
@@ -448,7 +448,7 @@ struct WorkerRunTreeSheet: View {
                 )
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronCyan)
     }
 }
@@ -485,7 +485,7 @@ struct WorkerRunTimelineSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronPurple)
     }
 }

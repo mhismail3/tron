@@ -445,6 +445,12 @@ extension ChatView {
                 message: message,
                 onTap: { action in handleBubbleTap(action) }
             )
+            .padding(
+                .bottom,
+                ChatMessageLayout.bottomSpacingAdjustment(
+                    isDeliveryProvenanceOnly: message.isDeliveryProvenanceOnly
+                )
+            )
             .id(message.id)
         case .toolGroup(let group):
             ToolInvocationGroupChip(
@@ -506,6 +512,12 @@ extension ChatView {
             MessageBubble(
                 message: message,
                 onTap: { action in handleBubbleTap(action) }
+            )
+            .padding(
+                .bottom,
+                ChatMessageLayout.bottomSpacingAdjustment(
+                    isDeliveryProvenanceOnly: message.isDeliveryProvenanceOnly
+                )
             )
             .id(message.id)
             .background {

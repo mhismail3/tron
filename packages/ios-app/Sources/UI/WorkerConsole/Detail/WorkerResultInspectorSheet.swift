@@ -198,7 +198,7 @@ struct WorkerResultInspectorSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     if isLoading {
                         ProgressView("Loading durable result…")
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -247,7 +247,7 @@ struct WorkerResultInspectorSheet: View {
                 await load()
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronSuccess)
     }
 
@@ -430,7 +430,7 @@ private struct WorkerResultTechnicalSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     WorkerConsoleSection(
                         title: "Result reference",
                         detail: "Integrity and immutable-version evidence.",
@@ -492,7 +492,7 @@ private struct WorkerResultTechnicalSheet: View {
                 )
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronSlate)
     }
 

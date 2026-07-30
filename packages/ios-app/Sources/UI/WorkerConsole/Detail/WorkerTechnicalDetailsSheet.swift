@@ -23,7 +23,7 @@ struct WorkerTechnicalDetailsSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronInfo)
     }
 

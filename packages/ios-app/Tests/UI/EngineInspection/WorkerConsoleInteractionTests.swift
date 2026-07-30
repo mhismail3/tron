@@ -255,9 +255,13 @@ struct WorkerConsoleInteractionTests {
         #expect(codeBlockSource.contains(".fixedSize(horizontal: true, vertical: true)"))
     }
 
-    @Test("Worker tabs and execution actions share liquid glass components")
+    @Test("Worker controls use glass only outside nested glass containers")
     func workerControlsUseSharedLiquidGlass() throws {
         let root = iosAppRoot()
+        let theme = try String(
+            contentsOf: root.appendingPathComponent("Sources/UI/Theme/TronColors.swift"),
+            encoding: .utf8
+        )
         let tabs = try String(
             contentsOf: root.appendingPathComponent("Sources/UI/Components/TronSegmentedControl.swift"),
             encoding: .utf8
@@ -279,10 +283,17 @@ struct WorkerConsoleInteractionTests {
             encoding: .utf8
         )
 
+        #expect(theme.contains("var usesLiquidGlassForControls: Bool"))
         #expect(tabs.contains("GlassEffectContainer"))
+        #expect(tabs.contains("@Environment(\\.usesLiquidGlassForControls)"))
+        #expect(tabs.contains("optionsView(usesLiquidGlass: false)"))
         #expect(tabs.contains("TronGlassSelectionButtonStyle("))
         #expect(selectionStyle.contains(".glassEffect("))
+        #expect(selectionStyle.contains("var usesLiquidGlass = true"))
+        #expect(selectionStyle.contains("staticStyled("))
         #expect(action.contains(".glassEffect("))
+        #expect(action.contains("@Environment(\\.usesLiquidGlassForControls)"))
+        #expect(action.contains(".fill(accent.opacity(isEnabled ? 0.12 : 0.05))"))
         #expect(workerDetail.contains("TronPrimaryActionButton("))
         #expect(delegation.contains("TronPrimaryActionButton("))
         #expect(!workerDetail.contains(".background(Color.tronEmerald"))
@@ -472,7 +483,7 @@ struct WorkerConsoleInteractionTests {
         #expect(technicalDetail.contains(#"label: provenance.count == 1 ? "Source" : "Sources""#))
         #expect(!technicalDetail.contains(#"title: "Input contract""#))
         #expect(!technicalDetail.contains(#"title: "Triggers""#))
-        #expect(technicalDetail.contains(".adaptivePresentationDetents([.medium, .large]"))
+        #expect(technicalDetail.contains(".workerConsoleSheetPresentation()"))
         #expect(!detail.contains("FlowLayout(spacing: 6)"))
         #expect(!detail.contains("showProvenance"))
         #expect(!detail.contains("Source Details"))
@@ -491,6 +502,93 @@ struct WorkerConsoleInteractionTests {
         #expect(!triggerSource.contains("WorkerConsoleInlineEmptyState"))
         #expect(!context.contains("WorkerSystemSheet("))
         #expect(!context.contains("workerSystemSection"))
+    }
+
+    @Test("Covered worker sheets freeze observation and dense content renders lazily")
+    func coveredWorkerSheetsFreezeAndRenderLazily() throws {
+        let root = iosAppRoot()
+        let components = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Presentation/WorkerConsoleComponents.swift"
+            ),
+            encoding: .utf8
+        )
+        let console = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Overview/WorkerConsoleViews.swift"
+            ),
+            encoding: .utf8
+        )
+        let delegation = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Domains/DelegationSheet.swift"
+            ),
+            encoding: .utf8
+        )
+        let research = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Domains/ResearchSuiteSheet.swift"
+            ),
+            encoding: .utf8
+        )
+        let workLedger = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Domains/WorkLedgerSheet.swift"
+            ),
+            encoding: .utf8
+        )
+        let runDetail = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Detail/WorkerConsoleDetailSheets.swift"
+            ),
+            encoding: .utf8
+        )
+        let toolRun = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/RunGraph/WorkerToolRunGraphView.swift"
+            ),
+            encoding: .utf8
+        )
+        let workerRow = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Overview/WorkerConsoleRow.swift"
+            ),
+            encoding: .utf8
+        )
+        let theme = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/Theme/TronColors.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(components.contains("func workerConsoleSheetPresentation()"))
+        #expect(components.contains("firstLevelGlassSectionFills()"))
+        #expect(components.contains(".adaptivePresentationDetents([.medium, .large]"))
+        #expect(theme.contains("case firstLevelOnly"))
+        #expect(theme.contains("return sectionFillDepth == 0"))
+        #expect(theme.contains(
+            "environment(\\.sectionFillDepth, sectionFillDepth + 1)"
+        ))
+        #expect(!workerRow.contains(".glassEffect("))
+        #expect(!toolRun.contains(".glassEffect("))
+        #expect(console.contains("LazyVStack(alignment: .leading"))
+        #expect(delegation.contains("LazyVStack(alignment: .leading"))
+        #expect(research.contains("LazyVStack(alignment: .leading"))
+        #expect(workLedger.contains("LazyVStack(alignment: .leading"))
+
+        #expect(console.contains("isCovered: isPresentingChildSheet"))
+        #expect(console.contains("guard !isPresentingChildSheet else { return }"))
+        #expect(delegation.contains(#"workerProjection: "covered""#))
+        #expect(delegation.contains("guard !isPresentingChildSheet else { return }"))
+        #expect(research.contains(#"workerProjection: "covered""#))
+        #expect(research.contains("guard !isPresentingChildSheet else { return }"))
+        #expect(workLedger.contains(".task(id: isPresentingChildSheet)"))
+        #expect(workLedger.contains("guard !isPresentingChildSheet else { return }"))
+        #expect(runDetail.contains("refreshRevision):\\(isPresentingChildSheet)"))
+        #expect(runDetail.contains("if !isPresentingChildSheet,"))
+        #expect(toolRun.contains("refreshRevision):\\(isPresentingChildSheet)"))
+        #expect(toolRun.contains("if !isPresentingChildSheet,"))
     }
 
     @Test("Worker sessions stay read only and inside dashboard sheets")

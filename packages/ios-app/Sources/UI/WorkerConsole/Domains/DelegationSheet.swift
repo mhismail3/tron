@@ -6,6 +6,13 @@ private enum DelegationSection: String, CaseIterable {
     case activity = "Activity"
 }
 
+private struct DelegationRefreshKey: Equatable {
+    let isConnected: Bool
+    let workerProjection: String
+    let runProjection: String
+    let isCovered: Bool
+}
+
 struct DelegationSheet: View {
     @Environment(\.dependencies) private var dependencies
 
@@ -23,7 +30,7 @@ struct DelegationSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     summaryCard
                     TronSegmentedControl(
                         options: DelegationSection.allCases.map { ($0.rawValue, $0) },
@@ -99,15 +106,12 @@ struct DelegationSheet: View {
             .sheet(isPresented: $showOptionalGuidance) {
                 DelegationGuidanceSheet(viewModel: viewModel)
             }
-            .task { await refresh() }
-            .onChange(of: consoleViewModel.workers) { _, _ in
-                Task { await refresh() }
-            }
-            .onChange(of: consoleViewModel.activityRuns) { _, _ in
-                Task { await refresh() }
+            .task(id: refreshKey) {
+                guard !isPresentingChildSheet else { return }
+                await refresh()
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronPurple)
     }
 
@@ -344,6 +348,35 @@ struct DelegationSheet: View {
         return dependencies.eventStoreManager.sessions.first { $0.id == sessionId }
     }
 
+    private var isPresentingChildSheet: Bool {
+        selectedRun != nil || showTechnicalDetails || showOptionalGuidance
+    }
+
+    private var refreshKey: DelegationRefreshKey {
+        if isPresentingChildSheet {
+            return DelegationRefreshKey(
+                isConnected: connectionState.isConnected,
+                workerProjection: "covered",
+                runProjection: "covered",
+                isCovered: true
+            )
+        }
+        let workers = consoleViewModel.workers
+            .filter { $0.workerId == "general-delegate" }
+            .map { "\($0.workerId):\($0.activeVersion):\($0.health):\($0.enabled):\($0.updatedAt)" }
+            .joined(separator: "|")
+        let runs = consoleViewModel.activityRuns
+            .filter { $0.workerId == "general-delegate" }
+            .map { "\($0.invocationId):\($0.status):\($0.completedAt ?? "")" }
+            .joined(separator: "|")
+        return DelegationRefreshKey(
+            isConnected: connectionState.isConnected,
+            workerProjection: workers,
+            runProjection: runs,
+            isCovered: false
+        )
+    }
+
     private func refresh() async {
         dependencies.eventStoreManager.requestSessionRefresh(reason: .serverHint)
         await viewModel.refresh(
@@ -354,14 +387,19 @@ struct DelegationSheet: View {
     }
 
     private func openTechnicalDetails() async {
-        guard let worker = viewModel.worker else { return }
-        await technicalViewModel.refresh(
+        guard let worker = viewModel.worker,
+              let inspection = viewModel.inspection else { return }
+        technicalViewModel.useLoadedSelection(
+            worker: worker,
+            inspection: inspection,
+            runs: viewModel.runs,
+            attention: viewModel.attention
+        )
+        showTechnicalDetails = true
+        await technicalViewModel.refreshSummary(
             repository: repository,
             connectionState: connectionState
         )
-        await technicalViewModel.select(worker.workerId, repository: repository)
-        guard technicalViewModel.selectedWorkerId == worker.workerId else { return }
-        showTechnicalDetails = true
     }
 }
 
@@ -371,7 +409,7 @@ private struct DelegationGuidanceSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: 14) {
                     DelegationFormTextArea(
                         title: "Context",
                         detail: "Relevant background, not hidden instructions.",
@@ -421,7 +459,7 @@ private struct DelegationGuidanceSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .workerConsoleSheetPresentation()
         .tint(.tronPurple)
     }
 }
