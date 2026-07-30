@@ -73,6 +73,14 @@
 //! Fixed worker creation, invocation, cancellation, lifecycle, webhook, and
 //! stop-all mutations therefore deduplicate at profile scope and remain usable
 //! from the profile-level Engine console without fabricating a chat session.
+//! The ordinary main-agent surface always includes the bounded coordination
+//! primitives for discovery, invocation, authorized result reads,
+//! invocation-scoped cancellation, durable waits, and Agent Delivery/mailbox
+//! operations. Worker administration (`upsert`, inspection/list management,
+//! lifecycle mutations, rollback, retirement, purge, global run audit, and
+//! detach) remains specialist- or client-only. An agent worker receives only
+//! its immutable `agentTools` allowlist and must declare `worker_invoke` plus a
+//! positive child budget when its production role launches another worker.
 //! Session actuators, host mutations, and dynamically projected worker tools
 //! retain causal session-scoped replay.
 //! Both stored promotions and the final dynamic provider surface have hard

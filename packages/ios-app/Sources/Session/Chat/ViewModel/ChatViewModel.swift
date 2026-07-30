@@ -225,6 +225,9 @@ final class ChatViewModel {
     static let initialMessageBatchSize = 300
     /// Initial persisted event count requested from `session::reconstruct`.
     static let initialReconstructionEventLimit = 300
+    /// Worker audit sheets open inside another sheet and initially need only
+    /// the recent execution tail. Older activity remains explicitly pageable.
+    static let workerAuditReconstructionEventLimit = 120
     /// Upper bound for a single reconnect reconstruction request. Larger gaps
     /// are filled by bounded pagination in `processReconstructionResult`.
     static let maxReconstructionEventLimit = 1_000

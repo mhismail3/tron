@@ -63,6 +63,14 @@ final class TurnLifecycleCoordinator {
         // Track turn boundary for multi-turn metadata assignment
         context.turnStartMessageIndex = context.messages.count
         context.firstTextMessageIdForTurn = nil
+        if !pluginResult.agentDeliveryProvenance.isEmpty {
+            context.appendToMessages(
+                .deliveryContinuation(
+                    pluginResult.agentDeliveryProvenance,
+                    turnNumber: pluginResult.turnNumber
+                )
+            )
+        }
         context.logDebug("Turn \(pluginResult.turnNumber) boundary set at message index \(context.turnStartMessageIndex ?? -1)")
     }
 
@@ -92,10 +100,13 @@ final class TurnLifecycleCoordinator {
             return
         }
 
+        attachDeliveryProvenanceIfNeeded(
+            pluginResult.agentDeliveryProvenance,
+            context: context
+        )
         context.updateMessage(at: index) { message in
             message.isFinalAssistantResponse = true
             message.turnNumber = pluginResult.turnNumber
-            message.agentDeliveryProvenance = pluginResult.agentDeliveryProvenance
         }
         context.logDebug(
             "Marked textual response for turn \(pluginResult.turnNumber) as final"
@@ -232,6 +243,7 @@ final class TurnLifecycleCoordinator {
         if let id = context.streamingMessageId,
            let index = MessageFinder.indexById(id, in: context.messages),
            context.messages[index].role == .assistant,
+           !context.messages[index].isDeliveryProvenanceOnly,
            context.messages[index].content.isAssistantResponseText {
             return index
         }
@@ -239,6 +251,7 @@ final class TurnLifecycleCoordinator {
         if let id = context.firstTextMessageIdForTurn,
            let index = MessageFinder.indexById(id, in: context.messages),
            context.messages[index].role == .assistant,
+           !context.messages[index].isDeliveryProvenanceOnly,
            context.messages[index].content.isAssistantResponseText {
             return index
         }
@@ -251,7 +264,38 @@ final class TurnLifecycleCoordinator {
 
         return (startIndex..<context.messages.count).reversed().first {
             context.messages[$0].role == .assistant &&
+            !context.messages[$0].isDeliveryProvenanceOnly &&
             context.messages[$0].content.isAssistantResponseText
+        }
+    }
+
+    /// Older servers expose continuation metadata only at response completion.
+    /// Place that fallback on the first assistant row for the turn so its
+    /// visual order is still provenance → thinking/tools → response.
+    private func attachDeliveryProvenanceIfNeeded(
+        _ provenance: [AgentDeliveryMessageProvenance],
+        context: TurnLifecycleContext
+    ) {
+        let startIndex = context.turnStartMessageIndex ?? 0
+        guard !provenance.isEmpty, startIndex < context.messages.count else {
+            return
+        }
+        if let existingIndex = (startIndex..<context.messages.count).first(where: {
+            !context.messages[$0].agentDeliveryProvenance.isEmpty
+        }) {
+            context.updateMessage(at: existingIndex) { message in
+                message.agentDeliveryProvenance = provenance
+            }
+            return
+        }
+        guard let firstAssistantIndex = (startIndex..<context.messages.count).first(where: {
+            context.messages[$0].role == .assistant
+        })
+        else {
+            return
+        }
+        context.updateMessage(at: firstAssistantIndex) { message in
+            message.agentDeliveryProvenance = provenance
         }
     }
 

@@ -293,10 +293,11 @@ extension SessionContextSheet {
                 } label: {
                     HStack(spacing: 8) {
                         Label(
-                            agentUpdatesLoadError
-                                ?? (isLoadingAgentUpdates
-                                    ? "Loading durable update state…"
-                                    : "No deliveries or waits are recorded."),
+                            SessionContextPresentation.deliveryWaitEmptyState(
+                                error: agentUpdatesLoadError,
+                                isLoading: isLoadingAgentUpdates,
+                                hasLoadedSnapshot: hasLoadedAgentUpdatesSnapshot
+                            ),
                             systemImage: agentUpdatesLoadError == nil
                                 ? "bell.slash"
                                 : "exclamationmark.triangle"

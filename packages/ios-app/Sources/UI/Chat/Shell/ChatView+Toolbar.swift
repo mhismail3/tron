@@ -43,7 +43,7 @@ extension ChatView {
                         ? readOnlyTitle ?? "Worker Session"
                         : presentedSession?.displayTitle ?? "Chat",
                     font: TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold),
-                    color: presentationMode == .workerAudit ? .tronPurple : .tronEmerald
+                    color: .tronEmerald
                 )
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -66,7 +66,7 @@ extension ChatView {
     var trailingToolbarItem: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
             if presentationMode == .workerAudit {
-                SheetDismissButton(color: .tronPurple)
+                SheetDismissButton(color: .tronEmerald)
             } else {
                 Button {
                     NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.settings.rawValue)

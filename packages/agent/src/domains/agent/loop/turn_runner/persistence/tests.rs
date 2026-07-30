@@ -72,6 +72,7 @@ async fn emit_turn_start_persists_before_broadcasting() {
         Some(&h.persister),
         &h.session_id,
         1,
+        None,
         Some(&h.counter),
         None,
         None,
@@ -91,6 +92,50 @@ async fn emit_turn_start_persists_before_broadcasting() {
     assert_eq!(
         persisted[0], broadcast_seq,
         "persisted and broadcast turn-start events must share a sequence"
+    );
+}
+
+#[tokio::test]
+async fn emit_turn_start_persists_and_broadcasts_delivery_continuation() {
+    let mut h = harness();
+    let continuation = json!({
+        "deliveries":[{
+            "deliveryId":"delivery-1",
+            "sourceKind":"worker_result",
+            "sourceWorkerName":"General Delegate",
+            "triggeredWake":true,
+            "redelivery":false
+        }]
+    });
+
+    emit_turn_start(
+        &h.emitter,
+        Some(&h.persister),
+        &h.session_id,
+        1,
+        Some(continuation.clone()),
+        Some(&h.counter),
+        None,
+        None,
+    )
+    .unwrap();
+
+    let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
+        .await
+        .expect("broadcast should arrive")
+        .expect("broadcast channel alive");
+    assert!(matches!(
+        broadcast,
+        TronEvent::TurnStart {
+            agent_delivery_continuation: Some(ref value),
+            ..
+        } if value == &continuation
+    ));
+
+    let payloads = persisted_payloads(&h.store, &h.session_id, "stream.turn_start");
+    assert_eq!(
+        payloads[0]["agentDeliveryContinuation"], continuation,
+        "reconstruction must retain the same provenance that live clients saw"
     );
 }
 
@@ -119,6 +164,7 @@ async fn emit_turn_start_advances_stale_sequence_counter_from_db() {
         Some(&h.persister),
         &h.session_id,
         1,
+        None,
         Some(&h.counter),
         None,
         None,
@@ -145,6 +191,7 @@ async fn emit_turn_start_allocates_after_live_runtime_events() {
         Some(&h.persister),
         &h.session_id,
         1,
+        None,
         Some(&h.counter),
         None,
         None,
@@ -173,6 +220,7 @@ async fn emit_turn_start_without_persister_still_broadcasts() {
         None,
         &h.session_id,
         1,
+        None,
         Some(&h.counter),
         None,
         None,
@@ -195,6 +243,7 @@ async fn emit_turn_start_skips_broadcast_on_persist_failure() {
         Some(&h.persister),
         "missing-session",
         1,
+        None,
         Some(&h.counter),
         None,
         None,

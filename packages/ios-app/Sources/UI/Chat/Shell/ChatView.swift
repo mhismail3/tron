@@ -210,7 +210,8 @@ struct ChatView: View {
                 )
                 initialLoadComplete = true
             }
-            if services.connection.connectionState.isConnected {
+            if presentationMode == .interactiveSession,
+               services.connection.connectionState.isConnected {
                 viewModel.startSpeechTranscriptionMonitoring()
             }
             // PERFORMANCE OPTIMIZATION: Parallelize independent operations
@@ -285,10 +286,12 @@ struct ChatView: View {
             }
         }
         .onChange(of: services.connection.connectionState) { oldState, newState in
-            if newState.isConnected {
-                viewModel.startSpeechTranscriptionMonitoring()
-            } else {
-                viewModel.stopSpeechTranscriptionMonitoring()
+            if presentationMode == .interactiveSession {
+                if newState.isConnected {
+                    viewModel.startSpeechTranscriptionMonitoring()
+                } else {
+                    viewModel.stopSpeechTranscriptionMonitoring()
+                }
             }
             // React when connection transitions to connected
             if initialLoadComplete, newState.isConnected && !oldState.isConnected {
@@ -405,7 +408,7 @@ struct ChatView: View {
 
     @ViewBuilder
     private var chatCoreContent: some View {
-        let content = messagesScrollView
+        let content = transcriptScrollView
             .overlay {
                 EmptyView()
             }

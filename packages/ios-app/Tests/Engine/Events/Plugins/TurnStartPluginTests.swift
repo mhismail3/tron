@@ -29,6 +29,35 @@ final class TurnStartPluginTests: XCTestCase {
         XCTAssertEqual(result?.agentPhase, "processing")
     }
 
+    func testTransformDecodesDeliveryContinuationAtTurnStart() throws {
+        let event = try TurnStartPlugin.parse(from: jsonData("""
+        {
+          "type": "agent.turn_start",
+          "data": {
+            "turn": 4,
+            "agentDeliveryContinuation": {
+              "deliveries": [{
+                "deliveryId": "delivery-1",
+                "sourceKind": "worker_result",
+                "sourceWorkerId": "general-delegate",
+                "sourceWorkerName": "General Delegate",
+                "wakePolicy": "wake",
+                "boundary": "next_run",
+                "triggeredWake": true,
+                "redelivery": false
+              }]
+            }
+          }
+        }
+        """))
+
+        let result = TurnStartPlugin.transform(event) as? TurnStartPlugin.Result
+        XCTAssertEqual(result?.agentDeliveryProvenance.count, 1)
+        XCTAssertEqual(result?.agentDeliveryProvenance.first?.deliveryId, "delivery-1")
+        XCTAssertEqual(result?.agentDeliveryProvenance.first?.sourceWorkerName, "General Delegate")
+        XCTAssertEqual(result?.agentDeliveryProvenance.first?.triggeredWake, true)
+    }
+
     private func jsonData(_ json: String) -> Data {
         Data(json.utf8)
     }

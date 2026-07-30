@@ -82,12 +82,13 @@ extension SessionContextSheet {
             guard refreshCoordinator.isCurrent(generation) else { return }
             agentUpdates = result.updates
             agentWaits = result.waits
+            hasLoadedAgentUpdatesSnapshot = true
             agentUpdatesLoadError = nil
         } catch is CancellationError {
             return
         } catch {
             guard refreshCoordinator.isCurrent(generation) else { return }
-            agentUpdatesLoadError = agentUpdates.isEmpty && agentWaits.isEmpty
+            agentUpdatesLoadError = !hasLoadedAgentUpdatesSnapshot
                 ? "Delivery and wait status could not load: \(error.localizedDescription)"
                 : "Couldn’t refresh delivery and wait status; showing the last update."
         }

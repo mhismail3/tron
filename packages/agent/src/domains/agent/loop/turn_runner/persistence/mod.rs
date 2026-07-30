@@ -157,15 +157,20 @@ pub(super) fn emit_turn_start(
     persister: Option<&EventPersister>,
     session_id: &str,
     turn: u32,
+    agent_delivery_continuation: Option<Value>,
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) -> Result<(), RuntimeError> {
     if let Some(persister) = persister {
+        let mut payload = json!({ "turn": turn });
+        if let Some(continuation) = agent_delivery_continuation.as_ref() {
+            payload["agentDeliveryContinuation"] = continuation.clone();
+        }
         let row = match persister.append_with_runtime_sequence(
             session_id,
             EventType::StreamTurnStart,
-            json!({ "turn": turn }),
+            payload,
             sequence_counter,
         ) {
             Ok(row) => row,
@@ -178,6 +183,7 @@ pub(super) fn emit_turn_start(
             base: base_event(session_id, trace_id, parent_invocation_id)
                 .with_sequence(row.sequence),
             turn,
+            agent_delivery_continuation,
         });
         return Ok(());
     }
@@ -186,6 +192,7 @@ pub(super) fn emit_turn_start(
         TronEvent::TurnStart {
             base: base_event(session_id, trace_id, parent_invocation_id),
             turn,
+            agent_delivery_continuation,
         },
         sequence_counter,
     );

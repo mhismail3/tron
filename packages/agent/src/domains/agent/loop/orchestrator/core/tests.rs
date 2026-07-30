@@ -189,6 +189,7 @@ fn replacement_run_never_inherits_stale_reconstruction_projection() {
     let _ = orch.broadcast().emit(TronEvent::TurnStart {
         base: BaseEvent::now("s1").with_sequence(1),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     assert_eq!(
         orch.active_reconstruction_snapshot("s1")
@@ -231,6 +232,7 @@ fn status_snapshot_never_pairs_registry_run_with_replacement_projection() {
     let _ = orch.broadcast().emit(TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     let _ = orch.broadcast().emit(TronEvent::ToolInvocationGenerating {
         base: BaseEvent::now("s1"),
@@ -679,6 +681,7 @@ async fn shutdown_clears_orphaned_runs() {
     let _ = orch.broadcast().emit(TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 99,
+        agent_delivery_continuation: None,
     });
     assert!(
         orch.turn_accumulators

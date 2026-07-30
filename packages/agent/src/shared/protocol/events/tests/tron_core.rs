@@ -29,6 +29,7 @@ fn tron_event_turn_start() {
     let e = TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 3,
+        agent_delivery_continuation: None,
     };
     assert_eq!(e.event_type(), "turn_start");
     let json = serde_json::to_value(&e).unwrap();

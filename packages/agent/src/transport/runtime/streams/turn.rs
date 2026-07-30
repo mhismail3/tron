@@ -5,11 +5,19 @@ use super::routed::{ProjectedEvent, global, session_scoped, set_opt};
 
 pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
     match event {
-        TronEvent::TurnStart { turn, .. } => Some(global(
-            event,
-            "agent.turn_start",
-            Some(json!({ "turn": turn, "agentPhase": "processing" })),
-        )),
+        TronEvent::TurnStart {
+            turn,
+            agent_delivery_continuation,
+            ..
+        } => {
+            let mut data = json!({ "turn": turn, "agentPhase": "processing" });
+            set_opt(
+                &mut data,
+                "agentDeliveryContinuation",
+                agent_delivery_continuation,
+            );
+            Some(global(event, "agent.turn_start", Some(data)))
+        }
         TronEvent::TurnEnd {
             turn,
             duration,

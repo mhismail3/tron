@@ -47,6 +47,7 @@ struct SessionContextSheet: View {
     @State var agentWaits: [SessionAgentWaitDTO] = []
     @State var agentUpdatesLoadError: String?
     @State var isLoadingAgentUpdates = false
+    @State var hasLoadedAgentUpdatesSnapshot = false
     @State var agentUpdatesLoadingGeneration: UInt64?
     @State var showDeliveryHistorySheet = false
     @State var selectedContextDetail: SessionContextDetailSelection?

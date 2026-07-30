@@ -97,6 +97,7 @@ fn thinking_end_event_replaces_accumulated_thinking() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::ThinkingDelta {
         base: BaseEvent::now("s1"),
@@ -333,6 +334,7 @@ fn map_snapshot_pairs_projected_state_with_emitted_sequence() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1").with_sequence(40),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1").with_sequence(42),
@@ -354,6 +356,7 @@ fn out_of_order_observation_invalidates_reconstruction_cursor() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1").with_sequence(40),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1").with_sequence(42),
@@ -374,6 +377,7 @@ fn response_complete_is_part_of_atomic_turn_snapshot() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1").with_sequence(1),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1").with_sequence(2),
@@ -514,6 +518,7 @@ fn update_from_turn_start_event() {
     let event = TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     };
     map.update_from_event(&event);
     assert!(state(&map, "s1").is_some());
@@ -526,6 +531,7 @@ fn update_from_message_update_event() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1"),
@@ -542,6 +548,7 @@ fn update_from_thinking_delta_event() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::ThinkingDelta {
         base: BaseEvent::now("s1"),
@@ -561,6 +568,7 @@ fn update_from_tool_lifecycle_events() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::ToolInvocationGenerating {
         base: BaseEvent::now("s1"),
@@ -595,6 +603,7 @@ fn update_from_tool_invocation_output_event() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::ToolInvocationGenerating {
         base: BaseEvent::now("s1"),
@@ -630,6 +639,7 @@ fn update_from_agent_end_clears() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1"),
@@ -649,6 +659,7 @@ fn update_from_turn_end_clears() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1"),

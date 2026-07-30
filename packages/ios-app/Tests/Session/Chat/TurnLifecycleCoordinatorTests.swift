@@ -106,6 +106,56 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertNil(mockContext.firstTextMessageIdForTurn)
     }
 
+    func testTurnStartPlacesDeliveryContinuationBeforeTurnContent() {
+        let prior = makeTextMessage("prior response")
+        mockContext.messages = [prior]
+        let provenance = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-1",
+            sourceKind: "worker_result",
+            sourceWorkerId: "general-delegate",
+            sourceWorkerName: "General Delegate",
+            sourceSessionId: nil,
+            sourceInvocationId: "worker-run-1",
+            wakePolicy: "wake",
+            boundary: "next_run",
+            triggeredWake: true,
+            redelivery: false
+        )
+
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 2,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [provenance]
+            ),
+            context: mockContext
+        )
+        mockContext.messages.append(
+            ChatMessage(
+                role: .assistant,
+                content: .thinking(
+                    visible: "Inspecting result",
+                    isExpanded: false,
+                    isStreaming: true,
+                    kind: .thinking
+                )
+            )
+        )
+
+        XCTAssertEqual(mockContext.turnStartMessageIndex, 1)
+        XCTAssertTrue(mockContext.messages[1].isDeliveryProvenanceOnly)
+        XCTAssertEqual(mockContext.messages[1].agentDeliveryProvenance, [provenance])
+        XCTAssertEqual(
+            AgentDeliveryContinuationPresentation.label(
+                mockContext.messages[1].agentDeliveryProvenance
+            ),
+            "Resumed from General Delegate"
+        )
+        guard case .thinking = mockContext.messages[2].content else {
+            return XCTFail("thinking must follow delivery provenance")
+        }
+    }
+
     // MARK: - handleTurnEnd Tests
 
     func testTurnEndMarksThinkingAsNoLongerStreaming() {
@@ -219,6 +269,63 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
             AgentDeliveryContinuationPresentation.label([natural]),
             "Update included · Agent Message"
         )
+    }
+
+    func testResponseCompleteEnrichesTurnStartDeliveryContinuationInPlace() {
+        let wake = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-wake",
+            sourceKind: "worker_result",
+            sourceWorkerId: "general-delegate",
+            sourceWorkerName: "General Delegate",
+            sourceSessionId: nil,
+            sourceInvocationId: "worker-run-1",
+            wakePolicy: "wake",
+            boundary: "next_run",
+            triggeredWake: true,
+            redelivery: false
+        )
+        let passive = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-passive",
+            sourceKind: "agent_message",
+            sourceWorkerId: nil,
+            sourceWorkerName: nil,
+            sourceSessionId: "peer-session",
+            sourceInvocationId: nil,
+            wakePolicy: "passive",
+            boundary: "next_turn",
+            triggeredWake: false,
+            redelivery: false
+        )
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 2,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [wake]
+            ),
+            context: mockContext
+        )
+        let responseId = UUID()
+        mockContext.streamingMessageId = responseId
+        mockContext.messages.append(
+            ChatMessage(
+                id: responseId,
+                role: .assistant,
+                content: .text("Used both updates.")
+            )
+        )
+
+        markResponseComplete(
+            turnNumber: 2,
+            hasToolInvocations: false,
+            agentDeliveryProvenance: [wake, passive]
+        )
+
+        XCTAssertTrue(mockContext.messages[0].isDeliveryProvenanceOnly)
+        XCTAssertEqual(
+            mockContext.messages[0].agentDeliveryProvenance,
+            [wake, passive]
+        )
+        XCTAssertTrue(mockContext.messages[1].agentDeliveryProvenance.isEmpty)
     }
 
     func testTurnEndUsesFirstTextMessageIdWhenStreamingFinalizedEarly() {

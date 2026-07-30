@@ -82,6 +82,25 @@ struct SessionContextPresentationTests {
         ))
     }
 
+    @Test("Background delivery refresh retains a settled empty snapshot")
+    func deliveryWaitEmptyStateDoesNotFlicker() {
+        #expect(SessionContextPresentation.deliveryWaitEmptyState(
+            error: nil,
+            isLoading: true,
+            hasLoadedSnapshot: false
+        ) == "Loading durable update state…")
+        #expect(SessionContextPresentation.deliveryWaitEmptyState(
+            error: nil,
+            isLoading: true,
+            hasLoadedSnapshot: true
+        ) == "No deliveries or waits are recorded.")
+        #expect(SessionContextPresentation.deliveryWaitEmptyState(
+            error: "Couldn’t refresh; showing the last update.",
+            isLoading: false,
+            hasLoadedSnapshot: true
+        ) == "Couldn’t refresh; showing the last update.")
+    }
+
     @Test("Cache percentage is bounded and handles zero input")
     func cachePercentage() {
         #expect(SessionContextPresentation.cacheReadPercentage(

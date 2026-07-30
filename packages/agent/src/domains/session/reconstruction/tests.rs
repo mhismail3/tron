@@ -317,6 +317,7 @@ async fn raw_allocator_cannot_advance_reconstruction_watermark() {
         .update_from_event(&TronEvent::TurnStart {
             base: BaseEvent::now(&session_id).with_sequence(2),
             turn: 1,
+            agent_delivery_continuation: None,
         });
     ctx.orchestrator
         .turn_accumulators()
@@ -535,6 +536,7 @@ async fn persisted_completed_response_is_not_duplicated_as_in_flight_text() {
     let _ = ctx.orchestrator.broadcast().emit(TronEvent::TurnStart {
         base: BaseEvent::now(&session_id).with_sequence(2),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     let _ = ctx.orchestrator.broadcast().emit(TronEvent::MessageUpdate {
         base: BaseEvent::now(&session_id).with_sequence(3),

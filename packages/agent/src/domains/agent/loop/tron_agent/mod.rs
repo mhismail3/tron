@@ -297,6 +297,9 @@ impl TronAgent {
 
         if !exited_via_break && run_turn >= max_turns {
             final_stop_reason = StopReason::MaxTurns;
+            error = Some(format!(
+                "Agent exhausted the maximum of {max_turns} turns without producing a terminal response"
+            ));
         }
 
         self.turn_offset.store(

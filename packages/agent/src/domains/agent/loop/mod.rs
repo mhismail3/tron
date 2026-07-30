@@ -49,7 +49,14 @@
 //! participate in semantic routing or authorization.
 //! Turn starts, ends, and failures are persisted before their matching live
 //! broadcast, and each surface shares the durable row sequence. User
-//! cancellation is terminalized by the active turn runner, which owns the
+//! delivery-wake admission projects bounded provenance onto the first durable
+//! turn-start before provider streaming begins, so live clients place the
+//! continuation reason before thinking and tools. The completed assistant
+//! event retains the same provenance as reconstruction truth. A run that
+//! exhausts its turn budget without terminal assistant content records an
+//! execution error at the loop boundary; downstream typed-result validation
+//! cannot misreport that control-flow failure as malformed worker output.
+//! User cancellation is terminalized by the active turn runner, which owns the
 //! session-global turn ordinal and any partial content; prompt completion never
 //! manufactures turn lifecycle rows. The streaming journal remains until
 //! tool completions and the turn terminal have committed; journal-write

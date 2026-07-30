@@ -120,6 +120,11 @@ tron_events! {
     /// Turn started.
     TurnStart {
         turn: u32,
+        #[serde(
+            rename = "agentDeliveryContinuation",
+            skip_serializing_if = "Option::is_none"
+        )]
+        agent_delivery_continuation: Option<Value>,
     } => "turn_start",
 
     /// Turn completed.

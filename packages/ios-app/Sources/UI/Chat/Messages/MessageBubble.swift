@@ -20,7 +20,9 @@ struct MessageBubble: View {
                 agentDeliveryProvenance
             }
 
-            contentView
+            if !message.isDeliveryProvenanceOnly {
+                contentView
+            }
 
             if let metadata = message.finalAssistantResponseMetadata {
                 MessageMetadataBadge(metadata: metadata)

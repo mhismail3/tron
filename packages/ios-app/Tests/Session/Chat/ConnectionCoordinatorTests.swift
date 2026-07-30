@@ -33,6 +33,19 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertFalse(mockContext.isReconstructing)
     }
 
+    func testReadOnlyReconstructionUsesBoundedAuditOverride() async {
+        mockContext.isConnected = true
+        mockContext.reconstructionEventLimit = 300
+
+        let outcome = await coordinator.reconstructReadOnly(
+            context: mockContext,
+            eventLimit: 120
+        )
+
+        XCTAssertEqual(outcome, .completed)
+        XCTAssertEqual(mockContext.lastReconstructLimit, 120)
+    }
+
     func testReadOnlyReconstructionFailureReleasesGateAndUsesWorkerError() async {
         mockContext.isConnected = true
         mockContext.reconstructShouldFail = true

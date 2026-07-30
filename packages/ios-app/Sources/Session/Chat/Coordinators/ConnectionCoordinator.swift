@@ -76,7 +76,10 @@ final class ConnectionCoordinator {
     /// Reconstruct a child-agent transcript for operator audit without
     /// resuming it as the connection's interactive session. This path has no
     /// live suffix buffer, so every terminal branch releases its local gate.
-    func reconstructReadOnly(context: ConnectionContext) async -> ConnectionReconstructionOutcome {
+    func reconstructReadOnly(
+        context: ConnectionContext,
+        eventLimit: Int? = nil
+    ) async -> ConnectionReconstructionOutcome {
         context.isReconstructing = true
         await context.connect()
         guard !Task.isCancelled else {
@@ -91,7 +94,7 @@ final class ConnectionCoordinator {
         do {
             let result = try await context.reconstructSession(
                 sessionId: context.sessionId,
-                limit: context.reconstructionEventLimit,
+                limit: eventLimit ?? context.reconstructionEventLimit,
                 beforeEventId: nil
             )
             guard !Task.isCancelled else {

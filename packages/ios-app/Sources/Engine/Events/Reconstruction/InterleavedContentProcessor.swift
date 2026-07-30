@@ -58,6 +58,16 @@ enum InterleavedContentProcessor {
         var messages: [ChatMessage] = []
         var emittedThinkingSnapshots = Set<String>()
 
+        if !parsed.agentDeliveryProvenance.isEmpty {
+            messages.append(
+                .deliveryContinuation(
+                    parsed.agentDeliveryProvenance,
+                    timestamp: timestamp,
+                    turnNumber: parsed.turn
+                )
+            )
+        }
+
         for block in blocks {
             guard let blockType = block["type"] as? String else { continue }
 
@@ -95,14 +105,6 @@ enum InterleavedContentProcessor {
                 }
             }
             // Other block types (redacted, etc.) are skipped
-        }
-
-        if !parsed.agentDeliveryProvenance.isEmpty,
-           let continuationIndex = messages.firstIndex(where: {
-               $0.content.isAssistantResponseText
-           }) {
-            messages[continuationIndex].agentDeliveryProvenance =
-                parsed.agentDeliveryProvenance
         }
 
         // Provider stop reasons do not identify finality: `end_turn` can arrive

@@ -15,6 +15,10 @@ struct AgentDeliveryMessageProvenance: Decodable, Equatable, Sendable {
     let redelivery: Bool
 }
 
+struct AgentDeliveryContinuationPayload: Decodable, Sendable {
+    let deliveries: [AgentDeliveryMessageProvenance]
+}
+
 enum AgentDeliveryContinuationPresentation {
     static func label(_ deliveries: [AgentDeliveryMessageProvenance]) -> String {
         guard !deliveries.isEmpty else { return "Agent update included" }
@@ -68,6 +72,10 @@ struct ChatMessage: Identifiable, Equatable {
     /// enough identity to explain why the assistant resumed without a user row.
     var agentDeliveryProvenance: [AgentDeliveryMessageProvenance]
 
+    /// A zero-content row whose only visual purpose is to place durable
+    /// delivery provenance before thinking, tools, and response text.
+    var isDeliveryProvenanceOnly: Bool
+
     /// Server-backed finality for the textual response that ends a prompt
     /// cycle. Live events set this from `agent.response_complete`; replay sets
     /// it from the persisted assistant payload's tool blocks.
@@ -90,6 +98,7 @@ struct ChatMessage: Identifiable, Equatable {
         turnNumber: Int? = nil,
         hasThinking: Bool? = nil,
         agentDeliveryProvenance: [AgentDeliveryMessageProvenance] = [],
+        isDeliveryProvenanceOnly: Bool = false,
         isFinalAssistantResponse: Bool = false,
         eventId: String? = nil
     ) {
@@ -106,8 +115,24 @@ struct ChatMessage: Identifiable, Equatable {
         self.turnNumber = turnNumber
         self.hasThinking = hasThinking
         self.agentDeliveryProvenance = agentDeliveryProvenance
+        self.isDeliveryProvenanceOnly = isDeliveryProvenanceOnly
         self.isFinalAssistantResponse = isFinalAssistantResponse
         self.eventId = eventId
+    }
+
+    static func deliveryContinuation(
+        _ provenance: [AgentDeliveryMessageProvenance],
+        timestamp: Date = Date(),
+        turnNumber: Int? = nil
+    ) -> ChatMessage {
+        ChatMessage(
+            role: .assistant,
+            content: .text(""),
+            timestamp: timestamp,
+            turnNumber: turnNumber,
+            agentDeliveryProvenance: provenance,
+            isDeliveryProvenanceOnly: true
+        )
     }
 
     var formattedTimestamp: String {

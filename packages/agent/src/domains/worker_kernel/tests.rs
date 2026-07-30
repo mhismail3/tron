@@ -30,15 +30,43 @@ fn model_facing_contracts_own_unique_names_and_order() {
             .iter()
             .filter(|tool| matches!(tool.audience, ModelToolAudience::Ordinary))
             .count(),
-        15
+        16
     );
     assert_eq!(
         tools
             .iter()
             .filter(|tool| matches!(tool.audience, ModelToolAudience::Specialist))
             .count(),
-        13
+        12
     );
+}
+
+#[test]
+fn ordinary_surface_always_contains_worker_coordination_primitives() {
+    let definitions = contract::function_definitions().expect("worker-kernel contracts");
+    let ordinary_names = definitions
+        .iter()
+        .filter_map(|definition| definition.model_tool.as_ref())
+        .filter(|tool| matches!(tool.audience, ModelToolAudience::Ordinary))
+        .map(|tool| tool.name.as_str())
+        .collect::<BTreeSet<_>>();
+
+    for required in [
+        "worker_discover",
+        "worker_invoke",
+        "worker_await",
+        "worker_cancel",
+        "worker_result_read",
+        "agent_send",
+        "agent_wait_for_workers",
+        "agent_mailbox_list",
+        "agent_mailbox_claim",
+    ] {
+        assert!(
+            ordinary_names.contains(required),
+            "{required} must remain available to an ordinary main agent"
+        );
+    }
 }
 
 #[test]

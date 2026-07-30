@@ -1173,9 +1173,11 @@ new file is required, or provide raw/`sha256:`-prefixed 64-digit hex.
 
 ### Worker operations
 
-Ordinary chat always receives `worker_discover`, `worker_await`,
-`worker_cancel`, and `worker_result_read`. The remaining model tools in this
-table are specialist-only and appear only in an exact agent-worker allowlist.
+Ordinary chat always receives `worker_discover`, `worker_invoke`,
+`worker_await`, `worker_cancel`, `worker_result_read`, `agent_send`,
+`agent_wait_for_workers`, `agent_mailbox_list`, and `agent_mailbox_claim`.
+Broad worker creation, inspection, lifecycle, and global audit tools are
+specialist-only and appear only in an exact agent-worker allowlist.
 
 | Model tool | Engine function |
 |---|---|
@@ -1196,6 +1198,15 @@ table are specialist-only and appear only in an exact agent-worker allowlist.
 
 `worker_webhook_rotate` and `worker_stop_all` remain authenticated dashboard
 operations and are intentionally not model tools.
+
+The ordinary main-agent surface always contains the narrow worker-coordination
+set: discovery, generic invocation, bounded observation, authorized result
+reads, invocation-scoped cancellation, durable waits, and scoped Agent
+Delivery/mailbox operations. Administrative creation, catalog inspection,
+lifecycle, rollback, retirement, purge, global run/inbox audit, and explicit
+detach remain specialist- or client-only. This lets an explicit known worker
+ID take the direct durable invocation path without requiring an intermediary
+delegate, while keeping broad worker administration out of unrelated requests.
 
 `worker_invoke` defaults to `mode: wait`. Top-level agent runners are admitted
 in background mode immediately. Command/service versions with five completed
@@ -2188,7 +2199,7 @@ Field acceptance then exercised the kernel boundaries around that worker:
 Inspection of the first deterministic guard exposed two worker-specific gaps,
 which Tron corrected through one ordinary update and one atomic `worker_upsert`.
 Active version
-`d10c5970c2a1d319ac01fd8dfc8a28f03ac1753e80671a57ff30d15f0b7d8c69`
+`83a932b3c2e085675d1d66b437efceece3f259edb32ab4352d89bdc068f80af6`
 requires exact one-to-one, order-preserving coverage of every caller constraint;
 a completed result requires every constraint to be observed and no unresolved
 items. Its caller-supplied deliverable schema is fail-closed rather than a
@@ -2209,6 +2220,18 @@ Delegate is therefore accepted for single-task typed delegation, durable
 enqueue, child-session evidence, precise cancellation, restart recovery,
 idempotent replay, malformed-input rejection, retained-version recovery, and
 generic-console operation.
+
+A later durable auto-resume smoke test exposed a capability mismatch rather
+than a delivery failure: General Delegate had been asked to enqueue a known
+worker while its immutable agent surface omitted `worker_invoke` and allowed no
+child invocation. It exhausted its model-turn budget probing private runtime
+routes, then the generic runner mislabeled the missing terminal response as a
+schema mismatch. The profile-owned worker was updated through ordinary
+`worker_upsert` to include exactly `worker_invoke`, a one-child budget, and
+instructions to use the public nested-call contract without polling or private
+API discovery. The agent loop now records max-turn exhaustion as the execution
+error before typed output validation. Durable wait reconciliation and the
+delivery-only resume had already completed correctly and remain unchanged.
 
 iOS now recognizes only the exact primary `general-delegate` presentation
 contract version 1 as the native Delegation experience. The sheet reads full

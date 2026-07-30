@@ -47,6 +47,8 @@ mod tool_phase;
 mod turn_context;
 mod turn_worker_results;
 
+pub(crate) use self::provider_phase::agent_delivery_provenance;
+
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -257,6 +259,16 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         persister,
         session_id,
         turn,
+        (run_context.delivery_wake_turn == Some(turn))
+            .then(|| {
+                let pending = run_context.pending_delivery_provenance.lock();
+                (!pending.is_empty()).then(|| {
+                    serde_json::json!({
+                        "deliveries":pending.clone(),
+                    })
+                })
+            })
+            .flatten(),
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),

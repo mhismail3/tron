@@ -24,6 +24,7 @@ fn tron_event_all_event_types() {
         TronEvent::TurnStart {
             base: base.clone(),
             turn: 1,
+            agent_delivery_continuation: None,
         },
         TronEvent::TurnEnd {
             base: base.clone(),

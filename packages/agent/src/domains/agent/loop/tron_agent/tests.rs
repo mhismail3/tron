@@ -103,8 +103,9 @@ impl ModelResponder for OrdinarySurfaceResponder {
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>();
         assert_eq!(self.calls.fetch_add(1, Ordering::SeqCst), 0);
-        assert_eq!(names.len(), 15, "{names:?}");
+        assert_eq!(names.len(), 16, "{names:?}");
         assert!(names.contains(&"worker_discover"), "{names:?}");
+        assert!(names.contains(&"worker_invoke"), "{names:?}");
         for hidden in [
             "worker_upsert",
             "worker_list",
@@ -359,6 +360,44 @@ async fn primitive_loop_calls_direct_worker_tool_observes_result_and_continues()
     let persisted_messages =
         serde_json::to_string(&agent.context_manager().get_messages()).expect("messages");
     assert!(persisted_messages.contains("continued after direct worker tool"));
+}
+
+#[tokio::test]
+async fn max_turn_exhaustion_reports_execution_error_before_result_validation() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let mut agent = TronAgent::new(
+        AgentConfig {
+            max_turns: 1,
+            ..AgentConfig::default()
+        },
+        make_primitive_loop_deps(
+            DirectWorkerListLoopResponder {
+                calls: calls.clone(),
+                observed_result: Arc::new(Mutex::new(None)),
+            },
+            ctx.engine_host.clone(),
+        ),
+        "max-turn-exhaustion-session".into(),
+    );
+
+    let result = agent
+        .run(
+            "keep using tools without producing a terminal response",
+            crate::domains::agent::r#loop::types::RunContext {
+                run_id: Some("max-turn-exhaustion-run".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert_eq!(result.stop_reason, StopReason::MaxTurns);
+    assert_eq!(result.turns_executed, 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        result.error.as_deref(),
+        Some("Agent exhausted the maximum of 1 turns without producing a terminal response")
+    );
 }
 
 #[tokio::test]

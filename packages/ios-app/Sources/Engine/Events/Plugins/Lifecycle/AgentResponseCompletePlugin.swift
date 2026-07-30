@@ -21,11 +21,7 @@ enum AgentResponseCompletePlugin: DispatchableEventPlugin {
             let turn: Int
             let hasToolInvocations: Bool
             let toolInvocationCount: Int
-            let agentDeliveryContinuation: AgentDeliveryContinuation?
-
-            struct AgentDeliveryContinuation: Decodable, Sendable {
-                let deliveries: [AgentDeliveryMessageProvenance]
-            }
+            let agentDeliveryContinuation: AgentDeliveryContinuationPayload?
         }
     }
 

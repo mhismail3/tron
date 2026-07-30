@@ -166,7 +166,10 @@ extension ChatViewModel {
     /// the shared transport's interactive-session context. Audit sheets are a
     /// read-only projection and must not disrupt the user's active chat.
     func reconstructReadOnlyTranscript() async -> ConnectionReconstructionOutcome {
-        await connectionCoordinator.reconstructReadOnly(context: self)
+        await connectionCoordinator.reconstructReadOnly(
+            context: self,
+            eventLimit: Self.workerAuditReconstructionEventLimit
+        )
     }
 
     /// Connect, resume, and reconstruct the session.

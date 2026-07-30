@@ -92,6 +92,62 @@ extension ChatView {
 
     // MARK: - Messages Scroll View
 
+    @ViewBuilder
+    var transcriptScrollView: some View {
+        if presentationMode == .workerAudit {
+            workerAuditMessagesScrollView
+        } else {
+            messagesScrollView
+        }
+    }
+
+    /// Read-only worker transcripts do not stream, own a composer, or need
+    /// viewport probes, scroll-position ownership, cascading visibility, and
+    /// geometry-driven autoload. Keeping this path intentionally small avoids
+    /// invalidating every transcript row while a detented sheet scrolls.
+    var workerAuditMessagesScrollView: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(spacing: 12) {
+                    if viewModel.hasMoreMessages {
+                        Button {
+                            Task {
+                                _ = await viewModel.loadEarlierMessagesForTopDetent()
+                            }
+                        } label: {
+                            Label("Load earlier activity", systemImage: "clock.arrow.circlepath")
+                                .font(TronTypography.sans(
+                                    size: TronTypography.sizeCaption,
+                                    weight: .semibold
+                                ))
+                                .foregroundStyle(.tronEmerald)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    let renderItems = ToolInvocationGrouping.renderItems(
+                        from: viewModel.messages
+                    )
+                    ForEach(renderItems) { item in
+                        workerAuditRenderItemView(item)
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom")
+                }
+                .padding()
+            }
+            .accessibilityIdentifier("worker-audit-message-scroll-view")
+            .defaultScrollAnchor(.bottom)
+            .onAppear {
+                scrollProxy = proxy
+            }
+        }
+    }
+
     var messagesScrollView: some View {
         ZStack(alignment: .bottom) {
             ScrollViewReader { proxy in
@@ -377,6 +433,27 @@ extension ChatView {
             }
         }
         .animation(.easeOut(duration: 0.2), value: scrollCoordinator.shouldShowNewContentPill)
+    }
+
+    @ViewBuilder
+    private func workerAuditRenderItemView(
+        _ item: ChatMessageRenderItem
+    ) -> some View {
+        switch item {
+        case .message(let message):
+            MessageBubble(
+                message: message,
+                onTap: { action in handleBubbleTap(action) }
+            )
+            .id(message.id)
+        case .toolGroup(let group):
+            ToolInvocationGroupChip(
+                data: group.data,
+                onTap: { handleBubbleTap(.toolInvocationGroup(group.data)) }
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .id(group.id)
+        }
     }
 
     // MARK: - Scroll to Bottom Button

@@ -33,13 +33,16 @@ struct DelegationRunDetailSheet: View {
                 }
                 if run.agentSessionId != nil {
                     ToolbarItem(placement: .topBarLeading) {
-                        SheetPrimaryActionButton(
+                        LoadingToolbarButton(
+                            label: "Open Chat",
                             icon: "text.bubble",
-                            accent: .tronPurple,
-                            accessibilityLabel: "Open worker session"
+                            color: .tronEmerald,
+                            isLoading: false,
+                            isEnabled: true
                         ) {
                             showAuditSession = true
                         }
+                        .accessibilityLabel("Open worker session")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {

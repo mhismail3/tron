@@ -62,6 +62,20 @@ enum SessionContextPresentation {
         inputTokens > 0 || outputTokens > 0 || cost > 0
     }
 
+    static func deliveryWaitEmptyState(
+        error: String?,
+        isLoading: Bool,
+        hasLoadedSnapshot: Bool
+    ) -> String {
+        if let error {
+            return error
+        }
+        if isLoading, !hasLoadedSnapshot {
+            return "Loading durable update state…"
+        }
+        return "No deliveries or waits are recorded."
+    }
+
     static func cacheReadPercentage(cacheReadTokens: Int, totalInputTokens: Int) -> Int {
         guard cacheReadTokens > 0, totalInputTokens > 0 else { return 0 }
         let ratio = Double(cacheReadTokens) / Double(totalInputTokens)

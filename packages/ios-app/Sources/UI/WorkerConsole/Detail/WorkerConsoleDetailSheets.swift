@@ -203,7 +203,6 @@ struct WorkerRunDetailSheet: View {
                                 .padding(.vertical, 18)
                         }
                     }
-                    modelContextControls
                     technicalControls
                 }
                 .padding(18)
@@ -222,13 +221,16 @@ struct WorkerRunDetailSheet: View {
                 }
                 ToolbarItemGroup(placement: .topBarLeading) {
                     if let sessionId = currentRun.agentSessionId {
-                        SheetPrimaryActionButton(
+                        LoadingToolbarButton(
+                            label: "Open Chat",
                             icon: "text.bubble",
-                            accent: .tronPurple,
-                            accessibilityLabel: "Open worker session"
+                            color: .tronEmerald,
+                            isLoading: false,
+                            isEnabled: true
                         ) {
                             selectedSession = WorkerRunSessionSelection(sessionId: sessionId)
                         }
+                        .accessibilityLabel("Open worker session")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -329,32 +331,6 @@ struct WorkerRunDetailSheet: View {
                 accent: .tronSlate
             ) {
                 showTechnicalDetails = true
-            }
-        }
-    }
-
-    private var modelContextControls: some View {
-        WorkerConsoleSection(
-            title: "Model Context",
-            detail: currentRun.agentSessionId == nil
-                ? "This deterministic command worker did not open a nested model request."
-                : "Inspect the worker agent session and its exact provider-request context.",
-            accent: .tronPurple
-        ) {
-            if let sessionId = currentRun.agentSessionId {
-                WorkerRunDisclosureRow(
-                    title: "Open model context",
-                    detail: "Instructions, messages, tools, automatic context, and provider audit.",
-                    symbol: "text.bubble",
-                    accent: .tronPurple
-                ) {
-                    selectedSession = WorkerRunSessionSelection(sessionId: sessionId)
-                }
-            } else {
-                Label("No nested model context", systemImage: "gearshape.2")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -460,6 +436,6 @@ struct WorkerAuditSessionSheet: View {
             .id(sessionId)
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .tint(.tronPurple)
+        .tint(.tronEmerald)
     }
 }

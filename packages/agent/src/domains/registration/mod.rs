@@ -400,15 +400,20 @@ mod tests {
                 .iter()
                 .filter(|tool| tool["audience"] == "ordinary")
                 .count(),
-            15
+            16
         );
         assert!(
             fixed_tools
                 .iter()
                 .any(|tool| tool["modelName"] == "worker_result_read")
         );
+        assert!(fixed_tools.iter().any(|tool| {
+            tool["modelName"] == "worker_invoke"
+                && tool["audience"] == "ordinary"
+                && tool["exposed"] == true
+        }));
         assert!(value["surface"]["catalogRevision"].is_u64());
-        assert_eq!(value["surface"]["fixedToolCount"], 15);
+        assert_eq!(value["surface"]["fixedToolCount"], 16);
         assert!(value["surface"]["surfaceHash"].is_string());
         assert!(value["surface"]["availableWorkers"].is_array());
         assert!(value["surface"].get("tools").is_none());
@@ -423,7 +428,7 @@ mod tests {
             .await
             .value
             .expect("rename surface snapshot");
-        assert_eq!(renamed["surface"]["fixedToolCount"], 16);
+        assert_eq!(renamed["surface"]["fixedToolCount"], 17);
         assert!(renamed["fixedTools"].as_array().is_some_and(|tools| {
             tools.iter().any(|tool| {
                 tool["modelName"] == "session_set_title"

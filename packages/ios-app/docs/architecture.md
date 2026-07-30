@@ -400,10 +400,13 @@ provides:
   retain their immutable evidence. The engine summary labels its independent
   current-state metric `Unhealthy`, so historical delivery evidence cannot be
   confused with current worker health;
-- a read-only worker-session transcript sheet launched from run-detail toolbar
-  actions; audit transcripts use a read-only native bottom anchor plus a
-  bounded LazyVStack settling pass so the newest evidence is visible when the
-  sheet opens without inheriting interactive chat's keyboard-aware scroll loop;
+- one emerald `Open Chat` toolbar action for agent-backed runs; run detail has
+  no duplicate Model Context section. The read-only worker-session transcript
+  initially reconstructs only the latest 120 events, pages older activity
+  explicitly, and uses a small vertical `LazyVStack` without interactive
+  chat's viewport probes, geometry-driven autoload, speech monitoring, composer,
+  or keyboard-aware scroll loop. A native bottom anchor plus two bounded layout
+  passes makes the newest evidence visible;
   the transcript content stays transparent so the canonical sheet presentation
   is Liquid Glass at medium height and an opaque app surface at large height, while
   reserved worker child sessions remain excluded from ordinary Home navigation
@@ -834,7 +837,11 @@ is active, a wait is pending, or a wake is pending/prepared, then performs one
 terminal refresh. Passive-only and historical state stop observation. Exact v4
 content and provenance remain request-specific evidence in the detail sheet.
 Delivery-only assistant continuations render without a fabricated user bubble
-and say `Resumed from …`; a natural turn says `Update included · …`. The
+and say `Resumed from …`; a natural turn says `Update included · …`. Wake
+provenance is persisted and broadcast on the first turn-start, before thinking,
+tools, or assistant text, while the completed assistant event retains the same
+metadata for replay. Older servers that supply it only at response completion
+retain a bounded fallback. The
 `agent_wait_for_workers` chip says `Auto-resume registered` while pending and
 does not imply that the worker has completed. Optional continuation metadata is
 backward-compatible and records source worker identity and presentation name,
@@ -861,12 +868,12 @@ geometry; headings remain attached to the content they introduce while wider
 inter-section spacing separates each completed card from the next section.
 The worker heading and explanatory line are one compact label block, and worker
 rows do not introduce a separate dashboard visual scale.
-Run detail opens a read-only transcript and nested Model Context action only
-when the invocation created a real agent child session. The originating session
-remains provenance and never masquerades as a worker transcript; command and
-resident-service runs explicitly report that they have no nested model
-context. Fork confirmation is a native animated liquid-glass sheet rather than
-an abrupt dialog overlay.
+Run detail offers one emerald `Open Chat` toolbar action only when the
+invocation created a real agent child session. The originating session remains
+provenance and never masquerades as a worker transcript; command and
+resident-service runs have no redundant empty Model Context section. Fork
+confirmation is a native animated liquid-glass sheet rather than an abrupt
+dialog overlay.
 Session actions are disabled while disconnected, compacting, or running a turn.
 There is no parallel context-control repository, resource/action audit,
 memory editor, or manual compact/clear façade. Those controls may appear only

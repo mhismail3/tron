@@ -370,9 +370,9 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Invoke an enabled persistent worker by id with typed JSON input, or retry one terminal invocation from its immutable contract. Predicted or unexpectedly slow top-level waits return the same durable invocation in background mode; nested worker calls remain synchronous.",
         "worker_invoke",
-        ModelToolAudience::Specialist,
+        ModelToolAudience::Ordinary,
         140,
-        "worker_administration",
+        "worker_interaction",
     )?);
     specs.push(model_spec(
         "worker_kernel::await",

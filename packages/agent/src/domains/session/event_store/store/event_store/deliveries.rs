@@ -281,6 +281,10 @@ pub(crate) struct AgentDeliveryRecord {
 }
 
 impl AgentDeliveryRecord {
+    pub(crate) fn is_pending(&self) -> bool {
+        self.disposition == AgentDeliveryDisposition::Pending
+    }
+
     pub(crate) fn is_redelivery(&self) -> bool {
         self.lease_count > 1
     }

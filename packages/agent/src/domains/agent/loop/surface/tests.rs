@@ -684,27 +684,50 @@ fn surface_primer_is_stable_and_omits_volatile_catalog_evidence() {
         router_worker_id: Some("worker-relevance-router".to_owned()),
         router_worker_version: Some("abcdef1234567890".to_owned()),
         router_invocation_id: Some("invocation-1".to_owned()),
-        tools: vec![crate::domains::worker_kernel::SurfaceToolSnapshot {
-            model_name: "worker_discover".to_owned(),
-            function_id: "worker_kernel::dynamic_recent".to_owned(),
-            function_revision: 2,
-            owner_worker: "worker_kernel".to_owned(),
-            description: "Recent research".to_owned(),
-            input_schema: serde_json::json!({"type":"object"}),
-            input_schema_sha256: "input-digest".to_owned(),
-            output_schema: Some(serde_json::json!({"type":"object"})),
-            output_schema_sha256: Some("output-digest".to_owned()),
-            effect_class: "ExternalSideEffect".to_owned(),
-            risk: "high".to_owned(),
-            exposed: true,
-            worker_id: Some("recent".to_owned()),
-            worker_version: Some("abcdef1234567890".to_owned()),
-            primitive_group: None,
-            audience: "ordinary".to_owned(),
-            access_path: "dynamic_worker".to_owned(),
-            selection_reason: "relevance".to_owned(),
-            omission_reason: None,
-        }],
+        tools: vec![
+            crate::domains::worker_kernel::SurfaceToolSnapshot {
+                model_name: "worker_discover".to_owned(),
+                function_id: "worker_kernel::dynamic_recent".to_owned(),
+                function_revision: 2,
+                owner_worker: "worker_kernel".to_owned(),
+                description: "Recent research".to_owned(),
+                input_schema: serde_json::json!({"type":"object"}),
+                input_schema_sha256: "input-digest".to_owned(),
+                output_schema: Some(serde_json::json!({"type":"object"})),
+                output_schema_sha256: Some("output-digest".to_owned()),
+                effect_class: "ExternalSideEffect".to_owned(),
+                risk: "high".to_owned(),
+                exposed: true,
+                worker_id: Some("recent".to_owned()),
+                worker_version: Some("abcdef1234567890".to_owned()),
+                primitive_group: None,
+                audience: "ordinary".to_owned(),
+                access_path: "dynamic_worker".to_owned(),
+                selection_reason: "relevance".to_owned(),
+                omission_reason: None,
+            },
+            crate::domains::worker_kernel::SurfaceToolSnapshot {
+                model_name: "worker_invoke".to_owned(),
+                function_id: "worker_kernel::invoke".to_owned(),
+                function_revision: 1,
+                owner_worker: "worker_kernel".to_owned(),
+                description: "Invoke a known worker".to_owned(),
+                input_schema: serde_json::json!({"type":"object"}),
+                input_schema_sha256: "invoke-input-digest".to_owned(),
+                output_schema: Some(serde_json::json!({"type":"object"})),
+                output_schema_sha256: Some("invoke-output-digest".to_owned()),
+                effect_class: "ExternalSideEffect".to_owned(),
+                risk: "high".to_owned(),
+                exposed: true,
+                worker_id: None,
+                worker_version: None,
+                primitive_group: Some("worker_interaction".to_owned()),
+                audience: "ordinary".to_owned(),
+                access_path: "fixed".to_owned(),
+                selection_reason: "ordinary".to_owned(),
+                omission_reason: None,
+            },
+        ],
         fixed_tools: Vec::new(),
         available_workers: vec![crate::domains::worker_kernel::AvailableWorkerToolSnapshot {
             worker_id: "recent".to_owned(),
@@ -725,9 +748,10 @@ fn surface_primer_is_stable_and_omits_volatile_catalog_evidence() {
     assert_eq!(
         primer,
         "Use only the typed tools supplied in this request. Use worker_discover when a dynamic \
-         capability is omitted. Use Engine Steward for worker diagnosis and Worker Forge for \
-         worker changes; permanent deletion, secret rotation, and engine-wide stop remain \
-         authenticated dashboard actions."
+         capability is omitted. When the caller supplies an exact worker id, invoke it directly \
+         with worker_invoke rather than delegating merely to launch it. Use Engine Steward for \
+         worker diagnosis and Worker Forge for worker changes; permanent deletion, secret \
+         rotation, and engine-wide stop remain authenticated dashboard actions."
     );
     for volatile in ["r42", "1/7 workers", "abcdef12", "runs=4"] {
         assert!(!primer.contains(volatile));

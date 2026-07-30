@@ -409,6 +409,35 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         .map(|prompt| build_user_content_override(prompt, &model, attachments.as_deref()))
         .flatten();
 
+    let initial_delivery_provenance = if delivery_wake_ids.is_empty() {
+        Vec::new()
+    } else {
+        match event_store.agent_deliveries_by_ids(&delivery_wake_ids) {
+            Ok(deliveries) => {
+                let deliveries = deliveries
+                    .into_iter()
+                    .filter(|delivery| {
+                        delivery.target_session_id.as_deref() == Some(session_id.as_str())
+                            && delivery.is_pending()
+                    })
+                    .collect::<Vec<_>>();
+                crate::domains::agent::r#loop::turn_runner::agent_delivery_provenance(
+                    &deliveries,
+                    Some(&delivery_wake_ids),
+                )
+            }
+            Err(error) => {
+                warn!(
+                    session_id = %session_id,
+                    run_id = %run_id,
+                    error = %error,
+                    "failed to project delivery-wake provenance before turn start"
+                );
+                Vec::new()
+            }
+        }
+    };
+
     let run_context = RunContext {
         prompt_run_started_at: Some(prompt_run_started_at),
         reasoning_level: reasoning_level.and_then(|level| {
@@ -439,6 +468,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         worker_agent_tools: engine_causality
             .as_ref()
             .and_then(|causality| causality.context.worker_agent_tools().map(<[_]>::to_vec)),
+        pending_delivery_provenance: Arc::new(parking_lot::Mutex::new(initial_delivery_provenance)),
         ..Default::default()
     };
 
