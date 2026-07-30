@@ -50,6 +50,37 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         XCTAssertFalse(source.contains("Approval state"))
     }
 
+    func testParsedJSONFieldsUseSharedTrailingTypeHierarchy() throws {
+        let header = try source(pathComponents: [
+            "Sources", "UI", "Components", "StructuredDataFieldHeader.swift",
+        ])
+        XCTAssertTrue(header.contains("Spacer(minLength: 12)"))
+        XCTAssertTrue(header.contains("Text(type)"))
+        XCTAssertTrue(header.contains(".multilineTextAlignment(.trailing)"))
+        XCTAssertFalse(header.contains("Capsule()"))
+
+        let toolResults = try source(pathComponents: [
+            "Sources", "UI", "Tools", "ToolResultRenderers.swift",
+        ])
+        XCTAssertEqual(
+            occurrences(of: "StructuredDataFieldHeader(", in: toolResults),
+            2
+        )
+
+        let workerResults = try source(pathComponents: [
+            "Sources", "UI", "WorkerConsole", "Detail",
+            "WorkerResultInspectorSheet.swift",
+        ])
+        XCTAssertTrue(workerResults.contains("StructuredDataFieldHeader("))
+
+        let workerComponents = try source(pathComponents: [
+            "Sources", "UI", "WorkerConsole", "Presentation",
+            "WorkerConsoleComponents.swift",
+        ])
+        XCTAssertTrue(workerComponents.contains("StructuredDataFieldHeader("))
+        XCTAssertFalse(workerComponents.contains("Capsule().fill(Color.tronInfo.opacity(0.12))"))
+    }
+
     func testToolDetailSectionUsesLiquidGlassSurfaceForStableDetailNavigation() throws {
         let source = try source(pathComponents: ["Sources", "UI", "Tools", "Shared", "ToolDetailSection.swift"])
 
@@ -64,7 +95,7 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         let largeOnly =
             ".adaptivePresentationDetents([.large], ipadSizing: .largeForm)"
 
-        let sourcesWithExpectedCounts: [(String, Int)] = [
+        let directPresentationSources: [(String, Int)] = [
             (
                 try source(pathComponents: [
                     "Sources", "UI", "Tools", "Shared", "ToolDetailSheetContainer.swift",
@@ -83,11 +114,19 @@ final class ToolInvocationDetailViewTests: XCTestCase {
                 ]),
                 1
             ),
+        ]
+
+        for (sheetSource, expectedCount) in directPresentationSources {
+            XCTAssertEqual(occurrences(of: mediumAndLarge, in: sheetSource), expectedCount)
+            XCTAssertFalse(sheetSource.contains(largeOnly))
+        }
+
+        let sharedPresentationSources: [(String, Int)] = [
             (
                 try source(pathComponents: [
                     "Sources", "UI", "WorkerConsole", "RunGraph", "WorkerRunGraphComponents.swift",
                 ]),
-                2
+                1
             ),
             (
                 try source(pathComponents: [
@@ -103,8 +142,11 @@ final class ToolInvocationDetailViewTests: XCTestCase {
             ),
         ]
 
-        for (sheetSource, expectedCount) in sourcesWithExpectedCounts {
-            XCTAssertEqual(occurrences(of: mediumAndLarge, in: sheetSource), expectedCount)
+        for (sheetSource, expectedCount) in sharedPresentationSources {
+            XCTAssertEqual(
+                occurrences(of: ".workerConsoleSheetPresentation()", in: sheetSource),
+                expectedCount
+            )
             XCTAssertFalse(sheetSource.contains(largeOnly))
         }
 
@@ -114,7 +156,10 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         let auditSheet = try XCTUnwrap(
             workerDetails.components(separatedBy: "struct WorkerAuditSessionSheet").last
         )
-        XCTAssertEqual(occurrences(of: mediumAndLarge, in: auditSheet), 1)
+        XCTAssertEqual(
+            occurrences(of: ".workerConsoleSheetPresentation()", in: auditSheet),
+            1
+        )
         XCTAssertFalse(auditSheet.contains(largeOnly))
     }
 
@@ -201,12 +246,14 @@ final class ToolInvocationDetailViewTests: XCTestCase {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     WorkerRunGraphSummaryView(graph: graph)
-                    WorkerRunDetailLinksView(
+                    WorkerRunTerminalResultView(
                         graph: graph,
-                        openTree: {},
-                        openTimeline: {}
+                        chunk: Self.fixtureWorkerResult,
+                        isLoading: false,
+                        loadError: nil,
+                        inspectResult: {}
                     )
-                    WorkerRunTerminalResultView(graph: graph, inspectResult: {})
+                    WorkerRunExecutionOverviewView(graph: graph, openDetails: {})
                 }
                 .padding(18)
             }
@@ -453,6 +500,35 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         }
         """#.data(using: .utf8)!
         return try! JSONDecoder().decode(WorkerRunGraphDTO.self, from: data)
+    }
+
+    private static var fixtureWorkerResult: WorkerResultChunkDTO {
+        WorkerResultChunkDTO(
+            kind: "worker_result_chunk",
+            reference: WorkerResultReferenceDTO(
+                kind: "worker_result_reference",
+                invocationId: "worker_run_fixture",
+                workerId: "research-coordinator",
+                workerVersion: "version",
+                outputSchemaSha256: "schema",
+                contentSha256: "content",
+                sizeBytes: 240,
+                preview: "research.report.v1 · partial · Bounded conclusion",
+                message: "Read selectively"
+            ),
+            pointer: "",
+            value: AnyCodable([
+                "summary": "The evidence supports a bounded conclusion.",
+                "sources": ["Source A", "Source B"],
+                "warnings": ["Two claims remain unresolved."],
+            ]),
+            children: [],
+            offset: 0,
+            returned: 3,
+            total: 3,
+            nextOffset: nil,
+            truncated: false
+        )
     }
 
     private func visualArtifactURL(outputName: String) throws -> URL {

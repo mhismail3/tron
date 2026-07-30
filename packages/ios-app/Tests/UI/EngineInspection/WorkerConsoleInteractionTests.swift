@@ -70,10 +70,12 @@ struct WorkerConsoleInteractionTests {
 
         let fields = WorkerResultInspectorPresentation.fields(in: chunk)
         #expect(fields.first?.label == "Summary")
+        #expect(fields.first?.type == "Text")
         #expect(
             fields.first(where: { $0.label == "Path/to~value" })?.pointer
                 == "/path~1to~0value"
         )
+        #expect(fields.first(where: { $0.label == "Path/to~value" })?.type == "Boolean")
         #expect(
             WorkerResultInspectorPresentation.isEmptyCollection(AnyCodable([String: Any]()))
         )
@@ -142,13 +144,17 @@ struct WorkerConsoleInteractionTests {
         #expect(graph.contains("WorkerRunTimelineView"))
         #expect(graph.contains("entry.summary"))
         #expect(graph.contains("filter { !$0.technical }"))
-        #expect(graph.contains("WorkerRunDetailLinksView"))
-        #expect(graph.contains("WorkerRunTreeSheet"))
-        #expect(graph.contains("WorkerRunTimelineSheet"))
+        #expect(graph.contains("WorkerRunExecutionOverviewView"))
+        #expect(graph.contains("WorkerRunExecutionSheet"))
+        #expect(graph.contains("View full execution history"))
+        #expect(!graph.contains("WorkerRunDetailLinksView"))
+        #expect(!graph.contains("WorkerRunTreeSheet"))
+        #expect(!graph.contains("WorkerRunTimelineSheet"))
         #expect(tool.contains("WorkerToolRunGraphView("))
         #expect(graph.contains(".workerRunProjectionInvalidated"))
         #expect(graph.contains("WorkerRunGraphPresentation.shouldRefreshAfterInvalidation"))
-        #expect(graph.contains("Open full result"))
+        #expect(graph.contains("View complete result"))
+        #expect(graph.contains("fields.prefix(4)"))
         #expect(!graph.contains("Inspect result"))
         #expect(graph.contains("WorkerResultInspectorSheet("))
         #expect(context.contains(".workerRunProjectionInvalidated"))
@@ -157,6 +163,45 @@ struct WorkerConsoleInteractionTests {
         #expect(!graph.contains("joined(separator: \"\")"))
         #expect(!graphComponents.contains(#"Image(systemName: "arrow.up.right.square")"#))
         #expect(!resultInspector.contains(#"Image(systemName: "arrow.up.right.square")"#))
+    }
+
+    @Test("Worker run sheet leads with validated output and consolidates drill-down")
+    func workerRunSheetUsesOneExecutionAndTechnicalHierarchy() throws {
+        let root = iosAppRoot()
+        let detail = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Detail/WorkerConsoleDetailSheets.swift"
+            ),
+            encoding: .utf8
+        )
+        let technical = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Detail/WorkerRunTechnicalDetailsSheet.swift"
+            ),
+            encoding: .utf8
+        )
+        let runSheet = try sourceSlice(
+            detail,
+            from: "struct WorkerRunDetailSheet: View",
+            through: "private enum Mutation"
+        )
+        let resultPosition = try #require(
+            runSheet.range(of: "WorkerRunTerminalResultView(")?.lowerBound
+        )
+        let executionPosition = try #require(
+            runSheet.range(of: "WorkerRunExecutionOverviewView(")?.lowerBound
+        )
+
+        #expect(resultPosition < executionPosition)
+        #expect(runSheet.contains("showExecutionDetails"))
+        #expect(!runSheet.contains("showRunTree"))
+        #expect(!runSheet.contains("showTimeline"))
+        #expect(runSheet.contains("showsTechnicalDetails: false"))
+        #expect(runSheet.contains("initialResultChunk: resultChunk"))
+        #expect(technical.contains("Validated result JSON"))
+        #expect(technical.contains("Output schema"))
+        #expect(technical.contains("Technical timeline"))
+        #expect(technical.contains("Worker input"))
     }
 
     @Test("Worker run transcript exists only for a real child agent session")
@@ -231,6 +276,8 @@ struct WorkerConsoleInteractionTests {
         #expect(resultInspector.contains("WorkerResultTechnicalSheet"))
         #expect(resultInspector.contains("Open raw JSON"))
         #expect(resultInspector.contains("Result fields"))
+        #expect(resultInspector.contains("StructuredDataFieldHeader("))
+        #expect(!resultInspector.contains("Text(fieldMetadata(field))"))
         #expect(!resultInspector.contains(#"title: chunk.truncated ? "Result page" : "Result value""#))
         #expect(!resultInspector.contains("assembledResult"))
         let runDetail = try String(

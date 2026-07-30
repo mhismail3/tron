@@ -5,9 +5,24 @@ struct WorkerRunTechnicalDetailsSheet: View {
     let run: WorkerInvocationDTO
     let graph: WorkerRunGraphDTO?
 
+    @Environment(\.dependencies) private var dependencies
     @State private var showInput = false
     @State private var showLegacyOutput = false
+    @State private var showRawResult = false
     @State private var showTechnicalTimeline = false
+    @State private var resultChunk: WorkerResultChunkDTO?
+    @State private var isLoadingResult = false
+    @State private var resultLoadError: String?
+
+    init(
+        run: WorkerInvocationDTO,
+        graph: WorkerRunGraphDTO?,
+        initialResultChunk: WorkerResultChunkDTO? = nil
+    ) {
+        self.run = run
+        self.graph = graph
+        _resultChunk = State(initialValue: initialResultChunk)
+    }
 
     private var technicalTimelineValues: [String] {
         graph?.timeline
@@ -34,6 +49,38 @@ struct WorkerRunTechnicalDetailsSheet: View {
                                 symbol: "arrow.down.doc"
                             ) {
                                 showInput = true
+                            }
+                            if let resultChunk {
+                                WorkerMetadataDivider()
+                                disclosure(
+                                    title: "Validated result JSON",
+                                    detail: resultChunk.truncated
+                                        ? "Open the bounded root result page."
+                                        : "Open or copy the exact root result.",
+                                    symbol: "curlybraces"
+                                ) {
+                                    showRawResult = true
+                                }
+                            } else if isLoadingResult {
+                                WorkerMetadataDivider()
+                                HStack(spacing: 9) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Loading validated result evidence…")
+                                        .font(TronTypography.sans(
+                                            size: TronTypography.sizeCaption
+                                        ))
+                                        .foregroundStyle(.tronTextSecondary)
+                                }
+                                .padding(.vertical, 9)
+                            } else if let resultLoadError {
+                                WorkerMetadataDivider()
+                                Text("Validated result could not load: \(resultLoadError)")
+                                    .font(TronTypography.sans(
+                                        size: TronTypography.sizeCaption
+                                    ))
+                                    .foregroundStyle(.tronWarning)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.vertical, 9)
                             }
                             if run.output?.legacyInline != nil {
                                 WorkerMetadataDivider()
@@ -82,6 +129,12 @@ struct WorkerRunTechnicalDetailsSheet: View {
                                 )
                                 WorkerMetadataDivider()
                                 metadata("Content digest", reference.contentSha256, length: 16)
+                                WorkerMetadataDivider()
+                                metadata(
+                                    "Output schema",
+                                    reference.outputSchemaSha256,
+                                    length: 16
+                                )
                             }
                             if let graph {
                                 WorkerMetadataDivider()
@@ -128,12 +181,24 @@ struct WorkerRunTechnicalDetailsSheet: View {
                     )
                 }
             }
+            .sheet(isPresented: $showRawResult) {
+                if let resultChunk {
+                    WorkerJSONDetailSheet(
+                        title: "Validated Worker Result",
+                        value: resultChunk.value,
+                        accent: .tronSuccess
+                    )
+                }
+            }
             .sheet(isPresented: $showTechnicalTimeline) {
                 WorkerTextDetailSheet(
                     title: "Technical Timeline",
                     values: technicalTimelineValues,
                     accent: .tronSlate
                 )
+            }
+            .task(id: run.output?.reference?.invocationId) {
+                await loadResultIfNeeded()
             }
         }
         .workerConsoleSheetPresentation()
@@ -161,5 +226,29 @@ struct WorkerRunTechnicalDetailsSheet: View {
             value: WorkerConsolePresentation.compactIdentifier(value, length: length),
             isCode: true
         )
+    }
+
+    private func loadResultIfNeeded() async {
+        guard let reference = run.output?.reference,
+              resultChunk?.reference.invocationId != reference.invocationId,
+              !isLoadingResult else {
+            return
+        }
+        isLoadingResult = true
+        resultLoadError = nil
+        defer { isLoadingResult = false }
+        do {
+            resultChunk = try await dependencies.workerKernelRepository.workerResult(
+                invocationId: reference.invocationId,
+                pointer: "",
+                offset: 0,
+                limit: 20
+            )
+        } catch {
+            if error is CancellationError {
+                return
+            }
+            resultLoadError = error.localizedDescription
+        }
     }
 }

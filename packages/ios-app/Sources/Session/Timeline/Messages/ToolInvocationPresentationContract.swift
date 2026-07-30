@@ -112,6 +112,17 @@ indirect enum ToolStructuredValue: Equatable {
     case boolean(Bool)
     case null
 
+    var displayType: String {
+        switch self {
+        case .object: "Object"
+        case .array: "List"
+        case .string: "Text"
+        case .number: "Number"
+        case .boolean: "Boolean"
+        case .null: "Empty"
+        }
+    }
+
     var containsNestedValues: Bool {
         switch self {
         case .object(let fields):

@@ -139,9 +139,12 @@ struct WorkerRunDetailSheet: View {
     @State private var graph: WorkerRunGraphDTO?
     @State private var selectedSession: WorkerRunSessionSelection?
     @State private var selectedResult: WorkerResultSelection?
+    @State private var resultChunk: WorkerResultChunkDTO?
+    @State private var isLoadingResult = false
+    @State private var resultLoadingInvocationId: String?
+    @State private var resultLoadError: String?
     @State private var showTechnicalDetails = false
-    @State private var showRunTree = false
-    @State private var showTimeline = false
+    @State private var showExecutionDetails = false
     @State private var confirmCancel = false
     @State private var isMutating = false
     @State private var loadError: String?
@@ -171,15 +174,18 @@ struct WorkerRunDetailSheet: View {
                         if let loadError {
                             WorkerConsoleErrorBanner(message: loadError)
                         }
-                        WorkerRunDetailLinksView(
+                        WorkerRunTerminalResultView(
                             graph: graph,
-                            openTree: { showRunTree = true },
-                            openTimeline: { showTimeline = true }
-                        )
-                        WorkerRunTerminalResultView(graph: graph) {
+                            chunk: resultChunk,
+                            isLoading: isLoadingResult,
+                            loadError: resultLoadError
+                        ) {
                             selectedResult = WorkerResultSelection(
                                 invocationId: graph.requestedInvocationId
                             )
+                        }
+                        WorkerRunExecutionOverviewView(graph: graph) {
+                            showExecutionDetails = true
                         }
                         WorkerRunDeclarativePresentationView(
                             graph: graph,
@@ -246,21 +252,21 @@ struct WorkerRunDetailSheet: View {
             .sheet(item: $selectedResult) { selection in
                 WorkerResultInspectorSheet(
                     invocationId: selection.invocationId,
-                    repository: dependencies.workerKernelRepository
+                    repository: dependencies.workerKernelRepository,
+                    showsTechnicalDetails: false
                 )
             }
-            .sheet(isPresented: $showRunTree) {
+            .sheet(isPresented: $showExecutionDetails) {
                 if let graph {
-                    WorkerRunTreeSheet(graph: graph)
-                }
-            }
-            .sheet(isPresented: $showTimeline) {
-                if let graph {
-                    WorkerRunTimelineSheet(graph: graph)
+                    WorkerRunExecutionSheet(graph: graph)
                 }
             }
             .sheet(isPresented: $showTechnicalDetails) {
-                WorkerRunTechnicalDetailsSheet(run: currentRun, graph: graph)
+                WorkerRunTechnicalDetailsSheet(
+                    run: currentRun,
+                    graph: graph,
+                    initialResultChunk: resultChunk
+                )
             }
             .confirmationDialog(
                 "Cancel this worker run?",
@@ -323,20 +329,19 @@ struct WorkerRunDetailSheet: View {
     private var isPresentingChildSheet: Bool {
         selectedSession != nil
             || selectedResult != nil
-            || showRunTree
-            || showTimeline
+            || showExecutionDetails
             || showTechnicalDetails
     }
 
     private var technicalControls: some View {
         WorkerConsoleSection(
             title: "Technical details",
-            detail: "Raw input, identifiers, technical events, and timing evidence.",
+            detail: "Raw input and result, identifiers, technical events, and timing evidence.",
             accent: .tronSlate
         ) {
             WorkerRunDisclosureRow(
                 title: "Open technical details",
-                detail: "Inspect raw protocol values and durable execution identifiers.",
+                detail: "Inspect the consolidated protocol and durability evidence.",
                 symbol: "wrench.and.screwdriver",
                 accent: .tronSlate
             ) {
@@ -372,10 +377,63 @@ struct WorkerRunDetailSheet: View {
             if let refreshed = result.runs.first {
                 currentRun = refreshed
             }
-            graph = result.graphs?.first
-            loadError = graph == nil ? "The durable run graph is not available yet." : nil
+            let refreshedGraph = result.graphs?.first
+            graph = refreshedGraph
+            loadError = refreshedGraph == nil
+                ? "The durable run graph is not available yet."
+                : nil
+            if let refreshedGraph {
+                await loadResultOverview(for: refreshedGraph)
+            }
         } catch {
+            if error is CancellationError {
+                return
+            }
             loadError = "Live worker state could not load: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadResultOverview(for graph: WorkerRunGraphDTO) async {
+        guard WorkerRunGraphPresentation.canInspectResult(status: graph.status) else {
+            resultChunk = nil
+            resultLoadError = nil
+            isLoadingResult = false
+            resultLoadingInvocationId = nil
+            return
+        }
+        let invocationId = graph.requestedInvocationId
+        guard resultChunk?.reference.invocationId != invocationId,
+              resultLoadingInvocationId != invocationId else {
+            return
+        }
+
+        if resultChunk?.reference.invocationId != invocationId {
+            resultChunk = nil
+        }
+        isLoadingResult = true
+        resultLoadingInvocationId = invocationId
+        resultLoadError = nil
+        defer {
+            if resultLoadingInvocationId == invocationId {
+                isLoadingResult = false
+                resultLoadingInvocationId = nil
+            }
+        }
+        do {
+            let loadedChunk = try await dependencies.workerKernelRepository.workerResult(
+                invocationId: invocationId,
+                pointer: "",
+                offset: 0,
+                limit: 4
+            )
+            guard resultLoadingInvocationId == invocationId else { return }
+            resultChunk = loadedChunk
+        } catch {
+            guard resultLoadingInvocationId == invocationId,
+                  !(error is CancellationError) else {
+                return
+            }
+            resultLoadError = error.localizedDescription
         }
     }
 

@@ -76,24 +76,29 @@ struct WorkerToolRunGraphView: View {
     @State private var confirmCancel = false
     @State private var refreshRevision = 0
     @State private var selectedResult: WorkerResultSelection?
-    @State private var showRunTree = false
-    @State private var showTimeline = false
+    @State private var resultChunk: WorkerResultChunkDTO?
+    @State private var isLoadingResult = false
+    @State private var resultLoadingInvocationId: String?
+    @State private var resultLoadError: String?
+    @State private var showExecutionDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if let graph {
                 WorkerRunGraphSummaryView(graph: graph)
 
-                WorkerRunDetailLinksView(
+                WorkerRunTerminalResultView(
                     graph: graph,
-                    openTree: { showRunTree = true },
-                    openTimeline: { showTimeline = true }
-                )
-
-                WorkerRunTerminalResultView(graph: graph) {
+                    chunk: resultChunk,
+                    isLoading: isLoadingResult,
+                    loadError: resultLoadError
+                ) {
                     selectedResult = WorkerResultSelection(
                         invocationId: graph.requestedInvocationId
                     )
+                }
+                WorkerRunExecutionOverviewView(graph: graph) {
+                    showExecutionDetails = true
                 }
                 WorkerRunDeclarativePresentationView(
                     graph: graph,
@@ -136,14 +141,9 @@ struct WorkerToolRunGraphView: View {
                 refreshRevision += 1
             }
         }
-        .sheet(isPresented: $showRunTree) {
+        .sheet(isPresented: $showExecutionDetails) {
             if let graph {
-                WorkerRunTreeSheet(graph: graph)
-            }
-        }
-        .sheet(isPresented: $showTimeline) {
-            if let graph {
-                WorkerRunTimelineSheet(graph: graph)
+                WorkerRunExecutionSheet(graph: graph)
             }
         }
         .sheet(item: $selectedResult) { selection in
@@ -166,7 +166,7 @@ struct WorkerToolRunGraphView: View {
     }
 
     private var isPresentingChildSheet: Bool {
-        selectedResult != nil || showRunTree || showTimeline
+        selectedResult != nil || showExecutionDetails
     }
 
     private func observe() async {
@@ -193,10 +193,61 @@ struct WorkerToolRunGraphView: View {
                 invocationId: invocationId,
                 modelToolInvocationId: invocationId == nil ? modelToolInvocationId : nil
             )
-            graph = page.graphs?.first
+            let refreshedGraph = page.graphs?.first
+            graph = refreshedGraph
             error = nil
+            if let refreshedGraph {
+                await loadResultOverview(for: refreshedGraph)
+            }
         } catch {
+            if error is CancellationError {
+                return
+            }
             self.error = error.localizedDescription
+        }
+    }
+
+    private func loadResultOverview(for graph: WorkerRunGraphDTO) async {
+        guard WorkerRunGraphPresentation.canInspectResult(status: graph.status) else {
+            resultChunk = nil
+            resultLoadError = nil
+            isLoadingResult = false
+            resultLoadingInvocationId = nil
+            return
+        }
+        let targetInvocationId = graph.requestedInvocationId
+        guard resultChunk?.reference.invocationId != targetInvocationId,
+              resultLoadingInvocationId != targetInvocationId else {
+            return
+        }
+
+        if resultChunk?.reference.invocationId != targetInvocationId {
+            resultChunk = nil
+        }
+        isLoadingResult = true
+        resultLoadingInvocationId = targetInvocationId
+        resultLoadError = nil
+        defer {
+            if resultLoadingInvocationId == targetInvocationId {
+                isLoadingResult = false
+                resultLoadingInvocationId = nil
+            }
+        }
+        do {
+            let loadedChunk = try await dependencies.workerKernelRepository.workerResult(
+                invocationId: targetInvocationId,
+                pointer: "",
+                offset: 0,
+                limit: 4
+            )
+            guard resultLoadingInvocationId == targetInvocationId else { return }
+            resultChunk = loadedChunk
+        } catch {
+            guard resultLoadingInvocationId == targetInvocationId,
+                  !(error is CancellationError) else {
+                return
+            }
+            resultLoadError = error.localizedDescription
         }
     }
 

@@ -107,25 +107,13 @@ struct WorkerSchemaFieldRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 7) {
-                Text(field.name)
-                    .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-                Text(field.type)
-                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
-                    .foregroundStyle(.tronInfo)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background {
-                        Capsule().fill(Color.tronInfo.opacity(0.12))
-                    }
-                if field.isRequired {
-                    Text("required")
-                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                        .foregroundStyle(.tronWarning)
-                }
-                Spacer()
-            }
+            StructuredDataFieldHeader(
+                title: field.name,
+                type: WorkerConsolePresentation.displayLabel(field.type),
+                qualifier: field.isRequired ? "Required" : nil,
+                titleIsCode: true,
+                typeColor: .tronInfo
+            )
             if let detail = field.detail, !detail.isEmpty {
                 Text(detail)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))

@@ -172,6 +172,7 @@ enum WorkerResultInspectorPresentation {
 struct WorkerResultInspectorSheet: View {
     let invocationId: String
     let repository: any WorkerKernelRepository
+    let showsTechnicalDetails: Bool
 
     @State private var locations: [WorkerResultLocation]
     @State private var chunk: WorkerResultChunkDTO?
@@ -186,10 +187,12 @@ struct WorkerResultInspectorSheet: View {
     init(
         invocationId: String,
         repository: any WorkerKernelRepository,
-        initialPointer: String = ""
+        initialPointer: String = "",
+        showsTechnicalDetails: Bool = true
     ) {
         self.invocationId = invocationId
         self.repository = repository
+        self.showsTechnicalDetails = showsTechnicalDetails
         _locations = State(
             initialValue: [WorkerResultLocation(pointer: initialPointer, offset: 0)]
         )
@@ -211,7 +214,9 @@ struct WorkerResultInspectorSheet: View {
                         }
                         resultContent(chunk)
                         resultNavigation(chunk)
-                        technicalDetailsLink
+                        if showsTechnicalDetails {
+                            technicalDetailsLink
+                        }
                     } else if let error {
                         WorkerConsoleErrorBanner(message: error)
                     }
@@ -335,12 +340,10 @@ struct WorkerResultInspectorSheet: View {
                     .foregroundStyle(.tronPurple)
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(field.label)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(fieldMetadata(field))
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
+                    StructuredDataFieldHeader(
+                        title: field.label,
+                        type: fieldMetadata(field)
+                    )
                     Text(field.detail)
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)

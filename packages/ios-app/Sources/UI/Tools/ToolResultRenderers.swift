@@ -123,9 +123,11 @@ private struct ToolStructuredFieldView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(ToolPresentation.humanizeToolId(field.key))
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(tint.subtle)
+            StructuredDataFieldHeader(
+                title: ToolPresentation.humanizeToolId(field.key),
+                type: field.value.displayType,
+                typeColor: tint.subtle
+            )
 
             if depth >= depthLimit, field.value.containsNestedValues {
                 Text("Additional structured detail is available in the raw result.")
@@ -149,16 +151,11 @@ private struct ToolStructuredArrayItemView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            if let title = itemTitle {
-                Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
-                    .foregroundStyle(.tronTextPrimary)
-                    .lineLimit(2)
-            } else {
-                Text("Item \(index + 1)")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(tint.subtle)
-            }
+            StructuredDataFieldHeader(
+                title: itemTitle ?? "Item \(index + 1)",
+                type: value.displayType,
+                typeColor: tint.subtle
+            )
 
             if depth >= depthLimit, value.containsNestedValues {
                 Text("Additional structured detail is available in the raw result.")

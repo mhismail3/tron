@@ -636,16 +636,18 @@ model-tool/invocation association through `worker_kernel::runs(detail:
 "graph")`, then renders the server's status, mode, meaningful stage, elapsed
 time, child counts, result or actionable failure, and links to execution
 detail. The primary sheet never embeds an unbounded causal tree or lifecycle
-history. Live invalidations refresh only an absent or active graph; a terminal
-chip remains stable instead of restarting its durable result read when
-unrelated workers run. `Work breakdown` and `Activity` open separate
-large-detail sheets that
-render the server-ordered causal nodes, child-session links, and user-facing
-timeline. Those disclosure containers remain fully tappable without repeating
-right-aligned open-link symbols; their leading icon, title, and supporting text
-carry the navigation affordance. Every detail destination reachable from a
-tool sheet—including work breakdown, activity, exact result, result technical
-detail, raw payload, and child-session views—declares medium and large detents.
+history. Instead, one `Execution` section shows the work-item/attempt/model-turn
+counts and the latest three user-facing durable updates. One full execution
+history sheet then combines the server-ordered causal nodes, child-session
+links, and complete user-facing timeline; the same run is never split into
+parallel Work Breakdown and Activity destinations. Live invalidations refresh
+only an absent or active graph; a terminal chip remains stable instead of
+restarting its durable result read when unrelated workers run. Disclosure
+containers remain fully tappable without repeating right-aligned open-link
+symbols; their leading icon, title, and supporting text carry the navigation
+affordance. Every detail destination reachable from a tool sheet—including
+execution history, exact result, technical evidence, raw payload, and
+child-session views—declares medium and large detents.
 The shared adaptive presentation contract therefore opens each at medium on
 iPhone and leaves large available. Active child work therefore outranks a stale
 parent model event, and
@@ -654,13 +656,24 @@ starts/finishes cannot collapse into a concatenated “Latest output” blob.
 The same generic graph surface offers detach, bounded await, causal-subtree
 cancel, terminal-failure retry, root/child session inspection, and typed-result
 inspection according to server state. Terminal result previews remove
-protocol-only schema/status prefixes before presentation. Exact result
-inspection calls `worker_kernel::result_read` on demand: the primary result
-sheet is a readable field browser over one server-bounded path or page and
-follows server-authored child pointers. Primitive values wrap vertically as
-content rather than entering a code container. Raw JSON plus the immutable
-version and content/schema digests live in subordinate technical sheets; an
-empty collection receives an explicit empty state rather than a blank surface.
+protocol-only schema/status prefixes before presentation. A completed run
+loads one bounded root result page so its highest-signal fields appear ahead of
+Execution; the preview status is never the only visible output when readable
+fields are available. Exact result inspection still calls
+`worker_kernel::result_read` on demand: the complete-result sheet is a readable
+field browser over one server-bounded path or page and follows server-authored
+child pointers. Primitive values wrap vertically as content rather than
+entering a code container. A run has one Technical Details destination for raw
+input and result JSON, immutable version and content/schema digests, timings,
+identifiers, and internal events. The complete-result sheet opened from that
+run does not add a second technical-details branch. Standalone result
+inspection retains its own integrity evidence when no parent run sheet exists.
+An empty collection receives an explicit empty state rather than a blank
+surface.
+Parsed JSON fields across exact worker results, structured tool results, and
+worker input schemas use one row hierarchy: field identity leads, plain value
+type metadata trails, and the value or preview wraps below. Type labels never
+become leading content or decorative pills.
 The authenticated paired-client actor may inspect profile-local results from
 the engine-global Worker Console without inventing an originating session;
 agent and worker reads still require server-validated session or delivery-grant

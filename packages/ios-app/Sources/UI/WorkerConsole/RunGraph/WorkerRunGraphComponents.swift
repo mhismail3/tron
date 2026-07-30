@@ -83,6 +83,19 @@ enum WorkerRunGraphPresentation {
         return "\(entries.count) update\(entries.count == 1 ? "" : "s") · \(latest.summary)"
     }
 
+    static func visibleTimeline(_ graph: WorkerRunGraphDTO) -> [WorkerRunTimelineEntryDTO] {
+        graph.timeline.filter { !$0.technical }
+    }
+
+    static func recentActivity(
+        _ graph: WorkerRunGraphDTO,
+        limit: Int = 3
+    ) -> [WorkerRunTimelineEntryDTO] {
+        let entries = visibleTimeline(graph)
+        guard limit > 0, entries.count > limit else { return entries }
+        return Array(entries.suffix(limit))
+    }
+
     static func nodeTitle(_ node: WorkerRunNodeDTO) -> String {
         if node.kind == "attempt", let attempt = node.attemptNumber {
             return "Attempt \(attempt)"
@@ -329,45 +342,54 @@ struct WorkerRunDisclosureRow: View {
     }
 }
 
-struct WorkerRunDetailLinksView: View {
+struct WorkerRunExecutionOverviewView: View {
     let graph: WorkerRunGraphDTO
-    let openTree: () -> Void
-    let openTimeline: () -> Void
+    let openDetails: () -> Void
 
     private var visibleTimeline: [WorkerRunTimelineEntryDTO] {
-        graph.timeline.filter { !$0.technical }
+        WorkerRunGraphPresentation.visibleTimeline(graph)
+    }
+
+    private var recentActivity: [WorkerRunTimelineEntryDTO] {
+        WorkerRunGraphPresentation.recentActivity(graph)
     }
 
     var body: some View {
         WorkerConsoleSection(
-            title: "Execution details",
-            detail: "Open the durable work structure or activity only when you need it.",
+            title: "Execution",
+            detail: WorkerRunGraphPresentation.workBreakdown(graph),
             accent: .tronCyan
         ) {
             VStack(spacing: 0) {
-                WorkerRunDisclosureRow(
-                    title: "Work breakdown",
-                    detail: WorkerRunGraphPresentation.workBreakdown(graph),
-                    symbol: "point.3.connected.trianglepath.dotted",
-                    accent: .tronCyan,
-                    action: openTree
-                )
+                if recentActivity.isEmpty {
+                    WorkerConsoleInlineEmptyState(
+                        symbol: "clock",
+                        text: "Waiting for the first durable execution update."
+                    )
+                } else {
+                    WorkerRunTimelineView(entries: recentActivity, nodes: graph.nodes)
+                        .padding(.vertical, 9)
+                }
+
                 WorkerMetadataDivider()
                 WorkerRunDisclosureRow(
-                    title: "Activity",
+                    title: "View full execution history",
                     detail: WorkerRunGraphPresentation.activitySummary(visibleTimeline),
-                    symbol: "clock.arrow.circlepath",
-                    accent: .tronPurple,
-                    action: openTimeline
+                    symbol: "point.3.connected.trianglepath.dotted",
+                    accent: .tronCyan,
+                    action: openDetails
                 )
             }
         }
-        .accessibilityIdentifier("worker-run-detail-links")
+        .accessibilityIdentifier("worker-run-execution-overview")
     }
 }
 
 struct WorkerRunTerminalResultView: View {
     let graph: WorkerRunGraphDTO
+    let chunk: WorkerResultChunkDTO?
+    let isLoading: Bool
+    let loadError: String?
     let inspectResult: () -> Void
 
     var body: some View {
@@ -382,25 +404,21 @@ struct WorkerRunTerminalResultView: View {
                     .foregroundStyle(.tronError)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        } else if let preview = graph.resultPreview, !preview.isEmpty {
-            let result = WorkerRunGraphPresentation.resultPresentation(preview)
+        } else if graph.resultPreview?.isEmpty == false || chunk != nil || isLoading {
+            let preview = graph.resultPreview ?? "Validated worker result"
             WorkerConsoleSection(
-                title: result.status.map { "\($0) result" } ?? "Result",
-                detail: "Readable summary from the validated durable result.",
+                title: "Result",
+                detail: "Validated durable output from this worker run.",
                 accent: .tronSuccess
             ) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(result.summary)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(10)
-                        .fixedSize(horizontal: false, vertical: true)
+                    resultContent(preview: preview)
 
                     if WorkerRunGraphPresentation.canInspectResult(status: graph.status) {
                         WorkerMetadataDivider()
                         WorkerRunDisclosureRow(
-                            title: "Open full result",
-                            detail: "Browse fields on demand from the durable invocation.",
+                            title: "View complete result",
+                            detail: "Browse every field and nested value on demand.",
                             symbol: "doc.text.magnifyingglass",
                             accent: .tronSuccess,
                             action: inspectResult
@@ -411,22 +429,121 @@ struct WorkerRunTerminalResultView: View {
             .accessibilityIdentifier("worker-run-result-summary")
         }
     }
+
+    @ViewBuilder
+    private func resultContent(preview: String) -> some View {
+        if let chunk {
+            let fields = WorkerResultInspectorPresentation.fields(in: chunk)
+            if !fields.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(fields.prefix(4).enumerated()), id: \.element.id) {
+                        index,
+                        field in
+                        if index > 0 {
+                            WorkerMetadataDivider()
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            StructuredDataFieldHeader(
+                                title: field.label,
+                                type: field.type,
+                                typeColor: .tronTextSecondary
+                            )
+                            Text(field.detail)
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextSecondary)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 7)
+                    }
+                    if fields.count > 4 || chunk.nextOffset != nil {
+                        WorkerMetadataDivider()
+                        Text("Additional result fields are available.")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextMuted)
+                            .padding(.top, 7)
+                    }
+                }
+            } else if let text = WorkerResultInspectorPresentation.primitiveText(chunk.value) {
+                Text(text)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronTextPrimary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if WorkerResultInspectorPresentation.isEmptyCollection(chunk.value) {
+                WorkerConsoleInlineEmptyState(
+                    symbol: "tray",
+                    text: "The validated result is an empty collection."
+                )
+            } else {
+                WorkerConsoleInlineEmptyState(
+                    symbol: "nosign",
+                    text: "The validated result has no value."
+                )
+            }
+        } else if isLoading {
+            HStack(spacing: 9) {
+                ProgressView().controlSize(.small)
+                Text("Loading validated result fields…")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+            }
+        } else {
+            let result = WorkerRunGraphPresentation.resultPresentation(preview)
+            Text(result.summary)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(10)
+                .fixedSize(horizontal: false, vertical: true)
+            if let loadError {
+                Text("Result fields could not refresh: \(loadError)")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
 }
 
-struct WorkerRunTreeSheet: View {
+struct WorkerRunExecutionSheet: View {
     let graph: WorkerRunGraphDTO
 
     @State private var selectedSession: WorkerToolSessionSelection?
 
+    private var entries: [WorkerRunTimelineEntryDTO] {
+        WorkerRunGraphPresentation.visibleTimeline(graph)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    Text(WorkerRunGraphPresentation.workBreakdown(graph))
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextSecondary)
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    WorkerConsoleSectionHeader(
+                        title: "Work structure",
+                        detail: WorkerRunGraphPresentation.workBreakdown(graph)
+                    )
                     WorkerRunCausalTreeView(graph: graph) { sessionId in
                         selectedSession = WorkerToolSessionSelection(sessionId: sessionId)
+                    }
+
+                    WorkerConsoleSectionHeader(
+                        title: "Activity history",
+                        detail: "\(entries.count) durable execution update\(entries.count == 1 ? "" : "s")."
+                    )
+                    if entries.isEmpty {
+                        WorkerConsoleInlineEmptyState(
+                            symbol: "clock",
+                            text: "No user-facing activity has been recorded yet."
+                        )
+                    } else {
+                        WorkerRunTimelineView(entries: entries, nodes: graph.nodes)
+                    }
+
+                    if graph.truncated {
+                        WorkerConsoleInlineEmptyState(
+                            symbol: "ellipsis.circle",
+                            text: "This view is bounded to the execution history retained by the server."
+                        )
                     }
                 }
                 .padding(18)
@@ -435,7 +552,7 @@ struct WorkerRunTreeSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Work Breakdown", color: .tronCyan)
+                    SheetTitle(title: "Execution History", color: .tronCyan)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     SheetDismissButton(color: .tronCyan)
@@ -450,43 +567,6 @@ struct WorkerRunTreeSheet: View {
         }
         .workerConsoleSheetPresentation()
         .tint(.tronCyan)
-    }
-}
-
-struct WorkerRunTimelineSheet: View {
-    let graph: WorkerRunGraphDTO
-
-    private var entries: [WorkerRunTimelineEntryDTO] {
-        graph.timeline.filter { !$0.technical }
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                if entries.isEmpty {
-                    Text("No user-facing activity has been recorded yet.")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronTextMuted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(18)
-                } else {
-                    WorkerRunTimelineView(entries: entries, nodes: graph.nodes)
-                        .padding(18)
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Activity", color: .tronPurple)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    SheetDismissButton(color: .tronPurple)
-                }
-            }
-        }
-        .workerConsoleSheetPresentation()
-        .tint(.tronPurple)
     }
 }
 

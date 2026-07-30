@@ -143,6 +143,12 @@ final class ToolInvocationBriefPresentationTests: XCTestCase {
                 )
             ])
         )
+        XCTAssertEqual(ToolStructuredValue.object([]).displayType, "Object")
+        XCTAssertEqual(ToolStructuredValue.array([]).displayType, "List")
+        XCTAssertEqual(ToolStructuredValue.string("value").displayType, "Text")
+        XCTAssertEqual(ToolStructuredValue.number("1").displayType, "Number")
+        XCTAssertEqual(ToolStructuredValue.boolean(true).displayType, "Boolean")
+        XCTAssertEqual(ToolStructuredValue.null.displayType, "Empty")
         XCTAssertNil(ToolStructuredDocument.result(content: "plain result", details: nil))
     }
 
