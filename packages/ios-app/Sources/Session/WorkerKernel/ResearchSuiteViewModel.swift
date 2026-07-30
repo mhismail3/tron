@@ -380,6 +380,14 @@ final class ResearchSuiteViewModel {
             ?? WorkerConsolePresentation.displayLabel(workerId)
     }
 
+    func callerWorkerName(for run: WorkerInvocationDTO) -> String? {
+        guard let parentInvocationId = run.parentWorkerInvocationId,
+              let parent = runs.first(where: { $0.invocationId == parentInvocationId }) else {
+            return nil
+        }
+        return workerName(for: parent.workerId)
+    }
+
     private static func decodeReports(
         from runs: [WorkerInvocationDTO]
     ) -> (reports: [ResearchReport], errors: [String]) {

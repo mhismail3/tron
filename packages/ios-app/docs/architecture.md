@@ -389,11 +389,17 @@ provides:
 - trigger status and webhook rotation;
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
-- compact recent-run rows whose semantic name, summary, and error share one
-  leading edge while bounded status, trigger, timestamp, attempt, and
-  distinguishing run suffix form a deliberate trailing metadata column;
-  tapping one opens a canonical run-detail sheet with toolbar actions. Activity
-  uses runs as the primary execution ledger and shows a
+- shared compact activity cards that identify the worker and plain-text status
+  first, keep the task or failure summary to one line, and place caller,
+  manual/automatic provenance, foreground/background mode, retry count when
+  relevant, and invocation time on one bounded metadata row. The caller
+  projection distinguishes engine hooks, agent tool calls,
+  agent sessions, the Worker Console, schedules, self-wakeups, and parent
+  workers when the bounded run snapshot contains that parent. Random invocation,
+  version, trace, and idempotency identifiers remain in the canonical run-detail
+  sheet rather than competing with operational facts in the activity list;
+  tapping a card opens that detail sheet with toolbar actions. Activity uses
+  runs as the primary execution ledger and shows a
   separate Attention projection only for unresolved failures and pending
   background outcomes. A later verified activation or rollback removes resolved
   errors from Attention while the explicit Delivery Audit sheet and run ledger
@@ -448,6 +454,11 @@ automatically uses a static semantic tint instead of another glass layer. Each
 presented sheet resets that depth, preserving one glass level without
 glass-on-glass compositing. Top-level scroll stacks are lazy so opening or
 scrolling a detail does not construct every offscreen card.
+Activity run, Attention, trigger, audit, and lifecycle-action cards own those
+first-level surfaces directly; their headings are plain layout groups rather
+than decorative outer containers. Container sections remain reserved for
+cohesive forms, tables, and multi-row metadata whose rows are not independently
+actionable cards.
 
 Only the frontmost worker sheet observes live worker state. Presenting a run,
 technical detail, result, timeline, or other child sheet freezes the covered

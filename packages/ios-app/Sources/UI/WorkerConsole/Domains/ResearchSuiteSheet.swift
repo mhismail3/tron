@@ -249,7 +249,11 @@ struct ResearchSuiteSheet: View {
             } else {
                 LazyVStack(spacing: 9) {
                     ForEach(viewModel.runs) { run in
-                        WorkerRunCard(run: run, workerName: viewModel.workerName(for: run.workerId))
+                        WorkerRunCard(
+                            run: run,
+                            workerName: viewModel.workerName(for: run.workerId),
+                            callerWorkerName: viewModel.callerWorkerName(for: run)
+                        )
                     }
                 }
             }

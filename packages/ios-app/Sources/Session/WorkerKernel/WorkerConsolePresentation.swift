@@ -120,6 +120,71 @@ enum WorkerConsolePresentation {
         summaryValue(from: run.input, preferredKeys: ["task", "question", "query", "action", "title"])
     }
 
+    static func runInvocationSource(
+        _ run: WorkerInvocationDTO,
+        callerWorkerName: String? = nil
+    ) -> String {
+        if run.parentWorkerInvocationId != nil {
+            return callerWorkerName.map { "Worker · \($0)" } ?? "Worker dispatch"
+        }
+
+        if run.triggerKind.hasPrefix("engine_hook:") {
+            let hook = String(run.triggerKind.dropFirst("engine_hook:".count))
+            return "Engine · \(displayLabel(hook))"
+        }
+
+        switch normalized(run.triggerKind) {
+        case "manual":
+            if run.modelToolInvocationId != nil {
+                return "Agent tool call"
+            }
+            return run.originSessionId == nil ? "Worker Console" : "Agent session"
+        case "workerdispatch":
+            return callerWorkerName.map { "Worker · \($0)" } ?? "Worker dispatch"
+        case "schedule":
+            return "Schedule"
+        case "selfwakeup":
+            return "Worker self wake-up"
+        case "engineevent":
+            return "Engine event"
+        case "webhook":
+            return "Webhook"
+        case "stream":
+            return "Event stream"
+        default:
+            return displayLabel(run.triggerKind)
+        }
+    }
+
+    static func runInteractionMode(_ run: WorkerInvocationDTO) -> String {
+        switch normalized(run.interactionMode ?? "foreground") {
+        case "background": "Background"
+        case "foreground": "Foreground"
+        default: displayLabel(run.interactionMode ?? "foreground")
+        }
+    }
+
+    static func runAttemptLabel(_ run: WorkerInvocationDTO) -> String {
+        "\(run.attemptCount) attempt\(run.attemptCount == 1 ? "" : "s")"
+    }
+
+    static func runCompactMetadata(
+        _ run: WorkerInvocationDTO,
+        callerWorkerName: String? = nil
+    ) -> String {
+        var parts = [
+            runInvocationSource(run, callerWorkerName: callerWorkerName),
+        ]
+        if normalized(run.triggerKind) == "manual" {
+            parts.append("Manual")
+        }
+        parts.append(runInteractionMode(run))
+        if run.attemptCount > 1 {
+            parts.append(runAttemptLabel(run))
+        }
+        return parts.joined(separator: " · ")
+    }
+
     static func inboxSummary(_ item: WorkerInboxItemDTO) -> String {
         if let receipt = item.result.receipt {
             return compactText(

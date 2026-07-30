@@ -499,7 +499,9 @@ struct WorkerConsoleInteractionTests {
         let triggerStart = try #require(detail.range(of: "private func triggers"))
         let invocationStart = try #require(detail.range(of: "private func invocation"))
         let triggerSource = detail[triggerStart.lowerBound..<invocationStart.lowerBound]
-        #expect(!triggerSource.contains("WorkerConsoleInlineEmptyState"))
+        #expect(triggerSource.contains("WorkerConsoleGroup("))
+        #expect(triggerSource.contains("WorkerConsoleInlineEmptyState"))
+        #expect(!triggerSource.contains("WorkerConsoleSection("))
         #expect(!context.contains("WorkerSystemSheet("))
         #expect(!context.contains("workerSystemSection"))
     }
@@ -672,7 +674,7 @@ struct WorkerConsoleInteractionTests {
         #expect(audit.contains("attentionOnly: false"))
     }
 
-    @Test("Run cards use compact trailing metadata while delegated tasks retain one leading edge")
+    @Test("Run cards use compact operational metadata while delegated tasks retain one leading edge")
     func workerActivityCardsUseDeliberateTextAlignment() throws {
         let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
         let components = try String(
@@ -696,10 +698,49 @@ struct WorkerConsoleInteractionTests {
 
         #expect(!delegationRunRow.contains("Spacer"))
         #expect(workerRunCard.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
-        #expect(workerRunCard.contains("VStack(alignment: .trailing"))
-        #expect(workerRunCard.contains(".multilineTextAlignment(.trailing)"))
-        #expect(workerRunCard.contains("WorkerConsolePresentation.compactRunIdentifier"))
+        #expect(workerRunCard.contains("runCompactMetadata"))
+        #expect(workerRunCard.contains("timestamp(run.createdAt)"))
+        #expect(workerRunCard.contains(".lineLimit(1)"))
+        #expect(!workerRunCard.contains("runFact"))
+        #expect(!workerRunCard.contains("Capsule()"))
+        #expect(!workerRunCard.contains("\"Invoked by\""))
+        #expect(!workerRunCard.contains("compactRunIdentifier"))
         #expect(delegationRunRow.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+    }
+
+    @Test("Worker activity and lifecycle cards own their first-level glass surfaces")
+    func workerDetailAvoidsNestedGlassCardGroups() throws {
+        let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
+        let detail = try String(
+            contentsOf: workerRoot.appendingPathComponent("Detail/WorkerDetailSheet.swift"),
+            encoding: .utf8
+        )
+        let components = try String(
+            contentsOf: workerRoot.appendingPathComponent("Presentation/WorkerConsoleComponents.swift"),
+            encoding: .utf8
+        )
+        let activity = try sourceSlice(
+            detail,
+            from: "private var recentRuns: some View",
+            through: "private var inboxAudit: some View"
+        )
+        let auditAndLifecycle = try sourceSlice(
+            detail,
+            from: "private func audit",
+            through: "\n}"
+        )
+        let group = try sourceSlice(
+            components,
+            from: "struct WorkerConsoleGroup<Content: View>: View",
+            through: "extension View"
+        )
+
+        #expect(activity.contains("WorkerConsoleGroup("))
+        #expect(!activity.contains("WorkerConsoleSection("))
+        #expect(auditAndLifecycle.contains("WorkerConsoleGroup("))
+        #expect(!auditAndLifecycle.contains("WorkerConsoleSection("))
+        #expect(group.contains("WorkerConsoleSectionHeader"))
+        #expect(!group.contains("sectionFill"))
     }
 
     @Test("Worker experience summaries separate current attention from retained history")

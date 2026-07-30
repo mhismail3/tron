@@ -296,56 +296,57 @@ struct WorkerConsoleSheet: View {
 
     private var activityContent: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if !viewModel.activityAttention.isEmpty {
-                WorkerConsoleSectionHeader(
-                    title: "Attention",
-                    detail: "Failures, system events, and pending background outcomes that merit review."
-                )
-                LazyVStack(spacing: 9) {
-                    ForEach(viewModel.activityAttention) { item in
-                        WorkerInboxCard(
-                            item: item,
-                            workerName: viewModel.workerName(for: item.workerId)
-                        )
-                    }
-                }
-                if viewModel.activityAttentionNextOffset != nil {
-                    activityLoadMoreButton("Load older attention records") {
-                        await viewModel.loadOlderActivityAttention(repository: repository)
-                    }
-                }
-            }
-
-            WorkerConsoleSectionHeader(
+            WorkerConsoleGroup(
                 title: "Worker runs",
                 detail: "Queued, active, completed, failed, and interrupted invocations."
-            )
-            if viewModel.activityRuns.isEmpty {
-                WorkerConsoleInlineEmptyState(
-                    symbol: "waveform.path",
-                    text: "No worker runs recorded."
-                )
-            } else {
-                LazyVStack(spacing: 9) {
-                    ForEach(viewModel.activityRuns) { run in
-                        WorkerRunCard(
-                            run: run,
-                            workerName: viewModel.workerName(for: run.workerId)
-                        )
+            ) {
+                if viewModel.activityRuns.isEmpty {
+                    WorkerConsoleInlineEmptyState(
+                        symbol: "waveform.path",
+                        text: "No worker runs recorded."
+                    )
+                } else {
+                    LazyVStack(spacing: 9) {
+                        ForEach(viewModel.activityRuns) { run in
+                            WorkerRunCard(
+                                run: run,
+                                workerName: viewModel.workerName(for: run.workerId),
+                                callerWorkerName: viewModel.callerWorkerName(for: run)
+                            )
+                        }
                     }
-                }
-                if viewModel.activityRunsNextOffset != nil {
-                    activityLoadMoreButton("Load older runs") {
-                        await viewModel.loadOlderActivityRuns(repository: repository)
+                    if viewModel.activityRunsNextOffset != nil {
+                        activityLoadMoreButton("Load older runs") {
+                            await viewModel.loadOlderActivityRuns(repository: repository)
+                        }
                     }
                 }
             }
 
-            if viewModel.activityAttention.isEmpty {
-                WorkerConsoleInlineEmptyState(
-                    symbol: "checkmark.circle",
-                    text: "Nothing needs attention."
-                )
+            WorkerConsoleGroup(
+                title: "Attention",
+                detail: "Failures, system events, and pending background outcomes that merit review."
+            ) {
+                if viewModel.activityAttention.isEmpty {
+                    WorkerConsoleInlineEmptyState(
+                        symbol: "checkmark.circle",
+                        text: "Nothing needs attention."
+                    )
+                } else {
+                    LazyVStack(spacing: 9) {
+                        ForEach(viewModel.activityAttention) { item in
+                            WorkerInboxCard(
+                                item: item,
+                                workerName: viewModel.workerName(for: item.workerId)
+                            )
+                        }
+                    }
+                    if viewModel.activityAttentionNextOffset != nil {
+                        activityLoadMoreButton("Load older attention records") {
+                            await viewModel.loadOlderActivityAttention(repository: repository)
+                        }
+                    }
+                }
             }
 
             Button { showInboxAudit = true } label: {

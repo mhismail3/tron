@@ -254,20 +254,15 @@ struct WorkerDetailSheet: View {
     }
 
     private func triggers(_ inspection: WorkerInspectResultDTO) -> some View {
-        WorkerConsoleSection(
+        WorkerConsoleGroup(
             title: "Triggers",
-            detail: "Server-owned routes that can dispatch this worker.",
-            accent: .tronInfo
+            detail: "Server-owned routes that can dispatch this worker."
         ) {
             if inspection.triggers.isEmpty {
-                Label(
-                    "Manual invocation only. No automatic triggers are enabled.",
-                    systemImage: "hand.tap"
+                WorkerConsoleInlineEmptyState(
+                    symbol: "hand.tap",
+                    text: "Manual invocation only. No automatic triggers are enabled."
                 )
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.tronTextSecondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 2)
             } else {
                 VStack(spacing: 10) {
                     ForEach(inspection.triggers) { trigger in
@@ -466,17 +461,20 @@ struct WorkerDetailSheet: View {
     }
 
     private var recentRuns: some View {
-        WorkerConsoleSection(
+        WorkerConsoleGroup(
             title: "Recent runs",
-            detail: "Execution and delivery-attempt history from the durable worker queue.",
-            accent: .tronCyan
+            detail: "Execution and delivery-attempt history from the durable worker queue."
         ) {
             if viewModel.runs.isEmpty {
                 WorkerConsoleInlineEmptyState(symbol: "waveform.path", text: "No runs recorded yet.")
             } else {
                 VStack(spacing: 10) {
                     ForEach(viewModel.runs.prefix(20)) { run in
-                        WorkerRunCard(run: run) {
+                        WorkerRunCard(
+                            run: run,
+                            workerName: viewModel.workerName(for: run.workerId),
+                            callerWorkerName: viewModel.callerWorkerName(for: run)
+                        ) {
                             Task {
                                 await viewModel.cancel(
                                     run,
@@ -492,10 +490,9 @@ struct WorkerDetailSheet: View {
     }
 
     private var attention: some View {
-        WorkerConsoleSection(
+        WorkerConsoleGroup(
             title: "Attention",
-            detail: "Failures, system events, and pending background outcomes that merit review.",
-            accent: .tronAmber
+            detail: "Failures, system events, and pending background outcomes that merit review."
         ) {
             if viewModel.attention.isEmpty {
                 WorkerConsoleInlineEmptyState(
@@ -535,10 +532,9 @@ struct WorkerDetailSheet: View {
     }
 
     private func audit(_ inspection: WorkerInspectResultDTO) -> some View {
-        WorkerConsoleSection(
+        WorkerConsoleGroup(
             title: "Audit history",
-            detail: "Server-authored lifecycle evidence for this worker.",
-            accent: .tronSlate
+            detail: "Server-authored lifecycle evidence for this worker."
         ) {
             if inspection.audit.isEmpty {
                 WorkerConsoleInlineEmptyState(symbol: "checklist", text: "No audit entries recorded.")
@@ -553,12 +549,11 @@ struct WorkerDetailSheet: View {
     }
 
     private func lifecycle(_ worker: WorkerSummaryDTO) -> some View {
-        WorkerConsoleSection(
+        WorkerConsoleGroup(
             title: "Lifecycle",
             detail: worker.retired
                 ? "Restore a retained version, or permanently remove this retired worker."
-                : "Operational controls preserve durable state unless you explicitly retire the worker.",
-            accent: worker.retired ? .tronWarning : .tronEmerald
+                : "Operational controls preserve durable state unless you explicitly retire the worker."
         ) {
             VStack(spacing: 9) {
                 if worker.retired {

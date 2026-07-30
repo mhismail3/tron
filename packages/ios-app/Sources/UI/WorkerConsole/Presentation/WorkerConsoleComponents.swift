@@ -19,6 +19,25 @@ struct WorkerConsoleSection<Content: View>: View {
     }
 }
 
+/// A labeled group whose children remain first-level sheet containers.
+///
+/// Use this for collections of independently actionable cards. It avoids a
+/// decorative wrapper around cards that already own their own Liquid Glass
+/// surface.
+struct WorkerConsoleGroup<Content: View>: View {
+    let title: String
+    let detail: String
+    var spacing: CGFloat = 8
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            WorkerConsoleSectionHeader(title: title, detail: detail)
+            content()
+        }
+    }
+}
+
 extension View {
     /// Standard presentation policy for worker-console sheets.
     ///
@@ -243,6 +262,7 @@ struct WorkerVersionRow: View {
 struct WorkerRunCard: View {
     let run: WorkerInvocationDTO
     var workerName: String?
+    var callerWorkerName: String?
     var onCancel: (() -> Void)?
 
     @State private var showDetail = false
@@ -260,50 +280,75 @@ struct WorkerRunCard: View {
         Button { showDetail = true } label: {
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: statusSymbol)
+                    .font(
+                        TronTypography.sans(
+                            size: TronTypography.sizeBodySM,
+                            weight: .semibold
+                        )
+                    )
                     .foregroundStyle(color)
                     .frame(width: 20)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(workerName ?? "Worker run")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
 
-                    if let summary = WorkerConsolePresentation.runSummary(run) {
-                        Text(summary)
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextSecondary)
-                            .lineLimit(2)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(workerName ?? "Worker run")
+                            .font(
+                                TronTypography.sans(
+                                    size: TronTypography.sizeBodySM,
+                                    weight: .semibold
+                                )
+                            )
+                            .foregroundStyle(.tronTextPrimary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .layoutPriority(1)
+
+                        Text(WorkerConsolePresentation.displayLabel(run.status))
+                            .font(
+                                TronTypography.sans(
+                                    size: TronTypography.sizeSM,
+                                    weight: .semibold
+                                )
+                            )
+                            .foregroundStyle(color)
+                            .lineLimit(1)
                     }
 
                     if let error = run.error {
-                        Label(error, systemImage: "exclamationmark.circle")
+                        Text(error)
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronError)
-                            .lineLimit(2)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
-
-                VStack(alignment: .trailing, spacing: 5) {
-                    Text(runStateMetadata)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(color)
-                    if let timestamp = WorkerConsolePresentation.timestamp(run.completedAt ?? run.startedAt ?? run.createdAt) {
-                        Text(timestamp)
+                            .lineLimit(1)
+                    } else if let summary = WorkerConsolePresentation.runSummary(run) {
+                        Text(summary)
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextMuted)
+                            .foregroundStyle(.tronTextSecondary)
+                            .lineLimit(1)
                     }
-                    Text(attemptMetadata)
+
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(
+                            WorkerConsolePresentation.runCompactMetadata(
+                                run,
+                                callerWorkerName: callerWorkerName
+                            )
+                        )
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
-                    Text(WorkerConsolePresentation.compactRunIdentifier(run.invocationId))
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+
+                        Spacer(minLength: 6)
+
+                        if let timestamp = WorkerConsolePresentation.timestamp(run.createdAt) {
+                            Text(timestamp)
+                                .font(TronTypography.sans(size: TronTypography.sizeSM))
+                                .foregroundStyle(.tronTextMuted)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                    }
                 }
-                .multilineTextAlignment(.trailing)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-                .frame(minWidth: 112, idealWidth: 138, maxWidth: 152, alignment: .trailing)
             }
             .padding(11)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -322,16 +367,6 @@ struct WorkerRunCard: View {
 
     private var canCancel: Bool {
         run.status == "queued" || run.status == "running"
-    }
-
-    private var runStateMetadata: String {
-        let status = WorkerConsolePresentation.displayLabel(run.status)
-        let trigger = WorkerConsolePresentation.displayLabel(run.triggerKind)
-        return "\(status) · \(trigger)"
-    }
-
-    private var attemptMetadata: String {
-        "\(run.attemptCount) attempt\(run.attemptCount == 1 ? "" : "s")"
     }
 
     private var statusSymbol: String {

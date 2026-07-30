@@ -58,6 +58,16 @@ final class WorkerConsoleViewModel {
             ?? WorkerConsolePresentation.displayLabel(workerId)
     }
 
+    func callerWorkerName(for run: WorkerInvocationDTO) -> String? {
+        guard let parentInvocationId = run.parentWorkerInvocationId,
+              let parent = (activityRuns + runs).first(where: {
+                  $0.invocationId == parentInvocationId
+              }) else {
+            return nil
+        }
+        return workerName(for: parent.workerId)
+    }
+
     var healthyCount: Int {
         workers.filter { $0.enabled && $0.health == "healthy" }.count
     }

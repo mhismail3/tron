@@ -69,6 +69,101 @@ struct WorkerConsolePresentationTests {
         #expect(provenance.first?.fullLabel.contains("2-authenticated-model") == true)
     }
 
+    @Test("Worker run provenance distinguishes engine, agent, worker, and scheduled callers")
+    func workerRunProvenanceProjection() {
+        #expect(
+            WorkerConsolePresentation.runInvocationSource(
+                run(triggerKind: "engine_hook:continuity_context")
+            ) == "Engine · Continuity Context"
+        )
+        #expect(
+            WorkerConsolePresentation.runInvocationSource(
+                run(
+                    triggerKind: "worker_dispatch",
+                    parentWorkerInvocationId: "parent-run"
+                ),
+                callerWorkerName: "Worker Forge"
+            ) == "Worker · Worker Forge"
+        )
+        #expect(
+            WorkerConsolePresentation.runInvocationSource(
+                run(
+                    triggerKind: "worker_dispatch",
+                    parentWorkerInvocationId: "parent-run"
+                )
+            ) == "Worker dispatch"
+        )
+        #expect(
+            WorkerConsolePresentation.runInvocationSource(
+                run(triggerKind: "manual", modelToolInvocationId: "tool-call")
+            ) == "Agent tool call"
+        )
+        #expect(
+            WorkerConsolePresentation.runInvocationSource(
+                run(triggerKind: "manual", originSessionId: "session")
+            ) == "Agent session"
+        )
+        #expect(
+            WorkerConsolePresentation.runInvocationSource(
+                run(triggerKind: "manual")
+            ) == "Worker Console"
+        )
+        #expect(
+            WorkerConsolePresentation.runInvocationSource(
+                run(triggerKind: "schedule")
+            ) == "Schedule"
+        )
+        #expect(
+            WorkerConsolePresentation.runInvocationSource(
+                run(triggerKind: "self_wakeup")
+            ) == "Worker self wake-up"
+        )
+    }
+
+    @Test("Worker run execution mode and attempts use compact operator language")
+    func workerRunExecutionProjection() {
+        #expect(
+            WorkerConsolePresentation.runInteractionMode(
+                run(triggerKind: "manual", interactionMode: "background")
+            ) == "Background"
+        )
+        #expect(
+            WorkerConsolePresentation.runInteractionMode(
+                run(triggerKind: "manual", interactionMode: "foreground")
+            ) == "Foreground"
+        )
+        #expect(
+            WorkerConsolePresentation.runAttemptLabel(
+                run(triggerKind: "manual", attemptCount: 1)
+            ) == "1 attempt"
+        )
+        #expect(
+            WorkerConsolePresentation.runAttemptLabel(
+                run(triggerKind: "manual", attemptCount: 3)
+            ) == "3 attempts"
+        )
+        #expect(
+            WorkerConsolePresentation.runCompactMetadata(
+                run(
+                    triggerKind: "manual",
+                    interactionMode: "background",
+                    modelToolInvocationId: "tool-call"
+                )
+            ) == "Agent tool call · Manual · Background"
+        )
+        #expect(
+            WorkerConsolePresentation.runCompactMetadata(
+                run(
+                    triggerKind: "worker_dispatch",
+                    interactionMode: "background",
+                    parentWorkerInvocationId: "parent-run",
+                    attemptCount: 2
+                ),
+                callerWorkerName: "Worker Forge"
+            ) == "Worker · Worker Forge · Background · 2 attempts"
+        )
+    }
+
     @Test("Activity summaries prefer useful nested fields and remain bounded")
     func activitySummaryProjection() {
         let item = WorkerInboxItemDTO(
@@ -264,6 +359,38 @@ struct WorkerConsolePresentationTests {
             triggerCount: 1,
             updatedAt: "2026-07-20T16:18:00Z",
             presentation: nil
+        )
+    }
+
+    private func run(
+        triggerKind: String,
+        interactionMode: String? = "foreground",
+        originSessionId: String? = nil,
+        modelToolInvocationId: String? = nil,
+        parentWorkerInvocationId: String? = nil,
+        attemptCount: UInt32 = 1
+    ) -> WorkerInvocationDTO {
+        WorkerInvocationDTO(
+            invocationId: "worker_run_test",
+            workerId: "test-worker",
+            workerVersion: "version",
+            status: "completed",
+            input: AnyCodable([:]),
+            output: nil,
+            error: nil,
+            idempotencyKey: "test-key",
+            traceId: "test-trace",
+            causalDepth: 0,
+            triggerKind: triggerKind,
+            originSessionId: originSessionId,
+            agentSessionId: originSessionId,
+            interactionMode: interactionMode,
+            modelToolInvocationId: modelToolInvocationId,
+            parentWorkerInvocationId: parentWorkerInvocationId,
+            attemptCount: attemptCount,
+            createdAt: "2026-07-30T10:00:00Z",
+            startedAt: "2026-07-30T10:00:00Z",
+            completedAt: "2026-07-30T10:00:01Z"
         )
     }
 }
