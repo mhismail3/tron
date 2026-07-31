@@ -36,7 +36,9 @@
 //! the parallel request-local source sidecar carries only event and invocation
 //! identifiers. Projection and compaction preserve matching identifiers and
 //! label genuinely synthetic messages as generated instead of fabricating
-//! provenance.
+//! provenance. Assistant delivery metadata may carry provenance through a
+//! multi-turn tool run, but marks whether each delivery was present in that
+//! exact provider turn so chat cannot contradict the request-specific audit.
 
 mod failure;
 mod params;
@@ -528,11 +530,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 pending.push(delivery.clone());
             }
         }
-        (!pending.is_empty()).then(|| {
-            serde_json::json!({
-                "deliveries":pending.clone(),
-            })
-        })
+        assistant_delivery_continuation(&pending, &prepared_provider.leased_delivery_provenance)
     };
     if let Some(continuation) = agent_delivery_continuation.as_ref() {
         assistant_payload["agentDeliveryContinuation"] = continuation.clone();
@@ -805,5 +803,53 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         llm_stop_reason: Some(stream_result.stop_reason.clone()),
         context_window_tokens,
         ..Default::default()
+    }
+}
+
+/// Preserve run-level delivery provenance on the final visible assistant
+/// response without claiming that every carried delivery was present in that
+/// specific provider request. Session Context remains request-specific; this
+/// presentation sidecar makes the distinction explicit for chat.
+fn assistant_delivery_continuation(
+    pending: &[serde_json::Value],
+    included_this_turn: &[serde_json::Value],
+) -> Option<serde_json::Value> {
+    if pending.is_empty() {
+        return None;
+    }
+    let deliveries = pending
+        .iter()
+        .cloned()
+        .map(|mut delivery| {
+            let delivery_id = delivery.get("deliveryId");
+            let included = included_this_turn
+                .iter()
+                .any(|current| current.get("deliveryId") == delivery_id);
+            delivery["includedInThisTurn"] = serde_json::Value::Bool(included);
+            delivery
+        })
+        .collect::<Vec<_>>();
+    Some(serde_json::json!({ "deliveries": deliveries }))
+}
+
+#[cfg(test)]
+mod delivery_continuation_tests {
+    use super::assistant_delivery_continuation;
+    use serde_json::json;
+
+    #[test]
+    fn distinguishes_current_request_delivery_from_carried_run_provenance() {
+        let first = json!({"deliveryId":"delivery-1","sourceKind":"worker_result"});
+        let second = json!({"deliveryId":"delivery-2","sourceKind":"agent_message"});
+        let continuation =
+            assistant_delivery_continuation(&[first.clone(), second], &[first]).unwrap();
+
+        assert_eq!(continuation["deliveries"][0]["includedInThisTurn"], true);
+        assert_eq!(continuation["deliveries"][1]["includedInThisTurn"], false);
+    }
+
+    #[test]
+    fn omits_empty_delivery_continuation() {
+        assert!(assistant_delivery_continuation(&[], &[]).is_none());
     }
 }

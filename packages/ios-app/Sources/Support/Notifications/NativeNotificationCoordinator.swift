@@ -124,15 +124,21 @@ final class NativeNotificationCoordinator {
         serverId: String,
         deliveryId: String,
         acknowledgement: NotificationAcknowledgement
-    ) {
+    ) async {
         enqueue(
             acknowledgement,
             serverId: serverId,
             deliveryId: deliveryId
         )
+        // The UNUserNotificationCenter callback is the only guaranteed
+        // background execution window. Do not return it to iOS until the
+        // response is crash-safe locally and an online server has received one
+        // bounded synchronization attempt.
+        await flushPendingMutationPersistence()
         if acknowledgement == .opened {
             routeToNotification(serverId: serverId, deliveryId: deliveryId)
         }
+        await waitForServerWork(serverId: serverId)
     }
 
     func handleQuietRefresh(_ payload: [AnyHashable: Any]) async -> Bool {
@@ -632,6 +638,18 @@ final class NativeNotificationCoordinator {
     private func hasPendingServerWork(serverId: String) -> Bool {
         pendingServerWork[serverId] != nil
             || serverLaneTasks[serverId] != nil
+    }
+
+    private func waitForServerWork(serverId: String) async {
+        let deadline = ContinuousClock.now + Self.quietRefreshWaitBudget
+        while hasPendingServerWork(serverId: serverId),
+              ContinuousClock.now < deadline {
+            do {
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                return
+            }
+        }
     }
 
     /// Cancel transport work and await every accepted local response write.

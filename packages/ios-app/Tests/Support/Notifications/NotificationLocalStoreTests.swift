@@ -217,6 +217,85 @@ struct NotificationLocalStoreTests {
         }
     }
 
+    @Test("system response is durable and synchronized before callback returns")
+    func systemResponseCompletesAdmissionBeforeReturning() async throws {
+        try await IsolatedTestState.withState(
+            label: "notification-system-response"
+        ) { state in
+            let fileURL = state.rootURL.appendingPathComponent(
+                "Notifications/state-v2.json"
+            )
+            let repository = RecordingNotificationRepository()
+            let server = Self.server
+            let coordinator = NativeNotificationCoordinator(
+                defaults: state.defaults,
+                storeURL: fileURL,
+                runtimeMode: .hostedUnitTests,
+                servers: { [server] },
+                notificationSession: { _, operation in
+                    try await operation(repository)
+                }
+            )
+
+            await coordinator.handleNotificationResponse(
+                serverId: server.id,
+                deliveryId: "delivery-snooze",
+                acknowledgement: .snooze
+            )
+
+            #expect(repository.acknowledgements.count == 1)
+            #expect(
+                repository.acknowledgements.first?.acknowledgement == .snooze
+            )
+            let restored = NotificationLocalStore(
+                defaults: NotificationDefaultsHandle(value: state.defaults),
+                fileURL: fileURL
+            )
+            let snapshot = try await restored.load()
+            #expect(snapshot.outbox.isEmpty)
+            await coordinator.shutdown()
+        }
+    }
+
+    @Test("cold-launch response waits for coordinator attachment")
+    func responseBeforeCoordinatorAttachmentIsNotDropped() async throws {
+        await IsolatedTestState.withState(
+            label: "notification-response-before-attach"
+        ) { state in
+            let repository = RecordingNotificationRepository()
+            let server = Self.server
+            let coordinator = NativeNotificationCoordinator(
+                defaults: state.defaults,
+                storeURL: state.rootURL.appendingPathComponent(
+                    "Notifications/state-v2.json"
+                ),
+                runtimeMode: .hostedUnitTests,
+                servers: { [server] },
+                notificationSession: { _, operation in
+                    try await operation(repository)
+                }
+            )
+            let bridge = NotificationLifecycleBridge()
+            let response = Task { @MainActor in
+                await bridge.admitNotificationResponse(
+                    serverId: server.id,
+                    deliveryId: "delivery-cold-launch",
+                    acknowledgement: .complete
+                )
+            }
+            await Task.yield()
+
+            bridge.attach(coordinator)
+            await response.value
+
+            #expect(repository.acknowledgements.count == 1)
+            #expect(
+                repository.acknowledgements.first?.acknowledgement == .complete
+            )
+            await coordinator.shutdown()
+        }
+    }
+
     nonisolated private static func item(
         deliveryId: String
     ) -> NotificationInboxItem {
@@ -284,4 +363,68 @@ struct NotificationLocalStoreTests {
         registeredAt: nil,
         problem: "Offline"
     )
+
+    private static let server = PairedServer(
+        id: "server_1",
+        label: "Test server",
+        host: "127.0.0.1",
+        port: 9847
+    )
+}
+
+@MainActor
+private final class RecordingNotificationRepository: NotificationRepository {
+    private(set) var acknowledgements: [NotificationAcknowledgeDTO] = []
+
+    func upsertDevice(
+        _ registration: NotificationDeviceUpsertDTO,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> NotificationDeviceRegistrationDTO {
+        throw CancellationError()
+    }
+
+    func disableDevice(
+        installationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> NotificationDeviceDisableDTO {
+        throw CancellationError()
+    }
+
+    func deliveries(
+        cursor: String?,
+        limit: Int,
+        unreadOnly: Bool
+    ) async throws -> NotificationDeliveriesPageDTO {
+        NotificationDeliveriesPageDTO(
+            deliveries: [],
+            unreadCount: 0,
+            nextCursor: nil
+        )
+    }
+
+    func acknowledge(
+        _ response: NotificationAcknowledgeDTO,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> NotificationAcknowledgementResultDTO {
+        acknowledgements.append(response)
+        return NotificationAcknowledgementResultDTO(
+            deliveryId: response.deliveryId,
+            clientMutationId: response.clientMutationId,
+            acknowledgement: response.acknowledgement,
+            accepted: true,
+            currentTerminalResponse: response.acknowledgement.rawValue,
+            read: true,
+            eventRequired: true,
+            workerId: "automation-reminders",
+            sourceRecordId: "occurrence_1",
+            traceId: "trace_1",
+            occurredAt: response.occurredAt ?? "2026-07-30T00:00:00Z"
+        )
+    }
+
+    func status(
+        deliveryId: String
+    ) async throws -> NotificationDeliveryStatusDTO {
+        throw CancellationError()
+    }
 }

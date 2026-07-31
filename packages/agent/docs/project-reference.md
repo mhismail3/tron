@@ -284,6 +284,12 @@ cannot retain result authority. Autonomous wake
 propagation deeper than the existing causal limit of 16 is similarly retained
 as passive evidence.
 
+Assistant events retain bounded delivery provenance through a multi-turn tool
+run so the final visible answer can identify the update that informed it. Each
+entry separately records whether it was included in that exact provider turn;
+the v4 request audit remains the sole source of truth for the selected request's
+`Updates included` count.
+
 The fixed model tools are:
 
 - `agent_send`: same-workspace existing task send, atomic visible
@@ -1122,6 +1128,14 @@ request before invalidating its catalog. Brave
 Search and Exa remain separate named API-key providers because Research workers
 consume `provider-brave` and `provider-exa` secret bindings; neither becomes a
 model choice.
+
+Cloud provider response opening is bounded independently from response
+streaming. If response headers do not arrive within 30 seconds, the ordinary
+provider retry policy treats that attempt as a retryable network failure.
+Cancellation interrupts the opening attempt immediately. The shared HTTP
+client retains its longer total timeout after a stream opens, so slow or long
+model answers are not cut off merely to recover quickly from a dead connection
+before first response.
 
 ## Model-Facing Tools
 

@@ -13,6 +13,7 @@ struct AgentDeliveryMessageProvenance: Decodable, Equatable, Sendable {
     let boundary: String?
     let triggeredWake: Bool?
     let redelivery: Bool
+    let includedInThisTurn: Bool?
 }
 
 struct AgentDeliveryContinuationPayload: Decodable, Sendable {
@@ -29,9 +30,14 @@ enum AgentDeliveryContinuationPresentation {
         guard !deliveries.isEmpty else { return "Agent update included" }
         let resumed = deliveries.contains(where: { $0.triggeredWake == true })
         if deliveries.count > 1 {
+            let carriedOnly = deliveries.allSatisfy {
+                $0.includedInThisTurn == false
+            }
             return resumed
                 ? "Resumed with \(deliveries.count) updates"
-                : "\(deliveries.count) updates included"
+                : carriedOnly
+                    ? "Response informed by \(deliveries.count) earlier updates"
+                    : "\(deliveries.count) updates included"
         }
         let sources = Array(Set(deliveries.map {
             $0.sourceWorkerName
@@ -40,6 +46,9 @@ enum AgentDeliveryContinuationPresentation {
         let source = sources.isEmpty ? "agent update" : sources.joined(separator: " + ")
         if resumed {
             return "Resumed from \(source)"
+        }
+        if deliveries[0].includedInThisTurn == false {
+            return "Update used earlier · \(source)"
         }
         return "Update included · \(source)"
     }

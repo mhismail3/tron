@@ -13,6 +13,14 @@ final class NotificationLifecycleBridge: NSObject, UNUserNotificationCenterDeleg
     static let completeActionIdentifier = "TRON_REMINDER_COMPLETE"
 
     private weak var coordinator: NativeNotificationCoordinator?
+    private var pendingResponses: [PendingResponse] = []
+
+    private struct PendingResponse {
+        let serverId: String
+        let deliveryId: String
+        let acknowledgement: NotificationAcknowledgement
+        let continuation: CheckedContinuation<Void, Never>
+    }
 
     func install() {
         let snooze = UNNotificationAction(
@@ -44,6 +52,19 @@ final class NotificationLifecycleBridge: NSObject, UNUserNotificationCenterDeleg
 
     func attach(_ coordinator: NativeNotificationCoordinator) {
         self.coordinator = coordinator
+        guard !pendingResponses.isEmpty else { return }
+        let responses = pendingResponses
+        pendingResponses.removeAll()
+        Task { @MainActor in
+            for response in responses {
+                await coordinator.handleNotificationResponse(
+                    serverId: response.serverId,
+                    deliveryId: response.deliveryId,
+                    acknowledgement: response.acknowledgement
+                )
+                response.continuation.resume()
+            }
+        }
     }
 
     func didRegisterForRemoteNotifications(token: Data) {
@@ -112,11 +133,37 @@ final class NotificationLifecycleBridge: NSObject, UNUserNotificationCenterDeleg
             "Handling notification response action=\(acknowledgement.rawValue) route=\(Self.evidenceRoute(payload))",
             category: .notification
         )
-        await MainActor.run {
-            coordinator?.handleNotificationResponse(
+        await admitNotificationResponse(
+            serverId: serverId,
+            deliveryId: deliveryId,
+            acknowledgement: acknowledgement
+        )
+    }
+
+    /// Keep the system response callback alive until the process-local
+    /// coordinator has durably admitted the action. Cold launches may deliver
+    /// the callback before dependency composition attaches the coordinator.
+    func admitNotificationResponse(
+        serverId: String,
+        deliveryId: String,
+        acknowledgement: NotificationAcknowledgement
+    ) async {
+        if let coordinator {
+            await coordinator.handleNotificationResponse(
                 serverId: serverId,
                 deliveryId: deliveryId,
                 acknowledgement: acknowledgement
+            )
+            return
+        }
+        await withCheckedContinuation { continuation in
+            pendingResponses.append(
+                PendingResponse(
+                    serverId: serverId,
+                    deliveryId: deliveryId,
+                    acknowledgement: acknowledgement,
+                    continuation: continuation
+                )
             )
         }
     }

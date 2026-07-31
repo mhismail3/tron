@@ -10,6 +10,7 @@
 
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
@@ -193,6 +194,13 @@ pub enum ProviderError {
         retryable: bool,
     },
 
+    /// Provider response headers did not arrive within the stream-opening bound.
+    #[error("Provider response stream did not open within {timeout_ms}ms")]
+    StreamOpenTimeout {
+        /// Applied stream-opening deadline in milliseconds.
+        timeout_ms: u64,
+    },
+
     /// Stream was cancelled.
     #[error("Stream cancelled")]
     Cancelled,
@@ -206,6 +214,14 @@ pub enum ProviderError {
 }
 
 impl ProviderError {
+    /// Build the typed failure for a bounded provider stream-opening attempt.
+    #[must_use]
+    pub fn stream_open_timeout(timeout: Duration) -> Self {
+        Self::StreamOpenTimeout {
+            timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+        }
+    }
+
     /// Whether this error is retryable.
     pub fn is_retryable(&self) -> bool {
         match self {
@@ -217,6 +233,7 @@ impl ProviderError {
                     })
             }
             Self::RateLimited { .. } => true,
+            Self::StreamOpenTimeout { .. } => true,
             Self::Api { retryable, .. } | Self::StreamApi { retryable, .. } => *retryable,
             Self::SseParse { .. }
             | Self::StreamEnded { .. }
@@ -239,7 +256,7 @@ impl ProviderError {
     /// Error category string for event emission.
     pub fn category(&self) -> &str {
         match self {
-            Self::Http(_) => "network",
+            Self::Http(_) | Self::StreamOpenTimeout { .. } => "network",
             Self::Json(_) | Self::SseParse { .. } | Self::StreamEnded { .. } => "parse",
             Self::Auth { .. } => "auth",
             Self::UnsupportedModel { .. } => "invalid_model",
@@ -253,7 +270,7 @@ impl ProviderError {
     /// Stable public failure code for this provider error.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Http(_) => PROVIDER_HTTP_ERROR,
+            Self::Http(_) | Self::StreamOpenTimeout { .. } => PROVIDER_HTTP_ERROR,
             Self::Json(_) => PROVIDER_JSON_ERROR,
             Self::SseParse { .. } | Self::StreamEnded { .. } => PROVIDER_SSE_PARSE_ERROR,
             Self::Auth { .. } => PROVIDER_AUTH_ERROR,
@@ -277,6 +294,7 @@ impl ProviderError {
     /// Provider-specific error code, when available.
     pub fn provider_code(&self) -> Option<String> {
         match self {
+            Self::StreamOpenTimeout { .. } => Some("stream_open_timeout".to_owned()),
             Self::RateLimited { code, .. }
             | Self::Api { code, .. }
             | Self::StreamApi { code, .. } => code.clone(),
@@ -298,6 +316,15 @@ impl ProviderError {
                     "isTimeout": error.is_timeout(),
                     "isConnect": error.is_connect(),
                     "statusCode": error.status().map(|status| status.as_u16()),
+                })),
+            ),
+            Self::StreamOpenTimeout { timeout_ms } => (
+                FailureCategory::Network,
+                "Provider response did not start in time".to_owned(),
+                true,
+                Some(json!({
+                    "kind": "stream_open_timeout",
+                    "timeoutMs": timeout_ms,
                 })),
             ),
             Self::Json(_) => (
@@ -570,6 +597,24 @@ mod tests {
         assert!(err.is_retryable());
         assert_eq!(err.retry_after_ms(), Some(5000));
         assert_eq!(err.category(), "rate_limit");
+    }
+
+    #[test]
+    fn provider_stream_open_timeout_is_retryable_and_sanitized() {
+        let err = ProviderError::stream_open_timeout(Duration::from_secs(30));
+
+        assert!(err.is_retryable());
+        assert_eq!(err.category(), "network");
+        assert_eq!(err.code(), PROVIDER_HTTP_ERROR);
+        assert_eq!(err.provider_code().as_deref(), Some("stream_open_timeout"));
+
+        let failure = err.to_failure("openai", "gpt-5.6-sol");
+        assert_eq!(failure.category, FailureCategory::Network);
+        assert_eq!(failure.message, "Provider response did not start in time");
+        assert_eq!(failure.error_type.as_deref(), Some("stream_open_timeout"));
+        assert!(failure.retryable);
+        assert!(failure.recoverable);
+        assert_eq!(failure.details.as_ref().unwrap()["timeoutMs"], 30_000);
     }
 
     #[test]

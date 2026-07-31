@@ -119,7 +119,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
             wakePolicy: "wake",
             boundary: "next_run",
             triggeredWake: true,
-            redelivery: false
+            redelivery: false,
+            includedInThisTurn: true
         )
 
         coordinator.handleTurnStart(
@@ -235,7 +236,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
             wakePolicy: "wake",
             boundary: "next_run",
             triggeredWake: true,
-            redelivery: false
+            redelivery: false,
+            includedInThisTurn: true
         )
 
         markResponseComplete(
@@ -263,11 +265,29 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
             wakePolicy: "passive",
             boundary: "next_turn",
             triggeredWake: false,
-            redelivery: false
+            redelivery: false,
+            includedInThisTurn: true
         )
         XCTAssertEqual(
             AgentDeliveryContinuationPresentation.label([natural]),
             "Update included · Agent Message"
+        )
+        let carried = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-3",
+            sourceKind: "worker_result",
+            sourceWorkerId: "automation-reminders",
+            sourceWorkerName: "Automation Reminders",
+            sourceSessionId: nil,
+            sourceInvocationId: "worker-run-3",
+            wakePolicy: "passive",
+            boundary: "next_turn",
+            triggeredWake: false,
+            redelivery: false,
+            includedInThisTurn: false
+        )
+        XCTAssertEqual(
+            AgentDeliveryContinuationPresentation.label([carried]),
+            "Update used earlier · Automation Reminders"
         )
     }
 
@@ -282,7 +302,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
             wakePolicy: "wake",
             boundary: "next_run",
             triggeredWake: true,
-            redelivery: false
+            redelivery: false,
+            includedInThisTurn: true
         )
         let passive = AgentDeliveryMessageProvenance(
             deliveryId: "delivery-passive",
@@ -294,7 +315,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
             wakePolicy: "passive",
             boundary: "next_turn",
             triggeredWake: false,
-            redelivery: false
+            redelivery: false,
+            includedInThisTurn: true
         )
         coordinator.handleTurnStart(
             TurnStartPlugin.Result(
@@ -339,7 +361,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
             wakePolicy: "wake",
             boundary: "next_run",
             triggeredWake: true,
-            redelivery: false
+            redelivery: false,
+            includedInThisTurn: true
         )
 
         coordinator.handleTurnStart(
@@ -412,7 +435,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
             wakePolicy: "wake",
             boundary: "next_run",
             triggeredWake: true,
-            redelivery: false
+            redelivery: false,
+            includedInThisTurn: true
         )
         coordinator.restoreDeliveryPresentationState(
             from: [.deliveryContinuation([wake])],

@@ -477,16 +477,19 @@ final class DependencyContainer {
         for server: PairedServer,
         operation: NativeNotificationCoordinator.NotificationSessionOperation
     ) async throws {
-        if pairedServerStore.activeServer?.id == server.id {
-            guard engineClient.connectionState.isConnected else {
-                throw EngineClientError.connectionNotEstablished
-            }
+        if pairedServerStore.activeServer?.id == server.id,
+           engineClient.connectionState.isConnected {
             try await operation(
                 DefaultNotificationRepository(client: engineClient.notifications)
             )
             return
         }
 
+        // A notification action can cold-launch the app without establishing
+        // the canonical active-server socket. The durable response outbox must
+        // still get one bounded transport attempt during the system callback,
+        // so a disconnected active server follows the same narrow,
+        // authenticated short-lived path as an inactive server.
         guard let bearerToken = pairedServerTokenStore.token(
             forServerId: server.id
         ) else {

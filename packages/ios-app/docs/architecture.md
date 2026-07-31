@@ -883,7 +883,10 @@ is active, a wait is pending, or a wake is pending/prepared, then performs one
 terminal refresh. Passive-only and historical state stop observation. Exact v4
 content and provenance remain request-specific evidence in the detail sheet.
 Delivery-only assistant continuations render without a fabricated user bubble
-and say `Resumed from …`; a natural turn says `Update included · …`. Wake
+and say `Resumed from …`; a natural turn says `Update included · …` only when
+that delivery belongs to the same provider request. If a later tool turn carries
+the run-level provenance onto the final answer, chat says `Update used earlier
+· …`, while Session Context continues to count only the selected request. Wake
 provenance is persisted and broadcast on the first turn-start, before thinking,
 tools, or assistant text, while the completed assistant event retains the same
 metadata for replay. Live and reconstructed chat deduplicate that audit metadata
@@ -1034,11 +1037,12 @@ reminders; they are not a general device-control surface.
   Prod uses production.
 - Registration fans out to all paired engines through a narrow
   `NotificationRepository` session. `DependencyContainer` alone selects and
-  owns the transport: the active server reuses its current `/engine`
-  connection, while an inactive server gets one bounded, short-lived
-  authenticated client that is disconnected when the repository operation
-  returns. The coordinator never receives socket, URL, token, or connection
-  controls and never changes the selected server.
+  owns the transport: a connected active server reuses its current `/engine`
+  connection. An inactive server, or an active server whose canonical socket
+  is disconnected during a notification-only background launch, gets one
+  bounded, short-lived authenticated client that is disconnected when the
+  repository operation returns. The coordinator never receives socket, URL,
+  token, or connection controls and never changes the selected server.
 - `NotificationLifecycleBridge` presents worker-authored title/body as ordinary
   banner, list, and sound notifications. APNs `thread-id` comes only from the
   worker's bounded `threadKey`. The fixed reminder category exposes Snooze and
@@ -1092,8 +1096,12 @@ reminders; they are not a general device-control surface.
 - Open, Complete, Snooze, and clear-read mutations enter a durable per-server
   outbox, apply optimistically, retry after reconnect/foreground, and reconcile
   to the engine's first-wins terminal state. Quiet pushes refresh one server;
-  foreground and reconnect refresh all paired servers. The app badge is the
-  aggregate unread count across cached server truth.
+  foreground and reconnect refresh all paired servers. A notification action
+  callback does not return to iOS until the mutation is durably admitted and
+  one bounded online synchronization attempt finishes. If a cold launch
+  delivers the callback before dependency composition, the process bridge
+  retains it until the coordinator attaches instead of dropping it. The app
+  badge is the aggregate unread count across cached server truth.
 
 Registration and inbox synchronization share one coalescing lane per paired
 server: requests for the same engine serialize and merge, while unrelated

@@ -549,6 +549,8 @@ async fn open_provider_stream(
     cancel: CancellationToken,
     retry_config: Option<&RetryConfig>,
 ) -> Result<StreamEventStream, ProviderError> {
+    let stream_open_timeout =
+        crate::domains::model::providers::shared::retry::DEFAULT_STREAM_OPEN_TIMEOUT;
     if let Some(retry) = retry_config {
         let provider = provider.clone();
         let context = Arc::new(context);
@@ -562,11 +564,22 @@ async fn open_provider_stream(
         let retry_cfg = StreamRetryConfig {
             retry: retry.clone(),
             emit_retry_events: true,
+            stream_open_timeout,
             cancel_token: Some(cancel),
         };
         Ok(with_provider_retry(factory, retry_cfg))
     } else {
-        provider.stream(&context, &stream_options).await
+        let open_stream = tokio::time::timeout(
+            stream_open_timeout,
+            provider.stream(&context, &stream_options),
+        );
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => Err(ProviderError::Cancelled),
+            result = open_stream => {
+                result.unwrap_or_else(|_| Err(ProviderError::stream_open_timeout(stream_open_timeout)))
+            }
+        }
     }
 }
 

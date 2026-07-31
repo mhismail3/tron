@@ -38,7 +38,9 @@
 //! - Shared helpers are provider-neutral and contain no provider-specific auth
 //!   or endpoint policy.
 //! - Stream wrappers preserve cancellation and retry events without altering
-//!   provider-native parsing semantics.
+//!   provider-native parsing semantics. Provider response opening has its own
+//!   bounded deadline; the longer HTTP timeout remains available after headers
+//!   arrive for legitimate long-running model streams.
 //! - Provider-native terminal failures cross the SSE pipeline as typed
 //!   `ProviderError` values; they are never flattened into transient content
 //!   events or silently discarded at end-of-stream.

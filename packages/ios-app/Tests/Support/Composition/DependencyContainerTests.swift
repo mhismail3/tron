@@ -183,6 +183,35 @@ final class DependencyContainerTests: XCTestCase {
         container.engineClient.disconnect()
     }
 
+    func test_notificationResponseUsesBoundedClientWhenActiveClientIsDisconnected() async throws {
+        let (container, server) = pairedContainer(
+            id: "notification-active",
+            host: "127.0.0.1",
+            port: 65520
+        )
+        try container.pairedServerTokenStore.setToken(
+            "fixture",
+            forServerId: server.id
+        )
+        container.engineClient.disconnect()
+        let recorder = testState.attemptRecorders.last!
+        let attemptsBeforeResponse = recorder.requests.count
+
+        await container.notificationCoordinator.handleNotificationResponse(
+            serverId: server.id,
+            deliveryId: "notification-delivery",
+            acknowledgement: .snooze
+        )
+
+        XCTAssertGreaterThan(
+            recorder.requests.count,
+            attemptsBeforeResponse,
+            "A background notification response must attempt a bounded authenticated connection even when the active app socket is disconnected."
+        )
+        XCTAssertNil(container.engineClient.engineConnection)
+        await container.notificationCoordinator.shutdown()
+    }
+
     func test_supersededAutoConnectCannotConnectNoConnectGeneration() async throws {
         let first = PairedServer(id: "generation-a", label: "A", host: "127.0.0.1", port: 65523)
         let second = PairedServer(id: "generation-b", label: "B", host: "127.0.0.1", port: 65522)

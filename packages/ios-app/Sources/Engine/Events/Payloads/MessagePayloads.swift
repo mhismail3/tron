@@ -214,7 +214,8 @@ struct AssistantMessagePayload {
                     wakePolicy: object["wakePolicy"] as? String,
                     boundary: object["boundary"] as? String,
                     triggeredWake: object["triggeredWake"] as? Bool,
-                    redelivery: object["redelivery"] as? Bool ?? false
+                    redelivery: object["redelivery"] as? Bool ?? false,
+                    includedInThisTurn: object["includedInThisTurn"] as? Bool
                 )
             } ?? []
     }

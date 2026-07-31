@@ -50,7 +50,8 @@ final class AssistantMessagePayloadTests: XCTestCase {
                     "wakePolicy": "wake",
                     "boundary": "next_run",
                     "triggeredWake": true,
-                    "redelivery": true
+                    "redelivery": true,
+                    "includedInThisTurn": false
                 ] as [String: Any]
             ]
         ] as [String: Any])
@@ -70,6 +71,10 @@ final class AssistantMessagePayloadTests: XCTestCase {
         XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.boundary, "next_run")
         XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.triggeredWake, true)
         XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.redelivery, true)
+        XCTAssertEqual(
+            parsed?.agentDeliveryProvenance.first?.includedInThisTurn,
+            false
+        )
     }
 
     func testLegacyDeliveryContinuationStillDecodesWithoutNewPresentationMetadata() {
@@ -93,6 +98,7 @@ final class AssistantMessagePayloadTests: XCTestCase {
         XCTAssertNil(provenance?.wakePolicy)
         XCTAssertNil(provenance?.boundary)
         XCTAssertNil(provenance?.triggeredWake)
+        XCTAssertNil(provenance?.includedInThisTurn)
     }
 
     func testTextWithoutToolsIsEligibleForFinalResponsePresentation() {
