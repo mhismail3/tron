@@ -7,10 +7,9 @@ use super::*;
 use crate::domains::agent::r#loop::types::StreamResult;
 use crate::domains::session::event_store::ListEventsOptions;
 use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+use crate::domains::session::event_store::sqlite::schema::ensure_schema;
 use crate::domains::session::event_store::{AppendOptions, EventStore};
-use crate::shared::protocol::content::AssistantContent;
-use crate::shared::protocol::messages::{Provider, TokenUsage};
+use crate::shared::protocol::messages::ToolInvocationDraft;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -27,7 +26,7 @@ fn harness() -> Harness {
     let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
     {
         let conn = pool.get().unwrap();
-        run_migrations(&conn).unwrap();
+        ensure_schema(&conn).unwrap();
     }
     let store = Arc::new(EventStore::new(pool));
     let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
@@ -73,6 +72,7 @@ async fn emit_turn_start_persists_before_broadcasting() {
         Some(&h.persister),
         &h.session_id,
         1,
+        None,
         Some(&h.counter),
         None,
         None,
@@ -96,14 +96,58 @@ async fn emit_turn_start_persists_before_broadcasting() {
 }
 
 #[tokio::test]
+async fn emit_turn_start_persists_and_broadcasts_delivery_continuation() {
+    let mut h = harness();
+    let continuation = json!({
+        "deliveries":[{
+            "deliveryId":"delivery-1",
+            "sourceKind":"worker_result",
+            "sourceWorkerName":"General Delegate",
+            "triggeredWake":true,
+            "redelivery":false
+        }]
+    });
+
+    emit_turn_start(
+        &h.emitter,
+        Some(&h.persister),
+        &h.session_id,
+        1,
+        Some(continuation.clone()),
+        Some(&h.counter),
+        None,
+        None,
+    )
+    .unwrap();
+
+    let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
+        .await
+        .expect("broadcast should arrive")
+        .expect("broadcast channel alive");
+    assert!(matches!(
+        broadcast,
+        TronEvent::TurnStart {
+            agent_delivery_continuation: Some(ref value),
+            ..
+        } if value == &continuation
+    ));
+
+    let payloads = persisted_payloads(&h.store, &h.session_id, "stream.turn_start");
+    assert_eq!(
+        payloads[0]["agentDeliveryContinuation"], continuation,
+        "reconstruction must retain the same provenance that live clients saw"
+    );
+}
+
+#[tokio::test]
 async fn emit_turn_start_advances_stale_sequence_counter_from_db() {
     let mut h = harness();
     let inserted = h
         .store
         .append(&AppendOptions {
             session_id: &h.session_id,
-            event_type: EventType::MetadataUpdate,
-            payload: json!({"kind": "preexisting"}),
+            event_type: EventType::MessageUser,
+            payload: json!({"content": "preexisting"}),
             parent_id: None,
             sequence: None,
         })
@@ -120,6 +164,7 @@ async fn emit_turn_start_advances_stale_sequence_counter_from_db() {
         Some(&h.persister),
         &h.session_id,
         1,
+        None,
         Some(&h.counter),
         None,
         None,
@@ -146,6 +191,7 @@ async fn emit_turn_start_allocates_after_live_runtime_events() {
         Some(&h.persister),
         &h.session_id,
         1,
+        None,
         Some(&h.counter),
         None,
         None,
@@ -174,6 +220,7 @@ async fn emit_turn_start_without_persister_still_broadcasts() {
         None,
         &h.session_id,
         1,
+        None,
         Some(&h.counter),
         None,
         None,
@@ -196,6 +243,7 @@ async fn emit_turn_start_skips_broadcast_on_persist_failure() {
         Some(&h.persister),
         "missing-session",
         1,
+        None,
         Some(&h.counter),
         None,
         None,
@@ -219,11 +267,49 @@ fn stream_result_stub() -> StreamResult {
         },
         stop_reason: "end_turn".into(),
         token_usage: None,
-        capability_invocations: Vec::new(),
+        tool_invocations: Vec::new(),
         interrupted: false,
         partial_content: None,
         ttft_ms: None,
     }
+}
+
+#[tokio::test]
+async fn tool_batch_redacts_arguments_before_live_broadcast() {
+    let mut h = harness();
+    let token = "trwh_0123456789abcdef0123456789abcdef";
+    let invocation = ToolInvocationDraft::new(
+        "call-secret",
+        "worker_webhook_rotate",
+        serde_json::Map::from_iter([
+            ("token".to_owned(), json!(token)),
+            ("workerId".to_owned(), json!("recent-research")),
+        ]),
+    );
+
+    emit_tool_invocation_batch(
+        &h.emitter,
+        &h.session_id,
+        &[invocation],
+        Some(&h.counter),
+        None,
+        None,
+    );
+
+    let event = h.rx.recv().await.expect("tool batch broadcast");
+    let TronEvent::ToolInvocationBatch {
+        tool_invocations, ..
+    } = event
+    else {
+        panic!("expected tool invocation batch");
+    };
+    assert_eq!(tool_invocations[0].arguments["token"], "****");
+    assert_eq!(tool_invocations[0].arguments["workerId"], "recent-research");
+    assert!(
+        !serde_json::to_string(&tool_invocations)
+            .unwrap()
+            .contains(token)
+    );
 }
 
 #[tokio::test]
@@ -242,8 +328,6 @@ async fn emit_turn_end_persists_before_broadcasting() {
         None,
         25_000,
         "m",
-        Provider::Anthropic,
-        None,
         Some(&h.counter),
         None,
         None,
@@ -286,8 +370,6 @@ async fn emit_turn_end_skips_broadcast_on_persist_failure() {
         None,
         25_000,
         "m",
-        Provider::Anthropic,
-        None,
         Some(&h.counter),
         None,
         None,
@@ -300,111 +382,6 @@ async fn emit_turn_end_skips_broadcast_on_persist_failure() {
         result.is_err(),
         "no broadcast should fire when persist fails, got: {result:?}"
     );
-}
-
-#[test]
-fn completed_assistant_payload_carries_metadata_only_reasoning_evidence() {
-    let mut stream = stream_result_stub();
-    stream.message.content = vec![AssistantContent::Text {
-        text: "done".to_owned(),
-    }];
-    stream.token_usage = Some(TokenUsage {
-        input_tokens: 100,
-        output_tokens: 20,
-        reasoning_output_tokens: Some(7),
-        thought_tokens: Some(3),
-        total_tokens: Some(120),
-        provider_type: Some(Provider::OpenAi),
-        ..Default::default()
-    });
-
-    let payload = build_completed_assistant_payload(
-        &stream,
-        2,
-        "gpt-5.5",
-        123,
-        true,
-        Provider::OpenAi,
-        None,
-        None,
-        Some("high".to_owned()),
-        Some("trace-17a".to_owned()),
-        Some("invoke-17a".to_owned()),
-    );
-
-    let evidence = &payload["reasoningStatusEvidence"];
-    let evidence_string = evidence.to_string();
-    assert_eq!(
-        evidence["format"],
-        crate::shared::protocol::model_audit::MODEL_PROVIDER_REASONING_STATUS_EVIDENCE_FORMAT
-    );
-    assert_eq!(evidence["phase"], "message_assistant");
-    assert_eq!(evidence["providerType"], "openai");
-    assert_eq!(evidence["model"], "gpt-5.5");
-    assert_eq!(evidence["requestedReasoningLevel"], "high");
-    assert_eq!(evidence["status"]["thinkingEmitted"], true);
-    assert_eq!(evidence["status"]["stopReason"], "end_turn");
-    assert_eq!(evidence["tokens"]["reasoningOutputTokens"], 7);
-    assert_eq!(evidence["tokens"]["thoughtTokens"], 3);
-    assert_eq!(evidence["refs"]["traceId"], "trace-17a");
-    assert_eq!(evidence["safety"]["rawReasoningText"], "omitted");
-    assert_eq!(evidence["safety"]["syntheticReasoningSummary"], "omitted");
-    assert!(
-        !evidence_string.contains("chainOfThought"),
-        "reasoning evidence must not carry raw reasoning payload markers: {evidence_string}"
-    );
-    assert!(
-        !evidence_string.contains("/tmp/tron-provider"),
-        "reasoning evidence must not carry raw paths: {evidence_string}"
-    );
-}
-
-#[test]
-fn emit_turn_end_persists_reasoning_status_evidence() {
-    let h = harness();
-    let mut stream = stream_result_stub();
-    stream.message.content = vec![AssistantContent::Text {
-        text: "done".to_owned(),
-    }];
-    stream.token_usage = Some(TokenUsage {
-        input_tokens: 50,
-        output_tokens: 10,
-        reasoning_output_tokens: Some(4),
-        thought_tokens: Some(2),
-        total_tokens: Some(60),
-        provider_type: Some(Provider::Google),
-        ..Default::default()
-    });
-
-    emit_turn_end(
-        &h.emitter,
-        Some(&h.persister),
-        &h.session_id,
-        3,
-        77,
-        &stream,
-        None,
-        None,
-        25_000,
-        "gemini-3-pro-preview",
-        Provider::Google,
-        Some("medium"),
-        Some(&h.counter),
-        None,
-        None,
-    )
-    .unwrap();
-
-    let payloads = persisted_payloads(&h.store, &h.session_id, "stream.turn_end");
-    let evidence = &payloads[0]["reasoningStatusEvidence"];
-    assert_eq!(evidence["phase"], "turn_end");
-    assert_eq!(evidence["providerType"], "google");
-    assert_eq!(evidence["model"], "gemini-3-pro-preview");
-    assert_eq!(evidence["requestedReasoningLevel"], "medium");
-    assert_eq!(evidence["status"]["thinkingEmitted"], false);
-    assert_eq!(evidence["tokens"]["reasoningOutputTokens"], 4);
-    assert_eq!(evidence["tokens"]["thoughtTokens"], 2);
-    assert_eq!(evidence["refs"]["replaySource"], "session_event_log");
 }
 
 // ── Persist-before-broadcast: response-complete events ─────────────────

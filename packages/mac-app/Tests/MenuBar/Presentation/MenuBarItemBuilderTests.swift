@@ -94,6 +94,7 @@ struct MenuBarItemBuilderTests {
             "Open Tron folder",
             "Show logs",
             "Send feedback",
+            "Stop Mac Operator",
             "—",
             "Pause server",
             "Restart server",
@@ -163,6 +164,7 @@ struct MenuBarItemBuilderTests {
             "Show logs",
             "Open Tron folder",
             "Send feedback",
+            "Stop Mac Operator",
             "Uninstall Tron",
             "Quit Tron",
         ] {
@@ -184,6 +186,7 @@ struct MenuBarItemBuilderTests {
             "Open Tron folder",
             "Show logs",
             "Send feedback",
+            "Stop Mac Operator",
             "—",
             "Pause server",
             "Restart server",
@@ -206,6 +209,7 @@ struct MenuBarItemBuilderTests {
             "Show pairing info": .showPairingInfo,
             "Show logs": .viewLogs,
             "Send feedback": .sendFeedback,
+            "Stop Mac Operator": .stopMacOperator,
             "Pause server": .pauseServer,
             "Restart server": .restartServer,
             "Uninstall Tron": .uninstall,
@@ -220,6 +224,19 @@ struct MenuBarItemBuilderTests {
         )
         let devItems = Self.build(snapshot: devSnapshot)
         #expect(devItems.contains(.action(title: "Stop dev server", isEnabled: true, action: .stopDevServer)))
+
+        let stoppedItems = MenuBarItemBuilder.build(
+            snapshot: snap,
+            tronHome: URL(fileURLWithPath: "/tmp/tron", isDirectory: true),
+            defaultServerPort: 9847,
+            canManageLaunchAgent: true,
+            macOperatorStopped: true
+        )
+        #expect(stoppedItems.contains(.action(
+            title: "Resume Mac Operator",
+            isEnabled: true,
+            action: .resumeMacOperator
+        )))
     }
 
     @Test("debug companion disables production LaunchAgent controls")

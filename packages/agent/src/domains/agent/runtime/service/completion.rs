@@ -9,19 +9,13 @@ use super::{
     PromptEngineCausality, PromptRunCleanup, load_session_update_event,
     publish_prompt_runtime_stream,
 };
-use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
-};
+use crate::domains::agent::r#loop::errors::StopReason;
+use crate::engine::{ActorId, ActorKind, CausalContext, FunctionId, Invocation, TraceId};
 use crate::shared::protocol::events::{BaseEvent, TronEvent, error_event};
+use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::failure::{
     FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_RUN_ERROR,
 };
-
-#[derive(Debug, PartialEq)]
-struct AgentResultMessage {
-    text: String,
-    event_ref: Option<String>,
-}
 
 pub(super) struct PromptRunCompletion<'a> {
     pub(super) result: crate::domains::agent::r#loop::types::RunResult,
@@ -34,6 +28,9 @@ pub(super) struct PromptRunCompletion<'a> {
     pub(super) run_id: String,
     pub(super) provider_type: String,
     pub(super) model_for_error: String,
+    pub(super) user_prompt: Option<String>,
+    pub(super) delivery_wake_ids: Vec<String>,
+    pub(super) shutdown_requested: bool,
     pub(super) sequence_counter: Option<Arc<AtomicI64>>,
 }
 
@@ -49,6 +46,9 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         run_id,
         provider_type,
         model_for_error,
+        user_prompt,
+        delivery_wake_ids,
+        shutdown_requested,
         sequence_counter,
     } = args;
 
@@ -64,13 +64,66 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         has_error = result.error.is_some(),
         "agent prompt run finalizing"
     );
-    let agent_result_message =
-        resolve_agent_result_message(&event_store, &session_id, result.error.as_deref());
+    if result.interrupted && !shutdown_requested {
+        let demotion = event_store
+            .demote_leased_agent_wakes(&session_id, &run_id)
+            .and_then(|_| event_store.demote_agent_wakes(&session_id, &delivery_wake_ids));
+        if let Err(error) = demotion {
+            warn!(
+                session_id,
+                error = %error,
+                "failed to demote delivery wakes owned by the cancelled run"
+            );
+        }
+    } else if result.error.is_some()
+        && !delivery_wake_ids.is_empty()
+        && event_store
+            .record_agent_wake_failure(
+                &session_id,
+                &delivery_wake_ids,
+                result
+                    .error
+                    .as_deref()
+                    .unwrap_or("delivery-only run failed"),
+            )
+            .unwrap_or(false)
+    {
+        tracing::error!(
+            session_id,
+            "agent delivery wake exhausted retries and was demoted to passive"
+        );
+    }
+    if let Err(error) = event_store.stale_run_scoped_deliveries(
+        crate::domains::session::event_store::AgentDeliverySourceKind::Continuity,
+        &run_id,
+    ) {
+        warn!(
+            session_id,
+            run_id,
+            error = %error,
+            "failed to stale late run-scoped continuity delivery"
+        );
+    }
+    crate::domains::agent::r#loop::surface::clear_semantic_surface(&session_id, &run_id);
     // INVARIANT: the active-run slot owns every event that consumes its shared
     // sequence counter. Publish the final session metadata first. Terminal
     // error/idle/ready events and matching run release then share one registry
     // boundary, so event-triggered prompt admission cannot observe SessionBusy
     // and no old terminal event can race a replacement run.
+    let title_exchange = if let Some(prompt) = user_prompt {
+        load_title_exchange_if_eligible(
+            &result,
+            engine_causality
+                .as_ref()
+                .and_then(|causality| causality.context.origin_worker_id()),
+            event_store.clone(),
+            &session_id,
+            prompt,
+        )
+        .await
+    } else {
+        None
+    };
     emit_session_update(
         &event_store,
         &broadcast,
@@ -80,7 +133,7 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
     .await;
     let terminal_failure =
         run_error_event_if_needed(&session_id, &provider_type, &model_for_error, &result);
-    let _ = run_cleanup.release_with_terminal(|| {
+    let released = run_cleanup.release_with_terminal(|| {
         publish_terminal_lifecycle(
             &broadcast,
             &session_id,
@@ -89,17 +142,9 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
             terminal_failure,
         );
     });
-
-    let agent_result_refs = create_agent_result_resource(
-        &engine_host,
-        engine_causality.as_ref(),
-        &session_id,
-        &run_id,
-        &result,
-        &agent_result_message,
-    )
-    .await;
-    let agent_result_ref_count = agent_result_refs.as_ref().map_or(0, Vec::len);
+    if released && !shutdown_requested {
+        invoke_pending_delivery_wake(&engine_host, &session_id).await;
+    }
 
     info!(
         component = "agent.runtime",
@@ -110,7 +155,6 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         turns = result.turns_executed,
         interrupted = result.interrupted,
         has_error = result.error.is_some(),
-        agent_result_ref_count,
         "prompt run completed"
     );
     publish_prompt_runtime_stream(
@@ -124,10 +168,178 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
             "interrupted": result.interrupted,
             "stopReason": format!("{:?}", result.stop_reason),
             "error": result.error,
-            "resourceRefs": agent_result_refs.unwrap_or_default(),
         }),
     )
     .await;
+    if let Some((user_prompt, assistant_response)) = title_exchange {
+        invoke_session_title_hook(
+            &engine_host,
+            engine_causality.as_ref(),
+            &session_id,
+            &run_id,
+            user_prompt,
+            assistant_response,
+        )
+        .await;
+    }
+}
+
+async fn invoke_pending_delivery_wake(
+    engine_host: &crate::engine::EngineHostHandle,
+    session_id: &str,
+) {
+    let Ok(actor_id) = ActorId::new("system:agent-delivery-release") else {
+        return;
+    };
+    let Ok(function_id) = FunctionId::new("agent::delivery_wake") else {
+        return;
+    };
+    let causal = CausalContext::new(actor_id, ActorKind::System, TraceId::generate())
+        .with_session_id(session_id.to_owned())
+        .with_idempotency_key(format!(
+            "agent-delivery-release:{session_id}:{}",
+            uuid::Uuid::now_v7()
+        ));
+    let outcome = engine_host
+        .invoke(Invocation::new_sync(
+            function_id,
+            serde_json::json!({"sessionId":session_id}),
+            causal,
+        ))
+        .await;
+    if let Some(error) = outcome.error {
+        warn!(
+            session_id,
+            error = %error,
+            "failed to reconsider pending agent wake after run release"
+        );
+    }
+}
+
+fn title_hook_is_eligible(
+    result: &crate::domains::agent::r#loop::types::RunResult,
+    origin_worker_id: Option<&str>,
+) -> bool {
+    result.error.is_none()
+        && !result.interrupted
+        && matches!(
+            result.stop_reason,
+            StopReason::EndTurn | StopReason::NoToolInvocationDrafts
+        )
+        && origin_worker_id.is_none()
+}
+
+async fn load_title_exchange_if_eligible(
+    result: &crate::domains::agent::r#loop::types::RunResult,
+    origin_worker_id: Option<&str>,
+    event_store: Arc<crate::domains::session::event_store::EventStore>,
+    session_id: &str,
+    user_prompt: String,
+) -> Option<(String, String)> {
+    if !title_hook_is_eligible(result, origin_worker_id) {
+        return None;
+    }
+    let preview_session_id = session_id.to_owned();
+    let assistant_response = run_blocking_task("agent.prompt.session_title_preview", move || {
+        let Some(session) = event_store
+            .get_session(&preview_session_id)
+            .map_err(|error| crate::shared::server::errors::ToolError::Internal {
+                message: error.to_string(),
+            })?
+        else {
+            return Ok(None);
+        };
+        if session.is_worker_session()
+            || session
+                .title
+                .as_deref()
+                .is_some_and(|title| !title.trim().is_empty())
+        {
+            return Ok(None);
+        }
+        let session_ids = [preview_session_id.as_str()];
+        event_store
+            .get_session_message_previews(&session_ids)
+            .map(|mut previews| {
+                Some(
+                    previews
+                        .remove(&preview_session_id)
+                        .and_then(|preview| preview.last_assistant_response)
+                        .unwrap_or_default(),
+                )
+            })
+            .map_err(|error| crate::shared::server::errors::ToolError::Internal {
+                message: error.to_string(),
+            })
+    })
+    .await;
+    let assistant_response = match assistant_response {
+        Ok(Some(assistant_response)) => assistant_response,
+        Ok(None) => return None,
+        Err(error) => {
+            warn!(
+                session_id,
+                error = %error,
+                "failed to load assistant preview for automatic session title"
+            );
+            return None;
+        }
+    };
+    Some((
+        truncate_title_context(&user_prompt),
+        truncate_title_context(&assistant_response),
+    ))
+}
+
+async fn invoke_session_title_hook(
+    engine_host: &crate::engine::EngineHostHandle,
+    engine_causality: Option<&PromptEngineCausality>,
+    session_id: &str,
+    run_id: &str,
+    user_prompt: String,
+    assistant_response: String,
+) {
+    let Ok(actor_id) = ActorId::new("system:session-title") else {
+        return;
+    };
+    let trace_id = engine_causality
+        .map(|causality| causality.context.trace_id.clone())
+        .unwrap_or_else(TraceId::generate);
+    let mut causal = CausalContext::new(actor_id, ActorKind::System, trace_id)
+        .with_session_id(session_id.to_owned())
+        .with_trigger_depth(
+            engine_causality.map_or(0, |causality| causality.context.trigger_depth()),
+        )
+        .with_idempotency_key(format!("session-title:{session_id}:{run_id}"));
+    if let Some(parent) = engine_causality.map(|causality| causality.invocation_id.clone()) {
+        causal = causal.with_parent_invocation(parent);
+    }
+    let Ok(function_id) = FunctionId::new(crate::domains::worker_kernel::SESSION_TITLE_FUNCTION)
+    else {
+        return;
+    };
+    let outcome = engine_host
+        .invoke(Invocation::new_sync(
+            function_id,
+            serde_json::json!({
+                "userPrompt":user_prompt,
+                "assistantResponse":assistant_response,
+            }),
+            causal,
+        ))
+        .await;
+    if let Some(error) = outcome.error {
+        warn!(
+            session_id,
+            run_id,
+            error = %error,
+            "automatic session-title worker failed after successful prompt completion"
+        );
+    }
+}
+
+fn truncate_title_context(value: &str) -> String {
+    value.chars().take(4_096).collect()
 }
 
 pub(super) fn publish_terminal_lifecycle(
@@ -170,145 +382,6 @@ fn emit_maybe_sequenced(
         let _ = broadcast.emit_sequenced(event, counter);
     } else {
         let _ = broadcast.emit(event);
-    }
-}
-
-async fn create_agent_result_resource(
-    engine_host: &crate::engine::EngineHostHandle,
-    causality: Option<&PromptEngineCausality>,
-    session_id: &str,
-    run_id: &str,
-    result: &crate::domains::agent::r#loop::types::RunResult,
-    message: &AgentResultMessage,
-) -> Option<Vec<serde_json::Value>> {
-    let mut context = causality
-        .map(|causality| causality.context.clone())
-        .unwrap_or_else(|| {
-            CausalContext::new(
-                ActorId::new("system:agent").expect("valid actor id"),
-                ActorKind::System,
-                AuthorityGrantId::new("engine-system").expect("valid grant"),
-                TraceId::generate(),
-            )
-        });
-    context.actor_id = ActorId::new("system:agent").expect("valid actor id");
-    context.actor_kind = ActorKind::System;
-    context.authority_grant_id = AuthorityGrantId::new("engine-system").expect("valid grant");
-    if context.session_id.is_none() {
-        context = context.with_session_id(session_id.to_owned());
-    }
-    if let Some(causality) = causality {
-        context = context.with_parent_invocation(causality.invocation_id.clone());
-    }
-    context = context
-        .with_scope("resource.write")
-        .with_idempotency_key(format!("agent-result:{run_id}"));
-    let payload = serde_json::json!({
-        "kind": "agent_result",
-        "scope": "session",
-        "sessionId": session_id,
-        "payload": {
-            "message": message.text,
-            "promotedRefs": [],
-            "decisionRefs": [],
-            "subgoalRefs": [],
-            "stopReason": format!("{:?}", result.stop_reason),
-            "tokenUsage": &result.total_token_usage,
-            "metadata": {
-                "runId": run_id,
-                "messageEventRef": message.event_ref,
-                "turnsExecuted": result.turns_executed,
-                "interrupted": result.interrupted,
-                "lastContextWindowTokens": result.last_context_window_tokens
-            }
-        }
-    });
-    let invocation = Invocation::new_sync(
-        FunctionId::new("resource::create").expect("valid function id"),
-        payload,
-        context,
-    );
-    let result = engine_host.invoke(invocation).await;
-    if let Some(error) = result.error {
-        warn!(?error, run_id, "failed to create agent_result resource");
-        return None;
-    }
-    let refs = result.value.and_then(|value| {
-        value
-            .get("resourceRefs")
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-    });
-    info!(
-        component = "agent.runtime",
-        agent_event = "agent_result_resource_recorded",
-        session_id = %session_id,
-        run_id = %run_id,
-        resource_ref_count = refs.as_ref().map_or(0, Vec::len),
-        "agent result resource recorded"
-    );
-    refs
-}
-
-fn resolve_agent_result_message(
-    event_store: &crate::domains::session::event_store::EventStore,
-    session_id: &str,
-    run_error: Option<&str>,
-) -> AgentResultMessage {
-    match event_store.get_messages_at_head(session_id) {
-        Ok(reconstruction) => agent_result_message_from_reconstruction(&reconstruction, run_error),
-        Err(error) => {
-            warn!(
-                session_id,
-                ?error,
-                "failed to reconstruct final assistant message for agent_result"
-            );
-            AgentResultMessage {
-                text: run_error.unwrap_or_default().to_owned(),
-                event_ref: None,
-            }
-        }
-    }
-}
-
-fn agent_result_message_from_reconstruction(
-    reconstruction: &crate::domains::session::event_store::reconstruction::ReconstructionResult,
-    run_error: Option<&str>,
-) -> AgentResultMessage {
-    let assistant = reconstruction
-        .messages_with_event_ids
-        .iter()
-        .rev()
-        .find(|entry| entry.message.role == "assistant");
-    let text = assistant
-        .map(|entry| assistant_content_text(&entry.message.content))
-        .filter(|text| !text.is_empty());
-
-    AgentResultMessage {
-        text: text.unwrap_or_else(|| run_error.unwrap_or_default().to_owned()),
-        event_ref: assistant.and_then(|entry| {
-            entry
-                .event_ids
-                .iter()
-                .rev()
-                .find_map(|event_id| event_id.clone())
-        }),
-    }
-}
-
-fn assistant_content_text(content: &serde_json::Value) -> String {
-    match content {
-        serde_json::Value::String(text) => text.clone(),
-        serde_json::Value::Array(blocks) => blocks
-            .iter()
-            .filter_map(|block| {
-                (block.get("type").and_then(serde_json::Value::as_str) == Some("text"))
-                    .then(|| block.get("text").and_then(serde_json::Value::as_str))
-                    .flatten()
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => String::new(),
     }
 }
 
@@ -361,82 +434,7 @@ async fn emit_session_update(
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
-    use crate::domains::session::event_store::reconstruction::ReconstructionResult;
-    use crate::domains::session::event_store::types::payloads::TokenTotals;
-    use crate::domains::session::event_store::types::state::{Message, MessageWithEventId};
-
-    fn reconstruction(messages_with_event_ids: Vec<MessageWithEventId>) -> ReconstructionResult {
-        ReconstructionResult {
-            messages_with_event_ids,
-            token_usage: TokenTotals::default(),
-            turn_count: 1,
-            reasoning_level: None,
-            system_prompt: None,
-        }
-    }
-
-    #[test]
-    fn agent_result_uses_latest_assistant_text_and_event_ref() {
-        let state = reconstruction(vec![
-            MessageWithEventId {
-                message: Message {
-                    role: "user".into(),
-                    content: json!("question"),
-                    invocation_id: None,
-                    is_error: None,
-                },
-                event_ids: vec![Some("evt-user".into())],
-            },
-            MessageWithEventId {
-                message: Message {
-                    role: "assistant".into(),
-                    content: json!([
-                        {"type": "thinking", "thinking": "private"},
-                        {"type": "text", "text": "first"},
-                        {"type": "text", "text": "second"}
-                    ]),
-                    invocation_id: None,
-                    is_error: None,
-                },
-                event_ids: vec![
-                    Some("evt-assistant-1".into()),
-                    Some("evt-assistant-2".into()),
-                ],
-            },
-        ]);
-
-        assert_eq!(
-            agent_result_message_from_reconstruction(&state, Some("run failed")),
-            AgentResultMessage {
-                text: "first\nsecond".into(),
-                event_ref: Some("evt-assistant-2".into()),
-            }
-        );
-    }
-
-    #[test]
-    fn agent_result_uses_run_error_when_no_assistant_text_exists() {
-        let state = reconstruction(vec![MessageWithEventId {
-            message: Message {
-                role: "assistant".into(),
-                content: json!([{"type": "capability_invocation", "id": "call"}]),
-                invocation_id: None,
-                is_error: None,
-            },
-            event_ids: vec![Some("evt-call".into())],
-        }]);
-
-        assert_eq!(
-            agent_result_message_from_reconstruction(&state, Some("run failed")),
-            AgentResultMessage {
-                text: "run failed".into(),
-                event_ref: Some("evt-call".into()),
-            }
-        );
-    }
 
     #[tokio::test]
     async fn terminal_lifecycle_is_contiguous_and_ready_is_last() {
@@ -480,5 +478,32 @@ mod tests {
             received.iter().map(TronEvent::sequence).collect::<Vec<_>>(),
             vec![Some(11), Some(12), Some(13), Some(14)]
         );
+    }
+
+    #[test]
+    fn session_title_hook_runs_only_after_successful_ordinary_user_completion() {
+        let success = crate::domains::agent::r#loop::types::RunResult::default();
+        assert!(title_hook_is_eligible(&success, None));
+        assert!(!title_hook_is_eligible(&success, Some("worker-a")));
+
+        let mut interrupted = success.clone();
+        interrupted.interrupted = true;
+        assert!(!title_hook_is_eligible(&interrupted, None));
+
+        let mut failed = success.clone();
+        failed.error = Some("provider failed".to_owned());
+        assert!(!title_hook_is_eligible(&failed, None));
+
+        let mut exhausted = success;
+        exhausted.stop_reason = StopReason::MaxTurns;
+        assert!(!title_hook_is_eligible(&exhausted, None));
+    }
+
+    #[test]
+    fn session_title_context_is_unicode_safe_and_bounded() {
+        let input = "🦌".repeat(5_000);
+        let projected = truncate_title_context(&input);
+        assert_eq!(projected.chars().count(), 4_096);
+        assert!(projected.chars().all(|character| character == '🦌'));
     }
 }

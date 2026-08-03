@@ -1,6 +1,5 @@
 use super::*;
 mod credentials;
-mod extra_fields;
 mod google;
 use tempfile::TempDir;
 
@@ -18,8 +17,8 @@ fn make_tokens() -> OAuthTokens {
 
 #[test]
 fn auth_file_path_construction() {
-    let p = auth_file_path(Path::new("/home/user/.tron/profiles"));
-    assert_eq!(p, PathBuf::from("/home/user/.tron/profiles/auth.json"));
+    let p = auth_file_path(Path::new("/home/user/.tron"));
+    assert_eq!(p, PathBuf::from("/home/user/.tron/auth.json"));
 }
 
 #[test]
@@ -30,39 +29,6 @@ fn load_missing_file_returns_ok_none() {
         result.is_none(),
         "missing file must be Ok(None), not an error"
     );
-}
-
-#[test]
-fn load_empty_json_object_returns_pristine_storage() {
-    let dir = TempDir::new().unwrap();
-    let path = test_path(&dir);
-    std::fs::write(&path, "{}").unwrap();
-
-    let storage = load_auth_storage(&path)
-        .expect("empty object sentinel must load")
-        .expect("present sentinel returns pristine storage");
-
-    assert_eq!(storage.version, 1);
-    assert!(storage.bearer_token.is_none());
-    assert!(storage.providers.is_empty());
-    assert!(storage.services.is_none());
-    assert!(storage.extra.is_empty());
-    assert!(
-        !storage.last_updated.trim().is_empty(),
-        "pristine storage must have a materializable lastUpdated"
-    );
-}
-
-#[test]
-fn load_or_init_for_write_accepts_empty_json_object_sentinel() {
-    let dir = TempDir::new().unwrap();
-    let path = test_path(&dir);
-    std::fs::write(&path, "{\n}\n").unwrap();
-
-    let storage = load_or_init_for_write(&path).unwrap();
-
-    assert_eq!(storage.version, 1);
-    assert!(storage.providers.is_empty());
 }
 
 #[test]
@@ -97,14 +63,32 @@ fn load_partial_non_empty_object_returns_malformed_error() {
     let path = test_path(&dir);
     std::fs::write(&path, r#"{"version":1}"#).unwrap();
 
-    let err =
-        load_auth_storage(&path).expect_err("only the exact empty object is a pristine sentinel");
+    let err = load_auth_storage(&path).expect_err("partial objects must fail strict decoding");
 
     assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
     assert!(
         err.to_string().contains("missing field"),
         "partial auth objects must remain strict errors, got: {err}"
     );
+}
+
+#[test]
+fn load_rejects_unknown_top_level_auth_sections() {
+    let dir = TempDir::new().unwrap();
+    let path = test_path(&dir);
+    std::fs::write(
+        &path,
+        r#"{
+            "version": 1,
+            "providers": {},
+            "services": {},
+            "lastUpdated": "2026-07-21T00:00:00Z"
+        }"#,
+    )
+    .unwrap();
+
+    let error = load_auth_storage(&path).expect_err("retired auth sections must fail closed");
+    assert!(error.to_string().contains("services"), "{error}");
 }
 
 #[test]
@@ -118,41 +102,6 @@ fn save_and_load_roundtrip() {
     assert_eq!(loaded.version, 1);
     let restored = loaded.get_provider_auth("anthropic").unwrap();
     assert_eq!(restored.api_keys.as_ref().unwrap()[0].key, "sk-123");
-}
-
-/// Regression guard: a retired `services.{name}.apiKey` shape (singular
-/// string field) no longer silently wipes all configured providers — it
-/// produces a loud, actionable error naming the bad file. Prior to this
-/// change, R2 removed the singular field from `ServiceAuth` but
-/// `load_auth_storage` kept swallowing parse errors with a `warn!` and
-/// returning `None`, which made every provider appear unconfigured.
-#[test]
-fn load_retired_services_apikey_singular_shape_surfaces_error() {
-    let dir = TempDir::new().unwrap();
-    let path = test_path(&dir);
-    std::fs::write(
-        &path,
-        r#"{
-                "version": 1,
-                "providers": {},
-                "services": {
-                    "brave": { "apiKey": "retired-key-value" }
-                },
-                "lastUpdated": "2026-04-22T00:00:00Z"
-            }"#,
-    )
-    .unwrap();
-
-    let err = load_auth_storage(&path).expect_err(
-        "retired singular `apiKey` shape must surface as a hard error, \
-             not silently wipe all providers",
-    );
-    assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
-    let msg = err.to_string();
-    assert!(
-        msg.contains("unknown field") || msg.contains("apiKey") || msg.contains("missing field"),
-        "error must name the offending field. got: {msg}"
-    );
 }
 
 /// Regression guard: a parse failure must NOT be silently absorbed by
@@ -371,21 +320,6 @@ fn save_account_oauth_tokens_updates_existing() {
 }
 
 #[test]
-fn get_service_api_keys_from_file() {
-    let dir = TempDir::new().unwrap();
-    let path = test_path(&dir);
-
-    let mut storage = AuthStorage::new();
-    let mut services = std::collections::HashMap::new();
-    let _ = services.insert("brave".to_string(), ServiceAuth::from_single("key1"));
-    storage.services = Some(services);
-    save_auth_storage(&path, &mut storage).unwrap();
-
-    let keys = get_service_api_keys(&path, "brave").unwrap();
-    assert_eq!(keys, vec!["key1"]);
-}
-
-#[test]
 fn clear_provider_auth_removes_one() {
     let dir = TempDir::new().unwrap();
     let path = test_path(&dir);
@@ -447,9 +381,9 @@ fn lock_path_for(auth_path: &Path) -> std::path::PathBuf {
 }
 
 #[test]
-fn auth_lock_for_profile_auth_lives_under_internal_run() {
+fn auth_lock_for_root_auth_lives_under_internal_run() {
     let dir = TempDir::new().unwrap();
-    let auth_path = dir.path().join(".tron/profiles/auth.json");
+    let auth_path = dir.path().join(".tron/auth.json");
 
     assert_eq!(
         lock_path_for(&auth_path),

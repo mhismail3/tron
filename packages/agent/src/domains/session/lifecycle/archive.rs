@@ -2,19 +2,20 @@ use super::SessionLifecycleService;
 use super::{BaseEvent, TronEvent};
 use crate::domains::session::Deps;
 use crate::domains::session::event_store::ListSessionsOptions;
+use crate::engine::{ActorId, ActorKind, CausalContext, FunctionId, Invocation, TraceId};
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use serde_json::Value;
 use serde_json::json;
 
 impl SessionLifecycleService {
-    pub(crate) async fn archive(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
+    pub(crate) async fn archive(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let session_manager = deps.session_manager.clone();
         let session_id_for_archive = session_id.clone();
         run_blocking_task("session.archive", move || {
             session_manager
                 .archive_session(&session_id_for_archive)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: error.to_string(),
                 })?;
             Ok(())
@@ -33,16 +34,13 @@ impl SessionLifecycleService {
         Ok(json!({ "archived": true }))
     }
 
-    pub(crate) async fn unarchive(
-        deps: &Deps,
-        session_id: String,
-    ) -> Result<Value, CapabilityError> {
+    pub(crate) async fn unarchive(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let event_store = deps.event_store.clone();
         let session_id_for_unarchive = session_id.clone();
         run_blocking_task("session.unarchive", move || {
             let _ = event_store
                 .clear_session_ended(&session_id_for_unarchive)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 })?;
             Ok(())
@@ -55,6 +53,12 @@ impl SessionLifecycleService {
             .emit(TronEvent::SessionUnarchived {
                 base: BaseEvent::now(&session_id),
             });
+
+        // A wake that arrived while archived remained durable and did not
+        // consume an attempt. Re-run the normal wake admission after the
+        // archive flag is cleared so no polling interval is required for
+        // recovery.
+        reconsider_pending_wake(deps, &session_id).await;
 
         Ok(json!({ "unarchived": true }))
     }
@@ -76,10 +80,7 @@ impl SessionLifecycleService {
     /// `skipped` captures any candidates that failed mid-batch so the caller
     /// can surface them to the user and retry — partial success is explicit
     /// rather than rolled back.
-    pub(crate) async fn archive_older_than(
-        deps: &Deps,
-        days: u32,
-    ) -> Result<Value, CapabilityError> {
+    pub(crate) async fn archive_older_than(deps: &Deps, days: u32) -> Result<Value, ToolError> {
         let cutoff = chrono::Utc::now() - chrono::Duration::days(i64::from(days));
         let cutoff_rfc = cutoff.to_rfc3339();
 
@@ -92,11 +93,12 @@ impl SessionLifecycleService {
                     ended: Some(false),
                     ..Default::default()
                 };
-                let sessions = event_store.list_sessions(&options).map_err(|error| {
-                    CapabilityError::Internal {
-                        message: format!("Persistence error: {error}"),
-                    }
-                })?;
+                let sessions =
+                    event_store
+                        .list_sessions(&options)
+                        .map_err(|error| ToolError::Internal {
+                            message: format!("Persistence error: {error}"),
+                        })?;
                 // RFC3339 strings are lexicographically sortable, so a
                 // string comparison correctly implements "older than cutoff".
                 let ids: Vec<String> = sessions
@@ -130,5 +132,35 @@ impl SessionLifecycleService {
             "skipped": skipped,
             "cutoff": cutoff_rfc,
         }))
+    }
+}
+
+async fn reconsider_pending_wake(deps: &Deps, session_id: &str) {
+    let (Ok(function_id), Ok(actor_id)) = (
+        FunctionId::new("agent::delivery_wake"),
+        ActorId::new("system:session-unarchive"),
+    ) else {
+        return;
+    };
+    let causal = CausalContext::new(actor_id, ActorKind::System, TraceId::generate())
+        .with_session_id(session_id.to_owned())
+        .with_idempotency_key(format!(
+            "session-unarchive-wake:{session_id}:{}",
+            uuid::Uuid::now_v7()
+        ));
+    let outcome = deps
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id,
+            json!({"sessionId":session_id}),
+            causal,
+        ))
+        .await;
+    if let Some(error) = outcome.error {
+        tracing::warn!(
+            session_id,
+            error = %error,
+            "failed to reconsider a pending agent wake after unarchive"
+        );
     }
 }

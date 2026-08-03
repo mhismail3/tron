@@ -13,11 +13,11 @@ struct DiagnosticsBundleBuilderTests {
             parentId: "parent-raw",
             sessionId: "session-raw",
             workspaceId: "workspace-raw",
-            type: "capability.invocation.started",
+            type: "tool.invocation.started",
             timestamp: "2026-04-29T21:00:00Z",
             sequence: 1,
             payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+                "toolName": AnyCodable("process_run"),
                 "durationMs": AnyCodable(42),
                 "arguments": AnyCodable(#"{"path":"/Users/alice/project/file.swift"}"#),
                 "prompt": AnyCodable("secret prompt body"),
@@ -27,7 +27,7 @@ struct DiagnosticsBundleBuilderTests {
 
         let summary = DiagnosticsEventSanitizer.summarize(event)
         #expect(summary.idHash != "event-raw")
-        #expect(summary.payload["modelPrimitiveName"]?.stringValue == "execute")
+        #expect(summary.payload["toolName"]?.stringValue == "process_run")
         #expect(summary.payload["durationMs"]?.intValue == 42)
         #expect(summary.payload["arguments"] == nil)
         #expect(summary.payload["prompt"] == nil)
@@ -41,7 +41,7 @@ struct DiagnosticsBundleBuilderTests {
             parentId: nil,
             sessionId: "session-raw",
             workspaceId: "workspace-raw",
-            type: "error.capability",
+            type: "turn.failed",
             timestamp: "2026-04-29T21:00:00Z",
             sequence: 2,
             payload: [
@@ -158,7 +158,7 @@ struct DiagnosticsBundleBuilderTests {
     }
 
     @Test("delivery planner is mail-only without Mail or recipient")
-    func deliveryPlannerFallbacks() {
+    func deliveryPlannerRecoveryPaths() {
         #expect(
             FeedbackDeliveryPlanner.route(configuredRecipient: nil, canSendMail: true)
                 == .mailUnavailable(message: FeedbackDeliveryPlanner.missingRecipientMessage)
@@ -226,11 +226,11 @@ struct DiagnosticsBundleBuilderTests {
             parentId: sequence == 0 ? nil : "event-\(sequence - 1)",
             sessionId: "session-raw",
             workspaceId: "workspace-raw",
-            type: "capability.invocation.started",
+            type: "tool.invocation.started",
             timestamp: "2026-04-29T21:00:00Z",
             sequence: sequence,
             payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+                "toolName": AnyCodable("process_run"),
                 "prompt": AnyCodable("secret prompt body"),
                 "arguments": AnyCodable(#"{"path":"/Users/alice/project/file.swift"}"#),
             ]

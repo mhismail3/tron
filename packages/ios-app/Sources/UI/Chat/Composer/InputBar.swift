@@ -49,7 +49,10 @@ struct InputBar: View {
 
     private var micDisabled: Bool {
         if config.isRecording { return false }
-        return config.readOnly || config.agentPhase.isActive || config.isTranscribing || !config.isConnected
+        return config.readOnly
+            || config.agentPhase.isActive
+            || config.isTranscribing
+            || !config.isConnected
     }
 
     // MARK: - Body
@@ -77,11 +80,13 @@ struct InputBar: View {
 
                 inputField
 
-                if !config.readOnly, config.showsContextBriefingControl {
-                    ContextBriefingButton(
+                if config.showsContextBriefingControl,
+                   let onContextTap = actions.onContextTap {
+                    ContextProgressButton(
                         contextPercentage: config.contextPercentage,
-                        modelName: config.currentModelInfo?.name,
-                        onTap: actions.onContextTap
+                        modelName: config.currentModelInfo?.formattedModelName,
+                        isCompacting: config.isCompacting,
+                        onTap: onContextTap
                     )
                 }
 
@@ -89,6 +94,7 @@ struct InputBar: View {
                     ComposerTrailingButton(
                         showStop: showStop,
                         canSend: canSend,
+                        canRecord: config.speechTranscriptionAvailable,
                         isRecording: config.isRecording,
                         isTranscribing: config.isTranscribing,
                         micDisabled: micDisabled,
@@ -115,7 +121,7 @@ struct InputBar: View {
                 if !config.readOnly {
                     ComposerAttachmentButton(
                         isDisabled: config.agentPhase.isActive || config.readOnly,
-                        attachmentCapability: config.attachmentCapability,
+                        attachmentSupport: config.attachmentSupport,
                         includeRecentInputs: shouldShowRecentInputsMenuAction,
                         onSelect: presentAttachmentAction,
                         buttonSize: actionButtonSize
@@ -142,7 +148,7 @@ struct InputBar: View {
         }
         .sheet(isPresented: $showFilePicker) {
             DocumentPicker(
-                capability: config.attachmentCapability,
+                tool: config.attachmentSupport,
                 onDocumentPicked: addDocumentAttachment,
                 onSizeExceeded: handleDocumentSizeExceeded
             )
@@ -181,7 +187,7 @@ struct InputBar: View {
     private var attachmentArea: some View {
         ContentAreaView(
             attachments: state.attachments,
-            attachmentCapability: config.attachmentCapability,
+            attachmentSupport: config.attachmentSupport,
             onRemoveAttachment: actions.onRemoveAttachment
         )
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -353,7 +359,7 @@ extension Notification.Name {
         InputBar(
             state: previewState,
             config: InputBarConfig(
-                contextPercentage: 30,
+                contextPercentage: 42,
                 currentModelInfo: nil,
                 inputHistory: nil,
                 readOnly: false

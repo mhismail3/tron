@@ -11,11 +11,11 @@ enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
     var id: String { rawValue }
 
     static func availableActions(
-        for capability: AttachmentCapability,
+        for tool: AttachmentSupport,
         includeRecentInputs: Bool = false
     ) -> [AttachmentMenuAction] {
         var actions: [AttachmentMenuAction] = []
-        if capability.supportsImages {
+        if tool.supportsImages {
             actions += [.camera, .photoLibrary]
         }
         actions.append(.files)
@@ -54,7 +54,7 @@ enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
 
 struct ComposerAttachmentButton: View {
     let isDisabled: Bool
-    let attachmentCapability: AttachmentCapability
+    let attachmentSupport: AttachmentSupport
     let includeRecentInputs: Bool
     let onSelect: (AttachmentMenuAction) -> Void
     let buttonSize: CGFloat
@@ -73,7 +73,7 @@ struct ComposerAttachmentButton: View {
             .overlay {
                 Menu {
                     ForEach(AttachmentMenuAction.availableActions(
-                        for: attachmentCapability,
+                        for: attachmentSupport,
                         includeRecentInputs: includeRecentInputs
                     )) { action in
                         Button {
@@ -109,14 +109,20 @@ enum ComposerTrailingMode: Equatable {
     case send
     case record
 
-    init(showStop: Bool, canSend: Bool, isRecording: Bool, isTranscribing: Bool) {
+    init(
+        showStop: Bool,
+        canSend: Bool,
+        canRecord: Bool,
+        isRecording: Bool,
+        isTranscribing: Bool
+    ) {
         if showStop {
             self = .stopAgent
         } else if isRecording {
             self = .stopRecording
         } else if isTranscribing {
             self = .transcribing
-        } else if canSend {
+        } else if canSend || !canRecord {
             self = .send
         } else {
             self = .record
@@ -148,6 +154,7 @@ enum ComposerTrailingMode: Equatable {
 struct ComposerTrailingButton: View {
     let showStop: Bool
     let canSend: Bool
+    let canRecord: Bool
     let isRecording: Bool
     let isTranscribing: Bool
     let micDisabled: Bool
@@ -160,6 +167,7 @@ struct ComposerTrailingButton: View {
         ComposerTrailingMode(
             showStop: showStop,
             canSend: canSend,
+            canRecord: canRecord,
             isRecording: isRecording,
             isTranscribing: isTranscribing
         )
@@ -171,17 +179,15 @@ struct ComposerTrailingButton: View {
             return true
         case .record:
             return micDisabled
-        case .stopAgent, .stopRecording, .send:
+        case .send:
+            return !canSend
+        case .stopAgent, .stopRecording:
             return false
         }
     }
 
     private var accessibilityLabel: String {
         mode.accessibilityLabel
-    }
-
-    private var accessibilityHint: String {
-        mode.accessibilityHint(micDisabled: micDisabled)
     }
 
     var body: some View {
@@ -199,7 +205,7 @@ struct ComposerTrailingButton: View {
                 case .send:
                     Image(systemName: "arrow.up.circle.fill")
                         .font(TronTypography.button)
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
                 case .record:
                     Image(systemName: "mic.fill")
                         .font(TronTypography.buttonSM)
@@ -214,10 +220,11 @@ struct ComposerTrailingButton: View {
         .contentTransition(.symbolEffect(.replace))
         .animation(.easeInOut(duration: 0.2), value: showStop)
         .animation(.easeInOut(duration: 0.2), value: canSend)
+        .animation(.easeInOut(duration: 0.2), value: canRecord)
         .animation(.easeInOut(duration: 0.2), value: isRecording)
         .animation(.easeInOut(duration: 0.2), value: isTranscribing)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint(accessibilityHint)
+        .accessibilityHint(mode.accessibilityHint(micDisabled: micDisabled))
     }
 
     private func performAction() {

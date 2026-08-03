@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::domains::agent::contract;
 use crate::engine::{
-    EngineHostHandle, Invocation, InvocationId, PublishStreamEvent, TraceId, VisibilityScope,
+    EngineHostHandle, Invocation, InvocationId, PublishStreamEvent, StreamVisibility, TraceId,
 };
 
 /// Typed publisher for agent runtime events.
@@ -27,7 +27,7 @@ impl<'a> AgentStreamPublisher<'a> {
         let _ = self
             .engine_host
             .publish_stream_event(PublishStreamEvent {
-                topic: contract::STREAM_TOPICS[0].to_owned(),
+                topic: contract::RUNTIME_STREAM_TOPIC.to_owned(),
                 payload: json!({
                     "type": format!("agent.prompt.{action}"),
                     "action": action,
@@ -42,7 +42,7 @@ impl<'a> AgentStreamPublisher<'a> {
                     "idempotencyKey": invocation.causal_context.idempotency_key.clone(),
                     "payload": payload,
                 }),
-                visibility: VisibilityScope::Session,
+                visibility: StreamVisibility::Session,
                 session_id: Some(session_id.to_owned()),
                 workspace_id: invocation.causal_context.workspace_id.clone(),
                 producer: "agent::prompt".to_owned(),
@@ -64,14 +64,14 @@ impl<'a> AgentStreamPublisher<'a> {
         let _ = self
             .engine_host
             .publish_stream_event(PublishStreamEvent {
-                topic: contract::STREAM_TOPICS[0].to_owned(),
+                topic: contract::RUNTIME_STREAM_TOPIC.to_owned(),
                 payload: json!({
                     "type": format!("agent.prompt.{action}"),
                     "action": action,
                     "sessionId": session_id,
                     "payload": payload,
                 }),
-                visibility: VisibilityScope::Session,
+                visibility: StreamVisibility::Session,
                 session_id: Some(session_id.to_owned()),
                 workspace_id,
                 producer: "agent::prompt_apply".to_owned(),

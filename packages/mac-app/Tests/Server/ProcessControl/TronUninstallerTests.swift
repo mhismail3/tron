@@ -18,7 +18,7 @@ struct TronUninstallerTests {
             )
             _ = FileManager.default.createFile(atPath: path.path, contents: Data("x".utf8))
         }
-        try createFixtureFile(setup.settingsPath, contents: "[settings.server]\ntailscaleIp = \"100.64.0.1\"\n")
+        try createFixtureFile(setup.settingsPath, contents: "[server]\ntailscaleIp = \"100.64.0.1\"\n")
         try createFixtureFile(setup.bearerTokenPath, contents: "auth")
 
         let outcome = await TronUninstaller.unregisterAndClean(setup: setup)
@@ -32,7 +32,7 @@ struct TronUninstallerTests {
         #expect(FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
     }
 
-    @Test("reset options clear settings overlay and remove credentials after unregister")
+    @Test("reset options remove settings and credentials after unregister")
     func resetOptionsRemoveDurableFiles() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
@@ -41,15 +41,8 @@ struct TronUninstallerTests {
         try createFixtureFile(
             setup.settingsPath,
             contents: """
-            version = "2"
-            name = "user"
-            inherits = ["normal"]
-
-            [settings.server]
+            [server]
             tailscaleIp = "100.64.0.1"
-
-            [toolPolicies.default]
-            allowed = ["Bash"]
             """
         )
         try createFixtureFile(setup.bearerTokenPath, contents: "auth")
@@ -60,9 +53,7 @@ struct TronUninstallerTests {
         )
 
         #expect(outcome == .ok)
-        let profile = try String(contentsOf: setup.settingsPath, encoding: .utf8)
-        #expect(!profile.contains("[settings.server]"))
-        #expect(profile.contains("[toolPolicies.default]"))
+        #expect(!FileManager.default.fileExists(atPath: setup.settingsPath.path))
         #expect(!FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
     }
 
@@ -108,13 +99,12 @@ struct TronUninstallerTests {
         let internalDir = tmp.appendingPathComponent("internal", isDirectory: true)
         let run = internalDir.appendingPathComponent("run", isDirectory: true)
         let profiles = tmp.appendingPathComponent("profiles", isDirectory: true)
-        let userProfile = profiles.appendingPathComponent("user", isDirectory: true)
         return EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp.appendingPathComponent("Tron.app", isDirectory: true),
             bearerTokenPath: profiles.appendingPathComponent("auth.json", isDirectory: false),
             onboardedMarkerPath: run.appendingPathComponent(".onboarded", isDirectory: false),
-            settingsPath: userProfile.appendingPathComponent("profile.toml", isDirectory: false),
+            settingsPath: tmp.appendingPathComponent("settings.toml", isDirectory: false),
             launchAgentPlistPath: tmp.appendingPathComponent("Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist"),
             launchAgentLabel: "com.tron.server",
             serverPort: 9847,

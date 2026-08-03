@@ -31,7 +31,8 @@ enum MenuBarItemBuilder {
         snapshot: ServerStatusSnapshot,
         tronHome: URL,
         defaultServerPort: Int,
-        canManageLaunchAgent: Bool
+        canManageLaunchAgent: Bool,
+        macOperatorStopped: Bool = false
     ) -> [MenuItemDescriptor] {
         var items: [MenuItemDescriptor] = []
 
@@ -51,6 +52,12 @@ enum MenuBarItemBuilder {
         items.append(.action(title: "Show logs", isEnabled: true, action: .viewLogs))
 
         items.append(.action(title: "Send feedback", isEnabled: true, action: .sendFeedback))
+
+        items.append(.action(
+            title: macOperatorStopped ? "Resume Mac Operator" : "Stop Mac Operator",
+            isEnabled: true,
+            action: macOperatorStopped ? .resumeMacOperator : .stopMacOperator
+        ))
 
         items.append(.separator)
         if snapshot.state.isRunning {

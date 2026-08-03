@@ -6,10 +6,19 @@ enum ModelPickerReasoningVisibility {
     }
 }
 
+enum ModelPickerPresentation {
+    static let primaryAccent: Color = .tronEmerald
+
+    static func usesHighContrastNeutral(providerId: String, isDark: Bool) -> Bool {
+        isDark && providerId == "openai-codex"
+    }
+}
+
 // MARK: - Provider Section
 
 struct ProviderSection: View {
     let provider: ProviderGroup
+    let accentColor: Color
     let currentModelId: String
     let readOnly: Bool
     let isExpanded: Bool
@@ -25,17 +34,17 @@ struct ProviderSection: View {
                 Image(provider.icon)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .foregroundStyle(provider.color)
+                    .foregroundStyle(accentColor)
                     .frame(maxWidth: 22, maxHeight: 22)
                     .frame(width: 26, height: 26)
                 Text(provider.displayName)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(provider.color)
+                    .foregroundStyle(accentColor)
                 Spacer()
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(provider.color.opacity(0.6))
+                    .foregroundStyle(accentColor.opacity(0.75))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
             }
             .padding(12)
@@ -48,7 +57,7 @@ struct ProviderSection: View {
                     ForEach(provider.families) { family in
                         FamilySection(
                             family: family,
-                            providerColor: provider.color,
+                            providerColor: accentColor,
                             currentModelId: currentModelId,
                             readOnly: readOnly,
                             isExpanded: expandedFamilies.contains(family.id),
@@ -71,7 +80,7 @@ struct ProviderSection: View {
             }
         }
         .clipped()
-        .sectionFill(provider.color, interactive: false)
+        .sectionFill(accentColor, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -285,16 +294,16 @@ struct ModelCard: View {
                             .foregroundStyle(.tronTextSecondary)
                     }
 
-                    // Capability badges
+                    // Tool badges
                     HStack(spacing: 6) {
                         if model.supportsThinking {
-                            capabilityBadge("Thinking", icon: "brain", color: providerColor)
+                            toolBadge("Thinking", icon: "brain", color: providerColor)
                         }
                         if model.supportsReasoning == true {
-                            capabilityBadge("Reasoning", icon: "sparkles", color: providerColor)
+                            toolBadge("Reasoning", icon: "sparkles", color: providerColor)
                         }
                         if model.supportsImages {
-                            capabilityBadge("Vision", icon: "photo", color: providerColor)
+                            toolBadge("Vision", icon: "photo", color: providerColor)
                         }
                     }
 
@@ -332,7 +341,7 @@ struct ModelCard: View {
     }
 
     @ViewBuilder
-    private func capabilityBadge(_ label: String, icon: String, color: Color) -> some View {
+    private func toolBadge(_ label: String, icon: String, color: Color) -> some View {
         HStack(spacing: 3) {
             Image(systemName: icon)
             Text(label)

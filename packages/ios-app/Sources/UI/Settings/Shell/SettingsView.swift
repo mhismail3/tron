@@ -1,5 +1,10 @@
 import SwiftUI
 
+struct SettingsServerLoadKey: Equatable {
+    let serverSelectionVersion: Int
+    let isConnected: Bool
+}
+
 // MARK: - Settings View
 
 struct SettingsView: View {
@@ -10,9 +15,14 @@ struct SettingsView: View {
     private var connectionRepository: any AppConnectionRepository { dependencies.connectionRepository }
     var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     @State var showingResetAlert = false
-    @State private var showLogViewer = false
+    @State var showLogViewer = false
     @State var showArchiveAllConfirmation = false
     @State var isArchivingAll = false
+    @State var showWorkerDispatchConfirmation = false
+    @State var workersStopped = false
+    @State var workerDispatchLoaded = false
+    @State var isChangingWorkerDispatch = false
+    @State var workerDispatchError: String?
     @State var activePage: SettingsPage?
     @State var cardsVisible = false
     @State private var feedbackMailDraft: FeedbackMailDraft?
@@ -20,14 +30,21 @@ struct SettingsView: View {
     @State var isPreparingFeedback = false
 
     enum SettingsPage: String, Identifiable {
-        case engine, providers, app
+        case engine, providers, notifications, artifacts, app
         var id: String { rawValue }
     }
 
     @State private var settingsState = SettingsState()
     private let launchServerOnboarding: (PairedServer?) -> Void
+    private let draftSessionId: String?
 
-    init(launchServerOnboarding: @escaping (PairedServer?) -> Void = { ServerOnboardingLauncher.post(prefill: $0) }) {
+    init(
+        draftSessionId: String? = nil,
+        launchServerOnboarding: @escaping (PairedServer?) -> Void = {
+            ServerOnboardingLauncher.post(prefill: $0)
+        }
+    ) {
+        self.draftSessionId = draftSessionId
         self.launchServerOnboarding = launchServerOnboarding
     }
 
@@ -95,11 +112,12 @@ struct SettingsView: View {
             SettingsPageContainer(
                 title: "Settings",
                 leadingToolbar: {
-                    Button { showLogViewer = true } label: {
-                        Image(systemName: "doc.text.magnifyingglass")
+                    Button { activePage = .notifications } label: {
+                        Image(systemName: notificationToolbarIcon)
                             .font(TronTypography.buttonSM)
                             .foregroundStyle(.tronEmerald)
                     }
+                    .accessibilityLabel(notificationToolbarAccessibilityLabel)
                 }
             ) {
                 mainSettingsSection
@@ -108,6 +126,18 @@ struct SettingsView: View {
 
             settingsFooterDockView
         }
+    }
+
+    private var notificationToolbarIcon: String {
+        dependencies.notificationCoordinator.aggregateUnreadCount > 0
+            ? "bell.badge.fill"
+            : "bell"
+    }
+
+    private var notificationToolbarAccessibilityLabel: String {
+        let unreadCount = dependencies.notificationCoordinator.aggregateUnreadCount
+        guard unreadCount > 0 else { return "Open notifications" }
+        return "Open notifications, \(unreadCount) unread"
     }
 
     private var settingsWithSheets: some View {
@@ -133,20 +163,22 @@ struct SettingsView: View {
 
     private var settingsWithLifecycle: some View {
         settingsWithSheets
-            .task {
+            .task(id: SettingsServerLoadKey(
+                serverSelectionVersion: dependencies.activeServerSelectionVersion,
+                isConnected: connectionRepository.connectionState.isConnected
+            )) {
                 cardsVisible = true
-                await loadServerSettingsIfAvailable()
+                await loadServerOwnedState()
             }
             .onChange(of: dependencies.activeServerSelectionVersion) {
                 settingsState.clearServerSnapshot()
-                Task { await loadServerSettingsIfAvailable() }
+                clearWorkerDispatchState()
             }
             .onChange(of: connectionRepository.connectionState) { oldState, newState in
                 guard hasPairedServers else { return }
-                if newState.isConnected {
-                    Task { await loadServerSettingsIfAvailable() }
-                } else if oldState.isConnected {
+                if oldState.isConnected && !newState.isConnected {
                     settingsState.clearServerSnapshot()
+                    clearWorkerDispatchState()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { _ in
@@ -167,6 +199,14 @@ struct SettingsView: View {
                 Button("Archive All", role: .destructive) { archiveAllSessions() }
             } message: {
                 Text(archiveAllSessionsMessage)
+            }
+            .alert(workerDispatchConfirmationTitle, isPresented: $showWorkerDispatchConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button(workerDispatchConfirmationActionTitle, role: workersStopped ? nil : .destructive) {
+                    setWorkersStopped(!workersStopped)
+                }
+            } message: {
+                Text(workerDispatchConfirmationMessage)
             }
             .alert(
                 feedbackResultMessage ?? "",
@@ -190,10 +230,23 @@ struct SettingsView: View {
                 startServerOnboarding: { startOnboarding(prefill: $0) }
             )
         case .providers:
-            ProvidersSettingsPage()
+            ProvidersSettingsPage(
+                settingsState: settingsState,
+                updateServerSetting: updateServerSetting
+            )
         case .app:
             AppearanceSettingsPage(
                 confirmArchive: $confirmArchive
+            )
+        case .notifications:
+            NotificationInboxView(
+                coordinator: dependencies.notificationCoordinator,
+                servers: dependencies.pairedServerStore.servers
+            )
+        case .artifacts:
+            ArtifactInboxView(
+                repository: dependencies.workerKernelRepository,
+                draftSessionId: draftSessionId
             )
         }
     }
@@ -203,7 +256,28 @@ struct SettingsView: View {
         return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
     }
 
+    private var workerDispatchConfirmationTitle: String {
+        workersStopped ? "Resume All Workers?" : "Stop All Workers?"
+    }
+
+    private var workerDispatchConfirmationActionTitle: String {
+        workersStopped ? "Resume All" : "Stop All"
+    }
+
+    private var workerDispatchConfirmationMessage: String {
+        if workersStopped {
+            return "New dispatch will resume and durable queued work can run again."
+        }
+        return "New dispatch will pause, active work will be cancelled, and resident services will stop. Durable queued work stays visible."
+    }
+
     // MARK: - Actions
+
+    func loadServerOwnedState() async {
+        async let settingsLoad: Void = loadServerSettingsIfAvailable()
+        async let dispatchLoad: Void = loadWorkerDispatchStateIfAvailable()
+        _ = await (settingsLoad, dispatchLoad)
+    }
 
     func loadServerSettingsIfAvailable() async {
         guard let activeServer = dependencies.pairedServerStore.activeServer else {
@@ -217,7 +291,9 @@ struct SettingsView: View {
             return
         }
         let isAlive = await dependencies.verifyConnection()
-        guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+        guard !Task.isCancelled,
+              connection.connectionState.isConnected,
+              dependencies.pairedServerStore.activeServer?.id == activeServer.id,
               dependencies.activeServerSelectionVersion == selectionVersion else {
             return
         }
@@ -228,10 +304,14 @@ struct SettingsView: View {
         }
         settingsState.clearServerSnapshot()
         await settingsState.load(using: dependencies.settingsRepository) {
-            dependencies.pairedServerStore.activeServer?.id == activeServer.id
+            !Task.isCancelled
+                && dependencies.connectionRepository.connectionState.isConnected
+                && dependencies.pairedServerStore.activeServer?.id == activeServer.id
                 && dependencies.activeServerSelectionVersion == selectionVersion
         }
-        guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+        guard !Task.isCancelled,
+              dependencies.connectionRepository.connectionState.isConnected,
+              dependencies.pairedServerStore.activeServer?.id == activeServer.id,
               dependencies.activeServerSelectionVersion == selectionVersion else {
             return
         }
@@ -240,6 +320,65 @@ struct SettingsView: View {
 
     func startOnboarding(prefill server: PairedServer? = nil) {
         launchServerOnboarding(server)
+    }
+
+    func loadWorkerDispatchStateIfAvailable() async {
+        guard let activeServer = dependencies.pairedServerStore.activeServer,
+              connectionRepository.connectionState.isConnected else {
+            clearWorkerDispatchState()
+            return
+        }
+        let selectionVersion = dependencies.activeServerSelectionVersion
+        workerDispatchLoaded = false
+        workerDispatchError = nil
+        do {
+            let snapshot = try await dependencies.workerKernelRepository.workers(includeRetired: false)
+            guard !Task.isCancelled,
+                  connectionRepository.connectionState.isConnected,
+                  dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+                  dependencies.activeServerSelectionVersion == selectionVersion else { return }
+            workersStopped = snapshot.stopAll
+            workerDispatchLoaded = true
+        } catch {
+            guard !Task.isCancelled,
+                  dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+                  dependencies.activeServerSelectionVersion == selectionVersion else { return }
+            workerDispatchError = error.localizedDescription
+        }
+    }
+
+    func clearWorkerDispatchState() {
+        workersStopped = false
+        workerDispatchLoaded = false
+        workerDispatchError = nil
+        isChangingWorkerDispatch = false
+    }
+
+    private func setWorkersStopped(_ stopped: Bool) {
+        guard workerDispatchLoaded,
+              connectionRepository.connectionState.isConnected,
+              !isChangingWorkerDispatch else { return }
+        let activeServerId = dependencies.pairedServerStore.activeServer?.id
+        let selectionVersion = dependencies.activeServerSelectionVersion
+        isChangingWorkerDispatch = true
+        workerDispatchError = nil
+        Task { @MainActor in
+            defer { isChangingWorkerDispatch = false }
+            do {
+                let result = try await dependencies.workerKernelRepository.setWorkersStopped(
+                    stopped,
+                    idempotencyKey: .userAction(stopped ? "settings.worker.stopAll" : "settings.worker.resumeAll")
+                )
+                guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
+                      dependencies.activeServerSelectionVersion == selectionVersion else { return }
+                workersStopped = result.stopped
+                workerDispatchLoaded = true
+            } catch {
+                guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
+                      dependencies.activeServerSelectionVersion == selectionVersion else { return }
+                workerDispatchError = error.localizedDescription
+            }
+        }
     }
 
     private func resetToDefaults() {

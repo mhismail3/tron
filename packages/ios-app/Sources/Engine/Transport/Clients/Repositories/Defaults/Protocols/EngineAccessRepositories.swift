@@ -21,6 +21,7 @@ protocol SessionEventRepository: AnyObject {
 
     func events(for sessionId: String?) -> AsyncStream<ParsedEventV2>
     func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws
+    func releaseSessionEventSubscription(sessionId: String, workspaceId: String?) async
 }
 
 // MARK: - Settings Repository
@@ -31,24 +32,24 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
     let defaultModel: String
     let defaultWorkspace: String?
     let tailscaleIp: String?
+    let ollamaBaseUrl: String
     let compactionPreserveRecentCount: Int
     let compactionTriggerTokenThreshold: Double
-    let transcriptionEnabled: Bool
 
     init(
         defaultModel: String,
         defaultWorkspace: String?,
         tailscaleIp: String?,
+        ollamaBaseUrl: String,
         compactionPreserveRecentCount: Int,
-        compactionTriggerTokenThreshold: Double,
-        transcriptionEnabled: Bool
+        compactionTriggerTokenThreshold: Double
     ) {
         self.defaultModel = defaultModel
         self.defaultWorkspace = defaultWorkspace
         self.tailscaleIp = tailscaleIp
+        self.ollamaBaseUrl = ollamaBaseUrl
         self.compactionPreserveRecentCount = compactionPreserveRecentCount
         self.compactionTriggerTokenThreshold = compactionTriggerTokenThreshold
-        self.transcriptionEnabled = transcriptionEnabled
     }
 
     init(_ settings: ServerSettings) {
@@ -56,9 +57,9 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
             defaultModel: settings.defaultModel,
             defaultWorkspace: settings.defaultWorkspace,
             tailscaleIp: settings.tailscaleIp,
+            ollamaBaseUrl: settings.ollamaBaseUrl,
             compactionPreserveRecentCount: settings.compaction.preserveRecentCount,
-            compactionTriggerTokenThreshold: settings.compaction.triggerTokenThreshold,
-            transcriptionEnabled: settings.transcriptionEnabled
+            compactionTriggerTokenThreshold: settings.compaction.triggerTokenThreshold
         )
     }
 }
@@ -68,9 +69,9 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
 enum SettingsMutation {
     case defaultWorkspace(String)
     case defaultModel(String)
+    case ollamaBaseUrl(String)
     case compactionTriggerTokenThreshold(Double)
     case compactionPreserveRecentCount(Int)
-    case transcriptionEnabled(Bool)
 }
 
 /// Black-box settings contract for server-authoritative settings.
@@ -85,18 +86,13 @@ protocol SettingsRepository: AnyObject {
 
 struct AuthSnapshot: Equatable {
     let providers: [String: ProviderAuthSnapshot]
-    let services: [String: ServiceAuthSnapshot]
 
-    init(providers: [String: ProviderAuthSnapshot], services: [String: ServiceAuthSnapshot]) {
+    init(providers: [String: ProviderAuthSnapshot]) {
         self.providers = providers
-        self.services = services
     }
 
     init(_ state: AuthState) {
-        self.init(
-            providers: state.providers.mapValues(ProviderAuthSnapshot.init),
-            services: state.services.mapValues(ServiceAuthSnapshot.init)
-        )
+        self.init(providers: state.providers.mapValues(ProviderAuthSnapshot.init))
     }
 }
 
@@ -189,20 +185,6 @@ struct ProviderApiKeySnapshot: Equatable, Identifiable {
     }
 }
 
-struct ServiceAuthSnapshot: Equatable {
-    let hasApiKey: Bool
-    let apiKeyHint: String?
-
-    init(hasApiKey: Bool, apiKeyHint: String?) {
-        self.hasApiKey = hasApiKey
-        self.apiKeyHint = apiKeyHint
-    }
-
-    init(_ info: ServiceAuthInfo) {
-        self.init(hasApiKey: info.hasApiKey, apiKeyHint: info.apiKeyHint)
-    }
-}
-
 struct AuthCredentialSelection: Equatable, Sendable {
     enum Kind: String, Equatable, Sendable {
         case oauth
@@ -227,13 +209,11 @@ struct AuthCredentialSelection: Equatable, Sendable {
 }
 
 enum AuthMutation: Equatable, Sendable {
-    case serviceApiKey(service: String, key: String)
     case googleCloud(provider: String, clientId: String?, clientSecret: String?, projectId: String?)
 }
 
 enum AuthClearTarget: Equatable, Sendable {
     case provider(String)
-    case service(String)
 }
 
 struct OAuthBeginSnapshot: Equatable, Sendable {
@@ -276,18 +256,6 @@ protocol MessageRepository: AnyObject {
     ) async throws -> MessageDeleteResult
 }
 
-// MARK: - Transcription Repository
-
-@MainActor
-protocol TranscriptionRepository: AnyObject {
-    func transcribeAudio(
-        data: Data,
-        mimeType: String,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> TranscribeAudioResult
-    func listModels() async throws -> TranscriptionModelsResult
-}
-
 // MARK: - Workspace Browser Repository
 
 @MainActor
@@ -301,94 +269,309 @@ protocol WorkspaceBrowserRepository: AnyObject {
     ) async throws -> WorkspaceCreateDirectoryResult
 }
 
-// MARK: - Worker Lifecycle Repository
+// MARK: - Worker Kernel Repository
 
-/// Black-box worker lifecycle contract for the agent cockpit.
+/// Black-box operational contract for the engine-global worker console.
 @MainActor
-protocol WorkerLifecycleRepository: AnyObject {
-    func overview(afterRevision: UInt64?) async throws -> CatalogWatchSnapshotDTO
-
-    func listResources(kind: WorkerLifecycleResourceKind, lifecycle: String?, limit: UInt64) async throws -> ResourceListResultDTO
-
-    func inspectResource(_ resourceId: String) async throws -> ResourceInspectResultDTO
-
-    func moduleActivityOverview(
+protocol WorkerKernelRepository: AnyObject {
+    func engineSurfaceSnapshot(
+        sessionId: String?,
+        relevanceQuery: String?
+    ) async throws -> EngineIntrospectionSnapshotDTO
+    func workers(includeRetired: Bool) async throws -> WorkerListResultDTO
+    func inspectWorker(_ workerId: String) async throws -> WorkerInspectResultDTO
+    func workerRuns(
+        workerId: String?,
+        originSessionId: String?,
         limit: UInt64,
-        sessionId: String?,
-        workspaceId: String?
-    ) async throws -> ModuleActivityOverviewDTO
-
-    func capabilityCockpitOverview(
+        offset: UInt64?
+    ) async throws -> WorkerRunsResultDTO
+    func workerRunGraph(
+        invocationId: String?,
+        modelToolInvocationId: String?
+    ) async throws -> WorkerRunsResultDTO
+    func workerRunGraphs(
+        originSessionId: String,
         limit: UInt64,
-        sessionId: String?,
-        workspaceId: String?
-    ) async throws -> CapabilityCockpitOverviewDTO
-
-    func proposePackageChange(
-        manifest: [String: AnyCodable],
-        summary: String,
-        sessionId: String?,
-        workspaceId: String?,
+        offset: UInt64?
+    ) async throws -> WorkerRunsResultDTO
+    func workerResult(
+        invocationId: String,
+        pointer: String,
+        offset: UInt64,
+        limit: UInt8,
+        sessionId: String?
+    ) async throws -> WorkerResultChunkDTO
+    func workerInbox(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64?,
+        attentionOnly: Bool
+    ) async throws -> WorkerInboxResultDTO
+    func artifactDeliveries(
+        limit: UInt16,
+        offset: UInt64
+    ) async throws -> WorkerArtifactPageDTO
+    func artifactContent(
+        workerId: String,
+        artifactId: String
+    ) async throws -> WorkerArtifactContentDTO
+    func deleteArtifact(
+        workerId: String,
+        artifactId: String,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
-
-    func installPackage(
-        manifest: [String: AnyCodable],
-        sessionId: String?,
-        workspaceId: String?,
+    ) async throws -> WorkerArtifactDeleteDTO
+    func invokeWorker(
+        workerId: String,
+        input: AnyCodable,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
-
-    func enablePackage(
-        packageId: String,
-        packageVersion: String,
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
+    ) async throws -> WorkerInvocationDTO
+    func invokeWorkerFromSession(
+        workerId: String,
+        input: AnyCodable,
+        originSessionId: String,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
-
-    func disablePackage(
-        packageId: String,
-        packageVersion: String,
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
+    ) async throws -> WorkerInvocationDTO
+    func enqueueWorker(
+        workerId: String,
+        input: AnyCodable,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
-
-    func launchWorker(
-        packageId: String,
-        packageVersion: String,
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
+    ) async throws -> WorkerInvocationDTO
+    func cancelWorkerInvocation(
+        invocationId: String,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
-
+    ) async throws -> WorkerInvocationDTO
+    func detachWorkerInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO
+    func awaitWorkerInvocation(
+        invocationId: String,
+        timeoutSeconds: UInt8
+    ) async throws -> WorkerAwaitResultDTO
+    func retryWorkerInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO
+    func setWorkerEnabled(
+        _ enabled: Bool,
+        workerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerSummaryDTO
     func stopWorker(
-        launchAttemptResourceId: String,
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
+        workerId: String,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
+    ) async throws -> WorkerSummaryDTO
+    func rollbackWorker(
+        workerId: String,
+        version: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRollbackResultDTO
+    func retireWorker(
+        workerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerSummaryDTO
+    func purgeWorker(
+        workerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerPurgeResultDTO
+    func setWorkersStopped(
+        _ stopped: Bool,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerStopAllResultDTO
+    func rotateWorkerWebhook(
+        workerId: String,
+        triggerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerWebhookCredentialDTO
+    /// Starts connection-local worker invalidations at the current durable
+    /// stream tail. Historical evidence remains available through bounded
+    /// `runs` and `inbox` reads.
+    func ensureWorkerEventSubscriptions() async throws
+}
 
-    func createCatalogDiscoveryReport(
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> CatalogDiscoveryReportResultDTO
+extension WorkerKernelRepository {
+    func artifactDeliveries(
+        limit _: UInt16,
+        offset _: UInt64
+    ) async throws -> WorkerArtifactPageDTO {
+        throw EngineConnectionError.invalidResponse
+    }
 
-    func retirePackage(
-        packageId: String,
-        packageVersion: String,
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
+    func artifactContent(
+        workerId _: String,
+        artifactId _: String
+    ) async throws -> WorkerArtifactContentDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func deleteArtifact(
+        workerId _: String,
+        artifactId _: String,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> WorkerArtifactDeleteDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    /// Resolve only a just-completed bounded result needed by a native worker
+    /// contract. Historical lists and presentation paths must keep references
+    /// and use the explicit inspector instead.
+    ///
+    /// Session-originated native actions must hydrate their result with the
+    /// same durable session identity that admitted the invocation. This keeps
+    /// the server's narrow origin/delivery-grant authorization intact.
+    func resolvedWorkerResult(
+        _ invocation: WorkerInvocationDTO,
+        sessionId: String? = nil
+    ) async throws -> AnyCodable {
+        if let legacy = invocation.output?.legacyInline {
+            return legacy
+        }
+        guard let reference = invocation.output?.reference else {
+            throw EngineConnectionError.invalidResponse
+        }
+        guard reference.sizeBytes <= 32_768 else {
+            throw EngineConnectionError.invalidResponse
+        }
+        let chunk = try await workerResult(
+            invocationId: reference.invocationId,
+            pointer: "",
+            offset: 0,
+            limit: 20,
+            sessionId: sessionId ?? invocation.originSessionId
+        )
+        guard chunk.reference == reference,
+              chunk.pointer.isEmpty,
+              !chunk.truncated,
+              chunk.nextOffset == nil,
+              chunk.children.isEmpty else {
+            throw EngineConnectionError.invalidResponse
+        }
+        return chunk.value
+    }
+
+    func workerResult(
+        invocationId: String,
+        pointer: String,
+        offset: UInt64,
+        limit: UInt8,
+        sessionId _: String?
+    ) async throws -> WorkerResultChunkDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func workerResult(
+        invocationId: String,
+        pointer: String,
+        offset: UInt64,
+        limit: UInt8
+    ) async throws -> WorkerResultChunkDTO {
+        try await workerResult(
+            invocationId: invocationId,
+            pointer: pointer,
+            offset: offset,
+            limit: limit,
+            sessionId: nil
+        )
+    }
+
+    func workerRunGraph(
+        invocationId _: String?,
+        modelToolInvocationId _: String?
+    ) async throws -> WorkerRunsResultDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func workerRunGraphs(
+        originSessionId: String,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerRunsResultDTO {
+        try await workerRuns(
+            workerId: nil,
+            originSessionId: originSessionId,
+            limit: limit,
+            offset: offset
+        )
+    }
+
+    func detachWorkerInvocation(
+        invocationId _: String,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func awaitWorkerInvocation(
+        invocationId _: String,
+        timeoutSeconds _: UInt8
+    ) async throws -> WorkerAwaitResultDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func retryWorkerInvocation(
+        invocationId _: String,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func invokeWorkerFromSession(
+        workerId: String,
+        input: AnyCodable,
+        originSessionId _: String,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
+    ) async throws -> WorkerInvocationDTO {
+        try await invokeWorker(
+            workerId: workerId,
+            input: input,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO {
+        try await workerRuns(
+            workerId: workerId,
+            originSessionId: nil,
+            limit: limit,
+            offset: nil
+        )
+    }
+
+    func workerRuns(
+        workerId: String?,
+        originSessionId: String?,
+        limit: UInt64
+    ) async throws -> WorkerRunsResultDTO {
+        try await workerRuns(
+            workerId: workerId,
+            originSessionId: originSessionId,
+            limit: limit,
+            offset: nil
+        )
+    }
+
+    func workerInbox(workerId: String?, limit: UInt64) async throws -> WorkerInboxResultDTO {
+        try await workerInbox(
+            workerId: workerId,
+            limit: limit,
+            offset: nil,
+            attentionOnly: false
+        )
+    }
+
+    func workerAttention(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64? = nil
+    ) async throws -> WorkerInboxResultDTO {
+        try await workerInbox(
+            workerId: workerId,
+            limit: limit,
+            offset: offset,
+            attentionOnly: true
+        )
+    }
 }
 
 // MARK: - Chat Session Services
@@ -401,6 +584,5 @@ struct ChatSessionServices {
     let agent: any AgentRepository
     let models: any ModelRepository
     let messages: any MessageRepository
-    let transcription: any TranscriptionRepository
-    let workerLifecycle: any WorkerLifecycleRepository
+    let workerKernel: any WorkerKernelRepository
 }

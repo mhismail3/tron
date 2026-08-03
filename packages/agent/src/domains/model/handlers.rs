@@ -12,11 +12,8 @@ pub(crate) mod model {
         hidden = [];
         bindings = [
             "list" => |invocation, deps| {
-                let allow_server_context = matches!(
-                    invocation.causal_context.actor_kind,
-                    crate::engine::ActorKind::Client
-                );
-                routing::list_models(&invocation.payload, deps, allow_server_context).await
+                let _ = invocation;
+                routing::list_models(deps).await
             },
             "switch" => |invocation, deps| {
                 routing::switch_model(&invocation.payload, deps).await

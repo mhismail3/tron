@@ -1,17 +1,15 @@
 //! Auth workflow operations.
-use std::collections::HashMap;
 use std::path::Path;
 
 use super::{
     AccountEntry, ActiveCredential, ApiKeyEntry, DEFAULT_API_KEY_LABEL, KNOWN_PROVIDERS,
-    KNOWN_SERVICES, OAuthTokens, ProviderAuth, ServiceAuth, acquire_auth_file_lock,
-    load_auth_storage, load_or_init_for_write, map_auth_error, save_auth_storage,
-    save_named_api_key,
+    OAuthTokens, ProviderAuth, acquire_auth_file_lock, load_auth_storage, load_or_init_for_write,
+    map_auth_error, save_auth_storage, save_named_api_key,
 };
 use crate::domains::auth::Deps;
 use crate::engine::Invocation;
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use serde_json::Value;
 use serde_json::json;
 
@@ -20,16 +18,15 @@ pub(crate) async fn write_auth_and_broadcast<F>(
     invocation: &Invocation,
     task_name: &'static str,
     mutate: F,
-) -> Result<Value, CapabilityError>
+) -> Result<Value, ToolError>
 where
-    F: FnOnce(&Path) -> Result<(), CapabilityError> + Send + 'static,
+    F: FnOnce(&Path) -> Result<(), ToolError> + Send + 'static,
 {
     let auth_path = deps.auth_path.clone();
     let masked_state = run_blocking_task(task_name, move || {
-        let _lock =
-            acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
-                message: format!("Failed to acquire auth lock: {error}"),
-            })?;
+        let _lock = acquire_auth_file_lock(&auth_path).map_err(|error| ToolError::Internal {
+            message: format!("Failed to acquire auth lock: {error}"),
+        })?;
         mutate(&auth_path)?;
         build_masked_state(&auth_path).map_err(map_auth_error)
     })
@@ -42,8 +39,8 @@ pub(crate) fn update_standard_provider(
     auth_path: &Path,
     provider: &str,
     params: Option<&Value>,
-) -> Result<(), CapabilityError> {
-    let params = params.ok_or_else(|| CapabilityError::InvalidParams {
+) -> Result<(), ToolError> {
+    let params = params.ok_or_else(|| ToolError::InvalidParams {
         message: "Missing parameters".into(),
     })?;
 
@@ -93,8 +90,8 @@ pub(crate) fn update_standard_provider(
 pub(crate) fn update_google_provider(
     auth_path: &Path,
     params: Option<&Value>,
-) -> Result<(), CapabilityError> {
-    let params = params.ok_or_else(|| CapabilityError::InvalidParams {
+) -> Result<(), ToolError> {
+    let params = params.ok_or_else(|| ToolError::InvalidParams {
         message: "Missing parameters".into(),
     })?;
 
@@ -136,63 +133,25 @@ pub(crate) fn update_google_provider(
     save_auth_storage(auth_path, &mut storage).map_err(map_auth_error)
 }
 
-pub(crate) fn update_service(
-    auth_path: &Path,
-    service: &str,
-    params: Option<&Value>,
-) -> Result<(), CapabilityError> {
-    let params = params.ok_or_else(|| CapabilityError::InvalidParams {
-        message: "Missing parameters".into(),
-    })?;
-
-    let mut storage = load_or_init_for_write(auth_path).map_err(map_auth_error)?;
-    let services = storage.services.get_or_insert_with(HashMap::new);
-
-    if let Some(api_key_val) = params.get("apiKey") {
-        if api_key_val.is_null() {
-            let _: Option<_> = services.remove(service);
-        } else if let Some(key) = api_key_val.as_str()
-            && !key.is_empty()
-        {
-            let _: Option<_> = services.insert(service.to_owned(), ServiceAuth::from_single(key));
-        }
-    }
-
-    save_auth_storage(auth_path, &mut storage).map_err(map_auth_error)
-}
-
-pub(crate) fn clear_service_auth(
-    auth_path: &Path,
-    service: &str,
-) -> Result<(), crate::domains::auth::credentials::errors::AuthError> {
-    let Some(mut storage) = load_auth_storage(auth_path)? else {
-        return Ok(());
-    };
-    if let Some(ref mut services) = storage.services {
-        let _: Option<_> = services.remove(service);
-    }
-    save_auth_storage(auth_path, &mut storage)
-}
-
-pub(crate) fn parse_oauth_tokens(oauth: &Value) -> Result<OAuthTokens, CapabilityError> {
+pub(crate) fn parse_oauth_tokens(oauth: &Value) -> Result<OAuthTokens, ToolError> {
     let access_token = oauth
         .get("accessToken")
         .and_then(Value::as_str)
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: "oauth.accessToken is required".into(),
         })?
         .to_owned();
     let refresh_token = oauth
         .get("refreshToken")
         .and_then(Value::as_str)
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: "oauth.refreshToken is required".into(),
         })?
         .to_owned();
     let expires_at = oauth
         .get("expiresAt")
         .and_then(Value::as_i64)
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: "oauth.expiresAt is required (milliseconds)".into(),
         })?;
 
@@ -260,29 +219,7 @@ pub(crate) fn build_masked_state(
         }
     }
 
-    let mut services = serde_json::Map::new();
-    for &service in KNOWN_SERVICES {
-        let svc = storage
-            .as_ref()
-            .and_then(|storage| storage.get_service_auth(service));
-        let mut info = serde_json::Map::new();
-        if let Some(svc) = svc {
-            let first = svc
-                .api_keys
-                .first()
-                .expect("ServiceAuth.api_keys non-empty invariant");
-            let _ = info.insert("hasApiKey".into(), json!(true));
-            let _ = info.insert("apiKeyHint".into(), json!(mask_key(first)));
-        } else {
-            let _ = info.insert("hasApiKey".into(), json!(false));
-        }
-        let _ = services.insert(service.to_owned(), Value::Object(info));
-    }
-
-    Ok(json!({
-        "providers": Value::Object(providers),
-        "services": Value::Object(services),
-    }))
+    Ok(json!({"providers": Value::Object(providers)}))
 }
 
 pub(crate) fn empty_provider_info(google: bool) -> serde_json::Map<String, Value> {

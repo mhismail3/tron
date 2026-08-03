@@ -8,7 +8,7 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `host` | Catalog-backed invocation host, dispatch policy, recording, queue/stream/resource integration. |
+//! | `host` | Catalog-backed invocation host, dispatch policy, recording, state, and stream integration. |
 //! | `model` | Invocation, causal context, result, and durable invocation record DTOs. |
 //!
 //! ## Entry Points
@@ -22,8 +22,17 @@
 //!
 //! - Invocation IDs and causal context are created before dispatch and copied
 //!   into the durable record.
+//! - Local agent and worker paths carry their concrete actor identity.
+//! - Working directory, advertised surface pins, causal depth, delegated worker
+//!   parent, and a worker-selected agent-turn ceiling are closed typed
+//!   execution inputs. The latter two are causal/reliability evidence, never
+//!   authorization or semantic routing inputs.
 //! - Durable records preserve session/workspace/trace/idempotency references so
 //!   replay manifests can explain why an invocation occurred.
+//! - Model-originated direct calls carry the advertised function revision and,
+//!   for projected workers, immutable worker version. Preparation rejects a
+//!   changed contract as a typed stale-surface conflict instead of silently
+//!   routing provider arguments into a newer schema.
 //! - Production timestamps remain wall-clock values; deterministic tests and
 //!   replay/import paths inject timestamps explicitly.
 

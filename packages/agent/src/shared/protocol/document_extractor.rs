@@ -1,7 +1,7 @@
 //! Text extraction from document attachments.
 //!
-//! Handles text-based formats only (plain text, JSON). Binary formats like PDF
-//! are not extracted here — that's a separate future effort.
+//! Handles the text-based formats the provider context can admit directly
+//! (plain text and JSON). Binary formats remain opaque attachments.
 
 use base64::Engine;
 use serde_json::Value;

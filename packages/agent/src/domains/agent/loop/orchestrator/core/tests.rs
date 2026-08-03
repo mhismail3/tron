@@ -10,7 +10,7 @@ fn make_orchestrator() -> Orchestrator {
     .unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+        let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
     }
     let store = Arc::new(EventStore::new(pool));
     let mgr = Arc::new(SessionManager::new(store));
@@ -116,12 +116,80 @@ fn terminal_callback_serializes_replacement_admission() {
 }
 
 #[test]
+fn stable_delivery_boundary_serializes_run_admission_and_release() {
+    let orchestrator = Arc::new(make_orchestrator());
+    let run = orchestrator.begin_run("s1", "run-1").unwrap();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let stable_orchestrator = orchestrator.clone();
+    let stable = std::thread::spawn(move || {
+        stable_orchestrator.with_stable_active_run("s1", |active_run_id| {
+            assert_eq!(active_run_id, Some("run-1"));
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+    });
+    entered_rx.recv().unwrap();
+
+    let (dropped_tx, dropped_rx) = std::sync::mpsc::channel();
+    let dropping = std::thread::spawn(move || {
+        drop(run);
+        dropped_tx.send(()).unwrap();
+    });
+    assert!(
+        dropped_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err(),
+        "run release must wait while a delivery persists its stable boundary"
+    );
+    release_tx.send(()).unwrap();
+    dropped_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap();
+    stable.join().unwrap();
+    dropping.join().unwrap();
+
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let stable_orchestrator = orchestrator.clone();
+    let stable = std::thread::spawn(move || {
+        stable_orchestrator.with_stable_active_run("s1", |active_run_id| {
+            assert_eq!(active_run_id, None);
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+    });
+    entered_rx.recv().unwrap();
+
+    let (admitted_tx, admitted_rx) = std::sync::mpsc::channel();
+    let admission_orchestrator = orchestrator.clone();
+    let admission = std::thread::spawn(move || {
+        let admitted = admission_orchestrator.begin_run("s1", "run-2").unwrap();
+        admitted_tx.send(admitted).unwrap();
+    });
+    assert!(
+        admitted_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err(),
+        "run admission must wait while a delivery persists its stable boundary"
+    );
+    release_tx.send(()).unwrap();
+    let replacement = admitted_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap();
+    stable.join().unwrap();
+    admission.join().unwrap();
+    drop(replacement);
+}
+
+#[test]
 fn replacement_run_never_inherits_stale_reconstruction_projection() {
     let orch = make_orchestrator();
     let run_one = orch.begin_run("s1", "run-1").unwrap();
     let _ = orch.broadcast().emit(TronEvent::TurnStart {
         base: BaseEvent::now("s1").with_sequence(1),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     assert_eq!(
         orch.active_reconstruction_snapshot("s1")
@@ -164,30 +232,25 @@ fn status_snapshot_never_pairs_registry_run_with_replacement_projection() {
     let _ = orch.broadcast().emit(TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
-    let _ = orch
-        .broadcast()
-        .emit(TronEvent::CapabilityInvocationGenerating {
-            base: BaseEvent::now("s1"),
-            invocation_id: "cap-2".into(),
-            model_primitive_name: "execute".into(),
-            capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(
-            ),
-        });
-    let _ = orch
-        .broadcast()
-        .emit(TronEvent::CapabilityInvocationStarted {
-            base: BaseEvent::now("s1"),
-            invocation_id: "cap-2".into(),
-            model_primitive_name: "execute".into(),
-            arguments: None,
-            capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(
-            ),
-        });
+    let _ = orch.broadcast().emit(TronEvent::ToolInvocationGenerating {
+        base: BaseEvent::now("s1"),
+        invocation_id: "cap-2".into(),
+        tool_name: "test_tool".into(),
+        tool_identity: crate::shared::protocol::events::ToolEventIdentity::default(),
+    });
+    let _ = orch.broadcast().emit(TronEvent::ToolInvocationStarted {
+        base: BaseEvent::now("s1"),
+        invocation_id: "cap-2".into(),
+        tool_name: "test_tool".into(),
+        arguments: None,
+        tool_identity: crate::shared::protocol::events::ToolEventIdentity::default(),
+    });
 
-    let (run_id, capability) = orch.agent_status_snapshot("s1");
+    let (run_id, tool) = orch.agent_status_snapshot("s1");
     assert_eq!(run_id.as_deref(), Some("run-1"));
-    assert!(capability.is_none());
+    assert!(tool.is_none());
 }
 
 // --- Abort tests ---
@@ -248,16 +311,16 @@ fn abort_one_doesnt_affect_other() {
     assert!(!t2_token.is_cancelled());
 }
 
-// --- Capability invocation tracker tests ---
+// --- Tool invocation tracker tests ---
 
 #[tokio::test]
 async fn invocation_register_and_resolve() {
     let orch = make_orchestrator();
-    let rx = orch.register_capability_invocation("tc_1");
+    let rx = orch.register_tool_invocation("tc_1");
 
-    assert!(orch.has_pending_capability_invocation("tc_1"));
-    assert!(orch.resolve_capability_invocation("tc_1", json!({"result": "ok"})));
-    assert!(!orch.has_pending_capability_invocation("tc_1"));
+    assert!(orch.has_pending_tool_invocation("tc_1"));
+    assert!(orch.resolve_tool_invocation("tc_1", json!({"result": "ok"})));
+    assert!(!orch.has_pending_tool_invocation("tc_1"));
 
     let val = rx.await.unwrap();
     assert_eq!(val["result"], "ok");
@@ -266,7 +329,7 @@ async fn invocation_register_and_resolve() {
 #[test]
 fn invocation_resolve_unknown_returns_false() {
     let orch = make_orchestrator();
-    assert!(!orch.resolve_capability_invocation("unknown", json!(null)));
+    assert!(!orch.resolve_tool_invocation("unknown", json!(null)));
 }
 
 // --- Concurrency limit tests ---
@@ -349,7 +412,7 @@ async fn shutdown_cancels_all_runs() {
 #[tokio::test]
 async fn shutdown_clears_invocations() {
     let orch = make_orchestrator();
-    let rx = orch.register_capability_invocation("tc_1");
+    let rx = orch.register_tool_invocation("tc_1");
 
     orch.shutdown().await.unwrap();
     assert!(rx.await.is_err()); // sender was dropped
@@ -425,6 +488,27 @@ fn current_sequence_reads_without_increment() {
     let _ = orch.next_sequence("s1").unwrap();
     assert_eq!(orch.current_sequence("s1"), Some(2));
     assert_eq!(orch.current_sequence("s1"), Some(2));
+}
+
+#[tokio::test]
+async fn transient_session_events_share_the_live_sequence_counter() {
+    let orch = make_orchestrator();
+    orch.init_sequence_counter("s1", 7);
+    let mut events = orch.subscribe();
+
+    let delivered = orch.emit_transient_session_event(TronEvent::ToolInvocationProgress {
+        base: BaseEvent::now("s1"),
+        invocation_id: "provider-call-1".to_owned(),
+        tool_name: Some("worker_example".to_owned()),
+        message: Some("Working".to_owned()),
+        percent: Some(0.5),
+        tool_identity: Default::default(),
+    });
+
+    assert_eq!(delivered, 1);
+    let event = events.recv().await.unwrap();
+    assert_eq!(event.sequence(), Some(8));
+    assert_eq!(orch.current_sequence("s1"), Some(8));
 }
 
 #[test]
@@ -597,6 +681,7 @@ async fn shutdown_clears_orphaned_runs() {
     let _ = orch.broadcast().emit(TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 99,
+        agent_delivery_continuation: None,
     });
     assert!(
         orch.turn_accumulators

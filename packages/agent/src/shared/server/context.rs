@@ -1,7 +1,7 @@
 //! Server runtime setup context and shared domain support.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -13,14 +13,14 @@ use crate::engine::EngineHostHandle;
 use metrics::{counter, histogram};
 
 use crate::app::lifecycle::shutdown::{ShutdownCoordinator, ShutdownPhase};
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 
 const DEFAULT_BLOCKING_CONCURRENCY: usize = 16;
 const BLOCKING_SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 static GLOBAL_BLOCKING_SUPERVISOR: OnceLock<Arc<BlockingTaskSupervisor>> = OnceLock::new();
 
-/// Bounded owner for capability blocking work.
+/// Bounded owner for tool blocking work.
 ///
 /// Blocking closures cannot be force-aborted once the OS thread is running, so
 /// the production contract is: limit concurrency before side effects begin,
@@ -53,25 +53,29 @@ impl BlockingTaskSupervisor {
     }
 
     /// Run one blocking closure after acquiring a supervisor permit.
-    pub async fn run<T, F>(&self, task_name: &'static str, f: F) -> Result<T, CapabilityError>
+    pub async fn run<T, F>(&self, task_name: &'static str, f: F) -> Result<T, ToolError>
     where
         T: Send + 'static,
-        F: FnOnce() -> Result<T, CapabilityError> + Send + 'static,
+        F: FnOnce() -> Result<T, ToolError> + Send + 'static,
     {
         let start = Instant::now();
-        counter!("capability_blocking_tasks_started_total", "task" => task_name.to_owned())
-            .increment(1);
+        counter!("tool_blocking_tasks_started_total", "task" => task_name.to_owned()).increment(1);
 
-        let permit = self.semaphore.clone().acquire_owned().await.map_err(|_| {
-            CapabilityError::Internal {
-                message: format!("Blocking task supervisor closed before '{task_name}' started"),
-            }
-        })?;
+        let permit =
+            self.semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| ToolError::Internal {
+                    message: format!(
+                        "Blocking task supervisor closed before '{task_name}' started"
+                    ),
+                })?;
 
         let active = Arc::clone(&self.active);
         let drained = Arc::clone(&self.drained);
         let running = active.fetch_add(1, Ordering::SeqCst) + 1;
-        metrics::gauge!("capability_blocking_tasks_active").set(running as f64);
+        metrics::gauge!("tool_blocking_tasks_active").set(running as f64);
 
         match tokio::task::spawn_blocking(move || {
             let _guard = BlockingTaskGuard {
@@ -92,10 +96,10 @@ impl BlockingTaskSupervisor {
                 Err(error)
             }
             Err(error) => {
-                counter!("capability_blocking_failures_total", "task" => task_name.to_owned())
+                counter!("tool_blocking_failures_total", "task" => task_name.to_owned())
                     .increment(1);
                 record_blocking_outcome(task_name, start.elapsed(), "panic");
-                Err(CapabilityError::Internal {
+                Err(ToolError::Internal {
                     message: format!("Blocking task '{task_name}' failed: {error}"),
                 })
             }
@@ -129,7 +133,7 @@ struct BlockingTaskGuard {
 impl Drop for BlockingTaskGuard {
     fn drop(&mut self) {
         let remaining = self.active.fetch_sub(1, Ordering::SeqCst) - 1;
-        metrics::gauge!("capability_blocking_tasks_active").set(remaining as f64);
+        metrics::gauge!("tool_blocking_tasks_active").set(remaining as f64);
         if remaining == 0 {
             self.drained.notify_waiters();
         }
@@ -142,22 +146,18 @@ fn global_blocking_supervisor() -> Arc<BlockingTaskSupervisor> {
         .clone()
 }
 
-/// Register a bounded drain for capability blocking work during server shutdown.
+/// Register a bounded drain for tool blocking work during server shutdown.
 pub fn register_blocking_supervisor_shutdown(shutdown: &Arc<ShutdownCoordinator>) {
     let supervisor = global_blocking_supervisor();
-    shutdown.register_phase_callback(
-        ShutdownPhase::Capabilities,
-        "capability-blocking",
-        move || async move {
-            if !supervisor.drain(BLOCKING_SHUTDOWN_DRAIN_TIMEOUT).await {
-                tracing::warn!(
-                    active = supervisor.active_count(),
-                    timeout_ms = BLOCKING_SHUTDOWN_DRAIN_TIMEOUT.as_millis(),
-                    "timed out draining capability blocking tasks"
-                );
-            }
-        },
-    );
+    shutdown.register_phase_callback(ShutdownPhase::Tools, "tool-blocking", move || async move {
+        if !supervisor.drain(BLOCKING_SHUTDOWN_DRAIN_TIMEOUT).await {
+            tracing::warn!(
+                active = supervisor.active_count(),
+                timeout_ms = BLOCKING_SHUTDOWN_DRAIN_TIMEOUT.as_millis(),
+                "timed out draining tool blocking tasks"
+            );
+        }
+    });
 }
 
 /// Broad server runtime context used at app setup and domain registration.
@@ -173,16 +173,12 @@ pub struct ServerRuntimeContext {
     pub session_manager: Arc<SessionManager>,
     /// Event store for direct event queries.
     pub event_store: Arc<EventStore>,
-    /// Shared live capability engine host.
+    /// Shared live typed-function engine host.
     pub engine_host: EngineHostHandle,
-    /// Lazily loaded local speech-to-text backend.
-    pub transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
-    /// Private APNs token custody and optional relay transport.
-    pub apns_runtime: crate::platform::apns::ApnsRuntime,
-    /// Path to the sparse user profile settings overlay.
+    /// Path to the sparse engine settings file.
     pub settings_path: PathBuf,
-    /// Compiled active profile runtime.
-    pub profile_runtime: Arc<crate::domains::agent::r#loop::profile_runtime::ProfileRuntime>,
+    /// Current validated settings runtime.
+    pub settings_runtime: Arc<crate::domains::settings::SettingsRuntime>,
     /// Factory that creates a fresh model responder per prompt. When absent,
     /// the prompt handler returns `NotAvailable`.
     pub responder_factory: Option<Arc<dyn ModelResponderFactory>>,
@@ -192,7 +188,7 @@ pub struct ServerRuntimeContext {
     pub shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
     /// Server origin (e.g. `"localhost:9847"`).
     pub origin: String,
-    /// Path to auth JSON file (`~/.tron/profiles/auth.json`).
+    /// Path to auth JSON file (`~/.tron/auth.json`).
     pub auth_path: PathBuf,
     /// Pending OAuth flows keyed by flow ID (in-memory, TTL 10 min).
     pub oauth_flows: Arc<
@@ -200,68 +196,23 @@ pub struct ServerRuntimeContext {
             std::collections::HashMap<String, crate::domains::auth::oauth::flows::PendingOAuthFlow>,
         >,
     >,
-    /// WebSocket listening port. Surfaced via `system.getInfo` so iOS clients
-    /// can render the connection display ("Tailscale 100.x:9847") without
-    /// re-parsing user input. Initialized from config and updated after bind.
-    pub ws_port: Arc<AtomicU16>,
-    /// Path to the first-run sentinel (`~/.tron/internal/run/.onboarded`). Stored on
-    /// the context so tests can inject a temp path; production sets it to
-    /// [`crate::app::lifecycle::onboarding::onboarded_marker_path`]. Drives the `paired`
-    /// field returned by `system.getInfo`.
-    pub onboarded_marker_path: PathBuf,
 }
 
 impl ServerRuntimeContext {
-    /// Run blocking work on the dedicated blocking pool used by async capabilities.
-    pub async fn run_blocking<T, F>(
-        &self,
-        task_name: &'static str,
-        f: F,
-    ) -> Result<T, CapabilityError>
+    /// Run blocking work on the dedicated blocking pool used by async tools.
+    pub async fn run_blocking<T, F>(&self, task_name: &'static str, f: F) -> Result<T, ToolError>
     where
         T: Send + 'static,
-        F: FnOnce() -> Result<T, CapabilityError> + Send + 'static,
+        F: FnOnce() -> Result<T, ToolError> + Send + 'static,
     {
         run_blocking_task(task_name, f).await
     }
-
-    /// Spawn blocking work whose result is intentionally not part of the capability
-    /// response, while still registering the async owner with shutdown.
-    pub fn spawn_blocking_detached<F>(&self, task_name: &'static str, f: F)
-    where
-        F: FnOnce() -> Result<(), CapabilityError> + Send + 'static,
-    {
-        let handle = tokio::spawn(async move {
-            if let Err(error) = run_blocking_task(task_name, f).await {
-                tracing::warn!(task = task_name, error = %error, "detached blocking capability task failed");
-            }
-        });
-
-        if let Some(shutdown) = &self.shutdown_coordinator {
-            shutdown.register_task(handle);
-        } else {
-            drop(handle);
-        }
-    }
-
-    /// Current WebSocket listening port.
-    pub fn ws_port(&self) -> u16 {
-        self.ws_port.load(Ordering::SeqCst)
-    }
-
-    /// Update the current WebSocket listening port after bind.
-    pub fn set_ws_port(&self, port: u16) {
-        self.ws_port.store(port, Ordering::SeqCst);
-    }
 }
 
-pub(crate) async fn run_blocking_task<T, F>(
-    task_name: &'static str,
-    f: F,
-) -> Result<T, CapabilityError>
+pub(crate) async fn run_blocking_task<T, F>(task_name: &'static str, f: F) -> Result<T, ToolError>
 where
     T: Send + 'static,
-    F: FnOnce() -> Result<T, CapabilityError> + Send + 'static,
+    F: FnOnce() -> Result<T, ToolError> + Send + 'static,
 {
     global_blocking_supervisor().run(task_name, f).await
 }
@@ -272,13 +223,13 @@ fn record_blocking_outcome(
     outcome: &'static str,
 ) {
     counter!(
-        "capability_blocking_tasks_completed_total",
+        "tool_blocking_tasks_completed_total",
         "task" => task_name.to_owned(),
         "outcome" => outcome.to_owned()
     )
     .increment(1);
     histogram!(
-        "capability_blocking_task_duration_seconds",
+        "tool_blocking_task_duration_seconds",
         "task" => task_name.to_owned(),
         "outcome" => outcome.to_owned()
     )
@@ -293,32 +244,6 @@ mod tests {
         MockModelResponderFactory, ModelAwareMockFactory, StrictMockFactory, make_test_context,
     };
 
-    #[test]
-    fn context_has_server_start_time() {
-        let ctx = make_test_context();
-        let elapsed = ctx.server_start_time.elapsed();
-        assert!(elapsed.as_secs() < 5);
-    }
-
-    #[test]
-    fn server_start_time_allows_uptime_calc() {
-        let ctx = make_test_context();
-        let uptime = ctx.server_start_time.elapsed();
-        assert!(uptime.as_secs() < 5);
-    }
-
-    #[test]
-    fn context_has_orchestrator() {
-        let ctx = make_test_context();
-        assert_eq!(ctx.orchestrator.active_run_count(), 0);
-    }
-
-    #[test]
-    fn context_has_session_manager() {
-        let ctx = make_test_context();
-        assert_eq!(ctx.orchestrator.cached_session_count(), 0);
-    }
-
     #[tokio::test]
     async fn context_session_manager_matches_orchestrator() {
         let ctx = make_test_context();
@@ -327,24 +252,6 @@ mod tests {
             .create_session("model", "/tmp", Some("test"))
             .unwrap();
         assert_eq!(ctx.orchestrator.cached_session_count(), 1);
-    }
-
-    #[test]
-    fn context_has_event_store() {
-        let ctx = make_test_context();
-        let result = ctx.event_store.list_workspaces();
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn context_has_engine_host() {
-        let ctx = make_test_context();
-        let host = ctx.engine_host.lock().await;
-        assert!(
-            host.catalog()
-                .function(&crate::engine::FunctionId::new("engine::discover").unwrap())
-                .is_some()
-        );
     }
 
     #[tokio::test]
@@ -356,12 +263,6 @@ mod tests {
             .unwrap();
         let session = ctx.event_store.get_session(&sid).unwrap();
         assert!(session.is_some());
-    }
-
-    #[test]
-    fn context_has_settings_path() {
-        let ctx = make_test_context();
-        assert!(!ctx.settings_path.as_os_str().is_empty());
     }
 
     #[tokio::test]
@@ -389,7 +290,7 @@ mod tests {
     async fn run_blocking_executes_closure() {
         let ctx = make_test_context();
         let value = ctx
-            .run_blocking("test.run_blocking", || Ok::<_, CapabilityError>(41))
+            .run_blocking("test.run_blocking", || Ok::<_, ToolError>(41))
             .await;
         assert_eq!(value.unwrap(), 41);
     }
@@ -399,7 +300,7 @@ mod tests {
         let ctx = make_test_context();
         let err = ctx
             .run_blocking("test.run_blocking_error", || {
-                Err::<(), _>(CapabilityError::InvalidParams {
+                Err::<(), _>(ToolError::InvalidParams {
                     message: "bad input".into(),
                 })
             })
@@ -413,12 +314,9 @@ mod tests {
     async fn run_blocking_maps_panics_to_internal_error() {
         let ctx = make_test_context();
         let err = ctx
-            .run_blocking(
-                "test.run_blocking_panic",
-                || -> Result<(), CapabilityError> {
-                    panic!("boom");
-                },
-            )
+            .run_blocking("test.run_blocking_panic", || -> Result<(), ToolError> {
+                panic!("boom");
+            })
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INTERNAL_ERROR");
@@ -448,7 +346,7 @@ mod tests {
                         max_seen.fetch_max(now, Ordering::SeqCst);
                         std::thread::sleep(Duration::from_millis(30));
                         active.fetch_sub(1, Ordering::SeqCst);
-                        Ok::<_, CapabilityError>(())
+                        Ok::<_, ToolError>(())
                     })
                     .await
                     .unwrap();
@@ -470,7 +368,7 @@ mod tests {
             running
                 .run("test.blocking_drain", || {
                     std::thread::sleep(Duration::from_millis(30));
-                    Ok::<_, CapabilityError>(())
+                    Ok::<_, ToolError>(())
                 })
                 .await
                 .unwrap();
@@ -491,7 +389,7 @@ mod tests {
             running
                 .run("test.blocking_drain_timeout", || {
                     std::thread::sleep(Duration::from_millis(120));
-                    Ok::<_, CapabilityError>(())
+                    Ok::<_, ToolError>(())
                 })
                 .await
                 .unwrap();
@@ -504,21 +402,6 @@ mod tests {
         assert_eq!(supervisor.active_count(), 1);
         handle.await.unwrap();
         assert_eq!(supervisor.active_count(), 0);
-    }
-
-    #[test]
-    fn make_test_context_populates_all_fields() {
-        let ctx = make_test_context();
-        assert_eq!(ctx.orchestrator.active_run_count(), 0);
-        assert_eq!(ctx.orchestrator.cached_session_count(), 0);
-        assert!(ctx.event_store.list_workspaces().is_ok());
-        assert!(!ctx.settings_path.as_os_str().is_empty());
-    }
-
-    #[test]
-    fn context_can_leave_responder_factory_unconfigured() {
-        let ctx = make_test_context();
-        assert!(ctx.responder_factory.is_none());
     }
 
     #[tokio::test]

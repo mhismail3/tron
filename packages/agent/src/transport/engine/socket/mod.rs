@@ -4,16 +4,18 @@
 //! ids, server-driven heartbeat, and stream cursor subscription state. One
 //! stack-owned connection lease covers registry accounting, while one bounded
 //! child-task set owns the socket writer and subscription pump. Worker/client
-//! discover/inspect/watch/invoke/promote messages are translated into
+//! invoke messages are translated into
 //! [`crate::transport::engine::EngineTransportRequest`] and then dispatched
 //! through the canonical engine transport path. Public context is limited to
-//! session/workspace/trace correlation; authority scopes and runtime metadata
-//! are not accepted on the wire. Model providers do not receive this transport
-//! surface; they receive only the capability-domain `execute` orchestrator.
+//! session/workspace/trace correlation; authority scopes and trusted execution
+//! inputs are not accepted on the wire. Model providers receive their own
+//! direct typed tool surface rather than this authenticated client transport.
 //!
 //! A peer remains live while it returns Pong or any other inbound activity.
 //! Missing activity after a sent Ping retires the socket; teardown cancels its
 //! pumps, drops connection-local stream cursors, and bounds child-task drain.
+//! Explicit unsubscribe releases one cursor idempotently, while the fixed
+//! per-connection subscription ceiling bounds the 250 ms push-poll workload.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -23,17 +25,16 @@ use std::time::{Duration, Instant};
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use metrics::counter;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
-use crate::engine::EngineHostHandle;
 #[cfg(test)]
-use crate::engine::{StreamActorScope, StreamCursor};
+use crate::engine::StreamCursor;
 use crate::shared::server::context::ServerRuntimeContext;
-use crate::shared::server::errors::{CapabilityError, INVALID_PARAMS};
+use crate::shared::server::errors::{INVALID_PARAMS, ToolError};
 use crate::shared::server::failure::FailureOrigin;
 use crate::shared::server::validation::{MAX_JSON_DEPTH, validate_json_depth};
 use crate::transport::engine::{
@@ -46,11 +47,10 @@ const MIN_PROTOCOL_VERSION: u64 = 1;
 const OUTBOUND_QUEUE_CAPACITY: usize = 256;
 const STREAM_DEFAULT_LIMIT: usize = 100;
 const STREAM_MAX_LIMIT: usize = 500;
+const MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION: usize = 64;
 const PUSH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 const CONTROL_QUEUE_CAPACITY: usize = 1;
 const CHILD_TASK_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
-const LEGACY_SOCKET_SUBSCRIPTION_PREFIXES: [&str; 2] = ["engine-ws:", "engine-ws-stateless:"];
-
 mod outbound;
 mod stream_projection;
 mod subscriptions;
@@ -61,50 +61,9 @@ use outbound::{send_engine_ws_value, send_engine_ws_value_async};
 use stream_projection::stream_event_matches_filters;
 use subscriptions::{SubscriptionState, push_subscription_events};
 use wire::{
-    HeartbeatMessage, HelloMessage, InvokeMessage, PromoteMessage, RequestMessage, WireContext,
-    now_timestamp, optional_id, protocol_error,
+    HeartbeatMessage, HelloMessage, InvokeMessage, WireContext, now_timestamp, optional_id,
+    protocol_error,
 };
-
-/// Retire durable rows created by older `/engine` versions before socket
-/// subscriptions became connection-local. Exact UUIDv7 shapes avoid claiming
-/// caller-owned durable ids that only happen to share a textual prefix.
-pub(crate) async fn retire_legacy_socket_subscriptions(
-    engine_host: &EngineHostHandle,
-) -> crate::engine::Result<usize> {
-    let subscription_ids = engine_host.active_stream_subscription_ids().await?;
-    let mut retired = 0;
-    for subscription_id in subscription_ids
-        .iter()
-        .filter(|subscription_id| is_legacy_socket_subscription_id(subscription_id))
-    {
-        if engine_host.unsubscribe_stream(subscription_id).await? {
-            retired += 1;
-        }
-    }
-    Ok(retired)
-}
-
-fn is_legacy_socket_subscription_id(subscription_id: &str) -> bool {
-    let Some(suffix) = LEGACY_SOCKET_SUBSCRIPTION_PREFIXES
-        .iter()
-        .find_map(|prefix| subscription_id.strip_prefix(prefix))
-    else {
-        return false;
-    };
-    let mut segments = suffix.split(':');
-    let (Some(client_id), Some(instance_id), None) =
-        (segments.next(), segments.next(), segments.next())
-    else {
-        return false;
-    };
-    [client_id, instance_id].into_iter().all(|value| {
-        uuid::Uuid::parse_str(value).is_ok_and(|id| {
-            id.get_version() == Some(uuid::Version::SortRand)
-                && id.get_variant() == uuid::Variant::RFC4122
-                && id.to_string() == value
-        })
-    })
-}
 
 /// Tracks connected `/engine` clients.
 #[derive(Default)]
@@ -368,12 +327,9 @@ impl EngineWsSession {
 
         match message_type {
             "hello" => self.handle_hello(id, value).await,
-            "discover" => self.handle_request_message(id, "discover", value).await,
-            "inspect" => self.handle_request_message(id, "inspect", value).await,
-            "watch" => self.handle_request_message(id, "watch", value).await,
             "invoke" => self.handle_invoke(id, value).await,
-            "promote" => self.handle_promote(id, value).await,
             "subscribe" => self.handle_subscribe(id, value).await,
+            "unsubscribe" => self.handle_unsubscribe(id, value).await,
             "poll" => self.handle_poll(id, value).await,
             "ack" => self.handle_ack(id, value).await,
             "heartbeat" => self.handle_heartbeat(id, value).await,
@@ -436,29 +392,6 @@ impl EngineWsSession {
         }))
     }
 
-    async fn handle_request_message(
-        &self,
-        id: Option<String>,
-        public_method: &'static str,
-        value: Value,
-    ) -> bool {
-        let message = match serde_json::from_value::<RequestMessage>(value) {
-            Ok(message) => message,
-            Err(error) => {
-                return self.send_error(
-                    id,
-                    protocol_error(
-                        INVALID_PARAMS,
-                        format!("invalid request message: {error}"),
-                        None,
-                    ),
-                );
-            }
-        };
-        self.dispatch_transport(message.id, public_method, message.request, message.context)
-            .await
-    }
-
     async fn handle_invoke(&self, id: Option<String>, value: Value) -> bool {
         let message = match serde_json::from_value::<InvokeMessage>(value) {
             Ok(message) => message,
@@ -469,60 +402,18 @@ impl EngineWsSession {
                 );
             }
         };
-        let mut payload = Map::new();
-        payload.insert("functionId".to_owned(), Value::String(message.function_id));
-        payload.insert(
-            "payload".to_owned(),
-            message.payload.unwrap_or_else(|| json!({})),
-        );
-        if let Some(key) = message.idempotency_key {
-            payload.insert("idempotencyKey".to_owned(), Value::String(key));
-        }
-        self.dispatch_transport(
-            message.id,
-            "invoke",
-            Value::Object(payload),
-            message.context,
-        )
-        .await
-    }
-
-    async fn handle_promote(&self, id: Option<String>, value: Value) -> bool {
-        let message = match serde_json::from_value::<PromoteMessage>(value) {
-            Ok(message) => message,
-            Err(error) => {
-                return self.send_error(
-                    id,
-                    protocol_error(INVALID_PARAMS, format!("invalid promote: {error}"), None),
-                );
-            }
-        };
-        let mut payload = Map::new();
-        payload.insert("functionId".to_owned(), Value::String(message.function_id));
-        payload.insert(
-            "targetVisibility".to_owned(),
-            Value::String(message.target_visibility),
-        );
-        payload.insert(
-            "idempotencyKey".to_owned(),
-            Value::String(message.idempotency_key),
-        );
-        if let Some(workspace_id) = message.workspace_id {
-            payload.insert("workspaceId".to_owned(), Value::String(workspace_id));
-        }
-        self.dispatch_transport(
-            message.id,
-            "promote",
-            Value::Object(payload),
-            message.context,
-        )
-        .await
+        let payload = json!({
+            "functionId": message.function_id,
+            "payload": message.payload.unwrap_or_else(|| json!({})),
+            "idempotencyKey": message.idempotency_key,
+        });
+        self.dispatch_transport(message.id, payload, message.context)
+            .await
     }
 
     async fn dispatch_transport(
         &self,
         id: Option<String>,
-        public_method: &'static str,
         params_payload: Value,
         context_override: Option<WireContext>,
     ) -> bool {
@@ -532,21 +423,10 @@ impl EngineWsSession {
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let envelope = match build_engine_transport_request(EngineTransportBuildRequest {
             correlation_id,
-            public_method: public_method.to_owned(),
             params_payload,
             context,
         }) {
-            Ok(Some(envelope)) => envelope,
-            Ok(None) => {
-                return self.send_error(
-                    id,
-                    protocol_error(
-                        INVALID_PARAMS,
-                        format!("engine method {public_method} is not registered"),
-                        None,
-                    ),
-                );
-            }
+            Ok(envelope) => envelope,
             Err(error) => return self.send_error(id, error),
         };
         let trace_id = envelope.causal_context.trace_id.to_string();
@@ -615,14 +495,14 @@ impl EngineWsSession {
         .await
     }
 
-    fn send_error(&self, id: Option<String>, error: CapabilityError) -> bool {
+    fn send_error(&self, id: Option<String>, error: ToolError) -> bool {
         self.send_error_with_trace(id, error, None)
     }
 
     fn send_error_with_trace(
         &self,
         id: Option<String>,
-        error: CapabilityError,
+        error: ToolError,
         trace_id: Option<String>,
     ) -> bool {
         let failure = error

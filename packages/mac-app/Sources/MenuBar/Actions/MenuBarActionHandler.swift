@@ -12,6 +12,8 @@ enum MenuBarAction: Equatable, Sendable {
     case resumeServer
     case restartServer
     case stopDevServer
+    case stopMacOperator
+    case resumeMacOperator
     case uninstall
 }
 
@@ -46,6 +48,10 @@ final class MenuBarActionHandler {
             await restartServer()
         case .stopDevServer:
             await stopDevServer()
+        case .stopMacOperator:
+            menuBarController?.stopMacOperator()
+        case .resumeMacOperator:
+            menuBarController?.resumeMacOperator()
         case .uninstall:
             await confirmAndUninstall()
         }
@@ -205,13 +211,13 @@ final class MenuBarActionHandler {
             target: nil,
             action: nil
         )
-        resetSettingsCheckbox.toolTip = "Also clears [settings] overrides from ~/.tron/profiles/user/profile.toml. The database is never removed."
+        resetSettingsCheckbox.toolTip = "Also removes ~/.tron/settings.toml so compiled defaults apply. The database is never removed."
         let resetCredentialsCheckbox = NSButton(
             checkboxWithTitle: "Reset saved credentials",
             target: nil,
             action: nil
         )
-        resetCredentialsCheckbox.toolTip = "Also removes ~/.tron/profiles/auth.json. The database is never removed."
+        resetCredentialsCheckbox.toolTip = "Also removes ~/.tron/auth.json. The database is never removed."
 
         resetSettingsCheckbox.sizeToFit()
         resetCredentialsCheckbox.sizeToFit()

@@ -61,16 +61,16 @@ fn build_message_preserves_internal_newlines() {
 }
 
 #[tokio::test]
-async fn duplicate_capability_invocations_deduped_by_id() {
+async fn duplicate_tool_invocations_deduped_by_id() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         // First occurrence — empty/malformed args
-        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-dup".into(), name: "execute".into() });
-        yield Ok(StreamEvent::CapabilityInvocationDraftDelta { invocation_id: "tc-dup".into(), arguments_delta: "{}".into() });
-        // Second occurrence — valid args (replaces via CapabilityInvocationDraftEnd dedup)
-        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-dup".into(), name: "execute".into() });
-        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-dup", "execute", {
+        yield Ok(StreamEvent::ToolInvocationDraftStart { invocation_id: "tc-dup".into(), name: "test_tool".into() });
+        yield Ok(StreamEvent::ToolInvocationDraftDelta { invocation_id: "tc-dup".into(), arguments_delta: "{}".into() });
+        // Second occurrence — valid args (replaces via ToolInvocationDraftEnd dedup)
+        yield Ok(StreamEvent::ToolInvocationDraftStart { invocation_id: "tc-dup".into(), name: "test_tool".into() });
+        yield Ok(StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: ToolInvocationDraft::new("tc-dup", "test_tool", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("command".into(), serde_json::json!("ls"));
                 m
@@ -78,83 +78,75 @@ async fn duplicate_capability_invocations_deduped_by_id() {
         });
         yield Ok(StreamEvent::Done {
             message: AssistantMessage { content: vec![], token_usage: None },
-            stop_reason: "capability_invocation".into(),
+            stop_reason: "tool_invocation".into(),
         });
     };
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     assert_eq!(
-        result.capability_invocations.len(),
+        result.tool_invocations.len(),
         1,
-        "duplicate capability invocations should be deduped"
+        "duplicate tool invocations should be deduped"
     );
-    assert_eq!(result.capability_invocations[0].id, "tc-dup");
+    assert_eq!(result.tool_invocations[0].id, "tc-dup");
     assert_eq!(
-        result.capability_invocations[0].arguments["command"],
+        result.tool_invocations[0].arguments["command"],
         serde_json::json!("ls")
     );
 }
 
-// -- finalize_capability_invocation unit tests --
+// -- finalize_tool_invocation unit tests --
 
 #[test]
-fn finalize_capability_invocation_with_valid_json() {
-    let mut capability_invocations = Vec::new();
+fn finalize_tool_invocation_with_valid_json() {
+    let mut tool_invocations = Vec::new();
     let mut id = Some("tc-1".to_string());
-    let mut name = Some("execute".to_string());
+    let mut name = Some("test_tool".to_string());
     let mut args = r#"{"command":"ls"}"#.to_string();
 
-    finalize_capability_invocation(&mut capability_invocations, &mut id, &mut name, &mut args);
+    finalize_tool_invocation(&mut tool_invocations, &mut id, &mut name, &mut args);
 
-    assert_eq!(capability_invocations.len(), 1);
-    assert_eq!(capability_invocations[0].name, "execute");
-    assert_eq!(capability_invocations[0].id, "tc-1");
+    assert_eq!(tool_invocations.len(), 1);
+    assert_eq!(tool_invocations[0].name, "test_tool");
+    assert_eq!(tool_invocations[0].id, "tc-1");
     assert_eq!(
-        capability_invocations[0].arguments["command"],
+        tool_invocations[0].arguments["command"],
         serde_json::json!("ls")
     );
 }
 
 #[test]
-fn finalize_capability_invocation_with_malformed_json() {
-    let mut capability_invocations = Vec::new();
+fn finalize_tool_invocation_with_malformed_json() {
+    let mut tool_invocations = Vec::new();
     let mut id = Some("tc-2".to_string());
     let mut name = Some("inspect".to_string());
     let mut args = "{ not valid".to_string();
 
-    finalize_capability_invocation(&mut capability_invocations, &mut id, &mut name, &mut args);
+    finalize_tool_invocation(&mut tool_invocations, &mut id, &mut name, &mut args);
 
-    assert_eq!(capability_invocations.len(), 1);
-    assert_eq!(capability_invocations[0].name, "inspect");
-    assert_eq!(capability_invocations[0].id, "tc-2");
-    assert!(capability_invocations[0].arguments.is_empty());
+    assert_eq!(tool_invocations.len(), 1);
+    assert_eq!(tool_invocations[0].name, "inspect");
+    assert_eq!(tool_invocations[0].id, "tc-2");
+    assert!(tool_invocations[0].arguments.is_empty());
 }
 
 #[test]
-fn finalize_capability_invocation_with_empty_string() {
-    let mut capability_invocations = Vec::new();
+fn finalize_tool_invocation_with_empty_string() {
+    let mut tool_invocations = Vec::new();
     let mut id = Some("tc-3".to_string());
     let mut name = Some("search".to_string());
     let mut args = String::new();
 
-    finalize_capability_invocation(&mut capability_invocations, &mut id, &mut name, &mut args);
+    finalize_tool_invocation(&mut tool_invocations, &mut id, &mut name, &mut args);
 
     assert!(
-        capability_invocations.is_empty(),
-        "empty partial arguments are ignored because providers may send the final capability-invocation arguments on the done item"
+        tool_invocations.is_empty(),
+        "empty partial arguments are ignored because providers may send the final tool-invocation arguments on the done item"
     );
     assert!(args.is_empty());
 }
@@ -208,17 +200,9 @@ async fn abort_mid_thinking_preserves_signature() {
     };
 
     let emitter = make_emitter();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     assert!(result.interrupted);
     // The thinking signature must be preserved on the message
@@ -245,7 +229,6 @@ async fn stream_trace_logs_metadata_without_content() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -276,16 +259,16 @@ async fn stream_trace_logs_metadata_without_content() {
 }
 
 #[test]
-fn malformed_capability_arguments_log_length_not_preview() {
+fn malformed_tool_arguments_log_length_not_preview() {
     let (logs, _guard) = capture_logs();
-    let mut capability_invocations = Vec::new();
+    let mut tool_invocations = Vec::new();
     let mut id = Some("tc-sensitive".to_string());
-    let mut name = Some("execute".to_string());
+    let mut name = Some("test_tool".to_string());
     let secret_args = r#"{"content":"secret-file-content""#.to_string();
     let mut malformed_args = secret_args.clone();
 
-    finalize_capability_invocation(
-        &mut capability_invocations,
+    finalize_tool_invocation(
+        &mut tool_invocations,
         &mut id,
         &mut name,
         &mut malformed_args,
@@ -298,7 +281,7 @@ fn malformed_capability_arguments_log_length_not_preview() {
                 && has_field(
                     event,
                     "agent_event",
-                    "stream_capability_invocation_arguments_malformed",
+                    "stream_tool_invocation_arguments_malformed",
                 )
                 && has_field(event, "invocation_id", "tc-sensitive")
                 && has_field(event, "args_len", &secret_args.len().to_string())

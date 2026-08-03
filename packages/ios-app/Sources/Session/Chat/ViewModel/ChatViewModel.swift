@@ -27,18 +27,15 @@ final class ChatViewModel {
     var hasMoreMessages = false
     /// Whether currently loading more messages
     var isLoadingMoreMessages = false
-    /// Composer microphone recording state.
+    /// Native composer capture state. Recognition is supplied by the active
+    /// worker that owns the `speech_transcription` client action.
     var isRecording = false
-    /// Smoothed microphone energy for the recording affordance (0...1).
     var recordingAudioLevel: Double = 0
-    /// Composer audio is being sent to local transcription.
     var isTranscribing = false
-
-    // MARK: - Display Stream State
-
-    /// Display stream state (active stream, frames, sheet, stop tracking)
-    var displayStreamState = DisplayStreamState()
-
+    var speechTranscriptionOwner: ClientActionOwnerDTO?
+    var isSpeechTranscriptionAvailable: Bool {
+        speechTranscriptionOwner != nil
+    }
     // MARK: - Input State (delegated to InputBarState)
 
     /// Text input - delegated to inputBarState
@@ -71,9 +68,9 @@ final class ChatViewModel {
     let modelPickerState: ModelPickerState
     // MARK: - Protocol Conformance (Context Protocols)
 
-    /// Make a capability visible for rendering (CapabilityInvocationContext)
-    func makeCapabilityInvocationVisible(_ invocationId: String) {
-        animationCoordinator.makeCapabilityInvocationVisible(invocationId)
+    /// Make a tool visible for rendering (ToolInvocationContext)
+    func makeToolInvocationVisible(_ invocationId: String) {
+        animationCoordinator.makeToolInvocationVisible(invocationId)
     }
 
     /// Logging methods (ChatCoordinatorContext)
@@ -139,7 +136,7 @@ final class ChatViewModel {
     /// Raw reconstruction events already loaded into the timeline window.
     ///
     /// Older pages are transformed with this newer context so an assistant
-    /// content block split from its capability completion still renders the
+    /// content block split from its tool completion still renders the
     /// completed chip instead of degrading to a running placeholder.
     @ObservationIgnored
     var loadedReconstructionEvents: [RawEvent] = []
@@ -160,14 +157,14 @@ final class ChatViewModel {
     var localNotificationIdsByDedupKey: [String: UUID] = [:]
     // MARK: - Coordinators
 
-    /// Coordinates pill morph animations, message cascade timing, and capability staggering
+    /// Coordinates pill morph animations, message cascade timing, and tool staggering
     let animationCoordinator = AnimationCoordinator()
-    /// Ensures capability invocations appear in order and batches UI updates for 60fps
+    /// Ensures tool invocations appear in order and batches UI updates for 60fps
     let uiUpdateQueue = UIUpdateQueue()
     /// Manages text delta batching, thinking content, and backpressure
     let streamingManager = StreamingManager()
-    /// Coordinates capability invocation event handling (start/end) for capability invocation messages and UI updates
-    let capabilityInvocationCoordinator = CapabilityInvocationCoordinator()
+    /// Coordinates tool invocation event handling (start/end) for tool invocation messages and UI updates
+    let toolInvocationCoordinator = ToolInvocationCoordinator()
     /// Coordinates turn lifecycle handling (start/end, complete)
     let turnLifecycleCoordinator = TurnLifecycleCoordinator()
     /// Coordinates message sending, abort, and attachments
@@ -176,19 +173,22 @@ final class ChatViewModel {
     let connectionCoordinator = ConnectionCoordinator()
     /// Coordinates compaction event handling (start/complete pill transitions)
     let compactionCoordinator = CompactionCoordinator()
-    /// Coordinates local composer mic recording and transcription.
-    let transcriptionCoordinator = ChatTranscriptionCoordinator()
-    /// Cancellable composer voice task covering readiness, stop, file load, and transcription upload.
-    @ObservationIgnored
-    var transcriptionTask: Task<Void, Never>?
-    @ObservationIgnored
-    var transcriptionTaskGeneration: UInt64 = 0
-    /// Composer-scoped microphone recorder.
+    /// Coordinates the native capture → durable speech-worker → draft path.
+    let speechTranscriptionCoordinator = ChatSpeechTranscriptionCoordinator()
+    /// Native capture owns permission, recording, metering, and WAV encoding.
     let micRecorder = ComposerMicRecorder()
+    @ObservationIgnored
+    var speechTranscriptionTask: Task<Void, Never>?
+    @ObservationIgnored
+    var speechTranscriptionTaskGeneration: UInt64 = 0
+    @ObservationIgnored
+    var speechWorkerMonitorTask: Task<Void, Never>?
+    @ObservationIgnored
+    var speechWorkerMonitorTaskGeneration: UInt64 = 0
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
-    /// Message identities for capability invocations in the live current turn.
-    var currentTurnCapabilityMessageIds: Set<UUID> = []
+    /// Message identities for tool invocations in the live current turn.
+    var currentTurnToolMessageIds: Set<UUID> = []
 
     /// Track the message index where the current turn started
     /// Used to find which messages to update with metadata at turn_end
@@ -225,6 +225,9 @@ final class ChatViewModel {
     static let initialMessageBatchSize = 300
     /// Initial persisted event count requested from `session::reconstruct`.
     static let initialReconstructionEventLimit = 300
+    /// Worker audit sheets open inside another sheet and initially need only
+    /// the recent execution tail. Older activity remains explicitly pageable.
+    static let workerAuditReconstructionEventLimit = 120
     /// Upper bound for a single reconnect reconstruction request. Larger gaps
     /// are filled by bounded pagination in `processReconstructionResult`.
     static let maxReconstructionEventLimit = 1_000
@@ -267,13 +270,11 @@ final class ChatViewModel {
         self.eventStoreManager = eventStoreManager
         self.photoPickerDataLoader = photoPickerDataLoader
         self.modelPickerState = ModelPickerState(modelRepository: services.models)
+        micRecorder.onFinish = { [weak self] url, success in
+            self?.handleRecordingFinished(url: url, success: success)
+        }
         setupBindings()
         setupEventProcessingCallbacks()
-        micRecorder.onFinish = { [weak self] url, success in
-            Task { @MainActor [weak self] in
-                await self?.handleRecordingFinished(url: url, success: success)
-            }
-        }
     }
 
     @ObservationIgnored
@@ -282,10 +283,13 @@ final class ChatViewModel {
     private func setupBindings() {
         let connection = services.connection
         let inputBarState = inputBarState
-        let micRecorder = micRecorder
 
         observationTasks.append(Self.observeLoop({ connection.connectionState }) { [weak self] state in
             guard let self else { return }
+
+            if !state.isConnected {
+                cancelRecording()
+            }
 
             if case .disconnected = state {
                 // A matched Stop remains pending across transport loss. Only
@@ -296,8 +300,7 @@ final class ChatViewModel {
                 }
                 isCompacting = false
                 compactionInProgressMessageId = nil
-                runningCapabilityInvocationCount = 0
-                clearDisplayStreamState()
+                runningToolInvocationCount = 0
                 prunedLiveMessages.removeAll()
             }
         })
@@ -306,13 +309,14 @@ final class ChatViewModel {
             self?.startSelectedImageProcessing(images)
         })
 
-        observationTasks.append(Self.observeLoop({ micRecorder.isRecording }) { [weak self] recording in
-            self?.isRecording = recording
+        let micRecorder = micRecorder
+        observationTasks.append(Self.observeLoop({ micRecorder.isRecording }) { [weak self] isRecording in
+            self?.isRecording = isRecording
+        })
+        observationTasks.append(Self.observeLoop({ micRecorder.audioLevel }) { [weak self] audioLevel in
+            self?.recordingAudioLevel = audioLevel
         })
 
-        observationTasks.append(Self.observeLoop({ micRecorder.audioLevel }) { [weak self] level in
-            self?.recordingAudioLevel = level
-        })
     }
 
     func startLiveEventStream() {
@@ -348,6 +352,17 @@ final class ChatViewModel {
         eventTask = nil
     }
 
+    /// Release work whose lifecycle belongs to one mounted chat presentation.
+    /// Durable message/session state remains available for reconstruction when
+    /// the same SwiftUI state returns after a transient disappearance.
+    func deactivateMountedResources() {
+        cancelRecording()
+        stopLiveEventStream()
+        stopSpeechTranscriptionMonitoring()
+        uiUpdateQueue.flush()
+        streamingManager.suspendDisplayUpdates()
+    }
+
     /// Single cancel-and-replace owner for the current PhotosPicker selection.
     @ObservationIgnored
     var selectedImageTask: Task<Void, Never>?
@@ -359,7 +374,8 @@ final class ChatViewModel {
             eventTask?.cancel()
             for task in observationTasks { task.cancel() }
             selectedImageTask?.cancel()
-            transcriptionTask?.cancel()
+            speechTranscriptionTask?.cancel()
+            speechWorkerMonitorTask?.cancel()
             micRecorder.cancelRecording()
         }
     }
@@ -523,7 +539,7 @@ final class ChatViewModel {
     }
 
     /// Show "Processing..." only when the model is thinking and no other
-    /// visual feedback is active (streaming text, thinking block, or capability
+    /// visual feedback is active (streaming text, thinking block, or tool
     /// spinner).
     ///
     /// Every property read here must be on an @Observable object so SwiftUI
@@ -533,7 +549,7 @@ final class ChatViewModel {
         guard agentPhase == .processing else { return false }
         if messages.last?.isStreaming == true { return false }
         if isThinkingActivelyStreaming { return false }
-        if hasRunningCapabilityInvocations { return false }
+        if hasRunningToolInvocations { return false }
         return true
     }
 
@@ -546,13 +562,13 @@ final class ChatViewModel {
         return isStreaming
     }
 
-    /// Counter-based running capability detection — O(1) instead of O(n*m) scan.
-    /// Incremented in capability start handler, decremented in processOrderedCapabilityInvocationCompleted and capability end handler.
+    /// Counter-based running tool detection — O(1) instead of O(n*m) scan.
+    /// Incremented in tool start handler, decremented in processOrderedToolInvocationCompleted and tool end handler.
     /// Reset on turn start and disconnect.
-    var runningCapabilityInvocationCount: Int = 0
+    var runningToolInvocationCount: Int = 0
 
-    private var hasRunningCapabilityInvocations: Bool {
-        runningCapabilityInvocationCount > 0
+    private var hasRunningToolInvocations: Bool {
+        runningToolInvocationCount > 0
     }
 
     var currentModel: String {
@@ -565,7 +581,7 @@ final class ChatViewModel {
 
     /// Updates the context window from the model catalog loaded by ChatView.
     func updateContextWindow(from models: [ModelInfo]) {
-        if let model = models.first(where: { $0.id == currentModel }) {
+        if let model = ModelInfo.matching(currentModel, in: models) {
             contextState.currentContextWindow = model.contextWindow
         }
     }

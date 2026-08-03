@@ -10,8 +10,6 @@ pub(crate) struct PromptRunPlan {
     pub(super) settings: crate::domains::settings::TronSettings,
     pub(super) event_store: Arc<crate::domains::session::event_store::EventStore>,
     pub(super) shutdown_token: Option<tokio_util::sync::CancellationToken>,
-    pub(super) shutdown_coordinator:
-        Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) server_origin: String,
     pub(super) run_id: String,

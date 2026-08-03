@@ -16,6 +16,7 @@ extension ChatView {
                         isRecording: viewModel.isRecording,
                         recordingAudioLevel: viewModel.recordingAudioLevel,
                         isTranscribing: viewModel.isTranscribing,
+                        speechTranscriptionAvailable: viewModel.isSpeechTranscriptionAvailable,
                         placeholderText: initialLoadComplete ? "Type here" : "Loading latest messages",
                         placeholderShowsProgress: !initialLoadComplete,
                         contextPercentage: viewModel.contextState.contextPercentage,
@@ -46,9 +47,7 @@ extension ChatView {
                         },
                         onMicTap: viewModel.toggleRecording,
                         onHistoryNavigate: { newText in viewModel.inputText = newText },
-                        onContextTap: {
-                            sheetCoordinator.showContextControl()
-                        }
+                        onContextTap: { sheetCoordinator.showSessionContext() }
                     )
                 )
                 .id(sessionId)
@@ -60,8 +59,8 @@ extension ChatView {
 
     func handleBubbleTap(_ action: MessageBubbleTapAction) {
         switch action {
-        case .thinking(let content):
-            sheetCoordinator.showThinkingDetail(content)
+        case .thinking(let content, let kind):
+            sheetCoordinator.showThinkingDetail(content, kind: kind)
         case .compaction(let tokensBefore, let tokensAfter, let reason, let summary, let preservedTurns, let summarizedTurns):
             sheetCoordinator.showCompactionDetail(
                 tokensBefore: tokensBefore,
@@ -71,19 +70,19 @@ extension ChatView {
                 preservedTurns: preservedTurns,
                 summarizedTurns: summarizedTurns
             )
-        case .contextControlAction(let resourceId):
-            sheetCoordinator.showContextControl(actionResourceId: resourceId)
-        case .capabilityInvocation(let data):
-            sheetCoordinator.showCapabilityInvocationDetail(data)
-        case .capabilityInvocationGroup(let data):
-            sheetCoordinator.showCapabilityInvocationGroupDetail(data)
-        case .cancelCapabilityInvocation(let id):
-            viewModel.abortCapabilityInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortCapabilityInvocation"))
+        case .toolInvocation(let data):
+            sheetCoordinator.showToolInvocationDetail(data)
+        case .toolInvocationGroup(let data):
+            sheetCoordinator.showToolInvocationGroupDetail(data)
+        case .cancelToolInvocation(let id):
+            guard presentationMode == .interactiveSession else { return }
+            viewModel.abortToolInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortToolInvocation"))
         case .providerError(let data):
             sheetCoordinator.showProviderErrorDetail(data)
         case .localErrorDetail(let title, let message, let suggestion):
             sheetCoordinator.showLocalErrorDetail(title: title, message: message, suggestion: suggestion)
         case .retryTurn:
+            guard presentationMode == .interactiveSession else { return }
             // C7: user tapped the "Retry" button on a recoverable
             // `turn.failed` notification. Re-issues the last user prompt
             // so the agent tries the turn again.
@@ -92,6 +91,62 @@ extension ChatView {
     }
 
     // MARK: - Messages Scroll View
+
+    @ViewBuilder
+    var transcriptScrollView: some View {
+        if presentationMode == .workerAudit {
+            workerAuditMessagesScrollView
+        } else {
+            messagesScrollView
+        }
+    }
+
+    /// Read-only worker transcripts do not stream, own a composer, or need
+    /// viewport probes, scroll-position ownership, cascading visibility, and
+    /// geometry-driven autoload. Keeping this path intentionally small avoids
+    /// invalidating every transcript row while a detented sheet scrolls.
+    var workerAuditMessagesScrollView: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(spacing: 12) {
+                    if viewModel.hasMoreMessages {
+                        Button {
+                            Task {
+                                _ = await viewModel.loadEarlierMessagesForTopDetent()
+                            }
+                        } label: {
+                            Label("Load earlier activity", systemImage: "clock.arrow.circlepath")
+                                .font(TronTypography.sans(
+                                    size: TronTypography.sizeCaption,
+                                    weight: .semibold
+                                ))
+                                .foregroundStyle(.tronEmerald)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    let renderItems = ToolInvocationGrouping.renderItems(
+                        from: viewModel.messages
+                    )
+                    ForEach(renderItems) { item in
+                        workerAuditRenderItemView(item)
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom")
+                }
+                .padding()
+            }
+            .accessibilityIdentifier("worker-audit-message-scroll-view")
+            .defaultScrollAnchor(.bottom)
+            .onAppear {
+                scrollProxy = proxy
+            }
+        }
+    }
 
     var messagesScrollView: some View {
         ZStack(alignment: .bottom) {
@@ -103,7 +158,7 @@ extension ChatView {
                                 .id("topAutoloadSentinel")
                         }
 
-                        let renderItems = CapabilityInvocationGrouping.renderItems(from: viewModel.messages)
+                        let renderItems = ToolInvocationGrouping.renderItems(from: viewModel.messages)
                         ForEach(Array(renderItems.enumerated()), id: \.element.id) { index, item in
                             messageRenderItemView(
                                 item,
@@ -123,7 +178,6 @@ extension ChatView {
                             .frame(height: viewModel.shouldShowBreathingLine ? nil : 0, alignment: .top)
                             .clipped()
                             .opacity(viewModel.shouldShowBreathingLine ? 1 : 0)
-                            .animation(viewModel.shouldShowBreathingLine ? .easeInOut(duration: 0.3) : nil, value: viewModel.shouldShowBreathingLine)
                             .id("processing")
 
                         // Bottom anchor for scrolling
@@ -139,11 +193,19 @@ extension ChatView {
                     .padding()
                 }
                 .accessibilityIdentifier("chat-message-scroll-view")
-                // NOTE: We intentionally do NOT use .defaultScrollAnchor(.bottom) here.
-                // It causes content to jump off-screen when keyboard appears with long content,
-                // because it tries to re-anchor when container size changes.
-                // Instead, we manually scroll to bottom on initial load and when keyboard appears.
+                // Interactive chat keeps undersized content top-aligned and positions overflow
+                // manually so keyboard resizing cannot repeatedly re-anchor the transcript.
+                // Worker audits are read-only and have no composer, so native bottom alignment
+                // is stable there and makes the latest evidence visible as the sheet opens.
                 .coordinateSpace(name: ChatMessageScrollCoordinateSpace.name)
+                .defaultScrollAnchor(
+                    presentationMode == .workerAudit ? .bottom : .top,
+                    for: .alignment
+                )
+                .defaultScrollAnchor(
+                    presentationMode == .workerAudit ? .bottom : .top,
+                    for: .initialOffset
+                )
                 .scrollPosition($transcriptScrollPosition)
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.size.height
@@ -212,8 +274,7 @@ extension ChatView {
                 // After initial reveal, one observer owns bottom distance and the
                 // history top detent so overlapping scroll-geometry callbacks cannot
                 // invalidate each other's LazyVStack layout pass.
-                .onScrollGeometryChange(for: ChatScrollGeometryMetrics?.self) { geometry in
-                    guard initialLoadComplete else { return nil }
+                .onScrollGeometryChange(for: ChatScrollGeometryMetrics.self) { geometry in
                     let topDistance = max(0, geometry.contentOffset.y + geometry.contentInsets.top)
                     return ChatScrollGeometryMetrics(
                         distanceFromBottom: ChatTranscriptRevealPolicy.bottomDistance(
@@ -222,6 +283,7 @@ extension ChatView {
                             containerHeight: geometry.containerSize.height,
                             bottomInset: geometry.contentInsets.bottom
                         ),
+                        contentHeight: geometry.contentSize.height,
                         contentOffsetY: geometry.contentOffset.y,
                         viewportHeight: geometry.containerSize.height,
                         bottomInset: geometry.contentInsets.bottom,
@@ -230,10 +292,13 @@ extension ChatView {
                             viewportHeight: geometry.containerSize.height
                         )
                     )
-                } action: { oldMetrics, newMetrics in
-                    guard let metrics = newMetrics else { return }
-                    let oldMetrics = oldMetrics ?? metrics
-                    viewportMeasurements.recordViewportHeight(metrics.viewportHeight)
+                } action: { oldMetrics, metrics in
+                    viewportMeasurements.recordScrollGeometry(
+                        contentHeight: metrics.contentHeight,
+                        viewportHeight: metrics.viewportHeight,
+                        bottomInset: metrics.bottomInset
+                    )
+                    guard initialLoadComplete else { return }
                     viewportMeasurements.isNearTopHistoryDetent = metrics.historyTopMetrics.isNearTop
                     if !metrics.historyTopMetrics.isNearTop,
                        viewportMeasurements.hasConsumedTopHistoryDetent {
@@ -315,6 +380,28 @@ extension ChatView {
                         reason: "processing state"
                     )
                 }
+                // The lightweight thinking row can reappear between tool calls
+                // while `isProcessing` remains true and message count is stable.
+                // Follow that real tail insertion after layout so it cannot settle
+                // beneath the composer's safe-area inset.
+                .onChange(of: viewModel.shouldShowBreathingLine) { wasVisible, isVisible in
+                    guard ChatTranscriptRevealPolicy.shouldFollowTransientTail(
+                        wasVisible: wasVisible,
+                        isVisible: isVisible,
+                        initialLoadComplete: initialLoadComplete
+                    ) else { return }
+                    scrollCoordinator.contentDidArrive()
+                    taskCoordinator.replaceTask(.liveTailScroll) { ticket in
+                        await Task.yield()
+                        try? await Task.sleep(for: .milliseconds(20))
+                        guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+                        scrollToBottomIfAllowed(
+                            animated: true,
+                            animation: .easeOut(duration: 0.2),
+                            reason: "thinking row appeared"
+                        )
+                    }
+                }
                 // Re-anchor scroll position after live session pruning
                 .onChange(of: viewModel.prunedVersion) { _, _ in
                     scrollToBottomIfAllowed(reason: "session pruning")
@@ -346,6 +433,33 @@ extension ChatView {
             }
         }
         .animation(.easeOut(duration: 0.2), value: scrollCoordinator.shouldShowNewContentPill)
+    }
+
+    @ViewBuilder
+    private func workerAuditRenderItemView(
+        _ item: ChatMessageRenderItem
+    ) -> some View {
+        switch item {
+        case .message(let message):
+            MessageBubble(
+                message: message,
+                onTap: { action in handleBubbleTap(action) }
+            )
+            .padding(
+                .bottom,
+                ChatMessageLayout.bottomSpacingAdjustment(
+                    isDeliveryProvenanceOnly: message.isDeliveryProvenanceOnly
+                )
+            )
+            .id(message.id)
+        case .toolGroup(let group):
+            ToolInvocationGroupChip(
+                data: group.data,
+                onTap: { handleBubbleTap(.toolInvocationGroup(group.data)) }
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .id(group.id)
+        }
     }
 
     // MARK: - Scroll to Bottom Button
@@ -399,6 +513,12 @@ extension ChatView {
                 message: message,
                 onTap: { action in handleBubbleTap(action) }
             )
+            .padding(
+                .bottom,
+                ChatMessageLayout.bottomSpacingAdjustment(
+                    isDeliveryProvenanceOnly: message.isDeliveryProvenanceOnly
+                )
+            )
             .id(message.id)
             .background {
                 if initialLoadComplete, viewModel.hasMoreMessages {
@@ -414,10 +534,10 @@ extension ChatView {
                     : "chat-message-row"
             )
 
-        case .capabilityGroup(let group):
-            CapabilityInvocationGroupChip(
+        case .toolGroup(let group):
+            ToolInvocationGroupChip(
                 data: group.data,
-                onTap: { handleBubbleTap(.capabilityInvocationGroup(group.data)) }
+                onTap: { handleBubbleTap(.toolInvocationGroup(group.data)) }
             )
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(group.id)
@@ -565,6 +685,7 @@ private enum ChatMessageScrollCoordinateSpace {
 
 private struct ChatScrollGeometryMetrics: Equatable {
     let distanceFromBottom: CGFloat
+    let contentHeight: CGFloat
     let contentOffsetY: CGFloat
     let viewportHeight: CGFloat
     let bottomInset: CGFloat

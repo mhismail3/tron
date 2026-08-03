@@ -11,11 +11,13 @@ import Foundation
 @MainActor
 final class ChatViewTaskCoordinator {
     enum Key: Hashable {
+        case initialLoadWatchdog
         case modelPrefetch
         case connectionRefresh
         case deepLinkScroll
         case historyAutoload
         case keyboardScroll
+        case liveTailScroll
     }
 
     private let sessionId: String

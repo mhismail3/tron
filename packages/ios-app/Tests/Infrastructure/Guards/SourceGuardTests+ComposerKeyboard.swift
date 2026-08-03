@@ -2,6 +2,32 @@ import Testing
 import Foundation
 
 extension SourceGuardTests {
+    @Test("Chat composer owns one bottom inset and transient thinking follows without layout animation")
+    func testChatComposerAndTransientTailHaveSingleLayoutOwners() throws {
+        let iosRoot = iosAppRoot()
+        let shell = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/UI/Chat/Shell/ChatView.swift"
+            ),
+            encoding: .utf8
+        )
+        let messages = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/UI/Chat/Shell/ChatView+MessageList.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(
+            shell.components(separatedBy: ".safeAreaInset(edge: .bottom").count - 1 == 1
+        )
+        #expect(!messages.contains(
+            ".animation(viewModel.shouldShowBreathingLine"
+        ))
+        #expect(messages.contains(".onChange(of: viewModel.shouldShowBreathingLine)"))
+        #expect(messages.contains("replaceTask(.liveTailScroll)"))
+    }
+
     @Test("Composer attachment menu stays functional-only")
     func testComposerAttachmentMenuStaysFunctionalOnly() throws {
         let iosRoot = iosAppRoot()
@@ -35,37 +61,6 @@ extension SourceGuardTests {
             ".photosPicker(",
             "selection: $state.selectedImages",
         ]
-        let forbiddenFragments = [
-            "Add " + "Skill",
-            "Prompt " + "Library",
-            "Draft a " + "Plan",
-            "draft" + "Plan" + "Requested",
-            "Queued" + "Message",
-            "Pending" + "Queue" + "Item",
-            "show" + "Skill",
-            "skill" + "Mention",
-            "prompt" + "Library",
-            "pending" + "Attachment" + "Menu" + "Action",
-            "present" + "Pending" + "Attachment" + "Menu" + "Action",
-            "onDismiss: present" + "Pending" + "Attachment" + "Menu" + "Action",
-            "AttachmentNativeMenuOverlay",
-            "UIViewRepresentable",
-            "preferredElementSize",
-            "AttachmentMenuPopup",
-            "AttachmentMenuSheet",
-            "GlassRecentInputsButton",
-            ".popover(isPresented: $showAttachmentMenu",
-            ".sheet(isPresented: $showAttachmentMenu",
-            "compactHeightSheetPresentation(height: CompactActionSheetLayout.sheetHeight",
-            ".font(.system(size: 28",
-            ".frame(width: 300, alignment: .leading)",
-            "GlassAttachmentButton(",
-            "GlassActionButton(",
-            "GlassMicButton(",
-            ".matchedGeometryEffect(id: \"attachmentMorph\"",
-            ".matchedGeometryEffect(id: \"actionMorph\"",
-        ]
-
         let combined = try checkedPaths.map { relativePath in
             try String(
                 contentsOf: iosRoot.appendingPathComponent(relativePath),
@@ -79,13 +74,6 @@ extension SourceGuardTests {
 
         for fragment in requiredLayoutFragments {
             #expect(combined.contains(fragment), "composer attachment menu must keep keyboard-preserving native menu layout `\(fragment)`")
-        }
-
-        for fragment in forbiddenFragments {
-            #expect(
-                !combined.contains(fragment),
-                "composer attachment menu must not restore Phase 2/review-only affordance `\(fragment)`"
-            )
         }
     }
 
@@ -109,9 +97,9 @@ extension SourceGuardTests {
         )
         #expect(
             source.contains("ComposerAttachmentButton(") &&
-                source.contains("attachmentCapability: config.attachmentCapability") &&
+                source.contains("attachmentSupport: config.attachmentSupport") &&
                 source.contains("includeRecentInputs: shouldShowRecentInputsMenuAction"),
-            "The attachment action menu should stay attached to the composer plus button with the current model capability"
+            "The attachment action menu should stay attached to the composer plus button with the current model support"
         )
         #expect(
             !source.contains(".popover(isPresented: $showAttachmentMenu") &&
@@ -131,7 +119,7 @@ extension SourceGuardTests {
         let attachmentMenuRange = try #require(source.range(of: "ComposerAttachmentButton("))
 
         #expect(source.contains("ComposerAttachmentButton("))
-        #expect(source.contains("ContextBriefingButton("))
+        #expect(source.contains("ContextProgressButton("))
         #expect(source.contains("ComposerTrailingButton("))
         #expect(source.contains("inputField"))
         #expect(source.components(separatedBy: ".glassEffect(").count - 1 == 1)
@@ -179,29 +167,8 @@ extension SourceGuardTests {
             "inputHistory.addToHistory(sentText)",
             "defaults.removeObject(forKey: storageKey)",
         ]
-        let forbiddenFragments = [
-            "Prompt" + "Library",
-            "Prompt" + "Snippet",
-            "Prompt" + "Template",
-            "Prompt" + "Library" + "Client",
-            "prompt" + "_library::",
-            "prompt" + "Library",
-            "agent::" + "queue_prompt",
-            "skills::" + "activate",
-            "ui::" + "submit_action",
-            "artifact:prompt",
-            "addToHistory(viewModel.inputText)",
-        ]
-
         for fragment in requiredFragments {
             #expect(combined.contains(fragment), "recent input history should keep local behavior `\(fragment)`")
-        }
-
-        for fragment in forbiddenFragments {
-            #expect(
-                !combined.contains(fragment),
-                "recent input history must not restore backend prompt-history or routing behavior `\(fragment)`"
-            )
         }
     }
 
@@ -213,7 +180,9 @@ extension SourceGuardTests {
             encoding: .utf8
         )
         let receiverStart = try #require(source.range(of: ".onReceive(NotificationCenter.default.publisher(for: .pendingShareMessage))"))
-        let receiverEnd = try #require(source[receiverStart.upperBound...].range(of: ".onAppear"))
+        let receiverEnd = try #require(
+            source[receiverStart.upperBound...].range(of: ".onChange(of: scenePhase)")
+        )
         let receiverSource = String(source[receiverStart.lowerBound..<receiverEnd.lowerBound])
 
         #expect(

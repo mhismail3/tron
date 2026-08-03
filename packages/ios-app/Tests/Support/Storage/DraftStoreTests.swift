@@ -48,8 +48,8 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertTrue(freshState.attachments.isEmpty)
     }
 
-    func testSaveAndLoad_withAttachments() async throws {
-        let attachmentData = Data(repeating: 0xAB, count: 256)
+    func testSaveAndLoad_largeAttachmentUsesFileOwner() async throws {
+        let attachmentData = Data(repeating: 0xAB, count: 2 * 1_024 * 1_024)
         let attachmentId = UUID()
         let state = InputBarState()
         state.attachments = [makeAttachment(id: attachmentId, data: attachmentData)]

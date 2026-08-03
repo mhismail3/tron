@@ -35,14 +35,25 @@ final class ComposerMicCaptureBuffer: @unchecked Sendable {
     }
 }
 
+/// Native microphone actuator for the prompt composer.
+///
+/// It owns permission, a bounded mono PCM capture, metering, and WAV encoding.
+/// It deliberately owns no model, transcription, cleanup, or routing policy.
 @MainActor
 final class ComposerMicCaptureEngine {
     private(set) var isRunning = false
     private(set) var sampleRate: Double = 44_100
 
-    nonisolated static let sessionOptions: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .mixWithOthers]
+    nonisolated static let sessionOptions: AVAudioSession.CategoryOptions = [
+        .defaultToSpeaker,
+        .mixWithOthers,
+    ]
 
     private var engine: AVAudioEngine?
+    /// True only after this instance successfully activates the shared audio
+    /// session. A never-started recorder must not deactivate process-global
+    /// audio during ordinary chat teardown.
+    private var ownsActiveAudioSession = false
     private let captureBuffer = ComposerMicCaptureBuffer()
     private var simulatorRecordingStartedAt: Date?
 
@@ -91,15 +102,18 @@ final class ComposerMicCaptureEngine {
             try session.setCategory(.playAndRecord, mode: .default, options: Self.sessionOptions)
             try session.setPreferredSampleRate(44_100)
             try session.setActive(true, options: [])
+            ownsActiveAudioSession = true
         } catch {
-            throw ComposerMicCaptureError.startFailed("Failed to configure audio session: \(error.localizedDescription)")
+            throw ComposerMicCaptureError.startFailed(
+                "Failed to configure audio session: \(error.localizedDescription)"
+            )
         }
 
         sampleRate = session.sampleRate
         let audioEngine = AVAudioEngine()
         let inputNode = audioEngine.inputNode
-        let hwFormat = inputNode.outputFormat(forBus: 0)
-        guard hwFormat.channelCount > 0, hwFormat.sampleRate > 0 else {
+        let hardwareFormat = inputNode.outputFormat(forBus: 0)
+        guard hardwareFormat.channelCount > 0, hardwareFormat.sampleRate > 0 else {
             try? session.setActive(false, options: [.notifyOthersOnDeactivation])
             throw ComposerMicCaptureError.startFailed("No audio input available")
         }
@@ -110,7 +124,9 @@ final class ComposerMicCaptureEngine {
         } catch {
             inputNode.removeTap(onBus: 0)
             try? session.setActive(false, options: [.notifyOthersOnDeactivation])
-            throw ComposerMicCaptureError.startFailed("Failed to start audio engine: \(error.localizedDescription)")
+            throw ComposerMicCaptureError.startFailed(
+                "Failed to start audio engine: \(error.localizedDescription)"
+            )
         }
 
         engine = audioEngine
@@ -159,7 +175,7 @@ final class ComposerMicCaptureEngine {
         on inputNode: AVAudioInputNode,
         buffer: ComposerMicCaptureBuffer
     ) {
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { pcmBuffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 4_096, format: nil) { pcmBuffer, _ in
             guard let floatData = pcmBuffer.floatChannelData else { return }
             let frameCount = Int(pcmBuffer.frameLength)
             let channels = Int(pcmBuffer.format.channelCount)
@@ -169,16 +185,15 @@ final class ComposerMicCaptureEngine {
             var squaredAmplitude: Float = 0
             int16Data.withUnsafeMutableBytes { rawBuffer in
                 let samples = rawBuffer.bindMemory(to: Int16.self)
-                for i in 0..<frameCount {
-                    let sample: Float
-                    if channels > 1 {
-                        sample = (floatData[0][i] + floatData[1][i]) * 0.5
+                for index in 0..<frameCount {
+                    let sample: Float = if channels > 1 {
+                        (floatData[0][index] + floatData[1][index]) * 0.5
                     } else {
-                        sample = floatData[0][i]
+                        floatData[0][index]
                     }
                     let clamped = max(-1.0, min(1.0, sample))
                     squaredAmplitude += clamped * clamped
-                    samples[i] = Int16(clamped * 32767.0)
+                    samples[index] = Int16(clamped * 32_767.0)
                 }
             }
             let rms = sqrt(squaredAmplitude / Float(frameCount))
@@ -232,14 +247,22 @@ final class ComposerMicCaptureEngine {
         }
     }
 
-    private static func simulatorSilentPCMData(sampleRate: Double, elapsed: TimeInterval) -> Data {
+    private static func simulatorSilentPCMData(
+        sampleRate: Double,
+        elapsed: TimeInterval
+    ) -> Data {
         let boundedSeconds = min(max(elapsed, 0.25), 5.0)
         let frameCount = max(4_096, Int(sampleRate * boundedSeconds))
         return Data(count: frameCount * 2)
     }
 
     private func deactivateSession() {
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        guard ownsActiveAudioSession else { return }
+        ownsActiveAudioSession = false
+        try? AVAudioSession.sharedInstance().setActive(
+            false,
+            options: [.notifyOthersOnDeactivation]
+        )
     }
 }
 
@@ -255,12 +278,12 @@ enum ComposerMicCaptureError: LocalizedError {
 
 private extension Data {
     mutating func append(littleEndian value: UInt16) {
-        var v = value.littleEndian
-        append(Data(bytes: &v, count: 2))
+        var value = value.littleEndian
+        append(Data(bytes: &value, count: 2))
     }
 
     mutating func append(littleEndian value: UInt32) {
-        var v = value.littleEndian
-        append(Data(bytes: &v, count: 4))
+        var value = value.littleEndian
+        append(Data(bytes: &value, count: 4))
     }
 }

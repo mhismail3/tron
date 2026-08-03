@@ -3,10 +3,10 @@
 #![allow(unused_results)]
 
 use super::*;
-use crate::domains::session::event_store::sqlite::migrations::run_migrations;
 use crate::domains::session::event_store::sqlite::repositories::workspace::{
     CreateWorkspaceOptions, WorkspaceRepo,
 };
+use crate::domains::session::event_store::sqlite::schema::ensure_schema;
 
 fn setup() -> (Connection, String) {
     let conn = Connection::open_in_memory().unwrap();
@@ -14,7 +14,7 @@ fn setup() -> (Connection, String) {
         .unwrap();
     crate::domains::session::event_store::sqlite::connection::register_timestamp_functions(&conn)
         .unwrap();
-    run_migrations(&conn).unwrap();
+    ensure_schema(&conn).unwrap();
 
     let ws = WorkspaceRepo::create(
         &conn,

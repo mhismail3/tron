@@ -140,29 +140,6 @@ struct EngineProtocolResponseFrame: Decodable {
     let traceId: String?
 }
 
-struct EngineFunctionCallEnvelope<R: Decodable>: Decodable {
-    let child: EngineChildInvocation<R>
-}
-
-struct EngineChildInvocation<R: Decodable>: Decodable {
-    let invocationId: String?
-    let functionId: String?
-    let traceId: String?
-    let value: R?
-    let error: EngineChildError?
-    let replayedFrom: String?
-}
-
-struct EngineChildError: Decodable, Sendable {
-    let kind: String?
-    let message: String?
-    let details: [String: AnyCodable]?
-
-    var failure: CanonicalFailurePayload? {
-        CanonicalFailurePayload.fromDetails(details)
-    }
-}
-
 /// Known engine error codes from the server.
 ///
 /// Adding a case here forces exhaustive switches to handle new typed errors at
@@ -173,7 +150,7 @@ enum EngineErrorCode: String, CaseIterable, Sendable {
     case agentNotRunning = "AGENT_NOT_RUNNING"
     case invalidParams = "INVALID_PARAMS"
     case unknownMessageType = "UNKNOWN_MESSAGE_TYPE"
-    case capabilityNotFound = "CAPABILITY_NOT_FOUND"
+    case toolNotFound = "TOOL_NOT_FOUND"
     case invalidFunctionId = "INVALID_FUNCTION_ID"
     case unauthorized = "UNAUTHORIZED"
     case idempotencyConflict = "IDEMPOTENCY_CONFLICT"
@@ -213,7 +190,6 @@ struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
     let invocationId: String?
     let parentInvocationId: String?
     let sessionId: String?
-    let sourceEventId: String?
 
     init(
         code: String,
@@ -232,8 +208,7 @@ struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
         traceId: String? = nil,
         invocationId: String? = nil,
         parentInvocationId: String? = nil,
-        sessionId: String? = nil,
-        sourceEventId: String? = nil
+        sessionId: String? = nil
     ) {
         self.code = code
         self.category = category
@@ -252,7 +227,6 @@ struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
         self.invocationId = invocationId
         self.parentInvocationId = parentInvocationId
         self.sessionId = sessionId
-        self.sourceEventId = sourceEventId
     }
 
     init(failure: CanonicalFailurePayload) {
@@ -273,8 +247,7 @@ struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
             traceId: failure.traceId,
             invocationId: failure.invocationId,
             parentInvocationId: failure.parentInvocationId,
-            sessionId: failure.sessionId,
-            sourceEventId: failure.sourceEventId
+            sessionId: failure.sessionId
         )
     }
 
@@ -296,8 +269,7 @@ struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
             traceId: traceId,
             invocationId: invocationId,
             parentInvocationId: parentInvocationId,
-            sessionId: sessionId,
-            sourceEventId: sourceEventId
+            sessionId: sessionId
         )
     }
 

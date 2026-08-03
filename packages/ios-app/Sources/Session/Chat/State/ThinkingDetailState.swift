@@ -14,13 +14,19 @@ final class ThinkingDetailState {
 
     private let thinkingState: ThinkingState
     private let staticContent: String
+    private let staticKind: ThinkingDisplayKind
 
     /// Whether auto-scroll is enabled. Disabled when user scrolls up, re-enabled on return to bottom.
     private(set) var autoScrollEnabled: Bool = true
 
-    init(thinkingState: ThinkingState, staticContent: String) {
+    init(
+        thinkingState: ThinkingState,
+        staticContent: String,
+        staticKind: ThinkingDisplayKind = .thinking
+    ) {
         self.thinkingState = thinkingState
         self.staticContent = staticContent
+        self.staticKind = staticKind
     }
 
     // MARK: - Content Resolution
@@ -31,6 +37,14 @@ final class ThinkingDetailState {
             return thinkingState.currentText
         }
         return staticContent
+    }
+
+    /// Semantic source for the content currently selected by `displayContent`.
+    var displayKind: ThinkingDisplayKind {
+        if thinkingState.isStreaming || !thinkingState.currentText.isEmpty {
+            return thinkingState.kind
+        }
+        return staticKind
     }
 
     /// Whether thinking is currently being streamed.

@@ -9,7 +9,7 @@ extension ChatViewModel: TurnLifecycleContext {
     // MARK: - Turn Tracking State (Protocol Properties)
     // Most properties are already defined in ChatViewModel.swift:
     // - messages: [ChatMessage]
-    // - currentTurnCapabilityMessageIds: Set<UUID>
+    // - currentTurnToolMessageIds: Set<UUID>
     // - thinkingMessageId: UUID?
     // - turnStartMessageIndex: Int?
     // - firstTextMessageIdForTurn: UUID?
@@ -85,9 +85,9 @@ extension ChatViewModel: TurnLifecycleContext {
         uiUpdateQueue.enqueueTurnBoundary(data)
     }
 
-    /// Reset animation coordinator capability state (TurnLifecycleContext)
-    func resetAnimationCoordinatorCapabilityState() {
-        animationCoordinator.resetCapabilityState()
+    /// Reset animation coordinator tool state (TurnLifecycleContext)
+    func resetAnimationCoordinatorToolState() {
+        animationCoordinator.resetToolState()
     }
 
     /// Flush the UI update queue (TurnLifecycleContext)

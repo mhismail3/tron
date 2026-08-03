@@ -6,12 +6,10 @@ import Foundation
 enum TronPaths {
     private enum HomeComponent {
         static let internalDir = "internal"
-        static let profilesDir = "profiles"
-        static let userProfileDir = "user"
         static let runDir = "run"
         static let databaseDir = "database"
         static let authFile = "auth.json"
-        static let profileFile = "profile.toml"
+        static let settingsFile = "settings.toml"
     }
 
     static let tronDataDirEnv = "TRON_DATA_DIR"
@@ -47,8 +45,6 @@ enum TronPaths {
     }
 
     static var internalDir: URL { tronHome.appendingPathComponent(HomeComponent.internalDir, isDirectory: true) }
-    static var profilesDir: URL { tronHome.appendingPathComponent(HomeComponent.profilesDir, isDirectory: true) }
-    static var userProfileDir: URL { profilesDir.appendingPathComponent(HomeComponent.userProfileDir, isDirectory: true) }
     static var runDir: URL { internalDir.appendingPathComponent(HomeComponent.runDir, isDirectory: true) }
     static var databaseLockPath: URL {
             internalDir
@@ -73,7 +69,7 @@ enum TronPaths {
     }
 
     static var bearerTokenPath: URL {
-        profilesDir.appendingPathComponent(HomeComponent.authFile, isDirectory: false)
+        tronHome.appendingPathComponent(HomeComponent.authFile, isDirectory: false)
     }
 
     static var onboardedMarkerPath: URL {
@@ -92,8 +88,15 @@ enum TronPaths {
         runDir.appendingPathComponent(macWrapperLockFileName(bundleIdentifier: Bundle.main.bundleIdentifier), isDirectory: false)
     }
 
+    /// Owner-only local actuator socket created by the signed wrapper. The
+    /// ordinary Mac Operator worker derives this path from its Tron home; no
+    /// socket path or host identity enters its direct tool schema.
+    static var macOperatorSocketPath: URL {
+        runDir.appendingPathComponent("mac-operator.sock", isDirectory: false)
+    }
+
     static var settingsPath: URL {
-        userProfileDir.appendingPathComponent(HomeComponent.profileFile, isDirectory: false)
+        tronHome.appendingPathComponent(HomeComponent.settingsFile, isDirectory: false)
     }
 
     static var launchAgentPlistPath: URL {

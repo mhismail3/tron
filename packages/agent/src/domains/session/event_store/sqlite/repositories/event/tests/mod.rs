@@ -1,9 +1,8 @@
 use super::*;
 mod append_order_counters;
-mod pagination_filters;
 mod payload_blob_resolution;
 mod reconstruction_state;
-use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+use crate::domains::session::event_store::sqlite::schema::ensure_schema;
 use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::SessionEvent;
 use serde_json::Value;
@@ -13,7 +12,7 @@ fn setup() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
         .unwrap();
-    run_migrations(&conn).unwrap();
+    ensure_schema(&conn).unwrap();
 
     // Create workspace and session
     conn.execute(

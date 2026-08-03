@@ -84,7 +84,7 @@ fn convert_assistant_with_tool_calls() {
     let mut args = serde_json::Map::new();
     let _ = args.insert("path".into(), json!("/tmp/test"));
     let messages = vec![Message::Assistant {
-        content: vec![AssistantContent::CapabilityInvocation {
+        content: vec![AssistantContent::ToolInvocation {
             id: "toolu_abc123".into(),
             name: "read_file".into(),
             arguments: args,
@@ -100,7 +100,7 @@ fn convert_assistant_with_tool_calls() {
     assert_eq!(result[0].role, "assistant");
     let wire = serde_json::to_value(&result[0]).unwrap();
     assert!(wire["tool_calls"].is_array());
-    assert!(wire.get("capability_invocations").is_none());
+    assert!(wire.get("tool_invocations").is_none());
     let tc = result[0].tool_calls.as_ref().unwrap();
     assert_eq!(tc.len(), 1);
     assert_eq!(tc[0].function.name, "read_file");
@@ -128,6 +128,7 @@ fn convert_assistant_thinking_blocks_skipped() {
     let result = convert_messages(&messages, true);
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].content, Some("The answer is 42".into()));
+    assert!(result[0].thinking.is_none());
 }
 
 #[test]
@@ -148,12 +149,12 @@ fn convert_empty_assistant_skipped() {
 }
 
 #[test]
-fn convert_capability_result_message() {
+fn convert_tool_result_message() {
     let messages = vec![
         Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "toolu_xyz".into(),
-                name: "execute".into(),
+                name: "test_tool".into(),
                 arguments: serde_json::Map::new(),
                 thought_signature: None,
             }],
@@ -162,9 +163,9 @@ fn convert_capability_result_message() {
             stop_reason: None,
             thinking: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "toolu_xyz".into(),
-            content: CapabilityResultMessageContent::Text("command output".into()),
+            content: ToolResultMessageContent::Text("command output".into()),
             is_error: None,
         },
     ];
@@ -173,18 +174,18 @@ fn convert_capability_result_message() {
     assert_eq!(result[1].role, "tool");
     assert_eq!(result[1].content, Some("command output".into()));
     // Native Ollama API: tool results use tool_name, not invocation_id
-    assert_eq!(result[1].tool_name, Some("execute".into()));
+    assert_eq!(result[1].tool_name, Some("test_tool".into()));
 }
 
 #[test]
-fn capability_result_text_is_transport_exact() {
+fn tool_result_text_is_transport_exact() {
     let output_envelope = format!(
-        "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+        "{{\"summary\":\"{}\",\"kind\":\"test\"}}",
         "safe-évidence-".repeat(1_400)
     );
-    let messages = vec![Message::CapabilityResult {
+    let messages = vec![Message::ToolResult {
         invocation_id: "call_1".into(),
-        content: CapabilityResultMessageContent::Text(output_envelope.clone()),
+        content: ToolResultMessageContent::Text(output_envelope.clone()),
         is_error: None,
     }];
     let result = convert_messages(&messages, true);
@@ -193,7 +194,7 @@ fn capability_result_text_is_transport_exact() {
 
 #[test]
 fn convert_tools_to_chat_format() {
-    let capabilities = vec![ModelCapability {
+    let tools = vec![ModelTool {
         name: "get_weather".into(),
         description: "Get weather info".into(),
         parameters: serde_json::from_value(json!({
@@ -205,7 +206,7 @@ fn convert_tools_to_chat_format() {
         }))
         .unwrap(),
     }];
-    let result = convert_tools(&capabilities);
+    let result = convert_tools(&tools);
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].tool_type, "function");
     assert_eq!(result[0].function.name, "get_weather");
@@ -272,7 +273,7 @@ fn mixed_text_and_tool_calls_preserved() {
     let messages = vec![Message::Assistant {
         content: vec![
             AssistantContent::text("Let me search for that."),
-            AssistantContent::CapabilityInvocation {
+            AssistantContent::ToolInvocation {
                 id: "toolu_1".into(),
                 name: "search".into(),
                 arguments: args,
@@ -291,16 +292,16 @@ fn mixed_text_and_tool_calls_preserved() {
     assert_eq!(result[0].tool_calls.as_ref().unwrap().len(), 1);
 }
 
-// ── Phase 1: Arguments serialize as JSON objects ─────────────────────
+// ── Arguments serialize as JSON objects ──────────────────────────────
 
 #[test]
-fn capability_invocation_arguments_serialize_as_object() {
+fn tool_invocation_arguments_serialize_as_object() {
     let mut args = serde_json::Map::new();
     let _ = args.insert("command".into(), json!("echo hello"));
     let messages = vec![Message::Assistant {
-        content: vec![AssistantContent::CapabilityInvocation {
+        content: vec![AssistantContent::ToolInvocation {
             id: "toolu_01".into(),
-            name: "execute".into(),
+            name: "test_tool".into(),
             arguments: args,
             thought_signature: None,
         }],
@@ -322,11 +323,11 @@ fn capability_invocation_arguments_serialize_as_object() {
 }
 
 #[test]
-fn capability_invocation_empty_arguments_serialize_as_object() {
+fn tool_invocation_empty_arguments_serialize_as_object() {
     let messages = vec![Message::Assistant {
-        content: vec![AssistantContent::CapabilityInvocation {
+        content: vec![AssistantContent::ToolInvocation {
             id: "toolu_01".into(),
-            name: "execute".into(),
+            name: "test_tool".into(),
             arguments: serde_json::Map::new(),
             thought_signature: None,
         }],
@@ -343,14 +344,14 @@ fn capability_invocation_empty_arguments_serialize_as_object() {
 }
 
 #[test]
-fn capability_invocation_nested_arguments_serialize_as_object() {
+fn tool_invocation_nested_arguments_serialize_as_object() {
     let mut args = serde_json::Map::new();
     let _ = args.insert(
         "config".into(),
         json!({"key": "value", "nested": {"deep": true}}),
     );
     let messages = vec![Message::Assistant {
-        content: vec![AssistantContent::CapabilityInvocation {
+        content: vec![AssistantContent::ToolInvocation {
             id: "call_abc".into(),
             name: "configure".into(),
             arguments: args,
@@ -369,16 +370,16 @@ fn capability_invocation_nested_arguments_serialize_as_object() {
 }
 
 #[test]
-fn capability_invocation_arguments_with_special_chars() {
+fn tool_invocation_arguments_with_special_chars() {
     let mut args = serde_json::Map::new();
     let _ = args.insert(
         "command".into(),
         json!("echo \"hello\\nworld\" | grep 'test'"),
     );
     let messages = vec![Message::Assistant {
-        content: vec![AssistantContent::CapabilityInvocation {
+        content: vec![AssistantContent::ToolInvocation {
             id: "toolu_01".into(),
-            name: "execute".into(),
+            name: "test_tool".into(),
             arguments: args,
             thought_signature: None,
         }],
@@ -402,13 +403,13 @@ fn multiple_tool_calls_arguments_all_objects() {
     let _ = args2.insert("path".into(), json!("/tmp/b"));
     let messages = vec![Message::Assistant {
         content: vec![
-            AssistantContent::CapabilityInvocation {
+            AssistantContent::ToolInvocation {
                 id: "toolu_01".into(),
                 name: "inspect".into(),
                 arguments: args1,
                 thought_signature: None,
             },
-            AssistantContent::CapabilityInvocation {
+            AssistantContent::ToolInvocation {
                 id: "toolu_02".into(),
                 name: "inspect".into(),
                 arguments: args2,
@@ -425,20 +426,20 @@ fn multiple_tool_calls_arguments_all_objects() {
     for (i, tc) in wire["tool_calls"].as_array().unwrap().iter().enumerate() {
         assert!(
             tc["function"]["arguments"].is_object(),
-            "capability_invocation[{i}] arguments must be a JSON object"
+            "tool_invocation[{i}] arguments must be a JSON object"
         );
     }
 }
 
-// ── Phase 2: Tool results use tool_name ─────────────────────────────
+// ── Tool results use tool_name ───────────────────────────────────────
 
 #[test]
-fn capability_result_has_tool_name() {
+fn tool_result_has_tool_name() {
     let messages = vec![
         Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "toolu_01".into(),
-                name: "execute".into(),
+                name: "test_tool".into(),
                 arguments: serde_json::Map::new(),
                 thought_signature: None,
             }],
@@ -447,25 +448,24 @@ fn capability_result_has_tool_name() {
             stop_reason: None,
             thinking: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "toolu_01".into(),
-            content: CapabilityResultMessageContent::Text("ok".into()),
+            content: ToolResultMessageContent::Text("ok".into()),
             is_error: None,
         },
     ];
     let result = convert_messages(&messages, true);
     let wire = serde_json::to_value(&result[1]).unwrap();
-    assert_eq!(wire["tool_name"], "execute");
+    assert_eq!(wire["tool_name"], "test_tool");
     assert!(wire.get("invocation_id").is_none());
-    assert!(wire.get("model_primitive_name").is_none());
 }
 
 #[test]
-fn capability_result_after_provider_switch() {
+fn tool_result_after_provider_switch() {
     // Anthropic-origin IDs (toolu_*) must still resolve to tool_name
     let messages = vec![
         Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "toolu_01abc".into(),
                 name: "read_file".into(),
                 arguments: serde_json::Map::new(),
@@ -476,9 +476,9 @@ fn capability_result_after_provider_switch() {
             stop_reason: None,
             thinking: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "toolu_01abc".into(),
-            content: CapabilityResultMessageContent::Text("file contents".into()),
+            content: ToolResultMessageContent::Text("file contents".into()),
             is_error: None,
         },
     ];
@@ -487,11 +487,11 @@ fn capability_result_after_provider_switch() {
 }
 
 #[test]
-fn capability_result_with_blocks_content() {
-    use crate::shared::protocol::content::CapabilityResultContent;
+fn tool_result_with_blocks_content() {
+    use crate::shared::protocol::content::ToolResultContent;
     let messages = vec![
         Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "call_abc".into(),
                 name: "search".into(),
                 arguments: serde_json::Map::new(),
@@ -502,11 +502,11 @@ fn capability_result_with_blocks_content() {
             stop_reason: None,
             thinking: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "call_abc".into(),
-            content: CapabilityResultMessageContent::Blocks(vec![
-                CapabilityResultContent::text("line1"),
-                CapabilityResultContent::text("line2"),
+            content: ToolResultMessageContent::Blocks(vec![
+                ToolResultContent::text("line1"),
+                ToolResultContent::text("line2"),
             ]),
             is_error: None,
         },
@@ -517,13 +517,13 @@ fn capability_result_with_blocks_content() {
 }
 
 #[test]
-fn capability_result_with_is_error_still_converts() {
+fn tool_result_with_is_error_still_converts() {
     // is_error is silently dropped (Ollama native API doesn't support it)
     let messages = vec![
         Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "toolu_err".into(),
-                name: "execute".into(),
+                name: "test_tool".into(),
                 arguments: serde_json::Map::new(),
                 thought_signature: None,
             }],
@@ -532,29 +532,29 @@ fn capability_result_with_is_error_still_converts() {
             stop_reason: None,
             thinking: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "toolu_err".into(),
-            content: CapabilityResultMessageContent::Text("Error: permission denied".into()),
+            content: ToolResultMessageContent::Text("Error: permission denied".into()),
             is_error: Some(true),
         },
     ];
     let result = convert_messages(&messages, true);
     assert_eq!(result[1].role, "tool");
-    assert_eq!(result[1].tool_name, Some("execute".into()));
+    assert_eq!(result[1].tool_name, Some("test_tool".into()));
     assert_eq!(result[1].content, Some("Error: permission denied".into()));
 }
 
 #[test]
 fn full_roundtrip_conversation() {
-    // Full conversation: user → assistant+capability_invocation → capability_result
+    // Full conversation: user → assistant+tool_invocation → tool_result
     let mut args = serde_json::Map::new();
     let _ = args.insert("command".into(), json!("echo hello"));
     let messages = vec![
         Message::user("Run a command for me"),
         Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "toolu_01".into(),
-                name: "execute".into(),
+                name: "test_tool".into(),
                 arguments: args,
                 thought_signature: None,
             }],
@@ -563,9 +563,9 @@ fn full_roundtrip_conversation() {
             stop_reason: None,
             thinking: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "toolu_01".into(),
-            content: CapabilityResultMessageContent::Text("hello".into()),
+            content: ToolResultMessageContent::Text("hello".into()),
             is_error: None,
         },
     ];
@@ -584,7 +584,7 @@ fn full_roundtrip_conversation() {
     // Assistant message with tool call — arguments is an object
     assert_eq!(wire[1]["role"], "assistant");
     assert!(wire[1]["tool_calls"][0]["function"]["arguments"].is_object());
-    assert!(wire[1].get("capability_invocations").is_none());
+    assert!(wire[1].get("tool_invocations").is_none());
     assert_eq!(
         wire[1]["tool_calls"][0]["function"]["arguments"]["command"],
         "echo hello"
@@ -592,10 +592,9 @@ fn full_roundtrip_conversation() {
 
     // Tool result — uses tool_name, no invocation_id
     assert_eq!(wire[2]["role"], "tool");
-    assert_eq!(wire[2]["tool_name"], "execute");
+    assert_eq!(wire[2]["tool_name"], "test_tool");
     assert_eq!(wire[2]["content"], "hello");
     assert!(wire[2].get("invocation_id").is_none());
-    assert!(wire[2].get("model_primitive_name").is_none());
 }
 
 #[test]
@@ -607,15 +606,15 @@ fn multiple_tool_calls_multiple_results() {
     let messages = vec![
         Message::Assistant {
             content: vec![
-                AssistantContent::CapabilityInvocation {
+                AssistantContent::ToolInvocation {
                     id: "toolu_01".into(),
                     name: "read_file".into(),
                     arguments: args1,
                     thought_signature: None,
                 },
-                AssistantContent::CapabilityInvocation {
+                AssistantContent::ToolInvocation {
                     id: "toolu_02".into(),
-                    name: "execute".into(),
+                    name: "test_tool".into(),
                     arguments: args2,
                     thought_signature: None,
                 },
@@ -625,43 +624,43 @@ fn multiple_tool_calls_multiple_results() {
             stop_reason: None,
             thinking: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "toolu_01".into(),
-            content: CapabilityResultMessageContent::Text("file contents".into()),
+            content: ToolResultMessageContent::Text("file contents".into()),
             is_error: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "toolu_02".into(),
-            content: CapabilityResultMessageContent::Text("dir listing".into()),
+            content: ToolResultMessageContent::Text("dir listing".into()),
             is_error: None,
         },
     ];
     let result = convert_messages(&messages, true);
     assert_eq!(result.len(), 3);
     assert_eq!(result[1].tool_name, Some("read_file".into()));
-    assert_eq!(result[2].tool_name, Some("execute".into()));
+    assert_eq!(result[2].tool_name, Some("test_tool".into()));
 }
 
 #[test]
-fn capability_result_orphaned_id_unknown_marker() {
+fn tool_result_orphaned_id_unknown_marker() {
     // ToolResult with no matching assistant tool call → mark as "unknown".
-    let messages = vec![Message::CapabilityResult {
+    let messages = vec![Message::ToolResult {
         invocation_id: "orphan_id".into(),
-        content: CapabilityResultMessageContent::Text("result".into()),
+        content: ToolResultMessageContent::Text("result".into()),
         is_error: None,
     }];
     let result = convert_messages(&messages, true);
     assert_eq!(result[0].tool_name, Some("unknown".into()));
 }
 
-// ── Phase 3: Edge case verification ─────────────────────────────────
+// ── Edge case verification ───────────────────────────────────────────
 
 #[test]
 fn assistant_only_tool_calls_no_text() {
     let messages = vec![Message::Assistant {
-        content: vec![AssistantContent::CapabilityInvocation {
+        content: vec![AssistantContent::ToolInvocation {
             id: "call_abc".into(),
-            name: "execute".into(),
+            name: "test_tool".into(),
             arguments: serde_json::Map::new(),
             thought_signature: None,
         }],
@@ -688,7 +687,7 @@ fn assistant_thinking_text_and_tool_calls() {
                 signature: None,
             },
             AssistantContent::text("I'll search for that."),
-            AssistantContent::CapabilityInvocation {
+            AssistantContent::ToolInvocation {
                 id: "toolu_01".into(),
                 name: "search".into(),
                 arguments: args,
@@ -702,7 +701,8 @@ fn assistant_thinking_text_and_tool_calls() {
     }];
     let result = convert_messages(&messages, true);
     assert_eq!(result.len(), 1);
-    // Thinking is dropped
+    // Gemma 4 requires thinking to be retained on tool-call turns.
+    assert_eq!(result[0].thinking, Some("Let me plan this...".into()));
     assert_eq!(result[0].content, Some("I'll search for that.".into()));
     // Tool call preserved with object arguments
     let tc = result[0].tool_calls.as_ref().unwrap();
@@ -715,9 +715,9 @@ fn invocation_id_already_openai_format() {
     // IDs already in OpenAI format → no remapping needed, tool_name still resolves
     let messages = vec![
         Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "call_already_openai".into(),
-                name: "execute".into(),
+                name: "test_tool".into(),
                 arguments: serde_json::Map::new(),
                 thought_signature: None,
             }],
@@ -726,9 +726,9 @@ fn invocation_id_already_openai_format() {
             stop_reason: None,
             thinking: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "call_already_openai".into(),
-            content: CapabilityResultMessageContent::Text("done".into()),
+            content: ToolResultMessageContent::Text("done".into()),
             is_error: None,
         },
     ];
@@ -739,5 +739,5 @@ fn invocation_id_already_openai_format() {
         "call_already_openai"
     );
     // tool_name still resolved correctly
-    assert_eq!(result[1].tool_name, Some("execute".into()));
+    assert_eq!(result[1].tool_name, Some("test_tool".into()));
 }

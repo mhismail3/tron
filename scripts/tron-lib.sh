@@ -2,7 +2,7 @@
 # tron-lib.sh - Shared library for Tron CLI scripts
 #
 # Shared contributor-shell paths and functions for scripts/tron and tron-cli.
-# Rust foundation owners define the complete runtime home/profile layout.
+# Rust foundation owners define the complete runtime home layout.
 #
 # Do NOT execute this file directly.
 
@@ -17,7 +17,7 @@ BIN_DIR="$HOME/.local/bin"
 # `/Applications/Tron.app` and is registered by the Swift wrapper via SMAppService;
 # these bundles are only for shell-script development flows.
 RUN_DIR="$TRON_HOME/internal/run"
-USER_PROFILE_FILE="$TRON_HOME/profiles/user/profile.toml"
+SETTINGS_FILE="$TRON_HOME/settings.toml"
 CONTRIBUTOR_DIR="$RUN_DIR"
 DEPLOY_LOCK_FILE="$RUN_DIR/deploy.lock"
 DEPLOY_UPDATE_FILE="$RUN_DIR/deploy.in-progress"
@@ -46,7 +46,7 @@ ONBOARDED_MARKER_PATH="$RUN_DIR/.onboarded"
 DB_PATH="$TRON_HOME/internal/database/tron.sqlite"
 
 # OAuth
-AUTH_FILE="$TRON_HOME/profiles/auth.json"
+AUTH_FILE="$TRON_HOME/auth.json"
 
 #=============================================================================
 # COLORS & PRINT HELPERS
@@ -82,6 +82,10 @@ show_runtime_command_help() {
     echo "  rollback        Restore previous binary (--yes to skip confirmation)"
     echo "  login           Authenticate with a provider (--provider <name>, --label <name>)"
     echo "  auth rotate     Rotate the WebSocket bearer token (forces iOS re-pair)"
+    echo "  auth apns       Configure, inspect, or clear direct APNs credentials"
+    echo "  auth notifications Configure relay/direct notification transport"
+    echo "  state snapshot  Create a verified compressed profile snapshot"
+    echo "  state snapshots List profile snapshots; use verify/restore for recovery"
     echo "  logs            Query database logs (use -h for options)"
     echo "  errors          Show recent errors"
     echo ""
@@ -97,30 +101,8 @@ confirm_action() {
     [[ $REPLY =~ ^[Yy]$ ]]
 }
 
-clear_user_profile_settings() {
-    if [ ! -f "$USER_PROFILE_FILE" ]; then
-        return 0
-    fi
-
-    local tmp_file="$USER_PROFILE_FILE.tmp.$$"
-    awk '
-        /^[[:space:]]*\[+[^][]+\]+[[:space:]]*($|#)/ {
-            table = $0
-            sub(/^[[:space:]]*\[+/, "", table)
-            sub(/\]+[[:space:]]*($|#.*$)/, "", table)
-            skip = (table == "settings" || table ~ /^settings\./)
-            if (skip) {
-                next
-            }
-        }
-        !skip { print }
-    ' "$USER_PROFILE_FILE" > "$tmp_file"
-
-    if grep -q '[^[:space:]]' "$tmp_file"; then
-        mv "$tmp_file" "$USER_PROFILE_FILE"
-    else
-        rm -f "$tmp_file" "$USER_PROFILE_FILE"
-    fi
+clear_user_settings() {
+    rm -f "$SETTINGS_FILE"
 }
 
 #=============================================================================
@@ -150,6 +132,7 @@ dispatch_runtime_command() {
         rollback)  cmd_rollback "$@" ;;
         login)     cmd_login "$@" ;;
         auth)      cmd_auth "$@" ;;
+        state)     cmd_state "$@" ;;
         *)
             print_error "Unknown command: $command"
             cmd_help

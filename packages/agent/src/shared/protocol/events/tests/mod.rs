@@ -1,5 +1,5 @@
 use super::*;
-pub(super) use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
+pub(super) use crate::shared::protocol::messages::{TokenUsage, ToolInvocationDraft};
 pub(super) use serde_json::json;
 
 mod base_sequence;

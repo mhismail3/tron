@@ -14,6 +14,12 @@ struct ChatTranscriptRevealPolicyTests {
         #expect(ChatTranscriptRevealPolicy.contentOpacity(initialLoadComplete: true) == 1)
     }
 
+    @Test("Transcript reveal and shell loading have hard responsiveness budgets")
+    func initialLoadingBudgetsAreBounded() {
+        #expect(ChatTranscriptRevealPolicy.maximumTranscriptRevealDelayMilliseconds <= 400)
+        #expect(ChatTranscriptRevealPolicy.initialShellLoadingBudgetMilliseconds <= 5_000)
+    }
+
     @Test("Bottom distance uses settled content offset and clamps overscroll")
     func bottomDistanceUsesSettledContentOffset() {
         #expect(ChatTranscriptRevealPolicy.bottomDistance(
@@ -103,5 +109,74 @@ struct ChatTranscriptRevealPolicyTests {
     func autoscrollNearBottomUsesMeasuredDistance() {
         #expect(ChatTranscriptRevealPolicy.isNearBottomForAutoscroll(distanceFromBottom: 99))
         #expect(!ChatTranscriptRevealPolicy.isNearBottomForAutoscroll(distanceFromBottom: 100))
+    }
+
+    @Test("A newly visible transient tail follows only after initial load")
+    func transientTailFollowPolicy() {
+        #expect(ChatTranscriptRevealPolicy.shouldFollowTransientTail(
+            wasVisible: false,
+            isVisible: true,
+            initialLoadComplete: true
+        ))
+        #expect(!ChatTranscriptRevealPolicy.shouldFollowTransientTail(
+            wasVisible: true,
+            isVisible: true,
+            initialLoadComplete: true
+        ))
+        #expect(!ChatTranscriptRevealPolicy.shouldFollowTransientTail(
+            wasVisible: false,
+            isVisible: true,
+            initialLoadComplete: false
+        ))
+    }
+
+    @Test("Undersized transcripts reveal at top and reject bottom positioning")
+    func undersizedTranscriptStaysTopAligned() {
+        let hasOverflow = ChatTranscriptRevealPolicy.hasScrollableOverflow(
+            contentHeight: 700,
+            viewportHeight: 1_200,
+            bottomInset: 80
+        )
+
+        #expect(!hasOverflow)
+        #expect(ChatTranscriptRevealPolicy.shouldRevealAtTop(
+            hasScrollGeometry: true,
+            hasScrollableOverflow: hasOverflow
+        ))
+        #expect(!ChatTranscriptRevealPolicy.shouldRequestBottomPosition(
+            hasScrollGeometry: true,
+            hasScrollableOverflow: hasOverflow
+        ))
+    }
+
+    @Test("Overflowing transcripts retain bottom-follow behavior")
+    func overflowingTranscriptFollowsBottom() {
+        let hasOverflow = ChatTranscriptRevealPolicy.hasScrollableOverflow(
+            contentHeight: 2_000,
+            viewportHeight: 800,
+            bottomInset: 80
+        )
+
+        #expect(hasOverflow)
+        #expect(!ChatTranscriptRevealPolicy.shouldRevealAtTop(
+            hasScrollGeometry: true,
+            hasScrollableOverflow: hasOverflow
+        ))
+        #expect(ChatTranscriptRevealPolicy.shouldRequestBottomPosition(
+            hasScrollGeometry: true,
+            hasScrollableOverflow: hasOverflow
+        ))
+    }
+
+    @Test("Unmeasured transcripts preserve conservative bottom eligibility")
+    func unmeasuredTranscriptPreservesBottomEligibility() {
+        #expect(!ChatTranscriptRevealPolicy.shouldRevealAtTop(
+            hasScrollGeometry: false,
+            hasScrollableOverflow: false
+        ))
+        #expect(ChatTranscriptRevealPolicy.shouldRequestBottomPosition(
+            hasScrollGeometry: false,
+            hasScrollableOverflow: false
+        ))
     }
 }

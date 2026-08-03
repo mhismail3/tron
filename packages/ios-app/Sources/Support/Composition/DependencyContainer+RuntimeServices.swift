@@ -25,8 +25,7 @@ extension DependencyContainer {
             agent: agentRepository,
             models: modelRepository,
             messages: messageRepository,
-            transcription: transcriptionRepository,
-            workerLifecycle: workerLifecycleRepository
+            workerKernel: workerKernelRepository
         )
     }
 

@@ -150,7 +150,7 @@ async def engine_invoke(ws, call_id, function_id, payload=None):
 
 
 def unwrap_engine_response(resp):
-    """Normalize /engine invocation output to the capability result value."""
+    """Normalize /engine invocation output to the tool result value."""
     if resp.get("ok") is False:
         return {"success": False, "error": resp.get("error")}
     child = (resp.get("result") or {}).get("child")

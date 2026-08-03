@@ -79,7 +79,6 @@ struct EngineSettingsPage: View {
 
                 VStack(spacing: 16) {
                     contextSection
-                    transcriptionSection
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
             }
@@ -116,35 +115,9 @@ struct EngineSettingsPage: View {
         Group {
             defaultsSection
             contextSection
-            transcriptionSection
         }
         .disabled(!settingsState.isLoaded)
         .opacity(settingsState.isLoaded ? 1 : 0.45)
-    }
-
-    private var transcriptionSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: EngineSettingsSection.transcription.rawValue)
-
-            SettingsCard {
-                SettingsRow(icon: "mic", label: "Local transcription") {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { settingsState.transcriptionEnabled },
-                            set: { enabled in
-                                settingsState.transcriptionEnabled = enabled
-                                updateServerSetting(.transcriptionEnabled(enabled))
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .tint(.tronEmerald)
-                }
-            }
-
-            SettingsCaption(text: "Loads local speech recognition when the active server restarts.")
-        }
     }
 
     private var defaultsSection: some View {

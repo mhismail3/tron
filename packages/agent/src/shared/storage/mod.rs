@@ -1,16 +1,15 @@
 //! Unified engine storage runtime.
 //!
-//! Tron stores active server data in one engine-owned SQLite database:
-//! `~/.tron/internal/database/tron.sqlite`. Runtime connections use WAL for
-//! safe concurrent reads/writes; checkpoints and exports create compact
-//! single-file artifacts when the operator needs one. The `modular-engine-v4`
-//! generation is a clean break for the collapsed substrate: startup accepts only
-//! the canonical active DB path and moves a non-current `tron.sqlite` generation
-//! aside before creating the grant, resource, ledger, stream, state, queue,
-//! lease, compensation, storage, and session-harness tables from the current
-//! schema only. Generation inspection errors fail closed, archived DB/WAL/SHM
-//! files carry an `archive-manifest.json`, and shared storage schema setup runs
-//! behind a savepoint with drift and payload-reference integrity checks.
+//! Tron stores active engine data in `tron.sqlite` and durable worker
+//! operations in `workers.sqlite`. Both ledgers reuse this generic
+//! content-addressed payload schema; ownership rows never cross databases.
+//! Runtime connections use WAL for safe concurrent reads/writes; checkpoints
+//! and exports create compact single-file artifacts when the operator needs
+//! one. Payload references expose only semantic previews from conventional
+//! summary/answer fields or structural JSON counts; they never copy an
+//! arbitrary serialized object prefix back into run lists or model context.
+//! Shared schema setup runs behind a savepoint with drift and
+//! payload-reference integrity checks.
 //! Startup and manual cleanup share one managed diagnostic horizon and active
 //! database budget. Those bounds prune only low-signal diagnostic data and
 //! unowned blobs; they are not chat, session, or memory retention policy.
@@ -23,7 +22,6 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-mod archive;
 mod maintenance;
 mod payloads;
 mod schema;
@@ -32,32 +30,18 @@ mod stats;
 #[cfg(test)]
 mod tests;
 
-pub use archive::{archive_non_current_active_database, prepare_active_database};
 pub use maintenance::{checkpoint_database, export_snapshot};
 pub use payloads::{
-    decode_blob_content, encode_blob_content, register_existing_blob_owner,
-    resolve_stored_json_string, resolve_stored_json_value, store_content_blob, store_json_bytes,
-    store_json_value, store_owned_payload_ref,
+    decode_blob_content, delete_owned_payload_refs, delete_unowned_blobs, encode_blob_content,
+    owned_payload_ref, register_existing_blob_owner, resolve_owned_json_value,
+    resolve_owned_payload_bytes, resolve_stored_json_string, resolve_stored_json_value,
+    store_content_blob, store_json_bytes, store_json_value, store_owned_payload_ref,
 };
 pub use schema::{apply_runtime_pragmas, ensure_storage_schema};
 pub use stats::storage_stats;
 
 /// Canonical active database filename.
 pub const UNIFIED_DB_FILENAME: &str = "tron.sqlite";
-
-/// Canonical active lock filename.
-pub const UNIFIED_LOCK_FILENAME: &str = "tron.sqlite.lock";
-
-/// Current storage generation. A live DB without this marker is archived and
-/// reset before startup continues.
-pub const CURRENT_STORAGE_GENERATION: &str = "modular-engine-v4";
-
-/// Metadata key storing the active storage generation.
-pub const STORAGE_GENERATION_KEY: &str = "storage_generation";
-
-/// Default inline payload threshold. Larger payloads should store compact
-/// previews and blob refs instead of duplicating full JSON in primary rows.
-pub const DEFAULT_MAX_INLINE_PAYLOAD_BYTES: usize = 8 * 1024;
 
 /// Managed retention horizon for verbose diagnostic evidence.
 pub const DIAGNOSTIC_RETENTION_DAYS: u64 = 7;
@@ -67,41 +51,8 @@ pub const DATABASE_STORAGE_BUDGET_MB: u64 = 512;
 
 const ZSTD_COMPRESSION_THRESHOLD_BYTES: usize = 1024;
 
-/// Name of the archive directory under `internal/database`.
-pub const ARCHIVE_DIR: &str = "archive";
-
 /// Internal storage envelope key for payload-ref-backed JSON columns.
 pub const PAYLOAD_REF_ENVELOPE_KEY: &str = "__tronPayloadRef";
-
-/// Summary of one archived database file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ArchivedDatabaseFile {
-    /// Archived filename.
-    pub filename: String,
-    /// Final archived path.
-    pub archived_path: PathBuf,
-    /// File size in bytes at archive time.
-    pub size_bytes: u64,
-}
-
-/// Archive report emitted on startup.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ArchiveReport {
-    /// Archive directory used for this startup, if any files moved.
-    pub archive_dir: Option<PathBuf>,
-    /// Non-current files moved out of active storage.
-    pub files: Vec<ArchivedDatabaseFile>,
-}
-
-impl ArchiveReport {
-    /// Whether startup moved any non-current database artifacts.
-    #[must_use]
-    pub fn moved_any(&self) -> bool {
-        !self.files.is_empty()
-    }
-}
 
 /// Result of a WAL checkpoint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -313,7 +264,8 @@ impl StorePayloadOptions {
             session_id: None,
             workspace_id: None,
             expires_at: None,
-            inline_threshold: DEFAULT_MAX_INLINE_PAYLOAD_BYTES,
+            inline_threshold:
+                crate::shared::protocol::model_tools::DEFAULT_MAX_INLINE_MODEL_TOOL_RESULT_BYTES,
         }
     }
 
@@ -331,13 +283,6 @@ impl StorePayloadOptions {
         self
     }
 
-    /// Override payload kind.
-    #[must_use]
-    pub fn with_payload_kind(mut self, payload_kind: impl Into<String>) -> Self {
-        self.payload_kind = payload_kind.into();
-        self
-    }
-
     /// Override redaction level.
     #[must_use]
     pub fn with_redaction_level(mut self, redaction_level: impl Into<String>) -> Self {
@@ -345,9 +290,10 @@ impl StorePayloadOptions {
         self
     }
 
-    /// Override inline threshold.
+    /// Override inline threshold in storage branch tests.
+    #[cfg(test)]
     #[must_use]
-    pub fn with_inline_threshold(mut self, inline_threshold: usize) -> Self {
+    pub(crate) fn with_inline_threshold(mut self, inline_threshold: usize) -> Self {
         self.inline_threshold = inline_threshold;
         self
     }
@@ -396,17 +342,14 @@ impl StorageRuntime {
     pub fn open_connection(&self) -> Result<Connection> {
         let conn = Connection::open(&self.path)
             .with_context(|| format!("failed to open {}", self.path.display()))?;
+        crate::shared::foundation::home::set_private_file_permissions(&self.path)
+            .with_context(|| format!("failed to secure {}", self.path.display()))?;
         apply_runtime_pragmas(&conn)?;
         ensure_storage_schema(&conn)?;
         Ok(conn)
     }
 
-    /// Move a non-current `tron.sqlite` generation aside before startup.
-    pub fn prepare_for_startup(&self) -> Result<ArchiveReport> {
-        prepare_active_database(&self.path)
-    }
-
-    /// Run a truncating WAL checkpoint and record it in storage metadata.
+    /// Run a truncating WAL checkpoint and return its result.
     pub fn checkpoint(&self) -> Result<StorageCheckpointReport> {
         checkpoint_database(&self.path)
     }
@@ -451,7 +394,46 @@ fn table_exists(conn: &Connection, table_name: &str) -> Result<bool> {
 }
 
 fn payload_preview(payload: &[u8], max_chars: usize) -> String {
-    let text = String::from_utf8_lossy(payload);
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload) else {
+        return truncate_preview(&String::from_utf8_lossy(payload), max_chars);
+    };
+    let preview = match &value {
+        serde_json::Value::Object(fields) => {
+            let identity = ["schema", "status"]
+                .into_iter()
+                .filter_map(|key| fields.get(key).and_then(serde_json::Value::as_str))
+                .collect::<Vec<_>>();
+            let narrative = ["summary", "answer", "report", "result", "message", "title"]
+                .into_iter()
+                .find_map(|key| semantic_preview_text(fields.get(key)?))
+                .or_else(|| fields.get("question").and_then(semantic_preview_text));
+            match (identity.is_empty(), narrative) {
+                (false, Some(narrative)) => {
+                    format!("{} · {narrative}", identity.join(" · "))
+                }
+                (true, Some(narrative)) => narrative,
+                (false, None) => identity.join(" · "),
+                (true, None) => format!("JSON object ({} fields)", fields.len()),
+            }
+        }
+        serde_json::Value::Array(values) => format!("JSON array ({} items)", values.len()),
+        serde_json::Value::String(text) => text.clone(),
+        value => value.to_string(),
+    };
+    truncate_preview(&preview, max_chars)
+}
+
+fn semantic_preview_text(value: &serde_json::Value) -> Option<String> {
+    value.as_str().map(ToOwned::to_owned).or_else(|| {
+        value
+            .as_object()
+            .and_then(|value| value.get("content"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn truncate_preview(text: &str, max_chars: usize) -> String {
     let mut preview = text.chars().take(max_chars).collect::<String>();
     if text.chars().count() > max_chars {
         preview.push_str("...");

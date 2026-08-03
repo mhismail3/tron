@@ -3,15 +3,24 @@
 //! Centralized string constants for all supported model IDs across all providers.
 //! Using constants prevents typos and enables compile-time verification.
 //!
-//! **Note**: Model ID *arrays* are no longer defined here. The provider registries
-//! (e.g., `OPENAI_MODELS` in `openai/types.rs`) are the single source of truth.
+//! Provider registries such as `OPENAI_MODELS` in `openai/types.rs` are the
+//! single source of truth for model ID arrays.
 //! Use `all_openai_model_ids()`, `all_claude_model_ids()`, etc. for runtime lookups.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Anthropic / Claude
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Claude Opus 4.7 — released 2026-04-16, most capable Claude model.
+/// Claude Fable 5 — highest-capability long-running-agent model.
+pub const CLAUDE_FABLE_5: &str = "claude-fable-5";
+
+/// Claude Opus 4.8 — recommended for complex agentic coding.
+pub const CLAUDE_OPUS_4_8: &str = "claude-opus-4-8";
+
+/// Claude Sonnet 5 — balanced speed and intelligence.
+pub const CLAUDE_SONNET_5: &str = "claude-sonnet-5";
+
+/// Claude Opus 4.7 — previous Opus generation.
 pub const CLAUDE_OPUS_4_7: &str = "claude-opus-4-7";
 
 /// Claude Opus 4.6.
@@ -48,7 +57,19 @@ pub const CLAUDE_3_HAIKU: &str = "claude-3-haiku-20240307";
 // OpenAI / GPT
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// GPT 5.5 — current `OpenAI` flagship.
+/// GPT-5.6 Sol — current `OpenAI` frontier model.
+pub const GPT_5_6_SOL: &str = "gpt-5.6-sol";
+
+/// GPT-5.6 alias — routes to GPT-5.6 Sol.
+pub const GPT_5_6: &str = "gpt-5.6";
+
+/// GPT-5.6 Terra — balanced intelligence and cost.
+pub const GPT_5_6_TERRA: &str = "gpt-5.6-terra";
+
+/// GPT-5.6 Luna — efficient high-volume model.
+pub const GPT_5_6_LUNA: &str = "gpt-5.6-luna";
+
+/// GPT 5.5 — previous `OpenAI` flagship.
 pub const GPT_5_5: &str = "gpt-5.5";
 
 /// GPT 5.5 dated snapshot.
@@ -57,7 +78,7 @@ pub const GPT_5_5_2026_04_23: &str = "gpt-5.5-2026-04-23";
 /// GPT 5.4 — previous `OpenAI` flagship.
 pub const GPT_5_4: &str = "gpt-5.4";
 
-/// GPT 5.4 Pro — highest capability tier on the Platform API.
+/// GPT 5.4 Pro — highest tool tier on the Platform API.
 pub const GPT_5_4_PRO: &str = "gpt-5.4-pro";
 
 /// GPT 5.4 Mini — smaller, faster variant of GPT-5.4 for high-volume agentic workloads.
@@ -193,6 +214,15 @@ pub const GPT_OSS_20B: &str = "gpt-oss-20b";
 // Google / Gemini
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Gemini 3.6 Flash — current balanced Gemini model.
+pub const GEMINI_3_6_FLASH: &str = "gemini-3.6-flash";
+
+/// Gemini 3.5 Flash — sustained agentic and coding performance.
+pub const GEMINI_3_5_FLASH: &str = "gemini-3.5-flash";
+
+/// Gemini 3.5 Flash-Lite — current high-throughput Gemini model.
+pub const GEMINI_3_5_FLASH_LITE: &str = "gemini-3.5-flash-lite";
+
 /// Gemini 3.1 Pro (preview) — latest Gemini.
 pub const GEMINI_3_1_PRO_PREVIEW: &str = "gemini-3.1-pro-preview";
 
@@ -202,13 +232,16 @@ pub const GEMINI_3_PRO_PREVIEW: &str = "gemini-3-pro-preview";
 /// Gemini 3 Flash (preview).
 pub const GEMINI_3_FLASH_PREVIEW: &str = "gemini-3-flash-preview";
 
+/// Gemini 3.1 Flash-Lite.
+pub const GEMINI_3_1_FLASH_LITE: &str = "gemini-3.1-flash-lite";
+
 /// Gemini 2.5 Pro.
 pub const GEMINI_2_5_PRO: &str = "gemini-2.5-pro";
 
 /// Gemini 2.5 Flash.
 pub const GEMINI_2_5_FLASH: &str = "gemini-2.5-flash";
 
-/// Gemini 3.1 Flash Lite (preview) — cost-optimized for high-volume agentic tasks.
+/// Gemini 3.1 Flash-Lite preview — shut down 2026-05-25.
 pub const GEMINI_3_1_FLASH_LITE_PREVIEW: &str = "gemini-3.1-flash-lite-preview";
 
 /// Gemini 2.5 Flash Lite.
@@ -294,13 +327,13 @@ pub const DEFAULT_OLLAMA_MODEL: &str = GEMMA4_E4B;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Default API model (most capable).
-pub const DEFAULT_API_MODEL: &str = CLAUDE_OPUS_4_6;
+pub const DEFAULT_API_MODEL: &str = CLAUDE_FABLE_5;
 
 /// Default server model (balanced).
-pub const DEFAULT_SERVER_MODEL: &str = CLAUDE_SONNET_4;
+pub const DEFAULT_SERVER_MODEL: &str = CLAUDE_SONNET_5;
 
 /// Default Google model.
-pub const DEFAULT_GOOGLE_MODEL: &str = GEMINI_2_5_FLASH;
+pub const DEFAULT_GOOGLE_MODEL: &str = GEMINI_3_6_FLASH;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -350,6 +383,7 @@ mod tests {
     fn google_ids_not_empty() {
         let ids = all_gemini_model_ids();
         assert!(!ids.is_empty());
+        assert!(ids.contains(&GEMINI_3_6_FLASH));
         assert!(ids.contains(&GEMINI_2_5_FLASH));
     }
 

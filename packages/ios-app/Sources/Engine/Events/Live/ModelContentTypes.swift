@@ -1,0 +1,27 @@
+import Foundation
+
+/// Content-block discriminators shared by durable messages and the live stream.
+enum ContentBlockType: String {
+    case text
+    case image
+    case document
+    case toolInvocation = "tool_invocation"
+    case toolResult = "tool_result"
+    case thinking
+}
+
+/// Model tool lifecycle states restored into the live timeline.
+enum ToolInvocationStatusDTO: String {
+    case generating
+    case running
+    case completed
+    case error
+}
+
+/// Provider stop reasons stored with assistant messages.
+enum StopReason: String {
+    case endTurn = "end_turn"
+    case toolInvocation = "tool_invocation"
+    case maxTokens = "max_tokens"
+    case stopSequence = "stop_sequence"
+}

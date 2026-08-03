@@ -7,16 +7,16 @@ final class MessageFinderTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeCapabilityInvocationMessage(invocationId: String, operationName: String = "file_read") -> ChatMessage {
-        ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(
+    private func makeToolInvocationMessage(invocationId: String, toolName: String = "filesystem_read") -> ChatMessage {
+        ChatMessage(role: .assistant, content: .toolInvocation(testToolInvocation(
             id: invocationId,
             status: .success,
-            identity: testCapabilityIdentity(operationName: operationName)
+            identity: testToolIdentity(toolName: toolName)
         )))
     }
 
-    private func makeCapabilityResultMessage(invocationId: String) -> ChatMessage {
-        ChatMessage(role: .user, content: .capabilityResult(testCapabilityResult(id: invocationId)))
+    private func makeToolResultMessage(invocationId: String) -> ChatMessage {
+        ChatMessage(role: .user, content: .toolResult(testToolResult(id: invocationId)))
     }
 
     private func makeTextMessage(text: String = "Hello", eventId: String? = nil) -> ChatMessage {
@@ -59,56 +59,56 @@ final class MessageFinderTests: XCTestCase {
         XCTAssertNil(MessageFinder.indexByEventId("evt-1", in: []))
     }
 
-    // MARK: - lastIndexOfCapabilityInvocation
+    // MARK: - lastIndexOfToolInvocation
 
-    func testLastIndexOfCapabilityInvocationReturnsLast() {
+    func testLastIndexOfToolInvocationReturnsLast() {
         let messages = [
-            makeCapabilityInvocationMessage(invocationId: "tc-1"),
+            makeToolInvocationMessage(invocationId: "tc-1"),
             makeTextMessage(),
-            makeCapabilityInvocationMessage(invocationId: "tc-1"),
+            makeToolInvocationMessage(invocationId: "tc-1"),
         ]
-        XCTAssertEqual(MessageFinder.lastIndexOfCapabilityInvocation(id: "tc-1", in: messages), 2)
+        XCTAssertEqual(MessageFinder.lastIndexOfToolInvocation(id: "tc-1", in: messages), 2)
     }
 
-    func testLastIndexOfCapabilityInvocationNotFound() {
+    func testLastIndexOfToolInvocationNotFound() {
         let messages = [makeTextMessage()]
-        XCTAssertNil(MessageFinder.lastIndexOfCapabilityInvocation(id: "tc-missing", in: messages))
+        XCTAssertNil(MessageFinder.lastIndexOfToolInvocation(id: "tc-missing", in: messages))
     }
 
-    // MARK: - lastIndexOfCapabilityResult
+    // MARK: - lastIndexOfToolResult
 
-    func testLastIndexOfCapabilityResultReturnsLast() {
+    func testLastIndexOfToolResultReturnsLast() {
         let messages = [
-            makeCapabilityResultMessage(invocationId: "tc-1"),
-            makeCapabilityResultMessage(invocationId: "tc-1"),
+            makeToolResultMessage(invocationId: "tc-1"),
+            makeToolResultMessage(invocationId: "tc-1"),
         ]
-        XCTAssertEqual(MessageFinder.lastIndexOfCapabilityResult(id: "tc-1", in: messages), 1)
+        XCTAssertEqual(MessageFinder.lastIndexOfToolResult(id: "tc-1", in: messages), 1)
     }
 
-    func testLastIndexOfCapabilityResultNotFound() {
-        XCTAssertNil(MessageFinder.lastIndexOfCapabilityResult(id: "tc-x", in: [makeTextMessage()]))
+    func testLastIndexOfToolResultNotFound() {
+        XCTAssertNil(MessageFinder.lastIndexOfToolResult(id: "tc-x", in: [makeTextMessage()]))
     }
 
-    // MARK: - hasCapabilityInvocationMessage
+    // MARK: - hasToolInvocationMessage
 
-    func testHasCapabilityMessageForCapabilityInvocation() {
-        XCTAssertTrue(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeCapabilityInvocationMessage(invocationId: "tc-1")]))
+    func testHasToolMessageForToolInvocation() {
+        XCTAssertTrue(MessageFinder.hasToolInvocationMessage(invocationId: "tc-1", in: [makeToolInvocationMessage(invocationId: "tc-1")]))
     }
 
-    func testHasCapabilityMessageForCapabilityResult() {
-        XCTAssertTrue(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeCapabilityResultMessage(invocationId: "tc-1")]))
+    func testHasToolMessageForToolResult() {
+        XCTAssertTrue(MessageFinder.hasToolInvocationMessage(invocationId: "tc-1", in: [makeToolResultMessage(invocationId: "tc-1")]))
     }
 
-    func testHasCapabilityMessageReturnsFalseForText() {
-        XCTAssertFalse(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeTextMessage()]))
+    func testHasToolMessageReturnsFalseForText() {
+        XCTAssertFalse(MessageFinder.hasToolInvocationMessage(invocationId: "tc-1", in: [makeTextMessage()]))
     }
 
-    func testHasCapabilityMessageReturnsFalseForWrongId() {
-        XCTAssertFalse(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-wrong", in: [makeCapabilityInvocationMessage(invocationId: "tc-1")]))
+    func testHasToolMessageReturnsFalseForWrongId() {
+        XCTAssertFalse(MessageFinder.hasToolInvocationMessage(invocationId: "tc-wrong", in: [makeToolInvocationMessage(invocationId: "tc-1")]))
     }
 
-    func testHasCapabilityMessageEmptyArray() {
-        XCTAssertFalse(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: []))
+    func testHasToolMessageEmptyArray() {
+        XCTAssertFalse(MessageFinder.hasToolInvocationMessage(invocationId: "tc-1", in: []))
     }
 
 }

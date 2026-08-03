@@ -18,7 +18,7 @@ import SwiftUI
 ///    positioning paths even when SwiftUI animates directly from idle.
 ///
 /// 3. **Geometry signal** (`geometryChanged`) — tracks whether the viewport is near
-///    the bottom and accumulates stable movement toward older content. This fallback
+///    the bottom and accumulates stable movement toward older content. This recovery signal
 ///    covers accessibility and indirect scrolling on runtimes that publish neither a
 ///    phase nor native ownership. The coordinator owns the attribution threshold; the
 ///    view supplies bottom distance including `contentInsets.bottom` (input bar + safe

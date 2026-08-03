@@ -3,19 +3,19 @@
 //! On server startup (before accepting client connections), `recover_incomplete_turns`
 //! scans both orphaned journal files and durable turn starts that have no later
 //! terminal row. Prompt admission also repairs terminal prior turns whose
-//! capability starts still lack completions; if that atomic repair cannot
+//! tool starts still lack completions; if that atomic repair cannot
 //! commit, the new prompt is rejected before its user event or provider exists.
 //! The database sweep covers crashes and terminal-write failures that happen
 //! before a streaming journal exists. For each orphaned journal:
 //!
 //! 1. Scope durable assistant/end/failure rows to the latest start for that
-//!    ordinal. Legacy rows without a start are still recognized because older
-//!    builds could continue after start persistence failed.
-//! 2. Repair any started capability invocation without a completion so clients
+//!    ordinal. A journal without its required durable start fails closed for
+//!    manual inspection.
+//! 2. Repair any started tool invocation without a completion so clients
 //!    cannot reconstruct a permanently running invocation.
 //! 3. If an assistant is already durable, append only the missing recovered
 //!    lifecycle end; otherwise recover the partial assistant when present.
-//!    Recovery-owned assistant, capability, and turn-end rows commit atomically.
+//!    Recovery-owned assistant, tool, and turn-end rows commit atomically.
 //! 4. If the session was deleted, remove its orphaned journal.
 //!
 //! Recovery events use `sequence: None`; the event store assigns the next
@@ -25,7 +25,7 @@
 //!
 //! Recovery rows commit before the journal is deleted. A crash between commit
 //! and cleanup is idempotent: the next startup recognizes the durable terminal,
-//! repairs only a still-missing capability completion, and removes the journal
+//! repairs only a still-missing tool completion, and removes the journal
 //! without replaying the assistant.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -42,17 +42,17 @@ use crate::domains::session::event_store::{
 };
 
 #[derive(Clone, Copy)]
-enum CapabilityRecoveryCause {
+enum ToolRecoveryCause {
     ServerRestart,
     PromptAdmission,
 }
 
-impl CapabilityRecoveryCause {
+impl ToolRecoveryCause {
     fn content(self) -> &'static str {
         match self {
-            Self::ServerRestart => "Capability invocation was interrupted by a server restart.",
+            Self::ServerRestart => "Tool invocation was interrupted by a server restart.",
             Self::PromptAdmission => {
-                "Capability completion could not be persisted. The operation may have executed; inspect its effects before retrying."
+                "Tool completion could not be persisted. The operation may have executed; inspect its effects before retrying."
             }
         }
     }
@@ -66,8 +66,8 @@ impl CapabilityRecoveryCause {
 
     fn code(self) -> &'static str {
         match self {
-            Self::ServerRestart => "CAPABILITY_INVOCATION_CRASH_RECOVERED",
-            Self::PromptAdmission => "CAPABILITY_COMPLETION_PERSISTENCE_RECOVERED",
+            Self::ServerRestart => "TOOL_INVOCATION_CRASH_RECOVERED",
+            Self::PromptAdmission => "TOOL_COMPLETION_PERSISTENCE_RECOVERED",
         }
     }
 
@@ -160,7 +160,7 @@ pub fn recover_incomplete_turns(event_store: &Arc<EventStore>) -> Vec<String> {
 
 /// Repair terminal prior turns for one serialized session before a new prompt.
 ///
-/// All missing capability completions across the session commit in one batch.
+/// All missing tool completions across the session commit in one batch.
 /// Returning an error is an admission veto: callers must not append the new
 /// user message or construct a provider. The returned row/payload pairs are
 /// the exact durable completions that a live client must receive.
@@ -174,7 +174,7 @@ pub(crate) fn recover_incomplete_turns_for_session(
     let mut completed_high_water = HashMap::new();
     for row in rows
         .iter()
-        .filter(|row| row.event_type == EventType::CapabilityInvocationCompleted.as_str())
+        .filter(|row| row.event_type == EventType::ToolInvocationCompleted.as_str())
     {
         if let Some(invocation_id) = row.invocation_id.as_deref() {
             completed_high_water
@@ -186,13 +186,13 @@ pub(crate) fn recover_incomplete_turns_for_session(
     let mut candidate_turns = BTreeSet::new();
     for row in rows
         .iter()
-        .filter(|row| row.event_type == EventType::CapabilityInvocationStarted.as_str())
+        .filter(|row| row.event_type == EventType::ToolInvocationStarted.as_str())
     {
         let invocation_id = row
             .invocation_id
             .as_deref()
             .filter(|id| !id.trim().is_empty())
-            .ok_or_else(|| format!("capability start {} has no invocation id", row.id))?;
+            .ok_or_else(|| format!("tool start {} has no invocation id", row.id))?;
         if completed_high_water
             .get(invocation_id)
             .is_some_and(|sequence| *sequence > row.sequence)
@@ -201,7 +201,7 @@ pub(crate) fn recover_incomplete_turns_for_session(
         }
         let turn = row
             .turn
-            .ok_or_else(|| format!("capability start {} has no durable turn ordinal", row.id))?;
+            .ok_or_else(|| format!("tool start {} has no durable turn ordinal", row.id))?;
         candidate_turns.insert(
             u32::try_from(turn)
                 .map_err(|_| format!("session {session_id} has invalid prior turn {turn}"))?,
@@ -214,13 +214,9 @@ pub(crate) fn recover_incomplete_turns_for_session(
     for turn in candidate_turns {
         let state =
             durable_turn_state(event_store, session_id, turn).map_err(|error| error.to_string())?;
-        let incomplete = incomplete_capability_starts(
-            event_store,
-            session_id,
-            turn,
-            state.latest_start_sequence,
-        )
-        .map_err(|error| error.to_string())?;
+        let incomplete =
+            incomplete_tool_starts(event_store, session_id, turn, state.latest_start_sequence)
+                .map_err(|error| error.to_string())?;
         if incomplete.is_empty() {
             continue;
         }
@@ -230,7 +226,7 @@ pub(crate) fn recover_incomplete_turns_for_session(
             ));
         }
         for start in &incomplete {
-            let item = capability_recovery_item(start, CapabilityRecoveryCause::PromptAdmission)
+            let item = tool_recovery_item(start, ToolRecoveryCause::PromptAdmission)
                 .map_err(|error| error.to_string())?;
             payloads.push(item.payload.clone());
             items.push(item);
@@ -283,7 +279,7 @@ fn recover_unterminalized_starts(
         if state.has_terminal {
             continue;
         }
-        let incomplete_capabilities = incomplete_capability_starts(
+        let incomplete_tools = incomplete_tool_starts(
             event_store,
             &start.session_id,
             turn,
@@ -294,7 +290,7 @@ fn recover_unterminalized_starts(
             &start.session_id,
             turn,
             None,
-            &incomplete_capabilities,
+            &incomplete_tools,
             true,
         )?;
         info!(
@@ -337,7 +333,7 @@ fn recover_single_turn_from_path(
     }
 
     let durable_state = durable_turn_state(event_store, session_id, turn)?;
-    let incomplete_capabilities = incomplete_capability_starts(
+    let incomplete_tools = incomplete_tool_starts(
         event_store,
         session_id,
         turn,
@@ -350,7 +346,7 @@ fn recover_single_turn_from_path(
             session_id,
             turn,
             None,
-            &incomplete_capabilities,
+            &incomplete_tools,
             false,
         )?;
         info!(
@@ -363,14 +359,7 @@ fn recover_single_turn_from_path(
     }
 
     if durable_state.has_assistant {
-        persist_recovery_batch(
-            event_store,
-            session_id,
-            turn,
-            None,
-            &incomplete_capabilities,
-            true,
-        )?;
+        persist_recovery_batch(event_store, session_id, turn, None, &incomplete_tools, true)?;
         info!(
             session_id,
             turn, "closed turn whose assistant was durable before server interruption"
@@ -384,7 +373,7 @@ fn recover_single_turn_from_path(
     let recovered = StreamingJournal::load_recovery_from_path(journal_path, session_id, turn)?;
 
     // Build canonical assistant content blocks for the partial message. The
-    // journal preserves stream order, including capability positions from the
+    // journal preserves stream order, including tool positions from the
     // first draft marker rather than recovery-time bucket order.
     let assistant_payload = recovered.as_ref().and_then(|recovered| {
         let content = persistence::build_content_json(&recovered.content);
@@ -408,7 +397,7 @@ fn recover_single_turn_from_path(
         session_id,
         turn,
         assistant_payload,
-        &incomplete_capabilities,
+        &incomplete_tools,
         true,
     )?;
 
@@ -418,7 +407,7 @@ fn recover_single_turn_from_path(
             turn,
             text_len = recovered.accumulated_text.len(),
             thinking_len = recovered.accumulated_thinking.len(),
-            capability_invocations = recovered.capability_invocations.len(),
+            tool_invocations = recovered.tool_invocations.len(),
             "recovered interrupted turn from streaming journal"
         );
     } else {
@@ -437,7 +426,7 @@ fn recover_single_turn_from_path(
 
 #[derive(Default)]
 struct DurableTurnState {
-    latest_start_sequence: Option<i64>,
+    latest_start_sequence: i64,
     has_assistant: bool,
     has_terminal: bool,
 }
@@ -464,10 +453,15 @@ fn durable_turn_state(
         EventType::StreamTurnEnd,
         turn,
     )?;
-    let latest_start_sequence = latest_start.as_ref().map(|row| row.sequence);
-    let belongs_to_latest_attempt = |row: &EventRow| {
-        latest_start_sequence.is_none_or(|start_sequence| row.sequence > start_sequence)
-    };
+    let latest_start_sequence = latest_start
+        .as_ref()
+        .map(|row| row.sequence)
+        .ok_or_else(|| {
+            std::io::Error::other(format!(
+                "turn {turn} has a streaming journal without its durable start"
+            ))
+        })?;
+    let belongs_to_latest_attempt = |row: &EventRow| row.sequence > latest_start_sequence;
     let has_assistant = latest_assistant
         .as_ref()
         .is_some_and(belongs_to_latest_attempt);
@@ -482,26 +476,22 @@ fn durable_turn_state(
     })
 }
 
-fn incomplete_capability_starts(
+fn incomplete_tool_starts(
     event_store: &EventStore,
     session_id: &str,
     turn: u32,
-    latest_start_sequence: Option<i64>,
+    latest_start_sequence: i64,
 ) -> Result<Vec<EventRow>, Box<dyn std::error::Error>> {
-    let rows = if let Some(sequence) = latest_start_sequence {
-        event_store.get_events_since(session_id, sequence)?
-    } else {
-        event_store.get_events_by_session(session_id, &ListEventsOptions::default())?
-    };
+    let rows = event_store.get_events_since(session_id, latest_start_sequence)?;
     let completed = rows
         .iter()
-        .filter(|row| row.event_type == EventType::CapabilityInvocationCompleted.as_str())
+        .filter(|row| row.event_type == EventType::ToolInvocationCompleted.as_str())
         .filter_map(|row| row.invocation_id.as_deref())
         .collect::<HashSet<_>>();
     Ok(rows
         .iter()
         .filter(|row| {
-            row.event_type == EventType::CapabilityInvocationStarted.as_str()
+            row.event_type == EventType::ToolInvocationStarted.as_str()
                 && row.turn == Some(i64::from(turn))
                 && row
                     .invocation_id
@@ -517,12 +507,12 @@ fn persist_recovery_batch(
     session_id: &str,
     turn: u32,
     assistant_payload: Option<serde_json::Value>,
-    incomplete_capabilities: &[EventRow],
+    incomplete_tools: &[EventRow],
     append_turn_end: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut items = Vec::with_capacity(
         usize::from(assistant_payload.is_some())
-            + incomplete_capabilities.len()
+            + incomplete_tools.len()
             + usize::from(append_turn_end),
     );
     if let Some(payload) = assistant_payload {
@@ -532,11 +522,8 @@ fn persist_recovery_batch(
             sequence: None,
         });
     }
-    for start in incomplete_capabilities {
-        items.push(capability_recovery_item(
-            start,
-            CapabilityRecoveryCause::ServerRestart,
-        )?);
+    for start in incomplete_tools {
+        items.push(tool_recovery_item(start, ToolRecoveryCause::ServerRestart)?);
     }
     if append_turn_end {
         items.push(AppendBatchItem {
@@ -558,19 +545,23 @@ fn persist_recovery_batch(
     Ok(())
 }
 
-fn capability_recovery_item(
+fn tool_recovery_item(
     start: &EventRow,
-    cause: CapabilityRecoveryCause,
+    cause: ToolRecoveryCause,
 ) -> Result<AppendBatchItem, Box<dyn std::error::Error>> {
     let invocation_id = start
         .invocation_id
         .as_deref()
-        .ok_or_else(|| format!("capability start {} has no invocation id", start.id))?;
+        .ok_or_else(|| format!("tool start {} has no invocation id", start.id))?;
+    let tool_name = start
+        .tool_name
+        .as_deref()
+        .ok_or_else(|| format!("tool start {} has no tool name", start.id))?;
     Ok(AppendBatchItem {
-        event_type: EventType::CapabilityInvocationCompleted,
+        event_type: EventType::ToolInvocationCompleted,
         payload: json!({
             "invocationId": invocation_id,
-            "name": start.model_primitive_name.as_deref().unwrap_or("execute"),
+            "toolName": tool_name,
             "content": cause.content(),
             "isError": true,
             "duration": 0,
@@ -597,7 +588,7 @@ fn cleanup_empty_session_dir(journal_path: &std::path::Path) {
 mod tests {
     use super::*;
     use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-    use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+    use crate::domains::session::event_store::sqlite::schema::ensure_schema;
     use crate::domains::session::event_store::{AppendOptions, ListEventsOptions};
     use tempfile::TempDir;
 
@@ -647,9 +638,9 @@ mod tests {
                 kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                 signature: None,
             },
-            crate::shared::protocol::content::AssistantContent::CapabilityInvocation {
+            crate::shared::protocol::content::AssistantContent::ToolInvocation {
                 id: "tc_1".to_owned(),
-                name: "execute".to_owned(),
+                name: "test_tool".to_owned(),
                 arguments: args,
                 thought_signature: None,
             },
@@ -659,8 +650,8 @@ mod tests {
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "Hello world");
         assert_eq!(content[1]["type"], "thinking");
-        assert_eq!(content[2]["type"], "capability_invocation");
-        assert!(content[2].get("capability_invocation").is_none());
+        assert_eq!(content[2]["type"], "tool_invocation");
+        assert!(content[2].get("tool_invocation").is_none());
         assert_eq!(content[2]["id"], "tc_1");
         assert_eq!(content[2]["arguments"]["command"], "ls");
     }
@@ -670,7 +661,7 @@ mod tests {
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store
@@ -708,7 +699,7 @@ mod tests {
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
@@ -765,7 +756,7 @@ mod tests {
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
@@ -828,59 +819,11 @@ mod tests {
     }
 
     #[test]
-    fn legacy_failure_without_turn_start_prevents_duplicate_replay() {
+    fn recovery_closes_incomplete_tool_and_turn() {
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
-        }
-        let store = Arc::new(EventStore::new(pool));
-        let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
-        store
-            .append(&AppendOptions {
-                session_id: &session.session.id,
-                event_type: EventType::TurnFailed,
-                payload: json!({"turn": 9, "error": "legacy failure"}),
-                sequence: None,
-                parent_id: None,
-            })
-            .unwrap();
-        let tmp = TempDir::new().unwrap();
-        let journal_path = tmp.path().join("turn_9.wal");
-        fs::write(
-            &journal_path,
-            "{\"t\":\"text\",\"c\":\"must not duplicate\"}\n",
-        )
-        .unwrap();
-
-        let recovered =
-            recover_single_turn_from_path(&store, &session.session.id, 9, &journal_path).unwrap();
-
-        assert!(!recovered);
-        assert!(!journal_path.exists());
-        let events = store
-            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
-            .unwrap();
-        assert_eq!(
-            events
-                .iter()
-                .filter(|row| row.event_type == EventType::TurnFailed.as_str())
-                .count(),
-            1
-        );
-        assert!(
-            events
-                .iter()
-                .all(|row| row.event_type != EventType::MessageAssistant.as_str())
-        );
-    }
-
-    #[test]
-    fn recovery_closes_incomplete_capability_and_turn() {
-        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
-        {
-            let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
@@ -891,21 +834,21 @@ mod tests {
                 json!({
                     "turn": 4,
                     "content": [{
-                        "type": "capability_invocation",
+                        "type": "tool_invocation",
                         "id": "call-crashed",
-                        "name": "execute",
+                        "name": "test_tool",
                         "arguments": {"operation": "observe"}
                     }],
                     "model": "m",
-                    "stopReason": "capability_invocation"
+                    "stopReason": "tool_invocation"
                 }),
             ),
             (
-                EventType::CapabilityInvocationStarted,
+                EventType::ToolInvocationStarted,
                 json!({
                     "turn": 4,
                     "invocationId": "call-crashed",
-                    "name": "execute",
+                    "toolName": "test_tool",
                     "arguments": {"operation": "observe"}
                 }),
             ),
@@ -938,7 +881,7 @@ mod tests {
             .unwrap();
         let completions = events
             .iter()
-            .filter(|row| row.event_type == EventType::CapabilityInvocationCompleted.as_str())
+            .filter(|row| row.event_type == EventType::ToolInvocationCompleted.as_str())
             .collect::<Vec<_>>();
         assert_eq!(completions.len(), 1);
         assert_eq!(
@@ -966,31 +909,31 @@ mod tests {
     }
 
     #[test]
-    fn prompt_admission_retries_atomic_terminal_capability_repair() {
+    fn prompt_admission_retries_atomic_terminal_tool_repair() {
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool.clone()));
         let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
         for (event_type, payload) in [
             (EventType::StreamTurnStart, json!({"turn": 6})),
             (
-                EventType::CapabilityInvocationStarted,
+                EventType::ToolInvocationStarted,
                 json!({
                     "turn": 6,
                     "invocationId": "call-a",
-                    "name": "execute",
+                    "toolName": "test_tool",
                     "arguments": {"operation": "observe"}
                 }),
             ),
             (
-                EventType::CapabilityInvocationStarted,
+                EventType::ToolInvocationStarted,
                 json!({
                     "turn": 6,
                     "invocationId": "call-b",
-                    "name": "execute",
+                    "toolName": "test_tool",
                     "arguments": {"operation": "observe"}
                 }),
             ),
@@ -1014,7 +957,7 @@ mod tests {
             conn.execute_batch(
                 "CREATE TRIGGER fail_prompt_repair
                  BEFORE INSERT ON events
-                 WHEN NEW.type = 'capability.invocation.completed'
+                 WHEN NEW.type = 'tool.invocation.completed'
                   AND NEW.invocation_id = 'call-b'
                  BEGIN
                    SELECT RAISE(FAIL, 'forced prompt repair failure');
@@ -1031,7 +974,7 @@ mod tests {
                 .get_events_by_session(&session.session.id, &ListEventsOptions::default(),)
                 .unwrap()
                 .iter()
-                .all(|row| { row.event_type != EventType::CapabilityInvocationCompleted.as_str() }),
+                .all(|row| { row.event_type != EventType::ToolInvocationCompleted.as_str() }),
             "the first repair row must roll back with the rejected second row"
         );
 
@@ -1056,8 +999,7 @@ mod tests {
                 && payload["details"]["mayHaveExecuted"] == json!(true)
                 && payload["details"]["retrySafe"] == json!(false)
                 && payload["details"]["recoveryReason"] == json!("prompt_admission_repair")
-                && payload["details"]["code"]
-                    == json!("CAPABILITY_COMPLETION_PERSISTENCE_RECOVERED")
+                && payload["details"]["code"] == json!("TOOL_COMPLETION_PERSISTENCE_RECOVERED")
                 && !payload["content"]
                     .as_str()
                     .unwrap()
@@ -1071,19 +1013,19 @@ mod tests {
     }
 
     #[test]
-    fn prompt_admission_rejects_unidentifiable_capability_start() {
+    fn prompt_admission_rejects_unidentifiable_tool_start() {
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
         for (event_type, payload) in [
             (EventType::StreamTurnStart, json!({"turn": 2})),
             (
-                EventType::CapabilityInvocationStarted,
-                json!({"turn": 2, "name": "execute", "arguments": {}}),
+                EventType::ToolInvocationStarted,
+                json!({"turn": 2, "toolName": "test_tool", "arguments": {}}),
             ),
             (EventType::TurnFailed, json!({"turn": 2, "error": "failed"})),
         ] {
@@ -1108,7 +1050,7 @@ mod tests {
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
@@ -1143,7 +1085,7 @@ mod tests {
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();

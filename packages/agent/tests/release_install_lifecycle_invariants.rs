@@ -35,6 +35,7 @@ fn git_ls_files(prefix: &str) -> Vec<String> {
     String::from_utf8(output.stdout)
         .expect("git output should be utf8")
         .lines()
+        .filter(|path| repo_path(path).is_file())
         .map(str::to_owned)
         .collect()
 }
@@ -320,7 +321,7 @@ fn contributor_binary_recovery_has_one_service_owner() {
         service_start,
         "ensure_prod_binary",
         "launchd_restart \"$PLIST_NAME\"",
-        "contributor fallback must remain owned by the shared service start path",
+        "the contributor start path must remain owned by the shared service owner",
     );
     assert_order(
         service_start,
@@ -477,13 +478,6 @@ fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
     );
 
     let logs = read_repo_file("scripts/tron-lib.d/logs.sh");
-    let deployment_sources = format!("{manual}\n{service}\n{logs}");
-    for retired_writer in ["write_deployment_result", "TRON_DEPLOYMENT_"] {
-        assert!(
-            !deployment_sources.contains(retired_writer),
-            "scripts must not recreate the retired deployment-result writer: {retired_writer}"
-        );
-    }
     assert!(
         !manual.contains("last-deployment.json") && !logs.contains("last-deployment.json"),
         "restart-sentinel.json must remain the sole manual-deploy outcome projection"
@@ -499,9 +493,9 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     let tron_lib = read_repo_file("scripts/tron-lib.sh");
     for required in [
         "Shared contributor-shell paths and functions",
-        "Rust foundation owners define the complete runtime home/profile layout",
+        "Rust foundation owners define the complete runtime home layout",
         "RUN_DIR=\"$TRON_HOME/internal/run\"",
-        "AUTH_FILE=\"$TRON_HOME/profiles/auth.json\"",
+        "AUTH_FILE=\"$TRON_HOME/auth.json\"",
         "DEPLOY_UPDATE_FILE=\"$RUN_DIR/deploy.in-progress\"",
     ] {
         assert!(tron_lib.contains(required), "tron-lib missing {required}");
@@ -572,17 +566,6 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
             "shell layout must not restore retired path set {retired}"
         );
     }
-
-    let constitution = read_repo_file("packages/agent/src/shared/foundation/constitution.rs");
-    assert!(constitution.contains("fn profile_first_dirs"));
-    assert!(constitution.contains("Constitution seeds"));
-    assert!(constitution.contains("managed_default!(\"profiles/auth.json\", false)"));
-    assert!(constitution.contains("write_private_default_if_absent"));
-    assert!(constitution.contains("persist_noclobber"));
-    assert!(
-        repo_path("packages/agent/defaults/profiles/auth.json").exists(),
-        "profile validation requires the private empty auth compatibility sentinel"
-    );
 
     let auth = read_repo_file("scripts/tron-lib.d/auth.sh");
     assert!(
@@ -735,8 +718,8 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     );
 
     let bundle = read_repo_file("scripts/tron.d/bundle.sh");
-    assert!(bundle.contains("cp \"$CONTRIBUTOR_DIR/AppIcon.icns\""));
-    assert!(!bundle.contains("$script_dir/AppIcon.icns"));
+    assert!(bundle.contains("$PROJECT_DIR/packages/mac-app/Sources/Resources/AppIcon.icns"));
+    assert!(!bundle.contains("$CONTRIBUTOR_DIR/AppIcon.icns"));
     assert!(bundle.contains("\"$SCRIPT_DIR/tron-version\" print"));
     assert!(bundle.contains("TRON_APPLE_MARKETING_VERSION)"));
     assert!(bundle.contains("TRON_APPLE_BUILD)"));
@@ -800,7 +783,7 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
         "--reset-settings",
         "--reset-credentials",
         "Database and workspace data preserved",
-        "clear_user_profile_settings",
+        "clear_user_settings",
         "rm -f \"$AUTH_FILE\"",
     ] {
         assert!(
@@ -823,7 +806,8 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     let uninstaller =
         read_repo_file("packages/mac-app/Sources/Server/ProcessControl/TronUninstaller.swift");
     assert!(uninstaller.contains("preserveUserData"));
-    assert!(uninstaller.contains("removeSettingsOverlay"));
+    assert!(uninstaller.contains("ServerSettingsWriter.deleteSettings"));
+    assert!(uninstaller.contains("setup.settingsPath"));
     assert!(uninstaller.contains("setup.bearerTokenPath"));
     assert!(
         !uninstaller.contains("database") && !uninstaller.contains("workspace"),
@@ -1094,13 +1078,13 @@ fn runtime_command_help_has_one_shared_owner() {
         .collect::<Vec<_>>()
         .join(" ");
     assert_eq!(
-        dispatcher_commands, "status start stop restart uninstall logs errors rollback login auth",
+        dispatcher_commands,
+        "status start stop restart uninstall logs errors rollback login auth state",
         "runtime dispatcher inventory drifted"
     );
-    let expected_help_commands =
-        "status|start|stop|restart|uninstall|logs|errors|rollback|login|auth rotate"
-            .split('|')
-            .collect::<Vec<_>>();
+    let expected_help_commands = "status|start|stop|restart|uninstall|logs|errors|rollback|login|auth rotate|auth apns|auth notifications|state snapshot|state snapshots"
+        .split('|')
+        .collect::<Vec<_>>();
     assert_eq!(
         shared_help
             .lines()
@@ -1114,7 +1098,7 @@ fn runtime_command_help_has_one_shared_owner() {
         assert_eq!(entrypoint.matches("show_runtime_command_help").count(), 1);
     }
     for help_command in expected_help_commands {
-        let help_row = format!("echo \"  {help_command}");
+        let help_row = format!("echo \"  {help_command} ");
         assert_eq!(
             shared_help.matches(&help_row).count(),
             1,

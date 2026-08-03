@@ -2,25 +2,22 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::Utc;
 
+use crate::engine::durability::ledger::sqlite_codec::ledger_failure;
 use crate::engine::durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
-    IdempotencyReservationOutcome, IdempotencyStatus, StoredInvocationOutcome, ledger_failure,
+    IdempotencyReservationOutcome, IdempotencyStatus, StoredInvocationOutcome,
 };
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
-use crate::engine::kernel::ids::{FunctionId, InvocationId, WorkerId};
-use crate::engine::kernel::types::{
-    CatalogChange, CatalogRevision, FunctionDefinition, WorkerDefinition,
-};
+use crate::engine::kernel::ids::InvocationId;
+use crate::engine::kernel::types::{CatalogRevision, IdempotencyScope};
 
 /// In-memory ledger store used by `LiveCatalog::new`.
 #[derive(Default)]
 pub struct InMemoryEngineLedgerStore {
-    catalog_changes: Vec<CatalogChange>,
+    catalog_revision: CatalogRevision,
     invocations: Vec<InvocationRecord>,
     idempotency: BTreeMap<IdempotencyKey, IdempotencyEntry>,
-    durable_workers: BTreeMap<WorkerId, WorkerDefinition>,
-    durable_functions: BTreeMap<FunctionId, FunctionDefinition>,
 }
 
 impl InMemoryEngineLedgerStore {
@@ -32,66 +29,30 @@ impl InMemoryEngineLedgerStore {
 }
 
 impl EngineLedgerStore for InMemoryEngineLedgerStore {
-    fn append_catalog_change(&mut self, change: &CatalogChange) -> Result<()> {
-        self.catalog_changes.push(change.clone());
-        Ok(())
+    fn catalog_revision(&self) -> Result<CatalogRevision> {
+        Ok(self.catalog_revision)
     }
 
-    fn list_catalog_changes(&self) -> Result<Vec<CatalogChange>> {
-        Ok(self.catalog_changes.clone())
-    }
-
-    fn catalog_changes_after(
-        &self,
-        revision: CatalogRevision,
-        limit: usize,
-    ) -> Result<Vec<CatalogChange>> {
-        Ok(self
-            .catalog_changes
-            .iter()
-            .filter(|change| change.after > revision)
-            .take(limit)
-            .cloned()
-            .collect())
-    }
-
-    fn upsert_durable_worker_definition(&mut self, definition: &WorkerDefinition) -> Result<()> {
-        self.durable_workers
-            .insert(definition.id.clone(), definition.clone());
-        Ok(())
-    }
-
-    fn remove_durable_worker_definition(&mut self, worker_id: &WorkerId) -> Result<()> {
-        self.durable_workers.remove(worker_id);
-        self.durable_functions
-            .retain(|_, function| &function.owner_worker != worker_id);
-        Ok(())
-    }
-
-    fn list_durable_worker_definitions(&self) -> Result<Vec<WorkerDefinition>> {
-        Ok(self.durable_workers.values().cloned().collect())
-    }
-
-    fn upsert_durable_function_definition(
+    fn advance_catalog_revision(
         &mut self,
-        definition: &FunctionDefinition,
+        expected: CatalogRevision,
+        next: CatalogRevision,
     ) -> Result<()> {
-        self.durable_functions
-            .insert(definition.id.clone(), definition.clone());
+        if self.catalog_revision != expected || next != expected.next() {
+            return Err(ledger_failure(
+                "advance_catalog_revision",
+                format!(
+                    "expected durable revision {}, found {}; requested next {}",
+                    expected.0, self.catalog_revision.0, next.0
+                ),
+            ));
+        }
+        self.catalog_revision = next;
         Ok(())
-    }
-
-    fn remove_durable_function_definition(&mut self, function_id: &FunctionId) -> Result<()> {
-        self.durable_functions.remove(function_id);
-        Ok(())
-    }
-
-    fn list_durable_function_definitions(&self) -> Result<Vec<FunctionDefinition>> {
-        Ok(self.durable_functions.values().cloned().collect())
     }
 
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()> {
-        self.invocations.push(record.clone());
+        self.invocations.push(record.redacted_for_storage());
         Ok(())
     }
 
@@ -119,7 +80,7 @@ impl EngineLedgerStore for InMemoryEngineLedgerStore {
             .idempotency
             .values()
             .filter(|entry| {
-                (entry.key.scope.kind == "session" && entry.key.scope.value == session_id)
+                (entry.key.scope == IdempotencyScope::Session(session_id.to_owned()))
                     || session_invocations.contains(&entry.first_invocation_id)
                     || session_invocations.contains(&entry.latest_invocation_id)
             })
@@ -142,7 +103,6 @@ impl EngineLedgerStore for InMemoryEngineLedgerStore {
             key: reservation.key,
             payload_fingerprint: reservation.payload_fingerprint,
             function_revision: reservation.function_revision,
-            replay_behavior: reservation.replay_behavior,
             status: IdempotencyStatus::InProgress,
             first_invocation_id: reservation.invocation_id.clone(),
             latest_invocation_id: reservation.invocation_id,
@@ -166,7 +126,7 @@ impl EngineLedgerStore for InMemoryEngineLedgerStore {
             .ok_or_else(|| ledger_failure("complete_idempotency", "reservation not found"))?;
         entry.status = IdempotencyStatus::Completed;
         entry.latest_invocation_id = invocation_id.clone();
-        entry.outcome = Some(outcome);
+        entry.outcome = Some(outcome.redacted_for_storage());
         entry.updated_at = Utc::now();
         Ok(())
     }

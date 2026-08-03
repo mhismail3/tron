@@ -56,4 +56,48 @@ protocol NetworkSessionRepository: AnyObject {
     /// - Parameter limit: Maximum number of messages to return
     /// - Returns: Array of history messages
     func getHistory(limit: Int) async throws -> [HistoryMessage]
+
+    /// Read bounded provider-request context summaries without invoking a
+    /// model or policy worker.
+    func contextRequests(
+        sessionId: String,
+        beforeSequence: Int64?,
+        limit: Int
+    ) async throws -> SessionContextRequestsResultDTO
+
+    /// Read one exact redacted provider-request audit.
+    func contextRequestDetail(
+        sessionId: String,
+        eventId: String
+    ) async throws -> SessionContextRequestDetailDTO
+
+    /// Read durable delivery and non-blocking worker-wait state.
+    func agentUpdates(
+        sessionId: String,
+        limit: Int
+    ) async throws -> SessionAgentUpdatesResultDTO
+}
+
+extension NetworkSessionRepository {
+    func contextRequests(
+        sessionId _: String,
+        beforeSequence _: Int64?,
+        limit _: Int
+    ) async throws -> SessionContextRequestsResultDTO {
+        throw URLError(.unsupportedURL)
+    }
+
+    func contextRequestDetail(
+        sessionId _: String,
+        eventId _: String
+    ) async throws -> SessionContextRequestDetailDTO {
+        throw URLError(.unsupportedURL)
+    }
+
+    func agentUpdates(
+        sessionId _: String,
+        limit _: Int
+    ) async throws -> SessionAgentUpdatesResultDTO {
+        throw URLError(.unsupportedURL)
+    }
 }

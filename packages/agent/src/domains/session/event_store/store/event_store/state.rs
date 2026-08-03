@@ -43,9 +43,7 @@ impl EventStore {
         validated_reconstruction(&events)
     }
 
-    /// Build full session state at the head event.
-    ///
-    /// Combines session metadata with reconstructed messages.
+    /// Build the runtime session state at the head event.
     pub fn get_state_at_head(&self, session_id: &str) -> Result<SessionState> {
         let conn = self.conn()?;
         let session = SessionRepo::get_by_id(&conn, session_id)?
@@ -57,21 +55,7 @@ impl EventStore {
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
         let events = event_rows_to_session_events(&conn, &ancestors)?;
         let reconstruction = validated_reconstruction(&events)?;
-        Ok(build_session_state(&session, head_id, reconstruction))
-    }
-
-    /// Build full session state at a specific event.
-    pub fn get_state_at(&self, session_id: &str, event_id: &str) -> Result<SessionState> {
-        let conn = self.conn()?;
-        let session = SessionRepo::get_by_id(&conn, session_id)?
-            .ok_or_else(|| EventStoreError::SessionNotFound(session_id.to_string()))?;
-        let ancestors = EventRepo::get_ancestors(&conn, event_id)?;
-        if ancestors.is_empty() {
-            return Err(EventStoreError::EventNotFound(event_id.to_string()));
-        }
-        let events = event_rows_to_session_events(&conn, &ancestors)?;
-        let reconstruction = validated_reconstruction(&events)?;
-        Ok(build_session_state(&session, event_id, reconstruction))
+        Ok(build_session_state(&session, reconstruction))
     }
 }
 
@@ -103,7 +87,7 @@ pub(super) fn event_rows_to_session_events(
                         row.id
                     ))
                 })?;
-            if event_type == EventType::CapabilityInvocationCompleted {
+            if event_type == EventType::ToolInvocationCompleted {
                 validate_provider_history_payload(&row.id, event_type, &payload)?;
             }
             Ok(SessionEvent {
@@ -124,11 +108,11 @@ pub(super) fn event_rows_to_session_events(
 /// Reconstruct provider history and validate only events that survive its
 /// durable visibility rules.
 ///
-/// `message.deleted`, `compact.boundary`, and `context.cleared` can make older
+/// `message.deleted` and `compact.boundary` can make older
 /// message rows intentionally non-contributing. Message structural validation
 /// therefore runs after reconstruction identifies surviving source event IDs,
 /// but still validates every source row independently so same-role merging
-/// cannot hide a malformed contributor. Capability completions retain their
+/// cannot hide a malformed contributor. Tool completions retain their
 /// unconditional row-conversion guard because malformed identity can itself
 /// make a result appear unmatched and disappear from reconstruction.
 fn validated_reconstruction(events: &[SessionEvent]) -> Result<ReconstructionResult> {
@@ -156,7 +140,7 @@ fn validated_reconstruction(events: &[SessionEvent]) -> Result<ReconstructionRes
 /// Reject malformed payloads that can contribute to a future provider request.
 ///
 /// Full runtime-message decoding remains owned by the agent projection after
-/// reconstruction has applied compaction and message merging. Capability
+/// reconstruction has applied compaction and message merging. Tool
 /// completions need a minimal check here because reconstruction can legitimately
 /// discard an unmatched result; without it, a malformed completion could vanish
 /// before the runtime projection sees it.
@@ -172,7 +156,7 @@ fn validate_provider_history_payload(
         EventType::MessageAssistant => {
             return validate_message_payload(event_id, "assistant", payload);
         }
-        EventType::CapabilityInvocationCompleted => {}
+        EventType::ToolInvocationCompleted => {}
         _ => return Ok(()),
     }
 
@@ -183,7 +167,7 @@ fn validate_provider_history_payload(
         .is_none()
     {
         return Err(EventStoreError::InvalidOperation(format!(
-            "event {event_id} has invalid capability completion payload: \
+            "event {event_id} has invalid tool completion payload: \
              invocationId must be a non-empty string"
         )));
     }
@@ -191,7 +175,7 @@ fn validate_provider_history_payload(
     match payload.get("modelContextContent") {
         Some(value) if !value.is_string() => {
             return Err(EventStoreError::InvalidOperation(format!(
-                "event {event_id} has invalid capability completion payload: \
+                "event {event_id} has invalid tool completion payload: \
                  modelContextContent must be a string when present"
             )));
         }
@@ -201,7 +185,7 @@ fn validate_provider_history_payload(
             .is_some_and(serde_json::Value::is_string) =>
         {
             return Err(EventStoreError::InvalidOperation(format!(
-                "event {event_id} has invalid capability completion payload: \
+                "event {event_id} has invalid tool completion payload: \
                  content must be a string"
             )));
         }
@@ -213,7 +197,7 @@ fn validate_provider_history_payload(
         .is_some_and(serde_json::Value::is_boolean)
     {
         return Err(EventStoreError::InvalidOperation(format!(
-            "event {event_id} has invalid capability completion payload: \
+            "event {event_id} has invalid tool completion payload: \
              isError must be a boolean"
         )));
     }
@@ -241,15 +225,11 @@ fn validate_message_payload(
 
 pub(super) fn build_session_state(
     session: &SessionRow,
-    head_event_id: &str,
     reconstruction: ReconstructionResult,
 ) -> SessionState {
     use crate::domains::session::event_store::types::payloads::TokenUsage;
 
     SessionState {
-        session_id: session.id.clone(),
-        workspace_id: session.workspace_id.clone(),
-        head_event_id: head_event_id.to_string(),
         model: session.latest_model.clone(),
         working_directory: session.working_directory.clone(),
         messages_with_event_ids: reconstruction.messages_with_event_ids,
@@ -261,12 +241,6 @@ pub(super) fn build_session_state(
             ..Default::default()
         },
         turn_count: reconstruction.turn_count,
-        provider: None,
-        system_prompt: reconstruction.system_prompt,
-        reasoning_level: reconstruction.reasoning_level,
-        metadata: None,
         is_ended: session.ended_at.as_ref().map(|_| true),
-        branch: None,
-        timestamp: Some(session.last_activity_at.clone()),
     }
 }

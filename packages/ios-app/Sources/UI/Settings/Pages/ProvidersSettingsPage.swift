@@ -1,27 +1,29 @@
 import SwiftUI
 
-// ARCHITECTURE: ~115 lines coordinator. Provider list, auth state, engine invocations,
-// OAuth sheet, and error alert live here; per-provider/service UI lives under
-// ModelProviders/ (ModelProviderSection, ProviderServiceCard, ...).
+// ARCHITECTURE: Compact provider grids, auth state, engine invocations,
+// OAuth sheet, and error alert live here; per-provider UI lives under
+// ModelProviders/.
 
 struct ProvidersSettingsPage: View {
     @Environment(\.dependencies) private var dependencies
 
     static let title = SettingsLabels.providers
 
+    let settingsState: SettingsState
+    let updateServerSetting: (SettingsMutation) -> Void
+
     @State private var authState: AuthSnapshot?
     @State private var error: String?
     @State private var oauthProvider: OAuthProvider?
+    @State private var ollamaModels: [ModelInfo] = []
+    @State private var isRefreshingOllama = false
 
     private var authRepository: any AuthRepository { dependencies.authRepository }
 
     var body: some View {
         SettingsPageContainer(title: Self.title) {
-            if SettingsAdaptiveLayout.usesIPadLandscapeLayout {
-                landscapeContent
-            } else {
-                stackedContent
-            }
+            providerGroup(title: "Model Providers", providers: ProviderInfo.modelProviders)
+            providerGroup(title: "Search Providers", providers: ProviderInfo.searchProviders)
         }
         .sheet(item: $oauthProvider) { provider in
             OAuthLoginSheet(provider: provider) { updatedAuthState in
@@ -29,49 +31,50 @@ struct ProvidersSettingsPage: View {
             }
         }
         .task(id: dependencies.authVersion) { await loadAuthState() }
+        .task(id: settingsState.ollamaBaseUrl) { await refreshOllamaModels(force: false) }
         .tronErrorAlert(message: $error)
     }
 
-    @ViewBuilder
-    private var stackedContent: some View {
-        ForEach(ProviderInfo.modelProviders) { provider in
-            modelProviderSection(provider)
-        }
-
-        ProvidersServicesSectionHeader()
-
-        ForEach(ProviderInfo.services) { service in
-            providerServiceCard(service)
-        }
+    private var providerColumns: [GridItem] {
+        let count = SettingsAdaptiveLayout.usesIPadLandscapeLayout ? 2 : 1
+        return Array(
+            repeating: GridItem(.flexible(), spacing: 16, alignment: .top),
+            count: count
+        )
     }
 
-    private var landscapeContent: some View {
-        VStack(spacing: 16) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(Array(ProviderInfo.modelProviders.prefix(3))) { provider in
-                        modelProviderSection(provider)
-                    }
+    private func providerGroup(title: String, providers: [ProviderInfo]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: title)
+            LazyVGrid(columns: providerColumns, alignment: .leading, spacing: 12) {
+                ForEach(providers) { provider in
+                    modelProviderSection(provider)
                 }
-                .frame(maxWidth: .infinity, alignment: .top)
-
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(Array(ProviderInfo.modelProviders.dropFirst(3))) { provider in
-                        modelProviderSection(provider)
-                    }
-
-                    ProvidersServicesSectionHeader()
-
-                    ForEach(ProviderInfo.services) { service in
-                        providerServiceCard(service)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .top)
             }
         }
     }
 
     private func modelProviderSection(_ provider: ProviderInfo) -> some View {
+        Group {
+            if provider.id == "ollama" {
+                OllamaProviderSection(
+                    baseUrl: settingsState.ollamaBaseUrl,
+                    models: ollamaModels,
+                    isRefreshing: isRefreshingOllama,
+                    onSaveEndpoint: { endpoint in
+                        dependencies.modelRepository.invalidateCache()
+                        ollamaModels = []
+                        updateServerSetting(.ollamaBaseUrl(endpoint))
+                    },
+                    onRefresh: { await refreshOllamaModels(force: true) }
+                )
+            } else {
+                credentialProviderSection(provider)
+            }
+        }
+    }
+
+    private func credentialProviderSection(_ provider: ProviderInfo) -> some View {
         ModelProviderSection(
             provider: provider,
             providerAuth: authState?.providers[provider.id],
@@ -85,20 +88,22 @@ struct ProvidersSettingsPage: View {
         )
     }
 
-    private func providerServiceCard(_ service: ProviderInfo) -> some View {
-        ProviderServiceCard(
-            service: service,
-            serviceAuth: authState?.services[service.id],
-            onSave: { params in await saveProvider(params) },
-            onClear: { await clearService(service.id) }
-        )
-    }
-
     // MARK: - Actions
 
     private func loadAuthState() async {
         do {
             authState = try await authRepository.get()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func refreshOllamaModels(force: Bool) async {
+        isRefreshingOllama = true
+        defer { isRefreshingOllama = false }
+        do {
+            let models = try await dependencies.modelRepository.list(forceRefresh: force)
+            ollamaModels = models.filter { $0.provider == "ollama" }
         } catch {
             self.error = error.localizedDescription
         }
@@ -163,15 +168,6 @@ struct ProvidersSettingsPage: View {
         }
     }
 
-    private func clearService(_ serviceId: String) async -> ProviderAuthActionResult {
-        await performAuthAction {
-            try await authRepository.clear(
-                .service(serviceId),
-                idempotencyKey: .userAction("auth.clear")
-            )
-        }
-    }
-
     private func performAuthAction(_ action: () async throws -> AuthSnapshot) async -> ProviderAuthActionResult {
         do {
             authState = try await action()
@@ -180,22 +176,5 @@ struct ProvidersSettingsPage: View {
             self.error = error.localizedDescription
             return .failed
         }
-    }
-}
-
-enum ProvidersServicesSectionHeaderStyle {
-    static let fontSize = TronTypography.sizeBody
-    static let topPadding: CGFloat = 26
-    static let bottomPadding: CGFloat = 4
-}
-
-private struct ProvidersServicesSectionHeader: View {
-    var body: some View {
-        Text("Services")
-            .font(TronTypography.sans(size: ProvidersServicesSectionHeaderStyle.fontSize, weight: .semibold))
-            .foregroundStyle(.tronTextSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, ProvidersServicesSectionHeaderStyle.topPadding)
-            .padding(.bottom, ProvidersServicesSectionHeaderStyle.bottomPadding)
     }
 }

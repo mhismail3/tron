@@ -27,11 +27,7 @@ struct SystemEventView: View {
             tokensAfter: tokensAfter,
             reason: reason,
             onTap: isInProgress ? nil : {
-                if let resourceId = event.contextControlActionResourceId {
-                    onTap?(.contextControlAction(resourceId: resourceId))
-                } else {
-                    onTap?(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: event.compactionPreservedTurns, summarizedTurns: event.compactionSummarizedTurns))
-                }
+                onTap?(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: event.compactionPreservedTurns, summarizedTurns: event.compactionSummarizedTurns))
             }
         )
     }
@@ -48,13 +44,11 @@ struct SystemEventView: View {
         case .interrupted:
             InterruptedNotificationView()
 
-        case .contextCleared(let tokensBefore, let tokensAfter, let actionResourceId):
+        case .contextCleared(let tokensBefore, let tokensAfter):
             ContextClearedNotificationView(
                 tokensBefore: tokensBefore,
                 tokensAfter: tokensAfter,
-                onTap: actionResourceId.map { resourceId in
-                    { onTap?(.contextControlAction(resourceId: resourceId)) }
-                } ?? nil
+                onTap: nil
             )
 
         case .messageDeleted(let targetType):

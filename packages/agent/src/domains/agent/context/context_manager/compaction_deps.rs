@@ -14,7 +14,7 @@ pub(super) struct ManagerCompactionDeps {
     pub(super) current_tokens: u64,
     pub(super) context_limit: u64,
     pub(super) system_prompt_tokens: u64,
-    pub(super) capabilities_tokens: u64,
+    pub(super) tools_tokens: u64,
 }
 
 impl ManagerCompactionDeps {
@@ -24,7 +24,7 @@ impl ManagerCompactionDeps {
             current_tokens: manager.get_current_tokens(),
             context_limit: manager.get_context_limit(),
             system_prompt_tokens: manager.estimate_system_prompt_tokens(),
-            capabilities_tokens: manager.estimate_capabilities_tokens(),
+            tools_tokens: manager.estimate_tools_tokens(),
         }
     }
 }
@@ -50,8 +50,8 @@ impl CompactionDeps for ManagerCompactionDeps {
         self.system_prompt_tokens
     }
 
-    fn estimate_capabilities_tokens(&self) -> u64 {
-        self.capabilities_tokens
+    fn estimate_tools_tokens(&self) -> u64 {
+        self.tools_tokens
     }
 
     fn get_message_tokens(&self, msg: &Message) -> u64 {

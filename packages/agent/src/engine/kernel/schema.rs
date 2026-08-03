@@ -1,5 +1,6 @@
 //! Minimal enforced JSON Schema subset for engine contracts.
 
+use regex::Regex;
 use serde_json::Value;
 
 use super::errors::{EngineError, Result};
@@ -9,7 +10,7 @@ const SUPPORTED_TYPES: &[&str] = &[
     "array", "boolean", "integer", "null", "number", "object", "string",
 ];
 
-/// Validate that a schema only uses the subset enforced by Phase 1.
+/// Validate that a schema only uses the enforced subset.
 pub fn validate_schema_definition(
     function_id: &FunctionId,
     direction: &'static str,
@@ -18,7 +19,7 @@ pub fn validate_schema_definition(
     validate_schema_node(function_id, direction, schema, "$")
 }
 
-/// Validate a payload against the supported Phase 1 schema subset.
+/// Validate a payload against the enforced schema subset.
 pub fn validate_payload(
     function_id: &FunctionId,
     direction: &'static str,
@@ -89,11 +90,18 @@ fn validate_schema_node(
     }
 
     if let Some(additional) = object.get("additionalProperties") {
-        if !additional.is_boolean() {
+        if additional.is_object() {
+            validate_schema_node(
+                function_id,
+                direction,
+                additional,
+                &format!("{path}.additionalProperties"),
+            )?;
+        } else if !additional.is_boolean() {
             return Err(invalid_schema(
                 function_id,
                 direction,
-                format!("{path}.additionalProperties must be a boolean"),
+                format!("{path}.additionalProperties must be a boolean or schema"),
             ));
         }
     }
@@ -195,17 +203,45 @@ fn validate_schema_node(
         ));
     }
 
-    if let Some(min_length) = object.get("minLength") {
-        match min_length.as_u64() {
-            Some(_) => {}
-            None => {
-                return Err(invalid_schema(
-                    function_id,
-                    direction,
-                    format!("{path}.minLength must be a non-negative integer"),
-                ));
-            }
+    for keyword in ["minLength", "maxLength"] {
+        if object
+            .get(keyword)
+            .is_some_and(|value| value.as_u64().is_none())
+        {
+            return Err(invalid_schema(
+                function_id,
+                direction,
+                format!("{path}.{keyword} must be a non-negative integer"),
+            ));
         }
+    }
+    if let (Some(min_length), Some(max_length)) = (
+        object.get("minLength").and_then(Value::as_u64),
+        object.get("maxLength").and_then(Value::as_u64),
+    ) && min_length > max_length
+    {
+        return Err(invalid_schema(
+            function_id,
+            direction,
+            format!("{path}.minLength must not exceed maxLength"),
+        ));
+    }
+
+    if let Some(pattern) = object.get("pattern") {
+        let Some(pattern) = pattern.as_str() else {
+            return Err(invalid_schema(
+                function_id,
+                direction,
+                format!("{path}.pattern must be a string"),
+            ));
+        };
+        Regex::new(pattern).map_err(|error| {
+            invalid_schema(
+                function_id,
+                direction,
+                format!("{path}.pattern is not a valid regular expression: {error}"),
+            )
+        })?;
     }
 
     if let Some(enum_values) = object.get("enum") {
@@ -396,6 +432,32 @@ fn validate_payload_node(
             format!("string shorter than minLength {min_length}"),
         ));
     }
+    if let Some(max_length) = object.get("maxLength").and_then(Value::as_u64)
+        && let Some(text) = payload.as_str()
+        && text.chars().count() > max_length as usize
+    {
+        return Err(schema_violation(
+            function_id,
+            direction,
+            path,
+            format!("string longer than maxLength {max_length}"),
+        ));
+    }
+
+    if let (Some(pattern), Some(text)) = (
+        object.get("pattern").and_then(Value::as_str),
+        payload.as_str(),
+    ) && !Regex::new(pattern)
+        .expect("schema pattern was validated")
+        .is_match(text)
+    {
+        return Err(schema_violation(
+            function_id,
+            direction,
+            path,
+            "string does not match pattern".to_owned(),
+        ));
+    }
 
     if let Some(number) = payload.as_f64() {
         if let Some(minimum) = object.get("minimum").and_then(Value::as_f64)
@@ -442,13 +504,14 @@ fn validate_payload_node(
         }
     }
 
-    if let Some(properties) = object.get("properties").and_then(Value::as_object) {
-        let Some(payload_object) = payload.as_object() else {
-            return Ok(());
-        };
-        if object.get("additionalProperties").and_then(Value::as_bool) == Some(false) {
-            for key in payload_object.keys() {
-                if !properties.contains_key(key) {
+    if let Some(payload_object) = payload.as_object() {
+        let properties = object.get("properties").and_then(Value::as_object);
+        for (key, value) in payload_object {
+            if properties.is_some_and(|properties| properties.contains_key(key)) {
+                continue;
+            }
+            match object.get("additionalProperties") {
+                Some(Value::Bool(false)) => {
                     return Err(schema_violation(
                         function_id,
                         direction,
@@ -456,8 +519,22 @@ fn validate_payload_node(
                         "additional property is not allowed".to_owned(),
                     ));
                 }
+                Some(additional @ Value::Object(_)) => validate_payload_node(
+                    function_id,
+                    direction,
+                    additional,
+                    value,
+                    &format!("{path}.{key}"),
+                )?,
+                _ => {}
             }
         }
+    }
+
+    if let Some(properties) = object.get("properties").and_then(Value::as_object) {
+        let Some(payload_object) = payload.as_object() else {
+            return Ok(());
+        };
         for (key, child_schema) in properties {
             if let Some(child_payload) = payload_object.get(key) {
                 validate_payload_node(
@@ -613,6 +690,38 @@ mod tests {
     }
 
     #[test]
+    fn schema_valued_additional_properties_are_enforced() {
+        let schema = json!({
+            "type":"object",
+            "properties":{
+                "files":{
+                    "type":"object",
+                    "additionalProperties":{"type":"string"}
+                }
+            },
+            "required":["files"],
+            "additionalProperties":false
+        });
+
+        validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!({"files":{"worker.py":"print('ok')"}}),
+        )
+        .unwrap();
+        let error = validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!({"files":{"worker.py":17}}),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("$.files.worker.py"));
+        assert!(error.to_string().contains("type string"));
+    }
+
+    #[test]
     fn min_length_keyword_must_be_non_negative_integer() {
         let schema = json!({"type": "string", "minLength": "1"});
         let err = validate_schema_definition(&function_id(), "request", &schema).unwrap_err();
@@ -623,13 +732,62 @@ mod tests {
     }
 
     #[test]
+    fn max_length_is_definition_validated_and_enforced_by_character_count() {
+        let schema = json!({"type":"string","minLength":1,"maxLength":3});
+
+        validate_payload(&function_id(), "request", &schema, &json!("é日a")).unwrap();
+        let error =
+            validate_payload(&function_id(), "request", &schema, &json!("é日ab")).unwrap_err();
+        assert!(error.to_string().contains("maxLength 3"));
+
+        let invalid = json!({"type":"string","maxLength":"3"});
+        let error = validate_schema_definition(&function_id(), "request", &invalid).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("maxLength must be a non-negative integer")
+        );
+
+        let inverted = json!({"type":"string","minLength":4,"maxLength":3});
+        let error = validate_schema_definition(&function_id(), "request", &inverted).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("minLength must not exceed maxLength")
+        );
+    }
+
+    #[test]
+    fn string_pattern_is_definition_validated_and_enforced() {
+        let schema = json!({"type":"string","pattern":"^(?:sha256:)?[0-9a-f]{64}$"});
+        validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        )
+        .unwrap();
+        let mismatch = validate_payload(&function_id(), "request", &schema, &json!(""))
+            .expect_err("empty string must not match checksum pattern");
+        assert!(mismatch.to_string().contains("does not match pattern"));
+
+        for invalid in [
+            json!({"type":"string","pattern":17}),
+            json!({"type":"string","pattern":"["}),
+        ] {
+            validate_schema_definition(&function_id(), "request", &invalid)
+                .expect_err("invalid pattern definition must be rejected");
+        }
+    }
+
+    #[test]
     fn const_and_numeric_bounds_are_enforced() {
         let schema = json!({
             "type": "object",
             "additionalProperties": false,
             "required": ["operation", "limit"],
             "properties": {
-                "operation": {"type": "string", "const": "catalog_search"},
+                "operation": {"type": "string", "const": "lookup"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 500}
             }
         });
@@ -638,7 +796,7 @@ mod tests {
             &function_id(),
             "request",
             &schema,
-            &json!({"operation": "catalog_inspect", "limit": 10}),
+            &json!({"operation": "inspect", "limit": 10}),
         )
         .unwrap_err();
         assert!(wrong_operation.to_string().contains("does not match const"));
@@ -647,7 +805,7 @@ mod tests {
             &function_id(),
             "request",
             &schema,
-            &json!({"operation": "catalog_search", "limit": 0}),
+            &json!({"operation": "lookup", "limit": 0}),
         )
         .unwrap_err();
         assert!(below.to_string().contains("below minimum 1"));
@@ -656,7 +814,7 @@ mod tests {
             &function_id(),
             "request",
             &schema,
-            &json!({"operation": "catalog_search", "limit": 501}),
+            &json!({"operation": "lookup", "limit": 501}),
         )
         .unwrap_err();
         assert!(above.to_string().contains("exceeds maximum 500"));
@@ -665,7 +823,7 @@ mod tests {
             &function_id(),
             "request",
             &schema,
-            &json!({"operation": "catalog_search", "limit": 500}),
+            &json!({"operation": "lookup", "limit": 500}),
         )
         .unwrap();
     }

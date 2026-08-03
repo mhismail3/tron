@@ -27,29 +27,29 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
     // MARK: - Helper Functions
 
-    private func makeCapabilityInvocationStartResult(
-        modelPrimitiveName: String,
+    private func makeToolInvocationStartResult(
+        toolName: String,
         invocationId: String,
         arguments: [String: AnyCodable]? = nil,
-        identity: CapabilityIdentity? = nil
-    ) -> CapabilityInvocationStartedPlugin.Result {
-        CapabilityInvocationStartedPlugin.Result(
-            modelPrimitiveName: modelPrimitiveName,
+        identity: ToolIdentity? = nil
+    ) -> ToolInvocationStartedPlugin.Result {
+        ToolInvocationStartedPlugin.Result(
+            toolName: toolName,
             invocationId: invocationId,
             arguments: arguments,
             identity: identity
         )
     }
 
-    private func makeCapabilityInvocationEndResult(
+    private func makeToolInvocationEndResult(
         invocationId: String,
         success: Bool,
         result: String?,
         durationMs: Int? = nil
-    ) -> CapabilityInvocationCompletedPlugin.Result {
-        CapabilityInvocationCompletedPlugin.Result(
+    ) -> ToolInvocationCompletedPlugin.Result {
+        ToolInvocationCompletedPlugin.Result(
             invocationId: invocationId,
-            modelPrimitiveName: nil,
+            toolName: "test_tool",
             isError: !success,
             content: result ?? "",
             duration: durationMs,
@@ -199,119 +199,201 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertFalse(isStreaming)
     }
 
-    // MARK: - Capability Start Routing Tests
+    // MARK: - Tool Start Routing Tests
 
-    func test_capabilityInvocationGenerating_createsVisibleGeneratingMessageImmediately() {
-        let result = CapabilityInvocationGeneratingPlugin.Result(
-            modelPrimitiveName: "execute",
+    func test_toolInvocationGenerating_createsVisibleGeneratingMessageImmediately() {
+        let result = ToolInvocationGeneratingPlugin.Result(
+            toolName: "process_run",
             invocationId: "toolu_generating123",
-            identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "process_run")
+            identity: ToolIdentity(toolName: "process_run")
         )
 
-        viewModel.handleCapabilityInvocationGenerating(result)
+        viewModel.handleToolInvocationGenerating(result)
 
         XCTAssertEqual(viewModel.messages.count, 1)
-        XCTAssertTrue(viewModel.animationCoordinator.isCapabilityInvocationVisible("toolu_generating123"))
-        guard case .capabilityInvocation(let invocation) = viewModel.messages[0].content else {
-            return XCTFail("Expected capability invocation chip")
+        XCTAssertTrue(viewModel.animationCoordinator.isToolInvocationVisible("toolu_generating123"))
+        guard case .toolInvocation(let invocation) = viewModel.messages[0].content else {
+            return XCTFail("Expected tool invocation chip")
         }
         XCTAssertEqual(invocation.id, "toolu_generating123")
         XCTAssertEqual(invocation.status, .generating)
-        XCTAssertEqual(invocation.identity.operationName, "process_run")
     }
 
-    func test_parallelCapabilityInvocationGenerating_preservesArrivalOrderBeforeCompletion() {
-        viewModel.handleCapabilityInvocationGenerating(CapabilityInvocationGeneratingPlugin.Result(
-            modelPrimitiveName: "execute",
+    func test_parallelToolInvocationGenerating_preservesArrivalOrderBeforeCompletion() {
+        viewModel.handleToolInvocationGenerating(ToolInvocationGeneratingPlugin.Result(
+            toolName: "process_run",
             invocationId: "toolu_first",
-            identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "trace_list")
+            identity: ToolIdentity(toolName: "trace_list")
         ))
-        viewModel.handleCapabilityInvocationGenerating(CapabilityInvocationGeneratingPlugin.Result(
-            modelPrimitiveName: "execute",
+        viewModel.handleToolInvocationGenerating(ToolInvocationGeneratingPlugin.Result(
+            toolName: "process_run",
             invocationId: "toolu_second",
-            identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "program_execution_list")
+            identity: ToolIdentity(toolName: "program_execution_list")
         ))
 
         let invocationIds = viewModel.messages.compactMap { message -> String? in
-            guard case .capabilityInvocation(let invocation) = message.content else { return nil }
+            guard case .toolInvocation(let invocation) = message.content else { return nil }
             return invocation.id
         }
         XCTAssertEqual(invocationIds, ["toolu_first", "toolu_second"])
-        XCTAssertTrue(viewModel.animationCoordinator.isCapabilityInvocationVisible("toolu_first"))
-        XCTAssertTrue(viewModel.animationCoordinator.isCapabilityInvocationVisible("toolu_second"))
+        XCTAssertTrue(viewModel.animationCoordinator.isToolInvocationVisible("toolu_first"))
+        XCTAssertTrue(viewModel.animationCoordinator.isToolInvocationVisible("toolu_second"))
     }
 
-    func test_capabilityInvocationStarted_createsCapabilityMessage() {
+    func test_toolInvocationStarted_createsToolMessage() {
         // Given
         let initialCount = viewModel.messages.count
-        let result = makeCapabilityInvocationStartResult(
-            modelPrimitiveName: "execute",
+        let result = makeToolInvocationStartResult(
+            toolName: "process_run",
             invocationId: "toolu_test123",
             arguments: ["command": AnyCodable("ls -la")]
         )
 
         // When
-        viewModel.handleCapabilityInvocationStarted(result)
+        viewModel.handleToolInvocationStarted(result)
 
-        // Then - capability message should be created
+        // Then - tool message should be created
         XCTAssertEqual(viewModel.messages.count, initialCount + 1)
     }
 
-    // MARK: - Capability Progress Routing Tests
+    // MARK: - Tool Progress Routing Tests
 
-    func test_capabilityProgress_updatesChipProgressFields() {
+    func test_toolProgress_updatesChipProgressFields() {
         let invocationId = "toolu_progress1"
-        let startResult = makeCapabilityInvocationStartResult(
-            modelPrimitiveName: "execute",
+        let startResult = makeToolInvocationStartResult(
+            toolName: "process_run",
             invocationId: invocationId,
             arguments: ["command": AnyCodable("long-task")]
         )
-        viewModel.handleCapabilityInvocationStarted(startResult)
+        viewModel.handleToolInvocationStarted(startResult)
 
-        let progress = CapabilityInvocationProgressPlugin.Result(
+        let progress = ToolInvocationProgressPlugin.Result(
             invocationId: invocationId,
             message: "downloading chunk 3/5",
             percent: 0.6
         )
-        viewModel.handleCapabilityInvocationProgress(progress)
+        viewModel.handleToolInvocationProgress(progress)
 
         guard let index = viewModel.messages.lastIndex(where: {
-            if case .capabilityInvocation(let t) = $0.content { return t.id == invocationId }
+            if case .toolInvocation(let t) = $0.content { return t.id == invocationId }
             return false
-        }) else { return XCTFail("Capability invocation message not found") }
+        }) else { return XCTFail("Tool invocation message not found") }
 
-        if case .capabilityInvocation(let capability) = viewModel.messages[index].content {
-            XCTAssertEqual(capability.progressMessage, "downloading chunk 3/5")
-            XCTAssertEqual(capability.progressPercent, 0.6)
+        if case .toolInvocation(let tool) = viewModel.messages[index].content {
+            XCTAssertEqual(tool.progressMessage, "downloading chunk 3/5")
+            XCTAssertEqual(tool.progressPercent, 0.6)
         } else {
             XCTFail("Unexpected content type")
         }
     }
 
-    func test_capabilityProgress_unknownInvocationId_isIgnored() {
+    func test_toolProgress_unknownInvocationId_isIgnored() {
         let initialCount = viewModel.messages.count
-        let progress = CapabilityInvocationProgressPlugin.Result(
+        let progress = ToolInvocationProgressPlugin.Result(
             invocationId: "not-found",
             message: "ignored",
             percent: nil
         )
-        viewModel.handleCapabilityInvocationProgress(progress)
+        viewModel.handleToolInvocationProgress(progress)
         XCTAssertEqual(viewModel.messages.count, initialCount)
     }
 
-    func test_capabilityInvocationCompleted_clearsProgressFields() {
-        let invocationId = "toolu_progress_end"
-        viewModel.handleCapabilityInvocationStarted(makeCapabilityInvocationStartResult(
-            modelPrimitiveName: "execute",
+    func test_toolActivity_keepsDiscreteDeduplicatedProgressHistory() {
+        let invocationId = "toolu_activity"
+        viewModel.handleToolInvocationStarted(makeToolInvocationStartResult(
+            toolName: "process_run",
             invocationId: invocationId,
             arguments: nil
         ))
-        viewModel.handleCapabilityInvocationProgress(CapabilityInvocationProgressPlugin.Result(
+
+        viewModel.handleToolInvocationProgress(ToolInvocationProgressPlugin.Result(
+            invocationId: invocationId,
+            message: "Running Research Coordinator",
+            percent: 0.08
+        ))
+        viewModel.handleToolInvocationOutput(.init(
+            invocationId: invocationId,
+            output: "Started Research Search\nFinished Research Search"
+        ))
+        viewModel.handleToolInvocationOutput(.init(
+            invocationId: invocationId,
+            output: "Finished Research Search"
+        ))
+
+        guard let message = viewModel.messages.last(where: {
+            if case .toolInvocation(let invocation) = $0.content {
+                return invocation.id == invocationId
+            }
+            return false
+        }), case .toolInvocation(let invocation) = message.content else {
+            return XCTFail("Tool invocation message not found")
+        }
+
+        XCTAssertEqual(
+            invocation.logs,
+            [
+                "Running Research Coordinator",
+                "Started Research Search",
+                "Finished Research Search"
+            ]
+        )
+    }
+
+    func test_workerProgressUsesDurableGraphInsteadOfClientOwnedActivity() {
+        let invocationId = "toolu_worker_activity"
+        let workerIdentity = ToolIdentity(
+            toolName: "worker_research_coordinator",
+            presentationHints: [
+                "surfaceKind": "worker",
+                "workerId": "research-coordinator",
+                "workerName": "Research Coordinator",
+                "runnerKind": "agent"
+            ]
+        )
+        viewModel.handleToolInvocationStarted(makeToolInvocationStartResult(
+            toolName: "worker_research_coordinator",
+            invocationId: invocationId,
+            arguments: nil,
+            identity: workerIdentity
+        ))
+        viewModel.handleToolInvocationProgress(.init(
+            invocationId: invocationId,
+            message: "Started Filesystem listFinished Filesystem list",
+            percent: 0.25,
+            identity: workerIdentity
+        ))
+        viewModel.handleToolInvocationOutput(.init(
+            invocationId: invocationId,
+            output: "Started Worker research searchFinished Worker research search"
+        ))
+
+        guard let message = viewModel.messages.last(where: {
+            if case .toolInvocation(let invocation) = $0.content {
+                return invocation.id == invocationId
+            }
+            return false
+        }), case .toolInvocation(let invocation) = message.content else {
+            return XCTFail("Tool invocation message not found")
+        }
+
+        XCTAssertTrue(invocation.logs.isEmpty)
+        XCTAssertNil(invocation.progressMessage)
+        XCTAssertNil(invocation.progressPercent)
+    }
+
+    func test_toolInvocationCompleted_clearsProgressFields() {
+        let invocationId = "toolu_progress_end"
+        viewModel.handleToolInvocationStarted(makeToolInvocationStartResult(
+            toolName: "process_run",
+            invocationId: invocationId,
+            arguments: nil
+        ))
+        viewModel.handleToolInvocationProgress(ToolInvocationProgressPlugin.Result(
             invocationId: invocationId,
             message: "in-flight",
             percent: 0.4
         ))
-        viewModel.handleCapabilityInvocationCompleted(makeCapabilityInvocationEndResult(
+        viewModel.handleToolInvocationCompleted(makeToolInvocationEndResult(
             invocationId: invocationId,
             success: true,
             result: "done",
@@ -320,75 +402,75 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         viewModel.flushUIUpdateQueue()
 
         guard let index = viewModel.messages.lastIndex(where: {
-            if case .capabilityInvocation(let t) = $0.content { return t.id == invocationId }
+            if case .toolInvocation(let t) = $0.content { return t.id == invocationId }
             return false
-        }) else { return XCTFail("Capability invocation message not found") }
+        }) else { return XCTFail("Tool invocation message not found") }
 
-        if case .capabilityInvocation(let capability) = viewModel.messages[index].content {
-            XCTAssertNil(capability.progressMessage)
-            XCTAssertNil(capability.progressPercent)
+        if case .toolInvocation(let tool) = viewModel.messages[index].content {
+            XCTAssertNil(tool.progressMessage)
+            XCTAssertNil(tool.progressPercent)
         }
     }
 
-    // MARK: - Capability Completion Routing Tests
+    // MARK: - Tool Completion Routing Tests
 
-    func test_capabilityInvocationCompleted_updatesCapabilityMessage() {
-        // Given - start a capability first
+    func test_toolInvocationCompleted_updatesToolMessage() {
+        // Given - start a tool first
         let invocationId = "toolu_test456"
-        let startResult = makeCapabilityInvocationStartResult(
-            modelPrimitiveName: "execute",
+        let startResult = makeToolInvocationStartResult(
+            toolName: "process_run",
             invocationId: invocationId,
             arguments: ["command": AnyCodable("echo hello")]
         )
-        viewModel.handleCapabilityInvocationStarted(startResult)
+        viewModel.handleToolInvocationStarted(startResult)
 
-        // When - end the capability
-        let endResult = makeCapabilityInvocationEndResult(
+        // When - end the tool
+        let endResult = makeToolInvocationEndResult(
             invocationId: invocationId,
             success: true,
             result: "hello\n",
             durationMs: 50
         )
-        viewModel.handleCapabilityInvocationCompleted(endResult)
+        viewModel.handleToolInvocationCompleted(endResult)
         viewModel.flushUIUpdateQueue()
 
         guard let index = viewModel.messages.lastIndex(where: {
-            if case .capabilityInvocation(let invocation) = $0.content { return invocation.id == invocationId }
+            if case .toolInvocation(let invocation) = $0.content { return invocation.id == invocationId }
             return false
-        }) else { return XCTFail("Capability invocation message not found") }
-        guard case .capabilityInvocation(let invocation) = viewModel.messages[index].content else {
-            return XCTFail("Expected capability invocation content")
+        }) else { return XCTFail("Tool invocation message not found") }
+        guard case .toolInvocation(let invocation) = viewModel.messages[index].content else {
+            return XCTFail("Expected tool invocation content")
         }
         XCTAssertEqual(invocation.result, "hello\n")
         XCTAssertEqual(invocation.status, .success)
     }
 
-    func test_capabilityInvocationCompleted_error_marksCapabilityMessageAsError() {
-        // Given - start a capability
+    func test_toolInvocationCompleted_error_marksToolMessageAsError() {
+        // Given - start a tool
         let invocationId = "toolu_error789"
-        let startResult = makeCapabilityInvocationStartResult(
-            modelPrimitiveName: "execute",
+        let startResult = makeToolInvocationStartResult(
+            toolName: "process_run",
             invocationId: invocationId,
             arguments: ["command": AnyCodable("invalid_command")]
         )
-        viewModel.handleCapabilityInvocationStarted(startResult)
+        viewModel.handleToolInvocationStarted(startResult)
 
         // When - end with error
-        let endResult = makeCapabilityInvocationEndResult(
+        let endResult = makeToolInvocationEndResult(
             invocationId: invocationId,
             success: false,
             result: "Command not found",
             durationMs: 10
         )
-        viewModel.handleCapabilityInvocationCompleted(endResult)
+        viewModel.handleToolInvocationCompleted(endResult)
         viewModel.flushUIUpdateQueue()
 
         guard let index = viewModel.messages.lastIndex(where: {
-            if case .capabilityInvocation(let invocation) = $0.content { return invocation.id == invocationId }
+            if case .toolInvocation(let invocation) = $0.content { return invocation.id == invocationId }
             return false
-        }) else { return XCTFail("Capability invocation message not found") }
-        guard case .capabilityInvocation(let invocation) = viewModel.messages[index].content else {
-            return XCTFail("Expected capability invocation content")
+        }) else { return XCTFail("Tool invocation message not found") }
+        guard case .toolInvocation(let invocation) = viewModel.messages[index].content else {
+            return XCTFail("Expected tool invocation content")
         }
         XCTAssertEqual(invocation.status, .error)
     }
@@ -449,16 +531,16 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.streamRecoveryRequestGeneration, initialGeneration + 1)
     }
 
-    func test_turnStart_resetsCapabilityTracking() {
-        // Given - have some capability invocations from previous turn
-        viewModel.currentTurnCapabilityMessageIds = [UUID()]
+    func test_turnStart_resetsToolTracking() {
+        // Given - have some tool invocations from previous turn
+        viewModel.currentTurnToolMessageIds = [UUID()]
 
         // When
         let result = TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing")
         viewModel.handleTurnStart(result)
 
-        // Then - capability tracking should be cleared
-        XCTAssertTrue(viewModel.currentTurnCapabilityMessageIds.isEmpty)
+        // Then - tool tracking should be cleared
+        XCTAssertTrue(viewModel.currentTurnToolMessageIds.isEmpty)
     }
 
     func test_turnStart_clearsThinkingMessageId() {
@@ -523,16 +605,16 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertFalse(viewModel.isProcessing)
     }
 
-    func test_complete_clearsCapabilityTracking() {
+    func test_complete_clearsToolTracking() {
         // Given: agent must be processing for handleComplete to transition
         viewModel.agentPhase = .processing
-        viewModel.currentTurnCapabilityMessageIds = [UUID()]
+        viewModel.currentTurnToolMessageIds = [UUID()]
 
         // When
         viewModel.handleComplete()
 
         // Then
-        XCTAssertTrue(viewModel.currentTurnCapabilityMessageIds.isEmpty)
+        XCTAssertTrue(viewModel.currentTurnToolMessageIds.isEmpty)
     }
 
     // MARK: - Full Turn Flow Integration Test
@@ -554,21 +636,21 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         viewModel.handleTextDelta("Here's my response: ")
         viewModel.handleTextDelta("the answer is 42.")
 
-        // 4. Agent uses a capability
-        let capabilityInvocationStartedResult = makeCapabilityInvocationStartResult(
-            modelPrimitiveName: "execute",
+        // 4. Agent uses a tool
+        let toolInvocationStartedResult = makeToolInvocationStartResult(
+            toolName: "process_run",
             invocationId: "toolu_flow1",
             arguments: ["command": AnyCodable("echo test")]
         )
-        viewModel.handleCapabilityInvocationStarted(capabilityInvocationStartedResult)
+        viewModel.handleToolInvocationStarted(toolInvocationStartedResult)
 
-        let capabilityInvocationCompletedResult = makeCapabilityInvocationEndResult(
+        let toolInvocationCompletedResult = makeToolInvocationEndResult(
             invocationId: "toolu_flow1",
             success: true,
             result: "test\n",
             durationMs: 100
         )
-        viewModel.handleCapabilityInvocationCompleted(capabilityInvocationCompletedResult)
+        viewModel.handleToolInvocationCompleted(toolInvocationCompletedResult)
 
         // 5. Turn ends
         let tokenRecord = makeTokenRecord(
@@ -588,9 +670,9 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
         // Then - verify final state
         XCTAssertFalse(viewModel.isProcessing)
-        XCTAssertTrue(viewModel.currentTurnCapabilityMessageIds.isEmpty)
+        XCTAssertTrue(viewModel.currentTurnToolMessageIds.isEmpty)
 
-        // Should have: thinking message + capability message = at least 2 new messages
+        // Should have: thinking message + tool message = at least 2 new messages
         XCTAssertGreaterThanOrEqual(viewModel.messages.count, initialMessageCount + 2)
     }
 

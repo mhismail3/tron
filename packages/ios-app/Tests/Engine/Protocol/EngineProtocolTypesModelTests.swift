@@ -9,6 +9,8 @@ struct ModelInfoComputedTests {
 
     private func makeModel(
         id: String = "claude-sonnet-4-6-20250514",
+        canonicalModelId: String? = nil,
+        aliasIds: [String]? = nil,
         name: String = "Sonnet 4.6",
         provider: String = "anthropic",
         contextWindow: Int = 200_000,
@@ -29,8 +31,10 @@ struct ModelInfoComputedTests {
         // The fixture enforces the same contract.
         ModelInfo(
             id: id,
+            canonicalModelId: canonicalModelId,
             name: name,
             provider: provider,
+            aliasIds: aliasIds,
             contextWindow: contextWindow,
             supportsThinking: supportsThinking,
             supportsImages: supportsImages,
@@ -44,6 +48,52 @@ struct ModelInfoComputedTests {
             inputCostPerMillion: inputCostPerMillion,
             outputCostPerMillion: outputCostPerMillion
         )
+    }
+
+    // MARK: - Wire Evidence
+
+    @Test("Ollama discovery evidence decodes without a client model allowlist")
+    func ollamaDiscoveryEvidenceDecodes() throws {
+        let payload = #"""
+        {
+          "id": "ollama/example:8b",
+          "canonicalModelId": "example:8b",
+          "name": "Example 8B",
+          "provider": "ollama",
+          "contextWindow": 16384,
+          "maxContextWindow": 32768,
+          "supportsThinking": false,
+          "supportsImages": true,
+          "supportsDocuments": false,
+          "supportsTools": true,
+          "attachmentPolicy": {
+            "supportsPdfContent": false,
+            "supportsTextFiles": true,
+            "maxImageDimension": 1568,
+            "maxImageBytes": 1400000,
+            "maxDocumentBytes": 0,
+            "supportedImageMimeTypes": ["image/png"]
+          },
+          "tier": "local",
+          "isRetiredGeneration": false,
+          "available": true,
+          "providerReachable": true,
+          "installed": true,
+          "metadataSource": "ollama-show",
+          "parameterSize": "8B",
+          "quantizationLevel": "Q4_K_M"
+        }
+        """#
+        let model = try JSONDecoder().decode(ModelInfo.self, from: Data(payload.utf8))
+
+        #expect(model.id == "ollama/example:8b")
+        #expect(model.canonicalModelId == "example:8b")
+        #expect(model.available == true)
+        #expect(model.providerReachable == true)
+        #expect(model.installed == true)
+        #expect(model.metadataSource == "ollama-show")
+        #expect(model.parameterSize == "8B")
+        #expect(model.quantizationLevel == "Q4_K_M")
     }
 
     // MARK: - Pricing Format
@@ -105,7 +155,7 @@ struct ModelInfoComputedTests {
     }
 
     @Test("maxOutput falls back to maxOutputTokens")
-    func maxOutputFallback() {
+    func maxOutputUsesContextDerivedDefault() {
         let m = makeModel(maxOutputTokens: 64_000)
         #expect(m.formattedMaxOutput == "64K output")
     }
@@ -131,6 +181,22 @@ struct ModelInfoComputedTests {
     }
 
     // MARK: - Display Names
+
+    @Test("Catalog lookup resolves qualified, canonical, and alias identifiers")
+    func catalogIdentifierMatching() {
+        let model = makeModel(
+            id: "openai/gpt-5.6-sol",
+            canonicalModelId: "gpt-5.6-sol",
+            aliasIds: ["openai/gpt-5.6-latest"],
+            name: "GPT-5.6 Sol",
+            provider: "openai"
+        )
+
+        #expect(ModelInfo.matching("gpt-5.6-sol", in: [model])?.id == model.id)
+        #expect(ModelInfo.matching("openai/gpt-5.6-sol", in: [model])?.id == model.id)
+        #expect(ModelInfo.matching("gpt-5.6-latest", in: [model])?.id == model.id)
+        #expect(ModelInfo.matching("missing", in: [model]) == nil)
+    }
 
     @Test("displayName for Anthropic model")
     func displayNameAnthropic() {
@@ -292,7 +358,7 @@ struct ModelInfoStrictDecodeTests {
                 "supportedImageMimeTypes": ["image/jpeg", "image/png"]
             ],
             "tier": "sonnet",
-            "isLegacy": false
+            "isRetiredGeneration": false
         ]
     }
 
@@ -313,8 +379,8 @@ struct ModelInfoStrictDecodeTests {
         #expect(m.isRetiredGeneration == false)
     }
 
-    @Test("attachment capability derives from server policy")
-    func attachmentCapabilityUsesServerPolicy() throws {
+    @Test("attachment tool derives from server policy")
+    func attachmentSupportUsesServerPolicy() throws {
         var payload = Self.validPayload()
         payload["supportsImages"] = false
         payload["attachmentPolicy"] = [
@@ -327,11 +393,11 @@ struct ModelInfoStrictDecodeTests {
         ]
 
         let model = try decode(payload)
-        let capability = AttachmentCapability.from(model: model)
-        #expect(capability.supportsImages == false)
-        #expect(capability.supportsPdfContent == false)
-        #expect(capability.maxImageBytes == 0)
-        #expect(capability.maxDocumentBytes == 4_096)
+        let tool = AttachmentSupport.from(model: model)
+        #expect(tool.supportsImages == false)
+        #expect(tool.supportsPdfContent == false)
+        #expect(tool.maxImageBytes == 0)
+        #expect(tool.maxDocumentBytes == 4_096)
     }
 
     @Test("OpenAI endpoint-aware optional fields decode")
@@ -351,7 +417,7 @@ struct ModelInfoStrictDecodeTests {
         payload["reasoningLevels"] = ["minimal", "low", "medium", "high", "xhigh"]
         payload["defaultReasoningLevel"] = "medium"
         payload["supportsStreaming"] = true
-        payload["supportsCapabilityPrimitives"] = true
+        payload["supportsTools"] = true
         payload["supportsVerbosity"] = true
         payload["defaultVerbosity"] = "low"
         payload["replacementModel"] = "gpt-5.5"
@@ -366,7 +432,7 @@ struct ModelInfoStrictDecodeTests {
         #expect(m.maxContextWindow == 272_000)
         #expect(m.reasoningLevels == ["minimal", "low", "medium", "high", "xhigh"])
         #expect(m.supportsStreaming == true)
-        #expect(m.supportsCapabilityPrimitives == true)
+        #expect(m.supportsTools == true)
         #expect(m.supportsVerbosity == true)
         #expect(m.defaultVerbosity == "low")
         #expect(m.isHidden == false)
@@ -410,7 +476,7 @@ struct ModelInfoStrictDecodeTests {
     @Test("missing isRetiredGeneration fails decode")
     func missingIsRetired() {
         var payload = Self.validPayload()
-        payload.removeValue(forKey: "isLegacy")
+        payload.removeValue(forKey: "isRetiredGeneration")
         #expect(throws: DecodingError.self) { try decode(payload) }
     }
 
@@ -424,7 +490,7 @@ struct ModelInfoStrictDecodeTests {
     @Test("null isRetiredGeneration fails decode")
     func nullIsRetired() {
         var payload = Self.validPayload()
-        payload["isLegacy"] = NSNull()
+        payload["isRetiredGeneration"] = NSNull()
         #expect(throws: DecodingError.self) { try decode(payload) }
     }
 }

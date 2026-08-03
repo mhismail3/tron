@@ -54,20 +54,20 @@ fn stream_event_thinking_delta() {
 }
 
 #[test]
-fn stream_event_capability_invocation_start() {
-    let e = StreamEvent::CapabilityInvocationDraftStart {
+fn stream_event_tool_invocation_start() {
+    let e = StreamEvent::ToolInvocationDraftStart {
         invocation_id: "tc-1".into(),
-        name: "execute".into(),
+        name: "test_tool".into(),
     };
     let json = serde_json::to_value(&e).unwrap();
-    assert_eq!(json["type"], "capability_invocation_start");
+    assert_eq!(json["type"], "tool_invocation_start");
     assert_eq!(json["invocationId"], "tc-1");
-    assert_eq!(json["name"], "execute");
+    assert_eq!(json["name"], "test_tool");
 }
 
 #[test]
-fn stream_event_capability_invocation_delta() {
-    let e = StreamEvent::CapabilityInvocationDraftDelta {
+fn stream_event_tool_invocation_delta() {
+    let e = StreamEvent::ToolInvocationDraftDelta {
         invocation_id: "tc-1".into(),
         arguments_delta: r#"{"comm"#.into(),
     };
@@ -149,16 +149,16 @@ fn stream_event_all_variants_serialize() {
             kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
             signature: None,
         },
-        StreamEvent::CapabilityInvocationDraftStart {
+        StreamEvent::ToolInvocationDraftStart {
             invocation_id: "id".into(),
             name: "n".into(),
         },
-        StreamEvent::CapabilityInvocationDraftDelta {
+        StreamEvent::ToolInvocationDraftDelta {
             invocation_id: "id".into(),
             arguments_delta: "d".into(),
         },
-        StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::default(),
+        StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: ToolInvocationDraft::default(),
         },
         StreamEvent::Done {
             message: AssistantMessage {

@@ -5,7 +5,7 @@ use crate::domains::model::providers::openai::types::{
 };
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::Message;
-use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
+use crate::shared::protocol::model_tools::{ModelTool, ToolParameterSchema};
 
 fn test_tokens() -> crate::domains::auth::credentials::OAuthTokens {
     crate::domains::auth::credentials::OAuthTokens {
@@ -57,11 +57,11 @@ fn api_key_config(model: &str) -> OpenAIConfig {
     }
 }
 
-fn test_tool() -> ModelCapability {
-    ModelCapability {
+fn test_tool() -> ModelTool {
+    ModelTool {
         name: "echo".into(),
         description: "Echo input".into(),
-        parameters: CapabilityParameterSchema {
+        parameters: ToolParameterSchema {
             schema_type: "object".into(),
             properties: Some(serde_json::Map::new()),
             required: None,
@@ -388,7 +388,7 @@ fn base_url_override_codex_preserves_path() {
     assert_eq!(url, "https://custom.example.com/codex/responses");
 }
 
-// ── ModelCapability search availability ─────────────────────────────────────
+// ── ModelTool search availability ─────────────────────────────────────
 
 // ── resolve_reasoning_effort ──────────────────────────────────────
 
@@ -439,6 +439,16 @@ fn reasoning_effort_options_overrides_config() {
     };
     // gpt-5.3-codex doesn't support "max" — clamps to "xhigh" (highest available)
     assert_eq!(provider.resolve_reasoning_effort(&options), "xhigh");
+}
+
+#[test]
+fn reasoning_effort_max_is_preserved_for_gpt_56() {
+    let provider = OpenAIProvider::new(oauth_config("gpt-5.6-terra"));
+    let options = ProviderStreamOptions {
+        reasoning_effort: Some(ReasoningEffort::Max),
+        ..Default::default()
+    };
+    assert_eq!(provider.resolve_reasoning_effort(&options), "max");
 }
 
 #[test]

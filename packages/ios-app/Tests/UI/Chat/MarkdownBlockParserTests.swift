@@ -177,6 +177,71 @@ final class MarkdownBlockParserTests: XCTestCase {
         XCTAssertEqual(items.map(\.content), ["Parent", "Nested bullet", "Nested ordered", "Sibling"])
     }
 
+    func testListLayoutStartsAtMessageLeadingEdgeAndIndentsOnlyByDepth() {
+        XCTAssertEqual(MarkdownListLayout.leadingIndent(forDepth: 0), 0)
+        XCTAssertEqual(
+            MarkdownListLayout.minimumContentLeadingIndent(forDepth: 0),
+            MarkdownListLayout.minimumMarkerWidth + MarkdownListLayout.markerSpacing
+        )
+        XCTAssertLessThanOrEqual(
+            MarkdownListLayout.minimumContentLeadingIndent(forDepth: 0),
+            14,
+            "A root bullet should not create a visually large gap before its text"
+        )
+        XCTAssertEqual(
+            MarkdownListLayout.leadingIndent(forDepth: 1),
+            MarkdownListLayout.depthIndent
+        )
+        XCTAssertEqual(
+            MarkdownListLayout.leadingIndent(forDepth: 1),
+            MarkdownListLayout.minimumContentLeadingIndent(forDepth: 0),
+            "A child bullet should begin at its parent's minimum text origin"
+        )
+        XCTAssertEqual(
+            MarkdownListLayout.leadingIndent(forDepth: 2),
+            MarkdownListLayout.depthIndent * 2
+        )
+        XCTAssertEqual(
+            MarkdownListLayout.minimumContentLeadingIndent(forDepth: 1),
+            MarkdownListLayout.depthIndent * 2
+        )
+        XCTAssertEqual(
+            MarkdownListLayout.minimumContentLeadingIndent(forDepth: 2),
+            MarkdownListLayout.depthIndent * 3
+        )
+        XCTAssertEqual(MarkdownListLayout.leadingIndent(forDepth: -1), 0)
+    }
+
+    func testCommonIndentWidthsProduceTheSameSemanticHierarchy() {
+        for indentation in ["  ", "    ", "\t"] {
+            let text = """
+            - Parent
+            \(indentation)- Child
+            \(indentation)\(indentation)- Grandchild
+            - Sibling
+            """
+            let blocks = MarkdownBlockParser.parse(text)
+            guard case .list(let items) = blocks.first?.kind else {
+                return XCTFail("Expected list for indentation \(indentation.debugDescription)")
+            }
+            XCTAssertEqual(items.map(\.depth), [0, 1, 2, 0])
+        }
+    }
+
+    func testChangingIndentWidthDoesNotCreatePhantomLevels() {
+        let text = """
+        - Parent
+            - Four-space child
+          - Two-space sibling child
+        - Sibling
+        """
+        let blocks = MarkdownBlockParser.parse(text)
+        guard case .list(let items) = blocks.first?.kind else {
+            return XCTFail("Expected list")
+        }
+        XCTAssertEqual(items.map(\.depth), [0, 1, 1, 0])
+    }
+
     func testIndentedContinuationStaysWithOwningListItem() {
         let text = "- Item with\n    wrapped continuation\n- Next"
         let blocks = MarkdownBlockParser.parse(text)

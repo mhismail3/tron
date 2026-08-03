@@ -17,7 +17,9 @@ struct ClientLogIngestionBatch: Equatable, Sendable {
 }
 
 enum ClientLogIngestionPlanner {
-    static let defaultMaxEntries = 5_000
+    /// Automatic remote diagnostics stay a small problem-focused tail. Full
+    /// verbose history remains device-local and user-exported on demand.
+    static let defaultMaxEntries = 500
 
     static func makeBatch(
         from logs: [(Date, LogCategory, LogLevel, String)],

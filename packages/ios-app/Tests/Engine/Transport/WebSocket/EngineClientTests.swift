@@ -24,6 +24,174 @@ final class EngineClientErrorTests: XCTestCase {
 
 }
 
+@MainActor
+final class EnginePendingRequestLifecycleTests: XCTestCase {
+    func testCancellationImmediatelyRetiresOnlyTheTargetRequest() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:9847/engine")!
+        )
+        var startedRequestIds: Set<String> = []
+        let cancelled = Task { @MainActor in
+            try await connection.awaitPendingResponse(
+                id: "cancel-me",
+                operation: "test.cancel",
+                timeout: 60
+            ) {
+                startedRequestIds.insert("cancel-me")
+            }
+        }
+        let survivor = Task { @MainActor in
+            try await connection.awaitPendingResponse(
+                id: "keep-me",
+                operation: "test.keep",
+                timeout: 60
+            ) {
+                startedRequestIds.insert("keep-me")
+            }
+        }
+        while startedRequestIds.count < 2 {
+            await Task.yield()
+        }
+
+        cancelled.cancel()
+
+        do {
+            _ = try await cancelled.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(Set(connection.pendingRequests.keys), ["keep-me"])
+
+        let survivorData = Data(#"{"id":"keep-me","ok":true}"#.utf8)
+        XCTAssertTrue(
+            connection.finishPendingRequest(
+                id: "keep-me",
+                result: .success(survivorData)
+            )
+        )
+        let returned = try? await survivor.value
+        XCTAssertEqual(returned, survivorData)
+        XCTAssertTrue(connection.pendingRequests.isEmpty)
+
+        // A server response that was already in flight after caller
+        // cancellation is ignored instead of double-resuming the continuation.
+        await connection.handleMessage(
+            Data(#"{"id":"cancel-me","ok":true}"#.utf8)
+        )
+        XCTAssertTrue(connection.pendingRequests.isEmpty)
+    }
+
+    func testRequestTimeoutLeavesSharedConnectionAndOtherRequestAlive() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:9847/engine")!
+        )
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+        var startedRequestIds: Set<String> = []
+
+        let expiring = Task { @MainActor in
+            try await connection.awaitPendingResponse(
+                id: "expire-me",
+                operation: "test.timeout",
+                timeout: 0.02
+            ) {
+                startedRequestIds.insert("expire-me")
+            }
+        }
+        let survivor = Task { @MainActor in
+            try await connection.awaitPendingResponse(
+                id: "survive-timeout",
+                operation: "test.survivor",
+                timeout: 60
+            ) {
+                startedRequestIds.insert("survive-timeout")
+            }
+        }
+        while startedRequestIds.count < 2 {
+            await Task.yield()
+        }
+
+        do {
+            _ = try await expiring.value
+            XCTFail("Expected request-local timeout")
+        } catch EngineConnectionError.timeout {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertTrue(connection.isConnectedFlag)
+        XCTAssertEqual(connection.connectionState, .connected)
+        XCTAssertEqual(
+            Set(connection.pendingRequests.keys),
+            ["survive-timeout"]
+        )
+
+        let survivorData = Data(#"{"id":"survive-timeout","ok":true}"#.utf8)
+        XCTAssertTrue(
+            connection.finishPendingRequest(
+                id: "survive-timeout",
+                result: .success(survivorData)
+            )
+        )
+        let returned = try? await survivor.value
+        XCTAssertEqual(returned, survivorData)
+        XCTAssertTrue(connection.pendingRequests.isEmpty)
+    }
+
+    func testInboundResponseRoutingDoesNotMaterializeResultPayload() {
+        let data = Data(
+            #"{"type":"response","id":"response-1","ok":true,"result":{"body":"private"}}"#.utf8
+        )
+
+        switch EngineConnection.parseInboundMessage(data) {
+        case .response(let id):
+            XCTAssertEqual(id, "response-1")
+        default:
+            XCTFail("Expected correlated response routing")
+        }
+    }
+
+    func testInboundEventRoutingDecodesNeutralPayloadOnce() throws {
+        let data = Data(
+            #"{"type":"event","topic":"events.session","subscriptionId":"sub-1","cursor":7,"event":{"type":"agent.ready","sessionId":"session-1","timestamp":"2026-07-26T00:00:00Z"}}"#.utf8
+        )
+
+        switch EngineConnection.parseInboundMessage(data) {
+        case .event(let delivery):
+            XCTAssertEqual(delivery.subscriptionId, "sub-1")
+            XCTAssertEqual(delivery.cursor, EngineStreamCursor(rawValue: 7))
+            XCTAssertEqual(delivery.event.type, "agent.ready")
+            XCTAssertEqual(delivery.event.sessionId, "session-1")
+            let reconstructed = try JSONDecoder().decode(
+                ServerEventPayload.self,
+                from: delivery.eventData
+            )
+            XCTAssertEqual(reconstructed, delivery.event)
+        default:
+            XCTFail("Expected neutral event routing")
+        }
+    }
+
+    func testConnectionOwnedFrameDecoderNormalizesTextOffMainActor() async {
+        let decoder = EngineInboundFrameDecoder()
+        let frame = await decoder.decode(
+            text: #"{"id":"response-actor","ok":true,"result":{"body":"private"}}"#
+        )
+
+        XCTAssertEqual(frame.wireKind, .text)
+        switch frame.message {
+        case .response(let id):
+            XCTAssertEqual(id, "response-actor")
+        default:
+            XCTFail("Expected correlated response routing")
+        }
+    }
+}
+
 // MARK: - Connection State Tests
 
 @MainActor

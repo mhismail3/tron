@@ -1,6 +1,6 @@
 //! Canonical server-side failure envelope and vocabulary.
 //!
-//! Active runtime, transport, capability, provider, durable-event, and replay
+//! Active runtime, transport, tool, provider, durable-event, and replay
 //! paths convert failures into this envelope before exposing them to clients or
 //! storing structured failure details. The envelope is intentionally
 //! transport-neutral; individual protocol layers may keep their existing wire
@@ -14,11 +14,6 @@ pub const ENGINE_INVALID_ID: &str = "ENGINE_INVALID_ID";
 /// Engine function id parse failure.
 pub const ENGINE_INVALID_FUNCTION_ID: &str = "ENGINE_INVALID_FUNCTION_ID";
 /// Engine namespace authorization failure.
-pub const ENGINE_NAMESPACE_DENIED: &str = "ENGINE_NAMESPACE_DENIED";
-/// Engine delivery mode is not implemented.
-pub const ENGINE_UNSUPPORTED_DELIVERY_MODE: &str = "ENGINE_UNSUPPORTED_DELIVERY_MODE";
-/// Engine delivery mode is not allowed by a function definition.
-pub const ENGINE_DELIVERY_MODE_NOT_ALLOWED: &str = "ENGINE_DELIVERY_MODE_NOT_ALLOWED";
 /// Engine ledger or durable store operation failed.
 pub const ENGINE_LEDGER_FAILURE: &str = "ENGINE_LEDGER_FAILURE";
 /// Stored invocation failure replayed from the ledger.
@@ -27,14 +22,14 @@ pub const ENGINE_STORED_INVOCATION_ERROR: &str = "ENGINE_STORED_INVOCATION_ERROR
 pub const ENGINE_INVALID_SCHEMA: &str = "ENGINE_INVALID_SCHEMA";
 /// Engine invocation payload violates a declared schema.
 pub const ENGINE_SCHEMA_VIOLATION: &str = "ENGINE_SCHEMA_VIOLATION";
+/// A model tried to invoke a function contract that changed after it was
+/// advertised. The next model turn receives a freshly resolved surface.
+pub const ENGINE_STALE_FUNCTION_SURFACE: &str = "ENGINE_STALE_FUNCTION_SURFACE";
 /// Engine policy rejected a request.
 pub const ENGINE_POLICY_VIOLATION: &str = "ENGINE_POLICY_VIOLATION";
 /// Engine function exists but cannot currently be routed.
-pub const ENGINE_NOT_ROUTABLE: &str = "ENGINE_NOT_ROUTABLE";
-/// Engine domain capability preserved a native failure envelope.
+/// Engine domain tool preserved a native failure envelope.
 pub const ENGINE_DOMAIN_FAILURE: &str = "ENGINE_DOMAIN_FAILURE";
-/// Engine worker transport failed before a result arrived.
-pub const ENGINE_WORKER_TRANSPORT_FAILURE: &str = "ENGINE_WORKER_TRANSPORT_FAILURE";
 /// Engine handler returned an application failure.
 pub const ENGINE_HANDLER_FAILED: &str = "ENGINE_HANDLER_FAILED";
 
@@ -62,8 +57,8 @@ pub const MODEL_RESPONSE_ERROR: &str = "MODEL_RESPONSE_ERROR";
 pub const MODEL_AUTH_ERROR: &str = "MODEL_AUTH_ERROR";
 /// Provider request audit construction failure.
 pub const MODEL_PROVIDER_REQUEST_AUDIT_FAILED: &str = "MODEL_PROVIDER_REQUEST_AUDIT_FAILED";
-/// Runtime capability execution failure.
-pub const RUNTIME_CAPABILITY_ERROR: &str = "RUNTIME_CAPABILITY_ERROR";
+/// Runtime tool execution failure.
+pub const RUNTIME_TOOL_ERROR: &str = "RUNTIME_TOOL_ERROR";
 /// Runtime context-management failure.
 pub const RUNTIME_CONTEXT_ERROR: &str = "RUNTIME_CONTEXT_ERROR";
 /// Runtime cancellation.
@@ -76,7 +71,7 @@ pub const RUNTIME_SERVER_BUSY: &str = "RUNTIME_SERVER_BUSY";
 pub const RUNTIME_PERSISTENCE_ERROR: &str = "RUNTIME_PERSISTENCE_ERROR";
 /// Runtime run result reported an error after the original source boundary.
 pub const RUNTIME_RUN_ERROR: &str = "RUNTIME_RUN_ERROR";
-/// Runtime failed to resolve the live engine capability surface.
+/// Runtime failed to resolve the live engine tool surface.
 pub const ENGINE_TOOL_SURFACE_FAILED: &str = "ENGINE_TOOL_SURFACE_FAILED";
 /// Runtime failed to persist the provider request audit record.
 pub const MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED: &str =
@@ -85,13 +80,10 @@ pub const MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED: &str =
 pub const JOURNAL_CREATE_FAILED: &str = "JOURNAL_CREATE_FAILED";
 /// Runtime failed to persist the assistant message.
 pub const ASSISTANT_PERSIST_FAILED: &str = "ASSISTANT_PERSIST_FAILED";
-/// Requested model-facing capability primitive is not present in the resolved surface.
-pub const CAPABILITY_PRIMITIVE_NOT_FOUND: &str = "CAPABILITY_PRIMITIVE_NOT_FOUND";
-/// Engine invocation completed without a capability result payload.
-pub const CAPABILITY_ENGINE_RESULT_MISSING: &str = "CAPABILITY_ENGINE_RESULT_MISSING";
-/// Engine invocation returned a payload that is not a valid capability result.
-pub const CAPABILITY_RESULT_INVALID: &str = "CAPABILITY_RESULT_INVALID";
-
+/// Requested model-facing tool is not present in the resolved surface.
+pub const TOOL_PRIMITIVE_NOT_FOUND: &str = "TOOL_PRIMITIVE_NOT_FOUND";
+/// Engine invocation completed without a tool result payload.
+pub const TOOL_ENGINE_RESULT_MISSING: &str = "TOOL_ENGINE_RESULT_MISSING";
 /// Stable public failure category.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -119,7 +111,7 @@ pub enum FailureCategory {
     /// User or system cancellation.
     Cancelled,
     /// Model-requested primitive execution failure.
-    Capability,
+    Tool,
     /// Engine policy, routing, schema, worker, or ledger failure.
     Engine,
     /// Event store, ledger, journal, replay, or storage failure.
@@ -146,7 +138,7 @@ impl FailureCategory {
             Self::Api => "api",
             Self::Parse => "parse",
             Self::Cancelled => "cancelled",
-            Self::Capability => "capability",
+            Self::Tool => "tool",
             Self::Engine => "engine",
             Self::Persistence => "persistence",
             Self::Internal => "internal",
@@ -165,7 +157,7 @@ impl std::fmt::Display for FailureCategory {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailureOrigin {
-    /// Generic server capability or helper path.
+    /// Generic server tool or helper path.
     Server,
     /// Engine kernel, host, worker, or durability layer.
     Engine,
@@ -176,7 +168,7 @@ pub enum FailureOrigin {
     /// Agent runtime and turn loop.
     AgentRuntime,
     /// Model-requested primitive invocation path.
-    Capability,
+    Tool,
     /// Client transport adapter.
     Transport,
     /// Session event store and reconstruction path.
@@ -197,7 +189,7 @@ impl FailureOrigin {
             Self::ModelProvider => "model_provider",
             Self::ModelResponder => "model_responder",
             Self::AgentRuntime => "agent_runtime",
-            Self::Capability => "capability",
+            Self::Tool => "tool",
             Self::Transport => "transport",
             Self::EventStore => "event_store",
             Self::Auth => "auth",
@@ -228,9 +220,6 @@ pub struct FailureReferences {
     /// Session id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-    /// Durable source event id.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_event_id: Option<String>,
 }
 
 /// Canonical public failure envelope.
@@ -358,31 +347,10 @@ impl FailureEnvelope {
         self
     }
 
-    /// Attach an invocation id.
-    #[must_use]
-    pub fn with_invocation_id(mut self, invocation_id: Option<String>) -> Self {
-        self.references.invocation_id = invocation_id;
-        self
-    }
-
-    /// Attach a parent invocation id.
-    #[must_use]
-    pub fn with_parent_invocation_id(mut self, parent_invocation_id: Option<String>) -> Self {
-        self.references.parent_invocation_id = parent_invocation_id;
-        self
-    }
-
     /// Attach a session id.
     #[must_use]
     pub fn with_session_id(mut self, session_id: Option<String>) -> Self {
         self.references.session_id = session_id;
-        self
-    }
-
-    /// Attach a durable source event id.
-    #[must_use]
-    pub fn with_source_event_id(mut self, source_event_id: Option<String>) -> Self {
-        self.references.source_event_id = source_event_id;
         self
     }
 

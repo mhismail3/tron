@@ -10,10 +10,10 @@
 //! 2. [`ShutdownCoordinator::register_phase_callback`] — for subsystems
 //!    that need a specific async "please drain now" callback. Callbacks run
 //!    in [`ShutdownPhase`] order BEFORE the task drain so that, e.g.,
-//!    capability blocking work can drain before the database pool closes.
+//!    tool blocking work can drain before the database pool closes.
 //!
-//! The order is intentional: agent loops finish turns -> capabilities drain ->
-//! DB pool closes. See [`ShutdownPhase`].
+//! The order is intentional: the orchestrator cancels accepted agent runs ->
+//! tools drain -> DB pool closes. See [`ShutdownPhase`].
 //!
 //! INVARIANT: task registration and registry closure are one atomic decision.
 //! Once closure wins, new handles are aborted; once registration wins, shutdown
@@ -45,17 +45,17 @@ const PER_CALLBACK_TIMEOUT: Duration = Duration::from_secs(5);
 /// declaration order (lower variant runs first).
 ///
 /// The order matters:
-/// - [`Agent`](ShutdownPhase::Agent) drains in-flight turns first so
-///   capabilities they own finish naturally.
-/// - [`Capabilities`](ShutdownPhase::Capabilities) then cancels anything still running
-///   (e.g. long process capabilities that ignored turn cancel).
+/// - [`Agent`](ShutdownPhase::Agent) cancels in-flight turns and closes their
+///   durable session projections before lower-level drains begin.
+/// - [`Tools`](ShutdownPhase::Tools) then cancels anything still running
+///   (e.g. long process tools that ignored turn cancel).
 /// - [`Database`](ShutdownPhase::Database) flushes pending writes last.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ShutdownPhase {
-    /// Agent turn loops — drain in-flight turns before capability workers stop.
+    /// Agent turn loops — drain in-flight turns before tool workers stop.
     Agent = 0,
-    /// Capability executors that outlive their turn.
-    Capabilities = 1,
+    /// Tool executors that outlive their turn.
+    Tools = 1,
     /// Database pool — flushed last so all preceding phases can still write.
     Database = 2,
 }
@@ -64,7 +64,7 @@ impl ShutdownPhase {
     fn as_str(self) -> &'static str {
         match self {
             Self::Agent => "agent",
-            Self::Capabilities => "capabilities",
+            Self::Tools => "tools",
             Self::Database => "database",
         }
     }
@@ -173,7 +173,7 @@ impl ShutdownCoordinator {
     /// Callbacks run in [`ShutdownPhase`] order (lower variant first) BEFORE
     /// the task-drain step, each with a `PER_CALLBACK_TIMEOUT` budget. Use
     /// this for subsystems that need an explicit "stop" call — e.g.
-    /// draining blocking capability work — rather than the generic
+    /// draining blocking tool work — rather than the generic
     /// token-observation pattern of [`register_task`](Self::register_task).
     ///
     /// The factory runs lazily (on `graceful_shutdown`), so side-effects
@@ -192,11 +192,6 @@ impl ShutdownCoordinator {
             name,
             factory: Box::new(move || Box::pin(factory())),
         });
-    }
-
-    #[cfg(test)]
-    pub(crate) fn registered_phase_callback_count(&self) -> usize {
-        self.callbacks.lock().len()
     }
 
     /// Register a background task handle for graceful shutdown.
@@ -636,7 +631,7 @@ mod tests {
         for (phase, name) in [
             (ShutdownPhase::Database, "database"),
             (ShutdownPhase::Agent, "agent"),
-            (ShutdownPhase::Capabilities, "capabilities"),
+            (ShutdownPhase::Tools, "tools"),
         ] {
             let order = Arc::clone(&order);
             coord.register_phase_callback(phase, name, move || async move {
@@ -649,7 +644,7 @@ mod tests {
             .await;
 
         let observed = order.lock().clone();
-        assert_eq!(observed, vec!["agent", "capabilities", "database"]);
+        assert_eq!(observed, vec!["agent", "tools", "database"]);
     }
 
     #[tokio::test]
@@ -661,7 +656,7 @@ mod tests {
         coord.register_phase_callback(ShutdownPhase::Agent, "bad", move || async move {
             panic!("intentional test panic");
         });
-        coord.register_phase_callback(ShutdownPhase::Capabilities, "good", move || async move {
+        coord.register_phase_callback(ShutdownPhase::Tools, "good", move || async move {
             ran_after_clone.store(true, Ordering::SeqCst);
         });
 
@@ -685,7 +680,7 @@ mod tests {
         coord.register_phase_callback(ShutdownPhase::Agent, "slow", move || async move {
             tokio::time::sleep(Duration::from_secs(60)).await;
         });
-        coord.register_phase_callback(ShutdownPhase::Capabilities, "fast", move || async move {
+        coord.register_phase_callback(ShutdownPhase::Tools, "fast", move || async move {
             ran_after_clone.store(true, Ordering::SeqCst);
         });
 
@@ -737,7 +732,7 @@ mod tests {
 
         for phase in [
             ShutdownPhase::Agent,
-            ShutdownPhase::Capabilities,
+            ShutdownPhase::Tools,
             ShutdownPhase::Database,
         ] {
             let count = Arc::clone(&count);
@@ -757,7 +752,7 @@ mod tests {
     fn phase_ordering_is_total() {
         // Lock in the declared phase order; any reordering requires an
         // explicit change to this test + the module docs.
-        assert!(ShutdownPhase::Agent < ShutdownPhase::Capabilities);
-        assert!(ShutdownPhase::Capabilities < ShutdownPhase::Database);
+        assert!(ShutdownPhase::Agent < ShutdownPhase::Tools);
+        assert!(ShutdownPhase::Tools < ShutdownPhase::Database);
     }
 }

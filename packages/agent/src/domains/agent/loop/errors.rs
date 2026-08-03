@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::shared::server::errors::{INTERNAL_ERROR, SESSION_BUSY, SESSION_NOT_FOUND};
 use crate::shared::server::failure::{
-    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED, RUNTIME_CAPABILITY_ERROR,
-    RUNTIME_CONTEXT_ERROR, RUNTIME_MAX_TURNS, RUNTIME_PERSISTENCE_ERROR, RUNTIME_SERVER_BUSY,
+    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED, RUNTIME_CONTEXT_ERROR,
+    RUNTIME_MAX_TURNS, RUNTIME_PERSISTENCE_ERROR, RUNTIME_SERVER_BUSY, RUNTIME_TOOL_ERROR,
 };
 
 /// Errors that can occur during agent runtime execution.
@@ -17,11 +17,11 @@ pub enum RuntimeError {
     #[error("Provider error: {0}")]
     ModelResponse(#[from] crate::domains::model::responder::ModelResponseError),
 
-    /// Capability invocation error.
-    #[error("Capability error: {model_primitive_name}: {message}")]
-    ModelCapability {
-        /// Capability name.
-        model_primitive_name: String,
+    /// Tool invocation error.
+    #[error("Tool error: {tool_name}: {message}")]
+    ModelTool {
+        /// Tool name.
+        tool_name: String,
         /// Error description.
         message: String,
     },
@@ -73,7 +73,7 @@ impl RuntimeError {
             | Self::MaxTurns(_)
             | Self::SessionBusy(_)
             | Self::ServerBusy { .. } => true,
-            Self::ModelCapability { .. }
+            Self::ModelTool { .. }
             | Self::Context(_)
             | Self::SessionNotFound(_)
             | Self::Persistence(_)
@@ -85,7 +85,7 @@ impl RuntimeError {
     pub fn category(&self) -> &str {
         match self {
             Self::ModelResponse(error) => error.category(),
-            Self::ModelCapability { .. } => "capability",
+            Self::ModelTool { .. } => "tool",
             Self::Context(_) => "context",
             Self::Cancelled => "cancelled",
             Self::MaxTurns(_) => "max_turns",
@@ -101,19 +101,16 @@ impl RuntimeError {
     pub fn to_failure(&self) -> FailureEnvelope {
         match self {
             Self::ModelResponse(error) => error.failure().clone(),
-            Self::ModelCapability {
-                model_primitive_name,
-                message,
-            } => FailureEnvelope::new(
-                RUNTIME_CAPABILITY_ERROR,
-                FailureCategory::Capability,
+            Self::ModelTool { tool_name, message } => FailureEnvelope::new(
+                RUNTIME_TOOL_ERROR,
+                FailureCategory::Tool,
                 message.clone(),
                 false,
                 false,
                 FailureOrigin::AgentRuntime,
             )
             .with_details(Some(serde_json::json!({
-                "modelPrimitiveName": model_primitive_name,
+                "toolName": tool_name,
             }))),
             Self::Context(message) => FailureEnvelope::new(
                 RUNTIME_CONTEXT_ERROR,
@@ -195,15 +192,13 @@ pub enum StopReason {
     EndTurn,
     /// Turn limit reached.
     MaxTurns,
-    /// A turn-stopping primitive call requested the next loop iteration.
-    CapabilityStop,
     /// Unrecoverable error.
     Error,
     /// User abort.
     Interrupted,
-    /// Pure text response (no capabilities to execute).
-    #[serde(rename = "no_capability_invocations")]
-    NoCapabilityInvocationDrafts,
+    /// Pure text response (no tools to execute).
+    #[serde(rename = "no_tool_invocations")]
+    NoToolInvocationDrafts,
 }
 
 impl fmt::Display for StopReason {
@@ -211,10 +206,9 @@ impl fmt::Display for StopReason {
         match self {
             Self::EndTurn => write!(f, "end_turn"),
             Self::MaxTurns => write!(f, "max_turns"),
-            Self::CapabilityStop => write!(f, "capability_stop"),
             Self::Error => write!(f, "error"),
             Self::Interrupted => write!(f, "interrupted"),
-            Self::NoCapabilityInvocationDrafts => write!(f, "no_capability_invocations"),
+            Self::NoToolInvocationDrafts => write!(f, "no_tool_invocations"),
         }
     }
 }
@@ -225,11 +219,11 @@ mod tests {
 
     #[test]
     fn runtime_error_display() {
-        let err = RuntimeError::ModelCapability {
-            model_primitive_name: "execute".into(),
+        let err = RuntimeError::ModelTool {
+            tool_name: "test_tool".into(),
             message: "command failed".into(),
         };
-        assert_eq!(err.to_string(), "Capability error: execute: command failed");
+        assert_eq!(err.to_string(), "Tool error: test_tool: command failed");
     }
 
     #[test]
@@ -263,12 +257,12 @@ mod tests {
             "persistence"
         );
         assert_eq!(
-            RuntimeError::ModelCapability {
-                model_primitive_name: "t".into(),
+            RuntimeError::ModelTool {
+                tool_name: "t".into(),
                 message: "m".into()
             }
             .category(),
-            "capability"
+            "tool"
         );
     }
 
@@ -329,10 +323,9 @@ mod tests {
         let reasons = vec![
             StopReason::EndTurn,
             StopReason::MaxTurns,
-            StopReason::CapabilityStop,
             StopReason::Error,
             StopReason::Interrupted,
-            StopReason::NoCapabilityInvocationDrafts,
+            StopReason::NoToolInvocationDrafts,
         ];
         for r in &reasons {
             let json = serde_json::to_string(r).unwrap();
@@ -352,12 +345,8 @@ mod tests {
             "\"max_turns\""
         );
         assert_eq!(
-            serde_json::to_string(&StopReason::CapabilityStop).unwrap(),
-            "\"capability_stop\""
-        );
-        assert_eq!(
-            serde_json::to_string(&StopReason::NoCapabilityInvocationDrafts).unwrap(),
-            "\"no_capability_invocations\""
+            serde_json::to_string(&StopReason::NoToolInvocationDrafts).unwrap(),
+            "\"no_tool_invocations\""
         );
     }
 

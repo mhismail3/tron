@@ -14,7 +14,5 @@ fn ids_reject_empty_and_invalid_function_ids() {
 fn effect_class_helpers_classify_mutation() {
     assert!(!EffectClass::PureRead.is_mutating());
     assert!(!EffectClass::DeterministicCompute.is_mutating());
-    assert!(!EffectClass::DelegatedInvocation.is_mutating());
     assert!(EffectClass::IdempotentWrite.is_mutating());
-    assert!(EffectClass::IrreversibleSideEffect.requires_idempotency_for_agent_visibility());
 }

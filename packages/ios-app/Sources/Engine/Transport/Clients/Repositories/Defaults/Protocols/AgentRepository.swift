@@ -24,9 +24,9 @@ protocol AgentRepository: AnyObject {
     @discardableResult
     func abort(idempotencyKey: EngineIdempotencyKey) async throws -> Bool
 
-    /// Abort one in-flight capability invocation without stopping the whole turn.
+    /// Abort one in-flight tool invocation without stopping the whole turn.
     @discardableResult
-    func abortCapabilityInvocation(
+    func abortToolInvocation(
         invocationId: String,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> Bool

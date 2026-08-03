@@ -23,7 +23,6 @@ extension CachedSession {
     }
 
     var displayTitle: String {
-        if source == "chat" { return "Chat" }
         if let title = title, !title.isEmpty {
             return title
         }

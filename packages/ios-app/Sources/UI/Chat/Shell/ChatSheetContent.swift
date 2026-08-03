@@ -21,12 +21,38 @@ struct ChatSheetContent: View {
     private var sheetContent: some View {
         switch sheet {
         case .settings:
-            SettingsView { server in
+            SettingsView(draftSessionId: sessionId) { server in
                 viewModel.showSettings = false
                 sheetCoordinator?.activeSheet = nil
                 ServerOnboardingLauncher.post(prefill: server)
             }
                 .environment(\.dependencies, dependencies)
+
+        case .sessionContext:
+            SessionContextSheet(
+                sessionId: sessionId,
+                serverConnectionId: dependencies.pairedServerStore.activeServer?.id ?? "unpaired",
+                contextState: viewModel.contextState,
+                currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel),
+                currentModelInfo: viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel),
+                reasoningLevel: viewModel.inputBarState.reasoningLevel,
+                isConnected: dependencies.interactionPolicy.isConnected,
+                isAgentActive: viewModel.agentPhase.isActive,
+                isCompacting: viewModel.isCompacting,
+                isFork: eventStoreManager.sessions.first(where: { $0.id == sessionId })?.isFork == true,
+                modelRepository: dependencies.modelRepository,
+                sessionRepository: dependencies.sessionRepository,
+                workerRepository: dependencies.workerKernelRepository,
+                cachedProviderRequestEvents: viewModel.loadedReconstructionEvents.filter {
+                    $0.type == SessionEventType.modelProviderRequest.rawValue
+                },
+                onSelectModel: { model in
+                    NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                },
+                onFork: {
+                    try await eventStoreManager.forkSession(sessionId)
+                }
+            )
 
         case .compactionDetail(let data):
             CompactionDetailSheet(
@@ -38,19 +64,20 @@ struct ChatSheetContent: View {
                 summarizedTurns: data.summarizedTurns
             )
 
-        case .thinkingDetail(let content):
+        case .thinkingDetail(let data):
             ThinkingDetailSheet(
                 state: ThinkingDetailState(
                     thinkingState: viewModel.thinkingState,
-                    staticContent: content
+                    staticContent: data.content,
+                    staticKind: data.kind
                 )
             )
 
-        case .capabilityInvocationDetail(let data):
-            capabilityInvocationDetailSheet(snapshot: data)
+        case .toolInvocationDetail(let data):
+            toolInvocationDetailSheet(snapshot: data)
 
-        case .capabilityInvocationGroupDetail(let data):
-            capabilityInvocationGroupDetailSheet(snapshot: data)
+        case .toolInvocationGroupDetail(let data):
+            toolInvocationGroupDetailSheet(snapshot: data)
 
         case .providerErrorDetail(let data):
             ProviderErrorDetailSheet(data: data)
@@ -58,50 +85,33 @@ struct ChatSheetContent: View {
         case .localErrorDetail(let data):
             LocalErrorDetailSheet(data: data)
 
-        case .contextControl(let data):
-            ContextControlSheet(
-                sessionId: sessionId,
-                initialActionResourceId: data.initialActionResourceId,
-                initialModelName: viewModel.currentModel,
-                initialContextPercentage: viewModel.contextState.contextPercentage,
-                initialContextWindow: viewModel.contextState.currentContextWindow,
-                initialTokensRemaining: viewModel.contextState.tokensRemaining,
-                reasoningLevel: currentModelSupportsReasoning ? viewModel.inputBarState.reasoningLevel : nil,
-                client: dependencies.contextControlRepository,
-                modelRepository: dependencies.modelRepository
-            )
-
         }
-    }
-
-    private var currentModelSupportsReasoning: Bool {
-        viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel)?.supportsReasoning == true
     }
 
     // MARK: - Sheet Builders
 
     @ViewBuilder
-    private func capabilityInvocationDetailSheet(snapshot: CapabilityInvocationData) -> some View {
-        let liveData: CapabilityInvocationData = {
-            if let index = MessageFinder.lastIndexOfCapabilityInvocation(id: snapshot.id, in: viewModel.messages),
-               case .capabilityInvocation(let invocation) = viewModel.messages[index].content {
+    private func toolInvocationDetailSheet(snapshot: ToolInvocationData) -> some View {
+        let liveData: ToolInvocationData = {
+            if let index = MessageFinder.lastIndexOfToolInvocation(id: snapshot.id, in: viewModel.messages),
+               case .toolInvocation(let invocation) = viewModel.messages[index].content {
                 return invocation
             }
             return snapshot
         }()
-        CapabilityInvocationDetailSheet(data: liveData)
+        ToolInvocationDetailSheet(data: liveData)
     }
 
     @ViewBuilder
-    private func capabilityInvocationGroupDetailSheet(snapshot: CapabilityInvocationGroupData) -> some View {
-        let liveInvocations = snapshot.invocations.map { invocation -> CapabilityInvocationData in
-            if let index = MessageFinder.lastIndexOfCapabilityInvocation(id: invocation.id, in: viewModel.messages),
-               case .capabilityInvocation(let liveInvocation) = viewModel.messages[index].content {
+    private func toolInvocationGroupDetailSheet(snapshot: ToolInvocationGroupData) -> some View {
+        let liveInvocations = snapshot.invocations.map { invocation -> ToolInvocationData in
+            if let index = MessageFinder.lastIndexOfToolInvocation(id: invocation.id, in: viewModel.messages),
+               case .toolInvocation(let liveInvocation) = viewModel.messages[index].content {
                 return liveInvocation
             }
             return invocation
         }
-        CapabilityInvocationGroupDetailSheet(data: CapabilityInvocationGroupData(invocations: liveInvocations))
+        ToolInvocationGroupDetailSheet(data: ToolInvocationGroupData(invocations: liveInvocations))
     }
 
 }

@@ -58,6 +58,13 @@ You should never need to run `scripts/tron deploy` or any production
 deployment command — those are manual-only and reserved for the maintainer.
 Use `tron dev` for everything.
 
+Before a storage migration or risky local-state experiment, create and verify
+an owner-only profile archive with `scripts/tron state snapshot`. List or
+verify archives with `scripts/tron state snapshots` and
+`scripts/tron state verify <archive>`. `scripts/tron state restore <archive>`
+requires the server to be stopped and preserves replaced state in a dated
+recovery directory.
+
 ### iOS
 
 ```bash
@@ -141,14 +148,14 @@ client job only on a successfully path-filtered pull request.
 We follow [Conventional Commits](https://www.conventionalcommits.org/) loosely:
 
 ```
-feat(capability): add bounded workspace search
+feat(worker): add bounded recent-research runner
 fix(events): preserve session ownership during reconstruction
 docs(storage): clarify resource cleanup ownership
 ci: fail closed when path detection fails
 ```
 
 Common types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`, `style`.
-Common scopes mirror the touched module (`capability`, `events`, `ios-session`,
+Common scopes mirror the touched module (`tool`, `events`, `ios-session`,
 `mac-wizard`, `scripts`, `cargo`).
 
 The pre-commit hook (`scripts/install-hooks.sh`) runs Rust formatting check
@@ -182,10 +189,22 @@ The repo's regression guards (`paths.rs:workspace_has_no_personal_info_literals`
   configuration.
 - Encoded forms of the same (`-Users-<my-username>-…` from Claude-Code-style paths).
 
-User-specific values belong in `~/.tron/memory/MEMORY.md` (auto-loaded
-into every session) or `~/.tron/memory/rules/`. Skill-owned secrets go through
-the `vault` skill at `~/.tron/workspace/vault/`; Tron-owned provider auth lives
-in `~/.tron/profiles/auth.json`. Never paste secrets anywhere in the tree.
+User-specific values belong in runtime state outside the repository. Worker-owned
+secrets go through `~/.tron/workspace/vault/`; Tron-owned provider and transport
+credentials live in `~/.tron/auth.json`. Never paste secrets anywhere in the tree.
+
+Notification transport selection and relay HMAC credentials use the typed
+`notification-push` auth entry. Use
+`scripts/tron auth notifications configure-relay`, `status`, `use`, and
+`clear-relay`; the CLI must report only mode/readiness, never the URL or secret.
+Direct APNs provider credentials remain in the typed `apple-push` entry and are
+managed with `scripts/tron auth apns`. Device tokens are runtime transport data
+and must never appear in source, tests, logs, diagnostics, or CLI output.
+
+The Cloudflare relay in `packages/relay` is prepared and validated locally with
+`npm run check` and `npm test`. Its deployment and secret configuration are
+manual operations. Never deploy it, or run any production deployment command,
+as part of automated contributor validation.
 
 Tests that need identity-shaped data must use synthetic, nonpersonal fixtures;
 personal literals are not allowlisted into the repository.

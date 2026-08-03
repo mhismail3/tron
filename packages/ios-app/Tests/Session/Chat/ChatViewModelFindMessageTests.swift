@@ -21,44 +21,44 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         viewModel = nil
     }
 
-    // MARK: - Capability Call Tests
+    // MARK: - Tool Call Tests
 
-    func testFindMessageIdForCapabilityInvocationInCapabilityInvocation() {
-        // Given: A message with capability invocation content
+    func testFindMessageIdForToolInvocationInToolInvocation() {
+        // Given: A message with tool invocation content
         let messageId = UUID()
         let message = ChatMessage(
             id: messageId,
             role: .assistant,
-            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_abc", status: .success))
+            content: .toolInvocation(testToolInvocation(id: "toolu_abc", status: .success))
         )
         viewModel.messages = [message]
 
-        // When: Finding message for capability invocation
-        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_abc"))
+        // When: Finding message for tool invocation
+        let found = viewModel.findMessageId(for: .toolInvocation(id: "toolu_abc"))
 
         // Then: Should return the message ID
         XCTAssertEqual(found, messageId)
     }
 
-    func testFindMessageIdForCapabilityInvocationInCapabilityResult() {
-        // Given: A message with orphan capability result content
+    func testFindMessageIdForToolInvocationInToolResult() {
+        // Given: A message with orphan tool result content
         let messageId = UUID()
         let message = ChatMessage(
             id: messageId,
             role: .user,
-            content: .capabilityResult(testCapabilityResult(id: "toolu_abc", content: "Success"))
+            content: .toolResult(testToolResult(id: "toolu_abc", content: "Success"))
         )
         viewModel.messages = [message]
 
-        // When: Finding message for capability invocation
-        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_abc"))
+        // When: Finding message for tool invocation
+        let found = viewModel.findMessageId(for: .toolInvocation(id: "toolu_abc"))
 
         // Then: Should return the message ID
         XCTAssertEqual(found, messageId)
     }
 
-    func testFindMessageIdForCapabilityInvocationNotFound() {
-        // Given: A message without matching capability invocation ID
+    func testFindMessageIdForToolInvocationNotFound() {
+        // Given: A message without matching tool invocation ID
         let message = ChatMessage(
             id: UUID(),
             role: .assistant,
@@ -66,14 +66,14 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         )
         viewModel.messages = [message]
 
-        // When: Finding message for non-existent capability invocation
-        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_nonexistent"))
+        // When: Finding message for non-existent tool invocation
+        let found = viewModel.findMessageId(for: .toolInvocation(id: "toolu_nonexistent"))
 
         // Then: Should return nil
         XCTAssertNil(found)
     }
 
-    func testFindMessageIdForCapabilityInvocationWithMultipleMessages() {
+    func testFindMessageIdForToolInvocationWithMultipleMessages() {
         // Given: Multiple messages, only one matching
         let targetId = UUID()
         viewModel.messages = [
@@ -82,13 +82,13 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             ChatMessage(
                 id: targetId,
                 role: .assistant,
-                content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_target", status: .success))
+                content: .toolInvocation(testToolInvocation(id: "toolu_target", status: .success))
             ),
             ChatMessage(id: UUID(), role: .assistant, content: .text("Done"))
         ]
 
-        // When: Finding message for capability invocation
-        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_target"))
+        // When: Finding message for tool invocation
+        let found = viewModel.findMessageId(for: .toolInvocation(id: "toolu_target"))
 
         // Then: Should return the correct message ID
         XCTAssertEqual(found, targetId)
@@ -154,12 +154,12 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         viewModel.messages = []
 
         // When: Finding message
-        let foundCapabilityInvocation = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_abc"))
+        let foundToolInvocation = viewModel.findMessageId(for: .toolInvocation(id: "toolu_abc"))
         let foundEvent = viewModel.findMessageId(for: .event(id: "evt_xyz"))
         let foundBottom = viewModel.findMessageId(for: .bottom)
 
         // Then: All should return nil
-        XCTAssertNil(foundCapabilityInvocation)
+        XCTAssertNil(foundToolInvocation)
         XCTAssertNil(foundEvent)
         XCTAssertNil(foundBottom)
     }
@@ -172,7 +172,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         let targetMessage = ChatMessage(
             id: targetId,
             role: .assistant,
-            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_old", status: .success))
+            content: .toolInvocation(testToolInvocation(id: "toolu_old", status: .success))
         )
 
         // Simulate pagination: old message is in full history but not displayed
@@ -186,8 +186,8 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             ChatMessage(id: UUID(), role: .assistant, content: .text("Hi")),
         ]
 
-        // When: Finding message for capability invocation that's in full history
-        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_old"))
+        // When: Finding message for tool invocation that's in full history
+        let found = viewModel.findMessageId(for: .toolInvocation(id: "toolu_old"))
 
         // Then: Should find it in allReconstructedMessages
         XCTAssertEqual(found, targetId)
@@ -199,7 +199,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         let targetMessage = ChatMessage(
             id: targetId,
             role: .assistant,
-            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_recent", status: .success))
+            content: .toolInvocation(testToolInvocation(id: "toolu_recent", status: .success))
         )
 
         // Message is in both arrays (as would happen normally)
@@ -209,8 +209,8 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             targetMessage,
         ]
 
-        // When: Finding message for capability invocation
-        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_recent"))
+        // When: Finding message for tool invocation
+        let found = viewModel.findMessageId(for: .toolInvocation(id: "toolu_recent"))
 
         // Then: Should find it (displayed messages searched first)
         XCTAssertEqual(found, targetId)
@@ -241,7 +241,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         let targetMessage = ChatMessage(
             id: targetId,
             role: .assistant,
-            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_target", status: .success))
+            content: .toolInvocation(testToolInvocation(id: "toolu_target", status: .success))
         )
 
         viewModel.allReconstructedMessages = [
@@ -252,7 +252,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         viewModel.hasMoreMessages = true
 
         var loadCount = 0
-        let found = await viewModel.resolveMessageIdForDeepLink(.capabilityInvocation(id: "toolu_target")) {
+        let found = await viewModel.resolveMessageIdForDeepLink(.toolInvocation(id: "toolu_target")) {
             loadCount += 1
             self.viewModel.allReconstructedMessages.insert(targetMessage, at: 0)
             self.viewModel.insertAtFrontOfMessages([targetMessage])
@@ -330,7 +330,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         let targetMessage = ChatMessage(
             id: targetId,
             role: .assistant,
-            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_old", status: .success))
+            content: .toolInvocation(testToolInvocation(id: "toolu_old", status: .success))
         )
 
         // Build a realistic scenario: 60 messages total, only latest 50 displayed
@@ -349,7 +349,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         viewModel.displayedMessageCount = 50
 
         // When: Finding the old message
-        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_old"))
+        let found = viewModel.findMessageId(for: .toolInvocation(id: "toolu_old"))
 
         // Then: Should find it
         XCTAssertEqual(found, targetId)
@@ -364,7 +364,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         let targetMessage = ChatMessage(
             id: targetId,
             role: .assistant,
-            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_target", status: .success))
+            content: .toolInvocation(testToolInvocation(id: "toolu_target", status: .success))
         )
 
         viewModel.allReconstructedMessages = [
@@ -378,7 +378,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         viewModel.displayedMessageCount = 1
 
         // When: Finding the message
-        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_target"))
+        let found = viewModel.findMessageId(for: .toolInvocation(id: "toolu_target"))
 
         // Then: Should return the message ID
         XCTAssertEqual(found, targetId)
@@ -396,8 +396,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             agent: AgentClient(transport: transport),
             models: DefaultModelRepository(modelClient: ModelClient(transport: transport)),
             messages: DefaultMessageRepository(messageClient: MessageClient(transport: transport)),
-            transcription: DefaultTranscriptionRepository(client: TranscriptionClient(transport: transport)),
-            workerLifecycle: DefaultWorkerLifecycleRepository(client: WorkerLifecycleClient(transport: transport))
+            workerKernel: DefaultWorkerKernelRepository(client: WorkerKernelClient(transport: transport))
         )
         return (ChatViewModel(services: services, sessionId: "test-session"), sessions)
     }
@@ -471,6 +470,7 @@ private final class DeepLinkTestSessionEventRepository: SessionEventRepository {
     }
 
     func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws {}
+    func releaseSessionEventSubscription(sessionId: String, workspaceId: String?) async {}
 }
 
 @MainActor

@@ -58,27 +58,33 @@ struct AppearanceSettingsPage: View {
     }
 
     private var themeToggle: some View {
-        HStack(spacing: 4) {
-            ForEach(AppearanceMode.allCases, id: \.self) { mode in
-                let isSelected = appearanceSettings.mode == mode
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        appearanceSettings.mode = mode
+        GlassEffectContainer(spacing: 4) {
+            HStack(spacing: 4) {
+                ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                    let isSelected = appearanceSettings.mode == mode
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            appearanceSettings.mode = mode
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: mode.icon)
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            Text(mode.label)
+                                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: mode.icon)
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        Text(mode.label)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                    }
-                    .foregroundStyle(isSelected ? .tronSurface : .tronEmerald)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(isSelected ? Color.tronEmerald : Color.tronEmerald.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .buttonStyle(
+                        TronGlassSelectionButtonStyle(
+                            isSelected: isSelected,
+                            shape: .roundedRectangle(radius: 7)
+                        )
+                    )
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -179,13 +185,15 @@ struct AppearanceSettingsPage: View {
 
                 // Mono font chips
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(FontFamily.monoFamilies, id: \.id) { family in
-                            fontSelectionChip(
-                                family: family,
-                                isSelected: fontSettings.selectedMonoFamily == family
-                            ) {
-                                fontSettings.selectedMonoFamily = family
+                    GlassEffectContainer(spacing: 6) {
+                        HStack(spacing: 6) {
+                            ForEach(FontFamily.monoFamilies, id: \.id) { family in
+                                fontSelectionChip(
+                                    family: family,
+                                    isSelected: fontSettings.selectedMonoFamily == family
+                                ) {
+                                    fontSettings.selectedMonoFamily = family
+                                }
                             }
                         }
                     }
@@ -222,18 +230,20 @@ struct AppearanceSettingsPage: View {
             ForEach(categories, id: \.self) { category in
                 if let categoryFamilies = grouped[category] {
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            Text(category.displayName)
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                                .foregroundStyle(.tronTextMuted)
-                                .frame(width: 32, alignment: .leading)
+                        GlassEffectContainer(spacing: 6) {
+                            HStack(spacing: 6) {
+                                Text(category.displayName)
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                                    .foregroundStyle(.tronTextMuted)
+                                    .frame(width: 32, alignment: .leading)
 
-                            ForEach(categoryFamilies, id: \.id) { family in
-                                fontSelectionChip(
-                                    family: family,
-                                    isSelected: selected == family
-                                ) {
-                                    onSelect(family)
+                                ForEach(categoryFamilies, id: \.id) { family in
+                                    fontSelectionChip(
+                                        family: family,
+                                        isSelected: selected == family
+                                    ) {
+                                        onSelect(family)
+                                    }
                                 }
                             }
                         }
@@ -258,15 +268,12 @@ struct AppearanceSettingsPage: View {
         } label: {
             Text(family.displayName)
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                .foregroundStyle(isSelected ? .tronSurface : .tronTextPrimary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(
-                    Capsule()
-                        .fill(isSelected ? Color.tronEmerald : Color.tronEmerald.opacity(0.1))
-                )
+                .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TronGlassSelectionButtonStyle(isSelected: isSelected))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func axisSlider(_ axis: FontAxis, family: FontFamily) -> some View {

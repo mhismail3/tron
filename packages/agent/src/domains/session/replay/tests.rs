@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::json;
@@ -7,14 +6,23 @@ use super::*;
 use crate::domains::session::event_store::identity::{
     EventIdentity, SessionCreationIdentity, SessionIdentity, WorkspaceIdentity,
 };
-use crate::domains::session::event_store::{AGENT_TRACE_VERSION, AgentTraceRecord};
 use crate::domains::session::event_store::{
-    AppendOptions, ConnectionConfig, EventStore, EventType, new_file, run_migrations,
+    AppendOptions, ConnectionConfig, EventStore, EventType, ensure_schema, new_file,
 };
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, EnqueueInvocation,
-    FunctionId, Invocation, PublishStreamEvent, TraceId, VisibilityScope,
+    ActorId, ActorKind, CausalContext, EffectClass, EngineHostHandle, FunctionDefinition,
+    FunctionId, FunctionVisibility, IdempotencyContract, InProcessFunctionHandler, Invocation,
+    PublishStreamEvent, StreamVisibility, TraceId, WorkerId,
 };
+
+struct ReplayWriteHandler;
+
+#[async_trait::async_trait]
+impl InProcessFunctionHandler for ReplayWriteHandler {
+    async fn invoke(&self, invocation: Invocation) -> crate::engine::Result<serde_json::Value> {
+        Ok(json!({"stored": invocation.payload}))
+    }
+}
 
 struct ReplayHarness {
     _temp: tempfile::TempDir,
@@ -32,11 +40,24 @@ fn harness() -> ReplayHarness {
     .expect("event store");
     {
         let conn = pool.get().expect("connection");
-        run_migrations(&conn).expect("migrations");
+        ensure_schema(&conn).expect("schema");
         crate::shared::storage::ensure_storage_schema(&conn).expect("storage schema");
     }
     let event_store = Arc::new(EventStore::new(pool));
     let engine_host = EngineHostHandle::open_sqlite(&db_path).expect("engine host");
+    engine_host
+        .register_function_for_setup(
+            FunctionDefinition::new(
+                FunctionId::new("replay::write").expect("function id"),
+                WorkerId::new("replay").expect("owner id"),
+                "Write deterministic replay evidence",
+                FunctionVisibility::Public,
+                EffectClass::IdempotentWrite,
+            )
+            .with_idempotency(IdempotencyContract::session()),
+            Arc::new(ReplayWriteHandler),
+        )
+        .expect("register replay write function");
     ReplayHarness {
         _temp: temp,
         event_store,
@@ -94,51 +115,12 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
         )
         .expect("provider audit");
 
-    for id in ["trace-b", "trace-a"] {
-        harness
-            .event_store
-            .append_trace_record(&AgentTraceRecord {
-                id: id.to_owned(),
-                trace_id: "trace-shared".to_owned(),
-                invocation_id: format!("inv-{id}"),
-                parent_invocation_id: None,
-                provider_invocation_id: None,
-                session_id: Some(session_id.clone()),
-                workspace_id: Some(workspace_id.clone()),
-                turn: Some(1),
-                model_primitive_name: "execute".to_owned(),
-                operation: "observe".to_owned(),
-                status: "ok".to_owned(),
-                timestamp: "2026-06-09T12:00:04Z".to_owned(),
-                completed_at: Some("2026-06-09T12:00:05Z".to_owned()),
-                duration_ms: Some(1),
-                record_json: json!({
-                    "version": AGENT_TRACE_VERSION,
-                    "id": id,
-                    "metadata": {
-                        "dev.tron": {
-                            "traceId": "trace-shared",
-                            "invocationId": format!("inv-{id}"),
-                            "sessionId": session_id.clone(),
-                            "operation": "observe",
-                            "status": "ok",
-                            "request": {"traceRecord": id},
-                            "requestHash": format!("request-hash-{id}"),
-                            "result": {"traceRecord": id, "ok": true},
-                            "resultHash": format!("result-hash-{id}"),
-                        }
-                    }
-                }),
-            })
-            .expect("trace record");
-    }
-
     harness
         .engine_host
         .publish_stream_event(PublishStreamEvent {
             topic: "events.session".to_owned(),
             payload: json!({"stream": 1}),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some(session_id.clone()),
             workspace_id: Some(workspace_id.clone()),
             producer: "test".to_owned(),
@@ -152,7 +134,7 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
         .publish_stream_event(PublishStreamEvent {
             topic: "events.session".to_owned(),
             payload: json!({"stream": "other-session"}),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some("sess_other".to_owned()),
             workspace_id: Some(workspace_id.clone()),
             producer: "test".to_owned(),
@@ -162,27 +144,16 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
         .await
         .expect("other stream event");
 
-    enqueue_for_session(&harness.engine_host, "beta", &session_id, &workspace_id).await;
-    enqueue_for_session(&harness.engine_host, "alpha", &session_id, &workspace_id).await;
-
     let result = harness
         .engine_host
         .invoke(Invocation::new_sync(
-            FunctionId::new("state::set").unwrap(),
-            json!({
-                "scope": "session",
-                "sessionId": session_id,
-                "namespace": "replay",
-                "key": "marker",
-                "value": {"ok": true}
-            }),
+            FunctionId::new("replay::write").unwrap(),
+            json!({"sessionId": session_id, "value": {"ok": true}}),
             CausalContext::new(
                 actor_id("actor-replay"),
                 ActorKind::System,
-                grant_id("grant"),
                 trace_id("state-trace"),
             )
-            .with_scope("state.write")
             .with_session_id(session_id.clone())
             .with_workspace_id(workspace_id.clone())
             .with_idempotency_key("state-set-replay"),
@@ -198,7 +169,6 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
             CausalContext::new(
                 actor_id("actor-replay"),
                 ActorKind::System,
-                grant_id("grant"),
                 trace_id("missing-trace"),
             )
             .with_session_id(session_id.clone())
@@ -229,27 +199,10 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
     assert_eq!(provider_audits.len(), 1);
     assert_eq!(provider_audits[0]["eventId"], "evt_provider_audit");
 
-    let traces = first["sections"]["traceRecords"].as_array().unwrap();
-    let trace_ids = traces
-        .iter()
-        .map(|record| record["id"].as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(trace_ids, ["trace-a", "trace-b"]);
-
     let streams = first["sections"]["engineStreams"].as_array().unwrap();
     assert_eq!(streams.len(), 1);
     assert_eq!(streams[0]["payload"], json!({"stream": 1}));
     assert_eq!(streams[0]["payloadHash"].as_str().unwrap().len(), 64);
-
-    let queue_items = first["sections"]["engineQueueItems"].as_array().unwrap();
-    let queue_names = queue_items
-        .iter()
-        .map(|item| item["queue"].as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(queue_names, ["alpha", "beta"]);
-    for item in queue_items {
-        assert_eq!(item["payloadHash"].as_str().unwrap().len(), 64);
-    }
 
     let idempotency_entries = first["sections"]["engineIdempotencyEntries"]
         .as_array()
@@ -280,10 +233,7 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
         failed_invocation["error"]["failure"]["code"],
         "ENGINE_STORED_INVOCATION_ERROR"
     );
-    assert_eq!(
-        failed_invocation["error"]["failure"]["category"],
-        "capability"
-    );
+    assert_eq!(failed_invocation["error"]["failure"]["category"], "tool");
     assert_eq!(
         failed_invocation["error"]["kind"],
         "stored_invocation_error"
@@ -300,47 +250,10 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
     );
     assert_eq!(roundtrip.counts.engine_idempotency_entries, 1);
     assert_eq!(roundtrip.counts.engine_invocations, 2);
-    assert_eq!(roundtrip.counts.engine_queue_items, 2);
-}
-
-async fn enqueue_for_session(
-    engine_host: &EngineHostHandle,
-    queue: &str,
-    session_id: &str,
-    workspace_id: &str,
-) {
-    engine_host
-        .enqueue_invocation(EnqueueInvocation {
-            queue: queue.to_owned(),
-            function_id: FunctionId::new("state::get").unwrap(),
-            payload: json!({
-                "scope": "session",
-                "sessionId": session_id,
-                "namespace": "replay",
-                "key": "marker"
-            }),
-            actor_id: actor_id("actor-queue"),
-            actor_kind: ActorKind::System,
-            authority_grant_id: grant_id("grant-queue"),
-            authority_scopes: vec!["state.read".to_owned()],
-            runtime_metadata: BTreeMap::new(),
-            trace_id: trace_id(&format!("{queue}-trace")),
-            parent_invocation_id: None,
-            trigger_id: None,
-            session_id: Some(session_id.to_owned()),
-            workspace_id: Some(workspace_id.to_owned()),
-            idempotency_key: Some(format!("{queue}-key")),
-        })
-        .await
-        .expect("queue item");
 }
 
 fn actor_id(value: &str) -> ActorId {
     ActorId::new(value).unwrap()
-}
-
-fn grant_id(value: &str) -> AuthorityGrantId {
-    AuthorityGrantId::new(value).unwrap()
 }
 
 fn trace_id(value: &str) -> TraceId {

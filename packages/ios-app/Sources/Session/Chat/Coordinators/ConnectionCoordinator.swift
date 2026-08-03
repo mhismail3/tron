@@ -73,6 +73,58 @@ final class ConnectionCoordinator {
 
     init() {}
 
+    /// Reconstruct a child-agent transcript for operator audit without
+    /// resuming it as the connection's interactive session. This path has no
+    /// live suffix buffer, so every terminal branch releases its local gate.
+    func reconstructReadOnly(
+        context: ConnectionContext,
+        eventLimit: Int? = nil
+    ) async -> ConnectionReconstructionOutcome {
+        context.isReconstructing = true
+        await context.connect()
+        guard !Task.isCancelled else {
+            context.isReconstructing = false
+            return .cancelled
+        }
+        guard context.isConnected else {
+            context.isReconstructing = false
+            return .retryableFailure
+        }
+
+        do {
+            let result = try await context.reconstructSession(
+                sessionId: context.sessionId,
+                limit: eventLimit ?? context.reconstructionEventLimit,
+                beforeEventId: nil
+            )
+            guard !Task.isCancelled else {
+                context.isReconstructing = false
+                return .cancelled
+            }
+
+            context.sequenceHighWaterMark = max(context.sequenceHighWaterMark, result.lastSequence)
+            context.cleanUpStreamingState()
+            await context.processReconstructionResult(result)
+            guard !Task.isCancelled else {
+                context.isReconstructing = false
+                return .cancelled
+            }
+
+            context.setSessionProcessing(result.isRunning)
+            context.isReconstructing = false
+            return .completed
+        } catch {
+            context.isReconstructing = false
+            context.appendLocalError(
+                dedupKey: "worker.session.reconstruct.failed",
+                title: "Could not load worker session",
+                message: "Worker session history could not be loaded: \(error.localizedDescription)",
+                suggestion: "Check the connection, dismiss this sheet, and try again."
+            )
+            return .retryableFailure
+        }
+    }
+
     // MARK: - Connect and Reconstruct
 
     /// Connect, resume, and reconstruct the session.

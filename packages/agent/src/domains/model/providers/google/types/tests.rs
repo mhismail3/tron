@@ -19,10 +19,10 @@ fn thinking_level_serde_roundtrip() {
 
 #[test]
 fn thinking_level_to_api_string() {
-    assert_eq!(GeminiThinkingLevel::Minimal.to_api_string(), "MINIMAL");
-    assert_eq!(GeminiThinkingLevel::Low.to_api_string(), "LOW");
-    assert_eq!(GeminiThinkingLevel::Medium.to_api_string(), "MEDIUM");
-    assert_eq!(GeminiThinkingLevel::High.to_api_string(), "HIGH");
+    assert_eq!(GeminiThinkingLevel::Minimal.to_api_string(), "minimal");
+    assert_eq!(GeminiThinkingLevel::Low.to_api_string(), "low");
+    assert_eq!(GeminiThinkingLevel::Medium.to_api_string(), "medium");
+    assert_eq!(GeminiThinkingLevel::High.to_api_string(), "high");
 }
 
 // ── Safety types ─────────────────────────────────────────────────
@@ -158,13 +158,13 @@ fn gemini_part_text_with_thinking() {
 fn gemini_part_function_call_serde() {
     let part = GeminiPart::FunctionCall {
         function_call: FunctionCallData {
-            name: "execute".into(),
+            name: "test_tool".into(),
             args: serde_json::json!({"command": "ls"}),
         },
         thought_signature: Some("sig-123".into()),
     };
     let json = serde_json::to_value(&part).unwrap();
-    assert_eq!(json["functionCall"]["name"], "execute");
+    assert_eq!(json["functionCall"]["name"], "test_tool");
     assert_eq!(json["thoughtSignature"], "sig-123");
 }
 
@@ -172,12 +172,12 @@ fn gemini_part_function_call_serde() {
 fn gemini_part_function_response_serde() {
     let part = GeminiPart::FunctionResponse {
         function_response: FunctionResponseData {
-            name: "capability_result".into(),
+            name: "tool_result".into(),
             response: serde_json::json!({"result": "ok"}),
         },
     };
     let json = serde_json::to_value(&part).unwrap();
-    assert_eq!(json["functionResponse"]["name"], "capability_result");
+    assert_eq!(json["functionResponse"]["name"], "tool_result");
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn gemini_part_inline_data_serde() {
 fn gemini_tool_serde() {
     let tool = GeminiTool {
         function_declarations: vec![FunctionDeclaration {
-            name: "execute".into(),
+            name: "test_tool".into(),
             description: "Run a command".into(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -205,7 +205,7 @@ fn gemini_tool_serde() {
         }],
     };
     let json = serde_json::to_value(&tool).unwrap();
-    assert_eq!(json["functionDeclarations"][0]["name"], "execute");
+    assert_eq!(json["functionDeclarations"][0]["name"], "test_tool");
 }
 
 #[test]
@@ -278,6 +278,28 @@ fn model_gemini_3_1_pro() {
 }
 
 #[test]
+fn current_gemini_flash_models_match_provider_metadata() {
+    let flash = get_gemini_model("gemini-3.6-flash").unwrap();
+    assert_eq!(flash.context_window, 1_048_576);
+    assert_eq!(flash.max_output, 65_536);
+    assert_eq!(
+        flash.default_thinking_level,
+        Some(GeminiThinkingLevel::Medium)
+    );
+    assert_eq!(flash.input_cost_per_million, 1.50);
+    assert_eq!(flash.output_cost_per_million, 7.50);
+    assert!(flash.recommended);
+
+    let lite = get_gemini_model("gemini-3.5-flash-lite").unwrap();
+    assert_eq!(
+        lite.default_thinking_level,
+        Some(GeminiThinkingLevel::Minimal)
+    );
+    assert_eq!(lite.input_cost_per_million, 0.30);
+    assert_eq!(lite.output_cost_per_million, 2.50);
+}
+
+#[test]
 fn model_gemini_3_pro() {
     let model = get_gemini_model("gemini-3-pro-preview").unwrap();
     assert_eq!(model.short_name, "Gemini 3 Pro");
@@ -295,8 +317,9 @@ fn model_gemini_3_pro() {
 #[test]
 fn model_gemini_25_flash_lite() {
     let model = get_gemini_model("gemini-2.5-flash-lite").unwrap();
-    assert!(!model.supports_thinking);
+    assert!(model.supports_thinking);
     assert_eq!(model.tier, "flash-lite");
+    assert_eq!(model.max_output, 65_536);
     assert!(model.default_thinking_level.is_none());
 }
 
@@ -306,10 +329,15 @@ fn model_gemini_3_1_flash_lite() {
     assert_eq!(model.short_name, "Gemini 3.1 Flash Lite");
     assert_eq!(model.context_window, 1_048_576);
     assert_eq!(model.max_output, 65_536);
-    assert!(!model.supports_thinking);
+    assert!(model.supports_thinking);
     assert_eq!(model.tier, "flash-lite");
     assert!(model.preview);
-    assert!(model.default_thinking_level.is_none());
+    assert_eq!(
+        model.default_thinking_level,
+        Some(GeminiThinkingLevel::Minimal)
+    );
+    assert!(model.is_retired);
+    assert_eq!(model.deprecation_date, Some("2026-05-25"));
     assert!((model.input_cost_per_million - 0.25).abs() < f64::EPSILON);
     assert!((model.output_cost_per_million - 1.50).abs() < f64::EPSILON);
 }
@@ -323,11 +351,33 @@ fn model_unknown_returns_none() {
 fn all_model_ids_has_expected() {
     let ids = all_gemini_model_ids();
     assert!(ids.contains(&"gemini-3.1-pro-preview"));
+    assert!(ids.contains(&"gemini-3.6-flash"));
+    assert!(ids.contains(&"gemini-3.5-flash"));
+    assert!(ids.contains(&"gemini-3.5-flash-lite"));
+    assert!(ids.contains(&"gemini-3.1-flash-lite"));
     assert!(ids.contains(&"gemini-3-pro-preview"));
     assert!(ids.contains(&"gemini-2.5-pro"));
     assert!(ids.contains(&"gemini-2.5-flash-lite"));
     assert!(ids.contains(&"gemini-3.1-flash-lite-preview"));
-    assert_eq!(ids.len(), 7);
+    assert!(ids.contains(&"gemini-flash-latest"));
+    assert!(ids.contains(&"gemini-flash-lite-latest"));
+    assert!(ids.contains(&"gemini-pro-latest"));
+    assert_eq!(ids.len(), 14);
+}
+
+#[test]
+fn current_aliases_resolve_without_duplicate_picker_rows() {
+    assert_eq!(
+        get_gemini_model("gemini-flash-latest").unwrap().short_name,
+        "Gemini 3.5 Flash"
+    );
+    assert_eq!(
+        get_gemini_model("gemini-flash-lite-latest")
+            .unwrap()
+            .short_name,
+        "Gemini 3.1 Flash-Lite"
+    );
+    assert_eq!(all_gemini_models_api_json().len(), 11);
 }
 
 #[test]
@@ -335,6 +385,7 @@ fn is_gemini_3_model_check() {
     assert!(is_gemini_3_model("gemini-3.1-pro-preview"));
     assert!(is_gemini_3_model("gemini-3-pro-preview"));
     assert!(is_gemini_3_model("gemini-3-flash-preview"));
+    assert!(is_gemini_3_model("gemini-flash-latest"));
     assert!(!is_gemini_3_model("gemini-2.5-pro"));
     assert!(!is_gemini_3_model("gemini-2.5-flash"));
 }
@@ -376,13 +427,13 @@ fn to_api_json_gemini_31_pro() {
     assert_eq!(j["provider"], "google");
     assert_eq!(j["contextWindow"], 1_048_576);
     assert_eq!(j["tier"], "pro");
-    assert_eq!(j["family"], "Gemini 3");
+    assert_eq!(j["family"], "Gemini 3.1");
     assert_eq!(j["supportsThinking"], true);
     assert_eq!(j["isPreview"], true);
     assert_eq!(j["thinkingLevel"], "high");
     assert!(j["supportedThinkingLevels"].is_array());
-    assert_eq!(j["recommended"], true);
-    assert_eq!(j["isLegacy"], false);
+    assert_eq!(j["recommended"], false);
+    assert_eq!(j["isRetiredGeneration"], false);
     assert!(j.get("isDeprecated").is_none());
 }
 
@@ -395,20 +446,20 @@ fn to_api_json_gemini_retired() {
 }
 
 #[test]
-fn to_api_json_no_thinking() {
+fn to_api_json_numeric_budget_model_has_no_discrete_default() {
     let m = get_gemini_model("gemini-2.5-flash-lite").unwrap();
     let j = m.to_api_json("gemini-2.5-flash-lite");
-    assert_eq!(j["supportsThinking"], false);
+    assert_eq!(j["supportsThinking"], true);
     assert!(j.get("thinkingLevel").is_none());
-    assert!(j.get("supportedThinkingLevels").is_none());
+    assert!(j["supportedThinkingLevels"].is_array());
     assert!(j.get("isPreview").is_none());
 }
 
 #[test]
 fn all_gemini_models_api_json_sorted() {
     let models = all_gemini_models_api_json();
-    assert_eq!(models.len(), 7);
-    assert_eq!(models[0]["id"], "gemini-3.1-pro-preview");
+    assert_eq!(models.len(), 11);
+    assert_eq!(models[0]["id"], "gemini-3.6-flash");
     assert_eq!(models[0]["sortOrder"], 0);
 }
 

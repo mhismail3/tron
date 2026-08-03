@@ -7,10 +7,9 @@
 //!
 //! ```text
 //! tron::app           Bootstrap, HTTP shell, health, metrics, onboarding, shutdown
-//! tron::transport     /engine and /engine/workers protocol surfaces
-//! tron::engine        Live capability fabric, host lifecycle, engine ledger
+//! tron::transport     authenticated /engine and worker-webhook surfaces
+//! tron::engine        Live tool fabric, host lifecycle, engine ledger
 //! tron::domains       Worker-owned contracts, handlers, operations, services
-//! tron::platform      OS/vendor integrations retained by the primitive loop
 //! tron::shared        Foundation types, protocol DTOs, neutral helpers
 //! ```
 //!
@@ -18,7 +17,7 @@
 //!
 //! 1. Client connects to `/engine` and sends engine protocol messages
 //! 2. `transport` translates each message into the engine transport envelope
-//! 3. Canonical `namespace::function` capabilities call domain services
+//! 3. Direct typed core tools and projected worker tools call their owners
 //! 4. Engine streams publish live events and `/engine` subscriptions deliver them
 //!
 //! ## Core Invariants

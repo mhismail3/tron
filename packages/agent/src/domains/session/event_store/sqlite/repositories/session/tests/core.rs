@@ -41,6 +41,44 @@ fn list_sessions() {
 }
 
 #[test]
+fn list_sessions_hides_worker_owned_sessions_by_default_but_exact_reads_remain_available() {
+    let (conn, ws_id) = setup();
+    let user = create_default_session(&conn, &ws_id);
+    let worker_tags = vec![WORKER_SESSION_TAG.to_owned()];
+    let worker = SessionRepo::create(
+        &conn,
+        &CreateSessionOptions {
+            workspace_id: &ws_id,
+            model: "worker-model",
+            working_directory: "/tmp/worker",
+            title: Some("Worker child"),
+            tags: Some(&worker_tags),
+            parent_session_id: None,
+            fork_from_event_id: None,
+        },
+    )
+    .unwrap();
+
+    let ordinary = SessionRepo::list(&conn, &ListSessionsOptions::default()).unwrap();
+    assert_eq!(ordinary.len(), 1);
+    assert_eq!(ordinary[0].id, user.id);
+
+    let all = SessionRepo::list(
+        &conn,
+        &ListSessionsOptions {
+            include_worker_sessions: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(all.len(), 2);
+    assert!(all.iter().any(|session| session.id == worker.id));
+
+    let exact = SessionRepo::get_by_id(&conn, &worker.id).unwrap().unwrap();
+    assert!(exact.is_worker_session());
+}
+
+#[test]
 fn list_sessions_uses_stable_activity_and_id_keyset_order() {
     let (conn, ws_id) = setup();
     let timestamp = "2026-07-01T12:00:00Z";
@@ -437,6 +475,19 @@ fn update_title() {
     SessionRepo::update_title(&conn, &sess.id, None).unwrap();
     let found = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
     assert!(found.title.is_none());
+}
+
+#[test]
+fn set_title_if_untitled_is_compare_and_set() {
+    let (conn, ws_id) = setup();
+    let sess = create_default_session(&conn, &ws_id);
+
+    SessionRepo::update_title(&conn, &sess.id, Some(" \t\n\r ")).unwrap();
+    assert!(SessionRepo::set_title_if_untitled(&conn, &sess.id, "Generated").unwrap());
+    assert!(!SessionRepo::set_title_if_untitled(&conn, &sess.id, "Too Late").unwrap());
+
+    let found = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
+    assert_eq!(found.title.as_deref(), Some("Generated"));
 }
 
 #[test]

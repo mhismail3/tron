@@ -1,17 +1,15 @@
 //! Auth storage file I/O.
 //!
-//! Reads and writes `~/.tron/profiles/auth.json` with secure file permissions
-//! (`0o600`). Constitution creates an exact empty compatibility sentinel for
-//! profile validation; this owner materializes the normal schema on the first
-//! write. A missing file remains a legitimate direct-write case, and the loader
-//! retains sentinel compatibility for interrupted or older installs.
+//! Reads and writes `~/.tron/auth.json` with secure file permissions
+//! (`0o600`). A missing file is a legitimate first-write case. Present files
+//! must match the current strict schema.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::errors::AuthError;
 use super::types::{
     ActiveCredential, ApiKeyEntry, AuthStorage, GoogleProviderAuth, OAuthTokens, ProviderAuth,
-    ServiceAuth,
 };
 
 /// Default auth file name.
@@ -25,16 +23,13 @@ pub fn auth_file_path(data_dir: &Path) -> PathBuf {
 /// Load auth storage from file (sync).
 ///
 /// * `Ok(None)`     — file does not exist (first-use on a clean machine).
-/// * `Ok(Some(..))` — file exists, parsed successfully, version matches. An
-///   exact empty JSON object (`{}`) returns a pristine [`AuthStorage::new()`]
-///   so legacy pristine sentinels can be materialized by the next write.
+/// * `Ok(Some(..))` — file exists, parsed successfully, version matches.
 /// * `Err(..)`      — read I/O failure, parse failure, or unsupported version.
 ///
 /// INVARIANT: A parse error surfaces as [`AuthError::MalformedAuthFile`] and
 /// is **never** silently treated as "no auth configured". The only
-/// present-file exception is the exact empty object sentinel (`{}`). Callers
-/// must distinguish "not configured" (`Ok(None)` or the pristine sentinel)
-/// from "broken on disk" (`Err(_)`) so writers cannot replace invalid stored
+/// present file must match the schema. Callers must distinguish "not
+/// configured" (`Ok(None)`) from "broken on disk" (`Err(_)`) so writers cannot replace invalid stored
 /// credentials with an empty default.
 pub fn load_auth_storage(path: &Path) -> Result<Option<AuthStorage>, AuthError> {
     let data = match std::fs::read_to_string(path) {
@@ -49,10 +44,6 @@ pub fn load_auth_storage(path: &Path) -> Result<Option<AuthStorage>, AuthError> 
             details: e.to_string(),
         }
     })?;
-    if value.as_object().is_some_and(serde_json::Map::is_empty) {
-        return Ok(Some(AuthStorage::new()));
-    }
-
     match serde_json::from_value::<AuthStorage>(value) {
         Ok(storage) if storage.version == 1 => Ok(Some(storage)),
         Ok(storage) => Err(AuthError::MalformedAuthFile {
@@ -143,7 +134,7 @@ pub fn get_google_provider_auth(path: &Path) -> Result<Option<GoogleProviderAuth
 }
 
 /// Strict Google provider auth getter — returns `Err` when the stored
-/// shape fails to deserialize (e.g. retired `endpoint` field). Used by
+/// shape fails to deserialize. Used by
 /// `load_server_auth` to surface `MalformedProviderAuth` with re-auth
 /// guidance instead of silently falling back to "not configured".
 pub fn try_get_google_provider_auth(path: &Path) -> Result<Option<GoogleProviderAuth>, AuthError> {
@@ -151,22 +142,6 @@ pub fn try_get_google_provider_auth(path: &Path) -> Result<Option<GoogleProvider
         return Ok(None);
     };
     storage.try_get_google_auth()
-}
-
-/// Get service auth from storage file.
-pub fn get_service_auth(path: &Path, service: &str) -> Result<Option<ServiceAuth>, AuthError> {
-    Ok(load_auth_storage(path)?.and_then(|s| s.get_service_auth(service).cloned()))
-}
-
-/// Get service API keys from storage file.
-///
-/// Returns an empty vec when the file is missing or the service is not
-/// configured; propagates [`AuthError::MalformedAuthFile`] when the file
-/// exists but fails to parse.
-pub fn get_service_api_keys(path: &Path, service: &str) -> Result<Vec<String>, AuthError> {
-    Ok(load_auth_storage(path)?
-        .map(|s| s.get_service_api_keys(service))
-        .unwrap_or_default())
 }
 
 /// Save OAuth tokens for a named account.
@@ -272,6 +247,48 @@ pub fn save_named_api_key(
 
     storage.save_provider_base(provider, &pa);
     save_auth_storage(path, &mut storage)
+}
+
+/// Resolve the provider's effective named API key without exposing auth-file
+/// ownership to worker code. OAuth selections intentionally do not satisfy an
+/// API-key binding.
+pub fn load_provider_api_key(path: &Path, provider: &str) -> Result<Option<String>, AuthError> {
+    let Some(storage) = load_auth_storage(path)? else {
+        return Ok(None);
+    };
+    let Some(auth) = storage.get_provider_auth(provider) else {
+        return Ok(None);
+    };
+    Ok(match super::resolve_credential(&auth, None) {
+        Some(super::ResolvedCredential::ApiKey(key)) => Some(key.key.clone()),
+        _ => None,
+    })
+}
+
+/// Load every stored provider API-key value for leak detection and redaction.
+/// Internal labels are synthetic so credential labels never enter diagnostics.
+pub fn load_all_provider_api_keys(path: &Path) -> Result<HashMap<String, String>, AuthError> {
+    let Some(storage) = load_auth_storage(path)? else {
+        return Ok(HashMap::new());
+    };
+    let mut values = HashMap::new();
+    for provider in storage.providers.keys() {
+        let Some(auth) = storage.get_provider_auth(provider) else {
+            continue;
+        };
+        for (index, key) in auth.api_keys.unwrap_or_default().into_iter().enumerate() {
+            if !key.key.is_empty() {
+                let _ = values.insert(format!("provider-{provider}-{index}"), key.key);
+            }
+        }
+    }
+    if let Some(credentials) = super::apple_push::load_apple_push_credentials(path)? {
+        let _ = values.insert(
+            "transport-apple-push-private-key".to_owned(),
+            credentials.private_key,
+        );
+    }
+    Ok(values)
 }
 
 /// Remove a named API key by label.
@@ -470,22 +487,7 @@ fn auth_file_lock_path(auth_path: &Path) -> std::path::PathBuf {
     let Some(parent) = auth_path.parent() else {
         return auth_path.with_extension("lock");
     };
-
-    if parent.file_name().and_then(|name| name.to_str()) == Some("profiles")
-        && let Some(home) = parent.parent()
-    {
-        return crate::shared::foundation::paths::auth_lock_path_for_home(home);
-    }
-
-    if parent.file_name().and_then(|name| name.to_str()) == Some("vault")
-        && let Some(workspace) = parent.parent()
-        && workspace.file_name().and_then(|name| name.to_str()) == Some("workspace")
-        && let Some(home) = workspace.parent()
-    {
-        return crate::shared::foundation::paths::auth_lock_path_for_home(home);
-    }
-
-    parent.join("run/auth.lock")
+    crate::shared::foundation::paths::auth_lock_path_for_home(parent)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

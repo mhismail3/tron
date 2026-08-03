@@ -58,8 +58,8 @@ pub struct KimiModelInfo {
     pub max_output: u32,
     /// Supports extended thinking.
     pub supports_thinking: bool,
-    /// Supports capability invocation.
-    pub supports_capabilities: bool,
+    /// Supports tool invocation.
+    pub supports_tools: bool,
     /// Supports image inputs.
     pub supports_images: bool,
     /// Input cost per million tokens (USD).
@@ -79,7 +79,7 @@ pub struct KimiModelInfo {
 }
 
 // Note: Kimi K2.5 supports vision (supports_images: true), while older
-// models (K2-0905, Moonshot series) do not. The iOS AttachmentCapability
+// models (K2-0905, Moonshot series) do not. The iOS AttachmentTool
 // system checks each model's supports_images flag individually.
 static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::new(|| {
     let mut m = HashMap::new();
@@ -93,7 +93,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 262_144,
             max_output: 32_768,
             supports_thinking: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 0.60,
             output_cost_per_million: 3.00,
@@ -114,7 +114,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 262_144,
             max_output: 32_768,
             supports_thinking: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 0.60,
             output_cost_per_million: 2.50,
@@ -135,7 +135,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 131_072,
             max_output: 32_768,
             supports_thinking: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 0.60,
             output_cost_per_million: 2.50,
@@ -156,7 +156,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 262_144,
             max_output: 32_768,
             supports_thinking: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 1.15,
             output_cost_per_million: 8.00,
@@ -177,7 +177,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 262_144,
             max_output: 32_768,
             supports_thinking: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 0.60,
             output_cost_per_million: 2.50,
@@ -198,7 +198,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 262_144,
             max_output: 32_768,
             supports_thinking: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 1.15,
             output_cost_per_million: 8.00,
@@ -219,7 +219,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 8_192,
             max_output: 4_096,
             supports_thinking: false,
-            supports_capabilities: false,
+            supports_tools: false,
             supports_images: false,
             input_cost_per_million: 0.20,
             output_cost_per_million: 2.00,
@@ -240,7 +240,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 32_768,
             max_output: 4_096,
             supports_thinking: false,
-            supports_capabilities: false,
+            supports_tools: false,
             supports_images: false,
             input_cost_per_million: 1.00,
             output_cost_per_million: 3.00,
@@ -261,7 +261,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 131_072,
             max_output: 4_096,
             supports_thinking: false,
-            supports_capabilities: false,
+            supports_tools: false,
             supports_images: false,
             input_cost_per_million: 2.00,
             output_cost_per_million: 5.00,
@@ -299,7 +299,7 @@ impl KimiModelInfo {
             "contextWindow": self.context_window,
             "maxOutput": self.max_output,
             "supportsThinking": self.supports_thinking,
-            "supportsCapabilityPrimitives": self.supports_capabilities,
+            "supportsTools": self.supports_tools,
             "supportsImages": self.supports_images,
             "supportsDocuments": false,
             "inputCostPerMillion": self.input_cost_per_million,
@@ -309,7 +309,7 @@ impl KimiModelInfo {
             "description": self.description,
             "supportsReasoning": false,
             "recommended": self.recommended,
-            "isLegacy": self.is_retired_generation,
+            "isRetiredGeneration": self.is_retired_generation,
             "sortOrder": self.sort_order,
             "cacheReadCostPerMillion": self.cache_read_cost_per_million,
         })
@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(m.context_window, 262_144);
         assert!(m.supports_thinking);
         assert!(m.supports_images);
-        assert!(m.supports_capabilities);
+        assert!(m.supports_tools);
         assert!(m.recommended);
         assert!(!m.is_retired_generation);
     }
@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(m.context_window, 262_144);
         assert!(!m.supports_thinking);
         assert!(!m.supports_images);
-        assert!(m.supports_capabilities);
+        assert!(m.supports_tools);
     }
 
     #[test]
@@ -367,14 +367,14 @@ mod tests {
         let m = get_kimi_model("kimi-k2-turbo-preview").unwrap();
         assert_eq!(m.context_window, 262_144);
         assert!(!m.supports_thinking);
-        assert!(m.supports_capabilities);
+        assert!(m.supports_tools);
     }
 
     #[test]
     fn get_kimi_model_k2_thinking() {
         let m = get_kimi_model("kimi-k2-thinking").unwrap();
         assert!(m.supports_thinking);
-        assert!(m.supports_capabilities);
+        assert!(m.supports_tools);
         assert!(!m.supports_images);
     }
 
@@ -382,7 +382,7 @@ mod tests {
     fn get_kimi_model_k2_thinking_turbo() {
         let m = get_kimi_model("kimi-k2-thinking-turbo").unwrap();
         assert!(m.supports_thinking);
-        assert!(m.supports_capabilities);
+        assert!(m.supports_tools);
     }
 
     #[test]
@@ -391,7 +391,7 @@ mod tests {
         assert_eq!(m.context_window, 8_192);
         assert_eq!(m.max_output, 4_096);
         assert!(!m.supports_thinking);
-        assert!(!m.supports_capabilities);
+        assert!(!m.supports_tools);
         assert!(!m.supports_images);
         assert!(m.is_retired_generation);
     }
@@ -456,9 +456,9 @@ mod tests {
         for id in all_kimi_model_ids() {
             let m = get_kimi_model(id).unwrap();
             if id.starts_with("kimi-") {
-                assert!(m.supports_capabilities, "{id} should support tools");
+                assert!(m.supports_tools, "{id} should support tools");
             } else {
-                assert!(!m.supports_capabilities, "{id} should not support tools");
+                assert!(!m.supports_tools, "{id} should not support tools");
             }
         }
     }
@@ -525,7 +525,7 @@ mod tests {
         assert!(j["description"].is_string());
         assert_eq!(j["supportsReasoning"], false);
         assert_eq!(j["recommended"], true);
-        assert_eq!(j["isLegacy"], false);
+        assert_eq!(j["isRetiredGeneration"], false);
         assert_eq!(j["sortOrder"], 0);
     }
 
@@ -534,7 +534,7 @@ mod tests {
         let m = get_kimi_model("moonshot-v1-8k").unwrap();
         let j = m.to_api_json("moonshot-v1-8k");
         assert_eq!(j["tier"], "retired");
-        assert_eq!(j["isLegacy"], true);
+        assert_eq!(j["isRetiredGeneration"], true);
     }
 
     #[test]

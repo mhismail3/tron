@@ -126,7 +126,7 @@ final class TurnEndPluginTests: XCTestCase {
             "data": {
                 "turn": 2,
                 "duration": 3000,
-                "stopReason": "capability_invocation",
+                "stopReason": "tool_invocation",
                 "cost": 0.05,
                 "contextLimit": 128000,
                 "model": "claude-opus-4-6"
@@ -142,7 +142,7 @@ final class TurnEndPluginTests: XCTestCase {
         }
         XCTAssertEqual(turnResult.turnNumber, 2)
         XCTAssertEqual(turnResult.duration, 3000)
-        XCTAssertEqual(turnResult.stopReason, "capability_invocation")
+        XCTAssertEqual(turnResult.stopReason, "tool_invocation")
         XCTAssertEqual(turnResult.cost, 0.05)
         XCTAssertEqual(turnResult.contextLimit, 128000)
         XCTAssertEqual(turnResult.model, "claude-opus-4-6")

@@ -1,7 +1,7 @@
 //! # Model Registry
 //!
-//! Unified model registry for provider detection, model lookup, and capability queries.
-//! Each provider maintains its own detailed model registry (pricing, capabilities, etc.)
+//! Unified model registry for provider detection, model lookup, and tool queries.
+//! Each provider maintains its own detailed model registry (pricing, tools, etc.)
 //! in its respective module. This module provides cross-provider utilities.
 //!
 //! **Single source of truth**: provider type files (`anthropic/types.rs`, etc.) own all
@@ -34,7 +34,7 @@ pub fn detect_provider_from_model(model_id: &str) -> Option<Provider> {
             "google" | "gemini" if get_gemini_model(bare_model).is_some() => Some(Provider::Google),
             "minimax" if get_minimax_model(bare_model).is_some() => Some(Provider::MiniMax),
             "kimi" | "moonshot" if get_kimi_model(bare_model).is_some() => Some(Provider::Kimi),
-            "ollama" if get_ollama_model(bare_model).is_some() => Some(Provider::Ollama),
+            "ollama" if !bare_model.is_empty() => Some(Provider::Ollama),
             _ => None,
         };
     }
@@ -75,6 +75,9 @@ pub fn strip_provider_prefix(model_id: &str) -> &str {
 
 /// Check if a model ID is recognized by any provider.
 pub fn is_model_supported(model_id: &str) -> bool {
+    if model_id.starts_with("ollama/") {
+        return model_id.len() > "ollama/".len();
+    }
     let bare = strip_provider_prefix(model_id);
     get_claude_model(bare).is_some()
         || get_openai_model(bare).is_some()
@@ -90,6 +93,7 @@ pub fn is_model_supported(model_id: &str) -> bool {
 /// `OpenAI` uses its conservative default profile here; provider instances
 /// with auth context can inspect the active profile directly.
 pub fn model_supports_images(model_id: &str) -> bool {
+    let explicit_ollama = model_id.starts_with("ollama/");
     let bare = strip_provider_prefix(model_id);
     if let Some(m) = get_claude_model(bare) {
         return m.supports_images;
@@ -108,6 +112,9 @@ pub fn model_supports_images(model_id: &str) -> bool {
     }
     if let Some(m) = get_ollama_model(bare) {
         return m.supports_images;
+    }
+    if explicit_ollama {
+        return false;
     }
     true
 }
@@ -149,6 +156,7 @@ pub fn model_supports_documents(model_id: &str) -> DocumentSupport {
 /// auth is available.
 /// Unknown models default to 200,000 (Anthropic-equivalent context).
 pub fn model_context_window(model_id: &str) -> u64 {
+    let explicit_ollama = model_id.starts_with("ollama/");
     let bare = strip_provider_prefix(model_id);
     if let Some(m) = get_claude_model(bare) {
         return m.context_window;
@@ -167,6 +175,9 @@ pub fn model_context_window(model_id: &str) -> u64 {
     }
     if let Some(m) = get_ollama_model(bare) {
         return m.context_window;
+    }
+    if explicit_ollama {
+        return u64::from(crate::domains::model::providers::ollama::types::DEFAULT_NUM_CTX);
     }
     200_000
 }
@@ -636,6 +647,18 @@ mod tests {
     }
 
     #[test]
+    fn explicit_unknown_ollama_model_routes_conservatively() {
+        let model = "ollama/example-local:8b";
+        assert_eq!(detect_provider_from_model(model), Some(Provider::Ollama));
+        assert!(is_model_supported(model));
+        assert!(!model_supports_images(model));
+        assert_eq!(
+            model_context_window(model),
+            u64::from(crate::domains::model::providers::ollama::types::DEFAULT_NUM_CTX)
+        );
+    }
+
+    #[test]
     fn supported_model_ollama() {
         assert!(is_model_supported("gemma4:e4b"));
         assert!(is_model_supported("gemma4:26b"));
@@ -684,11 +707,17 @@ mod tests {
         assert!(ids.contains(&GPT_4_1));
         assert!(ids.contains(&O3));
         assert!(ids.contains(&GPT_OSS_120B));
+        assert!(ids.contains(&GEMINI_3_6_FLASH));
         assert!(ids.contains(&GEMINI_2_5_FLASH));
         assert!(ids.contains(&MINIMAX_M2_7));
         assert!(ids.contains(&MINIMAX_M2_5));
         assert!(ids.contains(&GEMMA4_E4B));
-        // Total = 11 Anthropic + 82 OpenAI ids/aliases + 7 Google + 7 MiniMax + 9 Kimi + 2 Ollama = 118
-        assert_eq!(ids.len(), 118);
+        let provider_total = all_claude_model_ids().len()
+            + all_openai_model_ids().len()
+            + all_gemini_model_ids().len()
+            + all_minimax_model_ids().len()
+            + all_kimi_model_ids().len()
+            + all_ollama_model_ids().len();
+        assert_eq!(ids.len(), provider_total);
     }
 }

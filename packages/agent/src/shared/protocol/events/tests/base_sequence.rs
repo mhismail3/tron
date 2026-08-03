@@ -37,6 +37,7 @@ fn tron_event_sequence_serialized_in_json() {
     let mut e = TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     };
     e.set_sequence(10);
     let json = serde_json::to_value(&e).unwrap();
@@ -48,6 +49,7 @@ fn tron_event_no_sequence_omitted_from_json() {
     let e = TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     };
     let json = serde_json::to_value(&e).unwrap();
     assert!(json.get("sequence").is_none());

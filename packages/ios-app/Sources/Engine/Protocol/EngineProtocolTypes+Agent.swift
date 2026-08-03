@@ -1,0 +1,147 @@
+import Foundation
+
+// MARK: - Agent Methods
+
+struct AgentPromptParams: Encodable {
+    let sessionId: String
+    let prompt: String
+    let attachments: [FileAttachment]?
+    let reasoningLevel: String?
+
+    init(
+        sessionId: String,
+        prompt: String,
+        attachments: [FileAttachment]? = nil,
+        reasoningLevel: String? = nil
+    ) {
+        self.sessionId = sessionId
+        self.prompt = prompt
+        self.attachments = attachments
+        self.reasoningLevel = reasoningLevel
+    }
+}
+
+/// Unified file attachment for images, PDFs, and documents
+struct FileAttachment: Encodable {
+    let data: String  // base64 encoded
+    let mimeType: String
+    let fileName: String?
+
+    init(data: Data, mimeType: String, fileName: String? = nil) {
+        self.data = data.base64EncodedString()
+        self.mimeType = mimeType
+        self.fileName = fileName
+    }
+
+    /// Create from an Attachment model
+    init(attachment: Attachment) {
+        self.data = attachment.data.base64EncodedString()
+        self.mimeType = attachment.mimeType
+        self.fileName = attachment.fileName
+    }
+}
+
+struct AgentPromptResult: Decodable {
+    let acknowledged: Bool
+}
+
+struct AgentAbortParams: Encodable {
+    let sessionId: String
+}
+
+struct AgentAbortResult: Decodable {
+    let aborted: Bool
+}
+
+struct AgentAbortInvocationParams: Encodable {
+    let sessionId: String
+    let invocationId: String
+}
+
+struct AgentAbortInvocationResult: Decodable {
+    let aborted: Bool
+}
+
+/// Tool invocation info for in-progress turn (used by session::reconstruct inFlight state)
+struct CurrentTurnToolInvocation: Decodable {
+    let invocationId: String
+    let arguments: [String: AnyCodable]?
+    let status: String  // "generating" | "running" | "completed" | "error"
+    let result: String?
+    let isError: Bool?
+    let startedAt: String?
+    let completedAt: String?
+    /// Progressive output accumulated during execution
+    let streamingOutput: String?
+    /// Latest human-readable progress state.
+    let progressMessage: String?
+    /// Latest 0.0–1.0 progress fraction.
+    let progressPercent: Double?
+    let toolName: String?
+    let traceId: String?
+    let rootInvocationId: String?
+    let themeColor: String?
+    let presentationHints: [String: AnyCodable]?
+}
+
+/// Structured content sequence item (interleaved text/thinking/tool_ref)
+enum ContentSequenceItem: Decodable {
+    case text(String)
+    case thinking(String, kind: ThinkingDisplayKind)
+    case toolRef(invocationId: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type, text, thinking, kind, invocationId
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "text":
+            self = .text(try container.decode(String.self, forKey: .text))
+        case "thinking":
+            let thinking = try container.decode(String.self, forKey: .thinking)
+            let kind = ThinkingDisplayKind(
+                serverValue: try container.decodeIfPresent(String.self, forKey: .kind)
+            )
+            self = .thinking(thinking, kind: kind)
+        case "tool_ref":
+            self = .toolRef(invocationId: try container.decode(String.self, forKey: .invocationId))
+        default:
+            self = .text("")
+        }
+    }
+}
+
+// MARK: - Token Usage Types
+
+struct TokenUsage: Decodable, Equatable {
+    let inputTokens: Int
+    let outputTokens: Int
+    let cacheReadTokens: Int?
+    let cacheCreationTokens: Int?
+
+    var totalTokens: Int { inputTokens + outputTokens }
+
+    var formattedInput: String { inputTokens.formattedTokenCount }
+    var formattedOutput: String { outputTokens.formattedTokenCount }
+    var formattedTotal: String { totalTokens.formattedTokenCount }
+
+    /// Format server-provided cache read tokens (e.g., 20000 → "20k"). Returns nil if not provided or zero.
+    var formattedCacheRead: String? {
+        guard let tokens = cacheReadTokens, tokens > 0 else { return nil }
+        return tokens.formattedTokenCount
+    }
+
+    /// Format server-provided cache write tokens. Returns nil if not provided or zero.
+    var formattedCacheWrite: String? {
+        guard let tokens = cacheCreationTokens, tokens > 0 else { return nil }
+        return tokens.formattedTokenCount
+    }
+
+    /// Check if server provided any cache tokens to display
+    var hasCacheActivity: Bool {
+        (cacheReadTokens ?? 0) > 0 || (cacheCreationTokens ?? 0) > 0
+    }
+}

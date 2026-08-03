@@ -1,20 +1,7 @@
-//! Typed payload definitions for each [`EventType`](super::EventType) variant.
-//!
-//! Each submodule defines the payload struct(s) for one domain of events.
-//! All payloads use `camelCase` field naming for DTO parity with
-//! TypeScript and iOS.
+//! Payload validators used by production persistence plus token totals used by
+//! reconstruction and session queries.
 
-pub mod capability_invocation;
-pub mod compact;
-pub mod context;
-pub mod error;
-pub mod message;
-pub mod message_ops;
-pub mod metadata;
-pub mod model;
-pub mod session;
-pub mod streaming;
 pub mod token_usage;
-pub mod turn;
+pub mod tool_invocation;
 
-pub use token_usage::{TokenRecord, TokenTotals, TokenUsage};
+pub use token_usage::{TokenTotals, TokenUsage};

@@ -7,13 +7,17 @@ use tokio_util::sync::CancellationToken;
 
 use crate::engine::{StreamActorScope, StreamCursor};
 use crate::shared::server::context::ServerRuntimeContext;
-use crate::shared::server::error_mapping::engine_error_to_capability_error;
+use crate::shared::server::error_mapping::engine_error_to_tool_error;
 use crate::shared::server::errors::INVALID_PARAMS;
 
 use super::outbound::send_engine_ws_value_async;
 use super::stream_projection::{protocol_event_value, stream_event_matches_filters};
-use super::wire::{AckMessage, PollMessage, SubscribeMessage, checked_limit, protocol_error};
-use super::{EngineWsSession, PUSH_POLL_INTERVAL, STREAM_MAX_LIMIT};
+use super::wire::{
+    AckMessage, PollMessage, SubscribeMessage, UnsubscribeMessage, checked_limit, protocol_error,
+};
+use super::{
+    EngineWsSession, MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION, PUSH_POLL_INTERVAL, STREAM_MAX_LIMIT,
+};
 
 #[derive(Clone, Debug)]
 pub(super) struct SubscriptionState {
@@ -21,7 +25,6 @@ pub(super) struct SubscriptionState {
     pub(super) cursor: StreamCursor,
     pub(super) filters: Option<Value>,
     pub(super) session_id: Option<String>,
-    pub(super) workspace_id: Option<String>,
 }
 
 impl EngineWsSession {
@@ -45,6 +48,18 @@ impl EngineWsSession {
             Ok(limit) => limit,
             Err(error) => return self.send_error(message.id, error),
         };
+        if self.subscriptions.lock().await.len() >= MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION {
+            return self.send_error(
+                message.id,
+                protocol_error(
+                    INVALID_PARAMS,
+                    format!(
+                        "stream subscription limit reached ({MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION})"
+                    ),
+                    None,
+                ),
+            );
+        }
         let cursor = match message.cursor {
             Some(cursor) => StreamCursor(cursor),
             None => match self
@@ -55,7 +70,7 @@ impl EngineWsSession {
             {
                 Ok(cursor) => cursor,
                 Err(error) => {
-                    return self.send_error(message.id, engine_error_to_capability_error(error));
+                    return self.send_error(message.id, engine_error_to_tool_error(error));
                 }
             },
         };
@@ -68,7 +83,6 @@ impl EngineWsSession {
                 cursor,
                 filters: message.filters,
                 session_id: context.session_id,
-                workspace_id: context.workspace_id,
             },
         );
         self.send_success(
@@ -115,10 +129,7 @@ impl EngineWsSession {
                 );
             };
             let after = StreamCursor(message.cursor.unwrap_or(subscription.cursor.0));
-            let actor = StreamActorScope::scoped(
-                subscription.session_id.clone(),
-                subscription.workspace_id.clone(),
-            );
+            let actor = StreamActorScope::scoped(subscription.session_id.clone());
             return self
                 .send_stream_page(
                     message.id,
@@ -157,7 +168,7 @@ impl EngineWsSession {
                 ),
             );
         };
-        let actor = StreamActorScope::scoped(context.session_id, context.workspace_id);
+        let actor = StreamActorScope::scoped(context.session_id);
         self.send_stream_page(
             message.id,
             &topic,
@@ -165,6 +176,47 @@ impl EngineWsSession {
             limit,
             &actor,
             message.filters.as_ref(),
+        )
+        .await
+    }
+
+    pub(super) async fn handle_unsubscribe(&mut self, id: Option<String>, value: Value) -> bool {
+        let message = match serde_json::from_value::<UnsubscribeMessage>(value) {
+            Ok(message) => message,
+            Err(error) => {
+                return self.send_error(
+                    id,
+                    protocol_error(
+                        INVALID_PARAMS,
+                        format!("invalid unsubscribe: {error}"),
+                        None,
+                    ),
+                );
+            }
+        };
+        if message.subscription_id.trim().is_empty() {
+            return self.send_error(
+                message.id,
+                protocol_error(
+                    INVALID_PARAMS,
+                    "stream subscription id must not be empty",
+                    None,
+                ),
+            );
+        }
+        let removed = self
+            .subscriptions
+            .lock()
+            .await
+            .remove(&message.subscription_id)
+            .is_some();
+        self.send_success_async(
+            message.id,
+            json!({
+                "unsubscribed": removed,
+                "subscriptionId": message.subscription_id,
+            }),
+            None,
         )
         .await
     }
@@ -201,7 +253,7 @@ impl EngineWsSession {
                     None,
                 )
             }
-            Err(error) => self.send_error(id, engine_error_to_capability_error(error)),
+            Err(error) => self.send_error(id, engine_error_to_tool_error(error)),
         }
     }
 
@@ -264,10 +316,7 @@ pub(super) async fn push_subscription_events(
                     .map(|(id, state)| (id.clone(), state.clone()))
                     .collect::<Vec<_>>();
                 for (subscription_id, state) in snapshot {
-                    let actor = StreamActorScope::scoped(
-                        state.session_id.clone(),
-                        state.workspace_id.clone(),
-                    );
+                    let actor = StreamActorScope::scoped(state.session_id.clone());
                     let page = match ctx
                         .engine_host
                         .poll_stream_topic(&state.topic, state.cursor, STREAM_MAX_LIMIT, &actor)

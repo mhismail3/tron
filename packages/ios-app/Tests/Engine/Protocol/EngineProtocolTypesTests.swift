@@ -117,7 +117,7 @@ final class SessionTypesTests: XCTestCase {
         let params = SessionCreateParams(
             workingDirectory: "/path/to/dir",
             model: "claude-opus-4-5-20251101",
-            contextFiles: ["file1.md", "file2.md"]
+            title: "Protocol parity"
         )
 
         let data = try JSONEncoder().encode(params)
@@ -125,7 +125,11 @@ final class SessionTypesTests: XCTestCase {
 
         XCTAssertEqual(decoded["workingDirectory"] as? String, "/path/to/dir")
         XCTAssertEqual(decoded["model"] as? String, "claude-opus-4-5-20251101")
-        XCTAssertEqual(decoded["contextFiles"] as? [String], ["file1.md", "file2.md"])
+        XCTAssertEqual(decoded["title"] as? String, "Protocol parity")
+        XCTAssertEqual(
+            Set(decoded.keys),
+            Set(["workingDirectory", "model", "title"])
+        )
     }
 
     // MARK: - SessionForkResult Tests
@@ -155,12 +159,11 @@ final class SessionTypesTests: XCTestCase {
             "role": "assistant",
             "content": "Hello, how can I help?",
             "timestamp": "2026-01-26T00:00:00.000Z",
-            "capabilityInvocations": [
+            "toolInvocations": [
                 {
                     "id": "toolu_123",
                     "identity": {
-                        "modelPrimitiveName": "execute",
-                        "operationName": "file_read",
+                        "toolName": "process_run",
                         "traceId": "trace-file"
                     },
                     "input": {"file_path": "/test.txt"},
@@ -175,10 +178,9 @@ final class SessionTypesTests: XCTestCase {
 
         XCTAssertEqual(message.id, "msg_123")
         XCTAssertEqual(message.role, "assistant")
-        XCTAssertEqual(message.capabilityInvocations?.count, 1)
-        XCTAssertEqual(message.capabilityInvocations?[0].id, "toolu_123")
-        XCTAssertEqual(message.capabilityInvocations?[0].identity?.operationName, "file_read")
-        XCTAssertEqual(message.capabilityInvocations?[0].identity?.traceId, "trace-file")
+        XCTAssertEqual(message.toolInvocations?.count, 1)
+        XCTAssertEqual(message.toolInvocations?[0].id, "toolu_123")
+        XCTAssertEqual(message.toolInvocations?[0].identity?.traceId, "trace-file")
     }
 }
 
@@ -353,7 +355,7 @@ final class ModelTypesExtendedTests: XCTestCase {
     func testModelInfoSortOrderDecoding() throws {
         // I8: the five required fields must be present on the wire.
         let json = """
-        {"id": "claude-opus-4-6", "name": "Opus 4.6", "provider": "anthropic", "contextWindow": 200000, "supportsThinking": true, "supportsImages": true, "supportsDocuments": true, "attachmentPolicy": {"supportsPdfContent": true, "supportsTextFiles": true, "maxImageDimension": 1568, "maxImageBytes": 1400000, "maxDocumentBytes": 20971520, "supportedImageMimeTypes": ["image/jpeg", "image/png"]}, "tier": "opus", "isLegacy": false, "sortOrder": 0}
+        {"id": "claude-opus-4-6", "name": "Opus 4.6", "provider": "anthropic", "contextWindow": 200000, "supportsThinking": true, "supportsImages": true, "supportsDocuments": true, "attachmentPolicy": {"supportsPdfContent": true, "supportsTextFiles": true, "maxImageDimension": 1568, "maxImageBytes": 1400000, "maxDocumentBytes": 20971520, "supportedImageMimeTypes": ["image/jpeg", "image/png"]}, "tier": "opus", "isRetiredGeneration": false, "sortOrder": 0}
         """.data(using: .utf8)!
         let model = try JSONDecoder().decode(ModelInfo.self, from: json)
         XCTAssertEqual(model.sortOrder, 0)
@@ -508,55 +510,65 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
         return try JSONSerialization.jsonObject(with: data) as! [String: Any]
     }
 
-    func testPublicEngineFramesDoNotExposeChildRuntimeMetadata() throws {
+    func testEngineFunctionCallResponseDecodesDirectResult() throws {
+        struct TestResult: Decodable, Equatable {
+            let data: String
+        }
+
+        let json = """
+        {"type":"response","id":"123","ok":true,"result":{"data":"hello"},"error":null}
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(EngineResponseEnvelope<TestResult>.self, from: json)
+
+        XCTAssertEqual(response.id, "123")
+        XCTAssertTrue(response.ok)
+        XCTAssertEqual(response.result, TestResult(data: "hello"))
+        XCTAssertNil(response.error)
+    }
+
+    func testEngineFunctionCallResponseDecodesTopLevelCanonicalError() throws {
         struct TestResult: Decodable {
             let data: String
         }
         let json = """
         {
-            "invocationId": "invocation-1",
-            "functionId": "system::ping",
-            "workerId": "engine",
-            "functionRevision": 7,
-            "catalogRevision": 9,
-            "traceId": "trace-1",
-            "value": {"data": "hello"},
-            "error": null,
-            "replayedFrom": null
+            "type":"response",
+            "id":"123",
+            "ok":false,
+            "result":null,
+            "error":{
+                "code":"TOOL_NOT_FOUND",
+                "category":"not_found",
+                "message":"function not found: worker_missing",
+                "retryable":false,
+                "recoverable":true,
+                "origin":"engine",
+                "details":{"id":"worker_missing"}
+            }
         }
         """.data(using: .utf8)!
 
-        let child = try JSONDecoder().decode(EngineChildInvocation<TestResult>.self, from: json)
+        let response = try JSONDecoder().decode(EngineResponseEnvelope<TestResult>.self, from: json)
 
-        XCTAssertEqual(child.invocationId, "invocation-1")
-        XCTAssertEqual(child.functionId, "system::ping")
-        XCTAssertEqual(child.traceId, "trace-1")
-        XCTAssertEqual(child.value?.data, "hello")
-        XCTAssertNil(child.error)
-        XCTAssertNil(child.replayedFrom)
+        XCTAssertFalse(response.ok)
+        XCTAssertNil(response.result)
+        XCTAssertEqual(response.error?.errorCode, .toolNotFound)
+        XCTAssertEqual(response.error?.message, "function not found: worker_missing")
+        XCTAssertEqual(response.error?.details?["id"]?.stringValue, "worker_missing")
     }
 
-    func testEngineFunctionCallResponseDecoding() throws {
+    func testEngineFunctionCallResponseRejectsRetiredChildEnvelope() throws {
         struct TestResult: Decodable {
             let data: String
         }
-        struct Response<T: Decodable>: Decodable {
-            let id: String?
-            let ok: Bool
-            let result: T?
-            let error: EngineProtocolError?
-        }
-
         let json = """
         {"type":"response","id":"123","ok":true,"result":{"child":{"value":{"data":"hello"}}},"error":null}
         """.data(using: .utf8)!
 
-        let response = try JSONDecoder().decode(Response<EngineFunctionCallEnvelope<TestResult>>.self, from: json)
-
-        XCTAssertEqual(response.id, "123")
-        XCTAssertTrue(response.ok)
-        XCTAssertEqual(response.result?.child.value?.data, "hello")
-        XCTAssertNil(response.error)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(EngineResponseEnvelope<TestResult>.self, from: json)
+        )
     }
 
     func testEngineErrorDecoding() throws {

@@ -1,10 +1,8 @@
 use super::*;
 use crate::shared::protocol::content::ThinkingContentKind;
-use crate::shared::protocol::events::{BaseEvent, CapabilityEventIdentity};
+use crate::shared::protocol::events::{BaseEvent, ToolEventIdentity};
 
-const EMPTY_IDENTITY: CapabilityEventIdentity = CapabilityEventIdentity {
-    model_primitive_name: None,
-    operation_name: None,
+const EMPTY_IDENTITY: ToolEventIdentity = ToolEventIdentity {
     trace_id: None,
     root_invocation_id: None,
     theme_color: None,
@@ -30,7 +28,7 @@ fn new_accumulator_is_empty() {
     let acc = TurnAccumulator::new();
     assert!(acc.text.is_empty());
     assert!(acc.thinking.is_empty());
-    assert!(acc.capability_invocations.is_empty());
+    assert!(acc.tool_invocations.is_empty());
     assert!(acc.content_sequence.is_empty());
 }
 
@@ -99,6 +97,7 @@ fn thinking_end_event_replaces_accumulated_thinking() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::ThinkingDelta {
         base: BaseEvent::now("s1"),
@@ -132,89 +131,83 @@ fn interleaved_text_and_thinking_creates_separate_sequence_items() {
 }
 
 #[test]
-fn add_capability_invocation_generating() {
+fn add_tool_invocation_generating() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
-    assert_eq!(acc.capability_invocations.len(), 1);
-    assert_eq!(acc.capability_invocations[0].invocation_id, "tc_1");
-    assert_eq!(
-        acc.capability_invocations[0].model_primitive_name,
-        "execute"
-    );
-    assert_eq!(acc.capability_invocations[0].status, "generating");
+    acc.add_tool_generating("tc_1", "test_tool", &EMPTY_IDENTITY);
+    assert_eq!(acc.tool_invocations.len(), 1);
+    assert_eq!(acc.tool_invocations[0].invocation_id, "tc_1");
+    assert_eq!(acc.tool_invocations[0].tool_name, "test_tool");
+    assert_eq!(acc.tool_invocations[0].status, "generating");
     assert_eq!(acc.content_sequence.len(), 1);
     assert!(matches!(
         &acc.content_sequence[0],
-        ContentSequenceItem::CapabilityRef { invocation_id } if invocation_id == "tc_1"
+        ContentSequenceItem::ToolRef { invocation_id } if invocation_id == "tc_1"
     ));
 }
 
 #[test]
-fn update_capability_started() {
+fn update_tool_started() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
-    acc.update_capability_started(
+    acc.add_tool_generating("tc_1", "test_tool", &EMPTY_IDENTITY);
+    acc.update_tool_started(
         "tc_1",
         Some(&serde_json::json!({"command": "ls"})),
         &EMPTY_IDENTITY,
     );
-    assert_eq!(acc.capability_invocations[0].status, "running");
-    assert!(acc.capability_invocations[0].arguments.is_some());
-    assert!(acc.capability_invocations[0].started_at.is_some());
+    assert_eq!(acc.tool_invocations[0].status, "running");
+    assert!(acc.tool_invocations[0].arguments.is_some());
+    assert!(acc.tool_invocations[0].started_at.is_some());
 }
 
 #[test]
-fn update_capability_completed_success() {
+fn update_tool_completed_success() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
-    acc.update_capability_started("tc_1", None, &EMPTY_IDENTITY);
-    acc.update_capability_completed("tc_1", Some("output"), false, &EMPTY_IDENTITY);
-    assert_eq!(acc.capability_invocations[0].status, "completed");
-    assert_eq!(
-        acc.capability_invocations[0].result.as_deref(),
-        Some("output")
-    );
-    assert!(!acc.capability_invocations[0].is_error);
-    assert!(acc.capability_invocations[0].completed_at.is_some());
+    acc.add_tool_generating("tc_1", "test_tool", &EMPTY_IDENTITY);
+    acc.update_tool_started("tc_1", None, &EMPTY_IDENTITY);
+    acc.update_tool_completed("tc_1", Some("output"), false, &EMPTY_IDENTITY);
+    assert_eq!(acc.tool_invocations[0].status, "completed");
+    assert_eq!(acc.tool_invocations[0].result.as_deref(), Some("output"));
+    assert!(!acc.tool_invocations[0].is_error);
+    assert!(acc.tool_invocations[0].completed_at.is_some());
 }
 
 #[test]
-fn update_capability_completed_error() {
+fn update_tool_completed_error() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
-    acc.update_capability_started("tc_1", None, &EMPTY_IDENTITY);
-    acc.update_capability_completed("tc_1", Some("command not found"), true, &EMPTY_IDENTITY);
-    assert_eq!(acc.capability_invocations[0].status, "error");
-    assert!(acc.capability_invocations[0].is_error);
+    acc.add_tool_generating("tc_1", "test_tool", &EMPTY_IDENTITY);
+    acc.update_tool_started("tc_1", None, &EMPTY_IDENTITY);
+    acc.update_tool_completed("tc_1", Some("command not found"), true, &EMPTY_IDENTITY);
+    assert_eq!(acc.tool_invocations[0].status, "error");
+    assert!(acc.tool_invocations[0].is_error);
 }
 
 #[test]
-fn update_capability_unknown_id_is_noop() {
+fn update_tool_unknown_id_is_noop() {
     let mut acc = TurnAccumulator::new();
-    acc.update_capability_started("unknown", None, &EMPTY_IDENTITY);
-    acc.update_capability_completed("unknown", None, false, &EMPTY_IDENTITY);
-    assert!(acc.capability_invocations.is_empty());
+    acc.update_tool_started("unknown", None, &EMPTY_IDENTITY);
+    acc.update_tool_completed("unknown", None, false, &EMPTY_IDENTITY);
+    assert!(acc.tool_invocations.is_empty());
 }
 
 #[test]
-fn multiple_capability_invocations_tracked_independently() {
+fn multiple_tool_invocations_tracked_independently() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
-    acc.add_capability_generating("tc_2", "inspect", &EMPTY_IDENTITY);
-    acc.update_capability_started("tc_1", None, &EMPTY_IDENTITY);
-    acc.update_capability_completed("tc_1", Some("ok"), false, &EMPTY_IDENTITY);
-    acc.update_capability_started("tc_2", None, &EMPTY_IDENTITY);
+    acc.add_tool_generating("tc_1", "test_tool", &EMPTY_IDENTITY);
+    acc.add_tool_generating("tc_2", "inspect", &EMPTY_IDENTITY);
+    acc.update_tool_started("tc_1", None, &EMPTY_IDENTITY);
+    acc.update_tool_completed("tc_1", Some("ok"), false, &EMPTY_IDENTITY);
+    acc.update_tool_started("tc_2", None, &EMPTY_IDENTITY);
 
-    assert_eq!(acc.capability_invocations.len(), 2);
-    assert_eq!(acc.capability_invocations[0].status, "completed");
-    assert_eq!(acc.capability_invocations[1].status, "running");
+    assert_eq!(acc.tool_invocations.len(), 2);
+    assert_eq!(acc.tool_invocations[0].status, "completed");
+    assert_eq!(acc.tool_invocations[1].status, "running");
 }
 
 #[test]
-fn text_after_capability_creates_new_text_item() {
+fn text_after_tool_creates_new_text_item() {
     let mut acc = TurnAccumulator::new();
     acc.append_text("before ");
-    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
+    acc.add_tool_generating("tc_1", "test_tool", &EMPTY_IDENTITY);
     acc.append_text("after");
     assert_eq!(acc.content_sequence.len(), 3);
     assert!(matches!(
@@ -223,7 +216,7 @@ fn text_after_capability_creates_new_text_item() {
     ));
     assert!(matches!(
         &acc.content_sequence[1],
-        ContentSequenceItem::CapabilityRef { .. }
+        ContentSequenceItem::ToolRef { .. }
     ));
     assert!(matches!(
         &acc.content_sequence[2],
@@ -235,15 +228,15 @@ fn text_after_capability_creates_new_text_item() {
 fn to_json_produces_expected_format() {
     let mut acc = TurnAccumulator::new();
     acc.append_text("hello");
-    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
-    let (text, capabilities, sequence) = acc.to_json();
+    acc.add_tool_generating("tc_1", "test_tool", &EMPTY_IDENTITY);
+    let (text, tools, sequence) = acc.to_json();
     assert_eq!(text, "hello");
-    assert!(capabilities.is_array());
-    assert_eq!(capabilities.as_array().unwrap().len(), 1);
+    assert!(tools.is_array());
+    assert_eq!(tools.as_array().unwrap().len(), 1);
     assert!(sequence.is_array());
 }
 
-// ── ContentSequenceItem::to_json key tests (Phase 1 fix) ──
+// ── ContentSequenceItem::to_json key tests ──
 
 #[test]
 fn to_json_text_uses_text_key() {
@@ -279,48 +272,48 @@ fn to_json_reasoning_summary_includes_kind() {
 }
 
 #[test]
-fn to_json_capability_ref_uses_snake_case_type() {
-    let item = ContentSequenceItem::CapabilityRef {
+fn to_json_tool_ref_uses_snake_case_type() {
+    let item = ContentSequenceItem::ToolRef {
         invocation_id: "tc_1".into(),
     };
     let json = item.to_json();
-    assert_eq!(json["type"], "capability_ref");
+    assert_eq!(json["type"], "tool_ref");
     assert_eq!(json["invocationId"], "tc_1");
 }
 
-// ── Streaming output tests (Phase 2) ──
+// ── Streaming output tests ──
 
 #[test]
-fn capability_streaming_output_accumulates() {
+fn tool_streaming_output_accumulates() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
-    acc.update_capability_started("tc_1", None, &EMPTY_IDENTITY);
-    let tc = &mut acc.capability_invocations[0];
+    acc.add_tool_generating("tc_1", "test_tool", &EMPTY_IDENTITY);
+    acc.update_tool_started("tc_1", None, &EMPTY_IDENTITY);
+    let tc = &mut acc.tool_invocations[0];
     let streaming = tc.streaming_output.get_or_insert_with(String::new);
     streaming.push_str("line 1\n");
     streaming.push_str("line 2\n");
     assert_eq!(
-        acc.capability_invocations[0].streaming_output.as_deref(),
+        acc.tool_invocations[0].streaming_output.as_deref(),
         Some("line 1\nline 2\n")
     );
 }
 
 #[test]
-fn capability_streaming_output_included_in_json() {
+fn tool_streaming_output_included_in_json() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
-    acc.update_capability_started("tc_1", None, &EMPTY_IDENTITY);
-    acc.capability_invocations[0].streaming_output = Some("partial output".into());
-    let (_, capabilities, _) = acc.to_json();
-    assert_eq!(capabilities[0]["streamingOutput"], "partial output");
+    acc.add_tool_generating("tc_1", "test_tool", &EMPTY_IDENTITY);
+    acc.update_tool_started("tc_1", None, &EMPTY_IDENTITY);
+    acc.tool_invocations[0].streaming_output = Some("partial output".into());
+    let (_, tools, _) = acc.to_json();
+    assert_eq!(tools[0]["streamingOutput"], "partial output");
 }
 
 #[test]
-fn capability_streaming_output_omitted_when_none() {
+fn tool_streaming_output_omitted_when_none() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
-    let (_, capabilities, _) = acc.to_json();
-    assert!(capabilities[0].get("streamingOutput").is_none());
+    acc.add_tool_generating("tc_1", "test_tool", &EMPTY_IDENTITY);
+    let (_, tools, _) = acc.to_json();
+    assert!(tools[0].get("streamingOutput").is_none());
 }
 
 // ── TurnAccumulatorMap tests ──
@@ -341,6 +334,7 @@ fn map_snapshot_pairs_projected_state_with_emitted_sequence() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1").with_sequence(40),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1").with_sequence(42),
@@ -362,6 +356,7 @@ fn out_of_order_observation_invalidates_reconstruction_cursor() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1").with_sequence(40),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1").with_sequence(42),
@@ -382,6 +377,7 @@ fn response_complete_is_part_of_atomic_turn_snapshot() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1").with_sequence(1),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1").with_sequence(2),
@@ -392,10 +388,11 @@ fn response_complete_is_part_of_atomic_turn_snapshot() {
         turn: 1,
         stop_reason: "end_turn".into(),
         token_usage: None,
-        has_capability_invocations: false,
-        capability_invocation_count: 0,
+        has_tool_invocations: false,
+        tool_invocation_count: 0,
         token_record: None,
         model: None,
+        agent_delivery_continuation: None,
     });
 
     let snapshot = map.reconstruction_snapshot("s1", "run-1").unwrap();
@@ -455,30 +452,30 @@ fn map_full_event_sequence() {
     map.handle_thinking_delta("s1", "let me think...", ThinkingContentKind::Thinking, None);
     map.handle_text_delta("s1", "The answer is ", None);
     map.handle_text_delta("s1", "42", None);
-    map.handle_capability_generating("s1", "tc_1", "execute", &EMPTY_IDENTITY, None);
-    map.handle_capability_started("s1", "tc_1", None, &EMPTY_IDENTITY, None);
-    map.handle_capability_completed("s1", "tc_1", Some("output"), false, &EMPTY_IDENTITY, None);
+    map.handle_tool_generating("s1", "tc_1", "test_tool", &EMPTY_IDENTITY, None);
+    map.handle_tool_started("s1", "tc_1", None, &EMPTY_IDENTITY, None);
+    map.handle_tool_completed("s1", "tc_1", Some("output"), false, &EMPTY_IDENTITY, None);
     map.handle_text_delta("s1", " and more", None);
 
-    let (text, capabilities, sequence) = state(&map, "s1").unwrap();
+    let (text, tools, sequence) = state(&map, "s1").unwrap();
     assert_eq!(text, "The answer is 42 and more");
-    assert_eq!(capabilities.as_array().unwrap().len(), 1);
-    assert_eq!(capabilities[0]["status"], "completed");
+    assert_eq!(tools.as_array().unwrap().len(), 1);
+    assert_eq!(tools[0]["status"], "completed");
     let seq = sequence.as_array().unwrap();
-    assert_eq!(seq.len(), 4); // thinking, text, capability_ref, text
+    assert_eq!(seq.len(), 4); // thinking, text, tool_ref, text
 }
 
 #[test]
-fn map_capability_streaming_output() {
+fn map_tool_streaming_output() {
     let map = TurnAccumulatorMap::new();
     begin(&map, "s1");
     map.handle_turn_start("s1", None);
-    map.handle_capability_generating("s1", "tc_1", "execute", &EMPTY_IDENTITY, None);
-    map.handle_capability_started("s1", "tc_1", None, &EMPTY_IDENTITY, None);
-    map.handle_capability_output("s1", "tc_1", "partial ", None);
-    map.handle_capability_output("s1", "tc_1", "output", None);
-    let (_, capabilities, _) = state(&map, "s1").unwrap();
-    assert_eq!(capabilities[0]["streamingOutput"], "partial output");
+    map.handle_tool_generating("s1", "tc_1", "test_tool", &EMPTY_IDENTITY, None);
+    map.handle_tool_started("s1", "tc_1", None, &EMPTY_IDENTITY, None);
+    map.handle_tool_output("s1", "tc_1", "partial ", None);
+    map.handle_tool_output("s1", "tc_1", "output", None);
+    let (_, tools, _) = state(&map, "s1").unwrap();
+    assert_eq!(tools[0]["streamingOutput"], "partial output");
 }
 
 #[test]
@@ -521,6 +518,7 @@ fn update_from_turn_start_event() {
     let event = TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     };
     map.update_from_event(&event);
     assert!(state(&map, "s1").is_some());
@@ -533,6 +531,7 @@ fn update_from_message_update_event() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1"),
@@ -549,6 +548,7 @@ fn update_from_thinking_delta_event() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::ThinkingDelta {
         base: BaseEvent::now("s1"),
@@ -562,72 +562,74 @@ fn update_from_thinking_delta_event() {
 }
 
 #[test]
-fn update_from_capability_lifecycle_events() {
+fn update_from_tool_lifecycle_events() {
     let map = TurnAccumulatorMap::new();
     begin(&map, "s1");
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
-    map.update_from_event(&TronEvent::CapabilityInvocationGenerating {
+    map.update_from_event(&TronEvent::ToolInvocationGenerating {
         base: BaseEvent::now("s1"),
         invocation_id: "tc_1".into(),
-        model_primitive_name: "execute".into(),
-        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
+        tool_name: "test_tool".into(),
+        tool_identity: crate::shared::protocol::events::ToolEventIdentity::default(),
     });
-    map.update_from_event(&TronEvent::CapabilityInvocationStarted {
+    map.update_from_event(&TronEvent::ToolInvocationStarted {
         base: BaseEvent::now("s1"),
         invocation_id: "tc_1".into(),
-        model_primitive_name: "execute".into(),
+        tool_name: "test_tool".into(),
         arguments: None,
-        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
+        tool_identity: crate::shared::protocol::events::ToolEventIdentity::default(),
     });
-    map.update_from_event(&TronEvent::CapabilityInvocationCompleted {
+    map.update_from_event(&TronEvent::ToolInvocationCompleted {
         base: BaseEvent::now("s1"),
         invocation_id: "tc_1".into(),
-        model_primitive_name: "execute".into(),
+        tool_name: "test_tool".into(),
         duration: 100,
         is_error: Some(false),
         result: None,
-        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
+        tool_identity: crate::shared::protocol::events::ToolEventIdentity::default(),
     });
-    let (_, capabilities, _) = state(&map, "s1").unwrap();
-    assert_eq!(capabilities[0]["status"], "completed");
+    let (_, tools, _) = state(&map, "s1").unwrap();
+    assert_eq!(tools[0]["status"], "completed");
 }
 
 #[test]
-fn update_from_capability_invocation_output_event() {
+fn update_from_tool_invocation_output_event() {
     let map = TurnAccumulatorMap::new();
     begin(&map, "s1");
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
-    map.update_from_event(&TronEvent::CapabilityInvocationGenerating {
+    map.update_from_event(&TronEvent::ToolInvocationGenerating {
         base: BaseEvent::now("s1"),
         invocation_id: "tc_1".into(),
-        model_primitive_name: "execute".into(),
-        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
+        tool_name: "test_tool".into(),
+        tool_identity: crate::shared::protocol::events::ToolEventIdentity::default(),
     });
-    map.update_from_event(&TronEvent::CapabilityInvocationStarted {
+    map.update_from_event(&TronEvent::ToolInvocationStarted {
         base: BaseEvent::now("s1"),
         invocation_id: "tc_1".into(),
-        model_primitive_name: "execute".into(),
+        tool_name: "test_tool".into(),
         arguments: None,
-        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
+        tool_identity: crate::shared::protocol::events::ToolEventIdentity::default(),
     });
-    map.update_from_event(&TronEvent::CapabilityInvocationOutput {
+    map.update_from_event(&TronEvent::ToolInvocationOutput {
         base: BaseEvent::now("s1"),
         invocation_id: "tc_1".into(),
         update: "line 1\n".into(),
     });
-    map.update_from_event(&TronEvent::CapabilityInvocationOutput {
+    map.update_from_event(&TronEvent::ToolInvocationOutput {
         base: BaseEvent::now("s1"),
         invocation_id: "tc_1".into(),
         update: "line 2\n".into(),
     });
-    let (_, capabilities, _) = state(&map, "s1").unwrap();
-    assert_eq!(capabilities[0]["streamingOutput"], "line 1\nline 2\n");
+    let (_, tools, _) = state(&map, "s1").unwrap();
+    assert_eq!(tools[0]["streamingOutput"], "line 1\nline 2\n");
 }
 
 #[test]
@@ -637,6 +639,7 @@ fn update_from_agent_end_clears() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1"),
@@ -656,6 +659,7 @@ fn update_from_turn_end_clears() {
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
+        agent_delivery_continuation: None,
     });
     map.update_from_event(&TronEvent::MessageUpdate {
         base: BaseEvent::now("s1"),
@@ -705,75 +709,45 @@ fn terminal_markers_clear_state_until_matching_run_release() {
 }
 
 #[test]
-fn capability_progress_and_run_status_are_reconstructed() {
+fn tool_progress_is_reconstructed() {
     let map = TurnAccumulatorMap::new();
     map.begin_run("s1", "run-1");
     map.handle_turn_start("s1", Some(1));
-    let identity = CapabilityEventIdentity {
-        model_primitive_name: Some("execute".into()),
-        operation_name: Some("process_run".into()),
+    let identity = ToolEventIdentity {
         trace_id: Some("trace-1".into()),
         root_invocation_id: Some("root-1".into()),
         theme_color: Some("#00ffff".into()),
         presentation_hints: Some(serde_json::json!({"chipTitle": "Process"})),
     };
-    map.handle_capability_generating("s1", "cap-1", "execute", &identity, Some(2));
-    map.update_from_event(&TronEvent::CapabilityInvocationProgress {
+    map.handle_tool_generating("s1", "tool-1", "process_run", &identity, Some(2));
+    map.update_from_event(&TronEvent::ToolInvocationStarted {
         base: BaseEvent::now("s1").with_sequence(3),
-        invocation_id: "cap-1".into(),
+        invocation_id: "tool-1".into(),
+        tool_name: "process_run".into(),
+        arguments: None,
+        tool_identity: ToolEventIdentity::default(),
+    });
+    map.update_from_event(&TronEvent::ToolInvocationProgress {
+        base: BaseEvent::now("s1").with_sequence(4),
+        invocation_id: "tool-1".into(),
+        tool_name: Some("process_run".into()),
         message: Some("Halfway".into()),
         percent: Some(0.5),
-        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
+        tool_identity: crate::shared::protocol::events::ToolEventIdentity::default(),
     });
-    map.update_from_event(&TronEvent::CapabilityRunStatus {
-        base: BaseEvent::now("s1").with_sequence(4),
-        run_id: "async-1".into(),
-        invocation_id: "cap-1".into(),
-        status: "paused".into(),
-        stream_topic: Some("topic-1".into()),
-        child_invocations: vec!["child-1".into()],
-        details: Some(serde_json::json!({ "reason": "approval" })),
-        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
-    });
-
-    let (_, capabilities, _, _) = map
+    let (_, tools, _, _) = map
         .reconstruction_snapshot("s1", "run-1")
         .unwrap()
         .state
         .unwrap();
-    assert_eq!(capabilities[0]["status"], "paused");
-    assert_eq!(capabilities[0]["progressMessage"], "Run paused");
-    assert_eq!(capabilities[0]["progressPercent"], 0.5);
-    assert_eq!(capabilities[0]["operationName"], "process_run");
-    assert_eq!(capabilities[0]["traceId"], "trace-1");
-    assert_eq!(capabilities[0]["rootInvocationId"], "root-1");
-    assert_eq!(capabilities[0]["themeColor"], "#00ffff");
-    assert_eq!(capabilities[0]["presentationHints"]["chipTitle"], "Process");
-    assert_eq!(capabilities[0]["details"]["runId"], "async-1");
-    assert_eq!(
-        capabilities[0]["details"]["runDetails"]["reason"],
-        "approval"
-    );
-
-    map.update_from_event(&TronEvent::CapabilityRunStatus {
-        base: BaseEvent::now("s1").with_sequence(5),
-        run_id: "async-1".into(),
-        invocation_id: "cap-1".into(),
-        status: "failed".into(),
-        stream_topic: Some("topic-1".into()),
-        child_invocations: vec![],
-        details: Some(serde_json::json!({ "reason": "exit" })),
-        capability_identity: identity,
-    });
-    let (_, failed, _, _) = map
-        .reconstruction_snapshot("s1", "run-1")
-        .unwrap()
-        .state
-        .unwrap();
-    assert_eq!(failed[0]["status"], "error");
-    assert_eq!(failed[0]["isError"], true);
-    assert!(failed[0].get("progressMessage").is_none());
-    assert!(failed[0].get("progressPercent").is_none());
+    assert_eq!(tools[0]["status"], "running");
+    assert_eq!(tools[0]["progressMessage"], "Halfway");
+    assert_eq!(tools[0]["progressPercent"], 0.5);
+    assert_eq!(tools[0]["toolName"], "process_run");
+    assert_eq!(tools[0]["traceId"], "trace-1");
+    assert_eq!(tools[0]["rootInvocationId"], "root-1");
+    assert_eq!(tools[0]["themeColor"], "#00ffff");
+    assert_eq!(tools[0]["presentationHints"]["chipTitle"], "Process");
 }
 
 #[test]

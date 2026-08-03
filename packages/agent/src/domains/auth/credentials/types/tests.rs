@@ -53,11 +53,8 @@ fn google_provider_auth_serde() {
     assert_eq!(gpa.base.accounts.as_ref().unwrap()[0].label, "test");
 }
 
-/// R3: retired auth.json files carrying `endpoint: "antigravity"` (from
-/// before the CCA migration) must fail to load with an error naming
-/// the unknown field. The user has to re-authenticate.
 #[test]
-fn google_provider_auth_rejects_retired_endpoint() {
+fn google_provider_auth_rejects_unknown_endpoint_field() {
     let json = r#"{
         "clientId": "cid",
         "endpoint": "antigravity",
@@ -67,12 +64,10 @@ fn google_provider_auth_rejects_retired_endpoint() {
     let msg = err.to_string();
     assert!(
         msg.contains("endpoint"),
-        "error should name the retired `endpoint` field, got: {msg}"
+        "error should name the unknown `endpoint` field, got: {msg}"
     );
 }
 
-/// R3 companion: completely unknown fields — not just `endpoint` — also
-/// fail to load, so no other retired shape can slip through.
 #[test]
 fn google_provider_auth_rejects_arbitrary_unknown_field() {
     let json = r#"{
@@ -80,71 +75,6 @@ fn google_provider_auth_rejects_arbitrary_unknown_field() {
         "somethingMadeUp": true
     }"#;
     assert!(serde_json::from_str::<GoogleProviderAuth>(json).is_err());
-}
-
-/// R2: `api_keys` is the canonical shape. Multiple keys are returned
-/// in the order they were configured — the provider picks the first
-/// by default and rotates on failure.
-#[test]
-fn service_auth_returns_all_api_keys() {
-    let mut storage = AuthStorage::new();
-    let mut services = HashMap::new();
-    let _ = services.insert(
-        "brave".to_string(),
-        ServiceAuth {
-            api_keys: vec!["first".to_string(), "second".to_string()],
-        },
-    );
-    storage.services = Some(services);
-
-    let keys = storage.get_service_api_keys("brave");
-    assert_eq!(keys, vec!["first", "second"]);
-}
-
-#[test]
-fn service_auth_missing_returns_empty() {
-    let storage = AuthStorage::new();
-    assert!(storage.get_service_api_keys("nonexistent").is_empty());
-}
-
-/// R2: retired `apiKey` single field is gone. An auth.json with only
-/// `apiKey: "..."` fails to load with an error naming the unknown
-/// field. Users must rewrite their auth.json to `apiKeys: ["..."]`.
-#[test]
-fn service_auth_rejects_retired_api_key_field() {
-    let json = r#"{"apiKey":"sk-retired"}"#;
-    let err = serde_json::from_str::<ServiceAuth>(json).unwrap_err();
-    let msg = err.to_string();
-    assert!(
-        msg.contains("apiKey") || msg.contains("apiKeys"),
-        "error should name the problematic field, got: {msg}"
-    );
-}
-
-/// R2: `apiKeys: []` is indistinguishable from an unconfigured service
-/// and is explicitly rejected.
-#[test]
-fn service_auth_rejects_empty_api_keys_array() {
-    let json = r#"{"apiKeys":[]}"#;
-    let err = serde_json::from_str::<ServiceAuth>(json).unwrap_err();
-    assert!(err.to_string().contains("apiKeys"));
-}
-
-/// R2: a single-element `apiKeys` array loads cleanly — this is the
-/// canonical replacement for the old `apiKey` single-field shape.
-#[test]
-fn service_auth_accepts_single_element_api_keys() {
-    let json = r#"{"apiKeys":["sk-one"]}"#;
-    let svc: ServiceAuth = serde_json::from_str(json).unwrap();
-    assert_eq!(svc.api_keys, vec!["sk-one"]);
-}
-
-/// R2: empty-string entries inside `apiKeys` are rejected (they would
-/// silently authenticate as anonymous).
-#[test]
-fn service_auth_rejects_empty_string_entry() {
-    let json = r#"{"apiKeys":[""]}"#;
-    assert!(serde_json::from_str::<ServiceAuth>(json).is_err());
 }
 
 #[test]

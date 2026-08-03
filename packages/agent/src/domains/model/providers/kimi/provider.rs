@@ -8,9 +8,11 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tracing::{debug, error, instrument};
 
-use crate::domains::model::providers::shared::compose_context_parts;
 use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
+};
+use crate::domains::model::providers::shared::{
+    compose_context_parts, messages_with_request_context,
 };
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
@@ -99,15 +101,15 @@ impl KimiProvider {
         get_kimi_model(&self.config.model).is_some_and(|m| m.supports_images)
     }
 
-    /// Check if the current model supports capabilities.
-    fn model_supports_capabilities(&self) -> bool {
-        get_kimi_model(&self.config.model).is_some_and(|m| m.supports_capabilities)
+    /// Check if the current model supports tools.
+    fn model_supports_tools(&self) -> bool {
+        get_kimi_model(&self.config.model).is_some_and(|m| m.supports_tools)
     }
 
     /// Build the request body for the chat completions API.
     fn build_request_body(&self, context: &Context, options: &ProviderStreamOptions) -> Value {
         let supports_images = self.model_supports_images();
-        let messages = convert_messages(&context.messages, supports_images);
+        let messages = convert_messages(&messages_with_request_context(context), supports_images);
 
         let mut body = json!({
             "model": self.config.model,
@@ -126,11 +128,11 @@ impl KimiProvider {
         body["messages"] = Value::Array(api_messages);
 
         // Tools (only for tool-capable models)
-        if self.model_supports_capabilities()
-            && let Some(ref capabilities) = context.capabilities
-            && !capabilities.is_empty()
+        if self.model_supports_tools()
+            && let Some(ref tools) = context.tools
+            && !tools.is_empty()
         {
-            let tool_defs = convert_tools(capabilities);
+            let tool_defs = convert_tools(tools);
             body["tools"] = serde_json::to_value(&tool_defs).unwrap_or_default();
         }
 
@@ -385,14 +387,14 @@ mod tests {
         assert_eq!(provider.calculate_max_tokens(&options), 4_096);
     }
 
-    // ── Model capabilities ───────────────────────────────────────────────
+    // ── Model tools ───────────────────────────────────────────────
 
     #[test]
     fn k2_5_supports_all() {
         let provider = KimiProvider::new(test_config());
         assert!(provider.model_supports_thinking());
         assert!(provider.model_supports_images());
-        assert!(provider.model_supports_capabilities());
+        assert!(provider.model_supports_tools());
     }
 
     #[test]
@@ -402,7 +404,7 @@ mod tests {
         let provider = KimiProvider::new(cfg);
         assert!(!provider.model_supports_thinking());
         assert!(!provider.model_supports_images());
-        assert!(!provider.model_supports_capabilities());
+        assert!(!provider.model_supports_tools());
     }
 
     #[test]
@@ -412,7 +414,7 @@ mod tests {
         let provider = KimiProvider::new(cfg);
         assert!(!provider.model_supports_thinking());
         assert!(!provider.model_supports_images());
-        assert!(provider.model_supports_capabilities());
+        assert!(provider.model_supports_tools());
     }
 
     // ── Request body ─────────────────────────────────────────────────────
@@ -436,6 +438,25 @@ mod tests {
     }
 
     #[test]
+    fn request_context_is_one_final_reference_message() {
+        let provider = KimiProvider::new(test_config());
+        let ctx = Context {
+            messages: vec![crate::shared::protocol::messages::Message::user("durable")].into(),
+            request_context: vec![crate::shared::protocol::messages::RequestContextBlock {
+                kind: crate::shared::protocol::messages::RequestContextKind::Continuity,
+                content: "selected memory".into(),
+            }],
+            ..Context::default()
+        };
+        let body = provider.build_request_body(&ctx, &ProviderStreamOptions::default());
+        let rendered = serde_json::to_string(&body["messages"]).unwrap();
+        assert_eq!(rendered.matches("[TRON REFERENCE CONTEXT]").count(), 1);
+        assert!(
+            rendered.find("durable").unwrap() < rendered.find("[TRON REFERENCE CONTEXT]").unwrap()
+        );
+    }
+
+    #[test]
     fn request_body_no_max_tokens_field() {
         let provider = KimiProvider::new(test_config());
         let ctx = context_with_system("test");
@@ -451,28 +472,25 @@ mod tests {
     fn request_body_with_tools() {
         let provider = KimiProvider::new(test_config());
         let ctx = Context {
-            capabilities: Some(vec![
-                crate::shared::protocol::model_capabilities::ModelCapability {
-                    name: "execute".into(),
-                    description: "Run commands".into(),
-                    parameters:
-                        crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
-                            schema_type: "object".into(),
-                            properties: None,
-                            required: None,
-                            description: None,
-                            extra: serde_json::Map::default(),
-                        },
+            tools: Some(vec![crate::shared::protocol::model_tools::ModelTool {
+                name: "test_tool".into(),
+                description: "Run commands".into(),
+                parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::default(),
                 },
-            ]),
+            }]),
             ..Context::default()
         };
         let options = ProviderStreamOptions::default();
         let body = provider.build_request_body(&ctx, &options);
-        let capabilities = body["tools"].as_array().unwrap();
-        assert_eq!(capabilities.len(), 1);
-        assert_eq!(capabilities[0]["type"], "function");
-        assert_eq!(capabilities[0]["function"]["name"], "execute");
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["function"]["name"], "test_tool");
     }
 
     #[test]
@@ -481,20 +499,17 @@ mod tests {
         cfg.model = "moonshot-v1-8k".into();
         let provider = KimiProvider::new(cfg);
         let ctx = Context {
-            capabilities: Some(vec![
-                crate::shared::protocol::model_capabilities::ModelCapability {
-                    name: "execute".into(),
-                    description: "Run commands".into(),
-                    parameters:
-                        crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
-                            schema_type: "object".into(),
-                            properties: None,
-                            required: None,
-                            description: None,
-                            extra: serde_json::Map::default(),
-                        },
+            tools: Some(vec![crate::shared::protocol::model_tools::ModelTool {
+                name: "test_tool".into(),
+                description: "Run commands".into(),
+                parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::default(),
                 },
-            ]),
+            }]),
             ..Context::default()
         };
         let options = ProviderStreamOptions::default();
@@ -559,7 +574,7 @@ mod tests {
     fn request_body_no_tools_when_empty() {
         let provider = KimiProvider::new(test_config());
         let ctx = Context {
-            capabilities: Some(vec![]),
+            tools: Some(vec![]),
             ..Context::default()
         };
         let options = ProviderStreamOptions::default();

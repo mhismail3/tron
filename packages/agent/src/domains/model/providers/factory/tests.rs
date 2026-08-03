@@ -283,9 +283,9 @@ async fn factory_creates_ollama_26b() {
 #[test]
 fn factory_projects_ollama_base_url_for_one_construction() {
     let mut settings = crate::domains::settings::TronSettings::default();
-    settings.api.ollama = Some(crate::domains::settings::OllamaApiSettings {
+    settings.api.ollama = crate::domains::settings::OllamaApiSettings {
         base_url: "http://192.168.1.100:11434".into(),
-    });
+    };
     let factory = test_factory(&settings.api);
     assert_eq!(
         factory.ollama_base_url.as_deref(),
@@ -294,10 +294,13 @@ fn factory_projects_ollama_base_url_for_one_construction() {
 }
 
 #[test]
-fn factory_ollama_base_url_none_by_default() {
+fn factory_projects_default_ollama_base_url() {
     let settings = crate::domains::settings::TronSettings::default();
     let factory = test_factory(&settings.api);
-    assert!(factory.ollama_base_url.is_none());
+    assert_eq!(
+        factory.ollama_base_url.as_deref(),
+        Some("http://localhost:11434")
+    );
 }
 
 #[tokio::test]

@@ -61,18 +61,18 @@ fn basic_preserve_zero() {
 }
 
 // ========================================================================
-// compute_split_point — Category 2: ModelCapability-heavy turns
+// compute_split_point — Category 2: ModelTool-heavy turns
 // ========================================================================
 
 #[test]
-fn capability_heavy_single_turn() {
+fn tool_heavy_single_turn() {
     // [U, A(tc), TR, A(tc), TR, A(text)] — 1 turn = 6 messages
     let msgs = vec![
         Message::user("do stuff"),
-        assistant_with_capability_invocation(&["tc1"]),
-        capability_result("tc1"),
-        assistant_with_capability_invocation(&["tc2"]),
-        capability_result("tc2"),
+        assistant_with_tool_invocation(&["tc1"]),
+        tool_result("tc1"),
+        assistant_with_tool_invocation(&["tc2"]),
+        tool_result("tc2"),
         Message::assistant("done"),
     ];
     let deps = MockDeps::new(msgs.clone());
@@ -82,15 +82,15 @@ fn capability_heavy_single_turn() {
 }
 
 #[test]
-fn capability_heavy_preserve_1_of_2() {
+fn tool_heavy_preserve_1_of_2() {
     // [U,A, U,A(tc),TR,TR,A] — 2 turns, preserve 1
     let msgs = vec![
         Message::user("q1"),
         Message::assistant("r1"),
         Message::user("q2"),
-        assistant_with_capability_invocation(&["tc2", "tc3"]),
-        capability_result("tc2"),
-        capability_result("tc3"),
+        assistant_with_tool_invocation(&["tc2", "tc3"]),
+        tool_result("tc2"),
+        tool_result("tc3"),
         Message::assistant("done"),
     ];
     let deps = MockDeps::new(msgs.clone());
@@ -100,13 +100,13 @@ fn capability_heavy_preserve_1_of_2() {
 }
 
 #[test]
-fn parallel_capabilities_one_turn() {
+fn parallel_tools_one_turn() {
     // [U, A(tc1,tc2), TR1, TR2, A] — 1 turn
     let msgs = vec![
         Message::user("do both"),
-        assistant_with_capability_invocation(&["tc1", "tc2"]),
-        capability_result("tc1"),
-        capability_result("tc2"),
+        assistant_with_tool_invocation(&["tc1", "tc2"]),
+        tool_result("tc1"),
+        tool_result("tc2"),
         Message::assistant("done"),
     ];
     let deps = MockDeps::new(msgs.clone());
@@ -116,15 +116,15 @@ fn parallel_capabilities_one_turn() {
 }
 
 #[test]
-fn mixed_capability_and_simple() {
+fn mixed_tool_and_simple() {
     // [U,A, U,A(tc),TR,A, U,A] — 3 turns, preserve 2
     let msgs = vec![
         Message::user("q1"),
         Message::assistant("r1"),
         Message::user("q2"),
-        assistant_with_capability_invocation(&["tc1"]),
-        capability_result("tc1"),
-        Message::assistant("done capability"),
+        assistant_with_tool_invocation(&["tc1"]),
+        tool_result("tc1"),
+        Message::assistant("done tool"),
         Message::user("q3"),
         Message::assistant("r3"),
     ];
@@ -305,7 +305,7 @@ fn recompact_multiple_summaries() {
 }
 
 // ========================================================================
-// compute_split_point — Category 5: Orphaned CapabilityResult prevention
+// compute_split_point — Category 5: Orphaned ToolResult prevention
 // ========================================================================
 
 #[test]
@@ -313,8 +313,8 @@ fn orphan_split_on_user_is_clean() {
     // Turn-based split always lands on User, no fixup needed
     let msgs = vec![
         Message::user("q1"),
-        assistant_with_capability_invocation(&["tc1"]),
-        capability_result("tc1"),
+        assistant_with_tool_invocation(&["tc1"]),
+        tool_result("tc1"),
         Message::user("q2"),
         Message::assistant("done"),
     ];
@@ -326,10 +326,10 @@ fn orphan_split_on_user_is_clean() {
 }
 
 #[test]
-fn degenerate_leading_capability_result() {
-    // [TR, U, A] — CapabilityResult before any User (shouldn't happen but must not panic)
+fn degenerate_leading_tool_result() {
+    // [TR, U, A] — ToolResult before any User (shouldn't happen but must not panic)
     let msgs = vec![
-        capability_result("tc_orphan"),
+        tool_result("tc_orphan"),
         Message::user("q"),
         Message::assistant("a"),
     ];
@@ -340,12 +340,12 @@ fn degenerate_leading_capability_result() {
 }
 
 #[test]
-fn degenerate_all_capability_results() {
+fn degenerate_all_tool_results() {
     // [A(tc), TR, TR] — no user turns, preserve everything
     let msgs = vec![
-        assistant_with_capability_invocation(&["tc1"]),
-        capability_result("tc1"),
-        capability_result("tc2"),
+        assistant_with_tool_invocation(&["tc1"]),
+        tool_result("tc1"),
+        tool_result("tc2"),
     ];
     let deps = MockDeps::new(msgs.clone());
     let engine = CompactionEngine::new(0.70, 1, deps);

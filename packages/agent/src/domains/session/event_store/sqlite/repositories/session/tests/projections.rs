@@ -229,7 +229,7 @@ fn extract_text_array_content() {
 #[test]
 fn extract_text_skips_non_text_blocks() {
     let text = extract_text_from_payload(
-        r#"{"content": [{"type": "text", "text": "hi"}, {"type": "capability_invocation", "name": "execute"}]}"#,
+        r#"{"content": [{"type": "text", "text": "hi"}, {"type": "tool_invocation", "name": "test_tool"}]}"#,
     );
     assert_eq!(text, "hi");
 }

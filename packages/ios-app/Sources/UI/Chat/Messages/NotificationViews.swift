@@ -347,8 +347,8 @@ struct MessageDeletedNotificationView: View {
             return "user message"
         case "message.assistant":
             return "assistant message"
-        case "capability.invocation.completed":
-            return "capability result"
+        case "tool.invocation.completed":
+            return "tool result"
         default:
             return "message"
         }
@@ -360,7 +360,7 @@ struct MessageDeletedNotificationView: View {
             return "person.fill.xmark"
         case "message.assistant":
             return "sparkles"
-        case "capability.invocation.completed":
+        case "tool.invocation.completed":
             return "hammer.fill"
         default:
             return "trash.fill"
@@ -504,7 +504,7 @@ enum ErrorCategoryDisplay {
         case "api": base = "API Error"
         case "parse": base = "Parse Error"
         case "cancelled": base = "Cancelled"
-        case "capability": base = "Capability Error"
+        case "tool": base = "Tool Error"
         case "engine": base = "Engine Error"
         case "persistence": base = "Persistence Error"
         case "internal": base = "Internal Error"
@@ -533,7 +533,7 @@ enum ErrorCategoryDisplay {
         case "api": return "network"
         case "parse": return "curlybraces"
         case "cancelled": return "xmark.circle"
-        case "capability": return "wrench.and.screwdriver.fill"
+        case "tool": return "wrench.and.screwdriver.fill"
         case "engine": return "gearshape.2.fill"
         case "persistence": return "externaldrive.fill"
         case "internal": return "exclamationmark.octagon.fill"

@@ -194,6 +194,28 @@ struct TronLoggerSensitiveDataTests {
         #expect(!message.contains("Project"))
     }
 
+    @Test("Local engine cancellation is diagnostic rather than an error")
+    func engineCancellationUsesDebugSeverity() {
+        let logger = TronLogger.shared
+        let originalLevel = logger.minimumLevel
+        defer {
+            logger.minimumLevel = originalLevel
+            logger.clearBufferForCategory(.engine)
+        }
+
+        logger.minimumLevel = .verbose
+        logger.clearBufferForCategory(.engine)
+        logger.logEngineCancellation(
+            functionId: "worker_kernel::runs",
+            id: "cancelled-request",
+            duration: 0.25
+        )
+
+        let entry = logger.getRecentLogs(category: .engine).last
+        #expect(entry?.2 == .debug)
+        #expect(entry?.3.contains("cancelled locally") == true)
+    }
+
     @Test("WebSocket message logging never buffers JSON previews")
     func websocketMessageLoggingOmitsPreview() {
         let logger = TronLogger.shared
@@ -209,8 +231,7 @@ struct TronLoggerSensitiveDataTests {
         logger.logWebSocketMessage(
             direction: "→ SEND",
             type: "auth.addApiKey",
-            size: 123,
-            preview: #"{"apiKey":"sk-test-abcdefghijklmnopqrstuvwxyz","apiKeyLabel":"Project"}"#
+            size: 123
         )
 
         let message = logger.getRecentLogs(category: .websocket).last?.3 ?? ""
@@ -220,5 +241,76 @@ struct TronLoggerSensitiveDataTests {
         #expect(!message.contains("sk-test-abcdefghijklmnopqrstuvwxyz"))
         #expect(!message.contains("apiKeyLabel"))
         #expect(!message.contains("Project"))
+    }
+
+    @Test("event logging admits metadata but has no payload input")
+    func eventLoggingRecordsOnlyMetadata() {
+        let logger = TronLogger.shared
+        let originalLevel = logger.minimumLevel
+        defer {
+            logger.minimumLevel = originalLevel
+            logger.clearBufferForCategory(.events)
+        }
+
+        logger.minimumLevel = .verbose
+        logger.clearBufferForCategory(.events)
+        logger.logEvent(
+            type: "notification.received",
+            sessionId: "session-private-suffix",
+            payloadBytes: 4_096
+        )
+
+        let message = logger.getRecentLogs(category: .events).last?.3 ?? ""
+        #expect(message.contains("notification.received"))
+        #expect(message.contains("session-..."))
+        #expect(message.contains("payloadBytes=4096"))
+        #expect(!message.contains("private-suffix"))
+    }
+
+    @Test("Malformed inbound frames never enter diagnostics verbatim")
+    func malformedInboundFrameLoggingOmitsContent() async {
+        let logger = TronLogger.shared
+        let originalLevel = logger.minimumLevel
+        defer {
+            logger.minimumLevel = originalLevel
+            logger.clearBufferForCategory(.websocket)
+        }
+        logger.minimumLevel = .verbose
+        logger.clearBufferForCategory(.websocket)
+        let sentinel = "private-notification-body-sentinel"
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:9847/engine")!
+        )
+
+        await connection.handleMessage(Data(sentinel.utf8))
+
+        let messages = logger.getRecentLogs(category: .websocket).map(\.3)
+        #expect(messages.contains { $0.contains("malformed non-JSON") })
+        #expect(!messages.contains { $0.contains(sentinel) })
+    }
+}
+
+@Suite("TronLogger Bounded Storage")
+@MainActor
+struct TronLoggerBoundedStorageTests {
+    @Test("Chatty transport logging keeps only the fixed ring capacity")
+    func websocketRingRemainsBounded() {
+        let logger = TronLogger.shared
+        let originalLevel = logger.minimumLevel
+        defer {
+            logger.minimumLevel = originalLevel
+            logger.clearBufferForCategory(.websocket)
+        }
+        logger.minimumLevel = .verbose
+        logger.clearBufferForCategory(.websocket)
+
+        for index in 0..<1_500 {
+            logger.verbose("frame \(index)", category: .websocket)
+        }
+
+        let logs = logger.getRecentLogs(count: 2_000, category: .websocket)
+        #expect(logs.count == 1_000)
+        #expect(logs.first?.3 == "frame 500")
+        #expect(logs.last?.3 == "frame 1499")
     }
 }

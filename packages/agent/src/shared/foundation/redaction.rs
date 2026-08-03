@@ -9,6 +9,7 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
+use serde_json::Value;
 
 /// Redact sensitive content from text.
 ///
@@ -84,6 +85,13 @@ pub fn redact_sensitive_content(text: &str) -> String {
                 Regex::new(r"AIzaSy[A-Za-z0-9_-]{30,}").unwrap(),
                 "AIzaSy****",
             ),
+            // Tron worker webhook credentials. These are deliberately
+            // recognizable so a bare token is still redacted after a JSON
+            // payload has been decomposed into individual string values.
+            (
+                Regex::new(r"trwh_[A-Za-z0-9_-]{20,}").unwrap(),
+                "trwh_****",
+            ),
         ]
     });
 
@@ -92,6 +100,57 @@ pub fn redact_sensitive_content(text: &str) -> String {
         result = pattern.replace_all(&result, *replacement).to_string();
     }
     result
+}
+
+/// Recursively redact sensitive JSON values while retaining non-secret shape.
+///
+/// Unlike text-only redaction, this helper can use an object's field names.
+/// That matters for generated credentials which may be opaque strings without
+/// a globally recognizable prefix. Exact credential fields are masked even
+/// when their values do not match one of the known textual secret shapes.
+#[must_use]
+pub fn redact_sensitive_json(value: &Value) -> Value {
+    match value {
+        Value::String(value) => Value::String(redact_sensitive_content(value)),
+        Value::Array(values) => Value::Array(values.iter().map(redact_sensitive_json).collect()),
+        Value::Object(values) => Value::Object(
+            values
+                .iter()
+                .map(|(key, value)| {
+                    let value = if is_sensitive_json_key(key) && !value.is_null() {
+                        Value::String("****".to_owned())
+                    } else {
+                        redact_sensitive_json(value)
+                    };
+                    (key.clone(), value)
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn is_sensitive_json_key(key: &str) -> bool {
+    let normalized = key
+        .chars()
+        .filter(|character| !matches!(character, '_' | '-'))
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    matches!(
+        normalized.as_str(),
+        "apikey"
+            | "token"
+            | "authorization"
+            | "bearer"
+            | "accesstoken"
+            | "refreshtoken"
+            | "clientsecret"
+            | "authorizationcode"
+            | "authcode"
+            | "oauthcode"
+            | "password"
+            | "secret"
+    )
 }
 
 #[cfg(test)]
@@ -128,6 +187,7 @@ mod tests {
             ("gho_xxxxxxxxxxxxxxxxxxxx123456", "gh*_****"),
             ("xoxb-1234-5678-abcdefghijklmno", "xox*-****"),
             ("AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", "AIzaSy****"),
+            ("trwh_0123456789abcdef0123456789abcdef", "trwh_****"),
         ] {
             let redacted = redact_sensitive_content(input);
             assert!(redacted.contains(expected), "{input} -> {redacted}");
@@ -177,5 +237,25 @@ mod tests {
         assert!(!result.contains("client-secret-1234567890"));
         assert!(result.contains("access_token=****"));
         assert!(result.contains("client_secret=****"));
+    }
+
+    #[test]
+    fn redacts_sensitive_json_fields_and_bare_worker_webhook_tokens() {
+        let token = "trwh_0123456789abcdef0123456789abcdef";
+        let payload = serde_json::json!({
+            "webhooks": [{"token": token, "path": "/hooks/research"}],
+            "nested": {"clientSecret": "opaque-without-known-prefix"},
+            "tokenUsage": {"inputTokens": 42},
+            "status": "healthy"
+        });
+
+        let redacted = redact_sensitive_json(&payload);
+
+        assert_eq!(redacted["webhooks"][0]["token"], "****");
+        assert_eq!(redacted["nested"]["clientSecret"], "****");
+        assert_eq!(redacted["tokenUsage"]["inputTokens"], 42);
+        assert_eq!(redacted["status"], "healthy");
+        assert!(!redacted.to_string().contains(token));
+        assert_eq!(redact_sensitive_content(token), "trwh_****");
     }
 }

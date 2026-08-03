@@ -11,8 +11,6 @@ use std::sync::LazyLock;
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ClaudeModelInfo {
-    /// Human-readable name.
-    pub name: &'static str,
     /// Short name for compact display.
     pub short_name: &'static str,
     /// Model family.
@@ -29,8 +27,8 @@ pub struct ClaudeModelInfo {
     pub supports_adaptive_thinking: bool,
     /// Supports effort levels (Opus 4.6+).
     pub supports_effort: bool,
-    /// Supports capability invocation.
-    pub supports_capabilities: bool,
+    /// Supports tool invocation.
+    pub supports_tools: bool,
     /// Supports image inputs.
     pub supports_images: bool,
     /// Input cost per million tokens (USD).
@@ -71,13 +69,29 @@ pub struct ClaudeModelInfo {
 /// Get model info for a Claude model ID.
 #[must_use]
 pub fn get_claude_model(model_id: &str) -> Option<&'static ClaudeModelInfo> {
-    CLAUDE_MODELS.get(model_id)
+    CLAUDE_MODELS.get(canonical_claude_model_id(model_id))
 }
 
 /// All registered Claude model IDs.
 #[must_use]
 pub fn all_claude_model_ids() -> Vec<&'static str> {
-    CLAUDE_MODELS.keys().copied().collect()
+    let mut ids: Vec<_> = CLAUDE_MODELS.keys().copied().collect();
+    ids.extend(CLAUDE_ALIASES.iter().map(|(alias, _)| *alias));
+    ids.sort_unstable();
+    ids
+}
+
+const CLAUDE_ALIASES: &[(&str, &str)] = &[
+    ("claude-opus-4-5", "claude-opus-4-5-20251101"),
+    ("claude-sonnet-4-5", "claude-sonnet-4-5-20250929"),
+    ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
+];
+
+fn canonical_claude_model_id(model_id: &str) -> &str {
+    CLAUDE_ALIASES
+        .iter()
+        .find_map(|(alias, canonical)| (*alias == model_id).then_some(*canonical))
+        .unwrap_or(model_id)
 }
 
 impl ClaudeModelInfo {
@@ -93,7 +107,7 @@ impl ClaudeModelInfo {
             "contextWindow": self.context_window,
             "maxOutput": self.max_output,
             "supportsThinking": self.supports_thinking,
-            "supportsCapabilityPrimitives": self.supports_capabilities,
+            "supportsTools": self.supports_tools,
             "supportsImages": self.supports_images,
             "supportsDocuments": true,
             "inputCostPerMillion": self.input_cost_per_million,
@@ -104,7 +118,7 @@ impl ClaudeModelInfo {
             "description": self.description,
             "supportsReasoning": self.reasoning_levels.is_some(),
             "recommended": self.recommended,
-            "isLegacy": self.retired_generation,
+            "isRetiredGeneration": self.retired_generation,
             "releaseDate": self.release_date,
             "sortOrder": self.sort_order,
         });
@@ -120,6 +134,13 @@ impl ClaudeModelInfo {
         }
         if let Some(date) = self.deprecation_date {
             let _ = map.insert("deprecationDate".into(), serde_json::json!(date));
+        }
+        let aliases: Vec<_> = CLAUDE_ALIASES
+            .iter()
+            .filter_map(|(alias, canonical)| (*canonical == id).then_some(*alias))
+            .collect();
+        if !aliases.is_empty() {
+            let _ = map.insert("aliasIds".into(), serde_json::json!(aliases));
         }
         obj
     }
@@ -141,11 +162,103 @@ pub fn all_claude_models_api_json() -> Vec<serde_json::Value> {
 static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLock::new(|| {
     let mut m = HashMap::new();
 
-    // Claude Opus 4.7 — released April 2026, most capable
+    // Claude Fable 5 — highest-capability, long-running-agent model.
+    let _ = m.insert(
+        "claude-fable-5",
+        ClaudeModelInfo {
+            short_name: "Fable 5",
+            family: "Claude 5",
+            context_window: 1_000_000,
+            max_output: 128_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: false,
+            supports_adaptive_thinking: true,
+            supports_effort: true,
+            supports_tools: true,
+            supports_images: true,
+            input_cost_per_million: 10.0,
+            output_cost_per_million: 50.0,
+            cache_read_cost_per_million: 1.0,
+            description: "Highest-capability Claude model for long-running agents",
+            recommended: false,
+            retired_generation: false,
+            tier: "fable",
+            sort_order: 0,
+            release_date: "2026-06-09",
+            is_retired: false,
+            deprecation_date: None,
+            reasoning_levels: Some(&["low", "medium", "high", "xhigh", "max"]),
+            default_reasoning_level: Some("high"),
+            thinking_display: Some("summarized"),
+        },
+    );
+
+    // Claude Opus 4.8 — recommended for complex agentic coding and enterprise work.
+    let _ = m.insert(
+        "claude-opus-4-8",
+        ClaudeModelInfo {
+            short_name: "Opus 4.8",
+            family: "Claude 4.8",
+            context_window: 1_000_000,
+            max_output: 128_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: false,
+            supports_adaptive_thinking: true,
+            supports_effort: true,
+            supports_tools: true,
+            supports_images: true,
+            input_cost_per_million: 5.0,
+            output_cost_per_million: 25.0,
+            cache_read_cost_per_million: 0.5,
+            description: "Recommended for complex agentic coding and enterprise work",
+            recommended: true,
+            retired_generation: false,
+            tier: "opus",
+            sort_order: 1,
+            release_date: "2026-05-28",
+            is_retired: false,
+            deprecation_date: None,
+            reasoning_levels: Some(&["low", "medium", "high", "xhigh", "max"]),
+            default_reasoning_level: Some("high"),
+            thinking_display: Some("summarized"),
+        },
+    );
+
+    // Claude Sonnet 5 — balanced default for new profiles.
+    let _ = m.insert(
+        "claude-sonnet-5",
+        ClaudeModelInfo {
+            short_name: "Sonnet 5",
+            family: "Claude 5",
+            context_window: 1_000_000,
+            max_output: 128_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: false,
+            supports_adaptive_thinking: true,
+            supports_effort: true,
+            supports_tools: true,
+            supports_images: true,
+            input_cost_per_million: 3.0,
+            output_cost_per_million: 15.0,
+            cache_read_cost_per_million: 0.3,
+            description: "Best combination of speed and intelligence",
+            recommended: true,
+            retired_generation: false,
+            tier: "sonnet",
+            sort_order: 2,
+            release_date: "2026-06-30",
+            is_retired: false,
+            deprecation_date: None,
+            reasoning_levels: Some(&["low", "medium", "high", "xhigh", "max"]),
+            default_reasoning_level: Some("high"),
+            thinking_display: Some("summarized"),
+        },
+    );
+
+    // Claude Opus 4.7
     let _ = m.insert(
         "claude-opus-4-7",
         ClaudeModelInfo {
-            name: "Claude Opus 4.7",
             short_name: "Opus 4.7",
             family: "Claude 4.7",
             context_window: 1_000_000,
@@ -154,21 +267,21 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: false,
             supports_adaptive_thinking: true,
             supports_effort: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 5.0,
             output_cost_per_million: 25.0,
             cache_read_cost_per_million: 0.5,
-            description: "Most capable Claude model — xhigh effort, high-res vision",
-            recommended: true,
-            retired_generation: false,
+            description: "Previous Opus with adaptive thinking and high-resolution vision",
+            recommended: false,
+            retired_generation: true,
             tier: "opus",
-            sort_order: 0,
+            sort_order: 10,
             release_date: "2026-04-16",
             is_retired: false,
             deprecation_date: None,
             reasoning_levels: Some(&["low", "medium", "high", "xhigh", "max"]),
-            default_reasoning_level: Some("xhigh"),
+            default_reasoning_level: Some("high"),
             thinking_display: Some("summarized"),
         },
     );
@@ -177,7 +290,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-opus-4-6",
         ClaudeModelInfo {
-            name: "Claude Opus 4.6",
             short_name: "Opus 4.6",
             family: "Claude 4.6",
             context_window: 1_000_000,
@@ -186,16 +298,16 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: false,
             supports_adaptive_thinking: true,
             supports_effort: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 5.0,
             output_cost_per_million: 25.0,
             cache_read_cost_per_million: 0.5,
             description: "Previous Opus — adaptive thinking, effort levels",
             recommended: false,
-            retired_generation: false,
+            retired_generation: true,
             tier: "opus",
-            sort_order: 1,
+            sort_order: 11,
             release_date: "2026-02-01",
             is_retired: false,
             deprecation_date: None,
@@ -209,7 +321,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-sonnet-4-6",
         ClaudeModelInfo {
-            name: "Claude Sonnet 4.6",
             short_name: "Sonnet 4.6",
             family: "Claude 4.6",
             context_window: 1_000_000,
@@ -218,21 +329,21 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: false,
             supports_adaptive_thinking: true,
             supports_effort: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
             cache_read_cost_per_million: 0.3,
             description: "Best combination of speed and intelligence — adaptive thinking",
-            recommended: true,
-            retired_generation: false,
+            recommended: false,
+            retired_generation: true,
             tier: "sonnet",
-            sort_order: 2,
+            sort_order: 12,
             release_date: "2026-02-17",
             is_retired: false,
             deprecation_date: None,
             reasoning_levels: Some(&["low", "medium", "high", "max"]),
-            default_reasoning_level: Some("medium"),
+            default_reasoning_level: Some("high"),
             thinking_display: None,
         },
     );
@@ -241,7 +352,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-opus-4-5-20251101",
         ClaudeModelInfo {
-            name: "Claude Opus 4.5",
             short_name: "Opus 4.5",
             family: "Claude 4.5",
             context_window: 200_000,
@@ -249,8 +359,8 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking: true,
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
-            supports_effort: false,
-            supports_capabilities: true,
+            supports_effort: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 5.0,
             output_cost_per_million: 25.0,
@@ -259,12 +369,12 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             retired_generation: false,
             tier: "opus",
-            sort_order: 3,
+            sort_order: 20,
             release_date: "2025-11-01",
             is_retired: false,
             deprecation_date: None,
-            reasoning_levels: None,
-            default_reasoning_level: None,
+            reasoning_levels: Some(&["low", "medium", "high"]),
+            default_reasoning_level: Some("high"),
             thinking_display: None,
         },
     );
@@ -272,7 +382,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-sonnet-4-5-20250929",
         ClaudeModelInfo {
-            name: "Claude Sonnet 4.5",
             short_name: "Sonnet 4.5",
             family: "Claude 4.5",
             context_window: 200_000,
@@ -281,7 +390,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
@@ -290,7 +399,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             retired_generation: true,
             tier: "sonnet",
-            sort_order: 4,
+            sort_order: 21,
             release_date: "2025-09-29",
             is_retired: false,
             deprecation_date: None,
@@ -303,7 +412,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-haiku-4-5-20251001",
         ClaudeModelInfo {
-            name: "Claude Haiku 4.5",
             short_name: "Haiku 4.5",
             family: "Claude 4.5",
             context_window: 200_000,
@@ -312,7 +420,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 1.0,
             output_cost_per_million: 5.0,
@@ -321,7 +429,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: true,
             retired_generation: false,
             tier: "haiku",
-            sort_order: 5,
+            sort_order: 22,
             release_date: "2025-10-01",
             is_retired: false,
             deprecation_date: None,
@@ -335,7 +443,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-opus-4-1-20250805",
         ClaudeModelInfo {
-            name: "Claude Opus 4.1",
             short_name: "Opus 4.1",
             family: "Claude 4.1",
             context_window: 200_000,
@@ -344,19 +451,19 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 15.0,
             output_cost_per_million: 75.0,
             cache_read_cost_per_million: 1.5,
-            description: "Previous Opus with enhanced agentic capabilities",
+            description: "Previous Opus with enhanced agentic tools",
             recommended: false,
             retired_generation: true,
             tier: "opus",
-            sort_order: 6,
+            sort_order: 30,
             release_date: "2025-08-05",
             is_retired: false,
-            deprecation_date: None,
+            deprecation_date: Some("2026-08-05"),
             reasoning_levels: None,
             default_reasoning_level: None,
             thinking_display: None,
@@ -367,7 +474,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-opus-4-20250514",
         ClaudeModelInfo {
-            name: "Claude Opus 4",
             short_name: "Opus 4",
             family: "Claude 4",
             context_window: 200_000,
@@ -376,7 +482,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 15.0,
             output_cost_per_million: 75.0,
@@ -385,10 +491,10 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             retired_generation: true,
             tier: "opus",
-            sort_order: 7,
+            sort_order: 31,
             release_date: "2025-05-14",
-            is_retired: false,
-            deprecation_date: None,
+            is_retired: true,
+            deprecation_date: Some("2026-06-15"),
             reasoning_levels: None,
             default_reasoning_level: None,
             thinking_display: None,
@@ -398,7 +504,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-sonnet-4-20250514",
         ClaudeModelInfo {
-            name: "Claude Sonnet 4",
             short_name: "Sonnet 4",
             family: "Claude 4",
             context_window: 200_000,
@@ -407,7 +512,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
@@ -416,10 +521,10 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             retired_generation: true,
             tier: "sonnet",
-            sort_order: 8,
+            sort_order: 32,
             release_date: "2025-05-14",
-            is_retired: false,
-            deprecation_date: None,
+            is_retired: true,
+            deprecation_date: Some("2026-06-15"),
             reasoning_levels: None,
             default_reasoning_level: None,
             thinking_display: None,
@@ -430,7 +535,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-3-7-sonnet-20250219",
         ClaudeModelInfo {
-            name: "Claude 3.7 Sonnet",
             short_name: "Sonnet 3.7",
             family: "Claude 3.7",
             context_window: 200_000,
@@ -439,7 +543,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
@@ -448,10 +552,10 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             retired_generation: true,
             tier: "sonnet",
-            sort_order: 9,
+            sort_order: 40,
             release_date: "2025-02-19",
             is_retired: true,
-            deprecation_date: Some("2025-10-01"),
+            deprecation_date: Some("2026-02-19"),
             reasoning_levels: None,
             default_reasoning_level: None,
             thinking_display: None,
@@ -462,7 +566,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-3-haiku-20240307",
         ClaudeModelInfo {
-            name: "Claude 3 Haiku",
             short_name: "Haiku 3",
             family: "Claude 3",
             context_window: 200_000,
@@ -471,7 +574,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: false,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 0.25,
             output_cost_per_million: 1.25,
@@ -480,10 +583,10 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             retired_generation: true,
             tier: "haiku",
-            sort_order: 10,
+            sort_order: 41,
             release_date: "2024-03-07",
-            is_retired: false,
-            deprecation_date: None,
+            is_retired: true,
+            deprecation_date: Some("2026-04-20"),
             reasoning_levels: None,
             default_reasoning_level: None,
             thinking_display: None,
@@ -495,4 +598,4 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
 
 /// Default model ID.
 #[cfg(test)]
-pub const DEFAULT_MODEL: &str = "claude-opus-4-6";
+pub const DEFAULT_MODEL: &str = "claude-sonnet-5";

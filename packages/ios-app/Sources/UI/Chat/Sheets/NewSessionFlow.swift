@@ -12,7 +12,7 @@ struct NewSessionFlow: View {
     let defaultModel: String
     let defaultWorkspace: String
     let eventStoreManager: EventStoreManager
-    let onSessionCreated: (NewSessionCreated) -> Void
+    let onSessionCreated: @MainActor (NewSessionCreated) async throws -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -316,22 +316,16 @@ struct NewSessionFlow: View {
                     )
                 }
 
-                await MainActor.run {
-                    onSessionCreated(NewSessionCreated(
-                        sessionId: result.sessionId,
-                        workspaceId: intent.workingDirectory,
-                        model: result.model,
-                        workingDirectory: intent.workingDirectory,
-                        source: nil,
-                        profile: nil
-                    ))
-                    isCreatingSession = false
-                }
+                try await onSessionCreated(NewSessionCreated(
+                    sessionId: result.sessionId,
+                    workspaceId: intent.workingDirectory,
+                    model: result.model,
+                    workingDirectory: intent.workingDirectory
+                ))
+                isCreatingSession = false
             } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    isCreatingSession = false
-                }
+                errorMessage = error.localizedDescription
+                isCreatingSession = false
             }
         }
     }

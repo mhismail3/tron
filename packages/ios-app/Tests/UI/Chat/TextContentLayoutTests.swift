@@ -68,6 +68,19 @@ final class TextContentLayoutTests: XCTestCase {
         XCTAssertTrue(finalText.hasSuffix("end."), "Should end with content, not whitespace. Got: '\(finalText.suffix(20))'")
     }
 
+    func testMarkdownTableWidthsProjectHeadersAndRowsOnce() {
+        let table = MarkdownTable(
+            headers: ["A", "LongHeader"],
+            rows: [["long-cell", "x"], ["b", "123456789012"]],
+            alignments: [.left, .right]
+        )
+
+        XCTAssertEqual(
+            MarkdownTableView.columnWidths(for: table),
+            [87.5, 110]
+        )
+    }
+
     func testLogRowAttributedStringPreservesRenderedText() {
         let date = Date(timeIntervalSince1970: 0)
         let attributed = LogRow.attributedString(

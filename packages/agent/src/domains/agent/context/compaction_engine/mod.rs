@@ -9,7 +9,7 @@
 //!
 //! 1. Walk toward the start counting real user turns (skip compaction summaries).
 //! 2. Stop when `preserve_recent_turns` reached or token budget exceeded.
-//! 3. Apply orphaned-CapabilityResult fixup at the split boundary.
+//! 3. Apply orphaned-ToolResult fixup at the split boundary.
 //! 4. Skip if no older messages are eligible for summarization.
 //! 5. Summarize older messages, replace with summary user + assistant ack.
 //! 6. Report token counts and turn statistics.
@@ -28,8 +28,8 @@ use crate::shared::protocol::messages::{Message, UserMessageContent};
 use tracing::{instrument, trace};
 
 use super::constants::{COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX};
-use super::summarizer::Summarizer;
-use super::types::{CompactionPreview, CompactionResult, ExtractedData};
+use super::summarizer::{Summarizer, SummaryContext};
+use super::types::CompactionResult;
 
 // =============================================================================
 // Dependencies trait
@@ -50,8 +50,8 @@ pub trait CompactionDeps: Send + Sync {
     fn get_context_limit(&self) -> u64;
     /// Estimate system prompt tokens.
     fn estimate_system_prompt_tokens(&self) -> u64;
-    /// Estimate capabilities definition tokens.
-    fn estimate_capabilities_tokens(&self) -> u64;
+    /// Estimate tools definition tokens.
+    fn estimate_tools_tokens(&self) -> u64;
     /// Get estimated token count for a specific message.
     fn get_message_tokens(&self, msg: &Message) -> u64;
 }
@@ -63,7 +63,7 @@ pub trait CompactionDeps: Send + Sync {
 /// Manages context compaction to stay within context window limits.
 ///
 /// Uses turn-based preservation: keeps the last N user turns (each turn
-/// being a user prompt plus all responses/capability-results until the next
+/// being a user prompt plus all responses/tool-results until the next
 /// user message), capped by a maximum token budget.
 pub struct CompactionEngine<D: CompactionDeps> {
     /// Compaction threshold ratio (0–1). Also used as the token budget
@@ -91,7 +91,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
     /// Algorithm:
     /// 1. Walk toward the start from the end counting real user turns (skip compaction summaries)
     /// 2. Stop when `preserve_recent_turns` reached OR token budget exceeded
-    /// 3. Apply orphaned-`CapabilityResult` fixup (walk toward the start past `CapabilityResult`s at boundary)
+    /// 3. Apply orphaned-`ToolResult` fixup (walk toward the start past `ToolResult`s at boundary)
     /// 4. Guarantee: if `preserve_recent_turns > 0` and there are messages,
     ///    preserve at least 1 complete turn
     fn compute_split_point(&self, messages: &[Message]) -> usize {
@@ -135,7 +135,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
                 // Reset for next turn
                 current_turn_tokens = 0;
             } else {
-                // Assistant, CapabilityResult, or compaction summary — accumulate into current turn
+                // Assistant, ToolResult, or compaction summary — accumulate into current turn
                 current_turn_tokens += msg_tokens;
             }
         }
@@ -155,10 +155,10 @@ impl<D: CompactionDeps> CompactionEngine<D> {
             }
         }
 
-        // Orphaned CapabilityResult fixup: if split is within bounds and lands on a CapabilityResult,
+        // Orphaned ToolResult fixup: if split is within bounds and lands on a ToolResult,
         // scan toward the start to include its preceding Assistant.
         if candidate_split < messages.len() {
-            while candidate_split > 0 && messages[candidate_split].is_capability_result() {
+            while candidate_split > 0 && messages[candidate_split].is_tool_result() {
                 candidate_split -= 1;
             }
         }
@@ -182,69 +182,13 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         self.compute_split_point(&messages) > 0
     }
 
-    /// Generate a compaction preview without modifying state.
-    #[instrument(skip_all)]
-    pub async fn preview(
-        &self,
-        summarizer: &dyn Summarizer,
-    ) -> Result<CompactionPreview, Box<dyn std::error::Error + Send + Sync>> {
-        let tokens_before = self.message_only_tokens();
-        let messages = self.deps.get_messages();
-
-        let split = self.compute_split_point(&messages);
-        let to_summarize = &messages[..split];
-        let preserved = &messages[split..];
-
-        if to_summarize.is_empty() {
-            return Ok(CompactionPreview {
-                tokens_before,
-                tokens_after: tokens_before,
-                compression_ratio: 1.0,
-                preserved_messages: preserved.len(),
-                summarized_messages: 0,
-                preserved_turns: Self::count_real_turns(preserved),
-                summarized_turns: 0,
-                summary: String::new(),
-                extracted_data: None,
-            });
-        }
-
-        let summary_result = summarizer.summarize(to_summarize).await?;
-
-        let tokens_after =
-            self.estimate_tokens_after_compaction(&summary_result.narrative, preserved);
-
-        let compression_ratio = if tokens_before > 0 {
-            #[allow(clippy::cast_precision_loss)]
-            {
-                tokens_after as f64 / tokens_before as f64
-            }
-        } else {
-            1.0
-        };
-
-        let preserved_turns = Self::count_real_turns(preserved);
-        let summarized_turns = Self::count_real_turns(to_summarize);
-
-        Ok(CompactionPreview {
-            tokens_before,
-            tokens_after,
-            compression_ratio,
-            preserved_messages: preserved.len(),
-            summarized_messages: to_summarize.len(),
-            preserved_turns,
-            summarized_turns,
-            summary: summary_result.narrative,
-            extracted_data: Some(summary_result.extracted_data),
-        })
-    }
-
     /// Execute compaction and update messages.
     #[instrument(skip_all, fields(edited = edited_summary.is_some()))]
     pub async fn execute(
         &self,
         summarizer: &dyn Summarizer,
         edited_summary: Option<&str>,
+        summary_context: &SummaryContext,
     ) -> Result<CompactionResult, Box<dyn std::error::Error + Send + Sync>> {
         let tokens_before = self.message_only_tokens();
         let messages = self.deps.get_messages();
@@ -268,7 +212,6 @@ impl<D: CompactionDeps> CompactionEngine<D> {
                 summarized_turns: 0,
                 preserved_messages: preserved.len(),
                 summary: String::new(),
-                extracted_data: None,
             });
         }
 
@@ -286,21 +229,17 @@ impl<D: CompactionDeps> CompactionEngine<D> {
             "Compaction: calling summarizer"
         );
 
-        // Generate or use edited summary
-        let summary: String;
-        let mut extracted_data: Option<ExtractedData> = None;
-
-        if let Some(edited) = edited_summary {
-            summary = edited.to_owned();
+        // Generate or use edited summary.
+        let summary = if let Some(edited) = edited_summary {
+            edited.to_owned()
         } else {
-            let result = summarizer.summarize(to_summarize).await?;
-            summary = result.narrative;
-            extracted_data = Some(result.extracted_data);
-        }
+            let result = summarizer.summarize(to_summarize, summary_context).await?;
+            result.narrative
+        };
+        validate_summary_for_durable_boundary(&summary)?;
 
         trace!(
             summary_length = summary.len(),
-            has_extracted_data = extracted_data.is_some(),
             "Compaction: summary generated"
         );
 
@@ -346,7 +285,6 @@ impl<D: CompactionDeps> CompactionEngine<D> {
                 summarized_turns,
                 preserved_messages: preserved.len(),
                 summary: String::new(),
-                extracted_data: None,
             });
         }
 
@@ -372,17 +310,16 @@ impl<D: CompactionDeps> CompactionEngine<D> {
             summarized_turns,
             preserved_messages: preserved.len(),
             summary,
-            extracted_data,
         })
     }
 
     // ─── Private helpers ─────────────────────────────────────────────────
 
-    /// Calculate message-only tokens (total - system overhead - capabilities overhead).
+    /// Calculate message-only tokens (total - system overhead - tools overhead).
     fn message_only_tokens(&self) -> u64 {
         let total = self.deps.get_current_tokens();
         let overhead =
-            self.deps.estimate_system_prompt_tokens() + self.deps.estimate_capabilities_tokens();
+            self.deps.estimate_system_prompt_tokens() + self.deps.estimate_tools_tokens();
         total.saturating_sub(overhead)
     }
 
@@ -393,7 +330,8 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         preserved_messages: &[Message],
     ) -> u64 {
         #[allow(clippy::cast_possible_truncation)]
-        let summary_tokens = summary.len().div_ceil(4) as u64;
+        let summary_tokens =
+            crate::domains::worker_kernel::estimate_context_summary_tokens(summary) as u64;
         let context_message_tokens: u64 = 50; // Overhead for context wrapper
         let ack_message_tokens: u64 = 50; // Assistant acknowledgment
 
@@ -404,6 +342,17 @@ impl<D: CompactionDeps> CompactionEngine<D> {
 
         summary_tokens + context_message_tokens + ack_message_tokens + preserved_tokens
     }
+}
+
+fn validate_summary_for_durable_boundary(
+    summary: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    crate::domains::worker_kernel::validate_context_summary_narrative(summary).map_err(|message| {
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            message,
+        )) as Box<dyn std::error::Error + Send + Sync>
+    })
 }
 
 // =============================================================================

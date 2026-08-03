@@ -1,5 +1,6 @@
 import Foundation
 
+/// Bounded composer recording lifecycle around the native capture actuator.
 @Observable
 @MainActor
 final class ComposerMicRecorder {

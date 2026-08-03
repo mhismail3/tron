@@ -5,13 +5,10 @@
 //! this module contains the portable, sync-only building blocks:
 //!
 //! - [`RetryConfig`]: Retry parameters (max retries, backoff, jitter)
-//! - [`RetryResult`]: Outcome of a retried operation
 //! - [`calculate_backoff_delay`]: Exponential backoff with jitter
 //! - [`parse_retry_after_header`]: Parse `Retry-After` HTTP header
 
 use serde::{Deserialize, Serialize};
-
-use crate::shared::foundation::errors::parse::ParsedError;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -75,25 +72,6 @@ impl Default for RetryConfig {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Result
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Outcome of a retried operation.
-#[derive(Clone, Debug)]
-pub struct RetryResult<T> {
-    /// Whether the operation succeeded.
-    pub success: bool,
-    /// The value on success.
-    pub value: Option<T>,
-    /// The last error on failure.
-    pub error: Option<ParsedError>,
-    /// Total number of attempts made (1-based).
-    pub attempts: u32,
-    /// Total delay spent waiting in ms.
-    pub total_delay_ms: u64,
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Backoff calculation
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -102,8 +80,7 @@ pub struct RetryResult<T> {
 /// Formula: `capped + capped * jitter_factor` where
 /// `capped = min(max_delay, base_delay * 2^attempt)`.
 ///
-/// Returns a value in `[capped, capped * (1 + jitter_factor)]`. For
-/// actual symmetric jitter, use [`calculate_backoff_delay_with_random`].
+/// Returns a value in `[capped, capped * (1 + jitter_factor)]`.
 ///
 /// # Arguments
 ///
@@ -140,33 +117,6 @@ pub fn calculate_backoff_delay(
     let with_jitter = (capped as f64) + jitter_range;
 
     with_jitter.round() as u64
-}
-
-/// Calculate backoff delay with explicit randomness.
-///
-/// `random` should be a value in `[0.0, 1.0)` from a PRNG.
-#[must_use]
-#[allow(
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
-pub fn calculate_backoff_delay_with_random(
-    attempt: u32,
-    base_delay_ms: u64,
-    max_delay_ms: u64,
-    jitter_factor: f64,
-    random: f64,
-) -> u64 {
-    let exponential = base_delay_ms.saturating_mul(1u64 << attempt.min(31));
-    let capped = exponential.min(max_delay_ms);
-
-    // Jitter: (1 + (random * 2 - 1) * jitter_factor)
-    // Maps random [0,1) to [-jitter, +jitter]
-    let jitter = 1.0 + (random * 2.0 - 1.0) * jitter_factor;
-    let with_jitter = (capped as f64) * jitter;
-
-    with_jitter.round().max(0.0) as u64
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -281,35 +231,6 @@ mod tests {
         let delay = calculate_backoff_delay(100, 1000, 60_000, 0.2);
         assert!(delay > 0);
         assert!(delay <= 72_000); // 60_000 * 1.2
-    }
-
-    // -- calculate_backoff_delay_with_random --
-
-    #[test]
-    fn backoff_with_random_zero() {
-        // random = 0.0 → jitter = 1 + (0*2-1)*0.2 = 1 - 0.2 = 0.8
-        let delay = calculate_backoff_delay_with_random(0, 1000, 60_000, 0.2, 0.0);
-        assert_eq!(delay, 800);
-    }
-
-    #[test]
-    fn backoff_with_random_half() {
-        // random = 0.5 → jitter = 1 + (1-1)*0.2 = 1.0
-        let delay = calculate_backoff_delay_with_random(0, 1000, 60_000, 0.2, 0.5);
-        assert_eq!(delay, 1000);
-    }
-
-    #[test]
-    fn backoff_with_random_one() {
-        // random = 1.0 → jitter = 1 + (2-1)*0.2 = 1.2
-        let delay = calculate_backoff_delay_with_random(0, 1000, 60_000, 0.2, 1.0);
-        assert_eq!(delay, 1200);
-    }
-
-    #[test]
-    fn backoff_with_random_capped() {
-        let delay = calculate_backoff_delay_with_random(20, 1000, 60_000, 0.2, 0.5);
-        assert_eq!(delay, 60_000);
     }
 
     // -- parse_retry_after_header --

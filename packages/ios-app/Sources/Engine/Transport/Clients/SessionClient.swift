@@ -1,6 +1,6 @@
 import Foundation
 
-/// Client for session-related engine capabilities.
+/// Client for session-related engine tools.
 /// Handles session creation, listing, resumption, deletion, and forking.
 final class SessionClient: EngineDomainClient {
 
@@ -10,8 +10,6 @@ final class SessionClient: EngineDomainClient {
         workingDirectory: String,
         model: String? = nil,
         title: String? = nil,
-        source: String? = nil,
-        profile: String? = nil,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> SessionCreateResult {
         _ = try requireTransport().requireConnection()
@@ -19,10 +17,7 @@ final class SessionClient: EngineDomainClient {
         let params = SessionCreateParams(
             workingDirectory: workingDirectory,
             model: model,
-            contextFiles: nil,
-            title: title,
-            source: source,
-            profile: profile
+            title: title
         )
 
         let result: SessionCreateResult = try await invokeWrite(
@@ -123,6 +118,47 @@ final class SessionClient: EngineDomainClient {
         )
 
         return result.messages
+    }
+
+    func contextRequests(
+        sessionId: String,
+        beforeSequence: Int64? = nil,
+        limit: Int = 10
+    ) async throws -> SessionContextRequestsResultDTO {
+        try await invokeRead(
+            "session::context_requests",
+            SessionContextRequestsParams(
+                sessionId: sessionId,
+                beforeSequence: beforeSequence,
+                limit: min(max(limit, 1), 20)
+            ),
+            context: sessionContext(sessionId)
+        )
+    }
+
+    func contextRequestDetail(
+        sessionId: String,
+        eventId: String
+    ) async throws -> SessionContextRequestDetailDTO {
+        try await invokeRead(
+            "session::context_request_detail",
+            SessionContextRequestDetailParams(sessionId: sessionId, eventId: eventId),
+            context: sessionContext(sessionId)
+        )
+    }
+
+    func agentUpdates(
+        sessionId: String,
+        limit: Int = 100
+    ) async throws -> SessionAgentUpdatesResultDTO {
+        try await invokeRead(
+            "session::agent_updates",
+            SessionAgentUpdatesParams(
+                sessionId: sessionId,
+                limit: min(max(limit, 1), 200)
+            ),
+            context: sessionContext(sessionId)
+        )
     }
 
     // MARK: - Reconstruction

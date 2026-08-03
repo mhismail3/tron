@@ -46,7 +46,9 @@ final class SessionRepositoryTests: XCTestCase {
         cost: Double = 0.05,
         isFork: Bool? = false,
         serverOrigin: String? = nil,
-        lastActivityLines: [ActivityLine]? = nil
+        lastActivityLines: [ActivityLine]? = nil,
+        labels: [String] = [],
+        organizationGroup: String? = nil
     ) -> CachedSession {
         var session = CachedSession(
             id: id,
@@ -72,6 +74,8 @@ final class SessionRepositoryTests: XCTestCase {
         session.isFork = isFork
         session.serverOrigin = serverOrigin
         session.lastActivityLines = lastActivityLines
+        session.labels = labels
+        session.organizationGroup = organizationGroup
         return session
     }
 
@@ -101,7 +105,10 @@ final class SessionRepositoryTests: XCTestCase {
     // MARK: - Insert + Get Round Trip
 
     func testInsertAndGetRoundTrip() async throws {
-        let session = makeSession()
+        let session = makeSession(
+            labels: ["Work", "Follow Up"],
+            organizationGroup: "Projects"
+        )
         try await database.sessions.insert(session)
 
         let retrieved = try await database.sessions.get("sess-1")
@@ -127,6 +134,8 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertEqual(retrieved!.cost, 0.05, accuracy: 0.0001)
         XCTAssertEqual(retrieved?.isFork, false)
         XCTAssertNil(retrieved?.serverOrigin)
+        XCTAssertEqual(retrieved?.labels, ["Work", "Follow Up"])
+        XCTAssertEqual(retrieved?.organizationGroup, "Projects")
     }
 
     func testInsertWithAllOptionalFieldsNil() async throws {
@@ -470,7 +479,7 @@ final class SessionRepositoryTests: XCTestCase {
     func testActivityLinesRoundTrip() async throws {
         let lines = [
             ActivityLine(kind: .text, text: "Hello world"),
-            ActivityLine(kind: .capabilityInvocationStarted, text: "Running test", modelPrimitiveName: "execute", status: .running),
+            ActivityLine(kind: .toolInvocationStarted, text: "Running test", toolName: "process_run", status: .running),
         ]
         let session = makeSession(lastActivityLines: lines)
         try await database.sessions.insert(session)
@@ -480,8 +489,8 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertEqual(retrieved?.lastActivityLines?.count, 2)
         XCTAssertEqual(retrieved?.lastActivityLines?[0].kind, .text)
         XCTAssertEqual(retrieved?.lastActivityLines?[0].text, "Hello world")
-        XCTAssertEqual(retrieved?.lastActivityLines?[1].kind, .capabilityInvocationStarted)
-        XCTAssertEqual(retrieved?.lastActivityLines?[1].modelPrimitiveName, "execute")
+        XCTAssertEqual(retrieved?.lastActivityLines?[1].kind, .toolInvocationStarted)
+        XCTAssertEqual(retrieved?.lastActivityLines?[1].toolName, "process_run")
     }
 
     func testActivityLinesNilRoundTrip() async throws {

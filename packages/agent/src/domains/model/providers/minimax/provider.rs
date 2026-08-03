@@ -20,6 +20,7 @@ use crate::domains::model::providers::anthropic::types::{
 use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
+use crate::domains::model::providers::shared::render_request_context;
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
 
@@ -109,12 +110,12 @@ impl MiniMaxProvider {
 
     /// Build tool definitions with a 5-minute cache breakpoint on the last tool.
     fn build_tools(context: &Context) -> Option<Vec<AnthropicTool>> {
-        let capabilities = context.capabilities.as_ref()?;
-        if capabilities.is_empty() {
+        let tools = context.tools.as_ref()?;
+        if tools.is_empty() {
             return None;
         }
 
-        let mut anthropic_capabilities: Vec<AnthropicTool> = capabilities
+        let mut anthropic_tools: Vec<AnthropicTool> = tools
             .iter()
             .map(|t| AnthropicTool {
                 name: t.name.clone(),
@@ -124,14 +125,14 @@ impl MiniMaxProvider {
             })
             .collect();
 
-        if let Some(last) = anthropic_capabilities.last_mut() {
+        if let Some(last) = anthropic_tools.last_mut() {
             last.cache_control = Some(CacheControl {
                 cache_type: "ephemeral".into(),
                 ttl: None,
             });
         }
 
-        Some(anthropic_capabilities)
+        Some(anthropic_tools)
     }
 
     /// Build thinking configuration — enabled only, never adaptive.
@@ -203,7 +204,7 @@ impl MiniMaxProvider {
             max_tokens: self.calculate_max_tokens(options),
             messages,
             system: Self::build_system_param(context),
-            capabilities: Self::build_tools(context),
+            tools: Self::build_tools(context),
             stream: true,
             thinking: Self::build_thinking_config(options),
             output_config: None,
@@ -224,6 +225,11 @@ impl MiniMaxProvider {
         // Strip images — MiniMax doesn't support them
         Self::strip_images(&mut messages);
         Self::apply_cache_to_last_user_message(&mut messages);
+        if let Some(reference) = render_request_context(context) {
+            messages.extend(convert_messages(&[
+                crate::shared::protocol::messages::Message::user(reference),
+            ]));
+        }
 
         let request = self.build_request(context, options, messages);
 
@@ -237,7 +243,7 @@ impl MiniMaxProvider {
             model = %request.model,
             max_tokens = request.max_tokens,
             message_count = request.messages.len(),
-            has_tools = request.capabilities.is_some(),
+            has_tools = request.tools.is_some(),
             has_thinking = request.thinking.is_some(),
             "Sending MiniMax request"
         );
@@ -318,6 +324,11 @@ impl Provider for MiniMaxProvider {
         let mut messages = convert_messages(&sanitized);
         Self::strip_images(&mut messages);
         Self::apply_cache_to_last_user_message(&mut messages);
+        if let Some(reference) = render_request_context(context) {
+            messages.extend(convert_messages(&[
+                crate::shared::protocol::messages::Message::user(reference),
+            ]));
+        }
         serde_json::to_value(self.build_request(context, options, messages))
             .map(ProviderAuditPayload::exact_provider_envelope)
             .map_err(ProviderError::Json)
@@ -345,7 +356,7 @@ impl Provider for MiniMaxProvider {
 mod tests {
     use super::*;
     use crate::domains::model::providers::anthropic::types::AnthropicMessageParam;
-    use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
+    use crate::shared::protocol::messages::{Message, ToolResultMessageContent};
     use serde_json::json;
 
     fn test_config() -> MiniMaxConfig {
@@ -367,14 +378,14 @@ mod tests {
     }
 
     #[test]
-    fn capability_result_text_is_transport_exact_through_shared_converter() {
+    fn tool_result_text_is_transport_exact_through_shared_converter() {
         let output_envelope = format!(
-            "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+            "{{\"summary\":\"{}\",\"kind\":\"test\"}}",
             "safe-evidence-".repeat(1_400)
         );
-        let messages = vec![Message::CapabilityResult {
+        let messages = vec![Message::ToolResult {
             invocation_id: "toolu_01minimax".into(),
-            content: CapabilityResultMessageContent::Text(output_envelope.clone()),
+            content: ToolResultMessageContent::Text(output_envelope.clone()),
             is_error: None,
         }];
 
@@ -477,42 +488,32 @@ mod tests {
     #[test]
     fn build_tools_marks_last_tool_cacheable() {
         let ctx = Context {
-            capabilities: Some(vec![
-                crate::shared::protocol::model_capabilities::ModelCapability {
-                    name: "execute".into(),
-                    description: "Run commands".into(),
-                    parameters:
-                        crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
-                            schema_type: "object".into(),
-                            properties: None,
-                            required: None,
-                            description: None,
-                            extra: serde_json::Map::default(),
-                        },
+            tools: Some(vec![crate::shared::protocol::model_tools::ModelTool {
+                name: "test_tool".into(),
+                description: "Run commands".into(),
+                parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::default(),
                 },
-            ]),
+            }]),
             ..Context::default()
         };
-        let capabilities = MiniMaxProvider::build_tools(&ctx).unwrap();
-        assert_eq!(capabilities.len(), 1);
+        let tools = MiniMaxProvider::build_tools(&ctx).unwrap();
+        assert_eq!(tools.len(), 1);
         assert_eq!(
-            capabilities[0].cache_control.as_ref().unwrap().cache_type,
+            tools[0].cache_control.as_ref().unwrap().cache_type,
             "ephemeral"
         );
-        assert!(
-            capabilities[0]
-                .cache_control
-                .as_ref()
-                .unwrap()
-                .ttl
-                .is_none()
-        );
+        assert!(tools[0].cache_control.as_ref().unwrap().ttl.is_none());
     }
 
     #[test]
     fn build_tools_empty_returns_none() {
         let ctx = Context {
-            capabilities: Some(vec![]),
+            tools: Some(vec![]),
             ..Context::default()
         };
         assert!(MiniMaxProvider::build_tools(&ctx).is_none());
@@ -592,6 +593,32 @@ mod tests {
         assert!(req.system.is_some());
         assert!(req.thinking.is_none());
         assert!(req.output_config.is_none());
+    }
+
+    #[test]
+    fn audit_request_context_is_one_final_uncached_reference_message() {
+        let provider = MiniMaxProvider::new(test_config());
+        let ctx = Context {
+            messages: vec![crate::shared::protocol::messages::Message::user("durable")].into(),
+            request_context: vec![crate::shared::protocol::messages::RequestContextBlock {
+                kind: crate::shared::protocol::messages::RequestContextKind::WorkerInbox,
+                content: "background result".into(),
+            }],
+            ..Context::default()
+        };
+        let payload =
+            Provider::audit_payload(&provider, &ctx, &ProviderStreamOptions::default()).unwrap();
+        let rendered = serde_json::to_string(&payload.body).unwrap();
+        assert_eq!(rendered.matches("[TRON REFERENCE CONTEXT]").count(), 1);
+        assert!(
+            rendered.find("durable").unwrap() < rendered.find("[TRON REFERENCE CONTEXT]").unwrap()
+        );
+        let messages = payload.body["messages"].as_array().unwrap();
+        assert!(
+            messages.last().unwrap()["content"][0]
+                .get("cache_control")
+                .is_none()
+        );
     }
 
     // ── Image stripping ─────────────────────────────────────────────────

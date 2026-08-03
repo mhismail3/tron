@@ -16,7 +16,7 @@ enum ThinkingDisplayKind: String, Codable, Equatable {
     var title: String {
         switch self {
         case .thinking: "Thinking"
-        case .reasoningSummary: "Thinking"
+        case .reasoningSummary: "Reasoning Summary"
         }
     }
 }
@@ -28,8 +28,8 @@ enum MessageContent: Equatable {
     case text(String)
     case streaming(String)
     case thinking(visible: String, isExpanded: Bool, isStreaming: Bool, kind: ThinkingDisplayKind)
-    case capabilityInvocation(CapabilityInvocationData)
-    case capabilityResult(CapabilityInvocationResultData)
+    case toolInvocation(ToolInvocationData)
+    case toolResult(ToolInvocationResultData)
     case error(String)
     case images([ImageContent])
     case attachments([Attachment])
@@ -58,12 +58,12 @@ enum MessageContent: Equatable {
         .systemEvent(.compactionInProgress(reason: reason))
     }
     /// In-chat notification for context compaction
-    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int? = nil, summarizedTurns: Int? = nil, contextControlActionResourceId: String? = nil) -> MessageContent {
-        .systemEvent(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: preservedTurns, summarizedTurns: summarizedTurns, contextControlActionResourceId: contextControlActionResourceId))
+    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int? = nil, summarizedTurns: Int? = nil) -> MessageContent {
+        .systemEvent(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: preservedTurns, summarizedTurns: summarizedTurns))
     }
     /// In-chat notification for context clearing
-    static func contextCleared(tokensBefore: Int, tokensAfter: Int, contextControlActionResourceId: String? = nil) -> MessageContent {
-        .systemEvent(.contextCleared(tokensBefore: tokensBefore, tokensAfter: tokensAfter, contextControlActionResourceId: contextControlActionResourceId))
+    static func contextCleared(tokensBefore: Int, tokensAfter: Int) -> MessageContent {
+        .systemEvent(.contextCleared(tokensBefore: tokensBefore, tokensAfter: tokensAfter))
     }
     /// In-chat notification for message deletion from context
     static func messageDeleted(targetType: String) -> MessageContent {
@@ -93,9 +93,9 @@ enum MessageContent: Equatable {
             return text
         case .thinking(let visible, _, _, _):
             return visible
-        case .capabilityInvocation(let invocation):
+        case .toolInvocation(let invocation):
             return "[\(invocation.displayName)]"
-        case .capabilityResult(let result):
+        case .toolResult(let result):
             return result.content
         case .error(let message):
             return message
@@ -123,9 +123,9 @@ enum MessageContent: Equatable {
         }
     }
 
-    var isCapabilityRelated: Bool {
+    var isToolRelated: Bool {
         switch self {
-        case .capabilityInvocation, .capabilityResult:
+        case .toolInvocation, .toolResult:
             return true
         default:
             return false

@@ -82,13 +82,13 @@ final class SessionStateInvariantsTests: XCTestCase {
     func testCleanUpStreamingStateClearsTurnTracking() {
         let vm = makeViewModel("sess-clear-\(UUID().uuidString)")
         vm.thinkingMessageId = UUID()
-        let capabilityMessageId = UUID()
-        vm.currentTurnCapabilityMessageIds.insert(capabilityMessageId)
+        let toolMessageId = UUID()
+        vm.currentTurnToolMessageIds.insert(toolMessageId)
 
         vm.cleanUpStreamingState()
 
         XCTAssertNil(vm.thinkingMessageId)
-        XCTAssertTrue(vm.currentTurnCapabilityMessageIds.isEmpty)
+        XCTAssertTrue(vm.currentTurnToolMessageIds.isEmpty)
     }
 
     /// A completed `session::reconstruct` response is server-authoritative.
@@ -97,18 +97,18 @@ final class SessionStateInvariantsTests: XCTestCase {
     func testCompletedReconstructionReconcilesTransientLiveState() {
         let vm = makeViewModel("sess-reconcile-\(UUID().uuidString)")
         vm.agentPhase = .processing
-        vm.runningCapabilityInvocationCount = 2
+        vm.runningToolInvocationCount = 2
         let thinking = ChatMessage.thinking("still thinking", isStreaming: true)
         vm.appendToMessages(thinking)
         vm.thinkingMessageId = thinking.id
-        let capabilityMessageId = UUID()
-        vm.currentTurnCapabilityMessageIds.insert(capabilityMessageId)
+        let toolMessageId = UUID()
+        vm.currentTurnToolMessageIds.insert(toolMessageId)
 
         vm.reconcileCompletedReconstructionState()
 
         XCTAssertEqual(vm.agentPhase, .idle)
-        XCTAssertEqual(vm.runningCapabilityInvocationCount, 0)
-        XCTAssertTrue(vm.currentTurnCapabilityMessageIds.isEmpty)
+        XCTAssertEqual(vm.runningToolInvocationCount, 0)
+        XCTAssertTrue(vm.currentTurnToolMessageIds.isEmpty)
         guard case .thinking(_, _, let isStreaming, _) = vm.messages[0].content else {
             return XCTFail("expected thinking message")
         }

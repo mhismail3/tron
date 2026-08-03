@@ -1,24 +1,161 @@
-//! Shared query-side services for session read capabilities.
+//! Shared query-side services for session read tools.
 //!
 //! `session::list` clamps every page to 200 rows and returns an opaque cursor
 //! over immutable creation/session-ID keys beneath one server-issued
 //! `snapshotAsOf` boundary. Mutable activity cannot move a row between pages,
 //! and clients can assemble a generous bounded snapshot without one unbounded
-//! database read. Row lookups and bounded listing read `EventStore` directly;
-//! within this query path, `SessionManager` remains only for resume/cache data.
+//! database read. Ordinary listings exclude worker-owned child sessions, while
+//! exact-ID audit reads and resume remain available. Row lookups and bounded
+//! listing read `EventStore` directly; within this query path, `SessionManager`
+//! remains only for resume/cache data.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::domains::session::Deps;
-use crate::domains::session::event_store::ListSessionsOptions;
+use crate::domains::session::event_store::{
+    AgentDeliverySourceKind, ListSessionsOptions, session_organization_from_tags,
+};
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::{self, CapabilityError};
+use crate::shared::server::errors::{self, ToolError};
 
 pub(crate) struct SessionQueryService;
 
 const SESSION_LIST_DEFAULT_LIMIT: usize = 50;
 const SESSION_LIST_MAX_LIMIT: usize = 200;
+const AGENT_UPDATE_PREVIEW_MAX_CHARS: usize = 1_024;
+
+fn worker_evidence_text(value: &Value) -> Option<&str> {
+    ["preview", "summary", "message"]
+        .into_iter()
+        .find_map(|key| value.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+fn worker_evidence_error(value: &Value) -> Option<&str> {
+    ["error", "reason"]
+        .into_iter()
+        .find_map(|key| value.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+fn readable_worker_evidence(status: &str, evidence: &Value) -> String {
+    match status {
+        "failed" => worker_evidence_error(evidence)
+            .map(|detail| format!("Failed: {detail}"))
+            .unwrap_or_else(|| "Worker execution failed.".to_owned()),
+        "cancelled" => worker_evidence_error(evidence)
+            .map(|detail| format!("Cancelled: {detail}"))
+            .unwrap_or_else(|| "Worker execution was cancelled.".to_owned()),
+        _ => match worker_evidence_text(evidence) {
+            Some(preview) if preview.eq_ignore_ascii_case("empty") => {
+                "Completed without a user-facing result summary.".to_owned()
+            }
+            Some(preview) => preview.to_owned(),
+            None => "Worker completed. Open its result for full details.".to_owned(),
+        },
+    }
+}
+
+fn parsed_wait_evidence(value: &Value) -> Vec<Value> {
+    value
+        .get("results")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|result| {
+            result
+                .get("evidence")
+                .and_then(Value::as_str)
+                .and_then(|evidence| serde_json::from_str::<Value>(evidence).ok())
+        })
+        .collect()
+}
+
+fn agent_update_preview(
+    is_worker_result: bool,
+    content: &str,
+) -> (String, Option<String>, Option<String>) {
+    let parsed = is_worker_result
+        .then(|| serde_json::from_str::<Value>(content).ok())
+        .flatten();
+    let wait_evidence = parsed
+        .as_ref()
+        .filter(|value| value.get("kind").and_then(Value::as_str) == Some("worker_wait"))
+        .map(parsed_wait_evidence)
+        .unwrap_or_default();
+    let source_worker_ids = parsed
+        .as_ref()
+        .and_then(|value| value.get("workerId"))
+        .and_then(Value::as_str)
+        .into_iter()
+        .chain(
+            wait_evidence
+                .iter()
+                .filter_map(|value| value.get("workerId").and_then(Value::as_str)),
+        )
+        .collect::<std::collections::BTreeSet<_>>();
+    let source_worker_id = (source_worker_ids.len() == 1)
+        .then(|| source_worker_ids.first().copied().map(ToOwned::to_owned))
+        .flatten();
+    let source_worker_names = parsed
+        .as_ref()
+        .and_then(|value| value.get("workerName"))
+        .and_then(Value::as_str)
+        .into_iter()
+        .chain(
+            wait_evidence
+                .iter()
+                .filter_map(|value| value.get("workerName").and_then(Value::as_str)),
+        )
+        .collect::<std::collections::BTreeSet<_>>();
+    let source_worker_name = (source_worker_names.len() == 1)
+        .then(|| source_worker_names.first().copied().map(ToOwned::to_owned))
+        .flatten();
+    let readable = match parsed.as_ref().and_then(|value| value.get("kind")) {
+        Some(Value::String(kind)) if kind == "worker_result" => {
+            let value = parsed.as_ref().expect("parsed worker result");
+            let status = value
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("completed");
+            readable_worker_evidence(status, value.get("evidence").unwrap_or(&Value::Null))
+        }
+        Some(Value::String(kind)) if kind == "worker_wait" => {
+            let result_count = wait_evidence.len();
+            let failed = wait_evidence
+                .iter()
+                .filter(|evidence| evidence.get("status").and_then(Value::as_str) == Some("failed"))
+                .count();
+            let first = wait_evidence.first().map(|evidence| {
+                let status = evidence
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("completed");
+                readable_worker_evidence(status, evidence.get("evidence").unwrap_or(evidence))
+            });
+            if result_count <= 1 {
+                first.unwrap_or_else(|| "The requested worker wait completed.".to_owned())
+            } else {
+                let outcome = if failed == 0 {
+                    format!("{result_count} worker results are ready.")
+                } else {
+                    format!("{result_count} worker results are ready; {failed} failed.")
+                };
+                first.map_or(outcome.clone(), |first| format!("{outcome} {first}"))
+            }
+        }
+        _ if is_worker_result => "A worker completed. Open its result for full details.".to_owned(),
+        _ => content.to_owned(),
+    };
+    let preview = crate::shared::foundation::redaction::redact_sensitive_content(&readable)
+        .chars()
+        .take(AGENT_UPDATE_PREVIEW_MAX_CHARS)
+        .collect();
+    (preview, source_worker_id, source_worker_name)
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,19 +171,210 @@ pub(crate) struct SessionListCursor {
 mod operations;
 
 pub(crate) use operations::{
-    session_export_value, session_get_head_value, session_get_history_value,
-    session_get_state_value, session_list_value, session_replay_manifest_value,
-    session_resume_value,
+    session_agent_updates_value, session_context_request_detail_value,
+    session_context_requests_value, session_export_value, session_get_head_value,
+    session_get_history_value, session_get_state_value, session_list_value,
+    session_replay_manifest_value, session_resume_value,
 };
 
 impl SessionQueryService {
-    pub(crate) async fn resume(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
+    pub(crate) async fn agent_updates(
+        deps: &Deps,
+        session_id: String,
+        limit: Option<usize>,
+    ) -> Result<Value, ToolError> {
+        let event_store = deps.event_store.clone();
+        run_blocking_task("session.agent_updates", move || {
+            let limit = limit.unwrap_or(100).clamp(1, 200);
+            let deliveries = event_store
+                .list_agent_deliveries_for_session(&session_id, limit)
+                .map_err(|error| match error {
+                    crate::domains::session::event_store::EventStoreError::SessionNotFound(_) => {
+                        ToolError::NotFound {
+                            code: errors::SESSION_NOT_FOUND.into(),
+                            message: format!("Session '{session_id}' not found"),
+                        }
+                    }
+                    other => ToolError::Internal {
+                        message: other.to_string(),
+                    },
+                })?;
+            let waits = event_store
+                .list_agent_waits_for_session(&session_id, limit)
+                .map_err(|error| ToolError::Internal {
+                    message: error.to_string(),
+                })?;
+            let updates = deliveries
+                .into_iter()
+                .map(|delivery| {
+                    let (preview, source_worker_id, source_worker_name) = agent_update_preview(
+                        delivery.source_kind == AgentDeliverySourceKind::WorkerResult,
+                        &delivery.content,
+                    );
+                    json!({
+                        "deliveryId":delivery.delivery_id,
+                        "status":delivery.projection_status(),
+                        "sourceKind":delivery.source_kind,
+                        "sourceWorkerId":source_worker_id,
+                        "sourceWorkerName":source_worker_name,
+                        "intent":delivery.intent,
+                        "sourceSessionId":delivery.source_session_id,
+                        "sourceInvocationId":delivery.source_invocation_id,
+                        "sourceTraceId":delivery.source_trace_id,
+                        "resultInvocationId":delivery.result_invocation_id,
+                        "wakePolicy":delivery.wake_policy,
+                        "boundary":delivery.boundary,
+                        "causalDepth":delivery.causal_depth,
+                        "redelivery":delivery.is_redelivery(),
+                        "leaseCount":delivery.lease_count,
+                        "wakeAttempts":delivery.wake_attempts,
+                        "lastError":delivery.last_error,
+                        "preview":preview,
+                        "createdAt":delivery.created_at,
+                        "preparedRunId":delivery.leased_run_id,
+                        "preparedTurn":delivery.leased_turn,
+                        "observedAt":delivery.observed_at,
+                        "cancelledAt":delivery.cancelled_at,
+                        "expiresAt":delivery.expires_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let waits = waits
+                .into_iter()
+                .map(|wait| {
+                    json!({
+                        "waitId":wait.wait_id,
+                        "mode":wait.mode,
+                        "status":wait.disposition,
+                        "deliveryId":wait.delivery_id,
+                        "createdAt":wait.created_at,
+                        "resolvedAt":wait.resolved_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok(json!({"updates":updates,"waits":waits}))
+        })
+        .await
+    }
+
+    pub(crate) async fn context_requests(
+        deps: &Deps,
+        session_id: String,
+        before_sequence: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<Value, ToolError> {
+        let event_store = deps.event_store.clone();
+        run_blocking_task("session.context_requests", move || {
+            let _ = event_store
+                .get_session(&session_id)
+                .map_err(|error| ToolError::Internal {
+                    message: format!("Persistence error: {error}"),
+                })?
+                .ok_or_else(|| ToolError::NotFound {
+                    code: errors::SESSION_NOT_FOUND.into(),
+                    message: format!("Session '{session_id}' not found"),
+                })?;
+            let limit = limit.unwrap_or(10).clamp(1, 20);
+            let fetch_limit = i64::try_from(limit.saturating_add(1)).unwrap_or(21);
+            let mut rows = event_store
+                .get_provider_request_audits(&session_id, before_sequence, fetch_limit)
+                .map_err(|error| ToolError::Internal {
+                    message: error.to_string(),
+                })?;
+            let has_more = rows.len() > limit;
+            rows.truncate(limit);
+            let next_before_sequence = has_more
+                .then(|| rows.last().map(|(row, _)| row.sequence))
+                .flatten();
+            let requests = rows
+                .into_iter()
+                .map(|(row, payload)| {
+                    let format = payload
+                        .get("format")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    let manifest = payload.get("contextManifest");
+                    json!({
+                        "eventId":row.id,
+                        "sequence":row.sequence,
+                        "timestamp":row.timestamp,
+                        "format":format,
+                        "turn":payload.get("turn").cloned().unwrap_or(Value::Null),
+                        "providerType":payload.get("providerType").cloned().unwrap_or(Value::Null),
+                        "providerName":payload.get("providerName").cloned().unwrap_or(Value::Null),
+                        "model":payload.get("model").cloned().unwrap_or(Value::Null),
+                        "requestClassification":payload.get("requestClassification").cloned().unwrap_or_else(|| json!("legacy")),
+                        "messageCount":payload.get("messageCount").cloned().unwrap_or_else(|| json!(0)),
+                        "toolCount":payload.get("toolCount").cloned().unwrap_or_else(|| json!(0)),
+                        "automaticContextCount":manifest
+                            .and_then(|manifest| manifest.get("automaticContext"))
+                            .and_then(Value::as_array)
+                            .map_or(0, Vec::len),
+                        "manifestAvailable":manifest.is_some(),
+                        "provenanceAvailability":if crate::shared::protocol::model_audit::provider_audit_has_complete_provenance(format) {
+                            "complete"
+                        } else {
+                            "legacy_unavailable"
+                        },
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok(json!({
+                "requests":requests,
+                "hasMore":has_more,
+                "nextBeforeSequence":next_before_sequence,
+            }))
+        })
+        .await
+    }
+
+    pub(crate) async fn context_request_detail(
+        deps: &Deps,
+        session_id: String,
+        event_id: String,
+    ) -> Result<Value, ToolError> {
+        let event_store = deps.event_store.clone();
+        run_blocking_task("session.context_request_detail", move || {
+            let (row, payload) = event_store
+                .get_provider_request_audit(&session_id, &event_id)
+                .map_err(|error| ToolError::Internal {
+                    message: error.to_string(),
+                })?
+                .ok_or_else(|| ToolError::NotFound {
+                    code: errors::SESSION_NOT_FOUND.into(),
+                    message: format!(
+                        "Provider request audit '{event_id}' was not found in session '{session_id}'"
+                    ),
+                })?;
+            let format = payload
+                .get("format")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            Ok(json!({
+                "eventId":row.id,
+                "sequence":row.sequence,
+                "timestamp":row.timestamp,
+                "format":format,
+                "contextManifest":payload.get("contextManifest").cloned().unwrap_or(Value::Null),
+                "providerAdditions":payload.get("providerAdditions").cloned().unwrap_or_else(|| json!([])),
+                "providerAudit":payload,
+                "provenanceAvailability":if crate::shared::protocol::model_audit::provider_audit_has_complete_provenance(format) {
+                    "complete"
+                } else {
+                    "legacy_unavailable"
+                },
+            }))
+        })
+        .await
+    }
+
+    pub(crate) async fn resume(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let session_manager = deps.session_manager.clone();
         let session_id_for_resume = session_id.clone();
         run_blocking_task("session.resume", move || {
             let state = session_manager
                 .resume_session(&session_id_for_resume)
-                .map_err(|error| CapabilityError::NotFound {
+                .map_err(|error| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: error.to_string(),
                 })?;
@@ -68,7 +396,7 @@ impl SessionQueryService {
         working_directory: Option<String>,
         offset: Option<usize>,
         cursor: Option<SessionListCursor>,
-    ) -> Result<Value, CapabilityError> {
+    ) -> Result<Value, ToolError> {
         let limit = limit
             .unwrap_or(SESSION_LIST_DEFAULT_LIMIT)
             .clamp(1, SESSION_LIST_MAX_LIMIT);
@@ -95,6 +423,7 @@ impl SessionQueryService {
                 } else {
                     Some(false)
                 },
+                include_worker_sessions: false,
                 #[allow(clippy::cast_possible_wrap)]
                 limit: Some(fetch_limit as i64),
                 #[allow(clippy::cast_possible_wrap)]
@@ -104,7 +433,7 @@ impl SessionQueryService {
                 before_session_id: before_session_id.as_deref(),
             };
             let mut sessions = event_store.list_sessions(&options).map_err(|error| {
-                CapabilityError::Internal {
+                ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 }
             })?;
@@ -142,6 +471,8 @@ impl SessionQueryService {
                     let is_cached = session_manager.is_cached(&session.id);
                     let is_running = orchestrator.has_active_run(&session.id);
                     let preview = previews.get(&session.id);
+                    let (labels, organization_group) =
+                        session_organization_from_tags(&session.tags);
                     json!({
                         "sessionId": session.id,
                         "model": session.latest_model,
@@ -150,10 +481,12 @@ impl SessionQueryService {
                         "createdAt": session.created_at,
                         "lastActivity": session.last_activity_at,
                         "endedAt": session.ended_at,
-                        // Wire compatibility: `isActive` means cache residency.
+                        // `isActive` reports session-cache residency.
                         "isActive": is_cached,
                         "isRunning": is_running,
                         "isArchived": session.ended_at.is_some(),
+                        "labels": labels,
+                        "organizationGroup": organization_group,
                         "eventCount": session.event_count,
                         "turnCount": session.turn_count,
                         "messageCount": session.message_count,
@@ -182,19 +515,16 @@ impl SessionQueryService {
         .await
     }
 
-    pub(crate) async fn get_head(
-        deps: &Deps,
-        session_id: String,
-    ) -> Result<Value, CapabilityError> {
+    pub(crate) async fn get_head(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let event_store = deps.event_store.clone();
         let session_id_for_head = session_id.clone();
         run_blocking_task("session.get_head", move || {
             let session = event_store
                 .get_session(&session_id_for_head)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 })?
-                .ok_or_else(|| CapabilityError::NotFound {
+                .ok_or_else(|| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_head}' not found"),
                 })?;
@@ -207,27 +537,24 @@ impl SessionQueryService {
         .await
     }
 
-    pub(crate) async fn get_state(
-        deps: &Deps,
-        session_id: String,
-    ) -> Result<Value, CapabilityError> {
+    pub(crate) async fn get_state(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let session_manager = deps.session_manager.clone();
         let event_store = deps.event_store.clone();
         let session_id_for_state = session_id.clone();
         run_blocking_task("session.get_state", move || {
             let session = event_store
                 .get_session(&session_id_for_state)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 })?
-                .ok_or_else(|| CapabilityError::NotFound {
+                .ok_or_else(|| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_state}' not found"),
                 })?;
 
             let state = session_manager
                 .resume_session(&session_id_for_state)
-                .map_err(|error| CapabilityError::NotFound {
+                .map_err(|error| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: error.to_string(),
                 })?;
@@ -267,16 +594,16 @@ impl SessionQueryService {
     /// sessions larger than ~50k events the export is large but not
     /// unbounded — the payload is serialized in memory before being
     /// returned, which matches how `session.reconstruct` already behaves.
-    pub(crate) async fn export(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
+    pub(crate) async fn export(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let event_store = deps.event_store.clone();
         let session_id_for_export = session_id.clone();
         run_blocking_task("session.export", move || {
             let session = event_store
                 .get_session(&session_id_for_export)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 })?
-                .ok_or_else(|| CapabilityError::NotFound {
+                .ok_or_else(|| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_export}' not found"),
                 })?;
@@ -284,15 +611,15 @@ impl SessionQueryService {
             let opts = crate::domains::session::event_store::ListEventsOptions::default();
             let events = event_store
                 .get_events_by_session(&session_id_for_export, &opts)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: error.to_string(),
                 })?;
 
             let event_count = events.len();
-            let session_value = serde_json::to_value(&session).map_err(|error| CapabilityError::Internal {
+            let session_value = serde_json::to_value(&session).map_err(|error| ToolError::Internal {
                 message: format!("session serialization failed: {error}"),
             })?;
-            let events_value = serde_json::to_value(&events).map_err(|error| CapabilityError::Internal {
+            let events_value = serde_json::to_value(&events).map_err(|error| ToolError::Internal {
                 message: format!("events serialization failed: {error}"),
             })?;
 
@@ -311,7 +638,7 @@ impl SessionQueryService {
     pub(crate) async fn replay_manifest(
         deps: &Deps,
         session_id: String,
-    ) -> Result<Value, CapabilityError> {
+    ) -> Result<Value, ToolError> {
         crate::domains::session::replay::replay_manifest_value(
             crate::domains::session::replay::ReplayDeps::new(
                 deps.event_store.clone(),
@@ -327,16 +654,16 @@ impl SessionQueryService {
         session_id: String,
         limit: Option<usize>,
         before_id: Option<String>,
-    ) -> Result<Value, CapabilityError> {
+    ) -> Result<Value, ToolError> {
         let event_store = deps.event_store.clone();
         let session_id_for_history = session_id.clone();
         run_blocking_task("session.get_history", move || {
             let _ = event_store
                 .get_session(&session_id_for_history)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 })?
-                .ok_or_else(|| CapabilityError::NotFound {
+                .ok_or_else(|| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_history}' not found"),
                 })?;
@@ -344,12 +671,12 @@ impl SessionQueryService {
             let message_types = [
                 "message.user",
                 "message.assistant",
-                "capability.invocation.completed",
+                "tool.invocation.completed",
             ];
             let type_strs: Vec<&str> = message_types.to_vec();
             let events = event_store
                 .get_events_by_type(&session_id_for_history, &type_strs, None)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: error.to_string(),
                 })?;
 
@@ -372,7 +699,7 @@ impl SessionQueryService {
             let resolved_payloads =
                 event_store
                     .resolve_event_payloads(&events)
-                    .map_err(|error| CapabilityError::Internal {
+                    .map_err(|error| ToolError::Internal {
                         message: format!("Failed to resolve event payloads: {error}"),
                     })?;
 
@@ -383,7 +710,7 @@ impl SessionQueryService {
                     let role = match event.event_type.as_str() {
                         "message.user" => "user",
                         "message.assistant" => "assistant",
-                        "capability.invocation.completed" => "capability",
+                        "tool.invocation.completed" => "tool",
                         _ => "unknown",
                     };
                     let mut message = json!({
@@ -392,10 +719,10 @@ impl SessionQueryService {
                         "content": content,
                         "timestamp": event.timestamp,
                     });
-                    if let Some(ref model_primitive_name) = event.model_primitive_name {
-                        message["capabilityInvocation"] = json!({ "name": model_primitive_name });
+                    if let Some(ref tool_name) = event.tool_name {
+                        message["toolInvocation"] = json!({ "name": tool_name });
                     }
-                    if event.event_type == "capability.invocation.completed" {
+                    if event.event_type == "tool.invocation.completed" {
                         if let Some(invocation_id) = content.get("invocationId") {
                             message["invocationId"] = invocation_id.clone();
                         }
@@ -426,6 +753,114 @@ mod tests {
     use super::*;
     use crate::domains::session::event_store::{AppendOptions, EventType};
     use crate::shared::server::test_support::make_test_context;
+
+    #[test]
+    fn agent_update_preview_projects_worker_result_evidence_without_raw_json() {
+        let content = json!({
+            "kind":"worker_result",
+            "invocationId":"worker-run",
+            "workerId":"research-curator",
+            "status":"completed",
+            "evidence":{
+                "preview":"Three relevant findings are ready.",
+                "reference":{"contentSha256":"sha256:secret-technical-evidence"}
+            }
+        })
+        .to_string();
+
+        let (preview, worker_id, worker_name) = agent_update_preview(true, &content);
+
+        assert_eq!(preview, "Three relevant findings are ready.");
+        assert_eq!(worker_id.as_deref(), Some("research-curator"));
+        assert!(worker_name.is_none());
+        assert!(!preview.contains("contentSha256"));
+    }
+
+    #[test]
+    fn agent_update_preview_explains_empty_and_failed_worker_results() {
+        let (empty, _, _) = agent_update_preview(
+            true,
+            &json!({
+                "kind":"worker_result",
+                "workerId":"continuity-curator",
+                "status":"completed",
+                "evidence":{"preview":"empty"}
+            })
+            .to_string(),
+        );
+        let (failed, _, _) = agent_update_preview(
+            true,
+            &json!({
+                "kind":"worker_result",
+                "workerId":"research-curator",
+                "status":"failed",
+                "evidence":{"error":"provider setup failed"}
+            })
+            .to_string(),
+        );
+
+        assert_eq!(empty, "Completed without a user-facing result summary.");
+        assert_eq!(failed, "Failed: provider setup failed");
+    }
+
+    #[test]
+    fn agent_update_preview_preserves_plain_delivery_content_and_bounds_it() {
+        let content = "Useful peer update. ".repeat(100);
+        let (preview, worker_id, worker_name) = agent_update_preview(false, &content);
+
+        assert_eq!(preview.chars().count(), AGENT_UPDATE_PREVIEW_MAX_CHARS);
+        assert!(worker_id.is_none());
+        assert!(worker_name.is_none());
+        assert!(preview.starts_with("Useful peer update."));
+    }
+
+    #[test]
+    fn agent_update_preview_does_not_expose_unknown_worker_payload_shapes() {
+        let content = json!({
+            "unexpected":"internal payload",
+            "reference":{"contentSha256":"sha256:technical-evidence"}
+        })
+        .to_string();
+
+        let (preview, worker_id, worker_name) = agent_update_preview(true, &content);
+
+        assert_eq!(
+            preview,
+            "A worker completed. Open its result for full details."
+        );
+        assert!(worker_id.is_none());
+        assert!(worker_name.is_none());
+        assert!(!preview.contains("contentSha256"));
+    }
+
+    #[test]
+    fn agent_update_preview_projects_wait_evidence_and_worker_identity() {
+        let content = json!({
+            "kind":"worker_wait",
+            "waitId":"wait-one",
+            "mode":"all",
+            "results":[{
+                "invocationId":"worker-run",
+                "status":"completed",
+                "evidence":json!({
+                    "workerId":"wait-ux-smoke",
+                    "workerName":"Wait UX Smoke Test",
+                    "status":"completed",
+                    "evidence":{
+                        "preview":"Background worker finished successfully."
+                    }
+                }).to_string()
+            }]
+        })
+        .to_string();
+
+        let (preview, worker_id, worker_name) = agent_update_preview(true, &content);
+
+        assert_eq!(preview, "Background worker finished successfully.");
+        assert_eq!(worker_id.as_deref(), Some("wait-ux-smoke"));
+        assert_eq!(worker_name.as_deref(), Some("Wait UX Smoke Test"));
+        assert!(!preview.contains("waitId"));
+    }
 
     /// A freshly-created session always has exactly one event — the
     /// `session.start` event inserted inside the create transaction.
@@ -468,7 +903,7 @@ mod tests {
     }
 
     /// Events in the export are ordered by sequence ASC. A downstream
-    /// import or replay capability relies on this; shuffling by insertion order
+    /// import or replay tool relies on this; shuffling by insertion order
     /// or ID would be a silent correctness bug.
     #[tokio::test]
     async fn export_events_are_ordered_by_sequence_asc() {
@@ -513,7 +948,7 @@ mod tests {
         assert_eq!(result["eventCount"].as_u64().unwrap(), 4);
     }
 
-    /// `exportedAt` is an RFC3339 timestamp. Downstream capabilities parse it
+    /// `exportedAt` is an RFC3339 timestamp. Downstream tools parse it
     /// as-is — if this regresses to a raw `SystemTime` or a broken format,
     /// import tooling silently breaks.
     #[tokio::test]
@@ -599,6 +1034,178 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ordinary_list_hides_worker_sessions_while_exact_audit_reads_remain_available() {
+        let ctx = make_test_context();
+        let user_session = ctx
+            .session_manager
+            .create_session("m", "/tmp/user", Some("User conversation"))
+            .unwrap();
+        let worker_session = ctx
+            .session_manager
+            .create_worker_session("m", "/tmp/worker", Some("Worker child"))
+            .unwrap();
+
+        let result = SessionQueryService::list(
+            &Deps::from_test_context(&ctx),
+            true,
+            Some(20),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let ids = result["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|session| session["sessionId"].as_str())
+            .collect::<Vec<_>>();
+        assert!(ids.contains(&user_session.as_str()));
+        assert!(!ids.contains(&worker_session.as_str()));
+
+        let state =
+            SessionQueryService::get_state(&Deps::from_test_context(&ctx), worker_session.clone())
+                .await
+                .unwrap();
+        assert_eq!(state["sessionId"], worker_session);
+    }
+
+    #[tokio::test]
+    async fn context_requests_page_only_provider_audits_and_label_legacy_provenance() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("context audit"))
+            .unwrap();
+        let legacy = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &sid,
+                event_type: EventType::ModelProviderRequest,
+                payload: json!({
+                    "format":crate::shared::protocol::model_audit::LEGACY_MODEL_PROVIDER_REQUEST_AUDIT_FORMAT,
+                    "providerType":"openai",
+                    "providerName":"openai",
+                    "model":"test",
+                    "messageCount":1,
+                    "toolCount":2,
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        let current = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &sid,
+                event_type: EventType::ModelProviderRequest,
+                payload: json!({
+                    "format":crate::shared::protocol::model_audit::MODEL_PROVIDER_REQUEST_AUDIT_FORMAT,
+                    "providerType":"openai",
+                    "providerName":"openai",
+                    "model":"test",
+                    "messageCount":2,
+                    "toolCount":3,
+                    "contextManifest":{"automaticContext":[]},
+                    "providerAdditions":[{
+                        "kind":"provider_system_prefix",
+                        "label":"Provider instructions",
+                        "content":"prefix",
+                        "byteCount":6,
+                        "sha256":"sha256:prefix"
+                    }]
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        ctx.event_store
+            .append(&AppendOptions {
+                session_id: &sid,
+                event_type: EventType::MessageUser,
+                payload: json!({"role":"user","content":"not an audit"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let first = SessionQueryService::context_requests(
+            &Deps::from_test_context(&ctx),
+            sid.clone(),
+            None,
+            Some(1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(first["requests"].as_array().unwrap().len(), 1);
+        assert_eq!(first["requests"][0]["eventId"], current.id);
+        assert_eq!(first["requests"][0]["provenanceAvailability"], "complete");
+        assert_eq!(first["hasMore"], true);
+
+        let second = SessionQueryService::context_requests(
+            &Deps::from_test_context(&ctx),
+            sid.clone(),
+            first["nextBeforeSequence"].as_i64(),
+            Some(1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(second["requests"][0]["eventId"], legacy.id);
+        assert_eq!(
+            second["requests"][0]["provenanceAvailability"],
+            "legacy_unavailable"
+        );
+        assert_eq!(second["hasMore"], false);
+
+        let detail = SessionQueryService::context_request_detail(
+            &Deps::from_test_context(&ctx),
+            sid,
+            current.id,
+        )
+        .await
+        .unwrap();
+        assert_eq!(detail["provenanceAvailability"], "complete");
+        assert!(detail["contextManifest"].is_object());
+        assert_eq!(
+            detail["providerAdditions"][0]["kind"],
+            "provider_system_prefix"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_request_detail_enforces_exact_session_ownership() {
+        let ctx = make_test_context();
+        let first = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("first"))
+            .unwrap();
+        let second = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("second"))
+            .unwrap();
+        let audit = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &first,
+                event_type: EventType::ModelProviderRequest,
+                payload: json!({"format":"tron.model_provider_request.v3"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let error = SessionQueryService::context_request_detail(
+            &Deps::from_test_context(&ctx),
+            second,
+            audit.id,
+        )
+        .await
+        .expect_err("cross-session audit read must fail");
+        assert!(matches!(error, ToolError::NotFound { .. }));
+    }
+
+    #[tokio::test]
     async fn list_rejects_mixed_cursor_and_offset_pagination() {
         let ctx = make_test_context();
         let cursor = serde_json::to_string(&SessionListCursor {
@@ -619,7 +1226,7 @@ mod tests {
         let error = session_list_value(Some(&params), &Deps::from_test_context(&ctx))
             .await
             .unwrap_err();
-        assert!(matches!(error, CapabilityError::InvalidParams { .. }));
+        assert!(matches!(error, ToolError::InvalidParams { .. }));
     }
 
     #[tokio::test]
@@ -645,6 +1252,6 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(matches!(error, CapabilityError::InvalidParams { .. }));
+        assert!(matches!(error, ToolError::InvalidParams { .. }));
     }
 }

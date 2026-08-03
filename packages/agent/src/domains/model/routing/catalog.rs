@@ -21,26 +21,29 @@ use crate::domains::model::providers::google::types::{
 };
 use crate::domains::model::providers::kimi::types::all_kimi_models_api_json;
 use crate::domains::model::providers::minimax::types::all_minimax_models_api_json;
-use crate::domains::model::providers::ollama::types::all_ollama_models_api_json_with_availability;
+use crate::domains::model::providers::ollama::discovery::all_ollama_models_api_json_with_availability;
 use crate::domains::model::providers::openai::types::openai_model_available_for_auth_path;
 use crate::domains::model::providers::openai::types::{
     all_openai_models_api_json_for_auth_path, get_openai_model,
 };
 use crate::domains::model::routing::models::registry::strip_provider_prefix;
-use crate::shared::server::errors::{self, CapabilityError};
+use crate::shared::server::errors::{self, ToolError};
 use crate::shared::server::params::require_string_param;
 
 /// All known models, derived from provider registries (single source of truth).
 ///
 /// Ollama models include live availability status from the local Ollama server.
 /// Adding a new model? Update the provider's `types.rs` — it appears here automatically.
-pub(crate) async fn known_models(openai_auth_path: OpenAIAuthPath) -> Vec<Value> {
+pub(crate) async fn known_models(
+    openai_auth_path: OpenAIAuthPath,
+    ollama_base_url: &str,
+) -> Vec<Value> {
     let mut models = all_claude_models_api_json();
     models.extend(all_openai_models_api_json_for_auth_path(openai_auth_path));
     models.extend(all_gemini_models_api_json());
     models.extend(all_minimax_models_api_json());
     models.extend(all_kimi_models_api_json());
-    models.extend(all_ollama_models_api_json_with_availability(None).await);
+    models.extend(all_ollama_models_api_json_with_availability(ollama_base_url).await);
     models
         .into_iter()
         .map(super::attachments::decorate_model)
@@ -48,6 +51,9 @@ pub(crate) async fn known_models(openai_auth_path: OpenAIAuthPath) -> Vec<Value>
 }
 
 pub(crate) fn is_model_supported(model_id: &str) -> bool {
+    if model_id.starts_with("ollama/") {
+        return model_id.len() > "ollama/".len();
+    }
     let bare = strip_provider_prefix(model_id);
     get_claude_model(bare).is_some()
         || get_openai_model(bare).is_some()
@@ -78,22 +84,23 @@ pub(crate) fn active_openai_auth_path(deps: &Deps) -> OpenAIAuthPath {
 }
 
 /// Switch the model for a session.
-pub(crate) async fn switch_model(
-    params: Option<&Value>,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
+pub(crate) async fn switch_model(params: Option<&Value>, deps: &Deps) -> Result<Value, ToolError> {
     let session_id = require_string_param(params, "sessionId")?;
     let requested_model = require_string_param(params, "model")?;
-    let model = strip_provider_prefix(&requested_model).to_string();
+    let model = if requested_model.starts_with("ollama/") {
+        requested_model.clone()
+    } else {
+        strip_provider_prefix(&requested_model).to_string()
+    };
 
     if !is_model_supported(&model) {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: format!("Unknown model: {requested_model}"),
         });
     }
 
     if is_model_retired(&model) {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: format!("Model '{model}' is retired and cannot be selected"),
         });
     }
@@ -101,7 +108,7 @@ pub(crate) async fn switch_model(
     if get_openai_model(&model).is_some() {
         let auth_path = active_openai_auth_path(deps);
         if !openai_model_available_for_auth_path(&model, auth_path) {
-            return Err(CapabilityError::InvalidParams {
+            return Err(ToolError::InvalidParams {
                 message: format!(
                     "OpenAI model '{model}' is not available for the active auth path ({})",
                     auth_path.as_str()
@@ -113,10 +120,10 @@ pub(crate) async fn switch_model(
     let session = deps
         .event_store
         .get_session(&session_id)
-        .map_err(|e| CapabilityError::Internal {
+        .map_err(|e| ToolError::Internal {
             message: e.to_string(),
         })?
-        .ok_or_else(|| CapabilityError::NotFound {
+        .ok_or_else(|| ToolError::NotFound {
             code: errors::SESSION_NOT_FOUND.into(),
             message: format!("Session '{session_id}' not found"),
         })?;
@@ -124,7 +131,7 @@ pub(crate) async fn switch_model(
     let previous_model = session.latest_model.clone();
 
     if deps.orchestrator.has_active_run(&session_id) {
-        return Err(CapabilityError::Custom {
+        return Err(ToolError::Custom {
             code: "SESSION_BUSY".into(),
             message: "Cannot switch model while session is running".into(),
             details: None,
@@ -134,7 +141,7 @@ pub(crate) async fn switch_model(
     let _ = deps
         .event_store
         .update_latest_model(&session_id, &model)
-        .map_err(|e| CapabilityError::Internal {
+        .map_err(|e| ToolError::Internal {
             message: e.to_string(),
         })?;
 
@@ -156,12 +163,16 @@ pub(crate) async fn switch_model(
             cache_creation_tokens: Some(session.total_cache_creation_tokens),
             cost: Some(session.total_cost),
             last_activity: session.last_activity_at.clone(),
-            // Wire compatibility: the event field retains its historical name.
+            // `isActive` reports session-cache residency.
             is_active: is_cached,
             last_user_prompt: None,
             last_assistant_response: None,
             parent_session_id: session.parent_session_id.clone(),
             activity_lines: None,
+            labels: None,
+            organization_group: None,
+            organization_changed: None,
+            is_archived: None,
         },
     );
 

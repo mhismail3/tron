@@ -1,68 +1,15 @@
 use super::*;
 
-// ========================================================================
-// preview
-// ========================================================================
-
-#[tokio::test]
-async fn preview_generates_summary() {
-    let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 2, deps);
-    let summarizer = MockSummarizer::new("Test summary");
-
-    let preview = engine.preview(&summarizer).await.unwrap();
-
-    assert_eq!(preview.summary, "Test summary");
-    assert_eq!(preview.tokens_before, 78_500);
-}
-
-#[tokio::test]
-async fn preview_turn_based() {
-    let deps = MockDeps::new(default_messages()); // 6 messages, 3 turns
-    let engine = CompactionEngine::new(0.70, 2, deps);
-    let summarizer = MockSummarizer::new("Summary");
-
-    let preview = engine.preview(&summarizer).await.unwrap();
-
-    assert_eq!(preview.preserved_messages, 4); // 2 turns = 4 messages
-    assert_eq!(preview.summarized_messages, 2);
-    assert_eq!(preview.preserved_turns, 2);
-    assert_eq!(preview.summarized_turns, 1);
-}
-
-#[tokio::test]
-async fn preview_with_extracted_data() {
-    let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 2, deps);
-    let summarizer = MockSummarizer::new("Summary");
-
-    let preview = engine.preview(&summarizer).await.unwrap();
-    assert!(preview.extracted_data.is_some());
-}
-
-#[tokio::test]
-async fn preview_empty_messages() {
-    let deps = MockDeps::new(vec![]);
-    let engine = CompactionEngine::new(0.70, 2, deps);
-    let summarizer = PanicSummarizer;
-
-    let preview = engine.preview(&summarizer).await.unwrap();
-    assert_eq!(preview.preserved_messages, 0);
-    assert_eq!(preview.summarized_messages, 0);
-    assert_eq!(preview.summary, "");
-}
-
-// ========================================================================
-// execute
-// ========================================================================
-
 #[tokio::test]
 async fn execute_compaction_updates_messages() {
     let deps = MockDeps::new(default_messages()); // 6 messages, 3 turns
     let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Compacted summary");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
 
     assert!(result.success);
     assert_eq!(result.summary, "Compacted summary");
@@ -79,12 +26,46 @@ async fn execute_uses_edited_summary() {
     let summarizer = MockSummarizer::new("Original");
 
     let result = engine
-        .execute(&summarizer, Some("User edited"))
+        .execute(&summarizer, Some("User edited"), &summary_context())
         .await
         .unwrap();
 
     assert_eq!(result.summary, "User edited");
-    assert!(result.extracted_data.is_none());
+}
+
+#[tokio::test]
+async fn execute_accepts_the_exact_durable_summary_token_and_byte_ceiling() {
+    let deps = MockDeps::new(default_messages());
+    let engine = CompactionEngine::new(0.70, 2, deps);
+    let narrative = "x".repeat(crate::domains::worker_kernel::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES);
+    let summarizer = MockSummarizer::new(&narrative);
+
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
+
+    assert!(result.success);
+    assert_eq!(result.summary, narrative);
+}
+
+#[tokio::test]
+async fn execute_rejects_summary_token_overflow_before_mutating_context() {
+    let messages = default_messages();
+    let deps = MockDeps::new(messages.clone());
+    let engine = CompactionEngine::new(0.70, 2, deps);
+    let narrative = "é".repeat(
+        crate::domains::worker_kernel::CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES.div_ceil("é".len()) + 1,
+    );
+    let summarizer = MockSummarizer::new(&narrative);
+
+    let error = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("estimated at 10001 tokens"));
+    assert_eq!(engine.deps.get_messages(), messages);
 }
 
 #[tokio::test]
@@ -93,7 +74,10 @@ async fn execute_returns_turn_counts() {
     let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Summary");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     assert_eq!(result.preserved_turns, 2);
     assert_eq!(result.summarized_turns, 1);
 }
@@ -119,7 +103,10 @@ async fn execute_token_cap_reflected() {
     let engine = CompactionEngine::new(0.70, 5, deps);
     let summarizer = MockSummarizer::new("Summary");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     assert_eq!(result.preserved_turns, 3); // Budget limited to 3
 }
 
@@ -140,7 +127,10 @@ async fn execute_recompact_correct() {
     let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Re-compacted summary");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     assert!(result.success);
     assert_eq!(result.preserved_turns, 2);
     assert_eq!(result.summarized_turns, 1); // Only real turns in summarized portion
@@ -152,7 +142,10 @@ async fn execute_summary_format() {
     let engine = CompactionEngine::new(0.70, 1, deps);
     let summarizer = MockSummarizer::new("The user worked on authentication.");
 
-    let _ = engine.execute(&summarizer, None).await.unwrap();
+    let _ = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     let new_msgs = engine.deps.get_messages();
 
     // Summary message
@@ -183,7 +176,10 @@ async fn execute_preserve_zero() {
     let engine = CompactionEngine::new(0.70, 0, deps);
     let summarizer = MockSummarizer::new("Everything summarized");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     let new_msgs = engine.deps.get_messages();
 
     assert!(result.success);
@@ -199,7 +195,10 @@ async fn execute_skips_when_all_within_preserve_window() {
     let engine = CompactionEngine::new(0.70, 5, deps);
     let summarizer = PanicSummarizer;
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
 
     assert!(!result.success);
     assert!(result.summary.is_empty());
@@ -214,7 +213,10 @@ async fn execute_skips_when_summary_would_not_reduce_context() {
     let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Summary");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
 
     assert!(!result.success);
     assert!(result.tokens_after >= result.tokens_before);
@@ -228,7 +230,10 @@ async fn execute_returns_compression_ratio() {
     let engine = CompactionEngine::new(0.70, 1, deps);
     let summarizer = MockSummarizer::new("Short");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
 
     assert!(result.compression_ratio > 0.0);
     assert!(result.compression_ratio <= 1.0);

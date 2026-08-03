@@ -3,12 +3,12 @@ import Foundation
 // MARK: - Message Extensions
 
 extension ChatMessage {
-    /// Extract the transport invocationId/capability invocation id from this message.
+    /// Extract the transport invocationId/tool invocation id from this message.
     var invocationId: String? {
         switch content {
-        case .capabilityInvocation(let data):
+        case .toolInvocation(let data):
             return data.id
-        case .capabilityResult(let data):
+        case .toolResult(let data):
             return data.id
         default:
             return nil
@@ -69,13 +69,13 @@ extension ChatMessage {
     }
 
     /// In-chat notification for context compaction
-    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String? = nil, preservedTurns: Int? = nil, summarizedTurns: Int? = nil, contextControlActionResourceId: String? = nil) -> ChatMessage {
-        ChatMessage(role: .system, content: .compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: preservedTurns, summarizedTurns: summarizedTurns, contextControlActionResourceId: contextControlActionResourceId))
+    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String? = nil, preservedTurns: Int? = nil, summarizedTurns: Int? = nil) -> ChatMessage {
+        ChatMessage(role: .system, content: .compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: preservedTurns, summarizedTurns: summarizedTurns))
     }
 
     /// In-chat notification for context clearing
-    static func contextCleared(tokensBefore: Int, tokensAfter: Int, contextControlActionResourceId: String? = nil) -> ChatMessage {
-        ChatMessage(role: .system, content: .contextCleared(tokensBefore: tokensBefore, tokensAfter: tokensAfter, contextControlActionResourceId: contextControlActionResourceId))
+    static func contextCleared(tokensBefore: Int, tokensAfter: Int) -> ChatMessage {
+        ChatMessage(role: .system, content: .contextCleared(tokensBefore: tokensBefore, tokensAfter: tokensAfter))
     }
 
     /// In-chat notification for message deletion from context

@@ -17,6 +17,9 @@ operation_bindings! {
         "run_turn" => |invocation, deps| {
             run_turn_value(Some(&invocation.payload), invocation, deps).await
         },
+        "delivery_wake" => |invocation, deps| {
+            delivery_wake_value(Some(&invocation.payload), invocation, deps).await
+        },
         "status" => |invocation, deps| {
             status_value(Some(&invocation.payload), deps).await
         },

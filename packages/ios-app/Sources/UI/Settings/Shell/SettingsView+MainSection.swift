@@ -24,7 +24,7 @@ extension SettingsView {
 
                 VStack(spacing: MainSettingsListLayout.rowSpacing) {
                     ForEach(SettingsDangerZoneAction.order, id: \.self) { action in
-                        SettingsCard(accent: .tronError) {
+                        SettingsCard(accent: dangerActionAccent(action)) {
                             dangerActionRow(action)
                         }
                     }
@@ -64,15 +64,19 @@ extension SettingsView {
             performDangerAction(action)
         } label: {
             SettingsRow(
-                icon: action.icon,
-                label: action.title,
-                accentColor: .tronError,
-                labelColor: .tronError
+                icon: action.displayIcon(workersStopped: workersStopped),
+                label: action.displayTitle(workersStopped: workersStopped),
+                accentColor: dangerActionAccent(action),
+                labelColor: dangerActionAccent(action)
             ) {
                 if isDangerActionInProgress(action) {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(.tronError)
+                        .tint(dangerActionAccent(action))
+                } else if action == .stopAllWorkers, workerDispatchError != nil {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.tronWarning)
+                        .accessibilityLabel("Worker dispatch state unavailable")
                 }
             }
             .contentShape(Rectangle())
@@ -92,9 +96,9 @@ extension SettingsView {
 
     func isMainSettingsDestinationEnabled(_ destination: MainSettingsGridDestination) -> Bool {
         switch destination {
-        case .engine, .app:
+        case .engine, .app, .logs:
             return true
-        case .providers:
+        case .providers, .artifacts:
             return serverSettingsReady
         }
     }
@@ -116,6 +120,10 @@ extension SettingsView {
             activePage = .app
         case .providers:
             activePage = .providers
+        case .artifacts:
+            activePage = .artifacts
+        case .logs:
+            showLogViewer = true
         }
     }
 
@@ -164,6 +172,7 @@ extension SettingsView {
     func isDangerActionEnabled(_ action: SettingsDangerZoneAction) -> Bool {
         action.isEnabled(
             hasSessions: !eventStoreManager.sessions.isEmpty,
+            workerDispatchReady: workerDispatchLoaded && dependencies.connectionRepository.connectionState.isConnected,
             serverSettingsReady: serverSettingsReady,
             serverSettingsUnavailable: showsServerUnavailableState,
             isInProgress: isDangerActionInProgress(action)
@@ -172,6 +181,12 @@ extension SettingsView {
 
     func isDangerActionInProgress(_ action: SettingsDangerZoneAction) -> Bool {
         switch action {
+        case .stopAllWorkers:
+            return isChangingWorkerDispatch || (
+                dependencies.connectionRepository.connectionState.isConnected
+                    && !workerDispatchLoaded
+                    && workerDispatchError == nil
+            )
         case .archiveAllSessions:
             return isArchivingAll
         case .resetAllSettings:
@@ -181,11 +196,17 @@ extension SettingsView {
 
     func performDangerAction(_ action: SettingsDangerZoneAction) {
         switch action {
+        case .stopAllWorkers:
+            showWorkerDispatchConfirmation = true
         case .archiveAllSessions:
             showArchiveAllConfirmation = true
         case .resetAllSettings:
             showingResetAlert = true
         }
+    }
+
+    func dangerActionAccent(_ action: SettingsDangerZoneAction) -> Color {
+        action == .stopAllWorkers && workersStopped ? .tronEmerald : .tronError
     }
 
     var settingsFooterDockView: some View {

@@ -2,8 +2,8 @@
 //!
 //! The thin `main.rs` entry point handles process-level dispatch. This module
 //! owns long-running server initialization so bootstrap, service construction,
-//! shutdown registration, legacy transport-state reconciliation, and
-//! background task wiring stay below one audited boundary.
+//! shutdown registration, and background task wiring stay below one audited
+//! boundary.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,6 +16,7 @@ pub mod server;
 use crate::app::bootstrap::config::ServerConfig;
 use crate::app::bootstrap::server::TronServer;
 use crate::app::cli::{Cli, run_subcommand};
+use crate::app::lifecycle::shutdown::{ShutdownCoordinator, ShutdownPhase};
 use crate::domains::agent::r#loop::{Orchestrator, SessionManager, recover_incomplete_turns};
 use crate::domains::model::responder::{DefaultModelResponderFactory, ModelResponderFactory};
 use crate::domains::session::event_store::{ConnectionConfig, EventStore};
@@ -102,18 +103,18 @@ pub(crate) fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Resolve the auth file path (`~/.tron/profiles/auth.json`).
-pub(crate) fn auth_path() -> PathBuf {
-    crate::domains::settings::profile::auth_path()
+/// Ensure `~/.tron/` has the primitive Tron Home layout.
+pub(crate) fn init_directories() -> Result<()> {
+    let home = crate::shared::foundation::paths::tron_home();
+    init_directories_at(&home)
 }
 
-/// Ensure `~/.tron/` has the primitive Tron Home layout.
-pub(crate) fn init_directories() -> Result<crate::shared::foundation::constitution::SeedReport> {
-    crate::shared::foundation::constitution::ensure_tron_home()
+fn init_directories_at(home: &Path) -> Result<()> {
+    crate::shared::foundation::home::ensure_tron_home_at(&home)
         .context("Failed to initialize primitive Tron Home")
 }
 
-/// Open the SQLite database, run migrations, and return the pool + resolved path.
+/// Open the SQLite database, install the current schema, and return the pool + resolved path.
 pub(crate) fn init_database(
     db_path_override: Option<PathBuf>,
 ) -> Result<(
@@ -123,21 +124,6 @@ pub(crate) fn init_database(
 )> {
     let db_path = resolve_production_db_path(db_path_override)?;
     ensure_parent_dir(&db_path)?;
-    let archive_report =
-        crate::shared::storage::prepare_active_database(&db_path).with_context(|| {
-            format!(
-                "Failed to prepare unified database files for {}",
-                db_path.display()
-            )
-        })?;
-    if archive_report.moved_any() {
-        tracing::info!(
-            archive_dir = ?archive_report.archive_dir,
-            files = archive_report.files.len(),
-            "archived non-current database files before unified storage startup"
-        );
-    }
-
     // INVARIANT: A single process owns the event-store DB. Take the
     // OS-level flock before opening the connection pool so a stray
     // `tron dev` alongside the launchd service aborts at startup
@@ -165,6 +151,8 @@ pub(crate) fn init_database(
     let pool =
         crate::domains::session::event_store::new_file(&db_str, &ConnectionConfig::default())
             .context("Failed to open database")?;
+    crate::shared::foundation::home::set_private_file_permissions(&db_path)
+        .context("Failed to secure unified database")?;
     {
         let conn = pool.get().context("Failed to get DB connection")?;
         // Catch WAL-recovery-hiding-corruption before any writes
@@ -176,15 +164,15 @@ pub(crate) fn init_database(
             "Database integrity check failed. The unified engine store may be corrupt; \
              restore from a backup or investigate ~/.tron/internal/database/tron.sqlite.",
         )?;
-        let _ = crate::domains::session::event_store::run_migrations(&conn)
-            .context("Failed to run migrations")?;
+        let _ = crate::domains::session::event_store::ensure_schema(&conn)
+            .context("Failed to install current schema")?;
         crate::shared::storage::ensure_storage_schema(&conn)
-            .context("Failed to initialize storage metadata schema")?;
+            .context("Failed to initialize payload storage schema")?;
     }
     Ok((pool, db_path, db_lock))
 }
 
-/// Initialize the server-owned live capability engine host.
+/// Initialize the server-owned live typed-function engine host.
 pub(crate) fn init_engine_host(db_path: &Path) -> Result<crate::engine::EngineHostHandle> {
     crate::engine::EngineHostHandle::open_sqlite(db_path).with_context(|| {
         format!(
@@ -209,7 +197,8 @@ fn init_logging(
     crate::shared::storage::apply_runtime_pragmas(&log_conn)
         .context("Failed to set logging connection pragmas")?;
     let log_handle =
-        crate::shared::observability::init_subscriber_with_sqlite(log_conn, stderr_enabled);
+        crate::shared::observability::init_subscriber_with_sqlite(log_conn, stderr_enabled)
+            .context("Failed to initialize SQLite log transport")?;
     let flush_task = crate::shared::observability::spawn_flush_task(log_handle.clone());
     Ok((log_handle, flush_task))
 }
@@ -219,11 +208,10 @@ struct ServiceState {
     event_store: Arc<EventStore>,
     session_manager: Arc<SessionManager>,
     orchestrator: Arc<Orchestrator>,
-    transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
     responder_factory: Arc<dyn ModelResponderFactory>,
 }
 
-/// Build core services: orchestrator, session manager, providers, and capabilities.
+/// Build core services: orchestrator, session manager, providers, and tools.
 async fn init_services(
     event_store: Arc<EventStore>,
     settings: &crate::domains::settings::TronSettings,
@@ -245,52 +233,12 @@ async fn init_services(
     let (responder_factory, shared_http_client) = init_model_responder_factory(settings).await;
     let _ = shared_http_client;
 
-    let transcription_runtime = crate::domains::transcription::SharedTranscriptionEngine::new();
-
     Ok(ServiceState {
         event_store,
         session_manager,
         orchestrator,
-        transcription_runtime,
         responder_factory,
     })
-}
-
-fn register_transcription_sidecar(
-    enabled: bool,
-    server: &TronServer,
-    transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
-) {
-    if !enabled {
-        transcription_runtime.mark_disabled();
-        tracing::info!("transcription sidecar disabled");
-        return;
-    }
-
-    transcription_runtime.mark_loading("Local transcription model is loading.");
-    let shutdown = server.shutdown().token();
-    let task = tokio::spawn(async move {
-        tokio::select! {
-            engine = crate::domains::transcription::MlxEngine::new() => {
-                match engine {
-                    Ok(engine) => {
-                        let engine: Arc<dyn crate::domains::transcription::TranscriptionEngine> = engine;
-                        if transcription_runtime.mark_ready(engine) {
-                            tracing::info!("transcription sidecar ready (parakeet-mlx)");
-                        }
-                    }
-                    Err(error) => {
-                        transcription_runtime.mark_failed(error.to_string());
-                        tracing::warn!(error = %error, "transcription sidecar setup failed");
-                    }
-                }
-            }
-            () = shutdown.cancelled() => {
-                tracing::debug!("transcription sidecar startup cancelled");
-            }
-        }
-    });
-    server.shutdown().register_task(task);
 }
 
 /// Create model responder factory and check startup auth availability.
@@ -322,7 +270,7 @@ fn build_server_runtime_context(
     services: ServiceState,
     engine_host: crate::engine::EngineHostHandle,
     settings_path: PathBuf,
-    profile_runtime: Arc<crate::domains::agent::r#loop::ProfileRuntime>,
+    settings_runtime: Arc<crate::domains::settings::SettingsRuntime>,
     origin: String,
 ) -> ServerRuntimeContext {
     ServerRuntimeContext {
@@ -330,24 +278,32 @@ fn build_server_runtime_context(
         session_manager: services.session_manager.clone(),
         event_store: services.event_store.clone(),
         engine_host,
-        transcription_runtime: services.transcription_runtime.clone(),
-        apns_runtime: crate::platform::apns::ApnsRuntime::production(
-            &crate::shared::foundation::paths::internal_dir(),
-        ),
         settings_path,
-        profile_runtime,
+        settings_runtime,
         responder_factory: Some(services.responder_factory),
         server_start_time: std::time::Instant::now(),
         shutdown_coordinator: None,
         origin,
-        auth_path: auth_path(),
+        auth_path: crate::shared::foundation::paths::auth_path(),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        // Provisional defaults; `TronServer::new` overwrites both with the
-        // actual `ServerConfig::port` and the canonical onboarded marker path
-        // so handlers see the live values from the start of the first request.
-        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
-        onboarded_marker_path: crate::app::lifecycle::onboarding::onboarded_marker_path(),
     }
+}
+
+/// Attach agent-runtime cleanup to the process shutdown path.
+///
+/// INVARIANT: accepted runs and durable session projections are ended before
+/// tool and storage drains begin. Process signals are the lifecycle
+/// authority; no externally invokable shutdown function is required.
+fn register_agent_shutdown(shutdown: &Arc<ShutdownCoordinator>, orchestrator: Arc<Orchestrator>) {
+    shutdown.register_phase_callback(
+        ShutdownPhase::Agent,
+        "agent-orchestrator",
+        move || async move {
+            if let Err(error) = orchestrator.shutdown().await {
+                tracing::warn!(%error, "agent orchestrator shutdown failed");
+            }
+        },
+    );
 }
 
 /// TTL for idle session cache eviction. Sessions idle beyond this are
@@ -384,24 +340,24 @@ fn spawn_background_tasks(session_manager: &Arc<SessionManager>, server: &TronSe
 }
 
 pub(crate) async fn run_server(args: Cli) -> Result<()> {
-    // Phase 1: Pre-database filesystem operations
+    // Establish filesystem and transport credentials before opening storage.
     init_directories()?;
     let bearer_token_path = crate::app::lifecycle::onboarding::bearer_token_path();
     let _bearer_token = initialize_bearer_token_at(&bearer_token_path)?;
 
-    // Phase 2: Database and logging
+    // Open durable storage and observability.
     // _db_lock is bound for the lifetime of main(); dropping it releases the
     // process-level lock on the event-store DB. Keep in scope explicitly so
     // compilation fails if it's ever moved out without an equivalent guard.
     let (pool, db_path, _db_lock) = init_database(args.db_path)?;
-    let profile_runtime = Arc::new(
-        crate::domains::agent::r#loop::ProfileRuntime::load(
+    let settings_runtime = Arc::new(
+        crate::domains::settings::SettingsRuntime::load(
             crate::shared::foundation::paths::tron_home(),
         )
-        .context("Failed to load active profile runtime")?,
+        .context("Failed to load engine settings")?,
     );
-    let settings_path = crate::domains::settings::profile::settings_path();
-    let settings = profile_runtime.current().settings.clone();
+    let settings_path = crate::shared::foundation::paths::settings_path();
+    let settings = settings_runtime.current().settings.clone();
     let origin = format!("localhost:{}", args.port);
     let (log_handle, flush_task) = init_logging(&db_path, !args.quiet)?;
     match crate::shared::storage::StorageRuntime::new(db_path.clone()).retention_run(false) {
@@ -441,33 +397,23 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     }
     let event_store = Arc::new(EventStore::new(pool));
     let engine_host = init_engine_host(&db_path)?;
-    let retired_socket_subscriptions =
-        crate::transport::engine::socket::retire_legacy_socket_subscriptions(&engine_host)
-            .await
-            .context("Failed to reconcile legacy engine WebSocket subscriptions")?;
-    if retired_socket_subscriptions > 0 {
-        tracing::info!(
-            retired = retired_socket_subscriptions,
-            "retired legacy durable engine WebSocket subscriptions"
-        );
-    }
 
-    // Phase 3: Core services (orchestrator, providers, primitive agent deps)
+    // Construct model and session services.
     let services = init_services(event_store, &settings).await?;
 
-    // Phase 4: Runtime context
+    // Assemble the shared runtime context.
     let session_manager_for_startup = services.session_manager.clone();
     let orchestrator_for_stream_events = services.orchestrator.clone();
-    let profile_runtime_for_watcher = profile_runtime.clone();
+    let settings_runtime_for_watcher = settings_runtime.clone();
     let runtime_context = build_server_runtime_context(
         services,
         engine_host,
         settings_path,
-        profile_runtime,
+        settings_runtime,
         origin.clone(),
     );
 
-    // Phase 5: Build and start server
+    // Register the function surface before accepting connections.
     let bind_host_label = args.host.clone();
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);
     let metrics_handle = crate::app::health::metrics::install_recorder();
@@ -477,13 +423,11 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     )
     .await
     .context("Failed to register server domain workers")?;
-    register_blocking_supervisor_shutdown(server.shutdown());
-    register_transcription_sidecar(
-        settings.server.transcription.enabled,
-        &server,
-        server.runtime_context().transcription_runtime.clone(),
+    register_agent_shutdown(
+        server.shutdown(),
+        Arc::clone(&orchestrator_for_stream_events),
     );
-
+    register_blocking_supervisor_shutdown(server.shutdown());
     // Stream pump: orchestrator events -> engine streams.
     let pump = EngineStreamEventPump::new(
         orchestrator_for_stream_events.subscribe(),
@@ -491,13 +435,12 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
         server.shutdown().token(),
     );
     let stream_event_pump_handle = tokio::spawn(pump.run());
-    crate::transport::runtime::EngineRuntimeServices::start(&server);
 
-    // Phase 6: Background tasks and bind
+    // Start supervised background work and bind the listener.
     spawn_background_tasks(&session_manager_for_startup, &server);
     server
         .shutdown()
-        .register_task(profile_runtime_for_watcher.spawn_watcher(server.shutdown().token()));
+        .register_task(settings_runtime_for_watcher.spawn_watcher(server.shutdown().token()));
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
     tracing::info!("{}", format_listening_log(&addr, &bind_host_label));
 
@@ -516,9 +459,11 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
         .graceful_shutdown(shutdown_handles, None)
         .await;
 
-    // Flush remaining logs to SQLite and stop the periodic flush task
+    // Stop periodic writes before the final checkpoint. Record its outcome and
+    // the terminal lifecycle message, then drain that complete final log batch
+    // with a bounded retry so ordinary SQLite contention cannot drop shutdown
+    // evidence.
     flush_task.abort();
-    log_handle.flush();
     match crate::shared::storage::StorageRuntime::new(db_path.clone()).checkpoint() {
         Ok(report) => tracing::debug!(
             wal_bytes = report.wal_bytes,
@@ -529,6 +474,12 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     }
 
     tracing::info!("Shutdown complete");
+    if !log_handle.flush_until_empty(std::time::Duration::from_secs(2)) {
+        eprintln!(
+            "[tron-logging] final flush deadline expired ({} entries could not be persisted)",
+            log_handle.pending_count()
+        );
+    }
     Ok(())
 }
 

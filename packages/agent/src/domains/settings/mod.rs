@@ -1,31 +1,25 @@
-//! settings domain worker.
+//! Flat engine-settings domain.
 //!
-//! This module owns canonical function execution for the settings namespace and keeps
-//! domain contracts, services, and tests beside the worker that uses them. Settings
-//! updates persist the sparse profile overlay, then compile and atomically swap
-//! `ProfileRuntime`'s authoritative snapshot. Each admitted prompt run projects
-//! provider and loop configuration from that one immutable snapshot.
+//! This module owns the typed schema, sparse `~/.tron/settings.toml` storage,
+//! atomic runtime snapshot, and authenticated settings operations. Each
+//! admitted prompt run captures one immutable settings snapshot.
 
+pub mod config;
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
-pub mod profile;
+pub mod runtime;
+pub(crate) use config::operations::{settings_reset_to_defaults_value, settings_update_value};
+pub use config::*;
 pub(crate) use deps::Deps;
-pub(crate) use profile::operations::{settings_reset_to_defaults_value, settings_update_value};
-pub use profile::*;
+pub use runtime::{SettingsRuntime, SettingsSnapshot};
 
-use crate::domains::registration::worker::DomainRegistrationContext;
-use crate::domains::registration::worker::DomainWorkerModule;
+use crate::domains::registration::composition::{
+    DomainFunctionRegistration, DomainRegistrationContext,
+};
 
-pub(crate) fn worker_module(
+pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainWorkerModule> {
-    {
-        let domain_deps = Deps::from_engine(deps);
-        crate::domains::registration::worker::domain_worker_module(
-            "settings",
-            contract::STREAM_TOPICS,
-            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
-        )
-    }
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    handlers::bind_functions(contract::function_definitions()?, Deps::from_engine(deps))
 }

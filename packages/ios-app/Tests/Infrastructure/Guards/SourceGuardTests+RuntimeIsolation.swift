@@ -50,24 +50,22 @@ extension SourceGuardTests {
         #expect(productionRoot.contains("@State private var container: DependencyContainer"))
         #expect(productionRoot.contains("init(container: DependencyContainer = DependencyContainer())"))
         #expect(productionRoot.contains("container.clientLogIngestionService.handleScenePhaseChange"))
-        #expect(productionRoot.contains("await registerPushIfAuthorized()"))
+        #expect(!productionRoot.contains("registerPushIfAuthorized"))
     }
 
-    @Test("live lifecycle effects stay lazy behind runtime guards")
+    @Test("the retained MetricKit lifecycle effect stays lazy behind the runtime guard")
     func testLiveLifecycleEffectsStayLazy() throws {
         let source = try String(
             contentsOf: iosAppRoot().appendingPathComponent("Sources/App/Lifecycle/AppDelegate.swift"),
             encoding: .utf8
         )
 
-        #expect(source.contains("installNotificationDelegate: { delegate in\n                UNUserNotificationCenter.current().delegate = delegate"))
         #expect(source.contains("startMetricKit: {\n                MetricKitDiagnosticsStore.shared.start()"))
-        #expect(source.contains("logTokenIssued: {\n                TronLogger.shared.info"))
         #expect(source.contains("guard runtimeMode.runsApplicationLifecycle else { return true }"))
-        #expect(occurrences(of: "guard runtimeMode.runsApplicationLifecycle else { return }", in: source) == 2)
-        #expect(!source.contains("let notificationCenter = UNUserNotificationCenter.current()"))
+        #expect(occurrences(of: "guard runtimeMode.runsApplicationLifecycle", in: source) == 4)
+        #expect(source.contains("installNotificationLifecycle()"))
+        #expect(source.contains("didRegisterForRemoteNotificationsWithDeviceToken"))
         #expect(!source.contains("let metricKit = MetricKitDiagnosticsStore.shared"))
-        #expect(!source.contains("let logger = TronLogger.shared"))
     }
 
     @Test("tests use registered isolated state and explicit storage seams")
@@ -93,8 +91,8 @@ extension SourceGuardTests {
         let safe = """
         IsolatedTestState.withDefaults(label: "first") { firstDefaults in
             IsolatedTestState.withDefaults(label: "second") { secondDefaults in
-                let first = DeviceInstallationIdentity.current(defaults: firstDefaults)
-                let second = DeviceInstallationIdentity.current(defaults: secondDefaults)
+                firstDefaults.set("first", forKey: "fixture")
+                secondDefaults.set("second", forKey: "fixture")
             }
         }
         IsolatedTestState.withState(label: "safe") { state in
@@ -277,7 +275,12 @@ extension SourceGuardTests {
         #expect(runtime.contains("pairedServerTokenStore: PairedServerTokenStore()"))
         #expect(runtime.contains("makePairingProbe: { URLSessionPairingProbe() }"))
         #expect(container.contains("private let runtimeIO: DependencyContainerRuntimeIO"))
-        #expect(occurrences(of: "sessionAttemptDirective: runtimeIO.sessionAttemptDirective", in: container) == 2)
+        #expect(
+            occurrences(
+                of: "sessionAttemptDirective: runtimeIO.sessionAttemptDirective",
+                in: container
+            ) == 3
+        )
         #expect(container.contains("pairedServerTokenStore = runtimeIO.pairedServerTokenStore"))
         #expect(container.contains("lazy var pairingProbe: any PairingProbing = runtimeIO.makePairingProbe()"))
         #expect(fixture.contains("sessionAttemptDirective: { [attemptRecorder] request in"))

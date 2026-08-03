@@ -1,15 +1,8 @@
 use super::*;
 use crate::domains::settings::db_path_policy::{
-    PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_tron_home,
+    PRODUCTION_DB_FILENAME, production_db_dir_from_tron_home,
     validate_production_db_path_for_tron_home,
 };
-
-#[test]
-fn default_db_path_under_tron_dir() {
-    let path = default_production_db_path();
-    assert!(path.to_string_lossy().contains(".tron"));
-    assert!(path.to_string_lossy().ends_with(PRODUCTION_DB_FILENAME));
-}
 
 #[test]
 fn ensure_parent_dir_creates_nested() {
@@ -26,11 +19,7 @@ async fn init_engine_host_bootstraps_sqlite_host() {
     ensure_parent_dir(&event_db).unwrap();
     let handle = init_engine_host(&event_db).unwrap();
     let host = handle.lock().await;
-    assert!(
-        host.catalog()
-            .function(&crate::engine::FunctionId::new("engine::discover").unwrap())
-            .is_some()
-    );
+    assert_eq!(host.catalog().revision(), crate::engine::CatalogRevision(0));
     assert!(event_db.exists());
 }
 
@@ -105,12 +94,6 @@ fn db_policy_rejects_symlink_db_file() {
     assert!(err.to_string().contains("symlink"));
 }
 #[test]
-fn auth_path_under_tron_dir() {
-    let path = auth_path();
-    assert!(path.to_string_lossy().contains(".tron"));
-    assert!(path.to_string_lossy().ends_with("auth.json"));
-}
-#[test]
 fn server_creates_db_on_first_run() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("new.db");
@@ -119,19 +102,19 @@ fn server_creates_db_on_first_run() {
     let db_str = db_path.to_string_lossy();
     let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     let conn = pool.get().unwrap();
-    let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+    let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
 
     assert!(db_path.exists());
 }
 
 #[test]
-fn server_runs_migrations() {
+fn server_installs_current_schema() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("tron.sqlite");
     let db_str = db_path.to_string_lossy();
     let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     let conn = pool.get().unwrap();
-    let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+    let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
 
     // Verify tables exist
     let count: i64 = conn

@@ -155,4 +155,27 @@ struct ChatViewTaskCoordinatorTests {
 
         #expect(!ran)
     }
+
+    @Test("new transient-tail follow cancels an older pending follow")
+    func transientTailFollowKeepsOnlyNewestLayoutPass() async {
+        let coordinator = ChatViewTaskCoordinator(sessionId: "session-a")
+        _ = coordinator.beginLifecycle()
+        var firstRan = false
+        var secondRan = false
+
+        coordinator.replaceTask(.liveTailScroll) { _ in
+            try? await Task.sleep(for: .milliseconds(50))
+            if !Task.isCancelled {
+                firstRan = true
+            }
+        }
+        coordinator.replaceTask(.liveTailScroll) { _ in
+            secondRan = true
+        }
+
+        try? await Task.sleep(for: .milliseconds(80))
+
+        #expect(!firstRan)
+        #expect(secondRan)
+    }
 }

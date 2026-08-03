@@ -108,8 +108,8 @@ fn auto_sequence_exhaustion_fails_without_wrapping() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::MetadataUpdate,
-            payload: serde_json::json!({"kind": "sequence ceiling"}),
+            event_type: EventType::MessageUser,
+            payload: serde_json::json!({"content": "sequence ceiling"}),
             parent_id: None,
             sequence: Some(i64::MAX),
         })
@@ -118,8 +118,8 @@ fn auto_sequence_exhaustion_fails_without_wrapping() {
     let error = store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::MetadataUpdate,
-            payload: serde_json::json!({"kind": "must not wrap"}),
+            event_type: EventType::MessageUser,
+            payload: serde_json::json!({"content": "must not wrap"}),
             parent_id: None,
             sequence: None,
         })

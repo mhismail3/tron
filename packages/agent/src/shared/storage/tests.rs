@@ -1,7 +1,6 @@
 use super::*;
 use chrono::Utc;
 use rusqlite::{Connection, params};
-use std::fs;
 
 #[test]
 fn managed_hygiene_policy_uses_bounded_diagnostic_scope() {
@@ -19,104 +18,35 @@ fn managed_hygiene_policy_uses_bounded_diagnostic_scope() {
 }
 
 #[test]
-fn non_current_active_database_is_archived_for_modular_engine_generation() {
-    let dir = tempfile::tempdir().unwrap();
-    let active = dir.path().join(UNIFIED_DB_FILENAME);
-    {
-        let conn = Connection::open(&active).unwrap();
-        conn.execute_batch("CREATE TABLE old_shape (id INTEGER PRIMARY KEY);")
-            .unwrap();
-    }
-    fs::write(wal_path(&active), b"wal").unwrap();
-    fs::write(shm_path(&active), b"shm").unwrap();
-
-    let report = prepare_active_database(&active).unwrap();
-    assert!(report.moved_any());
-    assert!(!active.exists());
-    assert!(!wal_path(&active).exists());
-    assert!(!shm_path(&active).exists());
-    let archive_dir = report.archive_dir.unwrap();
-    let archive_name = archive_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap();
-    assert!(archive_name.starts_with(CURRENT_STORAGE_GENERATION));
-    assert!(archive_dir.join(UNIFIED_DB_FILENAME).exists());
-    let manifest = fs::read_to_string(archive_dir.join("archive-manifest.json")).unwrap();
-    assert!(manifest.contains("active tron.sqlite missing current storage_generation marker"));
-    assert!(manifest.contains(UNIFIED_DB_FILENAME));
-}
-
-#[test]
-fn malformed_generation_marker_fails_closed_without_archiving_active_db() {
-    let dir = tempfile::tempdir().unwrap();
-    let active = dir.path().join(UNIFIED_DB_FILENAME);
-    {
-        let conn = Connection::open(&active).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE storage_metadata (key TEXT PRIMARY KEY);
-             INSERT INTO storage_metadata (key) VALUES ('storage_generation');",
-        )
-        .unwrap();
-    }
-
-    let error = prepare_active_database(&active).unwrap_err();
-
-    assert!(
-        error
-            .to_string()
-            .contains("failed to inspect active database generation"),
-        "unexpected error: {error:#}"
+fn payload_previews_are_semantic_and_never_copy_arbitrary_json_bodies() {
+    let report = serde_json::json!({
+        "schema":"research.report.v1",
+        "status":"complete",
+        "answer":{"format":"markdown","content":"A concise evidence-backed answer."},
+        "privateBulk":"x".repeat(10_000)
+    });
+    let report = serde_json::to_vec(&report).unwrap();
+    let preview = payload_preview(&report, 512);
+    assert_eq!(
+        preview,
+        "research.report.v1 · complete · A concise evidence-backed answer."
     );
-    assert!(
-        active.exists(),
-        "malformed active DB must remain inspectable"
+    assert!(!preview.contains("privateBulk"));
+    assert!(!preview.contains(&"x".repeat(100)));
+
+    let opaque = serde_json::to_vec(&serde_json::json!({
+        "privateBulk":"secret-shaped-but-already-redacted",
+        "items":[1,2,3]
+    }))
+    .unwrap();
+    assert_eq!(payload_preview(&opaque, 512), "JSON object (2 fields)");
+    assert_eq!(
+        payload_preview(
+            &serde_json::to_vec(&serde_json::json!([1, 2, 3])).unwrap(),
+            512
+        ),
+        "JSON array (3 items)"
     );
-    assert!(
-        !dir.path().join(ARCHIVE_DIR).exists(),
-        "malformed active DB must not be moved into an archive"
-    );
-}
-
-#[test]
-fn orphaned_wal_and_shm_sidecars_are_archived_before_fresh_startup() {
-    let dir = tempfile::tempdir().unwrap();
-    let active = dir.path().join(UNIFIED_DB_FILENAME);
-    fs::write(wal_path(&active), b"wal").unwrap();
-    fs::write(shm_path(&active), b"shm").unwrap();
-
-    let report = prepare_active_database(&active).unwrap();
-
-    assert!(report.moved_any());
-    assert!(!active.exists());
-    assert!(!wal_path(&active).exists());
-    assert!(!shm_path(&active).exists());
-    let archive_dir = report.archive_dir.unwrap();
-    assert!(
-        archive_dir
-            .join(format!("{UNIFIED_DB_FILENAME}-wal"))
-            .exists()
-    );
-    assert!(
-        archive_dir
-            .join(format!("{UNIFIED_DB_FILENAME}-shm"))
-            .exists()
-    );
-    let manifest = fs::read_to_string(archive_dir.join("archive-manifest.json")).unwrap();
-    assert!(manifest.contains("orphaned WAL/SHM sidecars without active tron.sqlite"));
-}
-
-#[test]
-fn current_generation_database_is_not_archived() {
-    let dir = tempfile::tempdir().unwrap();
-    let active = dir.path().join(UNIFIED_DB_FILENAME);
-    let runtime = StorageRuntime::new(&active);
-    let conn = runtime.open_connection().unwrap();
-    drop(conn);
-
-    let report = prepare_active_database(&active).unwrap();
-    assert!(!report.moved_any());
-    assert!(active.exists());
 }
 
 #[test]
@@ -165,42 +95,15 @@ fn owned_payload_refs_inline_small_and_blob_large_payloads() {
 }
 
 #[test]
-fn storage_schema_drift_fails_closed_before_marker_rewrite() {
+fn payload_schema_drift_fails_closed_without_mutating_the_existing_table() {
     let conn = Connection::open_in_memory().unwrap();
     apply_runtime_pragmas(&conn).unwrap();
-    conn.execute_batch("CREATE TABLE storage_metadata (key TEXT PRIMARY KEY);")
-        .unwrap();
-
-    let error = ensure_storage_schema(&conn).unwrap_err();
-
-    assert!(
-        error
-            .to_string()
-            .contains("storage schema drift: table storage_metadata missing column value"),
-        "unexpected error: {error:#}"
-    );
-    let checkpoints: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'storage_checkpoints'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(
-        checkpoints, 0,
-        "savepoint rollback must remove tables created during failed schema setup"
-    );
-}
-
-#[test]
-fn wrong_storage_generation_marker_is_not_silently_rewritten() {
-    let conn = Connection::open_in_memory().unwrap();
-    apply_runtime_pragmas(&conn).unwrap();
-    ensure_storage_schema(&conn).unwrap();
-    conn.execute(
-        "UPDATE storage_metadata SET value = 'older-generation'
-         WHERE key = ?1",
-        params![STORAGE_GENERATION_KEY],
+    conn.execute_batch(
+        "CREATE TABLE blobs (
+            id TEXT PRIMARY KEY,
+            hash TEXT NOT NULL UNIQUE,
+            ref_count INTEGER NOT NULL DEFAULT 1
+         );",
     )
     .unwrap();
 
@@ -209,17 +112,20 @@ fn wrong_storage_generation_marker_is_not_silently_rewritten() {
     assert!(
         error
             .to_string()
-            .contains("storage generation marker mismatch"),
+            .contains("storage schema drift: table blobs missing column content"),
         "unexpected error: {error:#}"
     );
-    let marker: String = conn
+    let blobs: i64 = conn
         .query_row(
-            "SELECT value FROM storage_metadata WHERE key = ?1",
-            params![STORAGE_GENERATION_KEY],
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'blobs'",
+            [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(marker, "older-generation");
+    assert_eq!(
+        blobs, 1,
+        "schema verification must preserve the preexisting table"
+    );
 }
 
 #[test]
@@ -249,6 +155,115 @@ fn dangling_payload_blob_refs_fail_storage_integrity_checks() {
             .contains("storage payload integrity failed"),
         "unexpected error: {error:#}"
     );
+}
+
+#[test]
+fn blob_backed_payload_resolution_verifies_owner_hash_and_size() {
+    let conn = Connection::open_in_memory().unwrap();
+    apply_runtime_pragmas(&conn).unwrap();
+    ensure_storage_schema(&conn).unwrap();
+    let value = serde_json::json!({"large":"verified".repeat(128)});
+    let stored = store_json_value(
+        &conn,
+        &value,
+        &StorePayloadOptions::new("worker_invocation", "run-1", "output", "audit")
+            .with_inline_threshold(1),
+    )
+    .unwrap();
+    assert_eq!(
+        resolve_owned_json_value(&conn, "worker_invocation", "run-1", "output", &stored).unwrap(),
+        value
+    );
+
+    conn.execute(
+        "UPDATE storage_payload_refs SET payload_hash='tampered'
+         WHERE owner_kind='worker_invocation' AND owner_id='run-1'",
+        [],
+    )
+    .unwrap();
+    let error = resolve_owned_json_value(&conn, "worker_invocation", "run-1", "output", &stored)
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("does not match its durable owner"),
+        "{error:#}"
+    );
+}
+
+#[test]
+fn inline_payload_resolution_verifies_requested_owner_hash_and_size() {
+    let conn = Connection::open_in_memory().unwrap();
+    apply_runtime_pragmas(&conn).unwrap();
+    ensure_storage_schema(&conn).unwrap();
+    let value = serde_json::json!({"small":"verified"});
+    let stored = store_json_value(
+        &conn,
+        &value,
+        &StorePayloadOptions::new("worker_invocation", "run-inline", "output", "audit"),
+    )
+    .unwrap();
+    assert!(!stored.contains(PAYLOAD_REF_ENVELOPE_KEY));
+    assert_eq!(
+        resolve_owned_json_value(&conn, "worker_invocation", "run-inline", "output", &stored,)
+            .unwrap(),
+        value
+    );
+
+    let error =
+        resolve_owned_json_value(&conn, "worker_invocation", "another-run", "output", &stored)
+            .unwrap_err();
+    assert!(error.to_string().contains("is missing"), "{error:#}");
+    conn.execute(
+        "UPDATE storage_payload_refs SET payload_size_bytes=payload_size_bytes+1
+         WHERE owner_kind='worker_invocation' AND owner_id='run-inline'",
+        [],
+    )
+    .unwrap();
+    let error =
+        resolve_owned_json_value(&conn, "worker_invocation", "run-inline", "output", &stored)
+            .unwrap_err();
+    assert!(error.to_string().contains("size or SHA-256"), "{error:#}");
+}
+
+#[test]
+fn owned_payload_cleanup_repairs_refcounts_and_prunes_only_unowned_blobs() {
+    let conn = Connection::open_in_memory().unwrap();
+    apply_runtime_pragmas(&conn).unwrap();
+    ensure_storage_schema(&conn).unwrap();
+    let value = serde_json::json!({"same":"content".repeat(128)});
+    for owner in ["run-1", "run-2"] {
+        store_json_value(
+            &conn,
+            &value,
+            &StorePayloadOptions::new("worker_invocation", owner, "output", "audit")
+                .with_inline_threshold(1),
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+
+    assert_eq!(
+        delete_owned_payload_refs(&conn, "worker_invocation", "run-1").unwrap(),
+        1
+    );
+    assert_eq!(delete_unowned_blobs(&conn).unwrap(), 0);
+    assert_eq!(
+        conn.query_row("SELECT ref_count FROM blobs", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+
+    assert_eq!(
+        delete_owned_payload_refs(&conn, "worker_invocation", "run-2").unwrap(),
+        1
+    );
+    assert_eq!(delete_unowned_blobs(&conn).unwrap(), 1);
 }
 
 #[test]
@@ -353,14 +368,8 @@ fn retention_prunes_expired_payload_refs_and_their_now_unowned_blobs() {
     let blobs: i64 = conn
         .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
         .unwrap();
-    let retention_runs: i64 = conn
-        .query_row("SELECT COUNT(*) FROM storage_retention_runs", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
     assert_eq!(refs, 0);
     assert_eq!(blobs, 0);
-    assert_eq!(retention_runs, 1);
 }
 
 #[test]
@@ -416,4 +425,34 @@ fn size_budget_runs_safe_retention_and_checkpoint_without_dropping_audit_refs() 
         )
         .unwrap();
     assert_eq!(audit_refs, 1);
+}
+
+#[test]
+fn binary_owner_read_verifies_exact_content_identity() {
+    let connection = Connection::open_in_memory().unwrap();
+    let payload = b"artifact bytes";
+    let stored = store_owned_payload_ref(
+        &connection,
+        payload,
+        &StorePayloadOptions::new("worker_artifact", "artifact-1", "content", "user_artifact")
+            .with_inline_threshold(0),
+    )
+    .unwrap();
+    assert!(stored.payload_blob_id.is_some());
+    assert_eq!(
+        resolve_owned_payload_bytes(&connection, "worker_artifact", "artifact-1", "content")
+            .unwrap(),
+        payload
+    );
+    connection
+        .execute(
+            "UPDATE storage_payload_refs SET payload_hash='tampered'
+             WHERE owner_kind='worker_artifact'",
+            [],
+        )
+        .unwrap();
+    assert!(
+        resolve_owned_payload_bytes(&connection, "worker_artifact", "artifact-1", "content")
+            .is_err()
+    );
 }

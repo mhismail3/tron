@@ -37,7 +37,7 @@ extension ChatViewModel: ConnectionContext {
     }
 
     /// Clear state that refers to an in-flight turn (streaming text,
-    /// thinking, running capabilities) so reconstruction can rebuild it from
+    /// thinking, running tools) so reconstruction can rebuild it from
     /// the event log without double-rendering.
     ///
     /// ## Scope
@@ -50,8 +50,6 @@ extension ChatViewModel: ConnectionContext {
     ///   would destroy their work.
     /// - `draftStore` (persisted drafts): same reason, and these are
     ///   disk-backed anyway.
-    /// - `displayStreamState`: driven by server events; the server
-    ///   re-emits on reconnect.
     /// - Coordinator-local caches: derived from persisted events, so
     ///   reconstruction refreshes them implicitly.
     ///
@@ -90,12 +88,12 @@ extension ChatViewModel: ConnectionContext {
         if let thinkingId = thinkingMessageId {
             removeFromMessages { $0.id == thinkingId }
         }
-        // Remove current-turn capability messages (will be re-created from reconstruction)
-        let currentTurnCapabilityIds = currentTurnCapabilityMessageIds
-        removeFromMessages { currentTurnCapabilityIds.contains($0.id) }
+        // Remove current-turn tool messages (will be re-created from reconstruction)
+        let currentTurnToolIds = currentTurnToolMessageIds
+        removeFromMessages { currentTurnToolIds.contains($0.id) }
         // Clear turn tracking state
         thinkingMessageId = nil
-        currentTurnCapabilityMessageIds.removeAll()
+        currentTurnToolMessageIds.removeAll()
         // Reset thinking accumulators so stale content doesn't bleed through
         thinkingState.seedCatchUpThinking("", isStreaming: false)
     }
@@ -163,6 +161,16 @@ extension ChatViewModel: ConnectionContext {
 // MARK: - Connection & Session Management
 
 extension ChatViewModel {
+
+    /// Reconstruct a worker-owned child session without resuming it or binding
+    /// the shared transport's interactive-session context. Audit sheets are a
+    /// read-only projection and must not disrupt the user's active chat.
+    func reconstructReadOnlyTranscript() async -> ConnectionReconstructionOutcome {
+        await connectionCoordinator.reconstructReadOnly(
+            context: self,
+            eventLimit: Self.workerAuditReconstructionEventLimit
+        )
+    }
 
     /// Connect, resume, and reconstruct the session.
     ///

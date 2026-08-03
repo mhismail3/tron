@@ -266,7 +266,7 @@ class CameraModel: NSObject {
         photoCaptureCompletion = completion
 
         guard let output = photoOutput else {
-            completion(nil)
+            completePhotoCapture(nil)
             return
         }
         let settings = AVCapturePhotoSettings()
@@ -274,6 +274,12 @@ class CameraModel: NSObject {
             guard let self else { return }
             output.capturePhoto(with: settings, delegate: self)
         }
+    }
+
+    private func completePhotoCapture(_ image: UIImage?) {
+        let completion = photoCaptureCompletion
+        photoCaptureCompletion = nil
+        completion?(image)
     }
 }
 
@@ -283,13 +289,13 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
               let data = photo.fileDataRepresentation(),
               let image = UIImage(data: data) else {
             Task { @MainActor in
-                photoCaptureCompletion?(nil)
+                completePhotoCapture(nil)
             }
             return
         }
 
         Task { @MainActor in
-            photoCaptureCompletion?(image)
+            completePhotoCapture(image)
         }
     }
 }

@@ -3,6 +3,39 @@ import XCTest
 
 @MainActor
 final class StreamingManagerTypewriterTests: XCTestCase {
+    func testDisplayLinkIsLazyAndReleasedByReset() {
+        let manager = StreamingManager()
+        XCTAssertFalse(manager.hasInstalledDisplayLink)
+        manager.onCreateStreamingMessage = { UUID() }
+
+        manager.handleTextDelta("stream")
+        XCTAssertTrue(manager.hasInstalledDisplayLink)
+
+        manager.reset()
+        XCTAssertFalse(manager.hasInstalledDisplayLink)
+    }
+
+    func testMountedViewSuspensionFlushesAndReleasesDisplayLinkWithoutErasingStream() {
+        let manager = StreamingManager()
+        let messageId = UUID()
+        var callbackText: String?
+        manager.onCreateStreamingMessage = { messageId }
+        manager.onTextUpdate = { _, text in callbackText = text }
+
+        manager.handleTextDelta("preserved stream")
+        XCTAssertTrue(manager.hasInstalledDisplayLink)
+
+        manager.suspendDisplayUpdates()
+
+        XCTAssertFalse(manager.hasInstalledDisplayLink)
+        XCTAssertEqual(manager.streamingMessageId, messageId)
+        XCTAssertEqual(manager.streamingText, "preserved stream")
+        XCTAssertEqual(callbackText, "preserved stream")
+
+        manager.handleTextDelta(" resumed")
+        XCTAssertTrue(manager.hasInstalledDisplayLink)
+    }
+
     // MARK: - Typewriter Animation Tests
 
     func testTypewriterRevealsTextGradually() {
@@ -101,6 +134,24 @@ final class StreamingManagerTypewriterTests: XCTestCase {
         // streamingText returns full receivedText even before flush
         XCTAssertEqual(manager.streamingText, "Full text")
         XCTAssertFalse(callbackFired, "No flush means no callback")
+    }
+
+    func testTypewriterDrainsManyDeltaChunksWithoutLosingUnicode() {
+        let manager = StreamingManager()
+        var latest = ""
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, text in latest = text }
+        let chunks = (0..<200).map { "\($0)🌍" }
+        for chunk in chunks {
+            XCTAssertTrue(manager.handleTextDelta(chunk))
+        }
+
+        for _ in 0..<10_000 where latest != chunks.joined() {
+            manager.flushPendingTextIfNeeded()
+        }
+
+        XCTAssertEqual(latest, chunks.joined())
+        XCTAssertEqual(manager.currentTextLength, chunks.joined().count)
     }
 
 

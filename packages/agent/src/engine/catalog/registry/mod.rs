@@ -1,65 +1,40 @@
 //! In-memory live catalog registry.
+//!
+//! Every entry couples one canonical function definition to its required
+//! executable handler. The registry cannot represent an advertised-but-inert
+//! function.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 
-use crate::engine::authority::grants::{EngineGrantStoreBackend, InMemoryEngineGrantStore};
 use crate::engine::durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, InMemoryEngineLedgerStore,
 };
 use crate::engine::invocation::model::{InProcessFunctionHandler, InvocationRecord};
 use crate::engine::kernel::errors::Result;
-use crate::engine::kernel::ids::{FunctionId, TriggerId, TriggerTypeId, WorkerId};
-use crate::engine::kernel::types::{
-    CatalogChange, CatalogRevision, FunctionDefinition, TriggerDefinition, TriggerTypeDefinition,
-    WorkerDefinition,
-};
+use crate::engine::kernel::ids::FunctionId;
+use crate::engine::kernel::types::{CatalogRevision, FunctionDefinition};
 
-mod authorization;
-mod catalog_changes;
-mod cleanup;
 mod idempotency;
 mod invocation;
-mod output_contract;
 mod registration;
 mod search;
 
-pub(in crate::engine) use idempotency::InvocationIdempotencyDecision;
 pub(in crate::engine) use invocation::{PreparedSyncInvocation, PreparedSyncInvocationDecision};
 
 const RESERVED_ENGINE_NAMESPACE: &str = "engine";
 const RESERVED_ENGINE_WORKER_ID: &str = "engine";
 
-struct WorkerEntry {
-    definition: WorkerDefinition,
-    volatile: bool,
-}
-
 struct FunctionEntry {
     definition: FunctionDefinition,
-    handler: Option<Arc<dyn InProcessFunctionHandler>>,
-    volatile: bool,
-}
-
-struct TriggerTypeEntry {
-    definition: TriggerTypeDefinition,
-    volatile: bool,
-}
-
-struct TriggerEntry {
-    definition: TriggerDefinition,
-    volatile: bool,
+    handler: Arc<dyn InProcessFunctionHandler>,
 }
 
 /// In-memory live catalog.
 pub struct LiveCatalog {
     revision: CatalogRevision,
-    workers: BTreeMap<WorkerId, WorkerEntry>,
     functions: BTreeMap<FunctionId, FunctionEntry>,
-    trigger_types: BTreeMap<TriggerTypeId, TriggerTypeEntry>,
-    triggers: BTreeMap<TriggerId, TriggerEntry>,
     ledger: Box<dyn EngineLedgerStore>,
-    grants: Arc<StdMutex<EngineGrantStoreBackend>>,
 }
 
 impl LiveCatalog {
@@ -74,23 +49,9 @@ impl LiveCatalog {
     pub(in crate::engine) fn with_ledger_store(ledger: Box<dyn EngineLedgerStore>) -> Self {
         Self {
             revision: CatalogRevision(0),
-            workers: BTreeMap::new(),
             functions: BTreeMap::new(),
-            trigger_types: BTreeMap::new(),
-            triggers: BTreeMap::new(),
             ledger,
-            grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::InMemory(
-                InMemoryEngineGrantStore::new(),
-            ))),
         }
-    }
-
-    /// Use a caller-supplied grant store for invocation authorization.
-    pub(in crate::engine) fn set_grant_store(
-        &mut self,
-        grants: Arc<StdMutex<EngineGrantStoreBackend>>,
-    ) {
-        self.grants = grants;
     }
 
     /// Current catalog revision.
@@ -103,21 +64,6 @@ impl LiveCatalog {
     #[cfg(test)]
     pub(in crate::engine) fn ledger_invocations(&self) -> Result<Vec<InvocationRecord>> {
         self.ledger.list_invocations()
-    }
-
-    /// Durable catalog changes recorded by the engine ledger for crate unit tests.
-    #[cfg(test)]
-    pub(in crate::engine) fn catalog_changes_after(
-        &self,
-        revision: CatalogRevision,
-        limit: usize,
-    ) -> Result<Vec<CatalogChange>> {
-        self.ledger.catalog_changes_after(revision, limit)
-    }
-
-    /// All durable catalog changes recorded by the engine ledger.
-    pub fn ledger_catalog_changes(&self) -> Result<Vec<CatalogChange>> {
-        self.ledger.list_catalog_changes()
     }
 
     /// Durable invocation records for one session in append order.

@@ -19,14 +19,25 @@ use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::{EventRow, SessionRow};
 
 mod auxiliary;
+mod deliveries;
 mod event_log;
 mod locking;
 mod logs;
+mod organization;
 mod session_lifecycle;
 mod state;
-mod trace_log;
 
+pub(crate) use deliveries::{
+    AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliveryRecord, AgentDeliverySourceKind,
+    AgentDeliveryTarget, AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode,
+    MAX_DELIVERIES_PER_TURN, NewAgentDelivery, NewAgentTaskDelivery, NewAgentWait,
+    WorkerTerminalEvidence,
+};
 pub use logs::{ClientLogEntry, ClientLogIngestResult, LogEntry, LogSessionFilter, RecentLogQuery};
+pub use organization::{
+    SESSION_ORGANIZATION_GROUP_TAG_PREFIX, SessionOrganizationArchiveAction,
+    SessionOrganizationMutation, SessionOrganizationSnapshot, session_organization_from_tags,
+};
 
 /// Result of creating a new session.
 #[derive(Debug)]

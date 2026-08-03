@@ -87,16 +87,16 @@ fn thinking_to_text_transition() {
 }
 
 #[test]
-fn capability_invocation_complete_in_one_chunk() {
+fn tool_invocation_complete_in_one_chunk() {
     let mut state = OllamaStreamState::new();
     let chunk = OllamaChatChunk {
         message: OllamaMessage {
             content: String::new(),
             thinking: None,
-            tool_calls: Some(vec![OllamaCapabilityInvocationDraft {
+            tool_calls: Some(vec![OllamaToolInvocationDraft {
                 id: Some("call_abc123".into()),
-                function: OllamaCapabilityInvocationDraftFunction {
-                    name: "execute".into(),
+                function: OllamaToolInvocationDraftFunction {
+                    name: "test_tool".into(),
                     arguments: {
                         let mut m = Map::new();
                         m.insert("command".into(), Value::String("ls".into()));
@@ -113,27 +113,24 @@ fn capability_invocation_complete_in_one_chunk() {
     let events = process_chunk(&chunk, &mut state);
     assert!(matches!(
         events[0],
-        StreamEvent::CapabilityInvocationDraftStart { .. }
+        StreamEvent::ToolInvocationDraftStart { .. }
     ));
     assert!(matches!(
         events[1],
-        StreamEvent::CapabilityInvocationDraftDelta { .. }
+        StreamEvent::ToolInvocationDraftDelta { .. }
     ));
     assert!(matches!(
         events[2],
-        StreamEvent::CapabilityInvocationDraftEnd { .. }
+        StreamEvent::ToolInvocationDraftEnd { .. }
     ));
-    if let StreamEvent::CapabilityInvocationDraftEnd {
-        capability_invocation,
-    } = &events[2]
-    {
-        assert_eq!(capability_invocation.name, "execute");
-        assert_eq!(capability_invocation.arguments["command"], "ls");
+    if let StreamEvent::ToolInvocationDraftEnd { tool_invocation } = &events[2] {
+        assert_eq!(tool_invocation.name, "test_tool");
+        assert_eq!(tool_invocation.arguments["command"], "ls");
     }
 }
 
 #[test]
-fn native_tool_calls_field_deserializes_to_capability_invocation() {
+fn native_tool_calls_field_deserializes_to_tool_invocation() {
     let chunk: OllamaChatChunk = serde_json::from_value(serde_json::json!({
         "message": {
             "tool_calls": [
@@ -141,7 +138,7 @@ fn native_tool_calls_field_deserializes_to_capability_invocation() {
                     "id": "call_abc123",
                     "function": {
                         "index": 0,
-                        "name": "execute",
+                        "name": "test_tool",
                         "arguments": {
                             "intent": "Read README.md"
                         }
@@ -159,7 +156,7 @@ fn native_tool_calls_field_deserializes_to_capability_invocation() {
         .expect("tool calls should map to internal tool calls");
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].id.as_deref(), Some("call_abc123"));
-    assert_eq!(calls[0].function.name, "execute");
+    assert_eq!(calls[0].function.name, "test_tool");
     assert_eq!(calls[0].function.arguments["intent"], "Read README.md");
 }
 
@@ -171,16 +168,16 @@ fn multiple_tool_calls_in_one_chunk() {
             content: String::new(),
             thinking: None,
             tool_calls: Some(vec![
-                OllamaCapabilityInvocationDraft {
+                OllamaToolInvocationDraft {
                     id: Some("call_1".into()),
-                    function: OllamaCapabilityInvocationDraftFunction {
-                        name: "execute".into(),
+                    function: OllamaToolInvocationDraftFunction {
+                        name: "test_tool".into(),
                         arguments: Map::new(),
                     },
                 },
-                OllamaCapabilityInvocationDraft {
+                OllamaToolInvocationDraft {
                     id: Some("call_2".into()),
-                    function: OllamaCapabilityInvocationDraftFunction {
+                    function: OllamaToolInvocationDraftFunction {
                         name: "inspect".into(),
                         arguments: Map::new(),
                     },
@@ -195,7 +192,7 @@ fn multiple_tool_calls_in_one_chunk() {
     let events = process_chunk(&chunk, &mut state);
     let starts: Vec<_> = events
         .iter()
-        .filter(|e| matches!(e, StreamEvent::CapabilityInvocationDraftStart { .. }))
+        .filter(|e| matches!(e, StreamEvent::ToolInvocationDraftStart { .. }))
         .collect();
     assert_eq!(starts.len(), 2);
 }
@@ -244,10 +241,10 @@ fn done_with_tool_calls_overrides_stop_reason() {
         message: OllamaMessage {
             content: String::new(),
             thinking: None,
-            tool_calls: Some(vec![OllamaCapabilityInvocationDraft {
+            tool_calls: Some(vec![OllamaToolInvocationDraft {
                 id: Some("call_1".into()),
-                function: OllamaCapabilityInvocationDraftFunction {
-                    name: "execute".into(),
+                function: OllamaToolInvocationDraftFunction {
+                    name: "test_tool".into(),
                     arguments: Map::new(),
                 },
             }]),
@@ -264,7 +261,7 @@ fn done_with_tool_calls_overrides_stop_reason() {
         .iter()
         .find(|e| matches!(e, StreamEvent::Done { .. }))
     {
-        assert_eq!(stop_reason, "capability_invocation");
+        assert_eq!(stop_reason, "tool_invocation");
     } else {
         panic!("expected Done event");
     }
@@ -278,10 +275,10 @@ fn thinking_plus_tool_calls() {
         message: OllamaMessage {
             content: String::new(),
             thinking: None,
-            tool_calls: Some(vec![OllamaCapabilityInvocationDraft {
+            tool_calls: Some(vec![OllamaToolInvocationDraft {
                 id: Some("call_1".into()),
-                function: OllamaCapabilityInvocationDraftFunction {
-                    name: "execute".into(),
+                function: OllamaToolInvocationDraftFunction {
+                    name: "test_tool".into(),
                     arguments: Map::new(),
                 },
             }]),
@@ -295,7 +292,7 @@ fn thinking_plus_tool_calls() {
     assert!(matches!(events[0], StreamEvent::ThinkingEnd { .. }));
     assert!(matches!(
         events[1],
-        StreamEvent::CapabilityInvocationDraftStart { .. }
+        StreamEvent::ToolInvocationDraftStart { .. }
     ));
 }
 
@@ -418,7 +415,7 @@ fn deserialization_done_chunk() {
 }
 
 #[test]
-fn deserialization_capability_invocation_chunk() {
+fn deserialization_tool_invocation_chunk() {
     let json = r#"{"model":"gemma4:e4b","created_at":"2026-04-10T21:37:18.864432Z","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_ba7d6wq8","function":{"index":0,"name":"get_weather","arguments":{"location":"San Francisco"}}}]},"done":false}"#;
     let chunk: OllamaChatChunk = serde_json::from_str(json).unwrap();
     let tc = chunk.message.tool_calls.as_ref().unwrap();

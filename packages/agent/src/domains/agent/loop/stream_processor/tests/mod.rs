@@ -1,22 +1,16 @@
 use super::*;
-mod drain;
 mod stream_state;
 use async_stream::stream;
-use std::collections::HashSet;
 use std::pin::Pin;
 
-use super::super::stream_state::{build_message, finalize_capability_invocation};
+use super::super::stream_state::{build_message, finalize_tool_invocation};
 use crate::domains::model::responder::{ModelResponseError, ModelResponseStream};
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, RetryErrorInfo, StreamEvent, TronEvent};
-use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
+use crate::shared::protocol::messages::{TokenUsage, ToolInvocationDraft};
 
 fn make_emitter() -> Arc<EventEmitter> {
     Arc::new(EventEmitter::new())
-}
-
-fn no_stopping_capabilities() -> HashSet<String> {
-    HashSet::new()
 }
 
 fn stream_from_provider_events(events: Vec<StreamEvent>) -> ModelResponseStream {
@@ -82,7 +76,7 @@ fn thinking_then_text_stream() -> ModelResponseStream {
     Box::pin(s)
 }
 
-fn capability_invocation_stream() -> ModelResponseStream {
+fn tool_invocation_stream() -> ModelResponseStream {
     let mut args = serde_json::Map::new();
     let _ = args.insert("command".into(), serde_json::json!("ls"));
     let s = stream! {
@@ -90,10 +84,10 @@ fn capability_invocation_stream() -> ModelResponseStream {
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "Running:".into() });
         yield Ok(StreamEvent::TextEnd { text: "Running:".into(), signature: None });
-        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-1".into(), name: "execute".into() });
-        yield Ok(StreamEvent::CapabilityInvocationDraftDelta { invocation_id: "tc-1".into(), arguments_delta: r#"{"command":"ls"}"#.into() });
-        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-1", "execute", {
+        yield Ok(StreamEvent::ToolInvocationDraftStart { invocation_id: "tc-1".into(), name: "test_tool".into() });
+        yield Ok(StreamEvent::ToolInvocationDraftDelta { invocation_id: "tc-1".into(), arguments_delta: r#"{"command":"ls"}"#.into() });
+        yield Ok(StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: ToolInvocationDraft::new("tc-1", "test_tool", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("command".into(), serde_json::json!("ls"));
                 m
@@ -103,9 +97,9 @@ fn capability_invocation_stream() -> ModelResponseStream {
             message: AssistantMessage {
                 content: vec![
                     AssistantContent::text("Running:"),
-                    AssistantContent::CapabilityInvocation {
+                    AssistantContent::ToolInvocation {
                         id: "tc-1".into(),
-                        name: "execute".into(),
+                        name: "test_tool".into(),
                         arguments: {
                             let mut m = serde_json::Map::new();
                             let _ = m.insert("command".into(), serde_json::json!("ls"));
@@ -116,7 +110,7 @@ fn capability_invocation_stream() -> ModelResponseStream {
                 ],
                 token_usage: Some(TokenUsage { input_tokens: 50, output_tokens: 30, ..Default::default() }),
             },
-            stop_reason: "capability_invocation".into(),
+            stop_reason: "tool_invocation".into(),
         });
     };
     Box::pin(s)
@@ -134,16 +128,16 @@ async fn normalized_final_only_text_call_text_uses_stream_order() {
             text: "before".into(),
             signature: None,
         },
-        StreamEvent::CapabilityInvocationDraftStart {
+        StreamEvent::ToolInvocationDraftStart {
             invocation_id: "call_mid".into(),
-            name: "execute".into(),
+            name: "test_tool".into(),
         },
-        StreamEvent::CapabilityInvocationDraftDelta {
+        StreamEvent::ToolInvocationDraftDelta {
             invocation_id: "call_mid".into(),
             arguments_delta: r#"{"operation":"inspect"}"#.into(),
         },
-        StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("call_mid", "execute", {
+        StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: ToolInvocationDraft::new("call_mid", "test_tool", {
                 let mut args = serde_json::Map::new();
                 let _ = args.insert("operation".into(), serde_json::json!("inspect"));
                 args
@@ -161,9 +155,9 @@ async fn normalized_final_only_text_call_text_uses_stream_order() {
             message: AssistantMessage {
                 content: vec![
                     AssistantContent::text("before"),
-                    AssistantContent::CapabilityInvocation {
+                    AssistantContent::ToolInvocation {
                         id: "call_mid".into(),
-                        name: "execute".into(),
+                        name: "test_tool".into(),
                         arguments: {
                             let mut args = serde_json::Map::new();
                             let _ = args.insert("operation".into(), serde_json::json!("inspect"));
@@ -180,7 +174,7 @@ async fn normalized_final_only_text_call_text_uses_stream_order() {
                     ..Default::default()
                 }),
             },
-            stop_reason: "capability_invocation".into(),
+            stop_reason: "tool_invocation".into(),
         },
     ];
 
@@ -191,7 +185,6 @@ async fn normalized_final_only_text_call_text_uses_stream_order() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -199,7 +192,7 @@ async fn normalized_final_only_text_call_text_uses_stream_order() {
     .unwrap();
 
     assert_eq!(result.token_usage.as_ref().unwrap().input_tokens, 12);
-    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.tool_invocations.len(), 1);
     assert_eq!(result.message.content.len(), 3);
     assert!(matches!(
         &result.message.content[0],
@@ -207,8 +200,8 @@ async fn normalized_final_only_text_call_text_uses_stream_order() {
     ));
     assert!(matches!(
         &result.message.content[1],
-        AssistantContent::CapabilityInvocation { id, name, .. }
-            if id == "call_mid" && name == "execute"
+        AssistantContent::ToolInvocation { id, name, .. }
+            if id == "call_mid" && name == "test_tool"
     ));
     assert!(matches!(
         &result.message.content[2],
@@ -228,12 +221,12 @@ async fn normalized_streamed_text_call_text_keeps_block_boundaries() {
             text: "before".into(),
             signature: None,
         },
-        StreamEvent::CapabilityInvocationDraftStart {
-            invocation_id: "execute".into(),
-            name: "execute".into(),
+        StreamEvent::ToolInvocationDraftStart {
+            invocation_id: "test_tool".into(),
+            name: "test_tool".into(),
         },
-        StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("execute", "execute", {
+        StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: ToolInvocationDraft::new("test_tool", "test_tool", {
                 let mut args = serde_json::Map::new();
                 let _ = args.insert("operation".into(), serde_json::json!("inspect"));
                 args
@@ -251,9 +244,9 @@ async fn normalized_streamed_text_call_text_keeps_block_boundaries() {
             message: AssistantMessage {
                 content: vec![
                     AssistantContent::text("before"),
-                    AssistantContent::CapabilityInvocation {
-                        id: "execute".into(),
-                        name: "execute".into(),
+                    AssistantContent::ToolInvocation {
+                        id: "test_tool".into(),
+                        name: "test_tool".into(),
                         arguments: {
                             let mut args = serde_json::Map::new();
                             let _ = args.insert("operation".into(), serde_json::json!("inspect"));
@@ -265,7 +258,7 @@ async fn normalized_streamed_text_call_text_keeps_block_boundaries() {
                 ],
                 token_usage: None,
             },
-            stop_reason: "capability_invocation".into(),
+            stop_reason: "tool_invocation".into(),
         },
     ];
 
@@ -276,15 +269,14 @@ async fn normalized_streamed_text_call_text_keeps_block_boundaries() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
     .await
     .unwrap();
 
-    assert_eq!(result.stop_reason, "capability_invocation");
-    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.stop_reason, "tool_invocation");
+    assert_eq!(result.tool_invocations.len(), 1);
     assert_eq!(result.message.content.len(), 3);
     assert!(matches!(
         &result.message.content[0],
@@ -292,7 +284,7 @@ async fn normalized_streamed_text_call_text_keeps_block_boundaries() {
     ));
     assert!(matches!(
         &result.message.content[1],
-        AssistantContent::CapabilityInvocation { name, .. } if name == "execute"
+        AssistantContent::ToolInvocation { name, .. } if name == "test_tool"
     ));
     assert!(matches!(
         &result.message.content[2],
@@ -302,14 +294,14 @@ async fn normalized_streamed_text_call_text_keeps_block_boundaries() {
 
 #[tokio::test]
 async fn terminal_thinking_snapshot_after_call_is_not_duplicated_and_normalizes_stop_reason() {
-    let thinking = "Inspect the current capability state.";
+    let thinking = "Inspect the current tool state.";
     let arguments = {
         let mut args = serde_json::Map::new();
-        let _ = args.insert("operation".into(), serde_json::json!("catalog_search"));
+        let _ = args.insert("query".into(), serde_json::json!("workers"));
         args
     };
-    let capability_invocation =
-        CapabilityInvocationDraft::new("call_after_thinking", "execute", arguments.clone());
+    let tool_invocation =
+        ToolInvocationDraft::new("call_after_thinking", "lookup", arguments.clone());
     let provider_events = vec![
         StreamEvent::Start,
         StreamEvent::ThinkingStart,
@@ -317,16 +309,16 @@ async fn terminal_thinking_snapshot_after_call_is_not_duplicated_and_normalizes_
             delta: thinking.into(),
             kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
         },
-        StreamEvent::CapabilityInvocationDraftStart {
+        StreamEvent::ToolInvocationDraftStart {
             invocation_id: "call_after_thinking".into(),
-            name: "execute".into(),
+            name: "lookup".into(),
         },
-        StreamEvent::CapabilityInvocationDraftDelta {
+        StreamEvent::ToolInvocationDraftDelta {
             invocation_id: "call_after_thinking".into(),
-            arguments_delta: r#"{"operation":"catalog_search"}"#.into(),
+            arguments_delta: r#"{"query":"workers"}"#.into(),
         },
-        StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: capability_invocation.clone(),
+        StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: tool_invocation.clone(),
         },
         StreamEvent::ThinkingEnd {
             thinking: thinking.into(),
@@ -341,9 +333,9 @@ async fn terminal_thinking_snapshot_after_call_is_not_duplicated_and_normalizes_
                         kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                         signature: Some("final-signature".into()),
                     },
-                    AssistantContent::CapabilityInvocation {
+                    AssistantContent::ToolInvocation {
                         id: "call_after_thinking".into(),
-                        name: "execute".into(),
+                        name: "lookup".into(),
                         arguments,
                         thought_signature: None,
                     },
@@ -366,15 +358,14 @@ async fn terminal_thinking_snapshot_after_call_is_not_duplicated_and_normalizes_
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
     .await
     .unwrap();
 
-    assert_eq!(result.stop_reason, "capability_invocation");
-    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.stop_reason, "tool_invocation");
+    assert_eq!(result.tool_invocations.len(), 1);
     assert_eq!(result.message.content.len(), 2);
     assert!(matches!(
         &result.message.content[0],
@@ -386,7 +377,7 @@ async fn terminal_thinking_snapshot_after_call_is_not_duplicated_and_normalizes_
     ));
     assert!(matches!(
         &result.message.content[1],
-        AssistantContent::CapabilityInvocation { id, .. } if id == "call_after_thinking"
+        AssistantContent::ToolInvocation { id, .. } if id == "call_after_thinking"
     ));
 }
 
@@ -404,14 +395,14 @@ async fn distinct_thinking_after_call_remains_a_separate_ordered_block() {
             kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
             signature: None,
         },
-        StreamEvent::CapabilityInvocationDraftStart {
+        StreamEvent::ToolInvocationDraftStart {
             invocation_id: "call_between_thinking".into(),
-            name: "execute".into(),
+            name: "test_tool".into(),
         },
-        StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new(
+        StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: ToolInvocationDraft::new(
                 "call_between_thinking",
-                "execute",
+                "test_tool",
                 serde_json::Map::new(),
             ),
         },
@@ -441,14 +432,13 @@ async fn distinct_thinking_after_call_remains_a_separate_ordered_block() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
     .await
     .unwrap();
 
-    assert_eq!(result.stop_reason, "capability_invocation");
+    assert_eq!(result.stop_reason, "tool_invocation");
     assert_eq!(result.message.content.len(), 3);
     assert!(matches!(
         &result.message.content[0],
@@ -456,7 +446,7 @@ async fn distinct_thinking_after_call_remains_a_separate_ordered_block() {
     ));
     assert!(matches!(
         &result.message.content[1],
-        AssistantContent::CapabilityInvocation { id, .. } if id == "call_between_thinking"
+        AssistantContent::ToolInvocation { id, .. } if id == "call_between_thinking"
     ));
     assert!(matches!(
         &result.message.content[2],
@@ -474,7 +464,6 @@ async fn pure_text_response() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -484,7 +473,7 @@ async fn pure_text_response() {
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "end_turn");
     assert!(result.partial_content.is_none());
-    assert!(result.capability_invocations.is_empty());
+    assert!(result.tool_invocations.is_empty());
     assert!(result.token_usage.is_some());
     assert_eq!(result.token_usage.as_ref().unwrap().input_tokens, 10);
 }
@@ -500,7 +489,6 @@ async fn thinking_plus_text_response() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -528,66 +516,57 @@ async fn thinking_plus_text_response() {
 }
 
 #[tokio::test]
-async fn text_plus_capability_invocation() {
+async fn text_plus_tool_invocation() {
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
 
     let result = process_stream(
-        capability_invocation_stream(),
+        tool_invocation_stream(),
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
     .await
     .unwrap();
 
-    assert_eq!(result.stop_reason, "capability_invocation");
-    assert_eq!(result.capability_invocations.len(), 1);
-    assert_eq!(result.capability_invocations[0].name, "execute");
+    assert_eq!(result.stop_reason, "tool_invocation");
+    assert_eq!(result.tool_invocations.len(), 1);
+    assert_eq!(result.tool_invocations[0].name, "test_tool");
     assert_eq!(
-        result.capability_invocations[0].arguments["command"],
+        result.tool_invocations[0].arguments["command"],
         serde_json::json!("ls")
     );
 }
 
 #[tokio::test]
-async fn multiple_capability_invocations() {
+async fn multiple_tool_invocations() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
-        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-1".into(), name: "inspect".into() });
-        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-1", "inspect", serde_json::Map::new()),
+        yield Ok(StreamEvent::ToolInvocationDraftStart { invocation_id: "tc-1".into(), name: "inspect".into() });
+        yield Ok(StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: ToolInvocationDraft::new("tc-1", "inspect", serde_json::Map::new()),
         });
-        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-2".into(), name: "search".into() });
-        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-2", "search", serde_json::Map::new()),
+        yield Ok(StreamEvent::ToolInvocationDraftStart { invocation_id: "tc-2".into(), name: "search".into() });
+        yield Ok(StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: ToolInvocationDraft::new("tc-2", "search", serde_json::Map::new()),
         });
         yield Ok(StreamEvent::Done {
             message: AssistantMessage { content: vec![], token_usage: None },
-            stop_reason: "capability_invocation".into(),
+            stop_reason: "tool_invocation".into(),
         });
     };
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
-    assert_eq!(result.capability_invocations.len(), 2);
-    assert_eq!(result.capability_invocations[0].name, "inspect");
-    assert_eq!(result.capability_invocations[1].name, "search");
+    assert_eq!(result.tool_invocations.len(), 2);
+    assert_eq!(result.tool_invocations[0].name, "inspect");
+    assert_eq!(result.tool_invocations[1].name, "search");
 }
 
 #[tokio::test]
@@ -609,9 +588,9 @@ async fn stream_order_overrides_bucketed_provider_done_content() {
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "before".into() });
         yield Ok(StreamEvent::TextEnd { text: "before".into(), signature: None });
-        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-1".into(), name: "execute".into() });
-        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-1", "execute", args.clone()),
+        yield Ok(StreamEvent::ToolInvocationDraftStart { invocation_id: "tc-1".into(), name: "test_tool".into() });
+        yield Ok(StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: ToolInvocationDraft::new("tc-1", "test_tool", args.clone()),
         });
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "after".into() });
@@ -625,32 +604,24 @@ async fn stream_order_overrides_bucketed_provider_done_content() {
                         signature: None,
                     },
                     AssistantContent::text("beforeafter"),
-                    AssistantContent::CapabilityInvocation {
+                    AssistantContent::ToolInvocation {
                         id: "tc-1".into(),
-                        name: "execute".into(),
+                        name: "test_tool".into(),
                         arguments: args,
                         thought_signature: None,
                     },
                 ],
                 token_usage: Some(TokenUsage { input_tokens: 11, output_tokens: 7, ..Default::default() }),
             },
-            stop_reason: "capability_invocation".into(),
+            stop_reason: "tool_invocation".into(),
         });
     };
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     assert_eq!(result.token_usage.as_ref().unwrap().input_tokens, 11);
     assert_eq!(result.message.content.len(), 4);
@@ -664,7 +635,7 @@ async fn stream_order_overrides_bucketed_provider_done_content() {
     ));
     assert!(matches!(
         &result.message.content[2],
-        AssistantContent::CapabilityInvocation { id, .. } if id == "tc-1"
+        AssistantContent::ToolInvocation { id, .. } if id == "tc-1"
     ));
     assert!(matches!(
         &result.message.content[3],
@@ -673,59 +644,51 @@ async fn stream_order_overrides_bucketed_provider_done_content() {
 }
 
 #[tokio::test]
-async fn capability_blocks_keep_first_observed_order_when_done_is_reversed() {
+async fn tool_blocks_keep_first_observed_order_when_done_is_reversed() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
-        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-a".into(), name: "execute".into() });
-        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-a", "execute", serde_json::Map::new()),
+        yield Ok(StreamEvent::ToolInvocationDraftStart { invocation_id: "tc-a".into(), name: "test_tool".into() });
+        yield Ok(StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: ToolInvocationDraft::new("tc-a", "test_tool", serde_json::Map::new()),
         });
-        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-b".into(), name: "inspect".into() });
-        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-b", "inspect", serde_json::Map::new()),
+        yield Ok(StreamEvent::ToolInvocationDraftStart { invocation_id: "tc-b".into(), name: "inspect".into() });
+        yield Ok(StreamEvent::ToolInvocationDraftEnd {
+            tool_invocation: ToolInvocationDraft::new("tc-b", "inspect", serde_json::Map::new()),
         });
         yield Ok(StreamEvent::Done {
             message: AssistantMessage {
                 content: vec![
-                    AssistantContent::CapabilityInvocation {
+                    AssistantContent::ToolInvocation {
                         id: "tc-b".into(),
                         name: "inspect".into(),
                         arguments: serde_json::Map::new(),
                         thought_signature: None,
                     },
-                    AssistantContent::CapabilityInvocation {
+                    AssistantContent::ToolInvocation {
                         id: "tc-a".into(),
-                        name: "execute".into(),
+                        name: "test_tool".into(),
                         arguments: serde_json::Map::new(),
                         thought_signature: None,
                     },
                 ],
                 token_usage: None,
             },
-            stop_reason: "capability_invocation".into(),
+            stop_reason: "tool_invocation".into(),
         });
     };
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     let ids: Vec<&str> = result
         .message
         .content
         .iter()
         .filter_map(|content| match content {
-            AssistantContent::CapabilityInvocation { id, .. } => Some(id.as_str()),
+            AssistantContent::ToolInvocation { id, .. } => Some(id.as_str()),
             _ => None,
         })
         .collect();
@@ -742,16 +705,7 @@ async fn error_mid_stream() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await;
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None).await;
 
     assert!(result.is_err());
     let failure = result.unwrap_err();
@@ -777,17 +731,9 @@ async fn journal_write_failure_stops_before_unrecoverable_live_delta() {
         },
     ]);
 
-    let failure = process_stream(
-        stream,
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        Some(&mut journal),
-    )
-    .await
-    .unwrap_err();
+    let failure = process_stream(stream, "s1", &emitter, &cancel, None, Some(&mut journal))
+        .await
+        .unwrap_err();
 
     assert!(matches!(failure.error, RuntimeError::Persistence(_)));
     assert!(failure.partial.message.content.is_empty());
@@ -815,17 +761,9 @@ async fn abort_mid_stream() {
     };
 
     let emitter = make_emitter();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     assert!(result.interrupted);
     assert_eq!(result.stop_reason, "interrupted");
@@ -861,17 +799,9 @@ async fn retry_event_emission() {
     let mut rx = emitter.subscribe();
     let cancel = CancellationToken::new();
 
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
     assert!(!result.interrupted);
 
     let mut saw_retry = false;
@@ -895,16 +825,7 @@ async fn safety_block_returns_error() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await;
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None).await;
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -923,21 +844,13 @@ async fn empty_response() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "end_turn");
-    assert!(result.capability_invocations.is_empty());
+    assert!(result.tool_invocations.is_empty());
 }
 
 #[tokio::test]
@@ -945,17 +858,9 @@ async fn token_usage_extraction() {
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
 
-    let result = process_stream(
-        text_stream("hello"),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(text_stream("hello"), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     let usage = result.token_usage.unwrap();
     assert_eq!(usage.input_tokens, 10);
@@ -968,17 +873,9 @@ async fn message_update_events_emitted() {
     let mut rx = emitter.subscribe();
     let cancel = CancellationToken::new();
 
-    let _ = process_stream(
-        text_stream("hello"),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let _ = process_stream(text_stream("hello"), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     let mut updates = vec![];
     while let Ok(event) = rx.try_recv() {
@@ -991,17 +888,16 @@ async fn message_update_events_emitted() {
 }
 
 #[tokio::test]
-async fn capability_invocation_generating_event_emitted() {
+async fn tool_invocation_generating_event_emitted() {
     let emitter = make_emitter();
     let mut rx = emitter.subscribe();
     let cancel = CancellationToken::new();
 
     let _ = process_stream(
-        capability_invocation_stream(),
+        tool_invocation_stream(),
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -1010,7 +906,7 @@ async fn capability_invocation_generating_event_emitted() {
 
     let mut saw_generating = false;
     while let Ok(event) = rx.try_recv() {
-        if matches!(event, TronEvent::CapabilityInvocationGenerating { .. }) {
+        if matches!(event, TronEvent::ToolInvocationGenerating { .. }) {
             saw_generating = true;
         }
     }

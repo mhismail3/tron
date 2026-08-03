@@ -15,10 +15,17 @@ final class EngineConnection {
 
     var urlSession: URLSession?
     var engineConnectionTask: URLSessionWebSocketTask?
+    /// Monotonic owner for work launched against `engineConnectionTask`.
+    /// A task identity check protects ordinary replacement, while the
+    /// generation also retires work when the current transport is cleared.
+    private(set) var transportGeneration: UInt64 = 0
     var pingTask: Task<Void, Never>?
     var receiveTask: Task<Void, Never>?
 
     let serverURL: URL
+    /// The URLSession transport is open and can carry the protocol handshake.
+    /// Public readiness remains `connectionState == .connected`, which is not
+    /// published until `hello.ok` completes.
     var isConnectedFlag = false
     var reconnectAttempts = 0
     /// Exact outbound frame budget negotiated through `hello.ok`.
@@ -29,6 +36,7 @@ final class EngineConnection {
 
     let requestTimeout: TimeInterval = 30.0
     nonisolated static let connectionVerificationTimeout: TimeInterval = 10.0
+    nonisolated static let protocolHandshakeTimeout: TimeInterval = 10.0
     nonisolated static let connectionOpenTimeout: TimeInterval = 10.0
     nonisolated static let manualRetryOpenTimeout: TimeInterval = connectionOpenTimeout
     nonisolated static let automaticReconnectProbeTimeout: TimeInterval = ReconnectProbePolicy().probeTimeout
@@ -46,12 +54,21 @@ final class EngineConnection {
     }
 
     var reconnectTask: Task<Void, Never>?
+    var reconnectTaskGeneration: UInt64 = 0
+    var reconnectLoopActive = false
     var openedWebSocketTask: URLSessionWebSocketTask?
     var openContinuation: SingleResumeContinuationBox?
     var openTimeoutTask: Task<Void, Never>?
 
-    var pendingRequests: [String: CheckedContinuation<Data, Error>] = [:]
-    var timeoutTasks: [String: Task<Void, Never>] = [:]
+    /// Correlated request ownership. Each entry includes its own timeout task,
+    /// so no separate resource map can drift out of sync.
+    var pendingRequests: [String: EnginePendingRequest] = [:]
+
+    /// Persistent off-main response decoder. A single actor preserves bounded
+    /// connection-owned execution instead of spawning one detached task per
+    /// response.
+    let responseDecodingExecutor = EngineResponseDecodingExecutor()
+    let inboundFrameDecoder = EngineInboundFrameDecoder()
 
     var isConnectionInProgress = false
 
@@ -106,8 +123,7 @@ final class EngineConnection {
     func markUnauthorized(reason: String) {
         logger.warning("WS upgrade rejected (401): \(reason)", category: .websocket)
 
-        reconnectTask?.cancel()
-        reconnectTask = nil
+        cancelReconnectOwnership()
         reconnectAttempts = 0
         isDeployRestarting = false
         deployRestartExpectedMs = 0
@@ -119,8 +135,7 @@ final class EngineConnection {
         openTimeoutTask = nil
         openContinuation?.resume(throwing: EngineConnectionError.unauthorized(reason))
         openContinuation = nil
-        engineConnectionTask?.cancel(with: .normalClosure, reason: nil)
-        engineConnectionTask = nil
+        retireCurrentTransport(closeCode: .normalClosure)
         urlSession?.invalidateAndCancel()
         urlSession = nil
         sessionDelegate = nil
@@ -187,7 +202,7 @@ final class EngineConnection {
 
         logger.verbose("Creating WebSocket task...", category: .websocket)
         let task = session.webSocketTask(with: request)
-        engineConnectionTask = task
+        let generation = installTransportOwnership(task)
         openedWebSocketTask = nil
         task.maximumMessageSize = 150 * 1024 * 1024  // 150MB — matches server limit for large inline payloads.
         task.resume()
@@ -210,19 +225,23 @@ final class EngineConnection {
         }
 
         isConnectedFlag = true
-        reconnectAttempts = 0
-        connectionState = .connected
-        logger.logWebSocketState("Connected", details: "Verified connection to \(serverURL.host ?? "unknown")")
-        logger.info("Connection verified for \(self.serverURL.absoluteString)", category: .websocket)
+        logger.info(
+            "WebSocket transport opened for \(self.serverURL.absoluteString); awaiting protocol hello",
+            category: .websocket
+        )
 
         receiveTask = Task { [weak self] in
-            await self?.receiveLoop()
+            await self?.receiveLoop(on: task, generation: generation)
         }
         logger.verbose("Receive loop started", category: .websocket)
 
         do {
-            let helloResult = try await hello()
-            negotiatedMaxMessageSize = helloResult.maxMessageSize
+            let helloResult = try await hello(timeout: Self.protocolHandshakeTimeout)
+            guard engineConnectionTask === task, isConnectedFlag else {
+                logger.debug("Protocol hello completed after socket teardown", category: .websocket)
+                return
+            }
+            markProtocolReady(maxMessageSize: helloResult.maxMessageSize)
         } catch {
             logger.warning("Engine hello failed: \(error.localizedDescription)", category: .websocket)
             cleanupDeadConnection(error: error, stateAfterCleanup: stateOnFailure)
@@ -230,9 +249,22 @@ final class EngineConnection {
         }
 
         pingTask = Task { [weak self] in
-            await self?.heartbeatLoop()
+            await self?.heartbeatLoop(on: task, generation: generation)
         }
         logger.verbose("Heartbeat loop started", category: .websocket)
+    }
+
+    /// Publish usable connection state only after the server has acknowledged
+    /// the protocol and supplied its negotiated frame ceiling.
+    func markProtocolReady(maxMessageSize: Int?) {
+        negotiatedMaxMessageSize = maxMessageSize
+        reconnectAttempts = 0
+        connectionState = .connected
+        logger.logWebSocketState(
+            "Connected",
+            details: "Protocol ready for \(serverURL.host ?? "unknown")"
+        )
+        logger.info("Connection protocol ready for \(serverURL.absoluteString)", category: .websocket)
     }
 
     func markWebSocketOpened(_ task: URLSessionWebSocketTask) {
@@ -247,8 +279,9 @@ final class EngineConnection {
 
     func markWebSocketClosed(_ task: URLSessionWebSocketTask, closeCode: URLSessionWebSocketTask.CloseCode) async {
         guard engineConnectionTask === task, isConnectedFlag else { return }
+        let generation = transportGeneration
         logger.warning("WebSocket closed by server (code: \(closeCode.rawValue))", category: .websocket)
-        await handleDisconnect()
+        await handleDisconnect(expectedTask: task, expectedGeneration: generation)
     }
 
     /// Own completion for both an opening and an established WebSocket.
@@ -271,8 +304,9 @@ final class EngineConnection {
         }
 
         guard isConnectedFlag else { return }
+        let generation = transportGeneration
         logger.warning("Established WebSocket task completed: \(NetworkDiagnosticsFormatter.errorSummary(completionError))", category: .websocket)
-        await handleDisconnect()
+        await handleDisconnect(expectedTask: socketTask, expectedGeneration: generation)
     }
 
     func markWebSocketOpenTimedOut(timeout: TimeInterval) {
@@ -312,11 +346,9 @@ final class EngineConnection {
         pingTask = nil
         receiveTask?.cancel()
         receiveTask = nil
-        reconnectTask?.cancel()
-        reconnectTask = nil
+        cancelReconnectOwnership()
 
-        engineConnectionTask?.cancel(with: .goingAway, reason: nil)
-        engineConnectionTask = nil
+        retireCurrentTransport(closeCode: .goingAway)
         urlSession?.invalidateAndCancel()
         urlSession = nil
         sessionDelegate = nil
@@ -338,8 +370,7 @@ final class EngineConnection {
             switch connectionState {
             case .connecting, .reconnecting:
                 logger.info("Cancelling in-flight reconnect for background transition", category: .websocket)
-                reconnectTask?.cancel()
-                reconnectTask = nil
+                cancelReconnectOwnership()
                 reconnectAttempts = 0
                 connectionState = .disconnected
             case .connected, .disconnected, .failed, .deployRestarting, .unauthorized:
@@ -364,12 +395,20 @@ final class EngineConnection {
         guard isConnectedFlag, let task = engineConnectionTask else {
             return false
         }
+        let generation = transportGeneration
 
         do {
             try await sendPing(on: task, timeout: Self.connectionVerificationTimeout)
+            guard ownsTransport(task, generation: generation) else {
+                return false
+            }
             logger.debug("Connection verification: alive", category: .websocket)
             return true
         } catch {
+            guard ownsTransport(task, generation: generation) else {
+                logger.debug("Ignoring verification failure from retired transport", category: .websocket)
+                return false
+            }
             logger.warning("Connection verification failed: \(error.localizedDescription)", category: .websocket)
             cleanupDeadConnection(error: error)
             return false
@@ -434,8 +473,7 @@ final class EngineConnection {
         openTimeoutTask = nil
         openContinuation?.resume(throwing: error)
         openContinuation = nil
-        engineConnectionTask?.cancel(with: .goingAway, reason: nil)
-        engineConnectionTask = nil
+        retireCurrentTransport(closeCode: .goingAway)
         urlSession?.invalidateAndCancel()
         urlSession = nil
         sessionDelegate = nil
@@ -444,6 +482,36 @@ final class EngineConnection {
         receiveTask?.cancel()
         receiveTask = nil
         failPendingRequests(error: EngineConnectionError.connectionFailed(error.localizedDescription))
+    }
+
+    /// Install one socket as the sole owner of receive, heartbeat, and
+    /// verification work. Each replacement advances the generation even when
+    /// a caller has already cleared the previous task.
+    @discardableResult
+    func installTransportOwnership(_ task: URLSessionWebSocketTask) -> UInt64 {
+        transportGeneration &+= 1
+        engineConnectionTask = task
+        return transportGeneration
+    }
+
+    /// Work launched by a retired socket must never read from or disconnect a
+    /// replacement socket.
+    func ownsTransport(
+        _ task: URLSessionWebSocketTask,
+        generation: UInt64
+    ) -> Bool {
+        isConnectedFlag
+            && engineConnectionTask === task
+            && transportGeneration == generation
+    }
+
+    /// Retire the current socket before cancellation callbacks can re-enter
+    /// the connection state machine.
+    func retireCurrentTransport(closeCode: URLSessionWebSocketTask.CloseCode) {
+        transportGeneration &+= 1
+        let task = engineConnectionTask
+        engineConnectionTask = nil
+        task?.cancel(with: closeCode, reason: nil)
     }
 
 }

@@ -26,14 +26,14 @@ final class TypewriterAnimationState {
     func animate(to newText: String) {
         animationTask?.cancel()
         animationTask = Task { @MainActor in
-            // Phase 1: Delete current text character by character
+            // Delete current text character by character.
             while !displayedText.isEmpty {
                 try? await Task.sleep(for: characterDelay)
                 guard !Task.isCancelled else { return }
                 displayedText = String(displayedText.dropLast())
             }
 
-            // Phase 2: Type new text character by character.
+            // Type new text character by character.
             // First char is appended without sleeping so the "" → "X"
             // transition is atomic. Without this, Text("") in a SwiftUI
             // toolbar causes a permanent layout collapse to zero width.

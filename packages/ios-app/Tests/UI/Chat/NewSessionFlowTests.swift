@@ -90,7 +90,7 @@ final class NewSessionFlowTests: XCTestCase {
             "Sources/UI/Chat/Sheets/WorkspaceSelectorRows.swift",
             "Sources/UI/Chat/Shell/ContentView.swift",
             "Sources/Engine/Transport/Clients/WorkspaceBrowserClient.swift",
-            "Sources/Engine/Protocol/Filesystem/EngineProtocolTypes+Filesystem.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Filesystem.swift",
         ].map { relativePath in
             try String(
                 contentsOf: iosAppRoot().appendingPathComponent(relativePath),
@@ -139,6 +139,20 @@ final class NewSessionFlowTests: XCTestCase {
                 "workspace selector exposed a broad filesystem surface: \(fragment)"
             )
         }
+    }
+
+    func testWorkspaceSelectorUsesCurrentPathAsHeadTruncatedSheetTitle() throws {
+        let source = try String(
+            contentsOf: iosAppRoot()
+                .appendingPathComponent("Sources/UI/Chat/Sheets/WorkspaceSelector.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("Text(sheetTitle)"))
+        XCTAssertTrue(source.contains("currentPath.abbreviatingHomeDirectory"))
+        XCTAssertTrue(source.contains(".truncationMode(.head)"))
+        XCTAssertTrue(source.contains("Current folder, \\(sheetTitle)"))
+        XCTAssertFalse(source.contains("locationSection"))
     }
 
     func testWorkspaceSelectorActionsShareTheShortcutPillPresentation() throws {

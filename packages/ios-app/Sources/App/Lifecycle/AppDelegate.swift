@@ -1,60 +1,35 @@
 import UIKit
-import UserNotifications
 
-/// Injectable lifecycle effects. `.live` is construction-inert: every Apple
-/// singleton lookup happens inside a closure after the runtime-mode guard.
+/// Injectable lifecycle effects. `.live` is construction-inert: MetricKit
+/// starts only after the runtime-mode guard.
 struct AppLifecycleEffects: @unchecked Sendable {
-    var installNotificationDelegate: (UNUserNotificationCenterDelegate) -> Void
     var startMetricKit: () -> Void
-    var publishDeviceToken: (String) -> Void
-    var publishRegistrationFailure: (Error) -> Void
-    var publishNavigation: ([AnyHashable: Any]) -> Void
-    var logTokenIssued: () -> Void
-    var logRegistrationFailure: (Error) -> Void
+    var installNotificationLifecycle: @MainActor () -> Void
+    var registeredForRemoteNotifications: @MainActor (Data) -> Void
+    var failedRemoteNotificationRegistration: @MainActor (Error) -> Void
+    var handleRemoteNotification: @MainActor (
+        [AnyHashable: Any],
+        @escaping (UIBackgroundFetchResult) -> Void
+    ) -> Void
 
     static var live: Self {
         Self(
-            installNotificationDelegate: { delegate in
-                UNUserNotificationCenter.current().delegate = delegate
-            },
             startMetricKit: {
                 MetricKitDiagnosticsStore.shared.start()
             },
-            publishDeviceToken: { token in
-                NotificationCenter.default.post(
-                    name: .deviceTokenDidUpdate,
-                    object: nil,
-                    userInfo: ["token": token]
-                )
+            installNotificationLifecycle: {
+                NotificationLifecycleBridge.shared.install()
             },
-            publishRegistrationFailure: { error in
-                NotificationCenter.default.post(
-                    name: .deviceTokenRegistrationFailed,
-                    object: nil,
-                    userInfo: ["error": error]
-                )
+            registeredForRemoteNotifications: { token in
+                NotificationLifecycleBridge.shared.didRegisterForRemoteNotifications(token: token)
             },
-            publishNavigation: { userInfo in
-                let sessionId = userInfo["sessionId"] as? String
-                let invocationId = userInfo["invocationId"] as? String
-                var payload: [String: String] = [:]
-                if let sessionId { payload["sessionId"] = sessionId }
-                if let invocationId { payload["invocationId"] = invocationId }
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(
-                        name: .navigateToSession,
-                        object: nil,
-                        userInfo: payload
-                    )
-                }
+            failedRemoteNotificationRegistration: { error in
+                NotificationLifecycleBridge.shared.didFailToRegisterForRemoteNotifications(error)
             },
-            logTokenIssued: {
-                TronLogger.shared.info("APNs issued a device token", category: .notification)
-            },
-            logRegistrationFailure: { error in
-                TronLogger.shared.error(
-                    "APNs registration failed: \(error.localizedDescription)",
-                    category: .notification
+            handleRemoteNotification: { payload, completion in
+                NotificationLifecycleBridge.shared.handleQuietRefresh(
+                    payload,
+                    completion: completion
                 )
             }
         )
@@ -83,8 +58,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         guard runtimeMode.runsApplicationLifecycle else { return true }
-        effects.installNotificationDelegate(self)
         effects.startMetricKit()
+        effects.installNotificationLifecycle()
         return true
     }
 
@@ -93,9 +68,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         guard runtimeMode.runsApplicationLifecycle else { return }
-        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
-        effects.publishDeviceToken(token)
-        effects.logTokenIssued()
+        effects.registeredForRemoteNotifications(deviceToken)
     }
 
     func application(
@@ -103,51 +76,18 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
         guard runtimeMode.runsApplicationLifecycle else { return }
-        effects.publishRegistrationFailure(error)
-        effects.logRegistrationFailure(error)
+        effects.failedRemoteNotificationRegistration(error)
     }
 
-}
-
-extension AppDelegate: UNUserNotificationCenterDelegate {
-    nonisolated func completeNotificationPresentation(
-        _ completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        completionHandler(runtimeMode.runsApplicationLifecycle ? [.banner, .sound] : [])
-    }
-
-    nonisolated func completeNotificationResponse(
-        userInfo: [AnyHashable: Any],
-        completionHandler: @escaping () -> Void
-    ) {
-        if runtimeMode.runsApplicationLifecycle {
-            effects.publishNavigation(userInfo)
+        guard runtimeMode.runsApplicationLifecycle else {
+            completionHandler(.noData)
+            return
         }
-        completionHandler()
+        effects.handleRemoteNotification(userInfo, completionHandler)
     }
-
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completeNotificationPresentation(completionHandler)
-    }
-
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
-        completeNotificationResponse(
-            userInfo: response.notification.request.content.userInfo,
-            completionHandler: completionHandler
-        )
-    }
-}
-
-extension Notification.Name {
-    static let deviceTokenDidUpdate = Notification.Name("tron.deviceTokenDidUpdate")
-    static let deviceTokenRegistrationFailed = Notification.Name("tron.deviceTokenRegistrationFailed")
-    static let navigateToSession = Notification.Name("tron.navigateToSession")
 }

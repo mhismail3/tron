@@ -8,14 +8,16 @@
 //!
 //! The retry wrapper:
 //! 1. Calls the stream factory
-//! 2. If it fails before yielding any data, waits with backoff and retries
-//! 3. Emits [`StreamEvent::Retry`] events before each retry wait
-//! 4. Respects cancellation via `CancellationToken`
+//! 2. Bounds the response-opening phase independently from long-lived streaming
+//! 3. If opening fails before yielding any data, waits with backoff and retries
+//! 4. Emits [`StreamEvent::Retry`] events before each retry wait
+//! 5. Respects cancellation via `CancellationToken`
 //!
 //! [`StreamEvent`]: crate::shared::protocol::events::StreamEvent
 
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
 
 use crate::shared::foundation::redaction::redact_sensitive_content;
 use crate::shared::foundation::retry::RetryConfig;
@@ -25,6 +27,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domains::model::providers::shared::provider::{ProviderError, StreamEventStream};
 
+/// Maximum time to wait for provider response headers on each attempt.
+///
+/// The shared HTTP client retains its longer total request timeout so an
+/// already-open model stream can continue producing a legitimate long answer.
+pub const DEFAULT_STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Configuration for stream retry behavior.
 #[derive(Clone, Debug)]
 pub struct StreamRetryConfig {
@@ -32,6 +40,8 @@ pub struct StreamRetryConfig {
     pub retry: RetryConfig,
     /// Whether to emit [`StreamEvent::Retry`] events before each retry.
     pub emit_retry_events: bool,
+    /// Maximum time allowed for one provider stream-opening attempt.
+    pub stream_open_timeout: Duration,
     /// Cancellation token for aborting retries.
     pub cancel_token: Option<CancellationToken>,
 }
@@ -41,6 +51,7 @@ impl Default for StreamRetryConfig {
         Self {
             retry: RetryConfig::default(),
             emit_retry_events: true,
+            stream_open_timeout: DEFAULT_STREAM_OPEN_TIMEOUT,
             cancel_token: None,
         }
     }
@@ -87,7 +98,21 @@ pub fn with_provider_retry(
         let mut has_yielded = false;
 
         loop {
-            let stream_result: Result<StreamEventStream, ProviderError> = factory().await;
+            let open_stream = tokio::time::timeout(config.stream_open_timeout, factory());
+            let stream_result: Result<StreamEventStream, ProviderError> =
+                if let Some(ref token) = config.cancel_token {
+                    tokio::select! {
+                        biased;
+                        () = token.cancelled() => Err(ProviderError::Cancelled),
+                        result = open_stream => {
+                            result.unwrap_or_else(|_| Err(ProviderError::stream_open_timeout(config.stream_open_timeout)))
+                        }
+                    }
+                } else {
+                    open_stream
+                        .await
+                        .unwrap_or_else(|_| Err(ProviderError::stream_open_timeout(config.stream_open_timeout)))
+                };
             match stream_result {
                 Ok(inner) => {
                     let mut inner = std::pin::pin!(inner);
@@ -252,6 +277,7 @@ mod tests {
                 jitter_factor: 0.0,
             },
             emit_retry_events: true,
+            stream_open_timeout: Duration::from_secs(1),
             cancel_token: None,
         }
     }
@@ -301,6 +327,7 @@ mod tests {
                 jitter_factor: 0.0,
             },
             emit_retry_events: true,
+            stream_open_timeout: Duration::from_secs(1),
             cancel_token: None,
         };
 
@@ -340,6 +367,7 @@ mod tests {
                 jitter_factor: 0.0,
             },
             emit_retry_events: false,
+            stream_open_timeout: Duration::from_secs(1),
             cancel_token: None,
         };
 
@@ -368,6 +396,7 @@ mod tests {
                 jitter_factor: 0.0,
             },
             emit_retry_events: true,
+            stream_open_timeout: Duration::from_secs(1),
             cancel_token: Some(token),
         };
 
@@ -437,6 +466,7 @@ mod tests {
                 jitter_factor: 0.0,
             },
             emit_retry_events: true,
+            stream_open_timeout: Duration::from_secs(1),
             cancel_token: None,
         };
 
@@ -496,6 +526,7 @@ mod tests {
                 jitter_factor: 0.0,
             },
             emit_retry_events: true,
+            stream_open_timeout: Duration::from_secs(1),
             cancel_token: None,
         };
 
@@ -533,5 +564,69 @@ mod tests {
             .filter(|e| matches!(e, Ok(StreamEvent::Done { .. })))
             .count();
         assert_eq!(done_count, 1);
+    }
+
+    #[tokio::test]
+    async fn retry_recovers_from_stream_open_timeout() {
+        let attempts = Arc::new(AtomicU32::new(0));
+        let attempts_for_factory = attempts.clone();
+        let factory: StreamFactory = Box::new(move || {
+            let attempts = attempts_for_factory.clone();
+            Box::pin(async move {
+                if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    std::future::pending::<()>().await;
+                    unreachable!();
+                }
+                let stream = futures::stream::iter(vec![Ok(StreamEvent::Done {
+                    message: AssistantMessage {
+                        content: vec![],
+                        token_usage: None,
+                    },
+                    stop_reason: "end_turn".to_owned(),
+                })]);
+                Ok(Box::pin(stream) as StreamEventStream)
+            })
+        });
+        let mut config = quick_retry_config();
+        config.stream_open_timeout = Duration::from_millis(5);
+
+        let events: Vec<_> = with_provider_retry(factory, config).collect().await;
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Ok(StreamEvent::Retry { error, .. })
+                if error.category == "network"
+                    && error.message.contains("did not open within 5ms")
+        )));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Ok(StreamEvent::Done { .. })))
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_interrupts_hung_stream_open() {
+        let token = CancellationToken::new();
+        let cancel = token.clone();
+        let factory: StreamFactory = Box::new(|| {
+            Box::pin(async {
+                std::future::pending::<()>().await;
+                unreachable!()
+            })
+        });
+        let mut config = quick_retry_config();
+        config.stream_open_timeout = Duration::from_secs(60);
+        config.cancel_token = Some(token);
+        let stream = with_provider_retry(factory, config);
+        tokio::pin!(stream);
+
+        cancel.cancel();
+        let event = tokio::time::timeout(Duration::from_millis(50), stream.next())
+            .await
+            .expect("cancellation should not wait for the opening deadline");
+
+        assert!(matches!(event, Some(Err(ProviderError::Cancelled))));
     }
 }

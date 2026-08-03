@@ -11,8 +11,7 @@ final class AssistantMessagePayloadTests: XCTestCase {
         content: AnyCodable,
         turn: Int = 1,
         model: String = "claude-sonnet-4",
-        stopReason: String = "end_turn",
-        providerType: String? = nil
+        stopReason: String = "end_turn"
     ) -> [String: AnyCodable] {
         var payload: [String: AnyCodable] = [
             "content": content,
@@ -20,9 +19,6 @@ final class AssistantMessagePayloadTests: XCTestCase {
             "model": AnyCodable(model),
             "stopReason": AnyCodable(stopReason)
         ]
-        if let providerType {
-            payload["providerType"] = AnyCodable(providerType)
-        }
         return payload
     }
 
@@ -38,31 +34,98 @@ final class AssistantMessagePayloadTests: XCTestCase {
         XCTAssertEqual(parsed?.contentBlocks[0]["text"] as? String, "Hello world")
     }
 
-    func testTextWithoutCapabilitiesIsEligibleForFinalResponsePresentation() {
+    func testParsesDeliveryOnlyContinuationProvenance() {
+        var payload = validPayload(content: AnyCodable([
+            ["type": "text", "text": "The worker finished."] as [String: Any]
+        ] as [[String: Any]]))
+        payload["agentDeliveryContinuation"] = AnyCodable([
+            "deliveries": [
+                [
+                    "deliveryId": "delivery-1",
+                    "sourceKind": "worker_result",
+                    "sourceWorkerId": "research-worker",
+                    "sourceWorkerName": "Research Specialist",
+                    "sourceSessionId": "session-source",
+                    "sourceInvocationId": "worker-run-1",
+                    "wakePolicy": "wake",
+                    "boundary": "next_run",
+                    "triggeredWake": true,
+                    "redelivery": true,
+                    "includedInThisTurn": false
+                ] as [String: Any]
+            ]
+        ] as [String: Any])
+
+        let parsed = AssistantMessagePayload(from: payload)
+
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.count, 1)
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.deliveryId, "delivery-1")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.sourceKind, "worker_result")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.sourceWorkerId, "research-worker")
+        XCTAssertEqual(
+            parsed?.agentDeliveryProvenance.first?.sourceWorkerName,
+            "Research Specialist"
+        )
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.sourceInvocationId, "worker-run-1")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.wakePolicy, "wake")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.boundary, "next_run")
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.triggeredWake, true)
+        XCTAssertEqual(parsed?.agentDeliveryProvenance.first?.redelivery, true)
+        XCTAssertEqual(
+            parsed?.agentDeliveryProvenance.first?.includedInThisTurn,
+            false
+        )
+    }
+
+    func testLegacyDeliveryContinuationStillDecodesWithoutNewPresentationMetadata() {
+        var payload = validPayload(content: AnyCodable([
+            ["type": "text", "text": "A prior update was included."] as [String: Any]
+        ] as [[String: Any]]))
+        payload["agentDeliveryContinuation"] = AnyCodable([
+            "deliveries": [[
+                "deliveryId": "delivery-legacy",
+                "sourceKind": "worker_result",
+                "redelivery": false
+            ] as [String: Any]]
+        ] as [String: Any])
+
+        let parsed = AssistantMessagePayload(from: payload)
+        let provenance = parsed?.agentDeliveryProvenance.first
+
+        XCTAssertEqual(provenance?.deliveryId, "delivery-legacy")
+        XCTAssertNil(provenance?.sourceWorkerId)
+        XCTAssertNil(provenance?.sourceWorkerName)
+        XCTAssertNil(provenance?.wakePolicy)
+        XCTAssertNil(provenance?.boundary)
+        XCTAssertNil(provenance?.triggeredWake)
+        XCTAssertNil(provenance?.includedInThisTurn)
+    }
+
+    func testTextWithoutToolsIsEligibleForFinalResponsePresentation() {
         let payload = validPayload(content: AnyCodable([
             ["type": "text", "text": "Final response"] as [String: Any]
         ] as [[String: Any]]), stopReason: "provider_specific_reason")
 
         let parsed = AssistantMessagePayload(from: payload)
 
-        XCTAssertEqual(parsed?.hasCapabilityInvocations, false)
+        XCTAssertEqual(parsed?.hasToolInvocations, false)
         XCTAssertEqual(parsed?.isFinalAssistantResponse, true)
     }
 
-    func testCapabilityBearingTextIsIneligibleRegardlessOfStopReason() {
+    func testToolBearingTextIsIneligibleRegardlessOfStopReason() {
         let payload = validPayload(content: AnyCodable([
             ["type": "text", "text": "I will inspect that"] as [String: Any],
             [
-                "type": "capability_invocation",
+                "type": "tool_invocation",
                 "id": "call-1",
-                "name": "execute",
+                "name": "process_run",
                 "input": ["command": "true"]
             ] as [String: Any]
         ] as [[String: Any]]), stopReason: "end_turn")
 
         let parsed = AssistantMessagePayload(from: payload)
 
-        XCTAssertEqual(parsed?.hasCapabilityInvocations, true)
+        XCTAssertEqual(parsed?.hasToolInvocations, true)
         XCTAssertEqual(parsed?.isFinalAssistantResponse, false)
     }
 
@@ -119,17 +182,6 @@ final class AssistantMessagePayloadTests: XCTestCase {
         XCTAssertEqual(parsed?.turn, 3)
     }
 
-    func testParsesProviderTypeWhenPresent() {
-        let payload = validPayload(
-            content: AnyCodable([[String: Any]]()),
-            providerType: "openai"
-        )
-
-        let parsed = AssistantMessagePayload(from: payload)
-
-        XCTAssertEqual(parsed?.providerType, "openai")
-    }
-
     func testMissingTurnFailsDecode() {
         // `turn` is non-optional on the Rust payload.
         let payload: [String: AnyCodable] = [
@@ -165,7 +217,7 @@ final class AssistantMessagePayloadTests: XCTestCase {
 final class ThinkingCompletePayloadTests: XCTestCase {
     func testReasoningSummaryUsesThinkingDisplayTitle() {
         XCTAssertEqual(ThinkingDisplayKind.thinking.title, "Thinking")
-        XCTAssertEqual(ThinkingDisplayKind.reasoningSummary.title, "Thinking")
+        XCTAssertEqual(ThinkingDisplayKind.reasoningSummary.title, "Reasoning Summary")
     }
 
     func testToDictionaryPersistsReasoningSummaryKind() {

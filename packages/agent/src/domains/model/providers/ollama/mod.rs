@@ -1,7 +1,8 @@
 //! Ollama provider — local LLM inference via Ollama's native `/api/chat` endpoint.
 //!
-//! Ollama runs locally and requires no authentication. Models: Gemma 4 family
-//! (E4B validation, 26B MoE production). Supports thinking, tool calling, and vision.
+//! Ollama runs locally or at a user-configured endpoint and requires no Tron
+//! credential. Installed models are discovered dynamically; `/api/show`
+//! evidence controls tools, thinking, vision, audio, and context metadata.
 //!
 //! # Why native API, not OpenAI-compatible?
 //!
@@ -21,12 +22,17 @@
 //!
 //! ## Submodules
 //!
-//! - [`types`] — Config, model registry, availability checking
+//! - [`types`] — Config, built-in Gemma metadata, and the live metadata cache
+//! - [`discovery`] — Configured-endpoint `/api/tags` and `/api/show` discovery
 //! - [`message_converter`] — Tron messages → Ollama native `/api/chat` format
 //! - [`stream_handler`] — NDJSON chunk parsing → unified `StreamEvent`s ([`crate::shared::protocol::events`])
 //! - [`provider`] — `OllamaProvider` implementing the shared `Provider` trait ([`crate::domains::model::providers::shared::provider`])
 
+pub mod discovery;
 pub mod message_converter;
 pub mod provider;
 pub mod stream_handler;
 pub mod types;
+
+#[cfg(test)]
+mod live_tests;

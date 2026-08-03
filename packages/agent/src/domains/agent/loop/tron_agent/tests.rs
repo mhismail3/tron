@@ -6,7 +6,7 @@ use crate::domains::model::responder::{
 };
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, StreamEvent, TronEvent};
-use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message, TokenUsage};
+use crate::shared::protocol::messages::{Message, TokenUsage, ToolResultMessageContent};
 use async_trait::async_trait;
 use futures::stream;
 use parking_lot::Mutex;
@@ -75,13 +75,70 @@ impl ModelResponder for TokenUsageResponder {
     }
 }
 
-struct PrimitiveExecuteLoopResponder {
+struct DirectWorkerListLoopResponder {
     calls: Arc<AtomicUsize>,
     observed_result: Arc<Mutex<Option<String>>>,
 }
 
+struct OrdinarySurfaceResponder {
+    calls: Arc<AtomicUsize>,
+}
+
 #[async_trait]
-impl ModelResponder for PrimitiveExecuteLoopResponder {
+impl ModelResponder for OrdinarySurfaceResponder {
+    fn info(&self) -> ModelResponderInfo {
+        test_responder_info()
+    }
+
+    async fn respond(
+        &self,
+        request: ModelResponseRequest,
+    ) -> Result<ModelResponse, ModelResponseError> {
+        let names = request
+            .context
+            .tools
+            .as_ref()
+            .expect("provider tools")
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(self.calls.fetch_add(1, Ordering::SeqCst), 0);
+        assert_eq!(names.len(), 16, "{names:?}");
+        assert!(names.contains(&"worker_discover"), "{names:?}");
+        assert!(names.contains(&"worker_invoke"), "{names:?}");
+        for hidden in [
+            "worker_upsert",
+            "worker_list",
+            "worker_inspect",
+            "worker_purge",
+            "worker_webhook_rotate",
+            "worker_stop_all",
+        ] {
+            assert!(!names.contains(&hidden), "{hidden} leaked into {names:?}");
+        }
+        let system_prompt = request.context.system_prompt.as_deref().unwrap_or_default();
+        assert!(system_prompt.contains("Worker Forge"), "{system_prompt}");
+        assert!(system_prompt.contains("Engine Steward"), "{system_prompt}");
+        Ok(model_response(vec![
+            Ok(StreamEvent::Start),
+            Ok(StreamEvent::TextDelta {
+                delta: "Ordinary chat retained a small fixed surface.".to_owned(),
+            }),
+            Ok(StreamEvent::Done {
+                message: AssistantMessage {
+                    content: vec![AssistantContent::text(
+                        "Ordinary chat retained a small fixed surface.",
+                    )],
+                    token_usage: None,
+                },
+                stop_reason: "end_turn".to_owned(),
+            }),
+        ]))
+    }
+}
+
+#[async_trait]
+impl ModelResponder for DirectWorkerListLoopResponder {
     fn info(&self) -> ModelResponderInfo {
         test_responder_info()
     }
@@ -91,47 +148,44 @@ impl ModelResponder for PrimitiveExecuteLoopResponder {
         request: ModelResponseRequest,
     ) -> Result<ModelResponse, ModelResponseError> {
         let context = &request.context;
-        let capability_names = context
-            .capabilities
+        let tool_names = context
+            .tools
             .as_ref()
-            .expect("provider capabilities")
+            .expect("provider tools")
             .iter()
-            .map(|capability| capability.name.as_str())
+            .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(capability_names, ["execute"]);
+        assert!(tool_names.contains(&"worker_discover"), "{tool_names:?}");
 
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         if call == 0 {
-            let mut arguments = serde_json::Map::new();
-            let _ = arguments.insert("operation".into(), serde_json::json!("observe"));
-            let _ = arguments.insert(
-                "input".into(),
-                serde_json::json!("primitive loop observed through execute"),
-            );
+            let arguments = serde_json::Map::from_iter([(
+                "query".to_owned(),
+                serde_json::json!("worker inventory"),
+            )]);
             let events = vec![
                 Ok(StreamEvent::Start),
-                Ok(StreamEvent::CapabilityInvocationDraftStart {
+                Ok(StreamEvent::ToolInvocationDraftStart {
                     invocation_id: "tc-primitive-observe".into(),
-                    name: "execute".into(),
+                    name: "worker_discover".into(),
                 }),
-                Ok(StreamEvent::CapabilityInvocationDraftDelta {
+                Ok(StreamEvent::ToolInvocationDraftDelta {
                     invocation_id: "tc-primitive-observe".into(),
                     arguments_delta: serde_json::to_string(&arguments).expect("arguments json"),
                 }),
-                Ok(StreamEvent::CapabilityInvocationDraftEnd {
-                    capability_invocation:
-                        crate::shared::protocol::messages::CapabilityInvocationDraft::new(
-                            "tc-primitive-observe",
-                            "execute",
-                            arguments,
-                        ),
+                Ok(StreamEvent::ToolInvocationDraftEnd {
+                    tool_invocation: crate::shared::protocol::messages::ToolInvocationDraft::new(
+                        "tc-primitive-observe",
+                        "worker_discover",
+                        arguments,
+                    ),
                 }),
                 Ok(StreamEvent::Done {
                     message: AssistantMessage {
                         content: vec![],
                         token_usage: None,
                     },
-                    stop_reason: "capability_invocation".into(),
+                    stop_reason: "tool_invocation".into(),
                 }),
             ];
             return Ok(model_response(events));
@@ -141,20 +195,20 @@ impl ModelResponder for PrimitiveExecuteLoopResponder {
             .messages
             .iter()
             .find_map(|message| match message {
-                Message::CapabilityResult {
+                Message::ToolResult {
                     invocation_id,
                     content,
                     ..
                 } if invocation_id == "tc-primitive-observe" => match content {
-                    CapabilityResultMessageContent::Text(text) => Some(text.clone()),
-                    CapabilityResultMessageContent::Blocks(blocks) => Some(
+                    ToolResultMessageContent::Text(text) => Some(text.clone()),
+                    ToolResultMessageContent::Blocks(blocks) => Some(
                         blocks
                             .iter()
                             .filter_map(|block| match block {
-                                crate::shared::protocol::content::CapabilityResultContent::Text { text } => {
-                                    Some(text.as_str())
-                                }
-                                crate::shared::protocol::content::CapabilityResultContent::Image {
+                                crate::shared::protocol::content::ToolResultContent::Text {
+                                    text,
+                                } => Some(text.as_str()),
+                                crate::shared::protocol::content::ToolResultContent::Image {
                                     ..
                                 } => None,
                             })
@@ -164,21 +218,18 @@ impl ModelResponder for PrimitiveExecuteLoopResponder {
                 },
                 _ => None,
             })
-            .expect("execute result should be in second provider context");
-        assert!(
-            observed.contains("primitive loop observed through execute"),
-            "{observed}"
-        );
+            .expect("worker_discover result should be in second provider context");
+        assert!(observed.contains("workers"), "{observed}");
         *self.observed_result.lock() = Some(observed);
 
         let events = vec![
             Ok(StreamEvent::Start),
             Ok(StreamEvent::TextDelta {
-                delta: "continued after execute".into(),
+                delta: "continued after direct worker tool".into(),
             }),
             Ok(StreamEvent::Done {
                 message: AssistantMessage {
-                    content: vec![AssistantContent::text("continued after execute")],
+                    content: vec![AssistantContent::text("continued after direct worker tool")],
                     token_usage: None,
                 },
                 stop_reason: "end_turn".into(),
@@ -204,12 +255,10 @@ fn model_response(events: Vec<Result<StreamEvent, ModelResponseError>>) -> Model
     }
 }
 
-fn test_context_manager(model: &str) -> ContextManager {
+fn test_context_manager() -> ContextManager {
     ContextManager::new(ContextManagerConfig {
-        model: model.to_owned(),
         system_prompt: Some("You are a test agent.".into()),
         working_directory: Some("/tmp".into()),
-        capabilities: vec![],
         compaction: crate::domains::agent::context::types::CompactionConfig::default(),
     })
 }
@@ -220,7 +269,7 @@ fn make_deps_with_host(
 ) -> AgentDeps {
     AgentDeps {
         responder: Arc::new(responder),
-        context_manager: test_context_manager("mock-model"),
+        context_manager: test_context_manager(),
         compaction_trigger_config:
             crate::domains::agent::context::types::CompactionTriggerConfig::default(),
         invocation_abort_registry: Arc::new(InvocationAbortRegistry::new()),
@@ -242,18 +291,8 @@ fn make_primitive_loop_deps(
     make_deps_with_host(responder, engine_host)
 }
 
-#[test]
-fn agent_uses_empty_initial_capability_snapshot() {
-    let agent = TronAgent::new(
-        AgentConfig::default(),
-        make_deps(MockResponder),
-        "empty-capability-snapshot-session".into(),
-    );
-    assert!(agent.context_manager().model_capability_names().is_empty());
-}
-
 #[tokio::test]
-async fn text_only_run_succeeds_without_frozen_capabilities() {
+async fn text_only_run_succeeds_without_frozen_tools() {
     let mut agent = TronAgent::new(
         AgentConfig {
             max_turns: 1,
@@ -276,7 +315,7 @@ async fn text_only_run_succeeds_without_frozen_capabilities() {
 }
 
 #[tokio::test]
-async fn primitive_loop_calls_execute_observes_result_and_continues() {
+async fn primitive_loop_calls_direct_worker_tool_observes_result_and_continues() {
     let calls = Arc::new(AtomicUsize::new(0));
     let observed_result = Arc::new(Mutex::new(None));
     let ctx = crate::shared::server::test_support::make_test_context();
@@ -286,7 +325,7 @@ async fn primitive_loop_calls_execute_observes_result_and_continues() {
             ..AgentConfig::default()
         },
         make_primitive_loop_deps(
-            PrimitiveExecuteLoopResponder {
+            DirectWorkerListLoopResponder {
                 calls: calls.clone(),
                 observed_result: observed_result.clone(),
             },
@@ -296,7 +335,7 @@ async fn primitive_loop_calls_execute_observes_result_and_continues() {
     );
     let result = agent
         .run(
-            "call execute and continue",
+            "list workers and continue",
             crate::domains::agent::r#loop::types::RunContext {
                 run_id: Some("primitive-loop-run".into()),
                 ..Default::default()
@@ -315,12 +354,89 @@ async fn primitive_loop_calls_execute_observes_result_and_continues() {
         observed_result
             .lock()
             .as_ref()
-            .is_some_and(|text| text.contains("primitive loop observed through execute"))
+            .is_some_and(|text| text.contains("workers"))
     );
 
     let persisted_messages =
         serde_json::to_string(&agent.context_manager().get_messages()).expect("messages");
-    assert!(persisted_messages.contains("continued after execute"));
+    assert!(persisted_messages.contains("continued after direct worker tool"));
+}
+
+#[tokio::test]
+async fn max_turn_exhaustion_reports_execution_error_before_result_validation() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let mut agent = TronAgent::new(
+        AgentConfig {
+            max_turns: 1,
+            ..AgentConfig::default()
+        },
+        make_primitive_loop_deps(
+            DirectWorkerListLoopResponder {
+                calls: calls.clone(),
+                observed_result: Arc::new(Mutex::new(None)),
+            },
+            ctx.engine_host.clone(),
+        ),
+        "max-turn-exhaustion-session".into(),
+    );
+
+    let result = agent
+        .run(
+            "keep using tools without producing a terminal response",
+            crate::domains::agent::r#loop::types::RunContext {
+                run_id: Some("max-turn-exhaustion-run".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert_eq!(result.stop_reason, StopReason::MaxTurns);
+    assert_eq!(result.turns_executed, 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        result.error.as_deref(),
+        Some("Agent exhausted the maximum of 1 turns without producing a terminal response")
+    );
+}
+
+#[tokio::test]
+async fn ordinary_chat_keeps_admin_tools_hidden_and_routes_to_worker_owners() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let mut agent = TronAgent::new(
+        AgentConfig {
+            max_turns: 1,
+            ..AgentConfig::default()
+        },
+        make_primitive_loop_deps(
+            OrdinarySurfaceResponder {
+                calls: Arc::clone(&calls),
+            },
+            ctx.engine_host.clone(),
+        ),
+        "proactive-adaptation-session".into(),
+    );
+
+    let result = agent
+        .run(
+            "Explain how I can inspect and improve one of my workers.",
+            crate::domains::agent::r#loop::types::RunContext {
+                run_id: Some("proactive-adaptation-run".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert!(
+        result.error.is_none(),
+        "agent run failed: {:?}",
+        result.error
+    );
+    assert_eq!(result.turns_executed, 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let messages = serde_json::to_string(&agent.context_manager().get_messages()).unwrap();
+    assert!(messages.contains("small fixed surface"));
 }
 
 #[tokio::test]

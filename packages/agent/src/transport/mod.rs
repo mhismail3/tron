@@ -1,6 +1,6 @@
 //! # Transport
 //!
-//! Thin client-facing transports over the canonical engine capability fabric.
+//! Thin client-facing transports over the canonical engine tool fabric.
 //!
 //! Transports own protocol framing, method existence, depth limits, timeout
 //! policy, metrics, subscription cursor state, and wire error sanitization.
@@ -10,17 +10,20 @@
 //! replay/catch-up and stateless stream polling require explicit stored
 //! cursors. `/engine` keeps subscription ids and acknowledged cursors local to
 //! the owning socket; it does not project transient connection state into the
-//! durable subscription store. The engine applies visibility before stream pagination so a
+//! durable engine database. The engine applies visibility before stream pagination so a
 //! session-specific `/engine` subscriber cannot starve behind older events from
-//! other sessions.
+//! other sessions. Clients explicitly unsubscribe when a presentation or
+//! processing lease ends; removal is idempotent, and each connection has a
+//! fixed active-subscription ceiling so abandoned clients cannot create
+//! unbounded polling work. No durable subscription-record plane exists.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`http`] | HTTP-adjacent auth gate for WebSocket upgrades |
-//! | [`engine`] | `/engine` contracts, request routing, socket sessions, and stream cursors |
-//! | [`runtime`] | Runtime services, external-worker transport, stream projection, and setup |
+//! | [`engine`] | Direct `/engine` invocation routing, socket sessions, and stream cursors |
+//! | [`runtime`] | Runtime services, stream projection, and setup |
 //!
 //! ## Entry Points
 //!
@@ -31,11 +34,10 @@
 //! - [`engine::socket::run_engine_ws_session`] owns one live WebSocket session,
 //!   subscriptions, request/response writes, and socket closure.
 //! - [`runtime::setup::register_server_domains_for_runtime_context`] registers
-//!   retained domain workers and transport triggers during async app startup,
-//!   then activates domain lifecycle tasks.
+//!   canonical domain functions during async app startup, then activates
+//!   domain lifecycle tasks.
 //! - [`runtime::setup::register_server_domains_for_context`] remains the
 //!   single-threaded setup/test fixture entrypoint with the same ordering.
-//! - [`runtime::EngineRuntimeServices::start`] launches retained runtime pumps.
 //!
 //! ## Invariants
 //!
@@ -52,20 +54,21 @@
 //!   remain stranded after task cancellation.
 //! - Transport must not implement domain behavior or call handler-shaped
 //!   shortcuts; it dispatches canonical engine requests only.
-//! - `/engine/workers` is loopback/local external-worker transport; registration
-//!   and invocation authority still live in the engine runtime. Every upgraded
-//!   worker socket is shutdown-owned before upgrade completion; shutdown closes
-//!   outbound admission, drains pending calls, retires runtime state, and joins
-//!   the writer before reporting the session complete.
+//! - Worker webhooks are loopback-only and independently authenticated with
+//!   rotatable per-trigger tokens. Persistent worker execution never enters a
+//!   parallel transport-owned lifecycle.
 //! - Live subscriptions without explicit cursors start at the topic tail; stored
 //!   replay requires explicit cursors.
+//! - Subscribe/unsubscribe state remains connection-local. Unsubscribe is
+//!   idempotent, and one connection cannot exceed the fixed active-subscription
+//!   ceiling.
 //!
 //! ## Test Ownership
 //!
 //! Socket/session behavior lives under `transport/engine/socket/tests.rs`.
-//! Runtime stream/external-worker behavior lives under the corresponding
-//! `transport/runtime/*/tests` module. Protocol parity and removed-surface
-//! assertions belong in the static integration targets under
+//! Runtime stream behavior lives under the corresponding transport tests.
+//! Protocol parity and architectural boundary assertions belong in the
+//! integration targets under
 //! `packages/agent/tests/`.
 
 pub mod engine;

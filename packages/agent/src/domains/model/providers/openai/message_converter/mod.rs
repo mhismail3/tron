@@ -1,36 +1,33 @@
 //! # `OpenAI` Message Converter
 //!
 //! Converts between Tron message format and `OpenAI` Responses API format.
-//! Handles capability invocation ID remapping for cross-provider DTO parity.
+//! Handles tool invocation ID remapping for cross-provider DTO parity.
 //!
 //! Key behaviors:
 //! - User messages → `input_text` / `input_image` content
 //! - Assistant text → `output_text` content
-//! - Capability invocations → `function_call` items with remapped IDs
-//! - Capability results → byte-preserved `function_call_output` items
+//! - Tool invocations → `function_call` items with remapped IDs
+//! - Tool results → byte-preserved `function_call_output` items
 //! - Documents → placeholder text (`OpenAI` doesn't support documents directly)
 
-use crate::domains::capability::operation_list_text;
 use crate::domains::model::providers::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
-use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent, UserContent};
-use crate::shared::protocol::messages::{
-    CapabilityResultMessageContent, Message, UserMessageContent,
-};
-use crate::shared::protocol::model_capabilities::ModelCapability;
+use crate::shared::protocol::content::{AssistantContent, ToolResultContent, UserContent};
+use crate::shared::protocol::messages::{Message, ToolResultMessageContent, UserMessageContent};
+use crate::shared::protocol::model_tools::ModelTool;
 
 use super::types::{MessageContent, ResponsesInputItem, ResponsesToolEntry};
 
 /// Convert Tron messages to Responses API input format.
 ///
-/// Capability invocation IDs from other providers (e.g., Anthropic's `toolu_` prefix)
+/// Tool invocation IDs from other providers (e.g., Anthropic's `toolu_` prefix)
 /// are remapped to `OpenAI`-compatible `call_` format for cross-provider support.
 #[must_use]
 pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputItem> {
     let mut input = Vec::new();
 
-    // Build capability invocation ID mapping for cross-provider switching
+    // Build tool invocation ID mapping for cross-provider switching
     let all_invocation_ids = collect_invocation_ids(messages);
     let id_refs: Vec<&str> = all_invocation_ids.iter().map(String::as_str).collect();
     let id_mapping = build_invocation_id_mapping(&id_refs, IdFormat::OpenAi);
@@ -43,12 +40,12 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
             Message::Assistant { content, .. } => {
                 convert_assistant_message(content, &id_mapping, &mut input);
             }
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id,
                 content,
                 ..
             } => {
-                convert_capability_result(invocation_id, content, &id_mapping, &mut input);
+                convert_tool_result(invocation_id, content, &id_mapping, &mut input);
             }
         }
     }
@@ -56,14 +53,14 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
     input
 }
 
-/// Convert Tron capabilities to Responses API tool entries.
+/// Convert Tron tools to Responses API tool entries.
 ///
 /// The primitive branch always exports concrete function entries. Hosted
 /// tool-search/deferred loading is intentionally ignored so provider requests
-/// match the single checked-in `execute` surface.
+/// match the live direct kernel and worker surface.
 #[must_use]
-pub fn convert_tools_v2(capabilities: &[ModelCapability]) -> Vec<ResponsesToolEntry> {
-    capabilities
+pub fn convert_tools_v2(tools: &[ModelTool]) -> Vec<ResponsesToolEntry> {
+    tools
         .iter()
         .map(|t| {
             let schema = serde_json::to_value(&t.parameters).unwrap_or_default();
@@ -103,77 +100,17 @@ pub fn normalize_schema_for_openai(schema: &serde_json::Value) -> serde_json::Va
     }
 }
 
-/// Generate provider instruction text for the single `execute` primitive.
-///
-/// Since `OpenAI` Codex has its own built-in system instructions that reference
-/// capabilities we don't use (shell, `apply_patch`, etc.), this text clarifies
-/// the actual available capability surface in the request instructions.
-#[must_use]
-pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) -> String {
-    let tool_descriptions: Vec<String> = capabilities
-        .iter()
-        .map(|t| {
-            let required = serde_json::to_value(&t.parameters)
-                .ok()
-                .and_then(|v| v.get("required").cloned())
-                .and_then(|v| {
-                    v.as_array().map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                })
-                .unwrap_or_else(|| "none".into());
-            format!(
-                "- **{}**: {} (required params: {required})",
-                t.name, t.description
-            )
-        })
-        .collect();
-
-    format!(
-        "[TRON CONTEXT]\n\
-        You are Tron, an AI coding assistant running in Tron's primitive loop.\n\
-        \n\
-        ## Available Primitive\n\
-        Use only `capability::execute` (the model-facing `execute` tool):\n\
-        \n\
-        {tool_list}\n\
-        \n\
-        ## Schema-Led Execution\n\
-        Canonical operation index (generated from engine contracts; discovery only): {operation_list}.\n\
-        1. Use one operation per call and put its fields at the top level. Do not invoke from the \
-        index alone.\n\
-        2. Never guess operation names. Run `catalog_search`, then `catalog_inspect` with \
-        `kind: \"function\"` and the exact `id: \"execute::<operation>\"` before invoking the selected operation.\n\
-        3. The canonical inspect schema owns the exact required fields, effect, risk, preflight, \
-        and output contract. Every non-read-only schema structurally requires a stable, \
-        caller-supplied `idempotencyKey`.\n\
-        4. Use exact refs and selectors returned by catalog and operation outputs; do not infer \
-        alternate names, wildcard selectors, or resource identifiers.\n\
-        5. Normal task invocation must not enter a capability replacement workflow unless the user \
-        explicitly requests replacement.\n\
-        6. If a call is invalid or unsupported, recover by catalog inspection: run `catalog_search`, \
-        inspect the exact `execute::<operation>` contract, and do not retry guessed variants.\n\
-        7. Provider-safe outputs are the model-first evidence path. Continue and answer from those \
-        projections instead of bypassing them for raw internal state.",
-        tool_list = tool_descriptions.join("\n"),
-        operation_list = operation_list_text(),
-    )
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Collect all capability invocation IDs from assistant messages.
+/// Collect all tool invocation IDs from assistant messages.
 fn collect_invocation_ids(messages: &[Message]) -> Vec<String> {
     let mut ids = Vec::new();
     for msg in messages {
         if let Message::Assistant { content, .. } = msg {
             for block in content {
-                if let AssistantContent::CapabilityInvocation { id, .. } = block {
+                if let AssistantContent::ToolInvocation { id, .. } = block {
                     ids.push(id.clone());
                 }
             }
@@ -257,9 +194,9 @@ fn convert_assistant_message(
         });
     }
 
-    // Convert capability invocations to function_call items
+    // Convert tool invocations to function_call items
     for block in content {
-        if let AssistantContent::CapabilityInvocation {
+        if let AssistantContent::ToolInvocation {
             id,
             name,
             arguments,
@@ -277,19 +214,19 @@ fn convert_assistant_message(
     }
 }
 
-/// Convert a capability result to a Responses API `function_call_output` item.
-fn convert_capability_result(
+/// Convert a tool result to a Responses API `function_call_output` item.
+fn convert_tool_result(
     invocation_id: &str,
-    content: &CapabilityResultMessageContent,
+    content: &ToolResultMessageContent,
     id_mapping: &std::collections::HashMap<String, String>,
     input: &mut Vec<ResponsesInputItem>,
 ) {
     let output_text = match content {
-        CapabilityResultMessageContent::Text(text) => text.clone(),
-        CapabilityResultMessageContent::Blocks(blocks) => blocks
+        ToolResultMessageContent::Text(text) => text.clone(),
+        ToolResultMessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|block| {
-                if let CapabilityResultContent::Text { text } = block {
+                if let ToolResultContent::Text { text } = block {
                     Some(text.as_str())
                 } else {
                     None

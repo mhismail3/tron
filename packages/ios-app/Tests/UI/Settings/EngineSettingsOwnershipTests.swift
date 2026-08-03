@@ -20,12 +20,16 @@ struct EngineSettingsOwnershipTests {
         #expect(MainSettingsGridDestination.order == [
             .engine,
             .providers,
+            .artifacts,
             .app,
+            .logs,
         ])
         #expect(MainSettingsGridDestination.order.map(\.description) == [
             "Servers, session defaults, context",
             "OAuth and API keys",
-            "Appearance, notifications, behavior",
+            "Worker-created files",
+            "Appearance and behavior",
+            "Local diagnostics",
         ])
         #expect(MainSettingsGridDestination.engine.description.contains("transcription") == false)
         let deletedTitles = ["Hooks", "Extension Sources", "Git Workflow", "Mem" + "ory", "Ru" + "les"]
@@ -39,7 +43,6 @@ struct EngineSettingsOwnershipTests {
         #expect(EngineSettingsSection.allCases == [
             .defaults,
             .context,
-            .transcription,
         ])
     }
 
@@ -55,23 +58,42 @@ struct EngineSettingsOwnershipTests {
     @Test("main settings danger row exposes durable account actions")
     func mainSettingsDangerRowExposesDurableAccountActions() {
         #expect(SettingsDangerZoneAction.order == [
+            .stopAllWorkers,
             .archiveAllSessions,
             .resetAllSettings,
         ])
+        #expect(SettingsDangerZoneAction.stopAllWorkers.isEnabled(
+            hasSessions: false,
+            workerDispatchReady: true,
+            serverSettingsReady: false,
+            serverSettingsUnavailable: false,
+            isInProgress: false
+        ))
+        #expect(
+            SettingsDangerZoneAction.stopAllWorkers.displayTitle(workersStopped: false)
+                == "Stop All Workers"
+        )
+        #expect(
+            SettingsDangerZoneAction.stopAllWorkers.displayTitle(workersStopped: true)
+                == "Resume All Workers"
+        )
         #expect(SettingsDangerZoneAction.archiveAllSessions.isEnabled(
             hasSessions: true,
+            workerDispatchReady: false,
             serverSettingsReady: false,
             serverSettingsUnavailable: true,
             isInProgress: false
         ) == false)
         #expect(SettingsDangerZoneAction.archiveAllSessions.isEnabled(
             hasSessions: true,
+            workerDispatchReady: false,
             serverSettingsReady: false,
             serverSettingsUnavailable: false,
             isInProgress: false
         ))
         #expect(SettingsDangerZoneAction.resetAllSettings.isEnabled(
             hasSessions: false,
+            workerDispatchReady: false,
             serverSettingsReady: false,
             serverSettingsUnavailable: true,
             isInProgress: true

@@ -1,4 +1,4 @@
-//! Error types for the live capability engine.
+//! Error types for the live typed-function engine.
 
 /// Result alias for engine operations.
 pub type Result<T> = std::result::Result<T, EngineError>;
@@ -40,31 +40,6 @@ pub enum EngineError {
         owner: String,
         /// Attempted owner id.
         attempted_owner: String,
-    },
-
-    /// A worker tried to register outside its namespace claims.
-    #[error("worker {worker_id} cannot register function {function_id}; namespace is not claimed")]
-    NamespaceDenied {
-        /// Worker id.
-        worker_id: String,
-        /// Function id.
-        function_id: String,
-    },
-
-    /// A delivery mode is not implemented for execution in Phase 1.
-    #[error("delivery mode {mode} is not executable in phase 1")]
-    UnsupportedDeliveryMode {
-        /// Requested delivery mode.
-        mode: &'static str,
-    },
-
-    /// A delivery mode is not allowed by a definition.
-    #[error("delivery mode {mode} is not allowed for {function_id}")]
-    DeliveryModeNotAllowed {
-        /// Function id.
-        function_id: String,
-        /// Requested delivery mode.
-        mode: &'static str,
     },
 
     /// A duplicate idempotency key cannot be replayed safely.
@@ -120,31 +95,29 @@ pub enum EngineError {
         message: String,
     },
 
-    /// A visibility promotion is not allowed.
-    #[error("invalid visibility promotion for {function_id} to {target}: {reason}")]
-    InvalidVisibilityPromotion {
-        /// Function id.
+    /// A caller attempted to execute a function contract older or newer than
+    /// the exact contract it was previously shown.
+    #[error(
+        "stale function surface for {function_id}: advertised revision {expected_revision}, current revision {actual_revision}"
+    )]
+    StaleFunctionSurface {
+        /// Function selected from the advertised surface.
         function_id: String,
-        /// Requested visibility target.
-        target: String,
-        /// Rejection reason.
-        reason: String,
+        /// Revision shown to the caller.
+        expected_revision: u64,
+        /// Revision currently registered.
+        actual_revision: u64,
+        /// Immutable worker version shown to the caller, for projected workers.
+        expected_worker_version: Option<String>,
+        /// Immutable worker version currently registered, for projected workers.
+        actual_worker_version: Option<String>,
     },
 
     /// A registration or invocation violates engine policy.
     #[error("policy violation: {0}")]
     PolicyViolation(String),
 
-    /// A function is present but cannot currently be routed.
-    #[error("function {function_id} is not routable: {reason}")]
-    NotRoutable {
-        /// Function id.
-        function_id: String,
-        /// Reason it cannot be called.
-        reason: String,
-    },
-
-    /// A domain capability preserved its native error envelope.
+    /// A product domain preserved its native error envelope.
     #[error("domain {domain} failed with {code}: {message}")]
     DomainFailure {
         /// Domain namespace.
@@ -155,15 +128,6 @@ pub enum EngineError {
         message: String,
         /// Domain-specific structured details.
         details: Option<serde_json::Value>,
-    },
-
-    /// The transport to a worker failed before the engine received a function result.
-    #[error("worker transport failed with {code}: {message}")]
-    WorkerTransportFailure {
-        /// Stable transport failure code.
-        code: String,
-        /// Transport failure detail.
-        message: String,
     },
 
     /// A cooperative in-process invocation was cancelled while its handler ran.

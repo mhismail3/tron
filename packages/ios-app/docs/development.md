@@ -21,7 +21,13 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -versio
 ```
 
 Physical-device builds honor the same selection when `DEVELOPER_DIR` is passed
-to `scripts/tron-ios-beta`.
+to `scripts/tron-ios-device`.
+
+Codex variant selection is owned by the repository's `tron-ios` skill:
+simulator app-path work and hosted tests select `Tron Beta`; fast
+physical-device iteration selects `Tron Fast` / `ProdDebug`; an install handed
+to the user selects `Tron` / `Prod`. Physical Beta installs are exceptional and
+require an explicit user request.
 
 ### Project Generation
 
@@ -46,7 +52,7 @@ PNGs and the 100px README preview under `docs/assets/`:
 ```bash
 cd packages/ios-app
 bun install --frozen-lockfile
-bun scripts/generate-icons.mjs
+bun ../../scripts/generate-ios-icons.mjs
 ```
 
 The app renders the vector asset directly; no raster logo image set is bundled.
@@ -74,34 +80,58 @@ The iOS engine transport logs redacted connection diagnostics under the
 `[WebSocket]` category for each `/engine` upgrade: host/path, timeout budget,
 Authorization header presence, URLSession task metrics, HTTP upgrade status
 when available, and NSError domain/code/underlying details. Tokens and URL
-queries are not logged. When physical-device pairing fails, copy the
+queries are not logged. Frame and event diagnostics admit only route metadata
+and encoded byte counts; their logging APIs have no raw-payload argument.
+When physical-device pairing fails, copy the
 `[WebSocket]` lines from Xcode first; they should identify whether the failure
 is local-network permission, Tailscale reachability, HTTP auth, or engine
 protocol response handling.
+
+Transport lifecycle tests must cover replacement races, not only ordinary
+disconnects. A receive, heartbeat, send, completion, or verification callback
+from an old socket must be unable to retire the current generation; manual
+retry must install exactly one reconnect owner. Chat lifecycle tests likewise
+assert that leaving a mounted chat cancels presentation-owned work and releases
+its display link while preserving reconstructable stream state. Run these
+focused checks with the Beta simulator scheme:
+
+```bash
+xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EnginePendingRequestLifecycleTests -only-testing:TronMobileTests/WebSocketRequestTransportTests -only-testing:TronMobileTests/EngineConnectionReconnectTests -only-testing:TronMobileTests/TronLoggerSensitiveDataTests -only-testing:TronMobileTests/StreamingManagerTypewriterTests -only-testing:TronMobileTests/ChatViewModelLifecycleTests
+```
 
 ### Codex App Local Actions
 
 The repository includes `.codex/environments/environment.toml` for Codex app
 toolbar actions. `Dev Server` starts `scripts/tron dev -bdt` from the project
 root, and `Stop Dev Server` runs `scripts/tron dev --stop`.
-`Rebuild + Install + Launch iOS Beta on iPhone` and `Rebuild + Install + Launch
-iOS Beta on iPad` run `scripts/tron-ios-beta install` with generic device-name
-selectors; the helper regenerates the Xcode project, preflights the active
-Xcode toolchain, and builds `TronMobile.xcodeproj` directly from the authoritative
-`project.yml`; arbitrary local workspaces do not override that generated owner.
-It builds the `Tron Beta` scheme for a physical iOS destination, writes a full
-log plus `.xcresult` bundle, installs the resulting app bundle with
-`xcrun devicectl`, and launches the resolved bundle ID with a bounded `devicectl`
-launch timeout.
+`Rebuild + Install + Launch iOS Beta Simulator` and `Just Launch Installed iOS
+Beta Simulator` use `scripts/tron-ios-simulator`; Codex-owned simulator
+app-path work therefore keeps the persistent Beta bundle and pairing container.
+Physical-device actions use `scripts/tron-ios-device`, which regenerates the
+Xcode project, preflights the active Xcode toolchain, and builds
+`TronMobile.xcodeproj` directly from authoritative `project.yml`; arbitrary
+local workspaces do not override that generated owner. It writes a full log
+plus `.xcresult` bundle, installs through `xcrun devicectl`, and launches the
+resolved bundle ID with a bounded `devicectl` launch timeout.
+The `status` and `stop` commands match the full app executable while tolerating
+the trailing column padding emitted by `devicectl` process tables.
 When Xcode fails before compilation, the helper preserves project-level
 diagnostics as well as file-and-line compiler errors. Signing failures such as a
 missing Apple account or development certificate are therefore shown directly
 in the action output; repair those in Xcode's Apple Accounts settings, then run
 the same rebuild action again.
 `Rebuild + Install + Launch iOS Prod Fast Debug on iPhone` uses the same helper
-with `TRON_IOS_SCHEME='Tron Fast'` and `TRON_IOS_CONFIGURATION=ProdDebug`, so
-it builds the fast production-bundle app and launches it on the selected iPhone.
-`Rebuild + Install + Launch iOS Prod Release on iPhone` uses
+with `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`,
+`TRON_IOS_REQUIRED_SDK_MAJOR=27`, `TRON_IOS_SCHEME='Tron Fast'`, and
+`TRON_IOS_CONFIGURATION=ProdDebug`. It therefore builds the fast
+production-bundle app against the iOS 27 SDK and launches it on the selected
+iPhone. The helper fails before compilation if that selected Xcode no longer
+provides an iOS 27 SDK; it must never silently fall back to the system-selected
+iOS 26 SDK because SDK-linked SwiftUI behavior, including scroll-edge effects,
+would differ. The action prints both the Xcode version and selected iPhoneOS SDK
+before compiling so its toolchain is visible in the action log.
+`Rebuild + Install + Launch iOS Prod Release on iPhone` and the matching iPad
+action use
 `TRON_IOS_SCHEME=Tron` and
 `TRON_IOS_CONFIGURATION=Prod`, so it builds the optimized production app,
 installs the fresh product, and then launches it through the same helper.
@@ -110,11 +140,90 @@ product so stale Beta or Prod app bundles left in DerivedData cannot be launched
 by a different action.
 Production rebuild actions use the helper's sole rebuild command, `install`, so
 local source changes are compiled before the app is reinstalled.
-The matching `Just Launch Installed ...` actions run `scripts/tron-ios-beta
-launch` for the already-installed app without rebuilding. The iPhone launch
-actions are deduplicated by bundle ID: Beta has its own launch action, and the
-single production launch action opens whichever `com.tron.mobile` binary is
-currently installed, whether it came from Prod Fast Debug or Prod Release.
+The matching physical `Just Launch Installed ...` actions run
+`scripts/tron-ios-device launch` without rebuilding. Prod Fast Debug and Prod
+Release are deduplicated by bundle ID: one production launch action per device
+opens whichever `com.tron.mobile` binary is currently installed.
+
+### Native Notification Validation
+
+The tracked Beta and production entitlement files declare their intended APNs
+environment, and the app declares the `remote-notification` background mode.
+Beta uses topic `com.tron.mobile.beta` with APNs sandbox; an App Store-exported
+Prod build uses `com.tron.mobile` with APNs production. The physical-device
+helper explicitly signs local Prod and ProdDebug installs for APNs development
+and embeds the matching `sandbox` registration route. This lets the
+production-bundle app receive notifications during device testing without
+misrouting its sandbox token to the production provider. It is still not
+production APNs acceptance; use TestFlight or an App Store export for that
+path. The relay accepts only the beta/sandbox, local-Prod/sandbox, and
+distributed-Prod/production routes. Every paired engine selects exactly one
+provider path. Development engines normally use the Cloudflare relay:
+
+```bash
+scripts/tron auth notifications configure-relay \
+  --url https://relay.example \
+  --secret-file /secure/path/relay-secret
+scripts/tron auth notifications use relay
+scripts/tron auth notifications status
+```
+
+Direct mode is explicit and requires local Apple signing credentials:
+
+```bash
+scripts/tron auth apns configure \
+  --team-id TEAM_ID \
+  --key-id KEY_ID \
+  --private-key-file /secure/path/AuthKey.p8
+scripts/tron auth apns status
+scripts/tron auth notifications use direct
+```
+
+Never put a relay secret, `.p8`, APNs token, or physical device id in the
+repository or a test fixture. Status commands report only mode and readiness.
+The engine never fails over between relay and direct automatically.
+
+Notification foundation changes use the Beta simulator and must cover legacy
+cache migration, concurrent actor serialization, batched Mark All Read
+durability, pending-response replay over an authoritative sync page, per-server
+work coalescing, request/work budgets, and shutdown draining:
+
+```bash
+xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/NotificationLocalStoreTests -only-testing:TronMobileTests/NativeNotificationPolicyTests -only-testing:TronMobileTests/DependencyContainerTests
+```
+
+Artifact delivery changes also use the Beta simulator. The focused suite covers
+closed protocol decoding and routing, exact-content hash verification, bounded
+temporary-file lifecycle, explicit deletion, and the explicit draft-attachment
+bridge:
+
+```bash
+xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ArtifactInboxViewModelTests -only-testing:TronMobileTests/WorkerKernelDTOTests -only-testing:TronMobileTests/WorkerKernelClientTests
+```
+
+For physical production-notification acceptance:
+
+1. Start the development server and install the current Prod build through
+   TestFlight or an App Store export. A locally development-signed Prod build is
+   not production APNs acceptance.
+2. Pair successfully, accept notification permission, tap the Settings toolbar
+   bell, and confirm Notifications separately reports permission, device/token
+   readiness, selected transport, and provider readiness.
+3. Create a natural-language one-time reminder and background, then terminate,
+   the app. Confirm exactly one notification arrives on every active
+   installation.
+4. Exercise tap/Open, Snooze, and Complete. Confirm inbox/read/badge state
+   reconciles on a second device and after reconnect.
+5. Verify recurrence, bounded follow-ups, restart catch-up, offline response
+   retry, inactive paired-server registration, and deep-link server switching.
+6. Repeat with denied permission, cleared selected-transport credentials,
+   server downtime, relay timeout, scheduler/policy outage, and an invalidated
+   token. The reminder run must remain successful while Engine Activity shows
+   sanitized blocked/retry/permanent evidence and no duplicate logical
+   notification.
+
+APNs HTTP success proves provider acceptance only. Product copy, tests, and
+diagnostics must say `accepted_by_apns`, never delivered.
 
 Keep device-specific values out of the repo. The Codex app actions use generic
 `TRON_IOS_DEVICE_NAME=iPhone` and `TRON_IOS_DEVICE_NAME=iPad` selectors. For
@@ -131,7 +240,9 @@ export TRON_IOS_DEVICE_NAME=<device-name>
 
 The helper also accepts `TRON_IOS_SCHEME` and `TRON_IOS_CONFIGURATION` for local
 variants. Defaults remain `Tron Beta` and `Beta`; the fast production action sets
-them to `Tron Fast` and `ProdDebug`.
+them to `Tron Fast` and `ProdDebug`. `TRON_IOS_REQUIRED_SDK_MAJOR` is an optional
+preflight for SDK-sensitive workflows; the Codex Prod Fast action sets it to
+`27` and explicitly selects Xcode beta.
 
 ## Build Configurations
 
@@ -143,14 +254,14 @@ them to `Tron Fast` and `ProdDebug`.
 | Test | Every test action | Hosted unit/UI validation (debug, isolated test identities) |
 
 `Debug.xcconfig` owns the compiler and test settings shared by Beta, ProdDebug,
-and Test; each leaf configuration owns only its compilation conditions and
-product identity. `Base.xcconfig` remains common to every configuration.
+and Test; each leaf configuration owns its compilation conditions, product
+identity, and APNs route. `Base.xcconfig` remains common to every configuration.
 
 Use `Tron Fast` when you want Xcode's debug-speed rebuilds to install over the
 production app (`com.tron.mobile`) instead of the side-by-side beta app. It uses
-the production app icon, production bundle IDs, and production entitlements, but
-keeps `-Onone`, `ENABLE_TESTABILITY=YES`, and `ONLY_ACTIVE_ARCH=YES` like the
-beta debug build.
+the production app icon and production bundle IDs, but uses development APNs
+signing/sandbox delivery and keeps `-Onone`, `ENABLE_TESTABILITY=YES`, and
+`ONLY_ACTIVE_ARCH=YES` like the beta debug build.
 
 ### Persistent Paired Simulator
 
@@ -189,7 +300,7 @@ misclassifying the preserved app as absent; `start` boots and validates it.
 
 ```bash
 xcodebuild test \
-  -scheme Tron \
+  -scheme 'Tron Beta' \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
@@ -213,7 +324,7 @@ OAuth owner in a hosted unit-test path.
 Named-suite cleanup is semantic and test-only. `IsolatedTestState` emits a
 versioned registration record before exposure, removes the exact persistent
 domain during cleanup, proves that the domain is nil or an empty dictionary,
-and emits one matching cleanup record. Repeated and process-fallback cleanup use
+and emits one matching cleanup record. Repeated and process-exit cleanup use
 the same idempotent owner and cannot duplicate the cleanup event. Tests must
 not discover, unlink, or synchronize CoreSimulator preference backing files;
 `cfprefsd` may materialize an empty plist after the process exits.
@@ -222,7 +333,7 @@ Token identities use a separate, complete
 records; registration and cleanup must be unique and set-equal by namespace,
 service, and account, and lifecycle JSON must never contain token material.
 Cleanup order is manager shutdown, token clear/proof/ledger emission, database
-close, fixture-root removal, defaults cleanup, then process-fallback
+close, fixture-root removal, defaults cleanup, then process-exit
 deregistration. Repeated cleanup must await the same drain and emit no duplicate
 record.
 
@@ -295,7 +406,7 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/TextStreamConvergenceTests \
   -only-testing:TronMobileTests/UnifiedEventTransformerTokenMetadataTests \
   -only-testing:TronMobileTests/ChatMessagePresentationTests \
-  -only-testing:TronMobileTests/CapabilityInvocationGroupingTests \
+  -only-testing:TronMobileTests/ToolInvocationGroupingTests \
   -only-testing:TronMobileTests/EventDatabaseTests/testEnrichedAssistantMessageMetadata
 
 xcodebuild test -scheme Tron \
@@ -304,23 +415,19 @@ xcodebuild test -scheme Tron \
 
 ```
 
-For the interactive prompt-composer glass, background-free proportional
-Session Briefing context ring, and voice-lifecycle slot/action ownership, run
-the focused presentation/source contracts and visual render:
+For the interactive prompt-composer glass and voice-lifecycle action ownership,
+run the focused presentation/source contracts and visual render:
 
 ```bash
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
-  -only-testing:TronMobileTests/ContextBriefingButtonTests \
+  -only-testing:TronMobileTests/ComposerVoiceStateTests \
   -only-testing:TronMobileTests/InputBarKeyboardTraversalTests
 
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
   -only-testing:TronMobileTests/ChatAffordanceVisualRenderTests
 
-xcodebuild test -scheme 'Tron UI Validation' \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
-  -only-testing:TronMobileUITests/SessionBriefingUITests/testComposerGlassKeepsAttachmentMenuAndSessionBriefingInteractive
 ```
 
 For the workspace selector's shared shortcut/action capsule geometry, run its
@@ -344,38 +451,37 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/SessionListExpansionAccessibilityTests
 ```
 
-For Dashboard capability visibility or `WorkerLifecycleRepository` protocol
-changes, run the focused cockpit state/view-model set:
+For Worker Console protocol, repository, declarative presentation, state, or
+Settings parity changes, run the focused worker-first set on Beta:
 
 ```bash
-xcodebuild test -scheme Tron \
+xcodebuild test -scheme 'Tron Beta' \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/AgentCockpitIssueStateTests \
-  -only-testing:TronMobileTests/AgentCockpitStateTests \
-  -only-testing:TronMobileTests/AgentCockpitDiscoveryStateTests \
-  -only-testing:TronMobileTests/AgentCockpitPresentationTests \
-  -only-testing:TronMobileTests/AgentCockpitViewModelTests
+  -only-testing:TronMobileTests/WorkerKernelDTOTests \
+  -only-testing:TronMobileTests/WorkerKernelClientTests \
+  -only-testing:TronMobileTests/WorkerConsolePresentationTests \
+  -only-testing:TronMobileTests/WorkerConsoleViewModelTests \
+  -only-testing:TronMobileTests/WorkerConsoleVisualContractTests \
+  -only-testing:TronMobileTests/SettingsParityTests
 ```
 
-For Dashboard presentation/model changes, run the dedicated source/model
-contracts and the single progressive-disclosure visual route. Issue aggregation
-has its own equally small state suite:
+For Session Context, worker protocol layout, invocation presentation,
+notification ownership helpers, or connection-policy moves, run this
+state-owner suite on Beta with parallel testing disabled so one hosted process
+owns teardown:
 
 ```bash
-xcodebuild test -scheme Tron \
+xcodebuild test -project TronMobile.xcodeproj -scheme 'Tron Beta' \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/DashboardPresentationTests \
-  -only-testing:TronMobileTests/AgentCockpitStateTests \
-  -only-testing:TronMobileTests/AgentCockpitDiscoveryStateTests \
-  -only-testing:TronMobileTests/AgentCockpitPresentationTests
-
-xcodebuild test -scheme Tron \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/AgentCockpitIssueStateTests
-
-xcodebuild test -scheme 'Tron UI Validation' \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
-  -only-testing:TronMobileUITests/DashboardHitTargetUITests/testEngineCockpitProgressiveDisclosurePath
+  -parallel-testing-enabled NO \
+  -only-testing:TronMobileTests/SessionContextPresentationTests \
+  -only-testing:TronMobileTests/SessionContextAuditDecodingTests \
+  -only-testing:TronMobileTests/WorkerKernelDTOTests \
+  -only-testing:TronMobileTests/WorkerConsoleInteractionTests \
+  -only-testing:TronMobileTests/ToolInvocationDetailViewTests \
+  -only-testing:TronMobileTests/NativeNotificationPolicyTests \
+  -only-testing:TronMobileTests/EngineClientTests \
+  -only-testing:TronMobileTests/EngineConnectionReconnectTests
 ```
 
 For the main Settings destination copy or the Engine/Providers sheet hierarchy,
@@ -385,7 +491,9 @@ run the focused ownership and no-summary-hero contracts:
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
   -only-testing:TronMobileTests/EngineSettingsOwnershipTests \
-  -only-testing:TronMobileTests/EngineSettingsPageLayoutTests/testEngineAndProvidersSheetsDoNotMountSummaryHeroes
+  -only-testing:TronMobileTests/EngineSettingsPageLayoutTests/testEngineAndProvidersSheetsDoNotMountSummaryHeroes \
+  -only-testing:TronMobileTests/EngineSettingsPageLayoutTests/testNotificationAndLogsUseTheirOwnedSettingsEntryPoints \
+  -only-testing:TronMobileTests/EngineSettingsPageLayoutTests/testNotificationSheetsUseStandardCardsToolbarsAndMediumDetents
 ```
 
 For settings, pairing, event decoding, error projection, and generic runtime
@@ -401,10 +509,10 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/SettingsParityTests \
   -only-testing:TronMobileTests/PairingValidationTests \
   -only-testing:TronMobileTests/PairingURLParserTests \
-  -only-testing:TronMobileTests/EventTypeRegistryTests \
+  -only-testing:TronMobileTests/SessionEventTypeTests \
   -only-testing:TronMobileTests/ErrorEventProjectionTests \
-  -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests \
-  -only-testing:TronMobileTests/GeneratedUIRendererTests
+  -only-testing:TronMobileTests/ToolInvocationDisplayModelTests \
+  -only-testing:TronMobileTests/WorkerConsoleVisualContractTests
 ```
 
 ### Simulator Deep-Link Smoke Test
@@ -413,7 +521,7 @@ xcodebuild test -scheme Tron \
 `DeepLinkRouter` owns the routes they accept:
 
 - `tron://session/<session-id>`
-- `tron://session/<session-id>?capability=<invocation-id>`
+- `tron://session/<session-id>?tool=<invocation-id>`
 - `tron://session/<session-id>?event=<event-id>`
 - `tron://settings`
 - `tron://share`
@@ -456,11 +564,17 @@ Tests/
 │   └── Transport/     # Clients, Retry, WebSocket, and DeepLinks tests mirror Sources
 ├── Session/           # Chat, timeline, attachment, and parsing tests
 │   ├── Chat/          # Coordinators, Messaging, Navigation, State, ViewModel owner roots
-│   └── WorkerLifecycle/ # State, discovery, presentation, and shared cockpit fixtures
-├── UI/                # Chat, settings, onboarding, runtime surface, and component tests
+│   └── WorkerKernel/  # Worker state and repository fixtures
+├── UI/                # Feature presentation and source-ownership contracts
+│   └── EngineInspection/ # Session Context and Worker Console contracts
 ├── Support/           # Composition, diagnostics, foundation, pairing, and storage tests
 └── Infrastructure/    # Fakes, fixtures, SourceGuard, cleanup, and project-structure guards
 ```
+
+After moving Swift sources, regenerate `TronMobile.xcodeproj` from
+`project.yml` before building. Source-ownership guards follow the feature
+directories recursively; do not preserve an obsolete path solely to satisfy a
+test, and do not add the same Swift file to more than one build phase.
 
 Active hierarchy and targeted hard-budget enforcement live in
 `SourceGuardTests` and do not depend on point-in-time campaign line counts.
@@ -674,10 +788,10 @@ and move straight to group assignment.
 
 ### Adding Runtime Presentation
 
-1. Emit operation, trace ids, and runtime-owned presentation hints from the server or generated runtime data.
-2. Reuse the generic capability chip, detail sheet, result renderer, and `GeneratedRuntimeSurfaceView`.
-3. Add a reusable renderer under `UI/Capabilities/` or `UI/RuntimeSurfaces/` only when primitive trace/result rendering is not expressive enough.
-4. Add focused tests for the primitive payload/result shape and the generic sheet route.
+1. Emit operation, trace ids, and runtime-owned presentation hints from the server.
+2. Reuse the generic tool chip, detail sheet, and result renderer.
+3. Add a reusable renderer under `UI/Tools/` only when primitive trace/result rendering is not expressive enough.
+4. Add focused tests for the primitive payload/result shape and its generic sheet route. Do not recreate the retired resource-backed generated-UI plane.
 
 ### Updating Event Handling
 

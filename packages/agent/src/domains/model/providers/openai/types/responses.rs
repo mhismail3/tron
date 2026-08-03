@@ -55,7 +55,7 @@ pub enum ResponsesInputItem {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<String>,
     },
-    /// Function call (capability invocation by assistant).
+    /// Function call (tool invocation by assistant).
     #[serde(rename = "function_call")]
     FunctionCall {
         /// Optional item ID (returned by API, omitted in requests).
@@ -68,7 +68,7 @@ pub enum ResponsesInputItem {
         /// JSON-encoded arguments.
         arguments: String,
     },
-    /// Function call output (capability result).
+    /// Function call output (tool result).
     #[serde(rename = "function_call_output")]
     FunctionCallOutput {
         /// Call ID this result corresponds to.
@@ -114,10 +114,10 @@ pub struct ResponsesRequest {
     /// Temperature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
-    /// Provider-wire tools generated from Tron capability primitives.
+    /// Provider-wire tools generated from Tron's resolved tool surface.
     #[serde(rename = "tools")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub capabilities: Option<Vec<ResponsesToolEntry>>,
+    pub tools: Option<Vec<ResponsesToolEntry>>,
     /// Max output tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
@@ -127,6 +127,9 @@ pub struct ResponsesRequest {
     /// Text output configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<ResponseTextConfig>,
+    /// Opaque stable-prefix routing key used only by the public Platform API.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
 }
 
 /// Reasoning configuration for the Responses API.
@@ -245,6 +248,9 @@ pub struct ResponsesResponse {
 /// Error details carried by a failed Responses API response.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ResponsesError {
+    /// Provider error type when it is distinct from or substitutes for `code`.
+    #[serde(default, rename = "type")]
+    pub error_type: Option<String>,
     /// Provider-specific error code.
     #[serde(default)]
     pub code: Option<String>,
@@ -290,6 +296,9 @@ pub struct ResponsesSseEvent {
     /// Error message on a top-level `error` stream event.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Nested error envelope used by some Responses-compatible streaming paths.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ResponsesError>,
     /// Full response (for `response.completed`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<ResponsesResponse>,
@@ -301,7 +310,7 @@ pub enum SseEventType {
     /// Streaming text content.
     #[serde(rename = "response.output_text.delta")]
     OutputTextDelta,
-    /// New output item (capability invocation or reasoning started).
+    /// New output item (tool invocation or reasoning started).
     #[serde(rename = "response.output_item.added")]
     OutputItemAdded,
     /// Output item finished.
@@ -341,7 +350,7 @@ pub enum SseEventType {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputItemType {
-    /// Function call (capability invocation by assistant).
+    /// Function call (tool invocation by assistant).
     FunctionCall,
     /// Message content.
     Message,

@@ -10,8 +10,8 @@ struct SessionSidebar: View {
     @State private var showArchiveConfirmation = false
     @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
     @State private var sessionExpansion = SessionListSessionExpansion()
-    @State private var engineCockpit = AgentCockpitViewModel()
-    @State private var showEngineCockpit = false
+    @State private var workerConsole = WorkerConsoleViewModel()
+    @State private var showWorkerConsole = false
 
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     let onNewSession: () -> Void
@@ -26,14 +26,10 @@ struct SessionSidebar: View {
         Dictionary(uniqueKeysWithValues: workspaceGroups.map { ($0.id, $0.sessions.count) })
     }
 
-    private var dashboardSessionId: String? {
-        selectedSessionId ?? eventStoreManager.sortedSessions.first?.id
-    }
-
-    private var cockpitRefreshKey: EngineCockpitDashboardRefreshKey {
-        EngineCockpitDashboardRefreshKey(
-            sessionId: dashboardSessionId,
-            isConnected: dependencies.connectionRepository.connectionState.isConnected
+    private var workerConsoleRefreshKey: WorkerConsoleRefreshKey {
+        WorkerConsoleRefreshKey(
+            isConnected: dependencies.connectionRepository.connectionState.isConnected,
+            dashboardPresented: showWorkerConsole
         )
     }
 
@@ -41,11 +37,8 @@ struct SessionSidebar: View {
         ZStack(alignment: .bottomTrailing) {
             List(selection: $selectedSessionId) {
                 Section {
-                    EngineCockpitDashboardBand(
-                        overview: engineCockpit.overview,
-                        isRefreshing: engineCockpit.isRefreshing
-                    ) {
-                        showEngineCockpit = true
+                    WorkerConsoleDashboardBand(viewModel: workerConsole) {
+                        showWorkerConsole = true
                     }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -171,15 +164,18 @@ struct SessionSidebar: View {
             sessionExpansion.reconcile(groupCounts: groupCounts)
             reconcileWorkspaceDisclosure(groupIds: Set(groupCounts.keys))
         }
-        .task(id: cockpitRefreshKey) {
-            await refreshCockpit()
+        .task(id: workerConsoleRefreshKey) {
+            guard !showWorkerConsole else { return }
+            await refreshWorkerConsoleSummary()
+            await workerConsole.monitorSummary(
+                repository: dependencies.workerKernelRepository,
+                connectionState: dependencies.connectionRepository.connectionState
+            )
         }
-        .sheet(isPresented: $showEngineCockpit) {
-            AgentCockpitSheet(
-                viewModel: engineCockpit,
-                repository: dependencies.workerLifecycleRepository,
-                sessionId: dashboardSessionId,
-                workspaceId: nil,
+        .sheet(isPresented: $showWorkerConsole) {
+            WorkerConsoleSheet(
+                viewModel: workerConsole,
+                repository: dependencies.workerKernelRepository,
                 connectionState: dependencies.connectionRepository.connectionState
             )
         }
@@ -260,11 +256,9 @@ struct SessionSidebar: View {
         }
     }
 
-    private func refreshCockpit() async {
-        await engineCockpit.refresh(
-            repository: dependencies.workerLifecycleRepository,
-            sessionId: dashboardSessionId,
-            workspaceId: nil,
+    private func refreshWorkerConsoleSummary() async {
+        await workerConsole.refreshSummary(
+            repository: dependencies.workerKernelRepository,
             connectionState: dependencies.connectionRepository.connectionState
         )
     }
@@ -314,7 +308,7 @@ struct SessionSidebar: View {
     }
 }
 
-private struct EngineCockpitDashboardRefreshKey: Equatable {
-    let sessionId: String?
+private struct WorkerConsoleRefreshKey: Equatable {
     let isConnected: Bool
+    let dashboardPresented: Bool
 }

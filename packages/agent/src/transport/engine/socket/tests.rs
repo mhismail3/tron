@@ -1,7 +1,7 @@
 use super::*;
 
-use crate::engine::{EngineError, PublishStreamEvent, VisibilityScope};
-use crate::shared::server::error_mapping::engine_error_to_capability_error;
+use crate::engine::{EngineError, PublishStreamEvent, StreamVisibility};
+use crate::shared::server::error_mapping::engine_error_to_tool_error;
 use crate::shared::server::events::ServerEventPayload;
 use crate::shared::server::failure::ENGINE_SCHEMA_VIOLATION;
 use crate::shared::server::test_support::make_test_context;
@@ -40,75 +40,6 @@ fn client_lease_owns_exact_registry_lifetime() {
     }
 
     assert_eq!(clients.connection_count(), 0);
-}
-
-#[tokio::test]
-async fn legacy_socket_reconciliation_is_exact_and_idempotent() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("tron.sqlite");
-    let host = EngineHostHandle::open_sqlite(&path).unwrap();
-    let client_id = uuid::Uuid::now_v7().to_string();
-    let instance_id = uuid::Uuid::now_v7().to_string();
-    let stateless_client_id = uuid::Uuid::now_v7().to_string();
-    let stateless_instance_id = uuid::Uuid::now_v7().to_string();
-    let legacy = format!("engine-ws:{client_id}:{instance_id}");
-    let legacy_stateless =
-        format!("engine-ws-stateless:{stateless_client_id}:{stateless_instance_id}");
-    let retained = [
-        "caller-durable-subscription".to_owned(),
-        format!("engine-wsx:{client_id}:{instance_id}"),
-        format!("{legacy}:extra"),
-        format!("engine-ws:{}:{instance_id}", client_id.to_uppercase()),
-        format!("engine-ws:{}:{instance_id}", client_id.replace('-', "")),
-        "engine-ws:550e8400-e29b-41d4-a716-446655440000:550e8400-e29b-41d4-a716-446655440001"
-            .to_owned(),
-    ];
-
-    for (index, subscription_id) in std::iter::once(legacy.clone())
-        .chain(std::iter::once(legacy_stateless.clone()))
-        .chain(retained.iter().cloned())
-        .enumerate()
-    {
-        host.subscribe_stream(
-            subscription_id,
-            "events.session".to_owned(),
-            StreamCursor(index as u64 + 10),
-            VisibilityScope::System,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-    }
-
-    assert_eq!(retire_legacy_socket_subscriptions(&host).await.unwrap(), 2);
-    assert_eq!(retire_legacy_socket_subscriptions(&host).await.unwrap(), 0);
-
-    let actor = StreamActorScope::admin();
-    for subscription_id in [&legacy, &legacy_stateless] {
-        assert!(matches!(
-            host.poll_stream(subscription_id, None, 1, &actor).await,
-            Err(EngineError::PolicyViolation(message)) if message.contains("inactive")
-        ));
-    }
-    for subscription_id in &retained {
-        host.poll_stream(subscription_id, None, 1, &actor)
-            .await
-            .unwrap();
-    }
-
-    let conn = rusqlite::Connection::open(&path).unwrap();
-    for (subscription_id, expected_cursor) in [(&legacy, 10_i64), (&legacy_stateless, 11_i64)] {
-        let (active, cursor): (i64, i64) = conn
-            .query_row(
-                "SELECT active, cursor FROM engine_stream_subscriptions WHERE subscription_id = ?1",
-                [subscription_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(active, 0);
-        assert_eq!(cursor, expected_cursor);
-    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -167,7 +98,7 @@ async fn oversized_frame_returns_a_correlated_error() {
 }
 
 #[tokio::test]
-async fn configured_budget_accepts_frames_above_the_removed_fixed_limit() {
+async fn configured_budget_accepts_frames_within_its_limit() {
     let (mut session, mut rx) = test_session_with_frame_limit(2 * 1024 * 1024);
     let message = json!({
         "type": "hello",
@@ -213,10 +144,11 @@ fn invoke_message_maps_to_engine_invoke_payload_context() {
 }
 
 #[test]
-fn invoke_message_rejects_authority_and_runtime_metadata_context() {
+fn invoke_message_rejects_unrecognized_execution_context() {
     for forbidden in [
         json!({"authorityScopes": ["system.read"]}),
-        json!({"runtimeMetadata": {"agent.runId": "run-1"}}),
+        json!({"trustedLocal": true}),
+        json!({"workingDirectory": "/tmp"}),
     ] {
         let value = json!({
             "type": "invoke",
@@ -226,7 +158,7 @@ fn invoke_message_rejects_authority_and_runtime_metadata_context() {
             "context": forbidden
         });
         let error = serde_json::from_value::<InvokeMessage>(value)
-            .expect_err("public context authority/runtime metadata must be rejected");
+            .expect_err("public context must reject engine-owned execution inputs");
         assert!(
             error.to_string().contains("unknown field"),
             "unexpected context rejection error: {error}"
@@ -246,7 +178,7 @@ fn stream_filters_match_neutral_server_event_scope() {
                 Some(json!({"title": "Test Session"}))
             )
         }),
-        visibility: VisibilityScope::System,
+        visibility: StreamVisibility::System,
         session_id: None,
         workspace_id: None,
         producer: "test".to_owned(),
@@ -277,7 +209,7 @@ fn recovery_marker_crosses_session_filter_but_respects_event_type_filter() {
                 Some(json!({"reason": "source_lag", "droppedEventCount": 3}))
             )
         }),
-        visibility: VisibilityScope::System,
+        visibility: StreamVisibility::System,
         session_id: None,
         workspace_id: None,
         producer: "test".to_owned(),
@@ -318,7 +250,7 @@ async fn stream_poll_returns_neutral_events() {
                     Some(json!({"ready": true}))
                 )
             }),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some("s1".to_owned()),
             workspace_id: None,
             producer: "test".to_owned(),
@@ -339,20 +271,6 @@ async fn stream_poll_returns_neutral_events() {
         .as_str()
         .unwrap()
         .to_owned();
-    assert!(matches!(
-        session
-            .ctx
-            .engine_host
-            .poll_stream(
-                &subscription_id,
-                Some(StreamCursor(0)),
-                100,
-                &StreamActorScope::scoped(Some("s1".to_owned()), None),
-            )
-            .await,
-        Err(EngineError::NotFound { .. })
-    ));
-
     assert!(
         session
             .handle_text(
@@ -400,7 +318,7 @@ async fn topic_poll_reads_without_creating_subscription_state() {
                     Some(json!({"ready": true}))
                 )
             }),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some("s1".to_owned()),
             workspace_id: None,
             producer: "test".to_owned(),
@@ -422,15 +340,6 @@ async fn topic_poll_reads_without_creating_subscription_state() {
         Some("agent.ready")
     );
     assert!(session.subscriptions.lock().await.is_empty());
-    assert!(
-        session
-            .ctx
-            .engine_host
-            .active_stream_subscription_ids()
-            .await
-            .unwrap()
-            .is_empty()
-    );
 }
 
 #[tokio::test]
@@ -452,7 +361,7 @@ async fn subscribe_without_cursor_starts_at_topic_tail() {
                     Some(json!({"old": true}))
                 )
             }),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some("s1".to_owned()),
             workspace_id: None,
             producer: "test".to_owned(),
@@ -483,6 +392,81 @@ async fn subscribe_without_cursor_starts_at_topic_tail() {
         .cloned()
         .unwrap();
     assert_eq!(subscription.cursor, old_cursor);
+}
+
+#[tokio::test]
+async fn unsubscribe_releases_connection_local_state_idempotently() {
+    let (mut session, mut rx) = test_session();
+    assert!(
+        session
+            .handle_text(r#"{"type":"subscribe","id":"s","topic":"events.session"}"#)
+            .await
+    );
+    let response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    let subscription_id = response["result"]["subscriptionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(session.subscriptions.lock().await.len(), 1);
+
+    for expected_removed in [true, false] {
+        assert!(
+            session
+                .handle_text(
+                    &json!({
+                        "type": "unsubscribe",
+                        "id": "u",
+                        "subscriptionId": subscription_id,
+                    })
+                    .to_string()
+                )
+                .await
+        );
+        let response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        assert_eq!(
+            response
+                .pointer("/result/unsubscribed")
+                .and_then(Value::as_bool),
+            Some(expected_removed)
+        );
+    }
+    assert!(session.subscriptions.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn subscribe_rejects_unbounded_connection_local_polling_work() {
+    let (mut session, mut rx) = test_session();
+    let mut subscriptions = session.subscriptions.lock().await;
+    for index in 0..MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION {
+        subscriptions.insert(
+            format!("existing-{index}"),
+            SubscriptionState {
+                topic: "events.session".to_owned(),
+                cursor: StreamCursor(0),
+                filters: None,
+                session_id: None,
+            },
+        );
+    }
+    drop(subscriptions);
+
+    assert!(
+        session
+            .handle_text(r#"{"type":"subscribe","id":"overflow","topic":"events.session"}"#)
+            .await
+    );
+    let response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    assert_eq!(response.get("ok").and_then(Value::as_bool), Some(false));
+    assert!(
+        response
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| message.contains("subscription limit reached"))
+    );
+    assert_eq!(
+        session.subscriptions.lock().await.len(),
+        MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION
+    );
 }
 
 #[tokio::test]
@@ -530,7 +514,7 @@ async fn topic_poll_requires_explicit_cursor() {
 #[tokio::test]
 async fn send_error_with_trace_preserves_embedded_engine_failure_on_outer_error() {
     let (session, mut rx) = test_session();
-    let error = engine_error_to_capability_error(EngineError::SchemaViolation {
+    let error = engine_error_to_tool_error(EngineError::SchemaViolation {
         function_id: "system::ping".to_owned(),
         direction: "request",
         path: "$.protocolVersion".to_owned(),
@@ -602,7 +586,6 @@ async fn ack_response_applies_backpressure_instead_of_closing_socket() {
                 cursor: StreamCursor(0),
                 filters: None,
                 session_id: Some("s1".to_owned()),
-                workspace_id: None,
             },
         )]))),
         CancellationToken::new(),
@@ -651,7 +634,7 @@ async fn push_subscription_advances_past_filtered_stream_pages() {
                         Some(json!({"index": index}))
                     )
                 }),
-                visibility: VisibilityScope::System,
+                visibility: StreamVisibility::System,
                 session_id: None,
                 workspace_id: None,
                 producer: "test".to_owned(),
@@ -672,7 +655,7 @@ async fn push_subscription_advances_past_filtered_stream_pages() {
                     Some(json!({"ready": true}))
                 )
             }),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some(target_session.to_owned()),
             workspace_id: None,
             producer: "test".to_owned(),
@@ -690,7 +673,6 @@ async fn push_subscription_advances_past_filtered_stream_pages() {
             cursor: StreamCursor(0),
             filters: Some(json!({"sessionId": target_session})),
             session_id: Some(target_session.to_owned()),
-            workspace_id: None,
         },
     )])));
     let (out_tx, mut out_rx) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);
@@ -763,7 +745,7 @@ async fn push_subscription_applies_backpressure_to_catch_up_bursts() {
                         Some(json!({"delta": index.to_string()}))
                     )
                 }),
-                visibility: VisibilityScope::Session,
+                visibility: StreamVisibility::Session,
                 session_id: Some(target_session.to_owned()),
                 workspace_id: None,
                 producer: "test".to_owned(),
@@ -782,7 +764,6 @@ async fn push_subscription_applies_backpressure_to_catch_up_bursts() {
             cursor: StreamCursor(0),
             filters: Some(json!({"sessionId": target_session})),
             session_id: Some(target_session.to_owned()),
-            workspace_id: None,
         },
     )])));
     let (out_tx, mut out_rx) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);

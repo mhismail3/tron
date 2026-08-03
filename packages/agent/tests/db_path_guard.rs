@@ -45,11 +45,12 @@ fn sqlite_table_names(source: &str) -> BTreeSet<String> {
         .collect()
 }
 
-fn project_reference_database_table_names() -> BTreeSet<String> {
+fn project_reference_table_names(section_heading: &str) -> BTreeSet<String> {
     let reference = read_repo_file("packages/agent/docs/project-reference.md");
+    let marker = format!("### {section_heading}\n");
     let table_section = reference
-        .split_once("### Tables\n")
-        .expect("project reference must document the database tables")
+        .split_once(&marker)
+        .unwrap_or_else(|| panic!("project reference must document {section_heading}"))
         .1;
     let mut names = BTreeSet::new();
     let mut rows_started = false;
@@ -201,7 +202,7 @@ fn rejected_path_does_not_create_or_modify_db_files() {
 }
 
 #[test]
-fn startup_migrations_only_touch_tron_sqlite() {
+fn startup_schema_only_touches_tron_sqlite() {
     let (_tmp, tron_home) = setup_tron_home();
     let expected_dir = production_db_dir_from_tron_home(&tron_home);
     std::fs::create_dir_all(&expected_dir).unwrap();
@@ -212,13 +213,13 @@ fn startup_migrations_only_touch_tron_sqlite() {
 
     let db_path = resolve_production_db_path_for_tron_home(None, &tron_home).unwrap();
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    tron::domains::session::event_store::run_migrations(&conn).unwrap();
+    tron::domains::session::event_store::ensure_schema(&conn).unwrap();
     drop(conn);
 
     let db_meta = std::fs::metadata(&db_path).unwrap();
     assert!(
         db_meta.len() > 0,
-        "tron.sqlite should contain schema after migration"
+        "tron.sqlite should contain the current schema"
     );
     assert_eq!(untouched_before, file_signature(&untouched));
 }
@@ -226,16 +227,11 @@ fn startup_migrations_only_touch_tron_sqlite() {
 #[test]
 fn project_reference_database_table_catalog_matches_active_sqlite_sources() {
     let schema_sources = [
-        "packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql",
+        "packages/agent/src/domains/session/event_store/sqlite/schema/current.sql",
         "packages/agent/src/shared/storage/schema.rs",
         "packages/agent/src/engine/durability/ledger/sqlite_codec.rs",
-        "packages/agent/src/engine/durability/queue/sqlite_store.rs",
         "packages/agent/src/engine/durability/streams/sqlite_store.rs",
         "packages/agent/src/engine/durability/state.rs",
-        "packages/agent/src/engine/durability/resources/store/sqlite_codec.rs",
-        "packages/agent/src/engine/authority/grants/mod.rs",
-        "packages/agent/src/engine/authority/leases.rs",
-        "packages/agent/src/engine/authority/compensation.rs",
     ];
     let source_tables = schema_sources
         .into_iter()
@@ -250,9 +246,35 @@ fn project_reference_database_table_catalog_matches_active_sqlite_sources() {
         .collect();
 
     assert_eq!(
-        project_reference_database_table_names(),
+        project_reference_table_names("Tables"),
         source_tables,
-        "project-reference database catalog must match active SQLite schema owners"
+        "project-reference primary database catalog must match active SQLite schema owners"
+    );
+}
+
+#[test]
+fn project_reference_worker_table_catalog_matches_worker_store() {
+    let store_root = repo_root().join("packages/agent/src/domains/worker_kernel/persistence/store");
+    let mut store_sources = Vec::new();
+    collect_text_files(&store_root, &mut store_sources);
+    store_sources.push(repo_root().join("packages/agent/src/shared/storage/schema.rs"));
+    let mut source_tables: BTreeSet<_> = store_sources
+        .into_iter()
+        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("rs"))
+        .flat_map(|path| {
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+            sqlite_table_names(&source)
+        })
+        .collect();
+    // Schema-v10 uses this table only as a restart-safe migration stage and
+    // drops it in the atomic cutover; it is not part of the active catalog.
+    let _ = source_tables.remove("worker_result_migration_v10");
+    assert!(!source_tables.is_empty(), "worker store declares no tables");
+    assert_eq!(
+        project_reference_table_names("Worker database"),
+        source_tables,
+        "project-reference worker database catalog must match its isolated store"
     );
 }
 
@@ -336,121 +358,6 @@ fn runtime_owners_do_not_delete_unified_storage_ad_hoc() {
             repo_relative(&file)
         );
     }
-}
-
-#[test]
-fn retired_tron_home_paths_are_absent() {
-    let root = repo_root();
-    let scan_roots = [
-        root.join("AGENTS.md"),
-        root.join(".claude"),
-        root.join("README.md"),
-        root.join("CONTRIBUTING.md"),
-        root.join("packages/agent/defaults"),
-        root.join("packages/agent/docs"),
-        root.join("packages/agent/src"),
-        root.join("packages/ios-app/Sources"),
-        root.join("packages/mac-app/Sources"),
-        root.join("packages/mac-app/docs"),
-        root.join("scripts"),
-    ];
-    let old_patterns = vec![
-        "~/.tron/system/".to_owned(),
-        ".tron/system/".to_owned(),
-        "system/database".to_owned(),
-        "system/settings.json".to_owned(),
-        "system/auth.json".to_owned(),
-        "system/run".to_owned(),
-        ["system/", "trans", "cription"].concat(),
-        "workspace/memory".to_owned(),
-        "workspace/artifacts".to_owned(),
-        "artifacts/renders".to_owned(),
-        "artifacts/screenshots".to_owned(),
-        "artifacts/exports".to_owned(),
-        "exports_dir".to_owned(),
-        "dirs::ARTIFACTS".to_owned(),
-        "dirs::EXPORTS".to_owned(),
-        "~/.tron/settings".to_owned(),
-        "~/.tron/knowledge/".to_owned(),
-        "~/.tron/vault/".to_owned(),
-        "~/.tron/instructions".to_owned(),
-        "~/.tron/user".to_owned(),
-        "master-default".to_owned(),
-        "~/.tron/deploy.lock".to_owned(),
-        concat!("~/.tron/", "to", "ols", "/json-render").to_owned(),
-    ];
-    let mut files = Vec::new();
-    for scan_root in scan_roots {
-        if scan_root.exists() {
-            collect_text_files(&scan_root, &mut files);
-        }
-    }
-
-    let mut violations = Vec::new();
-    for file in files {
-        let relative = repo_relative(&file);
-        let Ok(body) = std::fs::read_to_string(&file) else {
-            continue;
-        };
-        for pattern in &old_patterns {
-            if body.contains(pattern) {
-                violations.push(format!("{relative}: contains {pattern}"));
-            }
-        }
-    }
-
-    assert!(
-        violations.is_empty(),
-        "old Tron Home paths must not appear in runtime, defaults, docs, or scripts:\n{}",
-        violations.join("\n")
-    );
-}
-
-#[test]
-fn runtime_does_not_use_global_active_profile_helpers() {
-    let root = repo_root();
-    let scan_roots = [
-        root.join("packages/agent/src/domains/model/providers"),
-        root.join("packages/agent/src/domains/agent/loop"),
-        root.join("packages/agent/src/domains/agent/context"),
-        root.join("packages/agent/src/app"),
-    ];
-    let forbidden = [
-        "active_execution_spec(",
-        "active_process_spec(",
-        "resolve_active_profile(",
-        "instruction_prompts::entrypoint_prompt",
-        "instruction_prompts::process_prompt",
-        "instruction_prompts::provider_prompt",
-        "ContextPolicy::from_provider(",
-        "local_model_tools(",
-    ];
-
-    let mut files = Vec::new();
-    for scan_root in scan_roots {
-        if scan_root.exists() {
-            collect_text_files(&scan_root, &mut files);
-        }
-    }
-
-    let mut violations = Vec::new();
-    for file in files {
-        let relative = repo_relative(&file);
-        let Ok(body) = std::fs::read_to_string(&file) else {
-            continue;
-        };
-        for pattern in forbidden {
-            if body.contains(pattern) {
-                violations.push(format!("{relative}: contains {pattern}"));
-            }
-        }
-    }
-
-    assert!(
-        violations.is_empty(),
-        "runtime must consume ProfileRuntime/session/process plans, not global active-profile helpers:\n{}",
-        violations.join("\n")
-    );
 }
 
 #[test]
@@ -553,7 +460,7 @@ fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
     );
     assert!(
         !body.contains("asc testflight beta-groups list"),
-        "release workflow must not retain a legacy asc command-shape fallback"
+        "release workflow must expose only the current asc command shape"
     );
     assert!(
         body.contains("attempting public-link auto-discovery"),

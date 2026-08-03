@@ -13,7 +13,7 @@ struct MockDeps {
     current_tokens: u64,
     context_limit: u64,
     system_prompt_tokens: u64,
-    capabilities_tokens: u64,
+    tools_tokens: u64,
     message_token_value: u64,
     /// Optional token function for per-message token values.
     token_fn: Option<Box<dyn Fn(&Message) -> u64 + Send + Sync>>,
@@ -26,7 +26,7 @@ impl MockDeps {
             current_tokens: 80_000,
             context_limit: 100_000,
             system_prompt_tokens: 1_000,
-            capabilities_tokens: 500,
+            tools_tokens: 500,
             message_token_value: 100,
             token_fn: None,
         }
@@ -67,8 +67,8 @@ impl CompactionDeps for MockDeps {
         self.system_prompt_tokens
     }
 
-    fn estimate_capabilities_tokens(&self) -> u64 {
-        self.capabilities_tokens
+    fn estimate_tools_tokens(&self) -> u64 {
+        self.tools_tokens
     }
 
     fn get_message_tokens(&self, msg: &Message) -> u64 {
@@ -83,14 +83,12 @@ impl CompactionDeps for MockDeps {
 
 struct MockSummarizer {
     narrative: String,
-    extracted_data: Option<ExtractedData>,
 }
 
 impl MockSummarizer {
     fn new(narrative: &str) -> Self {
         Self {
             narrative: narrative.into(),
-            extracted_data: None,
         }
     }
 }
@@ -100,10 +98,10 @@ impl Summarizer for MockSummarizer {
     async fn summarize(
         &self,
         _messages: &[Message],
+        _context: &super::super::summarizer::SummaryContext,
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
         Ok(SummaryResult {
             narrative: self.narrative.clone(),
-            extracted_data: self.extracted_data.clone().unwrap_or_default(),
         })
     }
 }
@@ -115,9 +113,14 @@ impl Summarizer for PanicSummarizer {
     async fn summarize(
         &self,
         _messages: &[Message],
+        _context: &super::super::summarizer::SummaryContext,
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
         panic!("summarizer must not be called when no messages are summarizable");
     }
+}
+
+fn summary_context() -> super::super::summarizer::SummaryContext {
+    super::super::summarizer::SummaryContext::default()
 }
 
 fn default_messages() -> Vec<Message> {
@@ -131,14 +134,14 @@ fn default_messages() -> Vec<Message> {
     ]
 }
 
-/// Helper: create an assistant message with `capability_invocation` blocks.
-fn assistant_with_capability_invocation(ids: &[&str]) -> Message {
+/// Helper: create an assistant message with `tool_invocation` blocks.
+fn assistant_with_tool_invocation(ids: &[&str]) -> Message {
     Message::Assistant {
         content: ids
             .iter()
-            .map(|id| AssistantContent::CapabilityInvocation {
+            .map(|id| AssistantContent::ToolInvocation {
                 id: (*id).into(),
-                name: "test_capability".into(),
+                name: "test_tool".into(),
                 arguments: serde_json::Map::new(),
                 thought_signature: None,
             })
@@ -150,13 +153,11 @@ fn assistant_with_capability_invocation(ids: &[&str]) -> Message {
     }
 }
 
-/// Helper: create a capability result message.
-fn capability_result(id: &str) -> Message {
-    Message::CapabilityResult {
+/// Helper: create a tool result message.
+fn tool_result(id: &str) -> Message {
+    Message::ToolResult {
         invocation_id: id.into(),
-        content: crate::shared::protocol::messages::CapabilityResultMessageContent::Text(
-            "ok".into(),
-        ),
+        content: crate::shared::protocol::messages::ToolResultMessageContent::Text("ok".into()),
         is_error: None,
     }
 }

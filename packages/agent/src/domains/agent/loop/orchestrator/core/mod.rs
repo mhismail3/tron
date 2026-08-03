@@ -28,6 +28,9 @@
 //! - Runtime sequence assignment stays synchronized with durable event-store
 //!   sequence truth; one active run owns sequenced completion through the final
 //!   session metadata event.
+//! - Agent Delivery boundary capture executes under the same active-run mutex
+//!   as admission and release, so persisted next-run exclusions cannot race a
+//!   run transition.
 //!
 //! ## Test Ownership
 //!
@@ -54,9 +57,9 @@ use tracing::{debug, info, instrument, trace, warn};
 use crate::domains::agent::r#loop::compaction_handler::CompactionHandler;
 use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
-use crate::domains::agent::r#loop::orchestrator::capability_invocation_tracker::CapabilityInvocationTracker;
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
+use crate::domains::agent::r#loop::orchestrator::tool_invocation_tracker::ToolInvocationTracker;
 use crate::domains::agent::r#loop::orchestrator::turn_accumulator::{
     TurnAccumulatorMap, TurnReconstructionSnapshot,
 };
@@ -180,8 +183,8 @@ pub struct Orchestrator {
     session_manager: Arc<SessionManager>,
     broadcast: Arc<EventEmitter>,
     run_registry: Arc<RunRegistry>,
-    /// Capability invocation tracker shared with capability-result capabilities.
-    capability_invocation_tracker: Mutex<CapabilityInvocationTracker>,
+    /// Tool invocation tracker shared with tool-result tools.
+    tool_invocation_tracker: Mutex<ToolInvocationTracker>,
     /// Accumulates in-progress turn content for session resume catch-up.
     turn_accumulators: Arc<TurnAccumulatorMap>,
     /// Per-session monotonic sequence counters.
@@ -197,8 +200,8 @@ pub struct Orchestrator {
     /// and producing duplicate `memory.retained` events. Held as `Arc<DashMap>`
     /// so background tasks can hold a reference independent of the orchestrator.
     retain_in_flight: Arc<DashMap<String, ()>>,
-    /// Per-invocation cancellation tokens for `agent.abortCapabilityInvocation`. Populated by the
-    /// capability executor on each call, consumed (cancelled) by the engine transport.
+    /// Per-invocation cancellation tokens for `agent.abortToolInvocation`. Populated by the
+    /// tool executor on each call, consumed (cancelled) by the engine transport.
     invocation_abort_registry: Arc<InvocationAbortRegistry>,
 }
 
@@ -210,7 +213,7 @@ impl Orchestrator {
             session_manager,
             broadcast: Arc::new(EventEmitter::with_observer(turn_accumulators.clone())),
             run_registry: Arc::new(RunRegistry::new()),
-            capability_invocation_tracker: Mutex::new(CapabilityInvocationTracker::new()),
+            tool_invocation_tracker: Mutex::new(ToolInvocationTracker::new()),
             turn_accumulators,
             sequence_counters: Arc::new(DashMap::new()),
             compaction_handlers: Arc::new(DashMap::new()),
@@ -232,6 +235,22 @@ impl Orchestrator {
     /// Subscribe to all orchestrator events.
     pub fn subscribe(&self) -> broadcast::Receiver<TronEvent> {
         self.broadcast.subscribe()
+    }
+
+    /// Emit an ephemeral session event through the canonical live stream.
+    ///
+    /// Active sessions share the same monotonic counter used by durable turn
+    /// events, so transient worker progress cannot reorder a later terminal
+    /// row. Sessions without an initialized counter still receive the event;
+    /// this preserves diagnostic visibility without manufacturing durable
+    /// sequence state.
+    pub(crate) fn emit_transient_session_event(&self, event: TronEvent) -> usize {
+        let session_id = event.session_id().to_owned();
+        if let Some(counter) = self.sequence_counters.get(&session_id) {
+            self.broadcast.emit_sequenced(event, counter.value())
+        } else {
+            self.broadcast.emit(event)
+        }
     }
 
     /// Get the turn accumulator map (for session resume catch-up).
@@ -362,17 +381,6 @@ impl Orchestrator {
         self.retain_in_flight.contains_key(session_id)
     }
 
-    /// Get a cloned reference to a session's sequence counter.
-    ///
-    /// Returns `None` if the counter was never initialized for this session.
-    /// The returned `Arc<AtomicI64>` can be passed to agents and held across
-    /// async boundaries without holding a DashMap lock.
-    pub fn get_sequence_counter(&self, session_id: &str) -> Option<Arc<AtomicI64>> {
-        self.sequence_counters
-            .get(session_id)
-            .map(|entry| Arc::clone(entry.value()))
-    }
-
     // ── Per-session compaction handlers ──
 
     /// Register a compaction handler for a session.
@@ -387,6 +395,7 @@ impl Orchestrator {
     }
 
     /// Get the compaction handler for a session (if an agent is active).
+    #[cfg(test)]
     pub fn get_compaction_handler(&self, session_id: &str) -> Option<Arc<CompactionHandler>> {
         self.compaction_handlers
             .get(session_id)
@@ -463,24 +472,22 @@ impl Orchestrator {
         Some((run_id, snapshot))
     }
 
-    /// Atomically pair status run identity with its current capability.
+    /// Atomically pair status run identity with its current tool.
     pub(crate) fn agent_status_snapshot(
         &self,
         session_id: &str,
     ) -> (
         Option<String>,
-        Option<
-            crate::domains::agent::r#loop::orchestrator::turn_accumulator::CurrentCapabilitySnapshot,
-        >,
-    ){
+        Option<crate::domains::agent::r#loop::orchestrator::turn_accumulator::CurrentToolSnapshot>,
+    ) {
         let runs = self.run_registry.active_runs.lock();
         let Some(run_id) = runs.get(session_id).map(|run| run.run_id.clone()) else {
             return (None, None);
         };
-        let capability = self
+        let tool = self
             .turn_accumulators
-            .current_running_capability(session_id, &run_id);
-        (Some(run_id), capability)
+            .current_running_tool(session_id, &run_id);
+        (Some(run_id), tool)
     }
 
     /// Commit the durable prompt-admission row into the matching run's
@@ -513,6 +520,31 @@ impl Orchestrator {
             .contains_key(session_id)
     }
 
+    /// Return the active run identity for safe delivery-boundary projection.
+    pub(crate) fn active_run_id(&self, session_id: &str) -> Option<String> {
+        self.run_registry
+            .active_runs
+            .lock()
+            .get(session_id)
+            .map(|run| run.run_id.clone())
+    }
+
+    /// Execute one delivery admission decision while the target session's run
+    /// identity is stable.
+    ///
+    /// `begin_run` and [`StartedRun`] release use this same registry mutex. A
+    /// caller that persists `arrived_during_run_id` and `defer_until_run_id`
+    /// inside this callback therefore cannot race a run boundary and
+    /// accidentally admit a `next_run` delivery into the excluded run.
+    pub(crate) fn with_stable_active_run<R>(
+        &self,
+        session_id: &str,
+        callback: impl FnOnce(Option<&str>) -> R,
+    ) -> R {
+        let runs = self.run_registry.active_runs.lock();
+        callback(runs.get(session_id).map(|run| run.run_id.as_str()))
+    }
+
     /// Number of active runs.
     pub fn active_run_count(&self) -> usize {
         self.run_registry.active_runs.lock().len()
@@ -534,42 +566,36 @@ impl Orchestrator {
 
     /// Number of reconstructed session projections currently cached.
     ///
-    /// The health and `system.info` wire contracts retain their historical
-    /// `active_sessions` / `activeSessions` names for this cache-residency value.
-    /// Active run truth lives in `RunRegistry` and is exposed separately.
+    /// Health and `system.info` expose this cache-residency value as
+    /// `active_sessions` / `activeSessions`. Active run truth lives in
+    /// `RunRegistry` and is exposed separately.
     pub(crate) fn cached_session_count(&self) -> usize {
         self.session_manager.cached_count()
     }
 
-    /// Register a capability invocation, returning a receiver for the result.
-    pub fn register_capability_invocation(
+    /// Register a tool invocation, returning a receiver for the result.
+    pub fn register_tool_invocation(
         &self,
         invocation_id: &str,
     ) -> tokio::sync::oneshot::Receiver<serde_json::Value> {
-        self.capability_invocation_tracker
-            .lock()
-            .register(invocation_id)
+        self.tool_invocation_tracker.lock().register(invocation_id)
     }
 
-    /// Resolve a pending capability invocation with a result. Returns true if found.
-    pub fn resolve_capability_invocation(
-        &self,
-        invocation_id: &str,
-        value: serde_json::Value,
-    ) -> bool {
-        self.capability_invocation_tracker
+    /// Resolve a pending tool invocation with a result. Returns true if found.
+    pub fn resolve_tool_invocation(&self, invocation_id: &str, value: serde_json::Value) -> bool {
+        self.tool_invocation_tracker
             .lock()
             .resolve(invocation_id, value)
     }
 
-    /// Check if a capability invocation is pending.
-    pub fn has_pending_capability_invocation(&self, invocation_id: &str) -> bool {
-        self.capability_invocation_tracker
+    /// Check if a tool invocation is pending.
+    pub fn has_pending_tool_invocation(&self, invocation_id: &str) -> bool {
+        self.tool_invocation_tracker
             .lock()
             .has_pending(invocation_id)
     }
 
-    /// Graceful shutdown — cancel runtime work and end all unarchived durable sessions.
+    /// Graceful shutdown — cancel runtime work and release reconstructed session caches.
     #[instrument(skip(self))]
     pub async fn shutdown(&self) -> Result<(), RuntimeError> {
         info!("orchestrator shutdown initiated");
@@ -594,14 +620,14 @@ impl Orchestrator {
             self.turn_accumulators.clear();
         }
 
-        // Cancel all pending capability invocations
-        self.capability_invocation_tracker.lock().cancel_all();
+        // Cancel all pending tool invocations
+        self.tool_invocation_tracker.lock().cancel_all();
 
         // Clear all sequence counters and compaction handlers
         self.sequence_counters.clear();
         self.compaction_handlers.clear();
 
-        self.session_manager.end_unarchived_sessions_for_shutdown();
+        self.session_manager.clear_cache_for_shutdown();
 
         Ok(())
     }

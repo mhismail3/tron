@@ -16,6 +16,14 @@ struct ChatSheetTests {
         #expect(sheet.id == "settings")
     }
 
+    @Test("Session Context sheet has consistent id")
+    func testSessionContextSheetId() {
+        let sheet = ChatSheet.sessionContext
+
+        #expect(sheet.id == "sessionContext")
+        #expect(sheet == .sessionContext)
+    }
+
     @Test("Compaction detail has consistent id")
     func testCompactionDetailId() {
         let data1 = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
@@ -27,18 +35,6 @@ struct ChatSheetTests {
         // All compaction sheets share same id (only one can show at a time)
         #expect(sheet1.id == sheet2.id)
         #expect(sheet1.id == "compaction")
-    }
-
-    @Test("Context control sheet distinguishes overview and action detail")
-    func testContextControlSheetId() {
-        let overview = ChatSheet.contextControl(ContextControlSheetData())
-        let actionDetail = ChatSheet.contextControl(ContextControlSheetData(
-            initialActionResourceId: "resource:context-control-action:test"
-        ))
-
-        #expect(overview.id == "contextControl-overview")
-        #expect(actionDetail.id == "contextControl-resource:context-control-action:test")
-        #expect(overview != actionDetail)
     }
 
     @Test("Thinking detail has consistent id regardless of content")
@@ -53,7 +49,7 @@ struct ChatSheetTests {
     @Test("All sheet cases have unique base ids")
     func testAllCasesHaveUniqueBaseIds() {
         let compactionData = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
-        let capabilityData = testCapabilityInvocation(id: "capability_call", status: .success)
+        let toolData = testToolInvocation(id: "tool_call", status: .success)
         let providerErrorData = ProviderErrorDetailData(
             provider: "test",
             category: "rate_limit",
@@ -67,10 +63,10 @@ struct ChatSheetTests {
 
         let sheets: [ChatSheet] = [
             .settings,
+            .sessionContext,
             .compactionDetail(compactionData),
-            .contextControl(ContextControlSheetData()),
             .thinkingDetail("content"),
-            .capabilityInvocationDetail(capabilityData),
+            .toolInvocationDetail(toolData),
             .providerErrorDetail(providerErrorData)
         ]
 
@@ -187,32 +183,6 @@ struct SheetCoordinatorTests {
         #expect(coordinator.activeSheet == .thinkingDetail("second"))
     }
 
-    @Test("Show context control presents overview")
-    func testShowContextControlOverview() {
-        let coordinator = SheetCoordinator()
-
-        coordinator.showContextControl()
-
-        if case .contextControl(let data) = coordinator.activeSheet {
-            #expect(data.initialActionResourceId == nil)
-        } else {
-            Issue.record("Expected context control overview sheet")
-        }
-    }
-
-    @Test("Show context control action presents detail")
-    func testShowContextControlActionDetail() {
-        let coordinator = SheetCoordinator()
-
-        coordinator.showContextControl(actionResourceId: "resource:context-control-action:test")
-
-        if case .contextControl(let data) = coordinator.activeSheet {
-            #expect(data.initialActionResourceId == "resource:context-control-action:test")
-        } else {
-            Issue.record("Expected context control action detail sheet")
-        }
-    }
-
     @Test("Present replaces onDismiss callback")
     func testPresentReplacesOnDismissCallback() {
         let coordinator = SheetCoordinator()
@@ -282,6 +252,20 @@ struct SheetCoordinatorTests {
         #expect(coordinator.onDismiss == nil)
     }
 
+    @Test("Interactive dismissal releases callback and invokes it once")
+    func testPresentationDismissalIsIdempotent() {
+        let coordinator = SheetCoordinator()
+        var callbackCount = 0
+        coordinator.present(.settings) { callbackCount += 1 }
+
+        coordinator.presentationDidDismiss()
+        coordinator.presentationDidDismiss()
+
+        #expect(callbackCount == 1)
+        #expect(coordinator.activeSheet == nil)
+        #expect(coordinator.onDismiss == nil)
+    }
+
     // MARK: - Convenience Method Tests
 
     @Test("showSettings creates settings sheet")
@@ -291,6 +275,15 @@ struct SheetCoordinatorTests {
         coordinator.showSettings()
 
         #expect(coordinator.activeSheet == .settings)
+    }
+
+    @Test("showSessionContext creates Session Context sheet")
+    func testShowSessionContextCreatesCorrectSheet() {
+        let coordinator = SheetCoordinator()
+
+        coordinator.showSessionContext()
+
+        #expect(coordinator.activeSheet == .sessionContext)
     }
 
     @Test("showCompactionDetail creates compaction sheet with data")
@@ -320,8 +313,9 @@ struct SheetCoordinatorTests {
 
         coordinator.showThinkingDetail("Thinking content here")
 
-        if case .thinkingDetail(let content) = coordinator.activeSheet {
-            #expect(content == "Thinking content here")
+        if case .thinkingDetail(let data) = coordinator.activeSheet {
+            #expect(data.content == "Thinking content here")
+            #expect(data.kind == .thinking)
         } else {
             Issue.record("Expected thinkingDetail sheet")
         }

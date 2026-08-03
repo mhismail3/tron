@@ -1,6 +1,6 @@
 # Onboarding (iOS sheet)
 
-> Last verified: 2026-07-13 (medium-first onboarding and pairing; Engine → Servers ownership; concise Settings destinations; Engine and Providers sheets start directly with their owned sections instead of duplicate summary heroes).
+> Last verified: 2026-07-21 (worker-first Engine settings; compact model/search provider credential cards).
 
 The iOS app always opens to the normal session shell after initialization.
 `TronMobileApp` uses `AppRuntimeMode` only to prevent hosted XCTest from
@@ -14,7 +14,7 @@ scrolling is disabled at the medium detent, the app hides native sheet drag
 handles, and content only scrolls once the sheet is large. The sheet is a paged
 flow: welcome, install
 Tailscale on iPhone, install Tron Server on Mac, connect, then a short settings
-setup flow for workspace, credentials, services, and default model.
+setup flow for workspace, model-provider credentials, and default model.
 Setup pages are locked until the Mac connection succeeds. The sheet follows the
 app's standard Liquid Glass chrome: principal toolbar title, Back/Next controls
 in the top sheet toolbar for paged navigation, and a compact
@@ -146,7 +146,7 @@ side effects:
 If step 4 fails, onboarding rolls back the local paired-server store and
 Keychain token for that attempt, restoring the previous token when a token
 refresh fails, then leaves the user on the pairing page.
-Pairing never writes the iOS server list into server profile settings; the
+Pairing never writes the iOS server list into engine settings; the
 server only owns server runtime settings and secrets.
 
 ## Settings Setup Pages
@@ -172,9 +172,6 @@ host and port.
   `API key saved` plus the masked key preview into a right-aligned status
   column. These quick rows save the key under the `Default` label unless the
   user later renames it from Settings.
-- **Search services** exposes API-key rows for Brave Search and Exa.
-  Saved service keys use the same right-aligned masked preview layout as
-  optional model providers.
 - **Default model** reuses `ModelPickerSheet`, then writes
   `server.defaultModel`. Provider routing is inferred from the selected model.
 
@@ -183,15 +180,15 @@ server before the setup pages unlock. Existing server preferences from
 `settings.get` prefill workspace and model choices, so pairing a forgotten but
 still-running Mac can be completed by reviewing each page and using Next or the
 page gesture to advance.
-Existing provider and service credentials from `auth.get` are shown
+Existing provider credentials from `auth.get` are shown
 only as server-returned labels and masked hints; secrets are never copied into
 iOS storage. If `auth.get` fails after `settings.get` succeeds, onboarding
 still proceeds with the settings snapshot and shows an inline credential-status
 warning instead of blocking setup.
 
 Every credential write in the setup pages consumes the fresh `AuthState`
-returned by the server. OAuth completion, named provider API-key saves, and
-service API-key saves all refresh the same in-memory snapshot immediately, so
+returned by the server. OAuth completion and named provider API-key saves
+refresh the same in-memory snapshot immediately, so
 the current page swaps from empty entry state to a saved credential card with
 the masked label/hint before the user moves forward. The OAuth sheet also
 reports its returned `AuthState` to callers; Settings uses the same callback so
@@ -199,29 +196,31 @@ the model providers page refreshes even if the server event arrives later.
 Settings provider forms keep their local input until the auth engine protocol returns an
 updated `AuthState`; failed saves leave labels, API keys, and Google Cloud
 fields visible for correction or retry.
-The Providers settings sheet starts directly with model-provider credential
-cards; it does not project the loaded `AuthState` into a duplicate summary
-hero. Each model provider uses cards for current credential status and
-provider-specific details such as Google Cloud OAuth configuration, followed
-by leading-aligned OAuth/API-key buttons. OAuth login
+The Providers settings sheet starts directly with separate Model Providers and
+Search Providers groups; Brave Search and Exa use the same named API-key store
+as model providers without becoming model choices. It does not project the
+loaded `AuthState` into a duplicate summary hero. Each provider uses one compact
+credential card whose header owns a trailing add/login menu, eliminating a
+separate action-button row. Provider-specific details such as Google Cloud OAuth
+configuration remain in their own subordinate card. Ollama is the explicit
+credential-free exception: its subordinate card owns the validated endpoint,
+reachability, installed-model facts from server discovery, refresh, and
+actionable start/pull guidance; it does not install or control Ollama. OAuth login
 buttons are hidden when the provider already has a usable or refreshable OAuth
 account, and reappear for expired non-refreshable accounts. API-key-only
-providers and search services use the same native Add API Key alert: provider
-alerts collect a label plus the key, while service alerts collect only the
-single service key. Failed saves re-present the alert with the draft intact so
+providers use the same native Add API Key alert and collect a label plus the
+key. Failed saves re-present the alert with the draft intact so
 typed secrets are not lost. Masked server-returned hints never share a
 container with unsaved secret entry fields. Credential status cards keep OAuth
 state and masked key hints in the trailing monospace slot next to an explicit
-small red X icon button. The Services group uses a stronger spaced header than
-individual provider rows so the sheet reads as two clear sections: model
-providers first, then search services.
+small red X icon button.
 
 Provider credentials are written through `auth.*` engine invocations, so secrets land in
-`auth.json`, not profile settings.
+`auth.json`, not engine settings.
 
 Engine settings and app settings are intentionally separate. Server-backed
 settings live as sparse `[settings]` overrides in
-`~/.tron/profiles/user/profile.toml`; they remain behind the server-backed
+`~/.tron/settings.toml`; they remain behind the server-backed
 settings controls and are enabled only after the active server connects and
 `settings.get` returns real values. The main Settings sheet starts at the
 medium detent and presents Engine, Providers, and App as separate destination
@@ -267,12 +266,12 @@ at a bounded cadence until the server returns, the app backgrounds, or
 authentication fails, so shell and chat controls recover after a dev-server
 rebuild without requiring every screen to own retry logic.
 The Engine settings sheet starts directly with Servers, followed by the
-server-owned Session Defaults, Context, and Transcription sections; it has no
-top summary hero or separate presentation projection. Engine owns the retained
-quick-session defaults that exist as actionable iOS controls: model and
-workspace. The Local Transcription toggle remains an Engine policy even though
-the concise main Settings row does not enumerate it. Session briefing remains
-session-scoped through the prompt composer's context ring and briefing surfaces.
+server-owned Session Defaults and Context sections; it has no top summary hero
+or separate presentation projection. Worker-first execution is not a setting.
+Engine owns the
+retained quick-session defaults that exist as actionable iOS controls: model
+and workspace. Fixed local transcription and microphone capture are absent;
+speech workflows must return as workers developed through real use.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system::ping`. The server emits a

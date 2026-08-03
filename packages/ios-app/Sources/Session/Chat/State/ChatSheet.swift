@@ -69,12 +69,10 @@ struct LocalErrorDetailData: Equatable, Hashable {
     let suggestion: String?
 }
 
-struct ContextControlSheetData: Equatable, Hashable {
-    let initialActionResourceId: String?
-
-    init(initialActionResourceId: String? = nil) {
-        self.initialActionResourceId = initialActionResourceId
-    }
+/// Immutable source-aware snapshot for the reasoning detail sheet.
+struct ThinkingDetailData: Equatable {
+    let content: String
+    let kind: ThinkingDisplayKind
 }
 
 /// Identifiable enum representing all possible sheets in ChatView.
@@ -83,37 +81,37 @@ struct ContextControlSheetData: Equatable, Hashable {
 enum ChatSheet: Identifiable, Equatable {
     // Settings & Info
     case settings
+    case sessionContext
 
     case compactionDetail(CompactionDetailData)
 
-    case thinkingDetail(String)
+    case thinkingDetail(ThinkingDetailData)
     case providerErrorDetail(ProviderErrorDetailData)
     case localErrorDetail(LocalErrorDetailData)
-    case contextControl(ContextControlSheetData)
 
-    // Capability detail
-    case capabilityInvocationDetail(CapabilityInvocationData)
-    case capabilityInvocationGroupDetail(CapabilityInvocationGroupData)
+    // Tool detail
+    case toolInvocationDetail(ToolInvocationData)
+    case toolInvocationGroupDetail(ToolInvocationGroupData)
 
 
     var id: String {
         switch self {
         case .settings:
             return "settings"
+        case .sessionContext:
+            return "sessionContext"
         case .compactionDetail:
             return "compaction"
         case .thinkingDetail:
             return "thinking"
-        case .capabilityInvocationDetail(let data):
-            return "capability-\(data.id)"
-        case .capabilityInvocationGroupDetail(let data):
-            return "capability-group-\(data.id)"
+        case .toolInvocationDetail(let data):
+            return "tool-\(data.id)"
+        case .toolInvocationGroupDetail(let data):
+            return "tool-group-\(data.id)"
         case .providerErrorDetail:
             return "providerError"
         case .localErrorDetail(let data):
             return "localError-\(data.title)-\(data.message)"
-        case .contextControl(let data):
-            return "contextControl-\(data.initialActionResourceId ?? "overview")"
         }
     }
 
@@ -123,22 +121,27 @@ enum ChatSheet: Identifiable, Equatable {
         switch (lhs, rhs) {
         case (.settings, .settings):
             return true
+        case (.sessionContext, .sessionContext):
+            return true
         case (.compactionDetail(let data1), .compactionDetail(let data2)):
             return data1 == data2
-        case (.thinkingDetail(let content1), .thinkingDetail(let content2)):
-            return content1 == content2
-        case (.capabilityInvocationDetail(let data1), .capabilityInvocationDetail(let data2)):
+        case (.thinkingDetail(let data1), .thinkingDetail(let data2)):
+            return data1 == data2
+        case (.toolInvocationDetail(let data1), .toolInvocationDetail(let data2)):
             return data1.id == data2.id
-        case (.capabilityInvocationGroupDetail(let data1), .capabilityInvocationGroupDetail(let data2)):
+        case (.toolInvocationGroupDetail(let data1), .toolInvocationGroupDetail(let data2)):
             return data1.id == data2.id
         case (.providerErrorDetail(let data1), .providerErrorDetail(let data2)):
             return data1 == data2
         case (.localErrorDetail(let data1), .localErrorDetail(let data2)):
             return data1 == data2
-        case (.contextControl(let data1), .contextControl(let data2)):
-            return data1 == data2
         default:
             return false
         }
+    }
+
+    /// Source-compatible constructor for raw provider thinking.
+    static func thinkingDetail(_ content: String) -> ChatSheet {
+        .thinkingDetail(ThinkingDetailData(content: content, kind: .thinking))
     }
 }

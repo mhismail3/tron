@@ -3,13 +3,17 @@
 //! | Module | Responsibility |
 //! | --- | --- |
 //! | [`errors`] | Stable engine failure categories and results. |
-//! | [`ids`] | Validated identifiers for functions, workers, traces, invocations, and resources. |
-//! | [`policy`] | Kernel-level policy value types. |
-//! | [`schema`] | Enforced JSON Schema subset used before authority derivation and dispatch. |
-//! | [`types`] | Core invocation, resource, grant, and catalog records. |
+//! | [`ids`] | Validated identifiers for functions, workers, triggers, traces, and invocations. |
+//! | [`policy`] | Registration, visibility, delivery, and routability checks. |
+//! | [`schema`] | Enforced JSON Schema subset used before dispatch. |
+//! | [`types`] | Core function, worker, invocation, and catalog records. |
 //!
-//! INVARIANT: schema keywords admitted by canonical capability contracts are
+//! INVARIANT: schema keywords admitted by canonical function contracts are
 //! executable validation rules here, never documentation-only annotations.
+//! This includes schema-valued `additionalProperties`, which keeps dynamic
+//! string maps and similar extensible objects typed at runtime, plus string
+//! `minLength`, `maxLength`, and `pattern` constraints that reject malformed
+//! or unbounded provider arguments pre-dispatch.
 
 pub mod errors;
 pub mod ids;

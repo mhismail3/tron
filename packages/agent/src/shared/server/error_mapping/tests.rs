@@ -1,21 +1,19 @@
 use super::{
-    engine_error_to_capability_error, engine_error_to_failure, map_auth_error,
-    map_event_store_error,
+    engine_error_to_failure, engine_error_to_tool_error, map_auth_error, map_event_store_error,
 };
 use crate::domains::auth::credentials::errors::AuthError as A;
 use crate::domains::session::event_store::errors::EventStoreError as E;
 use crate::engine::EngineError;
-use crate::shared::server::errors::{self as codes, CapabilityError};
+use crate::shared::server::errors::{self as codes, ToolError};
 use crate::shared::server::failure::{
-    ENGINE_DELIVERY_MODE_NOT_ALLOWED, ENGINE_HANDLER_FAILED, ENGINE_INVALID_FUNCTION_ID,
-    ENGINE_INVALID_ID, ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED,
-    ENGINE_NOT_ROUTABLE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
-    ENGINE_STORED_INVOCATION_ERROR, ENGINE_UNSUPPORTED_DELIVERY_MODE, FailureCategory,
-    FailureOrigin, RUNTIME_CANCELLED,
+    ENGINE_HANDLER_FAILED, ENGINE_INVALID_FUNCTION_ID, ENGINE_INVALID_ID, ENGINE_INVALID_SCHEMA,
+    ENGINE_LEDGER_FAILURE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
+    ENGINE_STALE_FUNCTION_SURFACE, ENGINE_STORED_INVOCATION_ERROR, FailureCategory, FailureOrigin,
+    RUNTIME_CANCELLED,
 };
 
 fn assert_embedded_failure(
-    mapped: &CapabilityError,
+    mapped: &ToolError,
     expected_code: &str,
     expected_category: FailureCategory,
     expected_origin: FailureOrigin,
@@ -67,27 +65,6 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
             FailureCategory::Conflict,
         ),
         (
-            EngineError::NamespaceDenied {
-                worker_id: "worker-a".to_owned(),
-                function_id: "other::run".to_owned(),
-            },
-            ENGINE_NAMESPACE_DENIED,
-            FailureCategory::Auth,
-        ),
-        (
-            EngineError::UnsupportedDeliveryMode { mode: "enqueue" },
-            ENGINE_UNSUPPORTED_DELIVERY_MODE,
-            FailureCategory::InvalidRequest,
-        ),
-        (
-            EngineError::DeliveryModeNotAllowed {
-                function_id: "demo::run".to_owned(),
-                mode: "enqueue",
-            },
-            ENGINE_DELIVERY_MODE_NOT_ALLOWED,
-            FailureCategory::InvalidRequest,
-        ),
-        (
             EngineError::IdempotencyConflict {
                 function_id: "demo::run".to_owned(),
                 key: "k".to_owned(),
@@ -110,7 +87,7 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
                 message: "failed".to_owned(),
             },
             ENGINE_STORED_INVOCATION_ERROR,
-            FailureCategory::Capability,
+            FailureCategory::Tool,
         ),
         (
             EngineError::InvalidSchema {
@@ -132,26 +109,20 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
             FailureCategory::InvalidRequest,
         ),
         (
-            EngineError::InvalidVisibilityPromotion {
+            EngineError::StaleFunctionSurface {
                 function_id: "demo::run".to_owned(),
-                target: "session".to_owned(),
-                reason: "not allowed".to_owned(),
+                expected_revision: 1,
+                actual_revision: 2,
+                expected_worker_version: Some("v1".to_owned()),
+                actual_worker_version: Some("v2".to_owned()),
             },
-            "INVALID_VISIBILITY_PROMOTION",
-            FailureCategory::InvalidRequest,
+            ENGINE_STALE_FUNCTION_SURFACE,
+            FailureCategory::Conflict,
         ),
         (
             EngineError::PolicyViolation("denied".to_owned()),
             ENGINE_POLICY_VIOLATION,
             FailureCategory::InvalidRequest,
-        ),
-        (
-            EngineError::NotRoutable {
-                function_id: "demo::run".to_owned(),
-                reason: "worker offline".to_owned(),
-            },
-            ENGINE_NOT_ROUTABLE,
-            FailureCategory::Unavailable,
         ),
         (
             EngineError::DomainFailure {
@@ -164,14 +135,6 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
             FailureCategory::NotFound,
         ),
         (
-            EngineError::WorkerTransportFailure {
-                code: "WORKER_DISCONNECTED".to_owned(),
-                message: "worker disconnected".to_owned(),
-            },
-            "WORKER_DISCONNECTED",
-            FailureCategory::Engine,
-        ),
-        (
             EngineError::InvocationCancelled,
             RUNTIME_CANCELLED,
             FailureCategory::Cancelled,
@@ -179,7 +142,7 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
         (
             EngineError::HandlerFailed("boom".to_owned()),
             ENGINE_HANDLER_FAILED,
-            FailureCategory::Capability,
+            FailureCategory::Tool,
         ),
     ];
 
@@ -193,7 +156,7 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
 
 #[test]
 fn engine_owner_mismatch_is_typed() {
-    let mapped = engine_error_to_capability_error(EngineError::OwnerMismatch {
+    let mapped = engine_error_to_tool_error(EngineError::OwnerMismatch {
         kind: "function",
         id: "demo::run".to_owned(),
         owner: "worker-a".to_owned(),
@@ -206,20 +169,6 @@ fn engine_owner_mismatch_is_typed() {
     assert_eq!(details["owner"], "worker-a");
     assert_eq!(details["attemptedOwner"], "worker-b");
     assert_eq!(details["failure"]["category"], "conflict");
-}
-
-#[test]
-fn engine_invalid_visibility_promotion_is_typed() {
-    let mapped = engine_error_to_capability_error(EngineError::InvalidVisibilityPromotion {
-        function_id: "demo::run".to_owned(),
-        target: "session".to_owned(),
-        reason: "only workspace and system promotion are supported".to_owned(),
-    });
-    assert_eq!(mapped.code(), "INVALID_VISIBILITY_PROMOTION");
-    let details = mapped.details().expect("visibility promotion details");
-    assert_eq!(details["functionId"], "demo::run");
-    assert_eq!(details["target"], "session");
-    assert_eq!(details["failure"]["code"], "INVALID_VISIBILITY_PROMOTION");
 }
 
 #[test]
@@ -331,9 +280,9 @@ fn event_store_internal_errors_preserve_persistence_failure() {
 }
 
 #[test]
-fn event_store_migration_errors_preserve_safe_reason() {
-    let mapped = map_event_store_error(E::Migration {
-        message: "v003 failed".into(),
+fn event_store_schema_errors_preserve_safe_reason() {
+    let mapped = map_event_store_error(E::Schema {
+        message: "table creation failed".into(),
     });
     let details = assert_embedded_failure(
         &mapped,
@@ -343,8 +292,8 @@ fn event_store_migration_errors_preserve_safe_reason() {
         false,
         false,
     );
-    assert_eq!(details["kind"], "migration");
-    assert_eq!(details["reason"], "v003 failed");
+    assert_eq!(details["kind"], "schema");
+    assert_eq!(details["reason"], "table creation failed");
 }
 
 #[test]
@@ -469,7 +418,7 @@ fn auth_malformed_provider_auth_is_not_configured() {
 #[test]
 fn auth_malformed_auth_file_is_sanitized_storage_error() {
     let mapped = map_auth_error(A::MalformedAuthFile {
-        path: "/Users/local-secret/.tron/profiles/auth.json".into(),
+        path: "/Users/local-secret/.tron/auth.json".into(),
         details: "unknown field `services`".into(),
     });
     let details = assert_embedded_failure(

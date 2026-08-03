@@ -34,7 +34,7 @@ struct ChatSheetModifier: ViewModifier {
 
     private func onDismiss() {
         viewModel.showSettings = false
-        sheetCoordinator.onDismiss?()
+        sheetCoordinator.presentationDidDismiss()
     }
 }
 

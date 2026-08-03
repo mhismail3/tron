@@ -4,12 +4,11 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `context_manager` | Entry point — owns context lifecycle, compaction triggers, and manager dependency projections |
-//! | `context_snapshot_builder` | Builds context snapshots (stable + volatile breakdown) via `SnapshotDeps` |
+//! | `context_manager` | Entry point — owns context lifecycle and compaction dependency projection |
 //! | `compaction_engine` | Executes compaction: summarize older eligible messages, trim context |
-//! | `summarizer` | Summarizer trait and recovery implementations |
+//! | `summarizer` | Worker-backed semantic summary policy plus deterministic recovery |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
-//! | `soul` | Static seed instruction for the primitive loop |
+//! | `seed` | Minimal product-intent instruction for the primitive loop |
 //! | `token_estimator` | Token counting and context budget calculations |
 //! | `constants` | Token limits, compaction thresholds |
 //! | `types` | Shared types for context subsystem |
@@ -21,27 +20,42 @@
 //!
 //! ## Key Invariant
 //!
-//! The model-facing prompt begins with the static soul seed, the compact
-//! agent-owned state projection loaded through engine state primitives, and a
-//! provider-safe memory prompt-trace audit that carries only mode/count/ref
-//! evidence.
+//! The model-facing prompt begins with a concise behavioral seed and the
+//! current direct-tool surface. The seed owns only durable behavioral intent;
+//! live tool identity belongs to provider schemas, and exact authoring
+//! mechanics belong to each tool contract. Durable worker state reaches the
+//! model only through explicit tool results and bounded durable Agent
+//! Deliveries; the context manager does not maintain a parallel generic
+//! state-prompt channel.
 //! Compaction uses token pressure to decide when to compact context, and only
 //! commits when an older message window can be summarized and the result
 //! reduces the durable context. Runtime compaction also requires the loop
 //! handler to persist context-control proof before provider context is mutated;
 //! proof failure restores the pre-compaction checkpoint instead of creating an
 //! unaudited boundary.
-//! The replaceable strategy seam is limited to the summarizer implementation:
-//! context snapshots, compaction actions, epoch records, audit refs, and
-//! provider-safe projections remain server-owned record-plane custody.
+//! Summary generation first resolves the atomically active
+//! `context_summary` worker hook. The bounded hook projection excludes hidden
+//! thinking, tool arguments, binary results, usage, and cost; hook failure or
+//! absence falls back to deterministic keyword recovery. A hook worker never
+//! invokes itself while compacting its own agent-runner session. The strategy
+//! seam is limited to summary meaning. Every accepted narrative fits the
+//! worker contract's estimated 10,000-token and 40,000-byte UTF-8 ceilings
+//! before context mutation, and the same value enters live context, durable
+//! boundary proof, and restart replay:
+//! compaction actions, epoch records, audit refs, and provider-safe projections
+//! remain server-owned record-plane custody.
+//! Before token pressure is measured, the turn runner rebuilds worker tool
+//! evidence from the invocation ledger: only a trailing unconsumed small
+//! result is hydrated, while all historical results and consumed bounded pages
+//! are references. Compaction and provider admission therefore estimate the
+//! same canonical projection without a context-owned worker result cache.
 
 pub mod compaction_engine;
 pub mod compaction_trigger;
 pub mod constants;
 pub mod context_manager;
-pub mod context_snapshot_builder;
 pub mod message_store;
-pub mod soul;
+pub mod seed;
 pub mod summarizer;
 pub mod token_estimator;
 pub mod types;

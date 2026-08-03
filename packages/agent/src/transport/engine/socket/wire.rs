@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use serde_json::{Map, Value};
 
-use crate::shared::server::errors::{CapabilityError, INVALID_PARAMS};
+use crate::shared::server::errors::{INVALID_PARAMS, ToolError};
 use crate::shared::server::events::ServerEventPayload;
 
 use super::{STREAM_DEFAULT_LIMIT, STREAM_MAX_LIMIT};
@@ -50,21 +50,6 @@ pub(super) struct InvokeMessage {
     pub(super) payload: Option<Value>,
     #[serde(default)]
     pub(super) idempotency_key: Option<String>,
-    #[serde(default)]
-    pub(super) context: Option<WireContext>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct PromoteMessage {
-    #[serde(rename = "type")]
-    pub(super) _message_type: String,
-    pub(super) id: Option<String>,
-    pub(super) function_id: String,
-    pub(super) target_visibility: String,
-    #[serde(default)]
-    pub(super) workspace_id: Option<String>,
-    pub(super) idempotency_key: String,
     #[serde(default)]
     pub(super) context: Option<WireContext>,
 }
@@ -118,6 +103,15 @@ pub(super) struct AckMessage {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct UnsubscribeMessage {
+    #[serde(rename = "type")]
+    pub(super) _message_type: String,
+    pub(super) id: Option<String>,
+    pub(super) subscription_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct HeartbeatMessage {
     #[serde(rename = "type")]
     pub(super) _message_type: String,
@@ -138,19 +132,7 @@ pub(super) struct ProtocolEvent {
     pub(super) event: ServerEventPayload,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct RequestMessage {
-    #[serde(rename = "type")]
-    pub(super) _message_type: String,
-    #[serde(default)]
-    pub(super) id: Option<String>,
-    pub(super) request: Value,
-    #[serde(default)]
-    pub(super) context: Option<WireContext>,
-}
-
-pub(super) fn optional_id(object: &Map<String, Value>) -> Result<Option<String>, CapabilityError> {
+pub(super) fn optional_id(object: &Map<String, Value>) -> Result<Option<String>, ToolError> {
     match object.get("id") {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(value)) => {
@@ -172,7 +154,7 @@ pub(super) fn optional_id(object: &Map<String, Value>) -> Result<Option<String>,
     }
 }
 
-pub(super) fn checked_limit(limit: Option<usize>) -> Result<usize, CapabilityError> {
+pub(super) fn checked_limit(limit: Option<usize>) -> Result<usize, ToolError> {
     let limit = limit.unwrap_or(STREAM_DEFAULT_LIMIT);
     if limit == 0 {
         return Err(protocol_error(
@@ -188,8 +170,8 @@ pub(super) fn protocol_error(
     code: impl Into<String>,
     message: impl Into<String>,
     details: Option<Value>,
-) -> CapabilityError {
-    CapabilityError::Custom {
+) -> ToolError {
+    ToolError::Custom {
         code: code.into(),
         message: message.into(),
         details,

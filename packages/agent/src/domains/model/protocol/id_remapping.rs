@@ -1,16 +1,16 @@
-//! # ModelCapability Call ID Remapping
+//! # ModelTool Call ID Remapping
 //!
-//! When switching providers mid-session, capability invocation IDs from one provider
+//! When switching providers mid-session, tool invocation IDs from one provider
 //! (e.g., Anthropic's `toolu_01abc...`) may not be recognized by another
 //! (e.g., `OpenAI` expects `call_...`). This module handles the mapping.
 //!
-//! The approach: scan all existing capability invocations, generate synthetic IDs in the
+//! The approach: scan all existing tool invocations, generate synthetic IDs in the
 //! target format for any that don't match, and use the mapping during message
 //! conversion.
 
 use std::collections::HashMap;
 
-/// ID format for capability invocations.
+/// ID format for tool invocations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IdFormat {
     /// Anthropic format: `toolu_...`
@@ -19,17 +19,17 @@ pub enum IdFormat {
     OpenAi,
 }
 
-/// Check if a capability invocation ID is in Anthropic format (`toolu_` prefix).
+/// Check if a tool invocation ID is in Anthropic format (`toolu_` prefix).
 pub fn is_anthropic_id(id: &str) -> bool {
     id.starts_with("toolu_")
 }
 
-/// Check if a capability invocation ID is in `OpenAI` format (`call_` prefix).
+/// Check if a tool invocation ID is in `OpenAI` format (`call_` prefix).
 pub fn is_openai_id(id: &str) -> bool {
     id.starts_with("call_")
 }
 
-/// Determine the format of a capability invocation ID.
+/// Determine the format of a tool invocation ID.
 pub fn detect_id_format(id: &str) -> Option<IdFormat> {
     if is_anthropic_id(id) {
         Some(IdFormat::Anthropic)
@@ -40,7 +40,7 @@ pub fn detect_id_format(id: &str) -> Option<IdFormat> {
     }
 }
 
-/// Build a mapping from original capability invocation IDs to target-format IDs.
+/// Build a mapping from original tool invocation IDs to target-format IDs.
 ///
 /// Only IDs that don't already match the target format are remapped.
 /// Synthetic IDs are generated as `toolu_remap_N` or `call_remap_N`.
@@ -72,7 +72,7 @@ pub fn build_invocation_id_mapping(
     mapping
 }
 
-/// Remap a capability invocation ID using a previously built mapping.
+/// Remap a tool invocation ID using a previously built mapping.
 ///
 /// Returns the mapped ID if found, or the original ID unchanged.
 pub fn remap_invocation_id<'a, S: std::hash::BuildHasher>(

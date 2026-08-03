@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use crate::shared::server::errors::to_json_value;
 
 use super::Deps;
@@ -81,7 +81,7 @@ pub(super) struct CreateDirResult {
     pub(super) path: String,
 }
 
-pub(super) async fn get_home_value(deps: &Deps) -> Result<Value, CapabilityError> {
+pub(super) async fn get_home_value(deps: &Deps) -> Result<Value, ToolError> {
     let deps = deps.clone();
     run_blocking_task("filesystem::get_home", move || {
         to_json_value(&get_home(&deps))
@@ -89,11 +89,10 @@ pub(super) async fn get_home_value(deps: &Deps) -> Result<Value, CapabilityError
     .await
 }
 
-pub(super) async fn list_dir_value(payload: Value, deps: &Deps) -> Result<Value, CapabilityError> {
-    let params =
-        serde_json::from_value(payload).map_err(|error| CapabilityError::InvalidParams {
-            message: format!("Invalid filesystem list_dir params: {error}"),
-        })?;
+pub(super) async fn list_dir_value(payload: Value, deps: &Deps) -> Result<Value, ToolError> {
+    let params = serde_json::from_value(payload).map_err(|error| ToolError::InvalidParams {
+        message: format!("Invalid filesystem list_dir params: {error}"),
+    })?;
     let deps = deps.clone();
     run_blocking_task("filesystem::list_dir", move || {
         let result = list_dir(&deps, params)?;
@@ -102,14 +101,10 @@ pub(super) async fn list_dir_value(payload: Value, deps: &Deps) -> Result<Value,
     .await
 }
 
-pub(super) async fn create_dir_value(
-    payload: Value,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let params =
-        serde_json::from_value(payload).map_err(|error| CapabilityError::InvalidParams {
-            message: format!("Invalid filesystem create_dir params: {error}"),
-        })?;
+pub(super) async fn create_dir_value(payload: Value, deps: &Deps) -> Result<Value, ToolError> {
+    let params = serde_json::from_value(payload).map_err(|error| ToolError::InvalidParams {
+        message: format!("Invalid filesystem create_dir params: {error}"),
+    })?;
     let deps = deps.clone();
     run_blocking_task("filesystem::create_dir", move || {
         let result = create_dir(params, &deps)?;
@@ -147,7 +142,7 @@ fn get_home(deps: &Deps) -> HomeResult {
 pub(super) fn list_dir(
     deps: &Deps,
     params: ListDirParams,
-) -> Result<DirectoryListResult, CapabilityError> {
+) -> Result<DirectoryListResult, ToolError> {
     let path = normalize_user_path(params.path.as_deref().unwrap_or("~"), deps)?;
     let max_results = params
         .max_results
@@ -157,7 +152,7 @@ pub(super) fn list_dir(
 
     let metadata = fs::symlink_metadata(&path).map_err(|error| map_io_error(error, &path))?;
     if !metadata.is_dir() {
-        return Err(CapabilityError::Custom {
+        return Err(ToolError::Custom {
             code: FILESYSTEM_NOT_DIRECTORY.to_owned(),
             message: format!("Path is not a directory: {}", path.display()),
             details: None,
@@ -186,10 +181,10 @@ pub(super) fn list_dir(
 pub(super) fn create_dir(
     params: CreateDirParams,
     deps: &Deps,
-) -> Result<CreateDirResult, CapabilityError> {
+) -> Result<CreateDirResult, ToolError> {
     let path = normalize_user_path(&params.path, deps)?;
     if path.as_os_str().is_empty() {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: "path must not be empty".to_owned(),
         });
     }
@@ -200,7 +195,7 @@ pub(super) fn create_dir(
                 path: display_path(&path),
             });
         }
-        return Err(CapabilityError::Custom {
+        return Err(ToolError::Custom {
             code: FILESYSTEM_ERROR.to_owned(),
             message: format!("Path exists but is not a directory: {}", path.display()),
             details: None,
@@ -265,10 +260,10 @@ fn compare_entries(left: &DirectoryEntry, right: &DirectoryEntry) -> Ordering {
     }
 }
 
-fn normalize_user_path(raw: &str, deps: &Deps) -> Result<PathBuf, CapabilityError> {
+fn normalize_user_path(raw: &str, deps: &Deps) -> Result<PathBuf, ToolError> {
     let raw = raw.trim();
     if raw.is_empty() {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: "path must not be empty".to_owned(),
         });
     }
@@ -281,14 +276,14 @@ fn normalize_user_path(raw: &str, deps: &Deps) -> Result<PathBuf, CapabilityErro
     Ok(PathBuf::from(raw))
 }
 
-fn map_io_error(error: std::io::Error, path: &Path) -> CapabilityError {
+fn map_io_error(error: std::io::Error, path: &Path) -> ToolError {
     if error.kind() == std::io::ErrorKind::NotFound {
-        return CapabilityError::NotFound {
+        return ToolError::NotFound {
             code: "FILESYSTEM_NOT_FOUND".to_owned(),
             message: format!("Filesystem path not found: {}", path.display()),
         };
     }
-    CapabilityError::Custom {
+    ToolError::Custom {
         code: FILESYSTEM_ERROR.to_owned(),
         message: format!("{}: {}", path.display(), error),
         details: None,

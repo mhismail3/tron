@@ -17,6 +17,7 @@ enum TurnStartPlugin: DispatchableEventPlugin {
             let turn: Int?
             let turnNumber: Int?
             let agentPhase: String?
+            let agentDeliveryContinuation: AgentDeliveryContinuationPayload?
 
             /// Unified turn number accessor (handles both field names).
             var number: Int? { turn ?? turnNumber }
@@ -28,6 +29,17 @@ enum TurnStartPlugin: DispatchableEventPlugin {
     struct Result: EventResult {
         let turnNumber: Int
         let agentPhase: String
+        let agentDeliveryProvenance: [AgentDeliveryMessageProvenance]
+
+        init(
+            turnNumber: Int,
+            agentPhase: String,
+            agentDeliveryProvenance: [AgentDeliveryMessageProvenance] = []
+        ) {
+            self.turnNumber = turnNumber
+            self.agentPhase = agentPhase
+            self.agentDeliveryProvenance = agentDeliveryProvenance
+        }
     }
 
     // MARK: - Protocol Implementation
@@ -36,7 +48,9 @@ enum TurnStartPlugin: DispatchableEventPlugin {
         guard let data = event.data, let turnNumber = data.number else { return nil }
         return Result(
             turnNumber: turnNumber,
-            agentPhase: data.agentPhase ?? "processing"
+            agentPhase: data.agentPhase ?? "processing",
+            agentDeliveryProvenance:
+                data.agentDeliveryContinuation?.deliveries ?? []
         )
     }
 

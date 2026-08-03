@@ -1,17 +1,17 @@
 use super::{BaseEvent, Deps, SessionLifecycleService, TronEvent};
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use serde_json::Value;
 use serde_json::json;
 
 impl SessionLifecycleService {
-    pub(crate) async fn delete(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
+    pub(crate) async fn delete(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let session_manager = deps.session_manager.clone();
         let session_id_for_delete = session_id.clone();
         run_blocking_task("session.delete", move || {
             session_manager
                 .delete_session(&session_id_for_delete)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: error.to_string(),
                 })?;
             Ok(())

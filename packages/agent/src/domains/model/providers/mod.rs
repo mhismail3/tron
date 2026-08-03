@@ -6,21 +6,21 @@
 //! plus shared infrastructure used across providers. Provider-native
 //! function-call and tool-call wire details stay inside provider modules and
 //! `domains::model::protocol`; the rest of Tron consumes canonical
-//! capability invocation drafts, results, and history. Provider modules must
-//! reject malformed or non-object capability arguments at the stream boundary
+//! tool invocation drafts, results, and history. Provider modules must
+//! reject malformed or non-object tool arguments at the stream boundary
 //! instead of projecting them as empty canonical invocations.
-//! Canonical capability result envelopes are already redacted and structurally
-//! bounded by the capability domain; provider converters transport their text
+//! Canonical tool result envelopes are already redacted and structurally
+//! bounded by the tool domain; provider converters transport their text
 //! bytes unchanged and may only adapt invocation ids and provider-native wire
 //! wrappers.
 //!
 //! - [`shared::provider`] — Core [`shared::provider::Provider`] trait, [`shared::provider::ProviderStreamOptions`], [`shared::provider::ProviderError`]
-//! - [`crate::domains::model::routing::models`] — Model registry, ID constants, provider detection, capability queries
+//! - [`crate::domains::model::routing::models`] — Model registry, ID constants, provider detection, tool queries
 //! - [`shared::sse`] — Shared SSE line parser for HTTP streaming responses
 //! - [`shared::retry`] — Stream retry with exponential backoff + jitter
-//! - [`crate::domains::model::protocol::capability_parsing`] — Fail-closed JSON parsing for provider capability invocation arguments
+//! - [`crate::domains::model::protocol::tool_parsing`] — Fail-closed JSON parsing for provider tool invocation arguments
 //! - [`shared::context_composition`] — Context part ordering and stable/volatile grouping
-//! - [`crate::domains::model::protocol::id_remapping`] — Capability invocation ID format conversion between providers
+//! - [`crate::domains::model::protocol::id_remapping`] — Tool invocation ID format conversion between providers
 //! - [`shared::stream_common`] — Shared [`shared::stream_common::StreamAccumulator`] for delta processing
 //!
 //! ## Submodules
@@ -57,9 +57,9 @@
 //! - Shared provider infrastructure stays under [`shared`]; this root exposes
 //!   only the canonical provider protocol helpers used by provider modules.
 //! - Provider-native wire formats are converted before they reach canonical
-//!   capability history.
-//! - Malformed provider capability arguments fail closed at the stream boundary.
-//! - Provider converters never truncate or rewrite canonical capability result
+//!   tool history.
+//! - Malformed provider tool arguments fail closed at the stream boundary.
+//! - Provider converters never truncate or rewrite canonical tool result
 //!   envelope text.
 //!
 //! ## Test Ownership
@@ -80,6 +80,6 @@ pub mod shared;
 
 pub use crate::domains::model::protocol::remap_invocation_id;
 pub use crate::domains::model::protocol::{
-    CapabilityArgumentParseError, CapabilityCallContext, IdFormat, build_invocation_id_mapping,
-    id_remapping, parse_capability_call_arguments,
+    IdFormat, ToolArgumentParseError, ToolCallContext, build_invocation_id_mapping, id_remapping,
+    parse_tool_call_arguments,
 };

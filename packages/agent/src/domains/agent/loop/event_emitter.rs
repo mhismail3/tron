@@ -296,6 +296,7 @@ mod tests {
         let _ = emitter.emit(TronEvent::TurnStart {
             base: BaseEvent::now("s1"),
             turn: 1,
+            agent_delivery_continuation: None,
         });
         let _ = emitter.emit(TronEvent::MessageUpdate {
             base: BaseEvent::now("s1"),

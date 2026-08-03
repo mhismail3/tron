@@ -19,77 +19,77 @@ final class AnimationCoordinatorTests: XCTestCase {
 
     // MARK: - Initial State Tests
 
-    func test_initialState_noCapabilitiesVisible() {
+    func test_initialState_noToolsVisible() {
         XCTAssertTrue(coordinator.visibleInvocationIds.isEmpty)
     }
 
-    // MARK: - Capability Call Staggering Tests
+    // MARK: - Tool Call Staggering Tests
 
-    func test_queueCapabilityInvocationStart_makesCapabilityVisible() {
+    func test_queueToolInvocationStart_makesToolVisible() {
         // When
-        coordinator.queueCapabilityInvocationStart(invocationId: "capability-1")
+        coordinator.queueToolInvocationStart(invocationId: "tool-1")
 
         // Then
-        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-1"))
+        XCTAssertTrue(coordinator.isToolInvocationVisible("tool-1"))
     }
 
-    func test_queueCapabilityInvocationStart_queuesMultipleCapabilities() {
+    func test_queueToolInvocationStart_queuesMultipleTools() {
         // When
-        coordinator.queueCapabilityInvocationStart(invocationId: "capability-1")
-        coordinator.queueCapabilityInvocationStart(invocationId: "capability-2")
-        coordinator.queueCapabilityInvocationStart(invocationId: "capability-3")
+        coordinator.queueToolInvocationStart(invocationId: "tool-1")
+        coordinator.queueToolInvocationStart(invocationId: "tool-2")
+        coordinator.queueToolInvocationStart(invocationId: "tool-3")
 
         // Then
-        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-1"))
-        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-2"))
-        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-3"))
+        XCTAssertTrue(coordinator.isToolInvocationVisible("tool-1"))
+        XCTAssertTrue(coordinator.isToolInvocationVisible("tool-2"))
+        XCTAssertTrue(coordinator.isToolInvocationVisible("tool-3"))
     }
 
-    func test_markCapabilityInvocationComplete_makesCapabilityVisible() {
+    func test_markToolInvocationComplete_makesToolVisible() {
         // When
-        coordinator.markCapabilityInvocationComplete(invocationId: "capability-1")
+        coordinator.markToolInvocationComplete(invocationId: "tool-1")
 
         // Then
-        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-1"))
+        XCTAssertTrue(coordinator.isToolInvocationVisible("tool-1"))
     }
 
-    func test_makeCapabilityInvocationVisible_directlyAddsCapabilityId() {
+    func test_makeToolInvocationVisible_directlyAddsToolId() {
         // When
-        coordinator.makeCapabilityInvocationVisible("capability-direct")
+        coordinator.makeToolInvocationVisible("tool-direct")
 
         // Then
-        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-direct"))
+        XCTAssertTrue(coordinator.isToolInvocationVisible("tool-direct"))
     }
 
-    func test_resetCapabilityState_clearsPendingButKeepsVisible() {
-        // Given - some capabilities visible
-        coordinator.queueCapabilityInvocationStart(invocationId: "capability-1")
-        coordinator.queueCapabilityInvocationStart(invocationId: "capability-2")
+    func test_resetToolState_clearsPendingButKeepsVisible() {
+        // Given - some tools visible
+        coordinator.queueToolInvocationStart(invocationId: "tool-1")
+        coordinator.queueToolInvocationStart(invocationId: "tool-2")
 
         // When
-        coordinator.resetCapabilityState()
+        coordinator.resetToolState()
 
-        // Then - visible capabilities preserved
-        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-1"))
-        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-2"))
+        // Then - visible tools preserved
+        XCTAssertTrue(coordinator.isToolInvocationVisible("tool-1"))
+        XCTAssertTrue(coordinator.isToolInvocationVisible("tool-2"))
     }
 
-    func test_fullReset_clearsAllCapabilityState() {
+    func test_fullReset_clearsAllToolState() {
         // Given
-        coordinator.queueCapabilityInvocationStart(invocationId: "capability-1")
-        coordinator.queueCapabilityInvocationStart(invocationId: "capability-2")
+        coordinator.queueToolInvocationStart(invocationId: "tool-1")
+        coordinator.queueToolInvocationStart(invocationId: "tool-2")
 
         // When
         coordinator.fullReset()
 
         // Then
-        XCTAssertFalse(coordinator.isCapabilityInvocationVisible("capability-1"))
-        XCTAssertFalse(coordinator.isCapabilityInvocationVisible("capability-2"))
+        XCTAssertFalse(coordinator.isToolInvocationVisible("tool-1"))
+        XCTAssertFalse(coordinator.isToolInvocationVisible("tool-2"))
         XCTAssertTrue(coordinator.visibleInvocationIds.isEmpty)
     }
 
-    func test_isCapabilityInvocationVisible_returnsFalseForUnknownCapability() {
-        XCTAssertFalse(coordinator.isCapabilityInvocationVisible("unknown-capability"))
+    func test_isToolInvocationVisible_returnsFalseForUnknownTool() {
+        XCTAssertFalse(coordinator.isToolInvocationVisible("unknown-tool"))
     }
 
     // MARK: - Message Cascade Tests
@@ -158,7 +158,7 @@ final class AnimationCoordinatorTests: XCTestCase {
     func test_staticAnimations_exist() {
         // Verify animation helpers return valid animations
         _ = AnimationCoordinator.pillAnimation
-        _ = AnimationCoordinator.capabilityAnimation
+        _ = AnimationCoordinator.toolAnimation
         _ = AnimationCoordinator.cascadeAnimation
     }
 
@@ -169,8 +169,8 @@ final class AnimationCoordinatorTests: XCTestCase {
         XCTAssertGreaterThan(AnimationCoordinator.Timing.cascadeMaxMessages, 0)
         XCTAssertGreaterThan(AnimationCoordinator.Timing.cascadeSpringResponse, 0)
 
-        // Capability stagger
-        XCTAssertGreaterThan(AnimationCoordinator.Timing.capabilityStaggerInterval, 0)
-        XCTAssertGreaterThan(AnimationCoordinator.Timing.capabilityStaggerCap, 0)
+        // Tool stagger
+        XCTAssertGreaterThan(AnimationCoordinator.Timing.toolStaggerInterval, 0)
+        XCTAssertGreaterThan(AnimationCoordinator.Timing.toolStaggerCap, 0)
     }
 }

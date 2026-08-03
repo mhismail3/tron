@@ -1,87 +1,5 @@
 import Foundation
 
-// MARK: - Engine Client Errors
-
-enum EngineClientError: Error, LocalizedError {
-    case noActiveSession
-    case invalidURL
-    case connectionNotEstablished
-
-    var errorDescription: String? {
-        switch self {
-        case .noActiveSession: return "No active session"
-        case .invalidURL: return "Invalid server URL"
-        case .connectionNotEstablished: return "Connection not established"
-        }
-    }
-}
-
-enum EngineClientConnectionPolicy {
-    static func shouldSkipConnect(state: ConnectionState) -> Bool {
-        switch state {
-        case .connected, .connecting, .reconnecting, .deployRestarting:
-            return true
-        case .disconnected, .failed, .unauthorized:
-            return false
-        }
-    }
-
-    static func shouldDiscardExistingTransport(hasTransport: Bool, state: ConnectionState) -> Bool {
-        hasTransport && !shouldSkipConnect(state: state)
-    }
-}
-
-enum EngineClientStreamSubscriptionPolicy {
-    static func shouldClearSubscriptions(previous: ConnectionState, next: ConnectionState) -> Bool {
-        previous.isConnected && !next.isConnected
-    }
-
-    static func shouldResubscribe(
-        previous: ConnectionState,
-        next: ConnectionState,
-        hasCurrentSession: Bool
-    ) -> Bool {
-        !previous.isConnected && next.isConnected && hasCurrentSession
-    }
-}
-
-private struct EngineStreamSubscriptionKey: Hashable {
-    let topic: String
-    let sessionId: String?
-    let workspaceId: String?
-}
-
-/// Coalesces connection-local stream acknowledgements per subscription.
-struct EngineStreamAckCoalescer {
-    private var latestBySubscription: [String: EngineStreamCursor] = [:]
-    private var scheduledSubscriptions: Set<String> = []
-
-    mutating func record(subscriptionId: String, cursor: EngineStreamCursor) -> Bool {
-        if let existing = latestBySubscription[subscriptionId] {
-            latestBySubscription[subscriptionId] = max(existing, cursor)
-        } else {
-            latestBySubscription[subscriptionId] = cursor
-        }
-        return scheduledSubscriptions.insert(subscriptionId).inserted
-    }
-
-    mutating func takeForFlush(subscriptionId: String) -> EngineStreamCursor? {
-        latestBySubscription.removeValue(forKey: subscriptionId)
-    }
-
-    mutating func completeFlush(subscriptionId: String) -> Bool {
-        scheduledSubscriptions.remove(subscriptionId)
-        return latestBySubscription[subscriptionId] != nil
-    }
-
-    mutating func removeAll() {
-        latestBySubscription.removeAll()
-        scheduledSubscriptions.removeAll()
-    }
-}
-
-// MARK: - Engine Client
-
 @Observable
 @MainActor
 final class EngineClient: EngineTransport {
@@ -91,8 +9,21 @@ final class EngineClient: EngineTransport {
     private(set) var currentSessionId: String?
     private(set) var currentModel: String = ""
     private var streamSubscriptions: [EngineStreamSubscriptionKey: EngineSubscription] = [:]
+    private var streamSubscriptionGeneration: UInt64 = 0
+    private var sessionSubscriptionTasks: [
+        EngineStreamSubscriptionKey: Task<EngineSubscription, any Error>
+    ] = [:]
+    private(set) var sessionSubscriptionInterests: [
+        EngineStreamSubscriptionKey: Set<EngineSessionSubscriptionInterest>
+    ] = [:]
     private var streamAckCoalescer = EngineStreamAckCoalescer()
     private var streamAckTasks: [String: Task<Void, Never>] = [:]
+    private var workerEventSubscriptionTask: Task<Void, any Error>?
+    private var workerProjectionInvalidationTask: Task<Void, Never>?
+    private var workerProjectionInvalidations = WorkerProjectionInvalidationAccumulator()
+    private var connectionAttemptTask: Task<Void, Never>?
+    private var connectionAttemptGeneration: UInt64 = 0
+    private var currentSessionInterestGeneration: UInt64 = 0
 
     // MARK: - Domain Clients
 
@@ -132,25 +63,24 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var auth: AuthClient = AuthClient(transport: self)
 
-    /// Blob storage client (for Display capability image loading).
+    /// Blob storage client (for Display tool image loading).
     @ObservationIgnored
     lazy var blob: BlobClient = BlobClient(transport: self)
 
-    /// Worker lifecycle and catalog overview client.
+    /// Engine-global worker-kernel operations.
     @ObservationIgnored
-    lazy var workerLifecycle: WorkerLifecycleClient = WorkerLifecycleClient(transport: self)
+    lazy var workerKernel: WorkerKernelClient = WorkerKernelClient(transport: self)
+
+    /// Authenticated fixed native-notification operations.
+    @ObservationIgnored
+    lazy var notifications: NotificationClient = NotificationClient(transport: self)
 
     /// Session context visibility and context-boundary client.
     @ObservationIgnored
-    lazy var contextControl: ContextControlClient = ContextControlClient(transport: self)
 
     /// Server-backed workspace browser for human workspace selection.
     @ObservationIgnored
     lazy var workspaceBrowser: WorkspaceBrowserClient = WorkspaceBrowserClient(transport: self)
-
-    /// Local speech-to-text operations.
-    @ObservationIgnored
-    lazy var transcription: TranscriptionClient = TranscriptionClient(transport: self)
 
     // MARK: - Unified Event Stream
     //
@@ -194,9 +124,17 @@ final class EngineClient: EngineTransport {
     deinit {
         MainActor.assumeIsolated {
             observationTask?.cancel()
+            connectionAttemptTask?.cancel()
+            workerEventSubscriptionTask?.cancel()
+            workerProjectionInvalidationTask?.cancel()
+            for task in sessionSubscriptionTasks.values {
+                task.cancel()
+            }
             for task in streamAckTasks.values {
                 task.cancel()
             }
+            _eventStream.finish()
+            engineConnection?.disconnect()
         }
     }
 
@@ -218,6 +156,26 @@ final class EngineClient: EngineTransport {
     // MARK: - Connection
 
     func connect() async {
+        if let connectionAttemptTask {
+            await connectionAttemptTask.value
+            return
+        }
+        guard !connectionState.isConnected else { return }
+
+        connectionAttemptGeneration &+= 1
+        let generation = connectionAttemptGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performConnect()
+        }
+        connectionAttemptTask = task
+        await task.value
+        if connectionAttemptGeneration == generation {
+            connectionAttemptTask = nil
+        }
+    }
+
+    private func performConnect() async {
         // Also check connection state to prevent races during state transitions.
         // If we're already connecting or reconnecting, don't start another connection.
         if EngineClientConnectionPolicy.shouldSkipConnect(state: connectionState) {
@@ -247,16 +205,20 @@ final class EngineClient: EngineTransport {
         // Sync state immediately — the observation task may not have run yet,
         // so it can miss the .connecting → .connected transition.
         connectionState = ws.connectionState
-        if connectionState.isConnected, let currentSessionId {
-            _ = try? await ensureSessionEventSubscription(sessionId: currentSessionId, workspaceId: nil)
+        if connectionState.isConnected {
+            await restoreInterestedSessionSubscriptions()
         }
     }
 
     func disconnect() {
         logger.info("Disconnecting from server", category: .engine)
+        connectionAttemptGeneration &+= 1
+        connectionAttemptTask?.cancel()
+        connectionAttemptTask = nil
         observationTask?.cancel()
         observationTask = nil
         currentSessionId = nil
+        sessionSubscriptionInterests.removeAll()
         clearActiveStreamSubscriptions(reason: "explicit disconnect")
         engineConnection?.disconnect()
         engineConnection = nil
@@ -276,7 +238,7 @@ final class EngineClient: EngineTransport {
                 // Sync current state FIRST, then register for next change.
                 // This prevents missing the initial .connecting → .connected transition
                 // when ws.connect() completes before this Task starts executing.
-                var sessionToResubscribe: String?
+                var shouldRestoreSessionSubscriptions = false
                 do {
                     guard !Task.isCancelled, let self else { return }
                     let previousState = connectionState
@@ -291,18 +253,15 @@ final class EngineClient: EngineTransport {
                     if EngineClientStreamSubscriptionPolicy.shouldResubscribe(
                         previous: previousState,
                         next: nextState,
-                        hasCurrentSession: currentSessionId != nil
+                        hasCurrentSession: !sessionSubscriptionInterests.isEmpty
                     ) {
-                        sessionToResubscribe = currentSessionId
+                        shouldRestoreSessionSubscriptions = true
                     }
                 }
 
-                if let sessionToResubscribe {
+                if shouldRestoreSessionSubscriptions {
                     guard !Task.isCancelled else { return }
-                    _ = try? await self?.ensureSessionEventSubscription(
-                        sessionId: sessionToResubscribe,
-                        workspaceId: nil
-                    )
+                    await self?.restoreInterestedSessionSubscriptions()
                     // Re-read before installing the next observation so the
                     // final source state after subscription is reconciled.
                     continue
@@ -373,6 +332,15 @@ final class EngineClient: EngineTransport {
             "Engine stream event delivered: type=\(eventType) topic=\(delivery.topic ?? "nil") subscription=\(delivery.subscriptionId ?? "nil") cursor=\(delivery.cursor?.rawValue.description ?? "nil") session=\(delivery.event.sessionId ?? "nil")",
             category: .events
         )
+        defer { recordAndAck(delivery) }
+
+        if EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic(delivery.topic) {
+            scheduleWorkerProjectionInvalidation(
+                topic: delivery.topic,
+                sessionId: delivery.event.sessionId
+            )
+            return
+        }
 
         // Parse event using plugin system (no re-parsing of JSON for type extraction)
         guard let eventV2 = EventRegistry.shared.parse(type: eventType, data: delivery.eventData) else {
@@ -422,7 +390,37 @@ final class EngineClient: EngineTransport {
             _eventStream.send(recoveryEvent)
         }
 
-        recordAndAck(delivery)
+    }
+
+    /// One worker run emits several adjacent lifecycle facts. Collapse them
+    /// into one authoritative projection read so UI observation never creates
+    /// a request storm.
+    private func scheduleWorkerProjectionInvalidation(
+        topic: String?,
+        sessionId: String?
+    ) {
+        workerProjectionInvalidations.record(topic: topic, sessionId: sessionId)
+        guard workerProjectionInvalidationTask == nil else { return }
+        workerProjectionInvalidationTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled else { return }
+            workerProjectionInvalidationTask = nil
+            let invalidation = workerProjectionInvalidations.take()
+            NotificationCenter.default.post(
+                name: .workerRunProjectionInvalidated,
+                object: invalidation
+            )
+            if invalidation.lifecycleChanged {
+                NotificationCenter.default.post(
+                    name: .workerLifecycleProjectionInvalidated,
+                    object: invalidation
+                )
+            }
+        }
     }
 
     // MARK: - State Accessors
@@ -459,16 +457,36 @@ final class EngineClient: EngineTransport {
 
     func setCurrentSessionId(_ id: String?) {
         logger.info("Setting current engine session id to \(id ?? "nil")", category: .events)
+        let previousSessionId = currentSessionId
+        guard previousSessionId != id else { return }
         currentSessionId = id
-        guard connectionState.isConnected, let id else { return }
+        currentSessionInterestGeneration &+= 1
+        let generation = currentSessionInterestGeneration
         Task { @MainActor [weak self] in
-            do {
-                try await self?.ensureSessionEventSubscription(sessionId: id, workspaceId: nil)
-            } catch {
-                logger.warning(
-                    "Failed to ensure session event subscription for \(id): \(error.localizedDescription)",
-                    category: .events
+            guard let self else { return }
+            if let previousSessionId {
+                await releaseSessionEventInterest(
+                    sessionId: previousSessionId,
+                    workspaceId: nil,
+                    interest: .presentation
                 )
+            }
+            guard currentSessionInterestGeneration == generation,
+                  currentSessionId == id,
+                  let id else { return }
+            do {
+                _ = try await retainSessionEventSubscription(
+                    sessionId: id,
+                    workspaceId: nil,
+                    interest: .presentation
+                )
+            } catch {
+                if connectionState.isConnected {
+                    logger.warning(
+                        "Failed to ensure session event subscription for \(id): \(error.localizedDescription)",
+                        category: .events
+                    )
+                }
             }
         }
     }
@@ -479,8 +497,96 @@ final class EngineClient: EngineTransport {
 
     @discardableResult
     func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
-        currentSessionId = sessionId
-        return try await subscribeToSessionEvents(sessionId: sessionId, workspaceId: workspaceId)
+        try await retainSessionEventSubscription(
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            interest: .presentation
+        )
+    }
+
+    func releaseSessionEventSubscription(
+        sessionId: String,
+        workspaceId: String?
+    ) async {
+        await releaseSessionEventInterest(
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            interest: .presentation
+        )
+    }
+
+    func setProcessingSessionEventSubscription(
+        sessionId: String,
+        workspaceId: String?,
+        isActive: Bool
+    ) async throws {
+        if isActive {
+            _ = try await retainSessionEventSubscription(
+                sessionId: sessionId,
+                workspaceId: workspaceId,
+                interest: .processing
+            )
+        } else {
+            await releaseSessionEventInterest(
+                sessionId: sessionId,
+                workspaceId: workspaceId,
+                interest: .processing
+            )
+        }
+    }
+
+    func ensureWorkerEventSubscriptions() async throws {
+        if let workerEventSubscriptionTask {
+            try await workerEventSubscriptionTask.value
+            return
+        }
+
+        let generation = streamSubscriptionGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { throw EngineClientError.connectionNotEstablished }
+            try await installWorkerEventSubscriptions(generation: generation)
+        }
+        workerEventSubscriptionTask = task
+        do {
+            try await task.value
+            if streamSubscriptionGeneration == generation {
+                workerEventSubscriptionTask = nil
+            }
+        } catch {
+            if streamSubscriptionGeneration == generation {
+                workerEventSubscriptionTask = nil
+            }
+            throw error
+        }
+    }
+
+    private func installWorkerEventSubscriptions(generation: UInt64) async throws {
+        guard let ws = engineConnection else { throw EngineClientError.connectionNotEstablished }
+        guard connectionState.isConnected else { throw EngineConnectionError.notConnected }
+
+        for topic in EngineClientStreamSubscriptionPolicy.workerProjectionTopics {
+            let key = EngineStreamSubscriptionKey(
+                topic: topic,
+                sessionId: nil,
+                workspaceId: nil
+            )
+            if streamSubscriptions[key] != nil {
+                continue
+            }
+            // Worker history is available through bounded kernel reads. The
+            // projection monitor only needs changes after this connection's
+            // current durable tail.
+            let subscription = try await ws.subscribe(
+                topic: topic,
+                cursor: nil
+            )
+            guard streamSubscriptionGeneration == generation,
+                  engineConnection === ws,
+                  connectionState.isConnected else {
+                throw CancellationError()
+            }
+            streamSubscriptions[key] = subscription
+        }
     }
 
     private func subscribeToSessionEvents(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
@@ -499,6 +605,117 @@ final class EngineClient: EngineTransport {
             )
             return existing
         }
+        if let pending = sessionSubscriptionTasks[key] {
+            return try await pending.value
+        }
+        let generation = streamSubscriptionGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { throw EngineClientError.connectionNotEstablished }
+            return try await createSessionEventSubscription(
+                connection: ws,
+                generation: generation,
+                key: key,
+                filters: filters,
+                sessionId: sessionId,
+                workspaceId: workspaceId
+            )
+        }
+        sessionSubscriptionTasks[key] = task
+        defer {
+            if streamSubscriptionGeneration == generation {
+                sessionSubscriptionTasks[key] = nil
+            }
+        }
+        return try await task.value
+    }
+
+    private func retainSessionEventSubscription(
+        sessionId: String,
+        workspaceId: String?,
+        interest: EngineSessionSubscriptionInterest
+    ) async throws -> EngineSubscription {
+        let key = EngineStreamSubscriptionKey(
+            topic: "events.session",
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
+        sessionSubscriptionInterests[key, default: []].insert(interest)
+        do {
+            return try await subscribeToSessionEvents(
+                sessionId: sessionId,
+                workspaceId: workspaceId
+            )
+        } catch {
+            if !connectionState.isConnected {
+                // Retain the domain interest so automatic reconnect can
+                // restore exactly the sessions still presented or processing.
+                throw error
+            }
+            sessionSubscriptionInterests[key]?.remove(interest)
+            if sessionSubscriptionInterests[key]?.isEmpty == true {
+                sessionSubscriptionInterests[key] = nil
+            }
+            throw error
+        }
+    }
+
+    private func releaseSessionEventInterest(
+        sessionId: String,
+        workspaceId: String?,
+        interest: EngineSessionSubscriptionInterest
+    ) async {
+        let key = EngineStreamSubscriptionKey(
+            topic: "events.session",
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
+        sessionSubscriptionInterests[key]?.remove(interest)
+        guard sessionSubscriptionInterests[key]?.isEmpty != false else { return }
+        sessionSubscriptionInterests[key] = nil
+        guard let subscription = streamSubscriptions.removeValue(forKey: key) else { return }
+        streamAckTasks.removeValue(forKey: subscription.subscriptionId)?.cancel()
+        streamAckCoalescer.remove(subscriptionId: subscription.subscriptionId)
+        guard connectionState.isConnected, let engineConnection else { return }
+        do {
+            _ = try await engineConnection.unsubscribe(
+                subscriptionId: subscription.subscriptionId
+            )
+            logger.debug(
+                "Released session event subscription for \(sessionId)",
+                category: .events
+            )
+        } catch {
+            logger.debug(
+                "Session unsubscribe ended without acknowledgement for \(sessionId): \(error.localizedDescription)",
+                category: .events
+            )
+        }
+    }
+
+    private func restoreInterestedSessionSubscriptions() async {
+        let keys = Array(sessionSubscriptionInterests.keys)
+        for key in keys where key.topic == "events.session" {
+            guard connectionState.isConnected else { return }
+            _ = try? await subscribeToSessionEvents(
+                sessionId: key.sessionId ?? "",
+                workspaceId: key.workspaceId
+            )
+        }
+    }
+
+    private func createSessionEventSubscription(
+        connection ws: EngineConnection,
+        generation: UInt64,
+        key: EngineStreamSubscriptionKey,
+        filters: [String: AnyCodable],
+        sessionId: String,
+        workspaceId: String?
+    ) async throws -> EngineSubscription {
+        guard engineConnection === ws,
+              streamSubscriptionGeneration == generation,
+              connectionState.isConnected else {
+            throw EngineConnectionError.notConnected
+        }
         do {
             // Session history is reconstructed through `session::reconstruct`.
             // `events.session` is a connection-local live lane, so reconnects
@@ -509,6 +726,18 @@ final class EngineClient: EngineTransport {
                 filters: filters,
                 context: EngineInvocationContext(sessionId: sessionId, workspaceId: workspaceId)
             )
+            let shouldInstall = engineConnection === ws
+                && streamSubscriptionGeneration == generation
+                && sessionSubscriptionInterests[key]?.isEmpty == false
+                && connectionState.isConnected
+            guard shouldInstall else {
+                if engineConnection === ws, connectionState.isConnected {
+                    _ = try? await ws.unsubscribe(
+                        subscriptionId: subscription.subscriptionId
+                    )
+                }
+                throw CancellationError()
+            }
             streamSubscriptions[key] = subscription
             logger.info(
                 "Subscribed to \(key.topic) for session \(sessionId) from live tail \(subscription.cursor)",
@@ -555,12 +784,19 @@ final class EngineClient: EngineTransport {
             return
         }
         do {
-            try await engineConnection?.ack(subscriptionId: subscriptionId, cursor: cursor)
+            guard let engineConnection else {
+                throw EngineConnectionError.notConnected
+            }
+            try await engineConnection.ack(subscriptionId: subscriptionId, cursor: cursor)
             logger.verbose(
                 "Acked engine stream \(subscriptionId) through cursor \(cursor.rawValue)",
                 category: .events
             )
         } catch {
+            _ = streamAckCoalescer.record(
+                subscriptionId: subscriptionId,
+                cursor: cursor
+            )
             logger.debug(
                 "Engine stream coalesced ack failed for \(subscriptionId)@\(cursor.rawValue): \(error.localizedDescription)",
                 category: .events
@@ -573,8 +809,18 @@ final class EngineClient: EngineTransport {
     }
 
     private func clearActiveStreamSubscriptions(reason: String) {
+        streamSubscriptionGeneration &+= 1
         let subscriptionCount = streamSubscriptions.count
         let ackTaskCount = streamAckTasks.count
+        workerEventSubscriptionTask?.cancel()
+        workerEventSubscriptionTask = nil
+        workerProjectionInvalidationTask?.cancel()
+        workerProjectionInvalidationTask = nil
+        workerProjectionInvalidations = WorkerProjectionInvalidationAccumulator()
+        for task in sessionSubscriptionTasks.values {
+            task.cancel()
+        }
+        sessionSubscriptionTasks.removeAll()
         for task in streamAckTasks.values {
             task.cancel()
         }

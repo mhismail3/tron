@@ -105,71 +105,55 @@ extension ChatViewModel {
         logger.verbose("Thinking end: final total \(thinking.count) chars", category: .events)
     }
 
-    func handleCapabilityInvocationGenerating(_ pluginResult: CapabilityInvocationGeneratingPlugin.Result) {
-        capabilityInvocationCoordinator.handleCapabilityInvocationGenerating(pluginResult, context: self)
+    func handleToolInvocationGenerating(_ pluginResult: ToolInvocationGeneratingPlugin.Result) {
+        toolInvocationCoordinator.handleToolInvocationGenerating(pluginResult, context: self)
     }
 
-    func handleCapabilityInvocationStarted(_ pluginResult: CapabilityInvocationStartedPlugin.Result) {
-        // Delegate directly to coordinator (capability classification absorbed)
-        capabilityInvocationCoordinator.handleCapabilityInvocationStarted(pluginResult, context: self)
+    func handleToolInvocationStarted(_ pluginResult: ToolInvocationStartedPlugin.Result) {
+        // Delegate directly to coordinator (tool classification absorbed)
+        toolInvocationCoordinator.handleToolInvocationStarted(pluginResult, context: self)
     }
 
-    func handleCapabilityInvocationOutput(_ result: CapabilityInvocationOutputPlugin.Result) {
-        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
-            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
+    func handleToolInvocationOutput(_ result: ToolInvocationOutputPlugin.Result) {
+        guard let index = messageIndex.index(forToolInvocationId: result.invocationId)
+            ?? MessageFinder.lastIndexOfToolInvocation(id: result.invocationId, in: messages) else { return }
 
-        if case .capabilityInvocation(var invocation) = messages[index].content {
-            let accumulated = (invocation.logs.last ?? "") + result.output
-            invocation.logs = [String(accumulated.prefix(24_000))]
+        if case .toolInvocation(var invocation) = messages[index].content {
+            guard !ToolInvocationSurface(identity: invocation.identity).isWorker else { return }
+            invocation.logs = ToolActivityLog.appending(result.output, to: invocation.logs)
             updateMessage(at: index) { message in
-                message.content = .capabilityInvocation(invocation)
+                message.content = .toolInvocation(invocation)
             }
         }
     }
 
-    func handleCapabilityInvocationProgress(_ result: CapabilityInvocationProgressPlugin.Result) {
-        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
-            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
+    func handleToolInvocationProgress(_ result: ToolInvocationProgressPlugin.Result) {
+        guard let index = messageIndex.index(forToolInvocationId: result.invocationId)
+            ?? MessageFinder.lastIndexOfToolInvocation(id: result.invocationId, in: messages) else { return }
 
-        if case .capabilityInvocation(var invocation) = messages[index].content {
-            if let msg = result.message { invocation.progressMessage = msg }
-            if let pct = result.percent { invocation.progressPercent = pct }
-            if result.identity.stableCapabilityId != "capability" {
-                invocation.identity = result.identity
+        if case .toolInvocation(var invocation) = messages[index].content {
+            if !result.identity.isEmpty {
+                invocation.identity = invocation.identity.merging(result.identity)
+            }
+            let isWorker = ToolInvocationSurface(identity: invocation.identity).isWorker
+            if let msg = result.message {
+                if !isWorker {
+                    invocation.progressMessage = msg
+                    invocation.logs = ToolActivityLog.appending(msg, to: invocation.logs)
+                }
+            }
+            if let pct = result.percent, !isWorker {
+                invocation.progressPercent = pct
             }
             updateMessage(at: index) { message in
-                message.content = .capabilityInvocation(invocation)
+                message.content = .toolInvocation(invocation)
             }
         }
     }
 
-    func handleCapabilityRunStatus(_ result: CapabilityRunStatusPlugin.Result) {
-        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
-            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
-
-        if case .capabilityInvocation(var invocation) = messages[index].content {
-            invocation.status = capabilityStatus(forRunStatus: result.status, current: invocation.status)
-            invocation.progressMessage = "Run \(result.status)"
-            invocation.details = mergeCapabilityDetails(
-                invocation.details,
-                [
-                    "runId": AnyCodable(result.runId),
-                    "runStatus": AnyCodable(result.status),
-                    "streamTopic": AnyCodable(result.streamTopic as Any),
-                    "childInvocations": AnyCodable(result.childInvocations),
-                    "runDetails": AnyCodable(result.details as Any)
-                ]
-            )
-            if !result.identity.isEmpty { invocation.identity = result.identity }
-            updateMessage(at: index) { message in
-                message.content = .capabilityInvocation(invocation)
-            }
-        }
-    }
-
-    func handleCapabilityInvocationCompleted(_ pluginResult: CapabilityInvocationCompletedPlugin.Result) {
+    func handleToolInvocationCompleted(_ pluginResult: ToolInvocationCompletedPlugin.Result) {
         // Delegate directly to coordinator
-        capabilityInvocationCoordinator.handleCapabilityInvocationCompleted(pluginResult, context: self)
+        toolInvocationCoordinator.handleToolInvocationCompleted(pluginResult, context: self)
     }
 
     func handleTurnStart(_ pluginResult: TurnStartPlugin.Result) {
@@ -177,7 +161,7 @@ extension ChatViewModel {
         if agentPhase != .stopping {
             agentPhase = .processing
         }
-        runningCapabilityInvocationCount = 0
+        runningToolInvocationCount = 0
 
         if isCompacting {
             if let inProgressId = compactionInProgressMessageId,
@@ -222,11 +206,6 @@ extension ChatViewModel {
         // Clear thinking accumulation (streaming finalization handled by coordinator)
         thinkingState.clearCurrentStreaming()
 
-        // End any active display stream.
-        if displayStreamState.isStreamActive {
-            endDisplayStream()
-        }
-
         // Delegate to coordinator for all completion handling
         turnLifecycleCoordinator.handleComplete(streamingText: finalStreamingText, context: self)
 
@@ -258,30 +237,6 @@ extension ChatViewModel {
         advanceStreamRecoveryRequest()
     }
 
-    private func capabilityStatus(
-        forRunStatus status: String,
-        current: CapabilityInvocationStatus
-    ) -> CapabilityInvocationStatus {
-        switch status {
-        case "pending", "running": return .running
-        case "paused": return .paused
-        case "completed", "ok": return .success
-        case "cancelled", "timeout", "failed", "worker_disconnected", "policy_denied": return .error
-        default: return current
-        }
-    }
-
-    private func mergeCapabilityDetails(
-        _ existing: [String: AnyCodable]?,
-        _ updates: [String: AnyCodable]
-    ) -> [String: AnyCodable] {
-        var merged = existing ?? [:]
-        for (key, value) in updates {
-            merged[key] = value
-        }
-        return merged
-    }
-
     func handleCompactionStarted(_ pluginResult: CompactionStartedPlugin.Result) {
         compactionCoordinator.handleCompactionStarted(pluginResult, context: self)
     }
@@ -305,8 +260,7 @@ extension ChatViewModel {
         // Add context cleared notification pill to chat
         let clearedMessage = ChatMessage.contextCleared(
             tokensBefore: pluginResult.tokensBefore,
-            tokensAfter: pluginResult.tokensAfter,
-            contextControlActionResourceId: pluginResult.contextControlActionResourceId
+            tokensAfter: pluginResult.tokensAfter
         )
         appendToMessages(clearedMessage)
     }
@@ -324,7 +278,7 @@ extension ChatViewModel {
     private func resetToIdleState(errorPreview: String) {
         uiUpdateQueue.flush()
         uiUpdateQueue.reset()
-        animationCoordinator.resetCapabilityState()
+        animationCoordinator.resetToolState()
         streamingManager.reset()
 
         agentPhase = .idle

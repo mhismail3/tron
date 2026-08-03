@@ -53,7 +53,7 @@ final class ChatViewModelTerminalEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.messages.count, initialCount + 1)
         if let lastMessage = viewModel.messages.last,
            case .systemEvent(let event) = lastMessage.content,
-           case .compaction(let before, let after, _, _, _, _, _) = event {
+           case .compaction(let before, let after, _, _, _, _) = event {
             XCTAssertEqual(before, 100_000)
             XCTAssertEqual(after, 50_000)
         } else {
@@ -100,7 +100,7 @@ final class ChatViewModelTerminalEventRoutingTests: XCTestCase {
 
         XCTAssertEqual(viewModel.agentPhase, .idle)
         XCTAssertFalse(viewModel.messages.contains(where: \.isStreaming))
-        XCTAssertTrue(viewModel.currentTurnCapabilityMessageIds.isEmpty)
+        XCTAssertTrue(viewModel.currentTurnToolMessageIds.isEmpty)
     }
 
     private func makeCancelledTurnResult() -> TurnFailedPlugin.Result {

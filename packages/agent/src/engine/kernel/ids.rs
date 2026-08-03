@@ -64,11 +64,8 @@ macro_rules! engine_id {
 }
 
 engine_id!(WorkerId, "worker");
-engine_id!(TriggerId, "trigger");
-engine_id!(TriggerTypeId, "trigger_type");
 engine_id!(InvocationId, "invocation");
 engine_id!(ActorId, "actor");
-engine_id!(AuthorityGrantId, "authority_grant");
 engine_id!(TraceId, "trace");
 
 /// Stable function identifier in `namespace::operation` form.

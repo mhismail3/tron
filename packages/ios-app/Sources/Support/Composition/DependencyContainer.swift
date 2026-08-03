@@ -49,10 +49,6 @@ final class DependencyContainer {
     /// deduplication; this service only batches the local in-memory buffer.
     private(set) var clientLogIngestionService: ClientLogIngestionService
 
-    /// Owns only the local APNs authorization/token exchange. Server-side
-    /// device registration and delivery remain engine-owned.
-    private(set) var pushNotificationService: PushNotificationService
-
     /// iOS-local paired server list and active selection.
     @ObservationIgnored
     let pairedServerStore: PairedServerStore
@@ -64,13 +60,35 @@ final class DependencyContainer {
     private let pairedServerDefaults: UserDefaults
 
     /// Documents root selected with the same typed storage input as drafts and
-    /// the database. Empty working-directory fallback must never bypass it.
+    /// the database. Empty working-directory default resolution must never bypass it.
     @ObservationIgnored
     private let documentsURL: URL
+    /// App-private actor-owned native notification projection.
+    @ObservationIgnored
+    private let notificationStoreURL: URL
 
     /// Per-server bearer-token storage selected by the composition policy.
     @ObservationIgnored
     let pairedServerTokenStore: PairedServerTokenStore
+
+    /// Native permission, APNs registration, synchronized inbox, and durable
+    /// response-outbox owner. Lazy construction preserves hosted-test
+    /// isolation and avoids touching notification APIs before production root
+    /// initialization.
+    @ObservationIgnored
+    lazy var notificationCoordinator: NativeNotificationCoordinator = {
+        NativeNotificationCoordinator(
+            defaults: pairedServerDefaults,
+            storeURL: notificationStoreURL,
+            servers: { [unowned self] in pairedServerStore.servers },
+            notificationSession: { [unowned self] server, operation in
+                try await withNotificationRepository(
+                    for: server,
+                    operation: operation
+                )
+            }
+        )
+    }()
 
     /// One immutable I/O policy reused by initial and rebuilt server services.
     @ObservationIgnored
@@ -104,6 +122,8 @@ final class DependencyContainer {
     /// Client identity, rather than selection metadata, defines the generation.
     @ObservationIgnored
     private var activeServerStartupTask: Task<Void, Never>?
+    @ObservationIgnored
+    private let authUpdatedObserverLease = NotificationObserverLease()
 
     // MARK: - Repositories
 
@@ -131,17 +151,11 @@ final class DependencyContainer {
     /// Message mutation repository.
     private(set) var messageRepository: any MessageRepository
 
-    /// Local transcription repository.
-    private(set) var transcriptionRepository: any TranscriptionRepository
-
     /// Server-backed workspace browser repository.
     private(set) var workspaceBrowserRepository: any WorkspaceBrowserRepository
 
-    /// Worker lifecycle repository for the agent cockpit.
-    private(set) var workerLifecycleRepository: any WorkerLifecycleRepository
-
-    /// Session context-control repository for Session Briefing.
-    private(set) var contextControlRepository: any ContextControlRepository
+    /// Engine-global worker repository for the worker console.
+    private(set) var workerKernelRepository: any WorkerKernelRepository
 
     var diagnosticsEngineEndpoint: DiagnosticsEngineEndpoint {
         Self.makeDiagnosticsEngineEndpoint(client: engineClient)
@@ -189,6 +203,7 @@ final class DependencyContainer {
     ) {
         let pairedServerDefaults = storage.defaults
         let documentsURL = storage.documentsURL
+        let notificationStoreURL = storage.notificationStoreURL
         let db = storage.eventDatabase
         _workingDirectory = AppStorage(
             wrappedValue: "",
@@ -207,6 +222,7 @@ final class DependencyContainer {
         )
         self.pairedServerDefaults = pairedServerDefaults
         self.documentsURL = documentsURL
+        self.notificationStoreURL = notificationStoreURL
         self.runtimeIO = runtimeIO
         pairedServerTokenStore = runtimeIO.pairedServerTokenStore
         pairedServerStore = PairedServerStore(defaults: pairedServerDefaults)
@@ -215,8 +231,6 @@ final class DependencyContainer {
         eventDatabase = db
         draftStore = DraftStore(eventDatabase: db, documentsURL: documentsURL)
         deepLinkRouter = DeepLinkRouter()
-        pushNotificationService = PushNotificationService()
-
         // Build initial server URL from the iOS-local active pairing. With no
         // pair, use a non-routable placeholder so app launch never silently
         // falls back to localhost.
@@ -246,7 +260,7 @@ final class DependencyContainer {
             logsProvider: {
                 TronLogger.shared.getRecentLogs(
                     count: ClientLogIngestionPlanner.defaultMaxEntries,
-                    level: .verbose,
+                    level: .warning,
                     category: nil
                 )
             }
@@ -273,10 +287,8 @@ final class DependencyContainer {
         settingsRepository = DefaultSettingsRepository(settingsClient: client.settings)
         authRepository = DefaultAuthRepository(authClient: client.auth)
         messageRepository = DefaultMessageRepository(messageClient: client.message)
-        transcriptionRepository = DefaultTranscriptionRepository(client: client.transcription)
         workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: client.workspaceBrowser)
-        workerLifecycleRepository = DefaultWorkerLifecycleRepository(client: client.workerLifecycle)
-        contextControlRepository = client.contextControl
+        workerKernelRepository = DefaultWorkerKernelRepository(client: client.workerKernel)
 
         // Wire draft store into event store manager for cleanup on session delete
         eventStoreManager.draftStore = draftStore
@@ -286,7 +298,7 @@ final class DependencyContainer {
         // (`self` is fully available here).
         eventStoreManager.attachConnectionManager(manager)
         // Listen for auth updates from WebSocket events
-        NotificationCenter.default.addObserver(
+        authUpdatedObserverLease.token = NotificationCenter.default.addObserver(
             forName: .authDidUpdate,
             object: nil,
             queue: .main
@@ -455,6 +467,53 @@ final class DependencyContainer {
         }
     }
 
+    /// Lend one narrow notification repository for a bounded server pass.
+    ///
+    /// The native coordinator never receives transport, URL, or credential
+    /// control. The active server reuses its canonical connection; an inactive
+    /// server gets one authenticated short-lived client that this method always
+    /// disconnects before returning.
+    private func withNotificationRepository(
+        for server: PairedServer,
+        operation: NativeNotificationCoordinator.NotificationSessionOperation
+    ) async throws {
+        if pairedServerStore.activeServer?.id == server.id,
+           engineClient.connectionState.isConnected {
+            try await operation(
+                DefaultNotificationRepository(client: engineClient.notifications)
+            )
+            return
+        }
+
+        // A notification action can cold-launch the app without establishing
+        // the canonical active-server socket. The durable response outbox must
+        // still get one bounded transport attempt during the system callback,
+        // so a disconnected active server follows the same narrow,
+        // authenticated short-lived path as an inactive server.
+        guard let bearerToken = pairedServerTokenStore.token(
+            forServerId: server.id
+        ) else {
+            throw EngineClientError.connectionNotEstablished
+        }
+        let client = EngineClient(
+            serverURL: Self.buildServerURL(
+                host: server.host,
+                port: String(server.port)
+            ),
+            bearerTokenProvider: { bearerToken },
+            sessionAttemptDirective: runtimeIO.sessionAttemptDirective
+        )
+        await client.connect()
+        guard client.connectionState.isConnected else {
+            client.disconnect()
+            throw EngineClientError.connectionNotEstablished
+        }
+        defer { client.disconnect() }
+        try await operation(
+            DefaultNotificationRepository(client: client.notifications)
+        )
+    }
+
     private func rebuildServerBoundServices(connectAfterSwitch: Bool = false) {
         activeServerStartupTask?.cancel()
         activeServerStartupTask = nil
@@ -494,10 +553,8 @@ final class DependencyContainer {
         settingsRepository = DefaultSettingsRepository(settingsClient: newClient.settings)
         authRepository = DefaultAuthRepository(authClient: newClient.auth)
         messageRepository = DefaultMessageRepository(messageClient: newClient.message)
-        transcriptionRepository = DefaultTranscriptionRepository(client: newClient.transcription)
         workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: newClient.workspaceBrowser)
-        workerLifecycleRepository = DefaultWorkerLifecycleRepository(client: newClient.workerLifecycle)
-        contextControlRepository = newClient.contextControl
+        workerKernelRepository = DefaultWorkerKernelRepository(client: newClient.workerKernel)
         eventStoreManager.loadSessions()
         activeServerSelectionVersion += 1
         NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)
@@ -542,5 +599,17 @@ final class DependencyContainer {
         }
 
         return tokenStore.token(forServerId: activeId)
+    }
+}
+
+/// Process observer ownership is independent of MainActor deinitialization.
+/// The block callback still hops to its weak main-actor container.
+private final class NotificationObserverLease: @unchecked Sendable {
+    var token: NSObjectProtocol?
+
+    deinit {
+        if let token {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 }

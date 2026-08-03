@@ -13,8 +13,8 @@ protocol TurnLifecycleContext: ChatCoordinatorContext, MessageMutating {
     /// Index in messages array where the current turn started
     var turnStartMessageIndex: Int? { get set }
 
-    /// Message identities belonging to the current turn's capability invocations.
-    var currentTurnCapabilityMessageIds: Set<UUID> { get set }
+    /// Message identities belonging to the current turn's tool invocations.
+    var currentTurnToolMessageIds: Set<UUID> { get set }
 
     /// ID of the first text message created in this turn
     var firstTextMessageIdForTurn: UUID? { get set }
@@ -47,8 +47,8 @@ protocol TurnLifecycleContext: ChatCoordinatorContext, MessageMutating {
     /// Enqueue a turn boundary event for UI update queue
     func enqueueTurnBoundary(_ data: UIUpdateQueue.TurnBoundaryData)
 
-    /// Reset animation coordinator capability state
-    func resetAnimationCoordinatorCapabilityState()
+    /// Reset animation coordinator tool state
+    func resetAnimationCoordinatorToolState()
 
     /// Flush the UI update queue
     func flushUIUpdateQueue()

@@ -2,17 +2,28 @@
 //!
 //! `execute` owns the linear run-turn lifecycle, while sibling modules own the
 //! request DTO, dependency bundle, run plan, spawning, stream event publication,
-//! lightweight session title generation, and the major run-turn phases. The
+//! and the major run-turn phases. The
 //! service also owns the outer structured logging lifecycle for accepted prompt
-//! runs so logs, session events, trace records, and agent-result resources share
-//! common run/session/trace identifiers. `PromptRequest` is the single
+//! runs so logs, session events, and trace records share common
+//! run/session/trace identifiers. `PromptRequest` is the single
 //! plan-level owner of accepted invocation causality; execution moves that value
-//! into its turn and completion path. Completion derives `agent_result` text and
-//! its event reference after the turn's synchronous persistence calls have
-//! committed, then emits the runtime-owned durable session-update projection;
-//! it does not rebuild that wire event or retain session-cache ownership.
+//! into its turn and completion path. Completion emits the runtime-owned
+//! durable session-update projection after the turn's synchronous persistence
+//! calls have committed; it does not rebuild that wire event, retain
+//! session-cache ownership, or duplicate final assistant state.
+//! Successful ordinary user completion freezes a bounded preview of the
+//! completed exchange, publishes the ready session boundary, and durably
+//! enqueues the worker-owned `session_title` hook without awaiting worker
+//! execution. The hook is skipped for worker-origin sessions, interrupted or
+//! failed turns, and sessions already carrying an explicit title. Its terminal
+//! result is validated and compare-and-set before the worker run commits, so
+//! restart recovery can redeliver safely and hook failure remains operational
+//! evidence rather than rewriting the successful chat.
+//! Optional Continuity and semantic ranking also exclude durable worker audit
+//! sessions: their kernel-authored execution prompts are not user task queries
+//! and must never recursively enter semantic preparation.
 //! Before durable history is reconstructed, prompt admission atomically closes
-//! any terminal prior turn's unmatched capability starts and broadcasts those
+//! any terminal prior turn's unmatched tool starts and broadcasts those
 //! row-backed repairs to live clients. A repair failure rejects the prompt
 //! before `message.user` persistence or provider construction. Durable
 //! prior-history reconstruction and the new `message.user` append are likewise
@@ -25,18 +36,15 @@
 //! its authoritative orchestrator and owns its event persister; the session
 //! cache retains only reconstructed event-store state and no parallel runtime
 //! service. Completion does not maintain a second final-answer state. Run-turn
-//! admission snapshots settings from the authoritative `ProfileRuntime`; the
+//! admission snapshots settings from the authoritative `SettingsRuntime`; the
 //! spawned run keeps that immutable value instead of consulting a second
-//! mutable settings owner. Main
-//! response and background title providers are both created from that same
-//! admitted API-settings snapshot. Each resumed prompt fail-closed reads the
+//! mutable settings owner. Each resumed prompt fail-closed reads the
 //! durable sequence and turn high-water marks, then seeds its agent from the
 //! maximum of reconstructed, completed, and started turns. A cancelled
 //! zero-content attempt therefore consumes its ordinal, while corrupt or
 //! exhausted counters never wrap or reuse identity.
 
 use crate::domains::agent::r#loop::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
-use crate::domains::agent::r#loop::orchestrator::agent_runner::run_agent;
 use crate::domains::agent::r#loop::orchestrator::core::StartedRun;
 use crate::domains::agent::r#loop::types::{AgentConfig, RunContext};
 
@@ -49,19 +57,18 @@ use crate::engine::{CausalContext, FunctionId, InvocationId};
 
 mod agent_build;
 mod completion;
-mod context;
 mod deps;
 mod events;
 mod execute;
 mod plan;
 mod request;
+mod semantic;
 mod spawn;
-mod title_generation;
 
 pub use deps::{PromptEngineCausality, PromptRuntimeDeps};
 pub(super) use events::publish_prompt_runtime_stream;
 pub(super) use execute::execute_prompt_run;
 pub(super) use plan::PromptRunPlan;
 pub use request::PromptRequest;
+use semantic::{OptionalContextPreparation, spawn_optional_context_preparation};
 pub use spawn::spawn_prompt_run;
-use title_generation::{SessionTitleGenerationRequest, spawn_session_title_generation};

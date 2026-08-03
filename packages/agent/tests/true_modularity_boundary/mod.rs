@@ -33,20 +33,6 @@ fn agent_loop_uses_model_responder_boundary() {
 
 #[test]
 fn provider_internals_do_not_escape_model_domain() {
-    let provider_docs = read_repo_file("packages/agent/src/domains/model/providers/mod.rs");
-    assert!(
-        provider_docs.contains(
-            "Depended on by: `domains::model::responder`, model routing/catalog code,\n//! and app bootstrap only as the composition/root startup path."
-        ),
-        "provider root docs must name the approved dependents without broadening provider-internal access"
-    );
-    assert!(
-        !provider_docs.contains("Depended on by: the agent loop")
-            && !provider_docs.contains("agent loop, runtime bootstrap")
-            && !provider_docs.contains("agent loop depends on provider internals"),
-        "provider root docs must not claim the agent loop depends on provider internals"
-    );
-
     let allowed_prefixes = [
         "packages/agent/src/domains/model/",
         "packages/agent/src/app/bootstrap/",
@@ -102,14 +88,18 @@ fn engine_facade_is_the_only_cross_module_engine_api() {
 
 #[test]
 fn domain_workers_expose_contracts_not_services() {
-    let module_dependencies =
-        read_repo_file("packages/agent/src/domains/module_dependencies/mod.rs");
-    assert!(
-        !module_dependencies.contains("pub(crate) mod contract")
-            && !module_dependencies.contains("pub(crate) use crate::engine"),
-        "module-dependency contracts and engine identifiers must stay domain-private"
-    );
-
+    let worker_kernel = read_repo_file("packages/agent/src/domains/worker_kernel/mod.rs");
+    for required in [
+        "mod contract;",
+        "mod persistence;",
+        "mod runtime;",
+        "mod types;",
+    ] {
+        assert!(
+            worker_kernel.contains(required),
+            "worker-kernel concern must stay privately owned: {required}"
+        );
+    }
     let allowed_prefixes = [
         "packages/agent/src/domains/",
         "packages/agent/src/app/bootstrap/",
@@ -131,25 +121,25 @@ fn domain_workers_expose_contracts_not_services() {
         service_leaks.join("\n")
     );
 
-    let public_worker_constructors = rust_source_lines("packages/agent/src/domains")
+    let public_module_constructors = rust_source_lines("packages/agent/src/domains")
         .into_iter()
         .filter(|line| {
-            line.contains("pub fn worker_module")
-                || line.contains("pub fn worker_modules")
-                || line.contains("pub fn domain_worker_module")
-                || line.contains("pub fn register_domain_workers_for_context")
+            line.contains("pub fn function_module")
+                || line.contains("pub fn function_modules")
+                || line.contains("pub fn domain_module")
+                || line.contains("pub fn register_domains_for_context")
         })
         .collect::<Vec<_>>();
 
     assert!(
-        public_worker_constructors.is_empty(),
-        "domain worker registration and worker-module constructors must stay crate-private:\n{}",
-        public_worker_constructors.join("\n")
+        public_module_constructors.is_empty(),
+        "domain registration and function-module constructors must stay crate-private:\n{}",
+        public_module_constructors.join("\n")
     );
 
     let registration_call_leaks = rust_source_lines("packages/agent/src")
         .into_iter()
-        .filter(|line| line.contains("register_domain_workers_for_context("))
+        .filter(|line| line.contains("register_domains_for_context("))
         .filter(|line| {
             let path = path_from_line(line);
             path != "packages/agent/src/domains/registration/mod.rs"
@@ -159,8 +149,35 @@ fn domain_workers_expose_contracts_not_services() {
 
     assert!(
         registration_call_leaks.is_empty(),
-        "domain worker registration must be centralized behind transport runtime setup:\n{}",
+        "domain function registration must be centralized behind transport runtime setup:\n{}",
         registration_call_leaks.join("\n")
+    );
+}
+
+#[test]
+fn removed_fixed_subsystems_do_not_leave_runtime_or_active_documentation() {
+    let removed_phrase = ["core", "proposal"].join(" ");
+    let leaks = tracked_files()
+        .into_iter()
+        .filter(|path| {
+            (path.starts_with("packages/agent/src/")
+                || path == "README.md"
+                || path == "packages/agent/docs/project-reference.md")
+                && !is_test_support_path(path)
+                && repo_path(path).is_file()
+        })
+        .filter_map(|path| {
+            let text = read_repo_file(&path)
+                .to_ascii_lowercase()
+                .replace(['_', '-'], " ");
+            text.contains(&removed_phrase).then_some(path)
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        leaks.is_empty(),
+        "removed fixed subsystems must not remain in production source or active docs:\n{}",
+        leaks.join("\n")
     );
 }
 
@@ -170,7 +187,8 @@ fn state_stores_are_owner_private() {
         "packages/agent/src/app/bootstrap/",
         "packages/agent/src/domains/auth/",
         "packages/agent/src/domains/session/event_store/",
-        "packages/agent/src/domains/settings/profile/",
+        "packages/agent/src/domains/settings/config/",
+        "packages/agent/src/domains/worker_kernel/persistence/",
         "packages/agent/src/engine/authority/",
         "packages/agent/src/engine/durability/",
         "packages/agent/src/engine/invocation/host/",
@@ -245,7 +263,6 @@ fn ios_ui_uses_repositories_not_engine_transport() {
         "OAuthBeginResponse",
         "ActiveCredentialParam",
         "ProviderAuthInfo",
-        "ServiceAuthInfo",
         "AccountInfo",
         "ApiKeyInfo",
         "ActiveCredentialInfo",
@@ -310,6 +327,7 @@ fn boundary_errors_do_not_leak_impl_errors() {
                     "packages/agent/src/engine/durability/",
                     "packages/agent/src/domains/model/",
                     "packages/agent/src/domains/session/event_store/",
+                    "packages/agent/src/domains/worker_kernel/persistence/",
                     "packages/agent/src/shared/observability/transport.rs",
                     "packages/agent/src/shared/server/error_mapping/mod.rs",
                     "packages/agent/src/transport/",

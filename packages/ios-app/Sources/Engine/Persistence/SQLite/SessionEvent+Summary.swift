@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Session Event Summary
 
 extension SessionEvent {
-    /// Human-readable summary of the event (Phase 3 enhanced)
+    /// Human-readable summary of the event.
     var summary: String {
         switch eventType {
         case .sessionStart:
@@ -50,12 +50,12 @@ extension SessionEvent {
             let hasThinking = payload.bool("hasThinking") == true
             let stopReason = payload.string("stopReason")
 
-            if hasThinking && stopReason == "capability_invocation" {
-                parts.append("Thinking → capability invocation")
+            if hasThinking && stopReason == "tool_invocation" {
+                parts.append("Thinking → tool invocation")
             } else if hasThinking {
                 parts.append("Thinking response")
-            } else if stopReason == "capability_invocation" {
-                parts.append("Capability invocation")
+            } else if stopReason == "tool_invocation" {
+                parts.append("Tool invocation")
             } else {
                 parts.append("Assistant response")
             }
@@ -66,12 +66,9 @@ extension SessionEvent {
 
             return parts.joined(separator: " • ")
 
-        case .capabilityInvocationStarted:
-            let name = payload.string("operationName") ??
-                payload.string("operation") ??
-                payload.string("modelPrimitiveName") ??
-                "execute"
-            let displayName = formatCapabilityName(name)
+        case .toolInvocationStarted:
+            let name = payload.string("toolName") ?? "unknown_tool"
+            let displayName = formatToolName(name)
             let args = payload.dict("arguments") ?? [:]
             let keyArg = extractKeyArgument(from: args)
             if !keyArg.isEmpty {
@@ -79,7 +76,7 @@ extension SessionEvent {
             }
             return displayName
 
-        case .capabilityInvocationCompleted:
+        case .toolInvocationCompleted:
             let isError = payload.bool("isError") ?? false
             let duration = payload.int("duration")
             let status = isError ? "error" : "success"
@@ -100,52 +97,8 @@ extension SessionEvent {
             }
             return "\(turnLabel) ended"
 
-        case .errorAgent:
-            if let failure = CanonicalFailurePayload.fromDetails(payload.anyCodableDict("details")) {
-                return "\(failure.code): \(String(failure.message.prefix(30)))"
-            }
-            guard let code = payload.string("code"),
-                  let error = payload.string("error") else {
-                return "Malformed agent error event"
-            }
-            return "\(code): \(String(error.prefix(30)))"
-
-        case .errorProvider:
-            guard let provider = payload.string("provider"),
-                  let retryable = payload.bool("retryable") else {
-                return "Malformed provider error event"
-            }
-            if retryable, let delay = payload.int("retryAfter") {
-                return "\(provider) • retry in \(delay)ms"
-            }
-            if retryable, let delay = payload.int("retryAfterMs") {
-                return "\(provider) • retry in \(delay)ms"
-            }
-            return "\(provider) error"
-
-        case .errorCapability:
-            guard let modelPrimitiveName = payload.string("modelPrimitiveName") else {
-                return "Malformed capability error event"
-            }
-            return "\(modelPrimitiveName) failed"
-
-        case .configModelSwitch:
-            let from = payload.string("previousModel")?.shortModelName ?? "?"
-            let to = payload.string("newModel")?.shortModelName ??
-                     payload.string("model")?.shortModelName ?? "?"
-            return "Model: \(from) → \(to)"
-
         case .compactBoundary:
             return "Context compacted"
-
-        case .contextCleared:
-            return "Context cleared"
-
-        case .sessionBranch:
-            return "Branch created"
-
-        case .messageSystem:
-            return "System message"
 
         case .messageDeleted:
             return "Message deleted"
@@ -155,45 +108,7 @@ extension SessionEvent {
             let model = payload.string("model")?.shortModelName ?? "model"
             return "\(provider) request • \(model)"
 
-        case .configPromptUpdate:
-            return "Prompt updated"
-
-        case .configReasoningLevel:
-            let level = payload.string("level") ?? payload.string("reasoningLevel") ?? ""
-            if !level.isEmpty {
-                return "Reasoning: \(level)"
-            }
-            return "Reasoning level changed"
-
-        case .metadataUpdate:
-            return "Metadata updated"
-
-        case .metadataTag:
-            let tag = payload.string("tag") ?? ""
-            if !tag.isEmpty {
-                return "Tag: \(tag)"
-            }
-            return "Tag added"
-
-        case .fileRead:
-            if let path = payload.string("path") ?? payload.string("file_path") {
-                return "Read: \(URL(fileURLWithPath: path).lastPathComponent)"
-            }
-            return "File read"
-
-        case .fileWrite:
-            if let path = payload.string("path") ?? payload.string("file_path") {
-                return "Write: \(URL(fileURLWithPath: path).lastPathComponent)"
-            }
-            return "File written"
-
-        case .fileEdit:
-            if let path = payload.string("path") ?? payload.string("file_path") {
-                return "Edit: \(URL(fileURLWithPath: path).lastPathComponent)"
-            }
-            return "File edited"
-
-        case .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete:
+        case .streamThinkingComplete:
             return "Streaming..."
 
         case .turnFailed:
@@ -233,7 +148,7 @@ extension SessionEvent {
         return ""
     }
 
-    func formatCapabilityName(_ name: String) -> String {
+    func formatToolName(_ name: String) -> String {
         let tail = name.split(separator: "::").last.map(String.init) ?? name
         return tail
             .replacingOccurrences(of: "_", with: " ")

@@ -87,4 +87,67 @@ struct SessionClientTests {
         try await client.unarchive("session-123", idempotencyKey: "unarchive-idem")
         _ = try await client.fork("session-123", idempotencyKey: "fork-idem")
     }
+
+    @Test("Context audit reads use the exact session and bounded paging inputs")
+    func testContextAuditReads() async throws {
+        let transport = makeConnectedTransport()
+        let client = SessionClient(transport: transport)
+        transport.readHandler = { functionId, payload, options in
+            #expect(options.context?.sessionId == "session-123")
+            if functionId.rawValue == "session::context_requests" {
+                let params = try #require(payload as? SessionContextRequestsParams)
+                #expect(params.sessionId == "session-123")
+                #expect(params.beforeSequence == 41)
+                #expect(params.limit == 20)
+                return SessionContextRequestsResultDTO(
+                    requests: [],
+                    hasMore: false,
+                    nextBeforeSequence: nil
+                )
+            }
+            #expect(functionId.rawValue == "session::context_request_detail")
+            let params = try #require(payload as? SessionContextRequestDetailParams)
+            #expect(params.sessionId == "session-123")
+            #expect(params.eventId == "event-1")
+            return SessionContextRequestDetailDTO(
+                eventId: "event-1",
+                sequence: 42,
+                timestamp: "2026-07-27T12:00:00Z",
+                format: "tron.model_provider_request.v3",
+                contextManifest: nil,
+                providerAdditions: nil,
+                providerAudit: AnyCodable([String: Any]()),
+                provenanceAvailability: "complete"
+            )
+        }
+
+        _ = try await client.contextRequests(
+            sessionId: "session-123",
+            beforeSequence: 41,
+            limit: 50
+        )
+        _ = try await client.contextRequestDetail(
+            sessionId: "session-123",
+            eventId: "event-1"
+        )
+    }
+
+    @Test("Agent updates use the session scope and clamp their bounded limit")
+    func testAgentUpdatesRead() async throws {
+        let transport = makeConnectedTransport()
+        let client = SessionClient(transport: transport)
+        transport.readHandler = { functionId, payload, options in
+            #expect(functionId.rawValue == "session::agent_updates")
+            #expect(options.context?.sessionId == "session-123")
+            let params = try #require(payload as? SessionAgentUpdatesParams)
+            #expect(params.sessionId == "session-123")
+            #expect(params.limit == 200)
+            return SessionAgentUpdatesResultDTO(updates: [], waits: [])
+        }
+
+        let result = try await client.agentUpdates(sessionId: "session-123", limit: 500)
+
+        #expect(result.updates.isEmpty)
+        #expect(result.waits.isEmpty)
+    }
 }

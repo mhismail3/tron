@@ -57,8 +57,8 @@ pub struct MiniMaxModelInfo {
     pub max_output: u32,
     /// Supports extended thinking.
     pub supports_thinking: bool,
-    /// Supports capability invocation.
-    pub supports_capabilities: bool,
+    /// Supports tool invocation.
+    pub supports_tools: bool,
     /// Supports image inputs.
     pub supports_images: bool,
     /// Input cost per million tokens (USD).
@@ -87,7 +87,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -107,7 +107,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -127,7 +127,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -147,7 +147,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -167,7 +167,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -187,7 +187,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -207,7 +207,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -244,7 +244,7 @@ impl MiniMaxModelInfo {
             "contextWindow": self.context_window,
             "maxOutput": self.max_output,
             "supportsThinking": self.supports_thinking,
-            "supportsCapabilityPrimitives": self.supports_capabilities,
+            "supportsTools": self.supports_tools,
             "supportsImages": self.supports_images,
             "supportsDocuments": false,
             "inputCostPerMillion": self.input_cost_per_million,
@@ -254,7 +254,7 @@ impl MiniMaxModelInfo {
             "description": self.description,
             "supportsReasoning": false,
             "recommended": self.recommended,
-            "isLegacy": self.is_retired_generation,
+            "isRetiredGeneration": self.is_retired_generation,
             "sortOrder": self.sort_order,
         })
     }
@@ -365,7 +365,7 @@ mod tests {
     fn minimax_tool_support() {
         for id in all_minimax_model_ids() {
             let m = get_minimax_model(id).unwrap();
-            assert!(m.supports_capabilities, "{id} should support tools");
+            assert!(m.supports_tools, "{id} should support tools");
         }
     }
 
@@ -394,7 +394,7 @@ mod tests {
         assert!(j["description"].is_string());
         assert_eq!(j["supportsReasoning"], false);
         assert_eq!(j["recommended"], false);
-        assert_eq!(j["isLegacy"], false);
+        assert_eq!(j["isRetiredGeneration"], false);
         assert_eq!(j["sortOrder"], 2);
     }
 

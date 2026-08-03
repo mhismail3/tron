@@ -618,8 +618,8 @@ print_installed_service_restart_diagnostic() {
     print_error "Installed service restart was requested, but /health never passed."
     echo "  The installed helper was not reported as restarted because no healthy listener was observed."
     if [ -x "$RELEASE_APP_BINARY" ]; then
-        echo "  /Applications/Tron.app may be stale relative to the current profile defaults."
-        echo "  Stale helpers can fail while parsing capability schema providerSurface values."
+        echo "  /Applications/Tron.app may be stale relative to the current engine/settings contract."
+        echo "  Stale helpers can fail while parsing tool schema providerSurface values."
         echo "  Reinstall or update /Applications/Tron.app, then run: tron start"
     else
         echo "  /Applications/Tron.app is missing or not executable; install it before relying on production restore."
@@ -878,7 +878,7 @@ cmd_uninstall() {
                 echo ""
                 echo "Removes the LaunchAgent, CLI entrypoint, runtime bundles, and Mac onboarding marker."
                 echo "Preserves ~/.tron/internal/database and ~/.tron/workspace. Optional flags remove"
-                echo "settings overrides in ~/.tron/profiles/user/profile.toml and/or ~/.tron/profiles/auth.json."
+                echo "~/.tron/settings.toml and/or ~/.tron/auth.json."
                 return 0
                 ;;
             *)
@@ -930,8 +930,8 @@ cmd_uninstall() {
     rm -f "$ONBOARDED_MARKER_PATH"
 
     if [ "$reset_settings" = true ]; then
-        print_status "Clearing profile settings overrides..."
-        clear_user_profile_settings
+        print_status "Clearing engine settings..."
+        clear_user_settings
     fi
 
     if [ "$reset_credentials" = true ]; then

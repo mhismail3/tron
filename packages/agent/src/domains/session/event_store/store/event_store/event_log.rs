@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use rusqlite::OptionalExtension;
 use serde_json::Value;
 
@@ -15,7 +13,7 @@ use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::TokenTotals;
 use crate::domains::session::event_store::types::base::SessionEvent;
 use crate::domains::session::event_store::{EventRow, SessionRow};
-use crate::shared::foundation::redaction::redact_sensitive_content;
+use crate::shared::foundation::redaction::redact_sensitive_json;
 
 use super::{AppendBatchItem, AppendOptions, EventStore};
 
@@ -86,7 +84,7 @@ pub(super) fn append_event_in_tx_with_identity(
         }
     };
 
-    let payload = redact_json_strings(&opts.payload);
+    let payload = redact_sensitive_json(&opts.payload);
 
     let event = SessionEvent {
         id: identity.id,
@@ -142,20 +140,6 @@ pub(super) fn append_event_in_tx_with_identity(
 
     let _ = SessionRepo::increment_counters(tx, opts.session_id, &counters)?;
     Ok(event)
-}
-
-/// Recursively redact sensitive strings in a JSON value.
-fn redact_json_strings(value: &Value) -> Value {
-    match value {
-        Value::String(s) => Value::String(redact_sensitive_content(s)),
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .map(|(k, v)| (k.clone(), redact_json_strings(v)))
-                .collect(),
-        ),
-        Value::Array(arr) => Value::Array(arr.iter().map(redact_json_strings).collect()),
-        other => other.clone(),
-    }
 }
 
 impl EventStore {
@@ -255,7 +239,7 @@ impl EventStore {
     /// Delete a message by appending a `message.deleted` event.
     ///
     /// The target event must be a message event (`message.user`, `message.assistant`,
-    /// or `capability.invocation.completed`). The original event is never modified — deletion is recorded
+    /// or `tool.invocation.completed`). The original event is never modified — deletion is recorded
     /// as a new event and applied during message reconstruction.
     #[tracing::instrument(skip(self), fields(session_id, target_event_id))]
     pub fn delete_message(
@@ -276,10 +260,10 @@ impl EventStore {
 
             if !matches!(
                 target_type,
-                EventType::MessageUser | EventType::MessageAssistant | EventType::CapabilityInvocationCompleted
+                EventType::MessageUser | EventType::MessageAssistant | EventType::ToolInvocationCompleted
             ) {
                 return Err(EventStoreError::InvalidOperation(format!(
-                    "Cannot delete event of type '{}' — only message and capability result events can be deleted",
+                    "Cannot delete event of type '{}' — only message and tool result events can be deleted",
                     target.event_type
                 )));
             }
@@ -358,7 +342,7 @@ impl EventStore {
         EventRepo::get_latest_events(&conn, session_id, limit)
     }
 
-    /// Resolve payloads for event rows returned to capability clients.
+    /// Resolve payloads for event rows returned to tool clients.
     ///
     /// Persisted event rows may store large JSON payloads out-of-line behind an
     /// internal `__tronPayloadRef` envelope. Active runtime APIs must expose the
@@ -394,25 +378,6 @@ impl EventStore {
         EventRepo::get_token_usage_summary(&conn, session_id)
     }
 
-    /// Batch-fetch events by IDs.
-    ///
-    /// Returns a map of `event_id → EventRow`. IDs that don't match any event
-    /// are silently omitted.
-    pub fn get_events_by_ids(&self, event_ids: &[&str]) -> Result<HashMap<String, EventRow>> {
-        let conn = self.conn()?;
-        EventRepo::get_by_ids(&conn, event_ids)
-    }
-
-    /// Get events of specific types across multiple sessions.
-    pub fn get_events_by_sessions_and_types(
-        &self,
-        session_ids: &[&str],
-        types: &[&str],
-    ) -> Result<Vec<EventRow>> {
-        let conn = self.conn()?;
-        EventRepo::get_by_sessions_and_types(&conn, session_ids, types)
-    }
-
     /// Get events of specific types within a session.
     pub fn get_events_by_type(
         &self,
@@ -424,14 +389,58 @@ impl EventStore {
         EventRepo::get_by_types(&conn, session_id, types, limit)
     }
 
-    /// Get the latest event of a specific type within a session.
-    pub fn get_latest_event_by_type(
+    /// Resolve one bounded reverse-chronological page of provider-request
+    /// audit events, including blob-backed payloads.
+    pub(crate) fn get_provider_request_audits(
         &self,
         session_id: &str,
-        event_type: &str,
-    ) -> Result<Option<EventRow>> {
+        before_sequence: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<(EventRow, serde_json::Value)>> {
         let conn = self.conn()?;
-        EventRepo::get_latest_by_type(&conn, session_id, event_type)
+        EventRepo::get_by_type_before_sequence(
+            &conn,
+            session_id,
+            EventType::ModelProviderRequest.as_str(),
+            before_sequence,
+            limit,
+        )?
+        .into_iter()
+        .map(|row| {
+            let payload = crate::shared::storage::resolve_stored_json_value(&conn, &row.payload)
+                .map_err(|error| {
+                    crate::domains::session::event_store::errors::EventStoreError::Internal(
+                        format!("resolve provider request audit {}: {error:#}", row.id),
+                    )
+                })?;
+            Ok((row, payload))
+        })
+        .collect()
+    }
+
+    /// Resolve one exact provider-request audit owned by a session.
+    pub(crate) fn get_provider_request_audit(
+        &self,
+        session_id: &str,
+        event_id: &str,
+    ) -> Result<Option<(EventRow, serde_json::Value)>> {
+        let conn = self.conn()?;
+        let Some(row) = EventRepo::get_by_id(&conn, event_id)? else {
+            return Ok(None);
+        };
+        if row.session_id != session_id
+            || row.event_type != EventType::ModelProviderRequest.as_str()
+        {
+            return Ok(None);
+        }
+        let payload = crate::shared::storage::resolve_stored_json_value(&conn, &row.payload)
+            .map_err(|error| {
+                crate::domains::session::event_store::errors::EventStoreError::Internal(format!(
+                    "resolve provider request audit {}: {error:#}",
+                    row.id
+                ))
+            })?;
+        Ok(Some((row, payload)))
     }
 
     /// Get the latest event of a specific type for one session-turn ordinal.
@@ -476,82 +485,6 @@ impl EventStore {
     pub(crate) fn get_unterminalized_turn_starts(&self) -> Result<Vec<EventRow>> {
         let conn = self.conn()?;
         EventRepo::get_unterminalized_turn_starts(&conn)
-    }
-
-    /// Count events of a specific type in a session with `sequence > after_sequence`.
-    ///
-    /// `after_sequence = 0` counts all events of that type in the session
-    /// (sequence numbers start at 1). Used by auto-retain to count user
-    /// messages since the last retain boundary.
-    pub fn count_events_by_type_after_sequence(
-        &self,
-        session_id: &str,
-        event_type: &str,
-        after_sequence: i64,
-    ) -> Result<i64> {
-        let conn = self.conn()?;
-        EventRepo::count_by_type_after_sequence(&conn, session_id, event_type, after_sequence)
-    }
-
-    /// Get events by workspace and types (cross-session query).
-    pub fn get_events_by_workspace_and_types(
-        &self,
-        workspace_id: &str,
-        types: &[&str],
-        limit: Option<i64>,
-        offset: Option<i64>,
-    ) -> Result<Vec<EventRow>> {
-        let conn = self.conn()?;
-        EventRepo::get_by_workspace_and_types(&conn, workspace_id, types, limit, offset)
-    }
-
-    /// Count events by workspace and types.
-    pub fn count_events_by_workspace_and_types(
-        &self,
-        workspace_id: &str,
-        types: &[&str],
-    ) -> Result<i64> {
-        let conn = self.conn()?;
-        EventRepo::count_by_workspace_and_types(&conn, workspace_id, types)
-    }
-
-    /// Get events across multiple workspaces by types.
-    pub fn get_events_by_workspaces_and_types(
-        &self,
-        workspace_ids: &[&str],
-        types: &[&str],
-        limit: Option<i64>,
-        offset: Option<i64>,
-    ) -> Result<Vec<EventRow>> {
-        let conn = self.conn()?;
-        EventRepo::get_by_workspaces_and_types(&conn, workspace_ids, types, limit, offset)
-    }
-
-    /// Count events across multiple workspaces by types.
-    pub fn count_events_by_workspaces_and_types(
-        &self,
-        workspace_ids: &[&str],
-        types: &[&str],
-    ) -> Result<i64> {
-        let conn = self.conn()?;
-        EventRepo::count_by_workspaces_and_types(&conn, workspace_ids, types)
-    }
-
-    /// Get events of specific types across ALL workspaces (global query).
-    pub fn get_all_events_by_types(
-        &self,
-        types: &[&str],
-        limit: Option<i64>,
-        offset: Option<i64>,
-    ) -> Result<Vec<EventRow>> {
-        let conn = self.conn()?;
-        EventRepo::get_all_by_types(&conn, types, limit, offset)
-    }
-
-    /// Count events of specific types across ALL workspaces (global query).
-    pub fn count_all_events_by_types(&self, types: &[&str]) -> Result<i64> {
-        let conn = self.conn()?;
-        EventRepo::count_all_by_types(&conn, types)
     }
 
     /// Count total events in a session.

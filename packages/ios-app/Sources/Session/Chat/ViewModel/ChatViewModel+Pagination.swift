@@ -20,13 +20,6 @@ extension ChatViewModel {
         self.workspaceId = workspaceId
     }
 
-    /// Apply config state from reconstructed events.
-    func applyReconstructedConfig(_ state: ReconstructedState) {
-        if let eventSourcedLevel = state.reasoningLevel {
-            inputBarState.reasoningLevel = eventSourcedLevel
-        }
-    }
-
     /// Set token and cost state from reconstructed server events.
     /// Server events are the single source of truth for token values.
     func updateTokenState(from state: ReconstructedState, using manager: EventStoreManager) async {
@@ -99,7 +92,7 @@ extension ChatViewModel {
 
     /// Prune old messages from memory during long-running live sessions.
     ///
-    /// Called at turn_end boundaries when all messages are stable (no streaming, no running capabilities).
+    /// Called at turn_end boundaries when all messages are stable (no streaming, no running tools).
     /// Moves oldest messages to `prunedLiveMessages` buffer for instant "Load Earlier" recovery.
     /// Only the `messages` array (SwiftUI data source) is trimmed; pruned messages remain in memory
     /// but outside SwiftUI observation, eliminating the observation overhead that causes crashes.
@@ -214,7 +207,7 @@ extension ChatViewModel {
                 let olderMessages = UnifiedEventTransformer.transformPersistedEvents(
                     result.events,
                     presorted: true,
-                    capabilityContextEvents: loadedReconstructionEvents
+                    toolContextEvents: loadedReconstructionEvents
                 )
                 loadedReconstructionEvents.insert(contentsOf: result.events, at: 0)
                 reconstructionOldestEventId = result.oldestEventId

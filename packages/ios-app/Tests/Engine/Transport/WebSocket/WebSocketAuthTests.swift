@@ -243,6 +243,60 @@ struct WebSocketRequestTransportTests {
         )
     }
 
+    @Test("retired receive or heartbeat owner cannot disconnect replacement")
+    func retiredLoopOwnerLeavesReplacementConnected() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let retiredTask = makeTask()
+        let replacementTask = makeTask()
+        defer {
+            retiredTask.cancel()
+            replacementTask.cancel()
+        }
+
+        let retiredGeneration = connection.installTransportOwnership(retiredTask)
+        connection.isConnectedFlag = true
+        let replacementGeneration = connection.installTransportOwnership(replacementTask)
+        connection.connectionState = .connected
+
+        #expect(!connection.ownsTransport(retiredTask, generation: retiredGeneration))
+        #expect(connection.ownsTransport(replacementTask, generation: replacementGeneration))
+
+        await connection.handleDisconnect(
+            expectedTask: retiredTask,
+            expectedGeneration: retiredGeneration
+        )
+
+        #expect(connection.engineConnectionTask === replacementTask)
+        #expect(connection.isConnectedFlag)
+        #expect(connection.connectionState == .connected)
+    }
+
+    @Test("current transport owner can perform terminal disconnect cleanup")
+    func currentLoopOwnerDisconnectsCurrentTransport() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let currentTask = makeTask()
+        defer { currentTask.cancel() }
+
+        let generation = connection.installTransportOwnership(currentTask)
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+        connection.isInBackground = true
+
+        await connection.handleDisconnect(
+            expectedTask: currentTask,
+            expectedGeneration: generation
+        )
+
+        #expect(connection.engineConnectionTask == nil)
+        #expect(!connection.isConnectedFlag)
+        #expect(connection.connectionState == .disconnected)
+        #expect(connection.transportGeneration != generation)
+    }
+
     @Test("send failure from a retired socket cannot disconnect its replacement")
     func staleSendFailureLeavesReplacementConnected() async {
         let connection = EngineConnection(

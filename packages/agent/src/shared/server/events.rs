@@ -1,6 +1,6 @@
 //! Neutral server event payloads and wire conversion helpers.
 //!
-//! Domain capabilities and services publish [`ServerEventPayload`] values into
+//! Domain tools and services publish [`ServerEventPayload`] values into
 //! engine streams. Client transports convert those neutral payloads into their
 //! own wire shapes at the boundary.
 
@@ -8,7 +8,7 @@ use crate::domains::session::event_store::EventRow;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Transport-neutral event payload used by server capability streams.
+/// Transport-neutral event payload used by server tool streams.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ServerEventPayload {
@@ -94,11 +94,8 @@ pub(crate) fn event_row_to_wire_with_payload(row: &EventRow, payload: Option<Val
     if let Some(ref role) = row.role {
         let _ = m.insert("role".into(), Value::String(role.clone()));
     }
-    if let Some(ref model_primitive_name) = row.model_primitive_name {
-        let _ = m.insert(
-            "modelPrimitiveName".into(),
-            Value::String(model_primitive_name.clone()),
-        );
+    if let Some(ref tool_name) = row.tool_name {
+        let _ = m.insert("toolName".into(), Value::String(tool_name.clone()));
     }
     if let Some(ref invocation_id) = row.invocation_id {
         let _ = m.insert("invocationId".into(), Value::String(invocation_id.clone()));
@@ -177,7 +174,7 @@ mod tests {
             parent_id: None,
             sequence: 7,
             depth: 0,
-            event_type: "capability.invocation.completed".into(),
+            event_type: "tool.invocation.completed".into(),
             timestamp: "2026-05-14T00:00:00Z".into(),
             payload: json!({
                 "__tronPayloadRef": {
@@ -188,8 +185,8 @@ mod tests {
             .to_string(),
             content_blob_id: None,
             workspace_id: "workspace_1".into(),
-            role: Some("capability".into()),
-            model_primitive_name: None,
+            role: Some("tool".into()),
+            tool_name: None,
             invocation_id: None,
             turn: None,
             input_tokens: None,
@@ -206,7 +203,7 @@ mod tests {
         };
         let resolved = json!({
             "invocationId": "call_1",
-            "modelPrimitiveName": "inspect",
+            "toolName": "inspect",
             "content": "ok",
             "isError": false,
             "duration": 42
@@ -215,7 +212,7 @@ mod tests {
         let wire = event_row_to_wire_with_payload(&row, Some(resolved));
 
         assert_eq!(wire["payload"]["invocationId"], "call_1");
-        assert_eq!(wire["payload"]["modelPrimitiveName"], "inspect");
+        assert_eq!(wire["payload"]["toolName"], "inspect");
         assert!(wire["payload"].get("__tronPayloadRef").is_none());
     }
 }

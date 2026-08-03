@@ -12,6 +12,7 @@ struct ModelPickerSheet: View {
     let onSelect: (ModelInfo) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var expandedProviders: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
     @State private var expandedDetails: Set<String> = []
@@ -40,16 +41,6 @@ struct ModelPickerSheet: View {
         selectedModelInfo?.reasoningLevels ?? ["minimal", "low", "medium", "high", "xhigh"]
     }
 
-    /// Provider color for the currently selected model
-    private var selectedProviderColor: Color {
-        guard let model = selectedModelInfo else { return .tronEmerald }
-        for group in providerGroups {
-            let contains = group.families.contains { $0.models.contains { $0.id == model.id } }
-            if contains { return group.color }
-        }
-        return .tronEmerald
-    }
-
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
@@ -58,6 +49,7 @@ struct ModelPickerSheet: View {
                         ForEach(providerGroups) { provider in
                             ProviderSection(
                                 provider: provider,
+                                accentColor: displayColor(for: provider),
                                 currentModelId: pendingModelId.isEmpty ? currentModelId : pendingModelId,
                                 readOnly: readOnly,
                                 isExpanded: expandedProviders.contains(provider.id),
@@ -98,18 +90,19 @@ struct ModelPickerSheet: View {
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Models", color: .tronPurple)
+                    SheetTitle(title: "Models", color: ModelPickerPresentation.primaryAccent)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { commitSelection(); dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronPurple)
+                            .foregroundStyle(ModelPickerPresentation.primaryAccent)
                     }
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .tint(ModelPickerPresentation.primaryAccent)
         .onDisappear {
             commitSelection()
         }
@@ -146,13 +139,13 @@ struct ModelPickerSheet: View {
                 Text(reasoningLevelLabel(currentReasoningLevel))
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
             }
-            .foregroundStyle(selectedProviderColor)
+            .foregroundStyle(ModelPickerPresentation.primaryAccent)
         }
         .popover(isPresented: $showReasoningPopover, arrowEdge: .top) {
             ReasoningLevelPopover(
                 levels: availableReasoningLevels,
                 currentLevel: currentReasoningLevel,
-                accentColor: selectedProviderColor,
+                accentColor: ModelPickerPresentation.primaryAccent,
                 onSelect: { level in
                     showReasoningPopover = false
                     NotificationCenter.default.post(name: .reasoningLevelAction, object: level)
@@ -172,6 +165,13 @@ struct ModelPickerSheet: View {
         case "max": return "Max"
         default: return level.capitalized
         }
+    }
+
+    private func displayColor(for provider: ProviderGroup) -> Color {
+        ModelPickerPresentation.usesHighContrastNeutral(
+            providerId: provider.id,
+            isDark: colorScheme == .dark
+        ) ? .tronTextSecondary : provider.color
     }
 
     private func commitSelection() {

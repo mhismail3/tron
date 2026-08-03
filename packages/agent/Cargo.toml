@@ -71,12 +71,14 @@ hmac = "0.12"
 base64 = "0.22"
 rand = "0.9"
 percent-encoding = "2"
+p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
 
 # Filesystem
 walkdir = "2"
 regex = "1"
-rustix = { version = "1.1", features = ["fs"] }
+rustix = { version = "1.1", features = ["fs", "process"] }
 tempfile = "3"
+tar = "0.4"
 
 # Concurrency
 parking_lot = "0.12"

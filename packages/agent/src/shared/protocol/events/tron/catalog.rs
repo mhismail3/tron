@@ -1,13 +1,13 @@
-//! Generated `TronEvent` catalog and accessors.
+//! Outbound `TronEvent` catalog and accessors.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 
-use super::super::{ActivitySummaryLine, CapabilityEventIdentity, CapabilityInvocationSummary};
+use super::super::{ActivitySummaryLine, ToolEventIdentity, ToolInvocationSummary};
 use super::{BaseEvent, CompactionReason};
 use crate::shared::protocol::content::ThinkingContentKind;
 use crate::shared::protocol::messages::TokenUsage;
-use crate::shared::protocol::model_capabilities::CapabilityResult;
+use crate::shared::protocol::model_tools::ToolResult;
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -31,7 +31,7 @@ macro_rules! tron_events {
         ///
         /// These events are published through engine streams and may be persisted as
         /// session events. iOS relies on exact type strings and field names.
-        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Serialize)]
         #[serde(tag = "type")]
         #[allow(missing_docs)]
         pub enum TronEvent {
@@ -111,8 +111,8 @@ tron_events! {
         turn: u32,
         #[serde(rename = "partialContent", skip_serializing_if = "Option::is_none")]
         partial_content: Option<String>,
-        #[serde(rename = "activeCapability", skip_serializing_if = "Option::is_none")]
-        active_capability: Option<String>,
+        #[serde(rename = "activeTool", skip_serializing_if = "Option::is_none")]
+        active_tool: Option<String>,
     } => "agent_interrupted",
 
     // -- Turn lifecycle --
@@ -120,6 +120,11 @@ tron_events! {
     /// Turn started.
     TurnStart {
         turn: u32,
+        #[serde(
+            rename = "agentDeliveryContinuation",
+            skip_serializing_if = "Option::is_none"
+        )]
+        agent_delivery_continuation: Option<Value>,
     } => "turn_start",
 
     /// Turn completed.
@@ -159,21 +164,26 @@ tron_events! {
         partial_content: Option<String>,
     } => "agent.turn_failed",
 
-    /// LLM response finished streaming (before capability invocation).
+    /// LLM response finished streaming (before tool invocation).
     ResponseComplete {
         turn: u32,
         #[serde(rename = "stopReason")]
         stop_reason: String,
         #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
         token_usage: Option<TokenUsage>,
-        #[serde(rename = "hasCapabilityInvocations")]
-        has_capability_invocations: bool,
-        #[serde(rename = "capabilityInvocationCount")]
-        capability_invocation_count: u32,
+        #[serde(rename = "hasToolInvocations")]
+        has_tool_invocations: bool,
+        #[serde(rename = "toolInvocationCount")]
+        tool_invocation_count: u32,
         #[serde(rename = "tokenRecord", skip_serializing_if = "Option::is_none")]
         token_record: Option<Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        #[serde(
+            rename = "agentDeliveryContinuation",
+            skip_serializing_if = "Option::is_none"
+        )]
+        agent_delivery_continuation: Option<Value>,
     } => "response_complete",
 
     // -- Message --
@@ -183,115 +193,84 @@ tron_events! {
         content: String,
     } => "message_update",
 
-    // -- Capability invocation --
+    // -- Tool invocation --
 
-    /// All capability invocations from the model's response (before execution).
-    CapabilityInvocationBatch {
-        #[serde(rename = "capabilityInvocations")]
-        capability_invocations: Vec<CapabilityInvocationSummary>,
-    } => "capability.invocation.batch",
+    /// All tool invocations from the model's response (before execution).
+    ToolInvocationBatch {
+        #[serde(rename = "toolInvocations")]
+        tool_invocations: Vec<ToolInvocationSummary>,
+    } => "tool.invocation.batch",
 
-    /// Capability invocation started.
-    CapabilityInvocationStarted {
+    /// Tool invocation started.
+    ToolInvocationStarted {
         #[serde(rename = "invocationId")]
         invocation_id: String,
-        #[serde(rename = "modelPrimitiveName")]
-        model_primitive_name: String,
+        #[serde(rename = "toolName")]
+        tool_name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         arguments: Option<serde_json::Map<String, Value>>,
         #[serde(flatten)]
-        capability_identity: CapabilityEventIdentity,
-    } => "capability.invocation.started",
+        tool_identity: ToolEventIdentity,
+    } => "tool.invocation.started",
 
-    /// Capability invocation progress update.
-    CapabilityInvocationOutput {
+    /// Tool invocation progress update.
+    ToolInvocationOutput {
         #[serde(rename = "invocationId")]
         invocation_id: String,
         update: String,
-    } => "capability.invocation.output",
+    } => "tool.invocation.output",
 
-    /// Long-running capability progress heartbeat.
+    /// Long-running tool progress heartbeat.
     ///
     /// Carries an optional human-readable status message (shown as chip
     /// subtitle) and an optional 0.0–1.0 completion fraction.
-    CapabilityInvocationProgress {
+    ToolInvocationProgress {
         #[serde(rename = "invocationId")]
         invocation_id: String,
+        #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
+        tool_name: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         percent: Option<f64>,
         #[serde(flatten)]
-        capability_identity: CapabilityEventIdentity,
-    } => "capability.invocation.progress",
+        tool_identity: ToolEventIdentity,
+    } => "tool.invocation.progress",
 
-    /// Capability async run status update.
-    CapabilityRunStatus {
-        #[serde(rename = "runId")]
-        run_id: String,
+    /// Tool invocation completed.
+    ToolInvocationCompleted {
         #[serde(rename = "invocationId")]
         invocation_id: String,
-        status: String,
-        #[serde(rename = "streamTopic", skip_serializing_if = "Option::is_none")]
-        stream_topic: Option<String>,
-        #[serde(rename = "childInvocations")]
-        child_invocations: Vec<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        details: Option<Value>,
-        #[serde(flatten)]
-        capability_identity: CapabilityEventIdentity,
-    } => "capability.run.status",
-
-    /// Capability invocation completed.
-    CapabilityInvocationCompleted {
-        #[serde(rename = "invocationId")]
-        invocation_id: String,
-        #[serde(rename = "modelPrimitiveName")]
-        model_primitive_name: String,
+        #[serde(rename = "toolName")]
+        tool_name: String,
         duration: u64,
         #[serde(rename = "isError", skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        result: Option<CapabilityResult>,
+        result: Option<ToolResult>,
         #[serde(flatten)]
-        capability_identity: CapabilityEventIdentity,
-    } => "capability.invocation.completed",
+        tool_identity: ToolEventIdentity,
+    } => "tool.invocation.completed",
 
-    /// Capability invocation argument delta (during streaming).
-    CapabilityInvocationArgumentDelta {
+    /// Tool invocation argument delta (during streaming).
+    ToolInvocationArgumentDelta {
         #[serde(rename = "invocationId")]
         invocation_id: String,
-        #[serde(rename = "modelPrimitiveName", skip_serializing_if = "Option::is_none")]
-        model_primitive_name: Option<String>,
+        #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
+        tool_name: Option<String>,
         #[serde(rename = "argumentsDelta")]
         arguments_delta: String,
-    } => "capability.invocation.arguments_delta",
+    } => "tool.invocation.arguments_delta",
 
-    /// Capability invocation generating (before arguments streamed).
-    CapabilityInvocationGenerating {
+    /// Tool invocation generating (before arguments streamed).
+    ToolInvocationGenerating {
         #[serde(rename = "invocationId")]
         invocation_id: String,
-        #[serde(rename = "modelPrimitiveName")]
-        model_primitive_name: String,
+        #[serde(rename = "toolName")]
+        tool_name: String,
         #[serde(flatten)]
-        capability_identity: CapabilityEventIdentity,
-    } => "capability.invocation.generating",
-
-    // -- Session --
-
-    /// Session saved.
-    SessionSaved {
-        #[serde(rename = "filePath")]
-        file_path: String,
-    } => "session_saved",
-
-    /// Session loaded.
-    SessionLoaded {
-        #[serde(rename = "filePath")]
-        file_path: String,
-        #[serde(rename = "messageCount")]
-        message_count: u32,
-    } => "session_loaded",
+        tool_identity: ToolEventIdentity,
+    } => "tool.invocation.generating",
 
     // -- Context --
 
@@ -461,6 +440,14 @@ tron_events! {
         parent_session_id: Option<String>,
         #[serde(rename = "activityLines", skip_serializing_if = "Option::is_none")]
         activity_lines: Option<Vec<ActivitySummaryLine>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        labels: Option<Vec<String>>,
+        #[serde(rename = "organizationGroup", skip_serializing_if = "Option::is_none")]
+        organization_group: Option<String>,
+        #[serde(rename = "organizationChanged", skip_serializing_if = "Option::is_none")]
+        organization_changed: Option<bool>,
+        #[serde(rename = "isArchived", skip_serializing_if = "Option::is_none")]
+        is_archived: Option<bool>,
     } => "session_updated",
 
     /// Context cleared.
@@ -516,16 +503,15 @@ impl TronEvent {
         self.base().parent_invocation_id.as_deref()
     }
 
-    /// Whether this is a capability invocation event.
+    /// Whether this is a tool invocation event.
     #[must_use]
-    pub fn is_capability_invocation(&self) -> bool {
+    pub fn is_tool_invocation(&self) -> bool {
         matches!(
             self,
-            Self::CapabilityInvocationStarted { .. }
-                | Self::CapabilityInvocationOutput { .. }
-                | Self::CapabilityInvocationProgress { .. }
-                | Self::CapabilityRunStatus { .. }
-                | Self::CapabilityInvocationCompleted { .. }
+            Self::ToolInvocationStarted { .. }
+                | Self::ToolInvocationOutput { .. }
+                | Self::ToolInvocationProgress { .. }
+                | Self::ToolInvocationCompleted { .. }
         )
     }
 }

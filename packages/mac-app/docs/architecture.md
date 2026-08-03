@@ -22,7 +22,7 @@ first, then the outer wrapper is re-signed after copying the `Contents/Library`
 tree so ServiceManagement can verify the bundled LaunchAgent plists as sealed
 resources. The Xcode target copies `packages/agent/defaults/` into the built
 app's `Contents/Resources/Constitution/`; managed skills, transcription
-sidecars, and product capability assets are not bundled. See
+sidecars, and product tool assets are not bundled. See
 [development.md](./development.md) for the build pipeline.
 
 ## Directory Structure
@@ -35,28 +35,36 @@ packages/mac-app/
 ├── Sources/
 │   ├── Info.plist                  # Bundle metadata (starts regular; switches to accessory after onboarding)
 │   ├── App/
+│   │   ├── EnvironmentSetup.swift # Sendable DI struct (live + test values)
 │   │   ├── Lifecycle/              # @main entry, AppDelegate, startup maintenance, runtime variant
-│   │   ├── CommandMode/            # Internal start/uninstall command-mode entry points
-│   │   └── Composition/            # Sendable DI struct (live + test values)
+│   │   └── CommandMode/            # Internal start/uninstall command-mode entry points
 │   ├── MenuBar/
+│   │   ├── MenuBarController.swift # NSStatusItem and window lifecycle
 │   │   ├── Actions/                # Typed menu commands, action handler, and feedback issue action
-│   │   ├── Controller/             # NSStatusItem and window lifecycle
 │   │   └── Presentation/           # Pure typed-descriptor builder, logs reader, logs window
+│   ├── Operator/                    # Signed, closed Mac Operator boundary
+│   │   ├── MacOperatorProtocol.swift
+│   │   ├── MacOperatorActuator.swift # serialized action-dispatch owner
+│   │   ├── MacOperatorObservation*.swift
+│   │   ├── MacOperatorValidation.swift
+│   │   ├── MacOperatorActions.swift
+│   │   ├── MacOperatorScreenshot.swift
+│   │   ├── MacOperatorHostBridge.swift # listener/cancellation lifecycle
+│   │   ├── MacOperatorHostRequestDispatch.swift
+│   │   └── MacOperatorSocketTransport.swift
 │   ├── Resources/                  # tracked icons, fonts, and helper/LaunchAgent metadata
 │   │   ├── Fonts/
 │   │   │   └── Exo2-Variable.ttf   # bundled Google Fonts sans face for wizard typography
 │   │   └── Library/                # helper Info.plists + LaunchAgent plists; binaries are staged and ignored
 │   ├── Server/
+│   │   ├── BearerTokenReader.swift # auth.json bearer-token reader
 │   │   ├── LaunchAgent/            # protocol + SMAppService-backed LiveLaunchAgentManager
 │   │   ├── Health/                 # one-shot ping, health waiting, status polling
-│   │   ├── Paths/                  # TronPaths plus profile settings TOML cache
-│   │   ├── PairingToken/           # auth.json bearer-token reader
+│   │   ├── Paths/                  # TronPaths plus engine settings TOML cache
 │   │   └── ProcessControl/         # dev stopper, process probe, wrapper lock, uninstall
 │   ├── Support/
-│   │   ├── Diagnostics/
-│   │   │   └── DiagnosticsRedactor.swift   # strip paths, mask bearer/API/OAuth fields, drop chat content
-│   │   ├── Feedback/
-│   │   │   └── FeedbackComposer.swift      # pure GitHub issue composer with redacted log context
+│   │   ├── DiagnosticsRedactor.swift # strip paths, mask bearer/API/OAuth fields, drop chat content
+│   │   ├── FeedbackComposer.swift    # pure GitHub issue composer with redacted log context
 │   │   ├── Foundation/
 │   │   │   ├── Subprocess.swift
 │   │   │   └── VersionDisplay.swift
@@ -151,6 +159,57 @@ not independently maintained resources.
 refresh, or status UI policy: PID/uptime, parent bundle identity/version, helper
 executable path, and launch-constraint refresh state.
 
+### Mac Operator signed-host boundary
+
+The ordinary `mac-operator` worker owns outcome interpretation, action
+planning, confirmation policy, semantic verification, and recovery. The
+wrapper contributes only the native seam a worker process cannot safely own:
+Accessibility, Screen Recording, and foreground AppKit/WindowServer identity.
+This is the core delta for the capability; the Rust engine gains no Mac-control
+primitive, store, dispatcher, or semantic policy.
+
+After onboarding, the installed Release wrapper (or isolated-install Debug
+wrapper) creates one `0600` Unix socket inside its own Tron home. Debug
+companion mode never competes for that socket. The socket admits only status,
+visible-application discovery, foreground-window observation, ScreenCaptureKit
+window capture, accessibility press/value assignment, a fixed key set, bounded
+scroll, and a normalized coordinate fallback. The same-user peer check,
+64-KiB request ceiling, 20-second deadline ceiling, exact-key decoding, and
+single serial accept loop form the closed transport boundary.
+
+The actuator retains exactly one observation. Every mutation must name that
+observation and the same foreground bundle/window. Validation resolves the
+current Accessibility-focused window and requires both its AX identity and
+WindowServer number to match, so switching between two still-visible windows
+in the same app invalidates the observation. The observation is consumed
+before actuation, then a fresh observation is returned. Coordinate fallback
+also requires the latest screenshot identity and is invalidated after use.
+Editable values, secure text, process IDs, typed content, socket paths, and
+native errors are excluded from native action evidence. Accessibility tree
+traversal is bounded to 256 elements and ten levels. Screenshot bytes are
+returned only to the invoking worker; the native bridge never writes them to
+disk or its logs.
+
+The source split follows those owners without multiplying runtime state.
+`MacOperatorActuator` remains the sole actor and serialized action entry point;
+observation, focus validation, closed actions, and screenshot capture are actor
+extensions over that same state. `MacOperatorHostBridge` remains the sole
+listener/client/action lifecycle owner. `MacOperatorHostRequestDispatch`
+admits and drains one request against that owner, while
+`MacOperatorSocketTransport` provides stateless framing, same-user peer
+validation, and listener construction. There is no second socket, actor,
+operation queue, safety generation, or observation cache.
+
+The menu's **Stop Mac Operator** action increments a native safety generation,
+invalidating pending observations immediately. The host bridge also owns the
+active client descriptor and action task: emergency stop shuts down that
+client, cancels its task, and does not return until it has drained. Only
+**Resume Mac Operator** in the signed native menu can clear that stop; the
+socket protocol deliberately contains no resume operation. Wrapper termination
+stops admission, closes the listener and active client, cancels and drains the
+active task, and removes the socket only after the accept loop exits. Test-host
+mode remains inert and never starts the bridge or asks for a TCC permission.
+
 ### Wizard visual system
 
 `WizardLayout` owns the wizard's fixed 480×440 glass canvas, with pinned header,
@@ -230,13 +289,13 @@ to that tester group. The page also exposes copy/open actions for the same
 URL, but it does not call the server or mutate onboarding state beyond normal
 step persistence.
 
-The Pairing step does not require a pre-existing user profile. It reads the
+The Pairing step does not require a pre-existing settings file. It reads the
 agent-issued `auth.json` bearer token, confirms the server is answering
 `system::ping`, and resolves the host in this order: a fresh Tailscale probe,
 the wizard's latest Tailscale state, then the settings cache. The configured
 `EnvironmentSetup.serverPort` remains the pairing and local-process owner; ping
 does not duplicate connection metadata. The selected host is cached best-effort in
-`profiles/user/profile.toml`; a cache write failure does not invalidate the QR
+`settings.toml`; a cache write failure does not invalidate the QR
 payload.
 The QR/manual payload builder accepts only a bare DNS name, IPv4 address, or
 unbracketed IPv6 address plus a `1...65535` port, mirroring iOS
@@ -269,17 +328,23 @@ their context-specific colors. Consumers pattern-match `ServerPingResult`
 directly, while snapshots store only orthogonal process and host metadata.
 `ServerPing.decodeFrame` parses each WebSocket frame once, requires the
 canonical pong, timestamp, server/protocol versions, minimum client protocol,
-and compatibility fields, and projects only the server version. The configured
-port and profile-backed Tailscale cache stay with `EnvironmentSetup`; `paired`
-belongs to `system::get_info`, not the ping response. The status poller,
-pairing window, log window, and feedback action each read the bearer token
-through `EnvironmentSetup.readBearerToken` at the point of use and never retain
-it in presentation state. Every Mac token read rejects `auth.json` when group
-or other permission bits are present; no caller can bypass that owner-only
+and compatibility fields directly in the invocation response's top-level
+`result`, and projects only the server version. Canonical invocation failures
+remain top-level protocol errors; the wrapper decodes only the top-level result
+or failure. The configured
+port and settings-backed Tailscale cache stay with `EnvironmentSetup`; the Mac
+app owns its wizard-completion sentinel directly. `system::get_info` returns
+only the version, uptime, and cached-session count consumed by iOS. The status
+poller, pairing window, log window, and feedback action each read the bearer
+token through `EnvironmentSetup.readBearerToken` at the point of use and never
+retain it in presentation state. Every Mac token read rejects `auth.json` when
+group or other permission bits are present; no caller can bypass that owner-only
 policy. `MenuBarController` owns the setup used to compose
 the pairing and log windows; `MenuBarActionHandler` dispatches those typed
 window actions without resupplying composition. `MenuBarLogReader` accepts the
 token as request input and does not own credential storage or path resolution.
+It applies the same direct top-level `result`/top-level error contract to
+`logs::recent`.
 The poller is an immutable `Sendable` value. `MenuBarController` owns and
 cancels its consumer task, while each stream owns its producer task and buffers
 only the newest snapshot so a stalled consumer cannot accumulate obsolete
@@ -373,23 +438,23 @@ Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` both call
 `SMAppService.unregister`, remove runtime state
 (`run/.onboarded`, `run/auth.lock`, and
 the current `run/.mac-wrapper.<bundle-id>.lock`), and quit the wrapper. By default, auth,
-profile settings, databases, and workspace files remain intact, so the next app
+engine settings, databases, and workspace files remain intact, so the next app
 launch returns to the onboarding wizard instead of a broken menu-bar-only
 state. The menu confirmation dialog can also clear `[settings]` overrides from
-`profiles/user/profile.toml` and/or remove `auth.json`; databases and workspace
+`settings.toml` and/or remove `auth.json`; databases and workspace
 files are still preserved.
 
 ## Key Invariants
 
-- **`Tron.app` never builds the Rust agent.** The `tron` helper executable is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helpers/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side engine capability/TCC/install/settings-default change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`.
+- **`Tron.app` never builds the Rust agent.** The `tron` helper executable is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helpers/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side engine tool/TCC/install/settings-default change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`.
 - **The Install step is not an `onAppear` side effect.** Landing on the page is read-only; the user must press Install before the wrapper registers the service.
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` does not render install detection state; the Install step owns that status.
 - **The helper app must be signed before registration.** Validation fails loudly if the active helper app, its binary, the bundled LaunchAgent plist, or the helper signature is missing/corrupt. Production/local Release use `Tron Server.app` with bundle id `com.tron.server`; isolated Debug uses `Tron Server Dev.app` with bundle id `com.tron.server.dev`. The helper bundle id intentionally matches the active LaunchAgent label, while the LaunchAgent associates with the wrapper bundle ids because macOS presents some TCC services under the responsible wrapper app.
-- **Uninstall preserves user data.** Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` unregister the SMAppService agent and clear runtime state. Default Debug companion mode refuses to uninstall production. Menu-bar uninstall may clear `[settings]` overrides from `profiles/user/profile.toml` and/or remove `auth.json` only when the user explicitly checks the matching reset option; it never removes the database or workspace.
+- **Uninstall preserves user data.** Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` unregister the SMAppService agent and clear runtime state. Default Debug companion mode refuses to uninstall production. Menu-bar uninstall may remove `settings.toml` and/or `auth.json` only when the user explicitly checks the matching reset option; it never removes the database or workspace.
 - **A loaded LaunchAgent label is not proof that the correct helper is running.** Registration inspects `launchctl print` for the loaded job's parent bundle identifier and event-trigger executable before deciding whether to reuse, repair, or fail. Missing/mismatched helper executables are stale registrations and manager builds repair them; default Debug companion builds never repair or own production registration.
 - **Permission checks are wrapper-owned and probe-only.** The Permissions step records when it opened System Settings only to decide whether to show the visible "Checking permissions..." activity state on return. Its recurring probe loop runs directly in the view's SwiftUI `.task`, which owns cancellation when the page disappears; the separate gear-button watcher remains bounded and explicitly cancelled because button actions can restart it. App activation, Re-check, and that watcher call native wrapper probes without `launchctl kickstart`, and transient `.probeUnavailable` snapshots preserve the last concrete badge state instead of turning the page gray. The only permission-time restart is the one-time helper restart after Full Disk Access is green and the user presses Continue.
-- **Optional managed runtime assets stay out of the wrapper.** The build bundles helper apps and Constitution defaults. Skills, transcription sidecars, and product capability assets are not copied into the app or `~/.tron`.
+- **Optional managed runtime assets stay out of the wrapper.** The build bundles helper apps and Constitution defaults. Skills, transcription sidecars, and product tool assets are not copied into the app or `~/.tron`.
 - **Distributed app bundles are immutable at runtime.** Mutable files live under `~/.tron`; ephemeral locks live under `~/.tron/internal/run`. End users replace `Tron.app` from a notarized DMG; the documented local Release workflow is the explicit contributor-only exception.
 - **DMG assembly has one fail-closed owner.** `scripts/package-dmg.sh` copies the complete wrapper, accepts only an explicit structural or release layout, makes one image-creation attempt, and remounts the result to require the app, embedded helper, and `Applications -> /Applications` link. PR CI and the release workflow delegate that transaction to the script; signing, notarization, and publication remain release-workflow concerns.
 - **Wrapper and server share no in-memory state.** Interaction crosses persisted files, engine protocol calls, or OS service/process state. Crashing the wrapper does not kill the server because the LaunchAgent owns it.
@@ -418,7 +483,7 @@ Production workflows operate against the same `~/.tron/internal/` data tree and 
 
 - **Port `9847`** — the production WS bind. Always exclusive — see "Mutual exclusion" below. Workflow 4 uses `9848`.
 - **LaunchAgent label `com.tron.server`** — the launchd job that owns the installed production server. Workflows 1 and 2 register it through `SMAppService`; workflow 3 observes it; workflow 5 stops it before binding the port itself. Workflow 4 registers only `com.tron.server.dev` and points `BundleProgram` at `Tron Server Dev.app`.
-- **`~/.tron/` Constitution home** — production profiles/auth, workspace data, log database, and `internal/run/` state. Workflows 1, 2, 3, and 5 use it. Workflow 4 uses `~/.tron-dev`.
+- **`~/.tron/` engine home** — flat settings, provider/client auth, workspace data, log database, and `internal/run/` state. Workflows 1, 2, 3, and 5 use it. Workflow 4 uses `~/.tron-dev`.
 - **`auth.json.bearerToken`** — workflows 1, 2, 3, and 5 share the production token. The isolated workflow has a separate token under `~/.tron-dev`.
 - **Release identity** — `VERSION.env` is the only hand-edited release source.
   `scripts/tron version sync` mirrors the canonical Cargo/GitHub version into
@@ -459,7 +524,7 @@ The wrapper (workflow 1 or 2) does not need to be relaunched — its `ServerStat
 
 ### One production install path
 
-The wizard is the production install path. It validates `/Applications/Tron.app`, registers the bundled LaunchAgent through `SMAppService`, and lets the helper generate `bearerToken` inside `~/.tron/profiles/auth.json` on first start. `scripts/tron` remains contributor tooling and is not used by the distributed Mac app.
+The wizard is the production install path. It validates `/Applications/Tron.app`, registers the bundled LaunchAgent through `SMAppService`, and lets the helper generate `bearerToken` inside `~/.tron/auth.json` on first start. `scripts/tron` remains contributor tooling and is not used by the distributed Mac app.
 
 See [development.md](./development.md) for local dev + CI commands and the
 [README install section](../../../README.md#install) for end-user-facing setup.

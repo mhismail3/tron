@@ -1,6 +1,6 @@
 //! Streaming journal — per-turn append-only WAL for crash recovery.
 //!
-//! Each active LLM turn writes streaming deltas (text, thinking, capability invocations) to a
+//! Each active LLM turn writes streaming deltas (text, thinking, tool invocations) to a
 //! journal file at `~/.tron/internal/database/journals/{session_id}/turn_{n}.wal`.
 //! On normal completion the journal is deleted. If the server crashes mid-turn,
 //! orphaned journals are discovered on next startup and their content is persisted
@@ -13,8 +13,8 @@
 //! - `{"t":"text_end","c":"full text content"}`
 //! - `{"t":"thinking","c":"delta content"}`
 //! - `{"t":"thinking_end","c":"full thinking content"}`
-//! - `{"t":"capability_invocation_start","c":"{...}"}` (JSON-encoded `id` + `name`)
-//! - `{"t":"capability_invocation","c":"{...}"}` (JSON-encoded capability invocation)
+//! - `{"t":"tool_invocation_start","c":"{...}"}` (JSON-encoded `id` + `name`)
+//! - `{"t":"tool_invocation","c":"{...}"}` (JSON-encoded tool invocation)
 //!
 //! Each `append_delta` writes one line and flushes, providing crash safety to
 //! line granularity.
@@ -35,12 +35,12 @@ use tracing::{debug, trace, warn};
 
 use crate::shared::foundation::paths;
 use crate::shared::protocol::content::AssistantContent;
-use crate::shared::protocol::messages::CapabilityInvocationDraft;
+use crate::shared::protocol::messages::ToolInvocationDraft;
 
 /// A single delta entry in the journal WAL.
 #[derive(Debug, Serialize, Deserialize)]
 struct JournalEntry {
-    /// Delta type: "text", "thinking", or "capability_invocation"
+    /// Delta type: "text", "thinking", or "tool_invocation"
     t: String,
     /// Delta content
     c: String,
@@ -55,16 +55,16 @@ pub struct RecoveredTurn {
     pub accumulated_text: String,
     /// Accumulated thinking/reasoning content from all thinking deltas.
     pub accumulated_thinking: String,
-    /// Partial capability invocation data recovered from the journal.
-    pub capability_invocations: Vec<CapabilityInvocationDraft>,
+    /// Partial tool invocation data recovered from the journal.
+    pub tool_invocations: Vec<ToolInvocationDraft>,
 }
 
 #[derive(Clone, Debug)]
 enum RecoveredContentBlock {
     Text(String),
     Thinking(String),
-    CapabilityInvocation {
-        draft: CapabilityInvocationDraft,
+    ToolInvocation {
+        draft: ToolInvocationDraft,
         finalized: bool,
     },
 }
@@ -103,8 +103,8 @@ fn finish_recovered_thinking(blocks: &mut Vec<RecoveredContentBlock>, thinking: 
     }
 }
 
-fn parse_capability_invocation(value: &Value) -> Option<CapabilityInvocationDraft> {
-    let inner = value.get("capability_invocation").unwrap_or(value);
+fn parse_tool_invocation(value: &Value) -> Option<ToolInvocationDraft> {
+    let inner = value.get("tool_invocation").unwrap_or(value);
     let id = inner
         .get("id")
         .or_else(|| inner.get("invocationId"))
@@ -116,25 +116,25 @@ fn parse_capability_invocation(value: &Value) -> Option<CapabilityInvocationDraf
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_else(Map::new);
-    let mut draft = CapabilityInvocationDraft::new(id, name, arguments);
+    let mut draft = ToolInvocationDraft::new(id, name, arguments);
     if let Some(signature) = inner.get("thoughtSignature").and_then(Value::as_str) {
         draft = draft.with_thought_signature(signature);
     }
     Some(draft)
 }
 
-fn upsert_recovered_capability(
+fn upsert_recovered_tool(
     blocks: &mut Vec<RecoveredContentBlock>,
-    draft: CapabilityInvocationDraft,
+    draft: ToolInvocationDraft,
     finalized: bool,
 ) {
-    if let Some(RecoveredContentBlock::CapabilityInvocation {
+    if let Some(RecoveredContentBlock::ToolInvocation {
         draft: current,
         finalized: current_finalized,
     }) = blocks.iter_mut().find(|block| {
         matches!(
             block,
-            RecoveredContentBlock::CapabilityInvocation { draft: existing, .. }
+            RecoveredContentBlock::ToolInvocation { draft: existing, .. }
                 if existing.id == draft.id
         )
     }) {
@@ -143,7 +143,7 @@ fn upsert_recovered_capability(
         return;
     }
 
-    blocks.push(RecoveredContentBlock::CapabilityInvocation { draft, finalized });
+    blocks.push(RecoveredContentBlock::ToolInvocation { draft, finalized });
 }
 
 fn recovered_content_blocks(blocks: &[RecoveredContentBlock]) -> Vec<AssistantContent> {
@@ -161,8 +161,8 @@ fn recovered_content_blocks(blocks: &[RecoveredContentBlock]) -> Vec<AssistantCo
                     signature: None,
                 })
             }
-            RecoveredContentBlock::CapabilityInvocation { draft, finalized } => {
-                finalized.then(|| AssistantContent::CapabilityInvocation {
+            RecoveredContentBlock::ToolInvocation { draft, finalized } => {
+                finalized.then(|| AssistantContent::ToolInvocation {
                     id: draft.id.clone(),
                     name: draft.name.clone(),
                     arguments: draft.arguments.clone(),
@@ -283,7 +283,7 @@ impl StreamingJournal {
         let mut text = String::new();
         let mut thinking = String::new();
         let mut recovered_blocks = Vec::new();
-        let mut capability_invocations: Vec<CapabilityInvocationDraft> = Vec::new();
+        let mut tool_invocations: Vec<ToolInvocationDraft> = Vec::new();
         let mut recovered_lines = 0u64;
 
         for line_result in reader.lines() {
@@ -336,19 +336,19 @@ impl StreamingJournal {
                     thinking.clone_from(&entry.c);
                     finish_recovered_thinking(&mut recovered_blocks, &entry.c);
                 }
-                "capability_invocation_start" => {
+                "tool_invocation_start" => {
                     if let Ok(val) = serde_json::from_str::<Value>(&entry.c)
-                        && let Some(draft) = parse_capability_invocation(&val)
+                        && let Some(draft) = parse_tool_invocation(&val)
                     {
-                        upsert_recovered_capability(&mut recovered_blocks, draft, false);
+                        upsert_recovered_tool(&mut recovered_blocks, draft, false);
                     }
                 }
-                "capability_invocation" => {
+                "tool_invocation" => {
                     if let Ok(val) = serde_json::from_str::<Value>(&entry.c)
-                        && let Some(draft) = parse_capability_invocation(&val)
+                        && let Some(draft) = parse_tool_invocation(&val)
                     {
-                        capability_invocations.push(draft.clone());
-                        upsert_recovered_capability(&mut recovered_blocks, draft, true);
+                        tool_invocations.push(draft.clone());
+                        upsert_recovered_tool(&mut recovered_blocks, draft, true);
                     }
                 }
                 other => {
@@ -373,7 +373,7 @@ impl StreamingJournal {
             recovered_lines,
             text_len = text.len(),
             thinking_len = thinking.len(),
-            capability_invocations = capability_invocations.len(),
+            tool_invocations = tool_invocations.len(),
             "journal recovery loaded"
         );
 
@@ -381,7 +381,7 @@ impl StreamingJournal {
             content: recovered_content_blocks(&recovered_blocks),
             accumulated_text: text,
             accumulated_thinking: thinking,
-            capability_invocations,
+            tool_invocations,
         }))
     }
 
@@ -596,7 +596,7 @@ mod tests {
         writeln!(f, r#"{{"t":"thinking","c":"I should greet"}}"#).unwrap();
         writeln!(
             f,
-            r#"{{"t":"capability_invocation","c":"{{\"name\":\"execute\",\"id\":\"tc1\"}}"}}"#
+            r#"{{"t":"tool_invocation","c":"{{\"name\":\"test_tool\",\"id\":\"tc1\"}}"}}"#
         )
         .unwrap();
         drop(f);
@@ -606,7 +606,7 @@ mod tests {
         let reader = BufReader::new(file);
         let mut text = String::new();
         let mut thinking = String::new();
-        let mut capability_invocations: Vec<serde_json::Value> = Vec::new();
+        let mut tool_invocations: Vec<serde_json::Value> = Vec::new();
 
         for line_result in reader.lines() {
             let line = line_result.unwrap();
@@ -617,9 +617,9 @@ mod tests {
             match entry.t.as_str() {
                 "text" => text.push_str(&entry.c),
                 "thinking" => thinking.push_str(&entry.c),
-                "capability_invocation" => {
+                "tool_invocation" => {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&entry.c) {
-                        capability_invocations.push(val);
+                        tool_invocations.push(val);
                     }
                 }
                 _ => {}
@@ -628,25 +628,25 @@ mod tests {
 
         assert_eq!(text, "Hello world");
         assert_eq!(thinking, "I should greet");
-        assert_eq!(capability_invocations.len(), 1);
-        assert_eq!(capability_invocations[0]["name"], "execute");
+        assert_eq!(tool_invocations.len(), 1);
+        assert_eq!(tool_invocations[0]["name"], "test_tool");
     }
 
     #[test]
-    fn recovered_content_preserves_stream_order_and_canonical_capability_shape() {
+    fn recovered_content_preserves_stream_order_and_canonical_tool_shape() {
         let mut blocks = Vec::new();
         append_recovered_text(&mut blocks, "before");
-        upsert_recovered_capability(
+        upsert_recovered_tool(
             &mut blocks,
-            CapabilityInvocationDraft::new("tc1", "execute", Map::new()),
+            ToolInvocationDraft::new("tc1", "test_tool", Map::new()),
             false,
         );
         append_recovered_text(&mut blocks, "after");
         let mut args = Map::new();
         let _ = args.insert("operation".to_owned(), serde_json::json!("inspect"));
-        upsert_recovered_capability(
+        upsert_recovered_tool(
             &mut blocks,
-            CapabilityInvocationDraft::new("tc1", "execute", args),
+            ToolInvocationDraft::new("tc1", "test_tool", args),
             true,
         );
 
@@ -658,7 +658,7 @@ mod tests {
         ));
         assert!(matches!(
             &content[1],
-            AssistantContent::CapabilityInvocation { id, arguments, .. }
+            AssistantContent::ToolInvocation { id, arguments, .. }
                 if id == "tc1" && arguments["operation"] == "inspect"
         ));
         assert!(matches!(

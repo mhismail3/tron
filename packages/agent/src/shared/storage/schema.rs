@@ -3,10 +3,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
-use rusqlite::{Connection, OptionalExtension, params};
-
-use super::{CURRENT_STORAGE_GENERATION, STORAGE_GENERATION_KEY};
+use rusqlite::Connection;
 
 /// Apply storage-wide SQLite pragmas to one connection.
 pub fn apply_runtime_pragmas(conn: &Connection) -> Result<()> {
@@ -21,7 +18,7 @@ pub fn apply_runtime_pragmas(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Ensure storage metadata tables exist and still match the current owner shape.
+/// Ensure payload-storage tables exist and still match the current owner shape.
 pub fn ensure_storage_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch("SAVEPOINT tron_storage_schema")
         .context("failed to start storage schema savepoint")?;
@@ -42,36 +39,7 @@ pub fn ensure_storage_schema(conn: &Connection) -> Result<()> {
 
 fn ensure_storage_schema_inner(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS storage_metadata (
-           key TEXT PRIMARY KEY,
-           value TEXT NOT NULL,
-           updated_at TEXT NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS storage_checkpoints (
-           id INTEGER PRIMARY KEY AUTOINCREMENT,
-           checkpointed_at TEXT NOT NULL,
-           mode TEXT NOT NULL,
-           busy INTEGER NOT NULL,
-           log_pages INTEGER NOT NULL,
-           checkpointed_pages INTEGER NOT NULL,
-           wal_bytes INTEGER NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS storage_exports (
-           id INTEGER PRIMARY KEY AUTOINCREMENT,
-           exported_at TEXT NOT NULL,
-           snapshot_path TEXT NOT NULL,
-           snapshot_bytes INTEGER NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS storage_retention_runs (
-           id INTEGER PRIMARY KEY AUTOINCREMENT,
-           started_at TEXT NOT NULL,
-           finished_at TEXT NOT NULL,
-           dry_run INTEGER NOT NULL DEFAULT 0,
-           rows_deleted INTEGER NOT NULL DEFAULT 0,
-           blobs_deleted INTEGER NOT NULL DEFAULT 0,
-           notes TEXT
-         );
-         CREATE TABLE IF NOT EXISTS blobs (
+        "CREATE TABLE IF NOT EXISTS blobs (
            id              TEXT    PRIMARY KEY,
            hash            TEXT    NOT NULL UNIQUE,
            content         BLOB    NOT NULL,
@@ -102,7 +70,7 @@ fn ensure_storage_schema_inner(conn: &Connection) -> Result<()> {
            UNIQUE(owner_kind, owner_id, field_name)
          );",
     )
-    .context("failed to create storage metadata tables")?;
+    .context("failed to create payload storage tables")?;
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_blobs_hash ON blobs(hash);
          CREATE INDEX IF NOT EXISTS idx_blobs_ref_count ON blobs(ref_count) WHERE ref_count <= 0;
@@ -116,68 +84,11 @@ fn ensure_storage_schema_inner(conn: &Connection) -> Result<()> {
     .context("failed to create blob indexes")?;
     verify_storage_schema(conn)?;
     verify_payload_blob_integrity(conn)?;
-    let current_generation = conn
-        .query_row(
-            "SELECT value FROM storage_metadata WHERE key = ?1",
-            params![STORAGE_GENERATION_KEY],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .context("failed to read storage generation marker")?;
-    match current_generation {
-        Some(generation) if generation == CURRENT_STORAGE_GENERATION => {}
-        Some(generation) => {
-            anyhow::bail!(
-                "storage generation marker mismatch: found {generation}, expected {CURRENT_STORAGE_GENERATION}"
-            );
-        }
-        None => {
-            conn.execute(
-                "INSERT INTO storage_metadata (key, value, updated_at)
-                 VALUES (?1, ?2, ?3)",
-                params![
-                    STORAGE_GENERATION_KEY,
-                    CURRENT_STORAGE_GENERATION,
-                    Utc::now().to_rfc3339()
-                ],
-            )
-            .context("failed to record storage generation marker")?;
-        }
-    }
     Ok(())
 }
 
 fn verify_storage_schema(conn: &Connection) -> Result<()> {
     for (table, columns) in [
-        ("storage_metadata", &["key", "value", "updated_at"][..]),
-        (
-            "storage_checkpoints",
-            &[
-                "id",
-                "checkpointed_at",
-                "mode",
-                "busy",
-                "log_pages",
-                "checkpointed_pages",
-                "wal_bytes",
-            ][..],
-        ),
-        (
-            "storage_exports",
-            &["id", "exported_at", "snapshot_path", "snapshot_bytes"][..],
-        ),
-        (
-            "storage_retention_runs",
-            &[
-                "id",
-                "started_at",
-                "finished_at",
-                "dry_run",
-                "rows_deleted",
-                "blobs_deleted",
-                "notes",
-            ][..],
-        ),
         (
             "blobs",
             &[

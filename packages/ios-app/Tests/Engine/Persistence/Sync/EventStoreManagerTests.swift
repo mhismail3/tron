@@ -64,31 +64,12 @@ final class CachedSessionTests: XCTestCase {
             workspaceId: "/tmp/tron-fixtures/Project",
             model: "gpt-5",
             workingDirectory: "/tmp/tron-fixtures/Project",
-            source: nil,
-            profile: nil,
             now: "2026-06-23T12:00:00Z",
             serverOrigin: "localhost:8080"
         )
 
         XCTAssertNil(session.title)
         XCTAssertEqual(session.workingDirectory, "/tmp/tron-fixtures/Project")
-        XCTAssertEqual(session.listTitle, "New Session")
-    }
-
-    func testChatLocalNewSessionCacheKeepsAcceptedChatTitle() {
-        let session = EventStoreManager.makeLocalNewSessionCache(
-            sessionId: "chat-session",
-            workspaceId: "/tmp/tron-fixtures/Project",
-            model: "gpt-5",
-            workingDirectory: "/tmp/tron-fixtures/Project",
-            source: "chat",
-            profile: nil,
-            now: "2026-06-23T12:00:00Z",
-            serverOrigin: "localhost:8080"
-        )
-
-        XCTAssertEqual(session.title, "Chat")
-        XCTAssertEqual(session.source, "chat")
         XCTAssertEqual(session.listTitle, "New Session")
     }
 
@@ -122,8 +103,6 @@ final class CachedSessionTests: XCTestCase {
         )
         sourceWithPrompt.lastUserPrompt = "Summarize the cache audit finding"
         sourceWithPrompt.lastAssistantResponse = "Working on it"
-        sourceWithPrompt.source = nil
-        sourceWithPrompt.profile = "default"
 
         let promptTitleFork = EventStoreManager.makeLocalForkSessionCache(
             result: SessionForkResult(
@@ -140,7 +119,6 @@ final class CachedSessionTests: XCTestCase {
         XCTAssertNil(promptTitleFork.title)
         XCTAssertEqual(promptTitleFork.workingDirectory, "/tmp/tron-fixtures/ForkWorkspace")
         XCTAssertEqual(promptTitleFork.lastUserPrompt, "Summarize the cache audit finding")
-        XCTAssertEqual(promptTitleFork.profile, "default")
         XCTAssertEqual(promptTitleFork.listTitle, "Summarize the cache audit finding")
     }
 
@@ -159,8 +137,6 @@ final class CachedSessionTests: XCTestCase {
             workspaceId: "/tmp/tron-fixtures/Project",
             model: "gpt-5",
             workingDirectory: "/tmp/tron-fixtures/Project",
-            source: nil,
-            profile: nil,
             now: "2026-06-23T12:00:00Z",
             serverOrigin: "localhost:8080"
         )
@@ -226,8 +202,6 @@ final class CachedSessionTests: XCTestCase {
             workspaceId: "/tmp/tron-fixtures/Project",
             model: "gpt-5",
             workingDirectory: "/tmp/tron-fixtures/Project",
-            source: nil,
-            profile: nil,
             now: "2026-06-23T12:00:00Z",
             serverOrigin: "localhost:8080"
         )
@@ -1104,8 +1078,6 @@ final class CachedSessionTests: XCTestCase {
             title: title,
             lastUserPrompt: lastUserPrompt,
             lastAssistantResponse: nil,
-            source: nil,
-            profile: nil,
             isRunning: isRunning,
             activityLines: nil
         )
@@ -1283,16 +1255,16 @@ final class SessionEventTests: XCTestCase {
             parentId: nil,
             sessionId: "session-1",
             workspaceId: "/test",
-            type: "capability.invocation.started",
+            type: "tool.invocation.started",
             timestamp: ISO8601DateFormatter().string(from: Date()),
             sequence: 1,
             payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+                "toolName": AnyCodable("process_run"),
                 "arguments": AnyCodable(["command": "ls -la"])
             ]
         )
 
-        XCTAssertNotNil(event.payload["modelPrimitiveName"])
+        XCTAssertNotNil(event.payload["toolName"])
         XCTAssertNotNil(event.payload["arguments"])
     }
 }

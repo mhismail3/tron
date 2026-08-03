@@ -48,6 +48,10 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             last_assistant_response,
             parent_session_id,
             activity_lines,
+            labels,
+            organization_group,
+            organization_changed,
+            is_archived,
             ..
         } => Some(global(
             event,
@@ -68,6 +72,10 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 "isActive": is_active,
                 "lastUserPrompt": last_user_prompt,
                 "lastAssistantResponse": last_assistant_response,
+                "labels": labels,
+                "organizationGroup": organization_group,
+                "organizationChanged": organization_changed,
+                "isArchived": is_archived,
                 "parentSessionId": parent_session_id,
                 "activityLines": activity_lines,
             })),
@@ -77,9 +85,6 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             "session.processing_changed",
             Some(json!({ "isProcessing": is_processing })),
         )),
-        TronEvent::SessionSaved { .. } | TronEvent::SessionLoaded { .. } => {
-            Some(session_scoped(event, event.event_type(), Some(json!({}))))
-        }
         TronEvent::SessionArchived { .. }
         | TronEvent::SessionUnarchived { .. }
         | TronEvent::SessionDeleted { .. } => {

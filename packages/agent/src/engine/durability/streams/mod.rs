@@ -1,21 +1,23 @@
 //! Engine stream primitive.
 //!
 //! Streams are resumable cursor views over engine-visible change records. They
-//! are not a transport: engine clients, agent capabilities, and external workers can
-//! all poll the same stream cursor model. Package-owned lifecycle topics such
-//! as `catalog.discovery` and `approval.lifecycle` publish durable evidence
-//! transitions through this substrate without becoming typed session events.
-//! Durable consumers own subscription rows through subscribe/poll/ack. An
-//! ephemeral transport can instead read a topic from an explicit cursor and
-//! keep its connection lifecycle state outside this store.
+//! are not a transport: authenticated engine clients and retained internal
+//! services poll the same stream cursor model. Package-owned lifecycle topics
+//! publish durable evidence transitions through this substrate without
+//! becoming typed session events. Callers own their cursor; authenticated
+//! transports keep live-subscription lifecycle in connection state.
 //!
-//! INVARIANT: live subscriptions that omit an explicit cursor start at the
-//! topic tail. Historical replay is explicit (`afterCursor` / `cursor`) and
+//! INVARIANT: historical replay is explicit (`afterCursor` / `cursor`) and
 //! belongs to callers that are intentionally catching up.
 //!
-//! INVARIANT: stream polling applies engine visibility before pagination. A
+//! INVARIANT: stream delivery has exactly two scopes: system broadcasts and a
+//! named session. Internal consumers may intentionally read every session.
+//! Workspace remains event metadata and an explicit protocol filter; it is not
+//! a delivery or permission scope.
+//!
+//! INVARIANT: stream polling applies delivery scope before pagination. A
 //! session subscriber must never wait behind older rows owned by other
-//! sessions.
+//! sessions. Unknown persisted scope values fail closed.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -23,7 +25,7 @@ use serde_json::Value;
 
 use crate::engine::kernel::errors::EngineError;
 use crate::engine::kernel::ids::{InvocationId, TraceId};
-use crate::engine::kernel::types::VisibilityScope;
+use crate::engine::kernel::types::StreamVisibility;
 
 mod memory;
 mod sqlite_store;
@@ -55,12 +57,12 @@ pub struct EngineStreamEvent {
     /// JSON payload.
     pub payload: Value,
     /// Visibility for stream delivery.
-    pub visibility: VisibilityScope,
+    pub visibility: StreamVisibility,
     /// Optional session scope.
     pub session_id: Option<String>,
     /// Optional workspace scope.
     pub workspace_id: Option<String>,
-    /// Producer worker/capability label.
+    /// Producer worker/function label.
     pub producer: String,
     /// Trace propagated from the producer.
     pub trace_id: Option<TraceId>,
@@ -70,57 +72,31 @@ pub struct EngineStreamEvent {
     pub created_at: DateTime<Utc>,
 }
 
-/// Stream subscription record.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EngineStreamSubscription {
-    /// Stable subscription id.
-    pub subscription_id: String,
-    /// Topic being watched.
-    pub topic: String,
-    /// Cursor after which the next poll starts by default.
-    pub cursor: StreamCursor,
-    /// Visibility of the subscription itself.
-    pub visibility: VisibilityScope,
-    /// Optional session scope.
-    pub session_id: Option<String>,
-    /// Optional workspace scope.
-    pub workspace_id: Option<String>,
-    /// Whether the subscription is active.
-    pub active: bool,
-    /// Creation timestamp.
-    pub created_at: DateTime<Utc>,
-}
-
 /// Actor scope used by stream filtering.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StreamActorScope {
     /// Session visible to the actor.
     pub session_id: Option<String>,
-    /// Workspace visible to the actor.
-    pub workspace_id: Option<String>,
-    /// Whether the actor may see all streams.
-    pub admin: bool,
+    /// Whether the internal caller may read every session.
+    pub all_sessions: bool,
 }
 
 impl StreamActorScope {
-    /// Build a non-admin actor scope.
+    /// Build a session-scoped client view.
     #[must_use]
-    pub fn scoped(session_id: Option<String>, workspace_id: Option<String>) -> Self {
+    pub fn scoped(session_id: Option<String>) -> Self {
         Self {
             session_id,
-            workspace_id,
-            admin: false,
+            all_sessions: false,
         }
     }
 
-    /// Build an admin actor scope.
+    /// Build an internal view across every session.
     #[must_use]
-    pub fn admin() -> Self {
+    pub fn all() -> Self {
         Self {
             session_id: None,
-            workspace_id: None,
-            admin: true,
+            all_sessions: true,
         }
     }
 }
@@ -145,7 +121,7 @@ pub struct PublishStreamEvent {
     /// Payload.
     pub payload: Value,
     /// Visibility.
-    pub visibility: VisibilityScope,
+    pub visibility: StreamVisibility,
     /// Optional session scope.
     pub session_id: Option<String>,
     /// Optional workspace scope.
@@ -171,7 +147,7 @@ fn row_to_stream_event(
         cursor: StreamCursor(row.get::<_, i64>(0)? as u64),
         topic: row.get(1)?,
         payload,
-        visibility: visibility_from_str(&row.get::<_, String>(3)?),
+        visibility: visibility_from_str(&row.get::<_, String>(3)?)?,
         session_id: row.get(4)?,
         workspace_id: row.get(5)?,
         producer: row.get(6)?,
@@ -182,36 +158,33 @@ fn row_to_stream_event(
 }
 
 fn stream_scope_visible(
-    visibility: &VisibilityScope,
+    visibility: &StreamVisibility,
     session_id: Option<&str>,
-    workspace_id: Option<&str>,
     actor: &StreamActorScope,
 ) -> bool {
-    if actor.admin {
+    if actor.all_sessions {
         return true;
     }
     match visibility {
-        VisibilityScope::System | VisibilityScope::Agent | VisibilityScope::Client => true,
-        VisibilityScope::Session => {
+        StreamVisibility::System => true,
+        StreamVisibility::Session => {
             matches!((actor.session_id.as_deref(), session_id), (Some(a), Some(s)) if a == s)
         }
-        VisibilityScope::Workspace => {
-            matches!((actor.workspace_id.as_deref(), workspace_id), (Some(a), Some(w)) if a == w)
-        }
-        VisibilityScope::Internal | VisibilityScope::Worker | VisibilityScope::Admin => false,
     }
 }
 
-fn visibility_from_str(value: &str) -> VisibilityScope {
+fn visibility_from_str(value: &str) -> rusqlite::Result<StreamVisibility> {
     match value {
-        "session" => VisibilityScope::Session,
-        "workspace" => VisibilityScope::Workspace,
-        "system" => VisibilityScope::System,
-        "client" => VisibilityScope::Client,
-        "worker" => VisibilityScope::Worker,
-        "agent" => VisibilityScope::Agent,
-        "admin" => VisibilityScope::Admin,
-        _ => VisibilityScope::Internal,
+        "session" => Ok(StreamVisibility::Session),
+        "system" => Ok(StreamVisibility::System),
+        invalid => Err(rusqlite::Error::FromSqlConversionFailure(
+            3,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unknown engine stream visibility '{invalid}'"),
+            )),
+        )),
     }
 }
 
@@ -229,5 +202,24 @@ fn sqlite_err(operation: &'static str, message: impl Into<String>) -> EngineErro
     EngineError::LedgerFailure {
         operation,
         message: message.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persisted_visibility_decoder_accepts_only_runtime_scopes() {
+        assert_eq!(
+            visibility_from_str("session").expect("session visibility"),
+            StreamVisibility::Session
+        );
+        assert_eq!(
+            visibility_from_str("system").expect("system visibility"),
+            StreamVisibility::System
+        );
+        assert!(visibility_from_str("workspace").is_err());
+        assert!(visibility_from_str("internal").is_err());
     }
 }

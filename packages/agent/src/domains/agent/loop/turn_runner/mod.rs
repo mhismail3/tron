@@ -1,50 +1,129 @@
-//! Turn runner — orchestrates a single turn: context → stream → capabilities → events.
+//! Turn runner — orchestrates a single turn: context → stream → tools → events.
 //!
-//! Capability result content is the only provider-portable channel back into
-//! the model. Engine/UI/audit metadata stays in `details`, but model-facing
-//! `execute` observations are projected into result text by
-//! `capability_invocations::projection` so every provider can reason about
-//! direct primitive results without gaining a second capability API.
+//! Tool-result content is the only provider-portable channel back into
+//! the model. Engine/UI/audit metadata stays in `details`. Exact textual output
+//! remains durable for non-worker tools while direct-worker completions retain
+//! only their provider-call association. `turn_context` resolves the canonical
+//! worker result from its invocation ledger and deterministically bounds the
+//! model-facing projection for both newly executed and reconstructed results,
+//! so every provider can reason about direct tool evidence without accepting
+//! unbounded local, web, worker, or binary-derived payloads. Every
+//! provider turn resolves its tool surface from the same bounded latest-user
+//! intent. Assistant plans and tool results cannot manufacture worker relevance
+//! on later internal turns. A bounded `worker_result_read` page is fully
+//! available to the immediately following model turn; later turns retain only
+//! its durable worker-result reference and exact pointer/page coordinates.
+//! This one-turn evidence lease is derived from transcript order, requires no
+//! shadow execution state, and lets a worker re-read evidence when genuinely
+//! needed without paying to replay it on every growing-context turn.
+//!
+//! ## Concern ownership
+//!
+//! | Module | Responsibility |
+//! |--------|----------------|
+//! | `provider_phase` | Resolve the deterministic live surface, lease bounded durable deliveries, finalize the typed context manifest, persist the v4 request audit, and only then open the provider stream |
+//! | `stream_phase` | Journal and consume the provider stream, including durable failure and cancellation terminalization |
+//! | `tool_phase` | Execute a provider-requested tool batch and persist its lifecycle |
+//! | `persistence` | Build and commit assistant/turn protocol rows |
+//! | `failure` | Atomically terminalize failed and interrupted turns |
+//! | `turn_context` | Build provider context and bounded worker-relevance intent |
+//! | `turn_worker_results` | Hydrate a fresh small direct-worker result once, then retain only its integrity reference |
+//!
+//! The root runner owns ordering across those phases. In particular, provider
+//! bytes cannot be consumed before request-audit persistence, and a successful
+//! stream cannot leave its journal until assistant, tool, and turn-end rows are
+//! durable. Message bodies remain owned by the normal context/event pipeline;
+//! the parallel request-local source sidecar carries only event and invocation
+//! identifiers. Projection and compaction preserve matching identifiers and
+//! label genuinely synthetic messages as generated instead of fabricating
+//! provenance. Assistant delivery metadata may carry provenance through a
+//! multi-turn tool run, but marks whether each delivery was present in that
+//! exact provider turn so chat cannot contradict the request-specific audit.
 
-mod capability_invocations;
 mod failure;
 mod params;
 mod persistence;
-mod result;
+mod provider_phase;
+mod stream_phase;
+mod tool_phase;
 mod turn_context;
+mod turn_worker_results;
+
+pub(crate) use self::provider_phase::agent_delivery_provenance;
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::domains::model::responder::ModelResponseRequest;
 use crate::shared::server::failure::{
-    ASSISTANT_PERSIST_FAILED, ENGINE_TOOL_SURFACE_FAILED, FailureCategory, FailureEnvelope,
-    FailureOrigin, JOURNAL_CREATE_FAILED, MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED,
-    RUNTIME_CANCELLED, RUNTIME_PERSISTENCE_ERROR,
+    ASSISTANT_PERSIST_FAILED, FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
+    RUNTIME_PERSISTENCE_ERROR,
 };
 
 use metrics::{counter, histogram};
 use tracing::{error, info, instrument, trace, warn};
 
-use self::capability_invocations::CapabilityInvocationPhaseParams;
 use self::failure::{emit_turn_failure, terminalize_interrupted_turn};
 pub use self::params::TurnParams;
-pub(crate) use self::persistence::emit_persisted_capability_invocation_completed;
+pub(crate) use self::persistence::emit_persisted_tool_invocation_completed;
 use self::persistence::{
-    add_assistant_message_to_context, build_completed_assistant_payload,
-    build_failed_message_payload, build_interrupted_message_payload, build_token_record_json,
+    add_assistant_message_to_context, build_completed_assistant_payload, build_token_record_json,
     emit_response_complete, emit_turn_end, emit_turn_start, persist_completed_assistant_message,
-    persist_model_provider_request_audit,
 };
-use self::result::determine_turn_stop_reason;
-use self::turn_context::build_turn_context;
+use self::provider_phase::{ProviderPhaseParams, open_provider_response};
+use self::stream_phase::{StreamPhaseParams, process_provider_stream};
+use self::tool_phase::ToolPhaseParams;
 use crate::domains::agent::r#loop::errors::StopReason;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
-use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
-use crate::domains::agent::r#loop::primitive_surface;
-use crate::domains::agent::r#loop::stream_processor;
 use crate::domains::agent::r#loop::types::TurnResult;
 use crate::shared::protocol::messages::TokenUsage;
+
+struct DeliveryLeaseGuard {
+    event_store: Option<Arc<crate::domains::session::event_store::EventStore>>,
+    run_id: String,
+}
+
+impl DeliveryLeaseGuard {
+    fn new(
+        persister: Option<
+            &crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister,
+        >,
+        run_id: &str,
+        leased_delivery_ids: &[String],
+    ) -> Self {
+        Self {
+            event_store: (!leased_delivery_ids.is_empty())
+                .then(|| persister.map(|persister| Arc::clone(persister.event_store())))
+                .flatten(),
+            run_id: run_id.to_owned(),
+        }
+    }
+
+    fn observe(
+        &mut self,
+        session_id: &str,
+        turn: u32,
+    ) -> Result<(), crate::domains::agent::r#loop::errors::RuntimeError> {
+        if let Some(event_store) = self.event_store.as_ref() {
+            event_store
+                .observe_agent_deliveries(session_id, &self.run_id, turn)
+                .map_err(|error| {
+                    crate::domains::agent::r#loop::errors::RuntimeError::Persistence(format!(
+                        "failed to mark agent deliveries observed: {error}"
+                    ))
+                })?;
+            self.event_store = None;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for DeliveryLeaseGuard {
+    fn drop(&mut self) {
+        if let Some(event_store) = self.event_store.take() {
+            let _ = event_store.release_agent_delivery_leases(&self.run_id);
+        }
+    }
+}
 
 fn cancellation_failure(session_id: &str) -> FailureEnvelope {
     FailureEnvelope::new(
@@ -56,6 +135,21 @@ fn cancellation_failure(session_id: &str) -> FailureEnvelope {
         FailureOrigin::AgentRuntime,
     )
     .with_session_id(Some(session_id.to_owned()))
+}
+
+fn determine_turn_stop_reason(
+    tool_invocation_count: usize,
+    llm_stop_reason: &str,
+) -> Option<StopReason> {
+    if tool_invocation_count == 0 {
+        if llm_stop_reason == "end_turn" {
+            Some(StopReason::EndTurn)
+        } else {
+            Some(StopReason::NoToolInvocationDrafts)
+        }
+    } else {
+        None
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -159,14 +253,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         "agent turn entered"
     );
 
-    // H15 INVARIANT: every turn-entry path must advance the context
-    // manager's generation counter before any snapshot readers run, then
-    // refresh volatile tokens via set_volatile_tokens (called inside
-    // build_turn_context below). If a future refactor introduces a new
-    // turn-entry path that skips set_volatile_tokens, the debug_assert
-    // inside `get_snapshot` / `get_detailed_snapshot` will fire.
-    context_manager.begin_turn();
-
     // 1. Persist turn entry before any cancellable preparation. Compaction is
     // part of this turn's lifecycle, so a stop or failure there must close the
     // same durable ordinal rather than leaving an invisible consumed turn.
@@ -175,6 +261,16 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         persister,
         session_id,
         turn,
+        (run_context.delivery_wake_turn == Some(turn))
+            .then(|| {
+                let pending = run_context.pending_delivery_provenance.lock();
+                (!pending.is_empty()).then(|| {
+                    serde_json::json!({
+                        "deliveries":pending.clone(),
+                    })
+                })
+            })
+            .flatten(),
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),
@@ -213,7 +309,49 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         };
     }
 
-    // 2. Check context capacity (compact if needed), but let Stop cancel a
+    // 2. Canonicalize worker-result history before token estimation or
+    // compaction. Missing/corrupt fresh evidence is a storage failure and must
+    // stop before any provider request can observe divergent context.
+    let fresh_worker_results = match turn_context::canonicalize_worker_result_context(
+        context_manager,
+        engine_host,
+        session_id,
+        run_context.engine_trace_id.as_ref(),
+        run_context.parent_invocation_id.as_ref(),
+    )
+    .await
+    {
+        Ok(fresh) => fresh,
+        Err(error) => {
+            let error_msg = format!("failed to project durable worker results: {error}");
+            let failure = FailureEnvelope::new(
+                RUNTIME_PERSISTENCE_ERROR,
+                FailureCategory::Persistence,
+                error_msg.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            );
+            emit_turn_failure(
+                emitter,
+                persister,
+                session_id,
+                turn,
+                run_context,
+                sequence_counter,
+                &failure,
+                None,
+            );
+            return TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(StopReason::Error),
+                ..Default::default()
+            };
+        }
+    };
+
+    // 3. Check context capacity (compact if needed), but let Stop cancel a
     // long-running summarizer immediately and terminalize this active turn.
     let compaction_result = compaction
         .check_and_compact(
@@ -222,6 +360,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             emitter,
             sequence_counter,
             cancel,
+            run_context,
         )
         .await;
     match compaction_result {
@@ -300,257 +439,115 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         };
     }
 
-    let primitive_surface = match primitive_surface::resolve_provider_primitive_surface(
-        engine_host,
+    let prepared_provider = match open_provider_response(ProviderPhaseParams {
+        turn,
+        context_manager,
+        responder,
         session_id,
-        workspace_id,
-    )
+        emitter,
+        cancel,
+        run_context,
+        persister,
+        retry_config,
+        server_origin,
+        sequence_counter,
+        engine_host,
+        fresh_worker_results: &fresh_worker_results,
+    })
     .await
     {
-        Ok(capabilities) => capabilities,
-        Err(error) => {
-            let error_msg = format!("failed to resolve live engine capability surface: {error}");
-            error!(session_id, turn, error = %error_msg);
-            let failure = FailureEnvelope::new(
-                ENGINE_TOOL_SURFACE_FAILED,
-                FailureCategory::Engine,
-                error_msg.clone(),
-                true,
-                true,
-                FailureOrigin::Engine,
-            );
-            emit_turn_failure(
-                emitter,
-                persister,
-                session_id,
-                turn,
-                run_context,
-                sequence_counter,
-                &failure,
-                None,
-            );
-            return TurnResult {
-                success: false,
-                error: Some(error_msg),
-                stop_reason: Some(StopReason::Error),
-                ..Default::default()
-            };
-        }
+        Ok(prepared) => prepared,
+        Err(result) => return result,
     };
-    info!(
-        component = "agent.turn",
-        agent_event = "primitive_surface_resolved",
-        session_id,
-        run_id,
-        trace_id,
+    let primitive_surface = prepared_provider.primitive_surface;
+    let response = prepared_provider.response;
+    let mut delivery_lease_guard =
+        DeliveryLeaseGuard::new(persister, run_id, &prepared_provider.leased_delivery_ids);
+    let processed_stream = match process_provider_stream(StreamPhaseParams {
         turn,
-        capability_count = primitive_surface.capabilities.len(),
-        turn_stopping_capability_count = primitive_surface.turn_stopping_capabilities.len(),
-        "provider primitive surface resolved"
-    );
-    // 3. Build context (base from CM, external fields from RunContext/params)
-    let context = build_turn_context(
-        context_manager,
+        response,
+        session_id,
+        emitter,
+        cancel,
         run_context,
-        server_origin,
-        primitive_surface.capabilities.clone(),
-    );
-
-    // 4. Build and durably persist the provider request audit before the model
-    // stream opens. Provider selection, provider-native options, retry
-    // wrapping, and provider error mapping stay inside `domains::model`.
-    let model_request = ModelResponseRequest {
-        context,
-        session_id: session_id.to_owned(),
-        reasoning_level: run_context.reasoning_level.clone(),
-        trace_id: run_context
-            .engine_trace_id
-            .as_ref()
-            .map(|trace_id| trace_id.as_str().to_owned()),
-        parent_invocation_id: run_context
-            .parent_invocation_id
-            .as_ref()
-            .map(|invocation_id| invocation_id.as_str().to_owned()),
-        cancel: cancel.clone(),
-        retry_config: retry_config.cloned(),
-    };
-    let model_request_audit = match responder.request_audit(&model_request) {
-        Ok(audit) => audit,
-        Err(error) => {
-            let error_msg = error.to_string();
-            let failure = error.failure().clone();
-            let category = failure.category.as_str().to_owned();
-            warn!(
-                model = %responder.model(),
-                status = %category,
-                error = %error,
-                "model provider request audit error"
-            );
-            emit_turn_failure(
-                emitter,
-                persister,
-                session_id,
-                turn,
-                run_context,
-                sequence_counter,
-                &failure,
-                None,
-            );
-            return TurnResult {
-                success: false,
-                error: Some(error_msg),
-                stop_reason: Some(StopReason::Error),
-                ..Default::default()
-            };
-        }
-    };
-    trace!(
-        component = "agent.provider",
-        agent_event = "model_provider_request_audit_built",
-        session_id,
-        run_id,
-        trace_id,
-        turn,
-        model = %responder.model(),
-        "model provider request audit built"
-    );
-    if let Err(error) = persist_model_provider_request_audit(
         persister,
-        session_id,
-        &model_request_audit,
+        previous_context_baseline,
         sequence_counter,
-    ) {
-        let error_msg = format!("failed to persist model provider request audit: {error}");
-        error!(session_id, turn, error = %error_msg);
-        let failure = FailureEnvelope::new(
-            MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED,
-            FailureCategory::Persistence,
-            error_msg.clone(),
-            false,
-            false,
-            FailureOrigin::AgentRuntime,
-        );
-        emit_turn_failure(
-            emitter,
-            persister,
-            session_id,
-            turn,
-            run_context,
-            sequence_counter,
-            &failure,
-            None,
-        );
-        return TurnResult {
-            success: false,
-            error: Some(error_msg),
-            stop_reason: Some(StopReason::Error),
-            ..Default::default()
-        };
-    }
-    info!(
-        component = "agent.provider",
-        agent_event = "model_provider_request_audit_persisted",
-        session_id,
-        run_id,
-        trace_id,
-        turn,
-        model = %responder.model(),
-        "model provider request audit persisted"
-    );
-
-    info!(
-        component = "agent.provider",
-        agent_event = "model_response_requested",
-        session_id,
-        run_id,
-        trace_id,
-        turn,
-        model = %responder.model(),
-        "model response requested"
-    );
-    let response = match responder.respond(model_request).await {
-        Ok(response) => response,
-        Err(error) => {
-            if error.is_cancelled() || cancel.is_cancelled() {
-                return match terminalize_cancellation(
-                    emitter,
-                    persister,
-                    session_id,
-                    turn,
-                    run_context,
-                    sequence_counter,
-                    None,
-                    None,
-                ) {
-                    Ok(()) => interrupted_turn_result(None, None),
-                    Err(error) => terminalization_error_result(error, None, None),
-                };
-            }
-            let error_msg = error.to_string();
-            let failure = error.failure().clone();
-            let category = failure.category.as_str().to_owned();
-            warn!(
-                model = %responder.model(),
-                status = %category,
-                error = %error,
-                "model response error"
-            );
-
-            emit_turn_failure(
-                emitter,
-                persister,
-                session_id,
-                turn,
-                run_context,
-                sequence_counter,
-                &failure,
-                None,
-            );
-
-            return TurnResult {
-                success: false,
-                error: Some(error_msg),
-                stop_reason: Some(StopReason::Error),
-                ..Default::default()
-            };
-        }
+    })
+    .await
+    {
+        Ok(processed) => processed,
+        Err(result) => return result,
     };
-    let response_info = response.info;
-    let provider_name: &'static str = response_info.provider_name;
+    let response_info = processed_stream.info;
     let provider_type = response_info.provider_type;
     let model_name = response_info.model;
-    let stream = response.stream;
-    info!(
-        component = "agent.provider",
-        agent_event = "model_stream_opened",
+    let stream_result = processed_stream.stream_result;
+    let mut journal = Some(processed_stream.journal);
+
+    // Build token record + cost BEFORE ResponseComplete (iOS attaches stats from this)
+    let (token_record_json, cost) = build_token_record_json(
+        stream_result.token_usage.as_ref(),
+        provider_type,
         session_id,
-        run_id,
-        trace_id,
         turn,
-        provider = provider_name,
-        provider_type = %provider_type.as_str(),
-        model = %model_name,
-        "model response stream opened"
+        previous_context_baseline,
+        &model_name,
     );
 
-    // 5. Create streaming journal for crash recovery.
-    //
-    // Failure is a turn error, not a warning. Without the journal, a
-    // mid-stream crash loses the partial assistant message and session
-    // reconstruction on restart is broken for that turn. Silently
-    // continuing masks the real problem (disk full, bad perms, missing
-    // directory) and defers the damage to the next crash — by which
-    // point the operator has no warning.
-    let mut journal = match StreamingJournal::create(session_id, turn) {
-        Ok(j) => Some(j),
-        Err(e) => {
-            let error_msg = format!(
-                "failed to create streaming journal for crash recovery: {e}. \
-                 Check that ~/.tron/internal/database/journals/ is writable."
-            );
+    // INVARIANT: persist message.assistant BEFORE broadcasting
+    // ResponseComplete. If persist fails we cannot emit because iOS would
+    // see "response complete" for a message that is missing from the DB
+    // on reconnect. Fail the turn with an actionable error instead.
+    let has_thinking = {
+        let content_has_thinking = stream_result.message.content.iter().any(|c| {
+            matches!(
+                c,
+                crate::shared::protocol::content::AssistantContent::Thinking { .. }
+            )
+        });
+        content_has_thinking
+    };
+
+    let mut assistant_payload = build_completed_assistant_payload(
+        &stream_result,
+        turn,
+        &model_name,
+        turn_start.elapsed().as_millis() as u64,
+        has_thinking,
+        provider_type,
+        token_record_json.as_ref(),
+        cost,
+    );
+    let agent_delivery_continuation = {
+        let mut pending = run_context.pending_delivery_provenance.lock();
+        for delivery in &prepared_provider.leased_delivery_provenance {
+            let delivery_id = delivery.get("deliveryId");
+            if !pending
+                .iter()
+                .any(|existing| existing.get("deliveryId") == delivery_id)
+            {
+                pending.push(delivery.clone());
+            }
+        }
+        assistant_delivery_continuation(&pending, &prepared_provider.leased_delivery_provenance)
+    };
+    if let Some(continuation) = agent_delivery_continuation.as_ref() {
+        assistant_payload["agentDeliveryContinuation"] = continuation.clone();
+    }
+
+    let assistant_event = match persist_completed_assistant_message(
+        persister,
+        session_id,
+        assistant_payload,
+        sequence_counter,
+    ) {
+        Ok(event) => event,
+        Err(error) => {
+            let error_msg = format!("failed to persist assistant message: {error}");
             error!(session_id, turn, error = %error_msg);
             let failure = FailureEnvelope::new(
-                JOURNAL_CREATE_FAILED,
+                ASSISTANT_PERSIST_FAILED,
                 FailureCategory::Persistence,
                 error_msg.clone(),
                 false,
@@ -575,232 +572,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             };
         }
     };
-    trace!(
-        component = "agent.stream",
-        agent_event = "streaming_journal_created",
-        session_id,
-        run_id,
-        trace_id,
-        turn,
-        "streaming journal created"
-    );
-
-    // 6. Process stream (drain after turn-stopping capabilities to capture token usage cleanly)
-    let stream_result = match stream_processor::process_stream_with_trace(
-        stream,
-        session_id,
-        emitter,
-        cancel,
-        &primitive_surface.turn_stopping_capabilities,
-        sequence_counter,
-        journal.as_mut(),
-        run_context.engine_trace_id.as_ref(),
-        run_context.parent_invocation_id.as_ref(),
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(stream_failure) => {
-            let error_msg = stream_failure.error.to_string();
-            error!(session_id, turn, error = %error_msg, "stream failed");
-            let failure = stream_failure.error.to_failure();
-            let partial_content = stream_failure.partial.partial_content.clone();
-            let token_usage = stream_failure.partial.token_usage.clone();
-            let assistant_payload = build_failed_message_payload(
-                &stream_failure.partial.message,
-                stream_failure.partial.token_usage.as_ref(),
-                session_id,
-                turn,
-                &model_name,
-                provider_type,
-                previous_context_baseline,
-            );
-            let terminalized = terminalize_interrupted_turn(
-                emitter,
-                persister,
-                session_id,
-                turn,
-                run_context,
-                sequence_counter,
-                &failure,
-                assistant_payload,
-                partial_content.clone(),
-            );
-            if terminalized.is_ok() {
-                if let Some(j) = journal.take() {
-                    if let Err(cleanup_error) = j.finalize_and_delete() {
-                        warn!(
-                            session_id,
-                            turn,
-                            error = %cleanup_error,
-                            "failed to finalize streaming journal after durable turn failure"
-                        );
-                    }
-                }
-            }
-            return TurnResult {
-                success: false,
-                error: Some(if let Err(terminal_error) = terminalized {
-                    format!("{error_msg}; failed to persist stream failure: {terminal_error}")
-                } else {
-                    error_msg
-                }),
-                token_usage,
-                stop_reason: Some(StopReason::Error),
-                partial_content,
-                ..Default::default()
-            };
-        }
-    };
-    info!(
-        component = "agent.stream",
-        agent_event = "model_stream_completed",
-        session_id,
-        run_id,
-        trace_id,
-        turn,
-        provider = provider_name,
-        model = %model_name,
-        stop_reason = %stream_result.stop_reason,
-        capability_invocation_count = stream_result.capability_invocations.len(),
-        has_token_usage = stream_result.token_usage.is_some(),
-        ttft_ms = stream_result.ttft_ms.unwrap_or_default(),
-        interrupted = stream_result.interrupted,
-        "model response stream completed"
-    );
-
-    // Record time-to-first-token if available
-    if let Some(ttft) = stream_result.ttft_ms {
-        histogram!("provider_ttft_seconds", "provider" => provider_name).record({
-            #[allow(clippy::cast_precision_loss)]
-            let secs = ttft as f64 / 1000.0;
-            secs
-        });
-    }
-
-    // Record LLM token counts
-    if let Some(ref usage) = stream_result.token_usage {
-        counter!("llm_tokens_total", "provider" => provider_name, "direction" => "input")
-            .increment(usage.input_tokens);
-        counter!("llm_tokens_total", "provider" => provider_name, "direction" => "output")
-            .increment(usage.output_tokens);
-    }
-
-    if stream_result.interrupted {
-        let assistant_payload = build_interrupted_message_payload(
-            &stream_result.message,
-            stream_result.token_usage.as_ref(),
-            session_id,
-            turn,
-            &model_name,
-            provider_type,
-            previous_context_baseline,
-        );
-
-        let partial_content = stream_result.partial_content.clone();
-        let terminalized = terminalize_cancellation(
-            emitter,
-            persister,
-            session_id,
-            turn,
-            run_context,
-            sequence_counter,
-            assistant_payload,
-            partial_content.clone(),
-        );
-
-        if terminalized.is_ok() {
-            if let Some(j) = journal.take() {
-                if let Err(e) = j.finalize_and_delete() {
-                    warn!(session_id, turn, error = %e, "failed to finalize streaming journal after interruption");
-                }
-            }
-        }
-
-        return match terminalized {
-            Ok(()) => interrupted_turn_result(partial_content, stream_result.token_usage),
-            Err(error) => {
-                terminalization_error_result(error, partial_content, stream_result.token_usage)
-            }
-        };
-    }
-
-    // 8. Build token record + cost BEFORE ResponseComplete (iOS attaches stats from this)
-    let (token_record_json, cost) = build_token_record_json(
-        stream_result.token_usage.as_ref(),
-        provider_type,
-        session_id,
-        turn,
-        previous_context_baseline,
-        &model_name,
-    );
-
-    // INVARIANT: persist message.assistant BEFORE broadcasting
-    // ResponseComplete. If persist fails we cannot emit because iOS would
-    // see "response complete" for a message that is missing from the DB
-    // on reconnect. Fail the turn with an actionable error instead.
-    let has_thinking = {
-        let content_has_thinking = stream_result.message.content.iter().any(|c| {
-            matches!(
-                c,
-                crate::shared::protocol::content::AssistantContent::Thinking { .. }
-            )
-        });
-        content_has_thinking
-    };
-
-    let assistant_payload = build_completed_assistant_payload(
-        &stream_result,
-        turn,
-        &model_name,
-        turn_start.elapsed().as_millis() as u64,
-        has_thinking,
-        provider_type,
-        token_record_json.as_ref(),
-        cost,
-        model_request_audit.reasoning_level.clone(),
-        run_context
-            .engine_trace_id
-            .as_ref()
-            .map(|trace_id| trace_id.as_str().to_owned()),
-        run_context
-            .parent_invocation_id
-            .as_ref()
-            .map(|invocation_id| invocation_id.as_str().to_owned()),
-    );
-
-    if let Err(error) = persist_completed_assistant_message(
-        persister,
-        session_id,
-        assistant_payload,
-        sequence_counter,
-    ) {
-        let error_msg = format!("failed to persist assistant message: {error}");
-        error!(session_id, turn, error = %error_msg);
-        let failure = FailureEnvelope::new(
-            ASSISTANT_PERSIST_FAILED,
-            FailureCategory::Persistence,
-            error_msg.clone(),
-            false,
-            false,
-            FailureOrigin::AgentRuntime,
-        );
-        emit_turn_failure(
-            emitter,
-            persister,
-            session_id,
-            turn,
-            run_context,
-            sequence_counter,
-            &failure,
-            None,
-        );
-        return TurnResult {
-            success: false,
-            error: Some(error_msg),
-            stop_reason: Some(StopReason::Error),
-            ..Default::default()
-        };
+    if stream_result.tool_invocations.is_empty() {
+        run_context.pending_delivery_provenance.lock().clear();
     }
     info!(
         component = "agent.turn",
@@ -817,7 +590,11 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     // Persist succeeded — safe to commit the assistant turn to local context
     // and tell iOS the response is complete.
-    let _ = add_assistant_message_to_context(context_manager, &stream_result);
+    let _ = add_assistant_message_to_context(
+        context_manager,
+        &stream_result,
+        assistant_event.map(|event| event.id),
+    );
     if let Some(context_window_tokens) = token_record_json
         .as_ref()
         .and_then(|r| r["computed"]["contextWindowTokens"].as_u64())
@@ -834,32 +611,34 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),
+        agent_delivery_continuation,
     );
 
-    let invocation_phase = capability_invocations::execute_capability_invocation_phase(
-        CapabilityInvocationPhaseParams {
-            turn,
-            stream_result: &stream_result,
-            context_manager,
-            primitive_surface: &primitive_surface,
-            session_id,
-            emitter,
-            cancel,
-            workspace_id,
-            persister,
-            sequence_counter,
-            invocation_abort_registry,
-            engine_host,
-            run_id: run_context.run_id.as_deref(),
-            provider_type: provider_name,
-            trace_id: run_context.engine_trace_id.as_ref(),
-            parent_invocation_id: run_context.parent_invocation_id.as_ref(),
-        },
-    )
+    let invocation_phase = tool_phase::execute_tool_phase(ToolPhaseParams {
+        turn,
+        stream_result: &stream_result,
+        context_manager,
+        primitive_surface: &primitive_surface,
+        session_id,
+        emitter,
+        cancel,
+        workspace_id,
+        persister,
+        sequence_counter,
+        invocation_abort_registry,
+        engine_host,
+        run_id: run_context.run_id.as_deref(),
+        trace_id: run_context.engine_trace_id.as_ref(),
+        parent_invocation_id: run_context.parent_invocation_id.as_ref(),
+        worker_causal_depth: run_context.worker_causal_depth,
+        origin_worker_id: run_context.origin_worker_id.as_deref(),
+        origin_worker_invocation_id: run_context.origin_worker_invocation_id.as_deref(),
+        nested_tool_ordinals: &run_context.nested_tool_ordinals,
+    })
     .await;
 
     if let Some(error) = invocation_phase.error {
-        let error_msg = format!("failed to persist capability lifecycle: {error}");
+        let error_msg = format!("failed to persist tool lifecycle: {error}");
         let failure = FailureEnvelope::new(
             RUNTIME_PERSISTENCE_ERROR,
             FailureCategory::Persistence,
@@ -902,7 +681,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             && let Some(j) = journal.take()
             && let Err(error) = j.finalize_and_delete()
         {
-            warn!(session_id, turn, error = %error, "failed to finalize streaming journal after capability cancellation");
+            warn!(session_id, turn, error = %error, "failed to finalize streaming journal after tool cancellation");
         }
         return match terminalized {
             Ok(()) => interrupted_turn_result(None, stream_result.token_usage),
@@ -910,7 +689,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         };
     }
 
-    // 10. Emit TurnEnd
+    // Commit the terminal turn row after every tool completion is durable.
     let duration = turn_start.elapsed().as_millis() as u64;
     if let Err(error) = emit_turn_end(
         emitter,
@@ -923,8 +702,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         cost,
         context_manager.get_context_limit(),
         &model_name,
-        provider_type,
-        model_request_audit.reasoning_level.as_deref(),
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),
@@ -963,8 +740,21 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         };
     }
 
+    // Prepared delivery context becomes observed only after the assistant,
+    // tools, and terminal turn row are all durable. Every earlier return drops
+    // the guard and restores the leases to pending.
+    if let Err(error) = delivery_lease_guard.observe(session_id, turn) {
+        return TurnResult {
+            success: false,
+            error: Some(error.to_string()),
+            stop_reason: Some(StopReason::Error),
+            token_usage: stream_result.token_usage,
+            ..Default::default()
+        };
+    }
+
     // The journal remains authoritative until the complete turn lifecycle,
-    // including capability results and turn end, is durably committed.
+    // including tool results and turn end, is durably committed.
     if let Some(j) = journal.take()
         && let Err(error) = j.finalize_and_delete()
     {
@@ -982,7 +772,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         duration_ms = duration,
         model = %model_name,
         stop_reason = %stream_result.stop_reason,
-        capabilities = invocation_phase.capability_invocations_executed,
+        tools = invocation_phase.tool_invocations_executed,
         has_thinking,
         "turn completed"
     );
@@ -994,8 +784,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     // Determine stop reason for this turn
     let stop_reason = determine_turn_stop_reason(
-        invocation_phase.stop_turn_requested,
-        stream_result.capability_invocations.len(),
+        stream_result.tool_invocations.len(),
         &stream_result.stop_reason,
     );
 
@@ -1005,10 +794,9 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     TurnResult {
         success: true,
-        capability_invocations_executed: invocation_phase.capability_invocations_executed,
+        tool_invocations_executed: invocation_phase.tool_invocations_executed,
         token_usage: stream_result.token_usage,
         stop_reason,
-        stop_turn_requested: invocation_phase.stop_turn_requested,
         model: Some(model_name),
         latency_ms: duration,
         has_thinking,
@@ -1018,5 +806,50 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     }
 }
 
+/// Preserve run-level delivery provenance on the final visible assistant
+/// response without claiming that every carried delivery was present in that
+/// specific provider request. Session Context remains request-specific; this
+/// presentation sidecar makes the distinction explicit for chat.
+fn assistant_delivery_continuation(
+    pending: &[serde_json::Value],
+    included_this_turn: &[serde_json::Value],
+) -> Option<serde_json::Value> {
+    if pending.is_empty() {
+        return None;
+    }
+    let deliveries = pending
+        .iter()
+        .cloned()
+        .map(|mut delivery| {
+            let delivery_id = delivery.get("deliveryId");
+            let included = included_this_turn
+                .iter()
+                .any(|current| current.get("deliveryId") == delivery_id);
+            delivery["includedInThisTurn"] = serde_json::Value::Bool(included);
+            delivery
+        })
+        .collect::<Vec<_>>();
+    Some(serde_json::json!({ "deliveries": deliveries }))
+}
+
 #[cfg(test)]
-mod tests;
+mod delivery_continuation_tests {
+    use super::assistant_delivery_continuation;
+    use serde_json::json;
+
+    #[test]
+    fn distinguishes_current_request_delivery_from_carried_run_provenance() {
+        let first = json!({"deliveryId":"delivery-1","sourceKind":"worker_result"});
+        let second = json!({"deliveryId":"delivery-2","sourceKind":"agent_message"});
+        let continuation =
+            assistant_delivery_continuation(&[first.clone(), second], &[first]).unwrap();
+
+        assert_eq!(continuation["deliveries"][0]["includedInThisTurn"], true);
+        assert_eq!(continuation["deliveries"][1]["includedInThisTurn"], false);
+    }
+
+    #[test]
+    fn omits_empty_delivery_continuation() {
+        assert!(assistant_delivery_continuation(&[], &[]).is_none());
+    }
+}

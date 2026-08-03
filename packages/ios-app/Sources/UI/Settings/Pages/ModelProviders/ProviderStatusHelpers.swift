@@ -16,7 +16,8 @@ enum ProviderAuthActionItem: Equatable, Identifiable, Sendable {
     var id: String { title }
 
     static func items(for provider: ProviderInfo) -> [Self] {
-        provider.supportsOAuth ? [.oauthLogin, .addApiKey] : [.addApiKey]
+        guard provider.supportsCredentials else { return [] }
+        return provider.supportsOAuth ? [.oauthLogin, .addApiKey] : [.addApiKey]
     }
 
     static func visibleItems(for provider: ProviderInfo, providerAuth: ProviderAuthSnapshot?) -> [Self] {
@@ -60,17 +61,9 @@ enum ProviderAuthActionItem: Equatable, Identifiable, Sendable {
 
 enum ProviderCredentialStatusAction {
     static let title = "Clear"
-    static let icon = "xmark"
+    static let icon = "xmark.circle.fill"
     static let confirmationTitle = "Clear credential?"
     static let confirmationButtonTitle = "Clear"
-}
-
-enum ProviderAuthActionButtonsAlignment: Equatable, Sendable {
-    case leading
-}
-
-enum ProviderAuthActionButtonsLayout {
-    static let alignment = ProviderAuthActionButtonsAlignment.leading
 }
 
 enum ProviderApiKeyPromptPresentation: Equatable, Sendable {
@@ -87,26 +80,17 @@ enum ProviderApiKeyPrompt {
 
 enum ProviderApiKeyPromptScope: Equatable, Sendable {
     case provider(id: String, displayName: String)
-    case service(id: String, displayName: String)
 
     var title: String {
         "Add \(displayName) API Key"
     }
 
     var displayName: String {
-        switch self {
-        case .provider(_, let displayName), .service(_, let displayName):
-            return displayName
-        }
+        switch self { case .provider(_, let displayName): return displayName }
     }
 
     var showsLabelField: Bool {
-        switch self {
-        case .provider:
-            return true
-        case .service:
-            return false
-        }
+        true
     }
 }
 
@@ -127,27 +111,43 @@ struct ProviderApiKeyPromptDraft: Equatable, Sendable {
     }
 }
 
-enum ProviderCredentialClearPillStyle {
-    static let fontSize = TronTypography.sizeSM
-    static let horizontalPadding: CGFloat = 8
-    static let verticalPadding: CGFloat = 4
-    static let backgroundOpacity = 0.12
-    static let borderOpacity = 0.2
+/// One column contract shared by every provider header and detail row.
+///
+/// The leading icon and trailing action widths stay fixed even when their
+/// symbols differ, so provider names, row labels, and controls form two clean
+/// vertical axes instead of drifting with intrinsic icon sizes.
+enum ProviderSettingsRowLayout {
+    static let spacing: CGFloat = 8
+    static let leadingIconWidth: CGFloat = 20
+    static let trailingActionWidth: CGFloat = 44
+    static let circularActionDiameter: CGFloat = 30
 }
 
-struct ProviderCredentialClearPillLabel: View {
+/// Shared optical frame for circular provider actions. The outer row owns the
+/// trailing column; this label keeps every glyph centered inside the same
+/// visible diameter instead of letting intrinsic SF Symbol widths shift it.
+struct ProviderCircularActionLabel: View {
+    let systemName: String
+    let color: Color
+    var isBusy = false
+
     var body: some View {
-        Image(systemName: ProviderCredentialStatusAction.icon)
-            .font(TronTypography.sans(size: ProviderCredentialClearPillStyle.fontSize, weight: .semibold))
-            .foregroundStyle(.tronError)
-            .padding(.horizontal, ProviderCredentialClearPillStyle.horizontalPadding)
-            .padding(.vertical, ProviderCredentialClearPillStyle.verticalPadding)
-            .background(.tronError.opacity(ProviderCredentialClearPillStyle.backgroundOpacity), in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(.tronError.opacity(ProviderCredentialClearPillStyle.borderOpacity), lineWidth: 1)
+        Group {
+            if isBusy {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(color)
+            } else {
+                Image(systemName: systemName)
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                    .foregroundStyle(color)
             }
-            .contentShape(Capsule())
+        }
+        .frame(
+            width: ProviderSettingsRowLayout.circularActionDiameter,
+            height: ProviderSettingsRowLayout.circularActionDiameter
+        )
+        .contentShape(Circle())
     }
 }
 

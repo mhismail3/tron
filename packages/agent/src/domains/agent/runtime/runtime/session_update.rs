@@ -3,11 +3,11 @@ use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::recovery::recover_incomplete_turns_for_session;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
-use crate::domains::agent::r#loop::turn_runner::emit_persisted_capability_invocation_completed;
+use crate::domains::agent::r#loop::turn_runner::emit_persisted_tool_invocation_completed;
 use crate::domains::session::event_store::EventStore;
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use crate::shared::server::failure::{
     FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_PERSISTENCE_ERROR,
 };
@@ -27,14 +27,14 @@ pub(in crate::domains::agent::runtime) async fn resume_prompt_session(
     event_store: Arc<EventStore>,
     emitter: Arc<EventEmitter>,
     session_id: String,
-) -> Result<Arc<ReconstructedState>, CapabilityError> {
+) -> Result<Arc<ReconstructedState>, ToolError> {
     run_blocking_task("agent.prompt.resume", move || {
         let repaired = recover_incomplete_turns_for_session(&event_store, &session_id)
             .map_err(|error| map_prompt_recovery_error(error, &session_id))?;
         if !repaired.is_empty() {
             session_manager.invalidate_session(&session_id);
             for (row, payload) in repaired {
-                emit_persisted_capability_invocation_completed(&emitter, &row, &payload);
+                emit_persisted_tool_invocation_completed(&emitter, &row, &payload);
             }
         }
         session_manager
@@ -44,17 +44,17 @@ pub(in crate::domains::agent::runtime) async fn resume_prompt_session(
     .await
 }
 
-fn map_prompt_recovery_error(error: String, session_id: &str) -> CapabilityError {
+fn map_prompt_recovery_error(error: String, session_id: &str) -> ToolError {
     tracing::warn!(
         session_id,
         error,
-        "prior capability lifecycle could not be repaired before prompt admission"
+        "prior tool lifecycle could not be repaired before prompt admission"
     );
-    CapabilityError::from_failure(
+    ToolError::from_failure(
         FailureEnvelope::new(
             RUNTIME_PERSISTENCE_ERROR,
             FailureCategory::Persistence,
-            "Prior capability lifecycle could not be durably repaired",
+            "Prior tool lifecycle could not be durably repaired",
             false,
             true,
             FailureOrigin::AgentRuntime,
@@ -63,7 +63,7 @@ fn map_prompt_recovery_error(error: String, session_id: &str) -> CapabilityError
     )
 }
 
-fn map_prompt_resume_error(error: RuntimeError, session_id: &str) -> CapabilityError {
+fn map_prompt_resume_error(error: RuntimeError, session_id: &str) -> ToolError {
     let failure = match error {
         RuntimeError::Persistence(_) => FailureEnvelope::new(
             RUNTIME_PERSISTENCE_ERROR,
@@ -76,13 +76,13 @@ fn map_prompt_resume_error(error: RuntimeError, session_id: &str) -> CapabilityE
         .with_session_id(Some(session_id.to_owned())),
         other => other.to_failure(),
     };
-    CapabilityError::from_failure(failure)
+    ToolError::from_failure(failure)
 }
 
 pub(in crate::domains::agent::runtime) async fn load_session_update_event(
     event_store: Arc<EventStore>,
     session_id: String,
-) -> Result<Option<TronEvent>, CapabilityError> {
+) -> Result<Option<TronEvent>, ToolError> {
     run_blocking_task("agent.prompt.session_update", move || {
         let mut last_busy_error = None;
 
@@ -97,14 +97,14 @@ pub(in crate::domains::agent::runtime) async fn load_session_update_event(
                     std::thread::sleep(SESSION_UPDATE_LOAD_RETRY_DELAY);
                 }
                 Err(error) => {
-                    return Err(CapabilityError::Internal {
+                    return Err(ToolError::Internal {
                         message: error.to_string(),
                     });
                 }
             }
         }
 
-        Err(CapabilityError::Internal {
+        Err(ToolError::Internal {
             message: last_busy_error
                 .map(|error| error.to_string())
                 .unwrap_or_else(|| "session update data unavailable".to_string()),
@@ -136,6 +136,8 @@ fn load_session_update_event_once(
     let (last_user_prompt, last_assistant_response) = preview.map_or((None, None), |preview| {
         (preview.last_user_prompt, preview.last_assistant_response)
     });
+    let (labels, organization_group) =
+        crate::domains::session::event_store::session_organization_from_tags(&session.tags);
 
     Ok(Some(TronEvent::SessionUpdated {
         base: BaseEvent::now(session_id),
@@ -156,6 +158,10 @@ fn load_session_update_event_once(
         last_assistant_response,
         parent_session_id: session.parent_session_id,
         activity_lines: Some(activity_lines),
+        labels: Some(labels),
+        organization_group,
+        organization_changed: Some(true),
+        is_archived: Some(session.ended_at.is_some()),
     }))
 }
 
@@ -163,7 +169,7 @@ fn load_session_update_event_once(
 mod session_update_event_tests {
     use super::*;
     use crate::domains::session::event_store::{
-        AppendOptions, ConnectionConfig, EventType, new_in_memory, run_migrations,
+        AppendOptions, ConnectionConfig, EventType, ensure_schema, new_in_memory,
     };
     use crate::shared::protocol::messages::Message;
 
@@ -206,7 +212,7 @@ mod session_update_event_tests {
         let pool = new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
@@ -218,37 +224,37 @@ mod session_update_event_tests {
                     "turn": 1,
                     "content": [
                         {
-                            "type": "capability_invocation",
+                            "type": "tool_invocation",
                             "id": "call-a",
-                            "name": "execute",
+                            "name": "test_tool",
                             "arguments": {"operation": "observe"}
                         },
                         {
-                            "type": "capability_invocation",
+                            "type": "tool_invocation",
                             "id": "call-b",
-                            "name": "execute",
+                            "name": "test_tool",
                             "arguments": {"operation": "observe"}
                         }
                     ],
                     "model": "m",
-                    "stopReason": "capability_invocation"
+                    "stopReason": "tool_invocation"
                 }),
             ),
             (
-                EventType::CapabilityInvocationStarted,
+                EventType::ToolInvocationStarted,
                 serde_json::json!({
                     "turn": 1,
                     "invocationId": "call-a",
-                    "name": "execute",
+                    "toolName": "test_tool",
                     "arguments": {"operation": "observe"}
                 }),
             ),
             (
-                EventType::CapabilityInvocationStarted,
+                EventType::ToolInvocationStarted,
                 serde_json::json!({
                     "turn": 1,
                     "invocationId": "call-b",
-                    "name": "execute",
+                    "toolName": "test_tool",
                     "arguments": {"operation": "observe"}
                 }),
             ),
@@ -286,16 +292,14 @@ mod session_update_event_tests {
             .messages
             .iter()
             .filter_map(|message| match message {
-                Message::CapabilityResult { invocation_id, .. } => Some(invocation_id.as_str()),
+                Message::ToolResult { invocation_id, .. } => Some(invocation_id.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(result_ids, vec!["call-a", "call-b"]);
         let live_ids = std::iter::from_fn(|| events.try_recv().ok())
             .filter_map(|event| match event {
-                TronEvent::CapabilityInvocationCompleted { invocation_id, .. } => {
-                    Some(invocation_id)
-                }
+                TronEvent::ToolInvocationCompleted { invocation_id, .. } => Some(invocation_id),
                 _ => None,
             })
             .collect::<Vec<_>>();

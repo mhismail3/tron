@@ -20,6 +20,21 @@ final class ForkNavigationTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 
+    func testOnlyKnownHomeSessionsCanPresentInPrimaryNavigation() {
+        XCTAssertFalse(
+            shouldPresentSelectedSession(
+                selectedSessionId: "missing-session",
+                knownSessionIds: ["ordinary-session"]
+            )
+        )
+        XCTAssertTrue(
+            shouldPresentSelectedSession(
+                selectedSessionId: "ordinary-session",
+                knownSessionIds: ["ordinary-session"]
+            )
+        )
+    }
+
     func testSwitchToSessionNotificationNotPostedOnForkFailure() {
         let expectation = expectation(forNotification: .switchToSession, object: nil)
         expectation.isInverted = true

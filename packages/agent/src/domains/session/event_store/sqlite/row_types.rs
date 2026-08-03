@@ -2,6 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Reserved durable tag for model sessions owned by worker invocations.
+///
+/// These sessions remain reconstructable by exact ID for audit, but ordinary
+/// user-session listings exclude them.
+pub const WORKER_SESSION_TAG: &str = "tron.system.worker-session";
+
 /// Raw session row from the `sessions` table.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionRow {
@@ -51,6 +57,14 @@ pub struct SessionRow {
     pub tags: String,
 }
 
+impl SessionRow {
+    /// Whether this durable session belongs to a worker invocation.
+    pub fn is_worker_session(&self) -> bool {
+        serde_json::from_str::<Vec<String>>(&self.tags)
+            .is_ok_and(|tags| tags.iter().any(|tag| tag == WORKER_SESSION_TAG))
+    }
+}
+
 /// Raw event row from the `events` table.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventRow {
@@ -77,8 +91,8 @@ pub struct EventRow {
     pub workspace_id: String,
     /// Denormalized role.
     pub role: Option<String>,
-    /// Denormalized model primitive name.
-    pub model_primitive_name: Option<String>,
+    /// Denormalized tool name.
+    pub tool_name: Option<String>,
     /// Denormalized invocation ID.
     pub invocation_id: Option<String>,
     /// Denormalized turn number.

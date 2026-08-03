@@ -18,7 +18,6 @@ final class OnboardingState {
         case anthropic
         case openAI
         case providers
-        case services
         case model
 
         var toolbarTitle: String {
@@ -39,8 +38,6 @@ final class OnboardingState {
                 return "OpenAI"
             case .providers:
                 return "Other providers"
-            case .services:
-                return "Search services"
             case .model:
                 return "Default model"
             }

@@ -2,16 +2,16 @@
 //!
 //! Each in-flight provider call gets its own `CancellationToken` child of the
 //! turn-level cancellation token. The registry maps
-//! `(session_id, invocation_id)` to that child token so the `agent.abortCapabilityInvocation`
-//! Engine capabilities can cancel a single call without cancelling the rest of the turn.
+//! `(session_id, invocation_id)` to that child token so the `agent.abortToolInvocation`
+//! Engine tools can cancel a single call without cancelling the rest of the turn.
 //!
 //! ## Lifecycle
 //!
 //! 1. `register(session_id, invocation_id, parent)` — creates a child of the
 //!    turn's cancellation token and stores it. Returns the child so the
-//!    executor can pass it into capability-owned work.
+//!    executor can pass it into tool-owned work.
 //! 2. `unregister(session_id, invocation_id)` — removes the entry once the
-//!    capability invocation completes (success, error, or cancellation). Called in a `Drop`
+//!    tool invocation completes (success, error, or cancellation). Called in a `Drop`
 //!    guard in the executor so early returns cannot leak entries.
 //! 3. `abort(session_id, invocation_id)` — looked up by the engine transport.
 //!    Returns `true` if a matching call was in flight; the child token is
@@ -42,7 +42,7 @@ impl InvocationAbortRegistry {
     }
 
     /// Register a new in-flight provider call. Returns a child token derived
-    /// from `parent`; capability-owned work selects on it for cooperative
+    /// from `parent`; tool-owned work selects on it for cooperative
     /// cancellation.
     #[must_use]
     pub fn register(
@@ -66,7 +66,7 @@ impl InvocationAbortRegistry {
             .remove(&(session_id.to_owned(), invocation_id.to_owned()));
     }
 
-    /// Cancel a specific in-flight capability. Returns `true` if the invocation was in
+    /// Cancel a specific in-flight tool. Returns `true` if the invocation was in
     /// the registry (the token was cancelled and the entry removed).
     pub fn abort(&self, session_id: &str, invocation_id: &str) -> bool {
         if let Some((_, token)) = self
@@ -80,18 +80,18 @@ impl InvocationAbortRegistry {
         }
     }
 
-    /// Number of in-flight capability invocations tracked (across all sessions).
+    /// Number of in-flight tool invocations tracked (across all sessions).
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// True when no capability invocations are being tracked.
+    /// True when no tool invocations are being tracked.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 }
 
-/// RAII guard that unregisters a capability on drop. Ensures cleanup even on
+/// RAII guard that unregisters a tool on drop. Ensures cleanup even on
 /// early returns / panics in the executor.
 pub struct InvocationAbortGuard<'a> {
     registry: &'a InvocationAbortRegistry,
@@ -153,7 +153,7 @@ mod tests {
         assert!(child.is_cancelled());
         assert!(
             !parent.is_cancelled(),
-            "aborting a single capability must not cancel the turn"
+            "aborting a single tool must not cancel the turn"
         );
         assert!(reg.is_empty());
     }

@@ -1,27 +1,23 @@
 //! Engine state primitive.
 //!
-//! State is scoped projection data for workers and agents. Durable session
-//! truth remains the event store; state entries are cache/projection records
-//! with revisions and owner namespaces.
+//! State is profile-global or session-scoped projection data for workers and
+//! agents. Durable session truth remains the event store; state entries are
+//! cache/projection records with revisions and owner namespaces.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::engine::kernel::errors::{EngineError, Result};
 
 /// Engine state scope.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EngineStateScope {
-    /// Global local system state.
-    System,
-    /// Workspace-scoped state.
-    Workspace(String),
+    /// Profile-global state.
+    Profile,
     /// Session-scoped state.
     Session(String),
 }
@@ -29,23 +25,21 @@ pub enum EngineStateScope {
 impl EngineStateScope {
     fn kind(&self) -> &'static str {
         match self {
-            Self::System => "system",
-            Self::Workspace(_) => "workspace",
+            Self::Profile => "profile",
             Self::Session(_) => "session",
         }
     }
 
     fn value(&self) -> &str {
         match self {
-            Self::System => "system",
-            Self::Workspace(value) | Self::Session(value) => value,
+            Self::Profile => "profile",
+            Self::Session(value) => value,
         }
     }
 }
 
 /// State entry.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EngineStateEntry {
     /// Scope.
     pub scope: EngineStateScope,
@@ -117,26 +111,6 @@ impl InMemoryEngineStateStore {
         };
         self.entries.insert(id, entry.clone());
         Ok(entry)
-    }
-
-    /// Compare-and-set one entry.
-    pub fn compare_and_set(
-        &mut self,
-        scope: EngineStateScope,
-        namespace: String,
-        key: String,
-        expected_revision: Option<u64>,
-        value: Value,
-    ) -> Result<EngineStateEntry> {
-        let existing = self.get(scope.clone(), &namespace, &key)?;
-        let actual = existing.as_ref().map(|entry| entry.revision);
-        if actual != expected_revision {
-            return Err(EngineError::PolicyViolation(format!(
-                "state revision conflict for {namespace}/{key}: expected {:?}, actual {:?}",
-                expected_revision, actual
-            )));
-        }
-        self.set(scope, namespace, key, value)
     }
 
     /// Delete one entry.
@@ -287,26 +261,6 @@ CREATE TABLE IF NOT EXISTS engine_state_entries (
         })
     }
 
-    /// Compare-and-set one entry.
-    pub fn compare_and_set(
-        &mut self,
-        scope: EngineStateScope,
-        namespace: String,
-        key: String,
-        expected_revision: Option<u64>,
-        value: Value,
-    ) -> Result<EngineStateEntry> {
-        let existing = self.get(scope.clone(), &namespace, &key)?;
-        let actual = existing.as_ref().map(|entry| entry.revision);
-        if actual != expected_revision {
-            return Err(EngineError::PolicyViolation(format!(
-                "state revision conflict for {namespace}/{key}: expected {:?}, actual {:?}",
-                expected_revision, actual
-            )));
-        }
-        self.set(scope, namespace, key, value)
-    }
-
     /// Delete one entry.
     pub fn delete(&mut self, scope: EngineStateScope, namespace: &str, key: &str) -> Result<bool> {
         validate_namespace_key(namespace, key)?;
@@ -397,12 +351,21 @@ fn row_to_state_entry(
     let scope_kind: String = row.get(0)?;
     let scope_value: String = row.get(1)?;
     let value_json: String = row.get(4)?;
+    let scope = match (scope_kind.as_str(), scope_value.as_str()) {
+        ("profile", "profile") => EngineStateScope::Profile,
+        ("session", value) if !value.trim().is_empty() => {
+            EngineStateScope::Session(value.to_owned())
+        }
+        _ => {
+            return Err(rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                format!("invalid engine state scope {scope_kind}:{scope_value}").into(),
+            ));
+        }
+    };
     Ok(EngineStateEntry {
-        scope: match scope_kind.as_str() {
-            "workspace" => EngineStateScope::Workspace(scope_value),
-            "session" => EngineStateScope::Session(scope_value),
-            _ => EngineStateScope::System,
-        },
+        scope,
         namespace: row.get(2)?,
         key: row.get(3)?,
         value: crate::shared::storage::resolve_stored_json_value(conn, &value_json)
@@ -412,6 +375,80 @@ fn row_to_state_entry(
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sqlite_round_trips_the_two_runtime_state_scopes() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("state.sqlite");
+        let mut store = SqliteEngineStateStore::open(&path).expect("open state store");
+
+        let session = EngineStateScope::Session("session-a".to_owned());
+        store
+            .set(
+                session.clone(),
+                "routing".to_owned(),
+                "worker-a".to_owned(),
+                serde_json::json!({"promoted": true}),
+            )
+            .expect("write session state");
+        store
+            .set(
+                EngineStateScope::Profile,
+                "evidence".to_owned(),
+                "worker-a".to_owned(),
+                serde_json::json!({"completedRuns": 4}),
+            )
+            .expect("write profile state");
+
+        assert_eq!(
+            store
+                .get(session, "routing", "worker-a")
+                .expect("read session state")
+                .expect("session state")
+                .scope,
+            EngineStateScope::Session("session-a".to_owned())
+        );
+        assert_eq!(
+            store
+                .get(EngineStateScope::Profile, "evidence", "worker-a")
+                .expect("read profile state")
+                .expect("profile state")
+                .scope,
+            EngineStateScope::Profile
+        );
+    }
+
+    #[test]
+    fn sqlite_rejects_unknown_or_malformed_scope_rows() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("state.sqlite");
+        let store = SqliteEngineStateStore::open(&path).expect("open state store");
+        store
+            .conn
+            .execute(
+                "INSERT INTO engine_state_entries
+                 (scope_kind, scope_value, namespace, key, value_json, revision, updated_at)
+                 VALUES ('workspace', 'invalid', 'routing', 'worker-a', '{}', 1, ?1)",
+                [Utc::now().to_rfc3339()],
+            )
+            .expect("insert malformed row");
+
+        let row_error = store
+            .conn
+            .query_row(
+                "SELECT scope_kind, scope_value, namespace, key, value_json, revision, updated_at
+                 FROM engine_state_entries WHERE scope_kind = 'workspace'",
+                [],
+                |row| row_to_state_entry(&store.conn, row),
+            )
+            .expect_err("unknown scope must fail closed");
+        assert!(row_error.to_string().contains("invalid engine state scope"));
+    }
 }
 
 fn sqlite_err(operation: &'static str, message: impl Into<String>) -> EngineError {

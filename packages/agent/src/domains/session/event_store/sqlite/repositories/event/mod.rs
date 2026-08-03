@@ -14,6 +14,11 @@
 //! | `session_queries` | Session-scoped listing and pagination                 |
 //! | `tree_queries`    | Ancestor / child / descendant recursive CTEs          |
 //! | `type_queries`    | Type-filtered, workspace-scoped, and global queries   |
+//!
+//! Token denormalization prefers the immutable provider-aware `tokenRecord`.
+//! Event/session counters store base input and cache reads as mutually
+//! exclusive buckets even when a provider reports cached tokens inside its
+//! aggregate input count. Raw provider values remain unchanged in the payload.
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -32,11 +37,9 @@ mod type_queries;
 /// is defined in exactly one place.
 const EVENT_COLUMNS: &str = "\
     id, session_id, parent_id, sequence, depth, type, timestamp, payload, \
-    content_blob_id, workspace_id, role, model_primitive_name, invocation_id, turn, \
+    content_blob_id, workspace_id, role, tool_name, invocation_id, turn, \
     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum, \
     model, latency_ms, stop_reason, has_thinking, provider_type, cost";
-
-const SQLITE_BIND_LIMIT: usize = 900;
 
 /// Options for listing events.
 #[derive(Default)]
@@ -82,7 +85,7 @@ impl EventRepo {
             content_blob_id: row.get("content_blob_id")?,
             workspace_id: row.get("workspace_id")?,
             role: row.get("role")?,
-            model_primitive_name: row.get("model_primitive_name")?,
+            tool_name: row.get("tool_name")?,
             invocation_id: row.get("invocation_id")?,
             turn: row.get("turn")?,
             input_tokens: row.get("input_tokens")?,

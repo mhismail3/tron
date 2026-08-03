@@ -128,10 +128,10 @@ pub enum SseContentBlock {
     },
     /// Anthropic tool-use block.
     #[serde(rename = "tool_use")]
-    CapabilityInvocation {
-        /// Capability invocation ID.
+    ToolInvocation {
+        /// Tool invocation ID.
         id: String,
-        /// Capability name.
+        /// Tool name.
         name: String,
     },
 }
@@ -158,7 +158,7 @@ pub enum SseDelta {
         /// Signature fragment.
         signature: String,
     },
-    /// Capability invocation arguments delta.
+    /// Tool invocation arguments delta.
     #[serde(rename = "input_json_delta")]
     InputJsonDelta {
         /// Partial JSON string.

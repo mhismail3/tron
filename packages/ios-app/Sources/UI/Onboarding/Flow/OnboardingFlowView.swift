@@ -88,12 +88,6 @@ struct OnboardingFlowView: View {
                         )
                         .tag(OnboardingState.Step.providers)
 
-                        ServicesSetupOnboardingPage(
-                            state: state,
-                            dependencies: dependencies
-                        )
-                        .tag(OnboardingState.Step.services)
-
                         ModelSetupOnboardingPage(
                             state: state,
                             dependencies: dependencies,
@@ -226,7 +220,7 @@ private extension OnboardingState.Step {
         switch self {
         case .welcome, .installTailscale, .installMac, .connect:
             return .medium
-        case .workspace, .anthropic, .openAI, .providers, .services, .model:
+        case .workspace, .anthropic, .openAI, .providers, .model:
             return .large
         }
     }

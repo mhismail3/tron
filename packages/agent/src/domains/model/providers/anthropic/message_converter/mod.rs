@@ -2,20 +2,20 @@
 //!
 //! Converts core [`Context`] messages into Anthropic Messages API format.
 //! Handles:
-//! - User/assistant/internal capability-result message conversion
+//! - User/assistant/internal tool-result message conversion
 //! - Thinking block signature handling (only include with signature)
-//! - Capability invocation ID remapping for cross-provider DTO parity
+//! - Tool invocation ID remapping for cross-provider DTO parity
 //! - System prompt construction with cache breakpoints (all auth types)
 
 use std::collections::HashMap;
 
-use crate::domains::model::providers::shared::compose_context_parts_grouped;
+use crate::domains::model::providers::shared::compose_context_parts;
 use crate::domains::model::providers::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
-use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent, UserContent};
+use crate::shared::protocol::content::{AssistantContent, ToolResultContent, UserContent};
 use crate::shared::protocol::messages::{
-    CapabilityResultMessageContent, Context, Message, UserMessageContent,
+    Context, Message, ToolResultMessageContent, UserMessageContent,
 };
 use serde_json::{Value, json};
 
@@ -25,24 +25,24 @@ use super::types::{AnthropicMessageParam, CacheControl, SystemPromptBlock};
 // Message conversion
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Build capability invocation ID mapping from messages for cross-provider DTO parity.
+/// Build tool invocation ID mapping from messages for cross-provider DTO parity.
 fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
-    let mut all_capability_invocations = Vec::new();
+    let mut all_tool_invocations = Vec::new();
     for msg in messages {
         if let Message::Assistant { content, .. } = msg {
             for c in content {
-                if let AssistantContent::CapabilityInvocation { id, .. } = c {
-                    all_capability_invocations.push(id.as_str());
+                if let AssistantContent::ToolInvocation { id, .. } = c {
+                    all_tool_invocations.push(id.as_str());
                 }
             }
         }
     }
-    build_invocation_id_mapping(&all_capability_invocations, IdFormat::Anthropic)
+    build_invocation_id_mapping(&all_tool_invocations, IdFormat::Anthropic)
 }
 
 /// Convert conversation messages to Anthropic format.
 ///
-/// Builds capability invocation ID remapping internally, converting OpenAI-format
+/// Builds tool invocation ID remapping internally, converting OpenAI-format
 /// IDs to Anthropic format (`toolu_remap_N`).
 pub fn convert_messages(messages: &[Message]) -> Vec<AnthropicMessageParam> {
     let id_mapping = build_id_mapping(messages);
@@ -64,12 +64,12 @@ fn convert_messages_impl(
             Message::Assistant { content, .. } => {
                 result.push(convert_assistant_message(content, id_mapping));
             }
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id,
                 content,
                 is_error,
             } => {
-                result.push(convert_capability_result(
+                result.push(convert_tool_result(
                     invocation_id,
                     content,
                     *is_error,
@@ -242,7 +242,7 @@ fn convert_assistant_content(
                 "signature": sig,
             }))
         }
-        AssistantContent::CapabilityInvocation {
+        AssistantContent::ToolInvocation {
             id,
             name,
             arguments,
@@ -259,21 +259,20 @@ fn convert_assistant_content(
     }
 }
 
-/// Convert a capability result message to Anthropic format.
-fn convert_capability_result(
+/// Convert a tool result message to Anthropic format.
+fn convert_tool_result(
     invocation_id: &str,
-    content: &CapabilityResultMessageContent,
+    content: &ToolResultMessageContent,
     is_error: Option<bool>,
     id_mapping: &HashMap<String, String>,
 ) -> AnthropicMessageParam {
     let remapped_id = remap_invocation_id(invocation_id, id_mapping);
 
     let result_content = match content {
-        CapabilityResultMessageContent::Text(text) => vec![json!({"type": "text", "text": text})],
-        CapabilityResultMessageContent::Blocks(blocks) => blocks
-            .iter()
-            .map(convert_capability_result_content)
-            .collect(),
+        ToolResultMessageContent::Text(text) => vec![json!({"type": "text", "text": text})],
+        ToolResultMessageContent::Blocks(blocks) => {
+            blocks.iter().map(convert_tool_result_content).collect()
+        }
     };
 
     let mut block = json!({
@@ -292,11 +291,11 @@ fn convert_capability_result(
     }
 }
 
-/// Convert a capability result content block to Anthropic JSON.
-fn convert_capability_result_content(content: &CapabilityResultContent) -> Value {
+/// Convert a tool result content block to Anthropic JSON.
+fn convert_tool_result_content(content: &ToolResultContent) -> Value {
     match content {
-        CapabilityResultContent::Text { text } => json!({"type": "text", "text": text}),
-        CapabilityResultContent::Image { data, mime_type } => json!({
+        ToolResultContent::Text { text } => json!({"type": "text", "text": text}),
+        ToolResultContent::Image { data, mime_type } => json!({
             "type": "image",
             "source": {
                 "type": "base64",
@@ -324,11 +323,9 @@ pub fn build_system_prompt_for_provider(context: &Context, prefix: Option<&str>)
 /// When `prefix` is `Some`, it is prepended as the first block (e.g. OAuth identification).
 /// When `prefix` is `None` and there is no content, returns `None`.
 ///
-/// Cache breakpoints:
-/// - Breakpoint 2: Last stable instruction block -> 1h TTL
-/// - Breakpoint 3: Last volatile state block -> 5m TTL (default)
+/// The last instruction block receives a 1h cache breakpoint.
 fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value> {
-    let grouped = compose_context_parts_grouped(context);
+    let context_parts = compose_context_parts(context);
 
     let mut blocks: Vec<SystemPromptBlock> = Vec::new();
 
@@ -340,13 +337,7 @@ fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value>
         0
     };
 
-    // Stable instruction parts: cache at 1h.
-    for part in &grouped.stable {
-        blocks.push(SystemPromptBlock::text(part));
-    }
-
-    // Volatile state parts: cache at 5m.
-    for part in &grouped.volatile {
+    for part in &context_parts {
         blocks.push(SystemPromptBlock::text(part));
     }
 
@@ -358,26 +349,9 @@ fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value>
     if blocks.len() == prefix_offset && prefix.is_some() {
         blocks[0].cache_control = Some(CacheControl {
             cache_type: "ephemeral".into(),
-            ttl: None,
+            ttl: Some("1h".into()),
         });
-    } else if !grouped.volatile.is_empty() {
-        // Has volatile content — 1h on last stable, 5m on last volatile
-        let last_stable_idx = prefix_offset + grouped.stable.len();
-        if last_stable_idx > prefix_offset && last_stable_idx <= blocks.len() {
-            blocks[last_stable_idx - 1].cache_control = Some(CacheControl {
-                cache_type: "ephemeral".into(),
-                ttl: Some("1h".into()),
-            });
-        }
-        // 5m on last volatile (last block)
-        if let Some(last) = blocks.last_mut() {
-            last.cache_control = Some(CacheControl {
-                cache_type: "ephemeral".into(),
-                ttl: None,
-            });
-        }
-    } else if !grouped.stable.is_empty() {
-        // Only stable content — 1h on last block
+    } else if !context_parts.is_empty() {
         if let Some(last) = blocks.last_mut() {
             last.cache_control = Some(CacheControl {
                 cache_type: "ephemeral".into(),

@@ -1,4 +1,5 @@
 import XCTest
+@testable import TronMobile
 
 /// Source-level guards for app-wide iPad sheet sizing.
 ///
@@ -6,6 +7,37 @@ import XCTest
 /// sites that previously used raw iPhone detents must preserve their non-iPad
 /// sizing and background behavior.
 final class IPadSheetPresentationTests: XCTestCase {
+
+    func testStandardPhoneSheetsKeepDarkMediumContentReadable() {
+        XCTAssertEqual(
+            AdaptivePhonePresentationPolicy.automaticBackgroundOpacity(
+                isDark: true,
+                isLargeDetent: false
+            ),
+            0.62
+        )
+        XCTAssertEqual(
+            AdaptivePhonePresentationPolicy.automaticBackgroundOpacity(
+                isDark: false,
+                isLargeDetent: false
+            ),
+            0
+        )
+        XCTAssertEqual(
+            AdaptivePhonePresentationPolicy.automaticBackgroundOpacity(
+                isDark: true,
+                isLargeDetent: true
+            ),
+            1
+        )
+        XCTAssertEqual(
+            AdaptivePhonePresentationPolicy.automaticBackgroundOpacity(
+                isDark: false,
+                isLargeDetent: true
+            ),
+            1
+        )
+    }
 
     func testAdaptivePresentationHelperCentralizesIPadSizingAndPhonePreservation() throws {
         let content = try source(pathComponents: ["Sources", "Support", "Foundation", "SwiftUI", "View+Extensions.swift"])
@@ -37,6 +69,18 @@ final class IPadSheetPresentationTests: XCTestCase {
         XCTAssertTrue(
             content.contains("phoneBackground: AdaptivePhonePresentationBackground = .automaticLargeDetent"),
             "Existing adaptive callers should keep their established iPhone background branch by default"
+        )
+        XCTAssertTrue(
+            content.contains("phoneSelectedDetent == .large"),
+            "Detented iPhone sheets should use their opaque app surface whenever they reach the large detent"
+        )
+        XCTAssertTrue(
+            content.contains("AdaptivePhonePresentationPolicy.automaticBackgroundOpacity"),
+            "Standard phone sheets should share one dark-medium readability policy"
+        )
+        XCTAssertFalse(
+            content.contains("phoneSelectedDetent == .large && colorScheme == .light"),
+            "Large detent opacity must not disappear in dark mode"
         )
         XCTAssertTrue(
             content.contains("enum AdaptiveIPadPresentationBackground"),
@@ -103,12 +147,8 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ".immersiveCameraSheetPresentation"
             ),
             (
-                ["Sources", "UI", "Onboarding", "Pairing", "QRCodeScannerSheet.swift"],
+                ["Sources", "UI", "Onboarding", "QRCodeScannerSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
-            ),
-            (
-                ["Sources", "UI", "RuntimeSurfaces", "Display", "StreamSheetView.swift"],
-                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             ),
             (
                 ["Sources", "UI", "System", "CompactionDetailSheet.swift"],
@@ -209,6 +249,25 @@ final class IPadSheetPresentationTests: XCTestCase {
         XCTAssertTrue(
             offenders.isEmpty,
             "Raw presentationDetents bypass the iPad sizing helper: \(offenders.joined(separator: ", "))"
+        )
+    }
+
+    func testWorkerConsoleSheetsAlwaysOfferMediumFirst() throws {
+        let sourceRoot = try projectRoot()
+            .appendingPathComponent("Sources/UI/WorkerConsole")
+        let files = try swiftFiles(under: sourceRoot)
+        let offenders = try files.flatMap { file -> [String] in
+            let content = try String(contentsOf: file, encoding: .utf8)
+            return adaptivePresentationCalls(in: content).compactMap { call in
+                call.text.contains("[.medium, .large]")
+                    ? nil
+                    : "\(relativePath(file, under: sourceRoot)):\(call.line)"
+            }
+        }
+
+        XCTAssertTrue(
+            offenders.isEmpty,
+            "Worker sheets must open at medium and remain expandable: \(offenders.joined(separator: ", "))"
         )
     }
 

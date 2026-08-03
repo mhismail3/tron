@@ -23,7 +23,7 @@ impl StoredEngineError {
     /// Project an [`EngineError`] into a stable stored representation.
     #[must_use]
     pub fn from_engine_error(error: &EngineError) -> Self {
-        match error {
+        let stored = match error {
             EngineError::InvalidId { kind, value } => Self {
                 kind: "invalid_id".to_owned(),
                 message: error.to_string(),
@@ -53,27 +53,6 @@ impl StoredEngineError {
                     "owner": owner,
                     "attemptedOwner": attempted_owner,
                 }),
-            },
-            EngineError::NamespaceDenied {
-                worker_id,
-                function_id,
-            } => Self {
-                kind: "namespace_denied".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({
-                    "workerId": worker_id,
-                    "functionId": function_id,
-                }),
-            },
-            EngineError::UnsupportedDeliveryMode { mode } => Self {
-                kind: "unsupported_delivery_mode".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({ "mode": mode }),
-            },
-            EngineError::DeliveryModeNotAllowed { function_id, mode } => Self {
-                kind: "delivery_mode_not_allowed".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({ "functionId": function_id, "mode": mode }),
             },
             EngineError::IdempotencyConflict {
                 function_id,
@@ -126,34 +105,27 @@ impl StoredEngineError {
                     "message": message,
                 }),
             },
-            EngineError::InvalidVisibilityPromotion {
+            EngineError::StaleFunctionSurface {
                 function_id,
-                target,
-                reason,
+                expected_revision,
+                actual_revision,
+                expected_worker_version,
+                actual_worker_version,
             } => Self {
-                kind: "invalid_visibility_promotion".to_owned(),
+                kind: "stale_function_surface".to_owned(),
                 message: error.to_string(),
                 details: serde_json::json!({
                     "functionId": function_id,
-                    "target": target,
-                    "reason": reason,
+                    "expectedRevision": expected_revision,
+                    "actualRevision": actual_revision,
+                    "expectedWorkerVersion": expected_worker_version,
+                    "actualWorkerVersion": actual_worker_version,
                 }),
             },
             EngineError::PolicyViolation(message) => Self {
                 kind: "policy_violation".to_owned(),
                 message: error.to_string(),
                 details: serde_json::json!({ "message": message }),
-            },
-            EngineError::NotRoutable {
-                function_id,
-                reason,
-            } => Self {
-                kind: "not_routable".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({
-                    "functionId": function_id,
-                    "reason": reason,
-                }),
             },
             EngineError::DomainFailure {
                 domain,
@@ -170,11 +142,6 @@ impl StoredEngineError {
                     "details": details,
                 }),
             },
-            EngineError::WorkerTransportFailure { code, message } => Self {
-                kind: "worker_transport_failure".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({ "code": code, "message": message }),
-            },
             EngineError::InvocationCancelled => Self {
                 kind: "invocation_cancelled".to_owned(),
                 message: error.to_string(),
@@ -185,6 +152,16 @@ impl StoredEngineError {
                 message: error.to_string(),
                 details: serde_json::json!({ "message": message }),
             },
+        };
+        stored.redacted_for_storage()
+    }
+
+    #[must_use]
+    fn redacted_for_storage(&self) -> Self {
+        Self {
+            kind: self.kind.clone(),
+            message: crate::shared::foundation::redaction::redact_sensitive_content(&self.message),
+            details: crate::shared::foundation::redaction::redact_sensitive_json(&self.details),
         }
     }
 
@@ -226,6 +203,36 @@ impl StoredEngineError {
                     .to_owned(),
             );
         }
+        if self.kind == "stale_function_surface" {
+            return EngineError::StaleFunctionSurface {
+                function_id: self
+                    .details
+                    .get("functionId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("stored")
+                    .to_owned(),
+                expected_revision: self
+                    .details
+                    .get("expectedRevision")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                actual_revision: self
+                    .details
+                    .get("actualRevision")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                expected_worker_version: self
+                    .details
+                    .get("expectedWorkerVersion")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+                actual_worker_version: self
+                    .details
+                    .get("actualWorkerVersion")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+            };
+        }
         if self.kind == "domain_failure" {
             let domain = self
                 .details
@@ -257,22 +264,6 @@ impl StoredEngineError {
                 details,
             };
         }
-        if self.kind == "worker_transport_failure" {
-            return EngineError::WorkerTransportFailure {
-                code: self
-                    .details
-                    .get("code")
-                    .and_then(Value::as_str)
-                    .unwrap_or("WORKER_TRANSPORT_FAILURE")
-                    .to_owned(),
-                message: self
-                    .details
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or(&self.message)
-                    .to_owned(),
-            };
-        }
         if self.kind == "invocation_cancelled" {
             return EngineError::InvocationCancelled;
         }
@@ -297,11 +288,30 @@ impl StoredInvocationOutcome {
     #[must_use]
     pub fn from_result(result: &InvocationResult) -> Self {
         Self {
-            value: result.value.clone(),
+            value: result
+                .value
+                .as_ref()
+                .map(crate::shared::foundation::redaction::redact_sensitive_json),
             error: result
                 .error
                 .as_ref()
                 .map(StoredEngineError::from_engine_error),
+        }
+    }
+
+    /// Return the audit-safe projection accepted by durable and in-memory
+    /// idempotency ledgers.
+    #[must_use]
+    pub(crate) fn redacted_for_storage(&self) -> Self {
+        Self {
+            value: self
+                .value
+                .as_ref()
+                .map(crate::shared::foundation::redaction::redact_sensitive_json),
+            error: self
+                .error
+                .as_ref()
+                .map(StoredEngineError::redacted_for_storage),
         }
     }
 
@@ -330,5 +340,38 @@ impl StoredInvocationOutcome {
             error: self.error.as_ref().map(StoredEngineError::to_replay_error),
             replayed_from: Some(replayed_from),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::invocation::model::CausalContext;
+    use crate::engine::{ActorId, ActorKind, FunctionId, TraceId};
+
+    #[test]
+    fn stored_outcome_redacts_one_time_credential_but_live_result_stays_raw() {
+        let invocation = Invocation::new_sync(
+            FunctionId::new("worker_kernel::webhook_rotate").unwrap(),
+            serde_json::json!({}),
+            CausalContext::new(
+                ActorId::new("agent-secret").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-secret").unwrap(),
+            ),
+        );
+        let token = "trwh_0123456789abcdef0123456789abcdef";
+        let result = InvocationResult::success(
+            &invocation,
+            WorkerId::new("worker-kernel").unwrap(),
+            FunctionRevision(1),
+            CatalogRevision(1),
+            serde_json::json!({"token":token}),
+        );
+
+        let stored = StoredInvocationOutcome::from_result(&result);
+
+        assert_eq!(stored.value.as_ref().unwrap()["token"], "****");
+        assert_eq!(result.value.as_ref().unwrap()["token"], token);
     }
 }

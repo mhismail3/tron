@@ -1,12 +1,12 @@
 import Foundation
 
-/// Client for auth engine capabilities.
+/// Client for auth engine tools.
 /// Reads and writes provider API keys and OAuth tokens stored in auth.json.
 final class AuthClient: EngineDomainClient {
 
     // MARK: - Auth Methods
 
-    /// Get masked auth state for all providers and services.
+    /// Get masked auth state for all model providers.
     func get() async throws -> AuthState {
         let result: AuthState = try await invokeRead(
             "auth::get",

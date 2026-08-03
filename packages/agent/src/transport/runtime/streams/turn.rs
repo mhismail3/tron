@@ -5,11 +5,19 @@ use super::routed::{ProjectedEvent, global, session_scoped, set_opt};
 
 pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
     match event {
-        TronEvent::TurnStart { turn, .. } => Some(global(
-            event,
-            "agent.turn_start",
-            Some(json!({ "turn": turn, "agentPhase": "processing" })),
-        )),
+        TronEvent::TurnStart {
+            turn,
+            agent_delivery_continuation,
+            ..
+        } => {
+            let mut data = json!({ "turn": turn, "agentPhase": "processing" });
+            set_opt(
+                &mut data,
+                "agentDeliveryContinuation",
+                agent_delivery_continuation,
+            );
+            Some(global(event, "agent.turn_start", Some(data)))
+        }
         TronEvent::TurnEnd {
             turn,
             duration,
@@ -64,34 +72,40 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             turn,
             stop_reason,
             token_usage,
-            has_capability_invocations,
-            capability_invocation_count,
+            has_tool_invocations,
+            tool_invocation_count,
             token_record,
             model,
+            agent_delivery_continuation,
             ..
         } => {
             let mut data = json!({
                 "turn": turn,
                 "stopReason": stop_reason,
-                "hasCapabilityInvocations": has_capability_invocations,
-                "capabilityInvocationCount": capability_invocation_count,
+                "hasToolInvocations": has_tool_invocations,
+                "toolInvocationCount": tool_invocation_count,
             });
             insert_token_usage(&mut data, token_usage.as_ref());
             if let Some(record) = token_record {
                 data["tokenRecord"] = record.clone();
             }
             set_opt(&mut data, "model", model);
+            set_opt(
+                &mut data,
+                "agentDeliveryContinuation",
+                agent_delivery_continuation,
+            );
             Some(session_scoped(event, "agent.response_complete", Some(data)))
         }
         TronEvent::AgentInterrupted {
             turn,
             partial_content,
-            active_capability,
+            active_tool,
             ..
         } => {
             let mut data = json!({ "turn": turn });
             set_opt(&mut data, "partialContent", partial_content);
-            set_opt(&mut data, "activeCapability", active_capability);
+            set_opt(&mut data, "activeTool", active_tool);
             Some(session_scoped(event, "agent.interrupted", Some(data)))
         }
         TronEvent::ApiRetry {

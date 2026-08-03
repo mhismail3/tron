@@ -4,8 +4,8 @@ import SwiftUI
 
 /// Per-session ring buffer of recent activity lines for metadata persistence.
 /// Capped at `maxStreamBufferLines` to bound memory. Text deltas coalesce into a single
-/// `.text` line until a non-text event arrives. Each capability invocation gets its own
-/// `.capabilityInvocationStarted` line with summary, duration, and status.
+/// `.text` line until a non-text event arrives. Each tool invocation gets its own
+/// `.toolInvocationStarted` line with summary, duration, and status.
 struct SessionStreamBuffer {
     private(set) var lines: [ActivityLine] = []
     private(set) var isActive: Bool = true
@@ -47,70 +47,70 @@ struct SessionStreamBuffer {
         }
     }
 
-    // MARK: - Capability Events
+    // MARK: - Tool Events
 
-    mutating func addCapabilityStart(identity: CapabilityIdentity, invocationId: String? = nil, arguments: [String: AnyCodable]?) {
+    mutating func addToolStart(identity: ToolIdentity, invocationId: String? = nil, arguments: [String: AnyCodable]?) {
         guard isActive else { return }
         currentTextLineIndex = nil
 
-        let name = identity.stableCapabilityId
+        guard let name = identity.toolName?.nilIfEmpty else { return }
 
         let line = ActivityLine(
-            kind: .capabilityInvocationStarted,
+            kind: .toolInvocationStarted,
             text: name,
-            icon: CapabilityActivityPresentation.symbol(for: identity, arguments: arguments),
-            iconColor: CapabilityColor.fromCapability(identity),
-            modelPrimitiveName: name,
-            displayName: CapabilityActivityPresentation.title(for: identity, arguments: arguments),
-            summary: CapabilityActivityPresentation.summary(arguments: arguments, identity: identity),
+            icon: ToolActivityPresentation.symbol(for: identity, arguments: arguments),
+            iconColor: ToolColor.fromTool(identity),
+            toolName: name,
+            displayName: ToolActivityPresentation.title(for: identity, arguments: arguments),
+            summary: ToolActivityPresentation.summary(arguments: arguments, identity: identity),
             status: .running,
             invocationId: invocationId,
-            capabilityIdentity: identity
+            toolIdentity: identity
         )
         appendLine(line)
     }
 
-    mutating func addCapabilityEnd(identity: CapabilityIdentity, invocationId: String? = nil, success: Bool, durationMs: Int? = nil) {
+    mutating func addToolEnd(identity: ToolIdentity, invocationId: String? = nil, success: Bool, durationMs: Int? = nil) {
         guard isActive else { return }
+        guard let name = identity.toolName?.nilIfEmpty else { return }
         currentTextLineIndex = nil
 
         let formattedDuration = durationMs.map { Self.formatDuration($0) }
 
         if let invocationId,
-           let idx = lines.lastIndex(where: { $0.kind == .capabilityInvocationStarted && $0.invocationId == invocationId }) {
+           let idx = lines.lastIndex(where: { $0.kind == .toolInvocationStarted && $0.invocationId == invocationId }) {
             lines[idx].status = success ? .success : .error
             lines[idx].duration = formattedDuration
-            lines[idx].icon = CapabilityActivityPresentation.symbol(for: identity)
-            lines[idx].iconColor = CapabilityColor.fromCapability(identity)
-            lines[idx].displayName = CapabilityActivityPresentation.title(for: identity)
-            lines[idx].summary = CapabilityActivityPresentation.summary(identity: identity) ?? lines[idx].summary
-            lines[idx].capabilityIdentity = identity
+            lines[idx].icon = ToolActivityPresentation.symbol(for: identity)
+            lines[idx].iconColor = ToolColor.fromTool(identity)
+            lines[idx].displayName = ToolActivityPresentation.title(for: identity)
+            lines[idx].summary = ToolActivityPresentation.summary(identity: identity) ?? lines[idx].summary
+            lines[idx].toolIdentity = identity
             return
         }
 
-        let name = identity.stableCapabilityId
-        if let idx = lines.lastIndex(where: { $0.kind == .capabilityInvocationStarted && $0.modelPrimitiveName == name && $0.status == .running }) {
+        if let idx = lines.lastIndex(where: { $0.kind == .toolInvocationStarted && $0.toolName == name && $0.status == .running }) {
             lines[idx].status = success ? .success : .error
             lines[idx].duration = formattedDuration
-            lines[idx].icon = CapabilityActivityPresentation.symbol(for: identity)
-            lines[idx].iconColor = CapabilityColor.fromCapability(identity)
-            lines[idx].displayName = CapabilityActivityPresentation.title(for: identity)
-            lines[idx].summary = CapabilityActivityPresentation.summary(identity: identity) ?? lines[idx].summary
-            lines[idx].capabilityIdentity = identity
+            lines[idx].icon = ToolActivityPresentation.symbol(for: identity)
+            lines[idx].iconColor = ToolColor.fromTool(identity)
+            lines[idx].displayName = ToolActivityPresentation.title(for: identity)
+            lines[idx].summary = ToolActivityPresentation.summary(identity: identity) ?? lines[idx].summary
+            lines[idx].toolIdentity = identity
             return
         }
 
         let line = ActivityLine(
-            kind: .capabilityInvocationCompleted,
+            kind: .toolInvocationCompleted,
             text: name,
-            icon: CapabilityActivityPresentation.symbol(for: identity),
-            iconColor: CapabilityColor.fromCapability(identity),
-            modelPrimitiveName: name,
-            displayName: CapabilityActivityPresentation.title(for: identity),
-            summary: CapabilityActivityPresentation.summary(identity: identity),
+            icon: ToolActivityPresentation.symbol(for: identity),
+            iconColor: ToolColor.fromTool(identity),
+            toolName: name,
+            displayName: ToolActivityPresentation.title(for: identity),
+            summary: ToolActivityPresentation.summary(identity: identity),
             duration: formattedDuration,
             status: success ? .success : .error,
-            capabilityIdentity: identity
+            toolIdentity: identity
         )
         appendLine(line)
     }
@@ -184,7 +184,7 @@ struct SessionStreamBuffer {
 /// into completed-session snapshots.
 ///
 /// Text deltas are batched at ~60fps to avoid choppy re-renders. Structural
-/// events (capability start/end, completion) flush immediately for responsiveness.
+/// events (tool start/end, completion) flush immediately for responsiveness.
 @Observable
 @MainActor
 final class SessionActivityStreamManager {
@@ -242,10 +242,10 @@ final class SessionActivityStreamManager {
             handleTextDelta(sessionId: sessionId, delta: delta)
         case .thinkingDelta:
             handleThinkingDelta(sessionId: sessionId)
-        case .capabilityInvocationStarted(let identity, let id, let args):
-            handleCapabilityStart(sessionId: sessionId, identity: identity, invocationId: id, arguments: args)
-        case .capabilityInvocationCompleted(let identity, let id, let success, let ms):
-            handleCapabilityEnd(sessionId: sessionId, identity: identity, invocationId: id, success: success, durationMs: ms)
+        case .toolInvocationStarted(let identity, let id, let args):
+            handleToolStart(sessionId: sessionId, identity: identity, invocationId: id, arguments: args)
+        case .toolInvocationCompleted(let identity, let id, let success, let ms):
+            handleToolEnd(sessionId: sessionId, identity: identity, invocationId: id, success: success, durationMs: ms)
         case .turnFailed(let error):
             handleTurnFailed(sessionId: sessionId, error: error)
         case .complete:
@@ -270,21 +270,21 @@ final class SessionActivityStreamManager {
         flushSession(sessionId)
     }
 
-    func handleCapabilityStart(sessionId: String, identity: CapabilityIdentity, invocationId: String? = nil, arguments: [String: AnyCodable]?) {
+    func handleToolStart(sessionId: String, identity: ToolIdentity, invocationId: String? = nil, arguments: [String: AnyCodable]?) {
         guard ensurePendingBuffer(for: sessionId) else { return }
-        pendingBuffers[sessionId]?.addCapabilityStart(identity: identity, invocationId: invocationId, arguments: arguments)
+        pendingBuffers[sessionId]?.addToolStart(identity: identity, invocationId: invocationId, arguments: arguments)
         flushSession(sessionId)
     }
 
-    func handleCapabilityEnd(sessionId: String, identity: CapabilityIdentity, invocationId: String? = nil, success: Bool, durationMs: Int? = nil) {
+    func handleToolEnd(sessionId: String, identity: ToolIdentity, invocationId: String? = nil, success: Bool, durationMs: Int? = nil) {
         guard ensurePendingBuffer(for: sessionId) else { return }
-        pendingBuffers[sessionId]?.addCapabilityEnd(identity: identity, invocationId: invocationId, success: success, durationMs: durationMs)
+        pendingBuffers[sessionId]?.addToolEnd(identity: identity, invocationId: invocationId, success: success, durationMs: durationMs)
         flushSession(sessionId)
     }
 
     /// Handle a turn start event. Returns `true` if a fresh buffer was created
     /// (new session or resuming after completion), `false` if the existing buffer
-    /// was preserved (capability-invocation continuation turn within the same processing cycle).
+    /// was preserved (tool-invocation continuation turn within the same processing cycle).
     @discardableResult
     func handleTurnStart(sessionId: String) -> Bool {
         let wasCompleted = completedSessionIds.remove(sessionId) != nil
@@ -347,7 +347,7 @@ final class SessionActivityStreamManager {
     }
 
     /// Flush a single session's pending buffer to the observed `buffers` immediately.
-    /// Used for structural events (capability start/end, errors) that should appear instantly.
+    /// Used for structural events (tool start/end, errors) that should appear instantly.
     private func flushSession(_ sessionId: String) {
         dirtySessionIds.remove(sessionId)
         if let pending = pendingBuffers[sessionId] {

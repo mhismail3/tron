@@ -25,10 +25,10 @@ final class EventPluginTests: XCTestCase {
         XCTAssertFalse(ThinkingStartPlugin.eventType.isEmpty)
         XCTAssertFalse(ThinkingDeltaPlugin.eventType.isEmpty)
         XCTAssertFalse(ThinkingEndPlugin.eventType.isEmpty)
-        XCTAssertFalse(CapabilityInvocationBatchPlugin.eventType.isEmpty)
-        XCTAssertFalse(CapabilityInvocationArgumentsDeltaPlugin.eventType.isEmpty)
-        XCTAssertFalse(CapabilityInvocationStartedPlugin.eventType.isEmpty)
-        XCTAssertFalse(CapabilityInvocationCompletedPlugin.eventType.isEmpty)
+        XCTAssertFalse(ToolInvocationBatchPlugin.eventType.isEmpty)
+        XCTAssertFalse(ToolInvocationArgumentsDeltaPlugin.eventType.isEmpty)
+        XCTAssertFalse(ToolInvocationStartedPlugin.eventType.isEmpty)
+        XCTAssertFalse(ToolInvocationCompletedPlugin.eventType.isEmpty)
         XCTAssertFalse(TurnStartPlugin.eventType.isEmpty)
         XCTAssertFalse(TurnEndPlugin.eventType.isEmpty)
         XCTAssertFalse(AgentStartPlugin.eventType.isEmpty)
@@ -242,8 +242,8 @@ final class EventPluginTests: XCTestCase {
         XCTAssertTrue(registry.hasPlugin(for: "agent.thinking_start"))
         XCTAssertTrue(registry.hasPlugin(for: "agent.response_complete"))
         XCTAssertTrue(registry.hasPlugin(for: "agent.thinking_end"))
-        XCTAssertTrue(registry.hasPlugin(for: "capability.invocation.batch"))
-        XCTAssertTrue(registry.hasPlugin(for: "capability.invocation.arguments_delta"))
+        XCTAssertTrue(registry.hasPlugin(for: "tool.invocation.batch"))
+        XCTAssertTrue(registry.hasPlugin(for: "tool.invocation.arguments_delta"))
     }
 
     func testSessionScopedMarkerPluginsParseWithoutUiResult() {
@@ -256,8 +256,8 @@ final class EventPluginTests: XCTestCase {
             "context.warning",
             "session.forked",
             "agent.thinking_start",
-            "capability.invocation.batch",
-            "capability.invocation.arguments_delta"
+            "tool.invocation.batch",
+            "tool.invocation.arguments_delta"
         ] {
             let json = """
             {

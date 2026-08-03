@@ -18,43 +18,43 @@ command = "scripts/tron dev --stop"
 platform = "darwin"
 
 [[actions]]
-name = "Rebuild + Install + Launch iOS Beta on iPhone"
+name = "Rebuild + Install + Launch iOS Beta Simulator"
 icon = "debug"
-command = "env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta install"
+command = "scripts/tron-ios-simulator install"
 platform = "darwin"
 
 [[actions]]
 name = "Rebuild + Install + Launch iOS Prod Fast Debug on iPhone"
 icon = "debug"
-command = "env TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME='Tron Fast' TRON_IOS_CONFIGURATION=ProdDebug scripts/tron-ios-beta install"
+command = "env DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer TRON_IOS_REQUIRED_SDK_MAJOR=27 TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME='Tron Fast' TRON_IOS_CONFIGURATION=ProdDebug scripts/tron-ios-device install"
 platform = "darwin"
 
 [[actions]]
 name = "Rebuild + Install + Launch iOS Prod Release on iPhone"
 icon = "debug"
-command = "env TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME=Tron TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-beta install"
+command = "env TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME=Tron TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-device install"
 platform = "darwin"
 
 [[actions]]
-name = "Rebuild + Install + Launch iOS Beta on iPad"
+name = "Rebuild + Install + Launch iOS Prod Release on iPad"
 icon = "debug"
-command = "env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta install"
+command = "env TRON_IOS_DEVICE_NAME=iPad TRON_IOS_SCHEME=Tron TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-device install"
 platform = "darwin"
 
 [[actions]]
-name = "Just Launch Installed iOS Beta on iPhone"
+name = "Just Launch Installed iOS Beta Simulator"
 icon = "run"
-command = "env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta launch"
+command = "scripts/tron-ios-simulator start"
 platform = "darwin"
 
 [[actions]]
 name = "Just Launch Installed iOS Prod on iPhone"
 icon = "run"
-command = "env TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME=Tron TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-beta launch"
+command = "env TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME=Tron TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-device launch"
 platform = "darwin"
 
 [[actions]]
-name = "Just Launch Installed iOS Beta on iPad"
+name = "Just Launch Installed iOS Prod on iPad"
 icon = "run"
-command = "env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta launch"
+command = "env TRON_IOS_DEVICE_NAME=iPad TRON_IOS_SCHEME=Tron TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-device launch"
 platform = "darwin"

@@ -1,36 +1,28 @@
-//! Capability contracts owned by the settings domain worker.
+//! Function contracts owned by the settings domain worker.
 
 use serde_json::json;
 
-use crate::domains::registration::catalog::CapabilitySpec;
-use crate::domains::registration::contract::CapabilityContract;
+use crate::domains::registration::contract::FunctionContract;
 use crate::engine::{
-    CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
-    Result as EngineResult, RiskLevel,
+    EffectClass, FunctionDefinition, IdempotencyContract, Result as EngineResult, RiskLevel,
 };
 
-pub(crate) const STREAM_TOPICS: &[&str] = &["settings.changes"];
-
-/// Canonical capability contracts exposed by this domain worker.
-pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+/// Canonical function contracts exposed by this domain worker.
+pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     Ok(vec![
-        CapabilityContract::new("settings::get", "settings", EffectClass::PureRead, RiskLevel::Low, Some("settings.read"))
+        FunctionContract::new("settings::get", "settings", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{},"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
-        CapabilityContract::new("settings::update", "settings", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("settings.write"))
+        FunctionContract::new("settings::update", "settings", EffectClass::ReversibleSideEffect, RiskLevel::High)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"settings":{"additionalProperties":true,"type":"object"},"workspaceId":{"type":"string"}},"required":["settings"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"success":{"type":"boolean"}},"required":["success"],"type":"object"}))
-            .idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
-            .stream_topics(STREAM_TOPICS.to_vec())
+            .idempotency(IdempotencyContract::profile())
             .build()?,
-        CapabilityContract::new("settings::reset_to_defaults", "settings", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("settings.write"))
+        FunctionContract::new("settings::reset_to_defaults", "settings", EffectClass::ReversibleSideEffect, RiskLevel::High)
             .request_schema(json!({"additionalProperties":true,"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
-            .stream_topics(STREAM_TOPICS.to_vec())
+            .idempotency(IdempotencyContract::profile())
             .build()?
     ])
 }

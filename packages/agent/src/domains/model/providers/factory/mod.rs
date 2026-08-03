@@ -60,7 +60,7 @@ impl DefaultProviderFactory {
     /// Project one API-settings snapshot while reusing the process HTTP pool.
     pub(crate) fn with_client(settings: &ApiSettings, http_client: reqwest::Client) -> Self {
         Self {
-            auth_path: auth_path(),
+            auth_path: crate::shared::foundation::paths::auth_path(),
             anthropic: AnthropicSettings {
                 client_id: settings.anthropic.client_id.clone(),
                 system_prompt_prefix: settings.anthropic.system_prompt_prefix.clone(),
@@ -69,7 +69,7 @@ impl DefaultProviderFactory {
             },
             minimax_base_url: settings.minimax.as_ref().map(|m| m.base_url.clone()),
             kimi_base_url: settings.kimi.as_ref().map(|k| k.base_url.clone()),
-            ollama_base_url: settings.ollama.as_ref().map(|o| o.base_url.clone()),
+            ollama_base_url: Some(settings.ollama.base_url.clone()),
             http_client,
         }
     }
@@ -484,11 +484,6 @@ impl ProviderFactory for DefaultProviderFactory {
     async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
         self.create_for_model_with_credential(model, None).await
     }
-}
-
-/// Resolve the auth file path (`~/.tron/profiles/auth.json`).
-fn auth_path() -> PathBuf {
-    crate::domains::settings::profile::auth_path()
 }
 
 #[cfg(test)]

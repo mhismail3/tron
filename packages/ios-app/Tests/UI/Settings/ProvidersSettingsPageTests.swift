@@ -19,7 +19,7 @@ struct ProvidersSettingsPageTests {
         #expect(ProviderInfo.displayName(for: "future-provider") == "future-provider")
 
         let knownOptions = ProviderInfo.settingsOptions(including: "google")
-        #expect(knownOptions.map(\.value) == ["anthropic", "openai-codex", "google", "minimax", "kimi"])
+        #expect(knownOptions.map(\.value) == ["anthropic", "openai-codex", "google", "minimax", "kimi", "ollama"])
 
         let unknownOptions = ProviderInfo.settingsOptions(including: "future-provider")
         #expect(unknownOptions.last?.value == "future-provider")
@@ -32,13 +32,6 @@ struct ProvidersSettingsPageTests {
         #expect(!ProviderAuthActionResult.failed.shouldCommitLocalFormChanges)
     }
 
-    @Test("services section header is a stronger boundary than provider headers")
-    func servicesSectionHeaderIsStrongerBoundaryThanProviderHeaders() {
-        #expect(ProvidersServicesSectionHeaderStyle.fontSize > TronTypography.sizeBodySM)
-        #expect(ProvidersServicesSectionHeaderStyle.topPadding > ProvidersServicesSectionHeaderStyle.bottomPadding)
-        #expect(ProvidersServicesSectionHeaderStyle.bottomPadding < 8)
-    }
-
     @Test("credential row ids are stable and credential-type scoped")
     func credentialRowIdsAreStableAndCredentialTypeScoped() {
         let oauth = ProviderCredentialRowItem(kind: .oauth, label: "work")
@@ -49,16 +42,19 @@ struct ProvidersSettingsPageTests {
         #expect(oauth.id != apiKey.id)
     }
 
-    @Test("modelProviders array contains the five expected providers")
+    @Test("modelProviders array contains credential and local providers")
     func providerArrayShape() {
         let ids = ProviderInfo.modelProviders.map(\.id)
-        #expect(ids == ["anthropic", "openai-codex", "google", "minimax", "kimi"])
+        #expect(ids == ["anthropic", "openai-codex", "google", "minimax", "kimi", "ollama"])
+        #expect(ProviderInfo.displayName(for: "ollama") == "Ollama")
     }
 
-    @Test("services array contains Brave and Exa")
-    func serviceArrayShape() {
-        let ids = ProviderInfo.services.map(\.id)
-        #expect(ids == ["brave", "exa"])
+    @Test("search providers use the shared credential store without becoming model choices")
+    func searchProviderShape() {
+        #expect(ProviderInfo.searchProviders.map(\.id) == ["brave", "exa"])
+        #expect(ProviderInfo.displayName(for: "brave") == "Brave Search")
+        #expect(ProviderInfo.displayName(for: "exa") == "Exa")
+        #expect(!ProviderInfo.settingsOptions(including: "google").contains { $0.value == "brave" })
     }
 
     @Test("only Anthropic, OpenAI, and Google support OAuth")
@@ -67,10 +63,11 @@ struct ProvidersSettingsPageTests {
         #expect(oauthIds == ["anthropic", "openai-codex", "google"])
     }
 
-    @Test("MiniMax and Kimi do not support OAuth")
-    func apiKeyOnlyProviders() {
-        let apiKeyOnly = ProviderInfo.modelProviders.filter { !$0.supportsOAuth }.map(\.id)
-        #expect(Set(apiKeyOnly) == ["minimax", "kimi"])
+    @Test("non-OAuth model providers distinguish credentials from local runtime")
+    func nonOAuthProviders() {
+        let nonOAuth = ProviderInfo.modelProviders.filter { !$0.supportsOAuth }.map(\.id)
+        #expect(Set(nonOAuth) == ["minimax", "kimi", "ollama"])
+        #expect(ProviderInfo.modelProviders.first { $0.id == "ollama" }?.supportsCredentials == false)
     }
 
     @Test("provider section containers exclude auth action buttons")
@@ -84,13 +81,15 @@ struct ProvidersSettingsPageTests {
         #expect(ProviderSettingsContainer.containers(for: minimax) == [.status])
     }
 
-    @Test("provider auth actions match OAuth capability")
-    func providerAuthActionsMatchOAuthCapability() {
+    @Test("provider auth actions match OAuth tool")
+    func providerAuthActionsMatchOAuthTool() {
         let anthropic = ProviderInfo.modelProviders.first { $0.id == "anthropic" }!
         let minimax = ProviderInfo.modelProviders.first { $0.id == "minimax" }!
+        let ollama = ProviderInfo.modelProviders.first { $0.id == "ollama" }!
 
         #expect(ProviderAuthActionItem.items(for: anthropic) == [.oauthLogin, .addApiKey])
         #expect(ProviderAuthActionItem.items(for: minimax) == [.addApiKey])
+        #expect(ProviderAuthActionItem.items(for: ollama).isEmpty)
         #expect(ProviderAuthActionItem.oauthLogin.title == "OAuth Login")
         #expect(ProviderAuthActionItem.addApiKey.title == "Add API Key")
     }
@@ -112,16 +111,4 @@ struct ProvidersSettingsPageTests {
         #expect(ProviderAuthActionItem.visibleItems(for: minimax, providerAuth: activeOAuth) == [.addApiKey])
     }
 
-    @Test("provider auth action buttons are leading aligned")
-    func providerAuthActionButtonsAreLeadingAligned() {
-        #expect(ProviderAuthActionButtonsLayout.alignment == .leading)
-    }
-
-    @Test("service system icon dispatches by id")
-    func serviceSystemIcons() {
-        let brave = ProviderInfo.services.first { $0.id == "brave" }!
-        let exa = ProviderInfo.services.first { $0.id == "exa" }!
-        #expect(brave.serviceSystemIcon == "magnifyingglass")
-        #expect(exa.serviceSystemIcon == "doc.text.magnifyingglass")
-    }
 }

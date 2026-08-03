@@ -193,8 +193,8 @@ pub async fn load_server_auth_with_client(
     credential_override: Option<&super::types::ActiveCredential>,
     client: &reqwest::Client,
 ) -> Result<Option<GoogleAuth>, AuthError> {
-    // Strict parse: a retired `endpoint` field or any other unknown key
-    // surfaces as `AuthError::MalformedProviderAuth` with re-auth guidance.
+    // Strict parsing surfaces every unknown key as
+    // `AuthError::MalformedProviderAuth` with re-auth guidance.
     let gpa = super::storage::try_get_google_provider_auth(auth_path)?;
     let Some(ref gpa) = gpa else {
         return Ok(None);
@@ -387,34 +387,6 @@ struct GoogleTokenResponse {
     expires_in: i64,
 }
 
-/// Save Google OAuth credentials (client ID and secret).
-pub fn save_oauth_credentials(
-    auth_path: &std::path::Path,
-    client_id: &str,
-    client_secret: &str,
-) -> Result<(), AuthError> {
-    let mut gpa = super::storage::get_google_provider_auth(auth_path)?.unwrap_or_default();
-    gpa.client_id = Some(client_id.to_string());
-    gpa.client_secret = Some(client_secret.to_string());
-    super::storage::save_google_provider_auth(auth_path, &gpa)
-}
-
-/// Get stored Google OAuth credentials.
-///
-/// Returns `None` when auth.json is missing, when Google is not configured,
-/// or when either `clientId`/`clientSecret` is absent. A malformed auth file
-/// also surfaces as `None` here — this is a best-effort getter used only by
-/// the OAuth UI flow to pre-populate fields; the top-level load path
-/// (`load_server_auth`) propagates parse errors via `try_get_google_provider_auth`.
-pub fn get_oauth_credentials(auth_path: &std::path::Path) -> Option<(String, String)> {
-    let gpa = super::storage::get_google_provider_auth(auth_path)
-        .ok()
-        .flatten()?;
-    let id = gpa.client_id?;
-    let secret = gpa.client_secret?;
-    Some((id, secret))
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -561,30 +533,21 @@ mod tests {
         );
     }
 
-    /// R3: retired auth.json files with `endpoint: "antigravity"` (from the
-    /// pre-CCA era) must fail to load. The strict `GoogleProviderAuth`
-    /// deserializer rejects unknown fields, and `load_server_auth`
-    /// surfaces that as `AuthError::MalformedProviderAuth` with re-auth
-    /// guidance. The old "silently ignores endpoint and uses CCA anyway"
-    /// behavior is gone.
     #[tokio::test]
-    async fn load_server_auth_rejects_retired_antigravity_auth_json() {
+    async fn load_server_auth_rejects_unknown_provider_field() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        // Write a raw auth.json with the retired antigravity shape. We
-        // can't go through `save_google_provider_auth` because that type
-        // no longer serializes `endpoint`.
         let raw = serde_json::json!({
             "version": 1,
             "providers": {
                 "google": {
-                    "clientId": "retired-client",
-                    "endpoint": "antigravity",
+                    "clientId": "client-id",
+                    "unexpectedField": "value",
                     "accounts": [{
                         "label": "(test)",
                         "oauth": {
-                            "accessToken": "ya29.retired",
+                            "accessToken": "ya29.test",
                             "refreshToken": "ref",
                             "expiresAt": now_ms() + 3_600_000,
                         }
@@ -598,8 +561,8 @@ mod tests {
         let err = load_server_auth(&path).await.unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("endpoint"),
-            "error must name the retired `endpoint` field, got: {msg}"
+            msg.contains("unexpectedField"),
+            "error must name the unknown field, got: {msg}"
         );
         assert!(
             msg.contains("tron auth google"),
@@ -696,17 +659,5 @@ mod tests {
 
         assert!(refreshed);
         assert_eq!(tokens.access_token, "fresh-tok");
-    }
-
-    #[test]
-    fn save_and_get_oauth_credentials() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("auth.json");
-
-        save_oauth_credentials(&path, "my-client-id", "my-secret").unwrap();
-
-        let (id, secret) = get_oauth_credentials(&path).unwrap();
-        assert_eq!(id, "my-client-id");
-        assert_eq!(secret, "my-secret");
     }
 }

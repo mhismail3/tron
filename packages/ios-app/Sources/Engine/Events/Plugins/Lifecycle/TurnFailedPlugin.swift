@@ -41,7 +41,7 @@ enum TurnFailedPlugin: DispatchableEventPlugin {
         let partialContent: String?
 
         var isCancellation: Bool {
-            CanonicalFailurePayload.isTurnCancellation(code: code, category: category)
+            CanonicalFailurePayload.isTurnCancellation(code: code)
         }
     }
 

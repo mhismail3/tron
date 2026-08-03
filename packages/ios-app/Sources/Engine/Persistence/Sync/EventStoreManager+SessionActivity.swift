@@ -7,10 +7,11 @@ extension EventStoreManager {
     /// Mark a session as processing (agent is thinking)
     func setSessionProcessing(_ sessionId: String, isProcessing: Bool) {
         applySessionProcessingState(sessionId, isProcessing: isProcessing)
-        if isProcessing {
-            Task { @MainActor [weak self] in
-                await self?.subscribeToProcessingSession(sessionId)
-            }
+        Task { @MainActor [weak self] in
+            await self?.setProcessingSessionSubscription(
+                sessionId,
+                isProcessing: isProcessing
+            )
         }
     }
 
@@ -19,21 +20,26 @@ extension EventStoreManager {
         isProcessing: Bool
     ) async {
         applySessionProcessingState(sessionId, isProcessing: isProcessing)
-        if isProcessing {
-            await subscribeToProcessingSession(sessionId)
-        }
+        await setProcessingSessionSubscription(sessionId, isProcessing: isProcessing)
     }
 
-    private func subscribeToProcessingSession(_ sessionId: String) async {
+    private func setProcessingSessionSubscription(
+        _ sessionId: String,
+        isProcessing: Bool
+    ) async {
         do {
-            try await engineClient.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
+            try await engineClient.setProcessingSessionEventSubscription(
+                sessionId: sessionId,
+                workspaceId: nil,
+                isActive: isProcessing
+            )
             logger.debug(
-                "Session projection subscribed to live events for processing session \(String(sessionId.prefix(12)))...",
+                "Session projection \(isProcessing ? "retained" : "released") live events for processing session \(String(sessionId.prefix(12)))...",
                 category: .events
             )
         } catch {
             logger.warning(
-                "Session projection could not subscribe to live events for \(String(sessionId.prefix(12)))...: \(error.localizedDescription)",
+                "Session projection could not update live-event ownership for \(String(sessionId.prefix(12)))...: \(error.localizedDescription)",
                 category: .events
             )
         }
@@ -136,11 +142,11 @@ extension EventStoreManager {
                 sessionActivityStreamManager.handleEvent(.thinkingDelta, sessionId: sessionId)
             }
 
-        case CapabilityInvocationStartedPlugin.eventType:
+        case ToolInvocationStartedPlugin.eventType:
             if let sessionId = event.sessionId,
-               let result = event.getResult() as? CapabilityInvocationStartedPlugin.Result {
+               let result = event.getResult() as? ToolInvocationStartedPlugin.Result {
                 sessionActivityStreamManager.handleEvent(
-                    .capabilityInvocationStarted(
+                    .toolInvocationStarted(
                         identity: result.identity,
                         invocationId: result.invocationId,
                         arguments: result.arguments
@@ -149,11 +155,11 @@ extension EventStoreManager {
                 )
             }
 
-        case CapabilityInvocationCompletedPlugin.eventType:
+        case ToolInvocationCompletedPlugin.eventType:
             if let sessionId = event.sessionId,
-               let result = event.getResult() as? CapabilityInvocationCompletedPlugin.Result {
+               let result = event.getResult() as? ToolInvocationCompletedPlugin.Result {
                 sessionActivityStreamManager.handleEvent(
-                    .capabilityInvocationCompleted(
+                    .toolInvocationCompleted(
                         identity: result.identity,
                         invocationId: result.invocationId,
                         success: result.success,
@@ -219,7 +225,16 @@ extension EventStoreManager {
             if let prompt = result.lastUserPrompt { session.lastUserPrompt = prompt }
             if let response = result.lastAssistantResponse { session.lastAssistantResponse = response }
             if let lines = result.activityLines {
-                session.lastActivityLines = lines.map { $0.toActivityLine() }
+                session.lastActivityLines = lines.compactMap { $0.toActivityLine() }
+            }
+            if let labels = result.labels { session.labels = labels }
+            if result.organizationChanged == true {
+                session.organizationGroup = result.organizationGroup
+            }
+            if let isArchived = result.isArchived {
+                session.archivedAt = isArchived
+                    ? (session.archivedAt ?? result.lastActivity ?? session.lastActivityAt)
+                    : nil
             }
         }
         guard let session = sessions.first(where: { $0.id == sessionId }) else { return }
@@ -232,7 +247,7 @@ extension EventStoreManager {
 
     private func handleSessionCreated(_ result: SessionCreatedPlugin.Result) async {
         guard !sessions.contains(where: { $0.id == result.sessionId }) else { return }
-        var session = CachedSession(
+        let session = CachedSession(
             id: result.sessionId,
             workspaceId: result.workingDirectory ?? "",
             rootEventId: nil,
@@ -255,8 +270,6 @@ extension EventStoreManager {
             isFork: result.parentSessionId != nil,
             serverOrigin: engineClient.serverOrigin
         )
-        session.source = result.source
-        session.profile = result.profile
         insertSessionLocally(session, at: 0)
         do {
             try await eventDB.sessions.insert(session)

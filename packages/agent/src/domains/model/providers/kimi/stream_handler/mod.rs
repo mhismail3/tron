@@ -1,15 +1,15 @@
 //! Kimi SSE stream handler — `chat.completion.chunk` → `StreamEvent`.
 //!
 //! Deserializes OpenAI-format SSE chunks and maps them to Tron's `StreamEvent`
-//! types. Handles text, reasoning content, and capability invocation streaming.
+//! types. Handles text, reasoning content, and tool invocation streaming.
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
+use crate::domains::model::protocol::{ToolCallContext, parse_tool_call_arguments};
 use crate::shared::protocol::content::{AssistantContent, ThinkingContentKind};
 use crate::shared::protocol::events::StreamEvent;
-use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
+use crate::shared::protocol::messages::{Provider, TokenUsage, ToolInvocationDraft};
 
 // ─── SSE chunk types ──────────────────────────────────────────────────────
 
@@ -39,24 +39,24 @@ pub struct ChunkDelta {
     pub content: Option<String>,
     /// Reasoning/thinking content (mutually exclusive with `content` per delta).
     pub reasoning_content: Option<String>,
-    /// Capability invocations being constructed.
-    pub capability_invocations: Option<Vec<ChunkCapabilityInvocationDraft>>,
+    /// Tool invocations being constructed.
+    pub tool_invocations: Option<Vec<ChunkToolInvocationDraft>>,
 }
 
-/// A capability invocation delta within a streaming chunk.
+/// A tool invocation delta within a streaming chunk.
 #[derive(Debug, Deserialize)]
-pub struct ChunkCapabilityInvocationDraft {
-    /// Capability invocation index (for multiple concurrent capability invocations).
+pub struct ChunkToolInvocationDraft {
+    /// Tool invocation index (for multiple concurrent tool invocations).
     pub index: u32,
-    /// Capability invocation ID (present in the first delta for this capability invocation).
+    /// Tool invocation ID (present in the first delta for this tool invocation).
     pub id: Option<String>,
     /// Function details.
-    pub function: Option<ChunkCapabilityInvocationDraftFunction>,
+    pub function: Option<ChunkToolInvocationDraftFunction>,
 }
 
-/// Function details within a capability invocation delta.
+/// Function details within a tool invocation delta.
 #[derive(Debug, Deserialize)]
-pub struct ChunkCapabilityInvocationDraftFunction {
+pub struct ChunkToolInvocationDraftFunction {
     /// Function name (present in the first delta).
     pub name: Option<String>,
     /// Partial arguments string.
@@ -102,9 +102,9 @@ pub struct CompletionTokensDetails {
 
 // ─── Stream state ──────────────────────────────────────────────────────────
 
-/// Active capability invocation being accumulated.
+/// Active tool invocation being accumulated.
 #[derive(Debug, Clone)]
-struct ActiveCapabilityInvocationDraft {
+struct ActiveToolInvocationDraft {
     id: String,
     name: String,
     arguments: String,
@@ -121,8 +121,8 @@ pub struct KimiStreamState {
     thinking_text: String,
     /// Accumulated text content.
     text_content: String,
-    /// Active capability invocations by index.
-    active_capabilities: Vec<Option<ActiveCapabilityInvocationDraft>>,
+    /// Active tool invocations by index.
+    active_tools: Vec<Option<ActiveToolInvocationDraft>>,
     /// Token usage from the final chunk.
     usage: Option<TokenUsage>,
     /// Stop reason.
@@ -141,7 +141,7 @@ impl KimiStreamState {
             in_text: false,
             thinking_text: String::new(),
             text_content: String::new(),
-            active_capabilities: Vec::new(),
+            active_tools: Vec::new(),
             usage: None,
             stop_reason: None,
             failed: false,
@@ -236,9 +236,9 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
             });
         }
 
-        // Process capability invocations
-        if let Some(ref capability_invocations) = choice.delta.capability_invocations {
-            // End thinking/text blocks before capability invocations
+        // Process tool invocations
+        if let Some(ref tool_invocations) = choice.delta.tool_invocations {
+            // End thinking/text blocks before tool invocations
             if state.in_thinking {
                 state.in_thinking = false;
                 let thinking = std::mem::take(&mut state.thinking_text);
@@ -263,26 +263,26 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                 });
             }
 
-            for tc in capability_invocations {
+            for tc in tool_invocations {
                 let idx = tc.index as usize;
-                // Ensure active_capabilities is large enough
-                while state.active_capabilities.len() <= idx {
-                    state.active_capabilities.push(None);
+                // Ensure active_tools is large enough
+                while state.active_tools.len() <= idx {
+                    state.active_tools.push(None);
                 }
 
                 if let Some(ref id) = tc.id {
-                    // First delta for this capability invocation — start
+                    // First delta for this tool invocation — start
                     let name = tc
                         .function
                         .as_ref()
                         .and_then(|f| f.name.clone())
                         .unwrap_or_default();
-                    state.active_capabilities[idx] = Some(ActiveCapabilityInvocationDraft {
+                    state.active_tools[idx] = Some(ActiveToolInvocationDraft {
                         id: id.clone(),
                         name: name.clone(),
                         arguments: String::new(),
                     });
-                    events.push(StreamEvent::CapabilityInvocationDraftStart {
+                    events.push(StreamEvent::ToolInvocationDraftStart {
                         invocation_id: id.clone(),
                         name,
                     });
@@ -292,10 +292,10 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                 if let Some(ref func) = tc.function
                     && let Some(ref args) = func.arguments
                     && !args.is_empty()
-                    && let Some(ref mut active) = state.active_capabilities[idx]
+                    && let Some(ref mut active) = state.active_tools[idx]
                 {
                     active.arguments.push_str(args);
-                    events.push(StreamEvent::CapabilityInvocationDraftDelta {
+                    events.push(StreamEvent::ToolInvocationDraftDelta {
                         invocation_id: active.id.clone(),
                         arguments_delta: args.clone(),
                     });
@@ -339,7 +339,7 @@ fn nonzero(value: u64) -> Option<u64> {
 fn map_finish_reason(reason: &str) -> String {
     match reason {
         "stop" => "end_turn".into(),
-        "capability_invocations" => "capability_invocation".into(),
+        "tool_invocations" => "tool_invocation".into(),
         "length" => "max_tokens".into(),
         "content_filter" => "content_filter".into(),
         other => other.into(),
@@ -372,16 +372,16 @@ fn finalize_open_blocks(state: &mut KimiStreamState, events: &mut Vec<StreamEven
         });
     }
 
-    // End any open capability invocations
-    for slot in &mut state.active_capabilities {
+    // End any open tool invocations
+    for slot in &mut state.active_tools {
         if let Some(active) = slot.take() {
-            let ctx = CapabilityCallContext {
+            let ctx = ToolCallContext {
                 invocation_id: Some(active.id.clone()),
-                model_primitive_name: Some(active.name.clone()),
+                tool_name: Some(active.name.clone()),
                 provider: Some("kimi".into()),
             };
             let arguments: Map<String, Value> =
-                match parse_capability_call_arguments(Some(&active.arguments), Some(&ctx)) {
+                match parse_tool_call_arguments(Some(&active.arguments), Some(&ctx)) {
                     Ok(arguments) => arguments,
                     Err(error) => {
                         state.failed = true;
@@ -391,20 +391,14 @@ fn finalize_open_blocks(state: &mut KimiStreamState, events: &mut Vec<StreamEven
                         continue;
                     }
                 };
-            state
-                .content_blocks
-                .push(AssistantContent::CapabilityInvocation {
-                    id: active.id.clone(),
-                    name: active.name.clone(),
-                    arguments: arguments.clone(),
-                    thought_signature: None,
-                });
-            events.push(StreamEvent::CapabilityInvocationDraftEnd {
-                capability_invocation: CapabilityInvocationDraft::new(
-                    active.id,
-                    active.name,
-                    arguments,
-                ),
+            state.content_blocks.push(AssistantContent::ToolInvocation {
+                id: active.id.clone(),
+                name: active.name.clone(),
+                arguments: arguments.clone(),
+                thought_signature: None,
+            });
+            events.push(StreamEvent::ToolInvocationDraftEnd {
+                tool_invocation: ToolInvocationDraft::new(active.id, active.name, arguments),
             });
         }
     }

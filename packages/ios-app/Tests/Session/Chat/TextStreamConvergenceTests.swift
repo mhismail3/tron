@@ -105,36 +105,36 @@ final class TextStreamConvergenceTests: XCTestCase {
 
     // MARK: - Server payload shape
 
-    func testServerExtractsOnlyTextBlocksSkippingCapabilityInvocation() {
+    func testServerExtractsOnlyTextBlocksSkippingToolInvocation() {
         // When the server emits message.assistant with interleaved
-        // text + capability_invocation blocks, textContent returns only the text.
-        // Tool_use blocks render via capability.invocation.started events (handled live by
+        // text + tool_invocation blocks, textContent returns only the text.
+        // Tool_use blocks render via tool.invocation.started events (handled live by
         // a different plugin); they MUST NOT contribute to the text
         // message otherwise the live path (which does NOT include
-        // capability_invocation in receivedText) would diverge.
+        // tool_invocation in receivedText) would diverge.
         let payload: [String: AnyCodable] = [
             "content": AnyCodable([
-                ["type": "text", "text": "Before capability."],
-                ["type": "capability_invocation", "id": "t1", "name": "execute", "input": ["cmd": "ls"]],
-                ["type": "text", "text": "After capability."],
+                ["type": "text", "text": "Before tool."],
+                ["type": "tool_invocation", "id": "t1", "name": "process_run", "input": ["cmd": "ls"]],
+                ["type": "text", "text": "After tool."],
             ]),
             "turn": AnyCodable(1),
             "model": AnyCodable("claude-sonnet-4"),
-            "stopReason": AnyCodable("capability_invocation")
+            "stopReason": AnyCodable("tool_invocation")
         ]
         let server = AssistantMessagePayload(from: payload)?.textContent
         // Text blocks join with newline separator, then trim.
-        XCTAssertEqual(server, "Before capability.\nAfter capability.")
+        XCTAssertEqual(server, "Before tool.\nAfter tool.")
     }
 
     func testServerReturnsNilWhenContentHasNoTextBlocks() {
         let payload: [String: AnyCodable] = [
             "content": AnyCodable([
-                ["type": "capability_invocation", "id": "t1", "name": "execute", "input": [:] as [String: String]]
+                ["type": "tool_invocation", "id": "t1", "name": "process_run", "input": [:] as [String: String]]
             ]),
             "turn": AnyCodable(1),
             "model": AnyCodable("claude-sonnet-4"),
-            "stopReason": AnyCodable("capability_invocation")
+            "stopReason": AnyCodable("tool_invocation")
         ]
         XCTAssertNil(AssistantMessagePayload(from: payload)?.textContent)
     }

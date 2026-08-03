@@ -156,16 +156,356 @@ struct SessionInfoTests {
         let info = makeSessionInfo(parentSessionId: nil)
         #expect(info.isFork == false)
     }
+
+    @Test("canonical labels and group decode without an organizer shadow model")
+    func organizationProjectionDecodes() throws {
+        let data = Data("""
+        {
+          "sessionId":"sess-organized",
+          "model":"model",
+          "createdAt":"2026-07-27T00:00:00Z",
+          "messageCount":2,
+          "isActive":false,
+          "labels":["Work","Follow Up"],
+          "organizationGroup":"Projects"
+        }
+        """.utf8)
+        let info = try JSONDecoder().decode(SessionInfo.self, from: data)
+        #expect(info.labels == ["Work", "Follow Up"])
+        #expect(info.organizationGroup == "Projects")
+    }
 }
 
 @Suite("SessionCreateParams encoding")
 struct SessionCreateParamsEncodingTests {
-    @Test("profile encodes when supplied")
-    func profileEncodes() {
-        let params = SessionCreateParams(workingDirectory: "/tmp", profile: "local")
+    @Test("create encodes exactly the strict server-owned fields")
+    func strictCreateSchemaEncodes() {
+        let params = SessionCreateParams(
+            workingDirectory: "/tmp",
+            model: "gpt-5.4",
+            title: "Worker proof"
+        )
         let data = try! JSONEncoder().encode(params)
         let json = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
-        #expect(json["profile"] as? String == "local")
         #expect(json["workingDirectory"] as? String == "/tmp")
+        #expect(json["model"] as? String == "gpt-5.4")
+        #expect(json["title"] as? String == "Worker proof")
+        #expect(Set(json.keys) == Set(["workingDirectory", "model", "title"]))
+    }
+}
+
+@Suite("Session context audit decoding")
+struct SessionContextAuditDecodingTests {
+    @Test("V3 detail decodes automatic context, sources, and message event provenance")
+    func v3DetailDecodes() throws {
+        let data = Data("""
+        {
+          "eventId":"event-request-1",
+          "sequence":42,
+          "timestamp":"2026-07-27T12:00:00Z",
+          "format":"tron.model_provider_request.v3",
+          "contextManifest":{
+            "systemContributions":[{
+              "kind":"continuity_context",
+              "label":"Continuity context",
+              "content":"Remember the device gate.",
+              "byteCount":25,
+              "sha256":"sha256:system",
+              "provenance":{"workerId":"continuity-curator"}
+            }],
+            "messages":[{
+              "ordinal":0,
+              "role":"user",
+              "contentKinds":["text"],
+              "byteCount":12,
+              "sha256":"sha256:message",
+              "preview":"Run acceptance",
+              "projection":"provider_visible",
+              "sourceKind":"durable_event",
+              "sourceEventIds":["event-user-1"]
+            }],
+            "toolSurface":{"availableWorkers":[]},
+            "automaticContext":[{
+              "kind":"continuity",
+              "outcome":"injected",
+              "mechanism":"engine_hook",
+              "deliveryChannel":"reference",
+              "narrative":"Remember the device gate.",
+              "workerId":"continuity-curator",
+              "workerVersion":"version-2",
+              "invocationId":"invocation-2",
+              "sources":[{
+                "memoryId":"memory-1",
+                "revision":2,
+                "scope":"project"
+              }]
+            }],
+            "environment":{"sha256":"sha256:environment"},
+            "cacheLayout":{
+              "stableInstructionBytes":1024,
+              "stableInstructionSha256":"sha256:instructions",
+              "fixedToolCount":11,
+              "fixedToolSchemaBytes":4096,
+              "fixedToolPrefixSha256":"sha256:fixed",
+              "dynamicToolCount":3,
+              "dynamicToolSchemaBytes":2048,
+              "dynamicToolsSha256":"sha256:dynamic",
+              "requestContextBytes":512,
+              "requestContextSha256":"sha256:reference"
+            },
+            "systemPromptSha256":"sha256:system",
+            "messagesSha256":"sha256:messages",
+            "toolsSha256":"sha256:tools",
+            "contextSha256":"sha256:context"
+          },
+          "providerAdditions":[{
+            "kind":"provider_system_prefix",
+            "label":"Anthropic provider instructions",
+            "content":"Provider-owned prefix",
+            "byteCount":21,
+            "sha256":"sha256:provider",
+            "provenance":{"owner":"anthropic"}
+          }],
+          "providerAudit":{"providerRequest":{"kind":"exact_provider_envelope"}},
+          "provenanceAvailability":"complete"
+        }
+        """.utf8)
+
+        let detail = try JSONDecoder().decode(SessionContextRequestDetailDTO.self, from: data)
+
+        #expect(detail.contextManifest?.automaticContext.first?.sources.count == 1)
+        #expect(detail.contextManifest?.automaticContext.first?.deliveryChannel == "reference")
+        #expect(detail.contextManifest?.cacheLayout?.fixedToolCount == 11)
+        #expect(detail.contextManifest?.cacheLayout?.requestContextBytes == 512)
+        #expect(detail.contextManifest?.messages.first?.sourceKind == "durable_event")
+        #expect(detail.contextManifest?.messages.first?.sourceEventIds == ["event-user-1"])
+        #expect(detail.providerAdditions?.first?.kind == "provider_system_prefix")
+        #expect(detail.provenanceAvailability == "complete")
+    }
+
+    @Test("V3 manifest accepts omitted empty provenance arrays")
+    func v3ManifestAcceptsOmittedEmptyProvenance() throws {
+        let data = Data("""
+        {
+          "eventId":"event-request-empty-provenance",
+          "sequence":43,
+          "timestamp":"2026-07-28T07:19:34Z",
+          "format":"tron.model_provider_request.v3",
+          "contextManifest":{
+            "systemContributions":[{
+              "kind":"base_instructions",
+              "label":"Agent instructions",
+              "content":"Follow the request.",
+              "byteCount":19,
+              "sha256":"sha256:system"
+            }],
+            "messages":[{
+              "ordinal":0,
+              "role":"user",
+              "contentKinds":["text"],
+              "byteCount":27,
+              "sha256":"sha256:message",
+              "preview":"Tell me what you can do",
+              "projection":"provider_visible",
+              "sourceKind":"generated"
+            }],
+            "toolSurface":{"fixedTools":[],"availableWorkers":[]},
+            "automaticContext":[{
+              "kind":"continuity",
+              "outcome":"empty",
+              "mechanism":"continuity_hook",
+              "deliveryChannel":"none"
+            }],
+            "environment":{"sha256":"sha256:environment"},
+            "systemPromptSha256":"sha256:system",
+            "messagesSha256":"sha256:messages",
+            "toolsSha256":"sha256:tools",
+            "contextSha256":"sha256:context"
+          },
+          "providerAudit":{
+            "messageCount":1,
+            "toolCount":11,
+            "providerRequest":{"kind":"exact_provider_envelope"}
+          },
+          "provenanceAvailability":"complete"
+        }
+        """.utf8)
+
+        let detail = try JSONDecoder().decode(SessionContextRequestDetailDTO.self, from: data)
+
+        #expect(detail.contextManifest?.systemContributions.count == 1)
+        #expect(detail.contextManifest?.messages.first?.sourceEventIds == [])
+        #expect(detail.contextManifest?.automaticContext.first?.sources == [])
+        #expect(detail.contextManifest?.agentDeliveries == [])
+    }
+
+    @Test("V4 detail decodes exact agent delivery evidence")
+    func v4AgentDeliveryDecodes() throws {
+        let data = Data("""
+        {
+          "eventId":"event-request-delivery",
+          "sequence":44,
+          "timestamp":"2026-07-28T07:20:00Z",
+          "format":"tron.model_provider_request.v4",
+          "contextManifest":{
+            "systemContributions":[],
+            "messages":[{
+              "ordinal":0,
+              "role":"user",
+              "contentKinds":["text"],
+              "byteCount":20,
+              "sha256":"sha256:message",
+              "preview":"Durable user history",
+              "projection":"provider_visible",
+              "sourceKind":"durable_event",
+              "sourceEventIds":["event-user"]
+            }],
+            "toolSurface":{},
+            "automaticContext":[],
+            "agentDeliveries":[{
+              "deliveryId":"delivery-one",
+              "sourceKind":"worker_result",
+              "intent":"information",
+              "wakePolicy":"wake",
+              "boundary":"next_turn",
+              "redelivery":true,
+              "provenance":{
+                "sourceInvocationId":"worker-run-one",
+                "sourceTraceId":"trace-one"
+              },
+              "content":"The detached worker completed."
+            }],
+            "environment":{"sha256":"sha256:environment"},
+            "systemPromptSha256":"sha256:system",
+            "messagesSha256":"sha256:messages",
+            "toolsSha256":"sha256:tools",
+            "contextSha256":"sha256:context"
+          },
+          "providerAudit":{"providerRequest":{"kind":"exact_provider_envelope"}},
+          "provenanceAvailability":"complete"
+        }
+        """.utf8)
+
+        let detail = try JSONDecoder().decode(SessionContextRequestDetailDTO.self, from: data)
+        let delivery = try #require(detail.contextManifest?.agentDeliveries.first)
+
+        #expect(detail.format == "tron.model_provider_request.v4")
+        #expect(delivery.deliveryId == "delivery-one")
+        #expect(delivery.sourceKind == "worker_result")
+        #expect(delivery.redelivery)
+        #expect(delivery.content == "The detached worker completed.")
+        let provenance = try #require(delivery.provenance.value as? [String: Any])
+        #expect(provenance["sourceInvocationId"] as? String == "worker-run-one")
+    }
+
+    @Test("Agent update summaries decode their optional worker identity")
+    func agentUpdateSummaryDecodes() throws {
+        let data = Data("""
+        {
+          "updates":[{
+            "deliveryId":"delivery-one",
+            "status":"pending",
+            "sourceKind":"worker_result",
+            "sourceWorkerId":"research-curator",
+            "sourceWorkerName":"Research Curator",
+            "intent":"information",
+            "sourceSessionId":"session-one",
+            "sourceInvocationId":"worker-run-one",
+            "sourceTraceId":"trace-one",
+            "resultInvocationId":"worker-run-one",
+            "wakePolicy":"passive",
+            "boundary":"next_turn",
+            "causalDepth":1,
+            "redelivery":false,
+            "leaseCount":0,
+            "wakeAttempts":0,
+            "lastError":null,
+            "preview":"Three findings are ready.",
+            "createdAt":"2026-07-28T07:20:00Z",
+            "preparedRunId":null,
+            "preparedTurn":null,
+            "observedAt":null,
+            "cancelledAt":null,
+            "expiresAt":null
+          }],
+          "waits":[]
+        }
+        """.utf8)
+
+        let result = try JSONDecoder().decode(SessionAgentUpdatesResultDTO.self, from: data)
+        let update = try #require(result.updates.first)
+
+        #expect(update.sourceWorkerId == "research-curator")
+        #expect(update.sourceWorkerName == "Research Curator")
+        #expect(update.preview == "Three findings are ready.")
+    }
+
+    @Test("Legacy summaries remain readable without a manifest")
+    func legacySummaryDecodes() throws {
+        let data = Data("""
+        {
+          "requests":[{
+            "eventId":"legacy-event",
+            "sequence":7,
+            "timestamp":"2026-07-20T12:00:00Z",
+            "format":"tron.model_provider_request.v2",
+            "requestClassification":"legacy",
+            "messageCount":3,
+            "toolCount":4,
+            "automaticContextCount":0,
+            "manifestAvailable":false,
+            "provenanceAvailability":"legacy_unavailable"
+          }],
+          "hasMore":false,
+          "nextBeforeSequence":null
+        }
+        """.utf8)
+
+        let page = try JSONDecoder().decode(SessionContextRequestsResultDTO.self, from: data)
+
+        #expect(page.requests.first?.manifestAvailable == false)
+        #expect(page.requests.first?.provenanceAvailability == "legacy_unavailable")
+    }
+
+    @Test("Worker architecture remains a dynamic 26-node profile projection")
+    func dynamicWorkerArchitectureDecodes() throws {
+        let nodes: [[String: Any]] = (0..<26).map { index in
+            [
+                "workerId": "worker-\(index)",
+                "name": "Worker \(index)",
+                "description": "Owns domain \(index)",
+                "activeVersion": "version-\(index)",
+                "health": "healthy",
+                "modelExposure": index < 18 ? "direct" : "internal",
+                "runnerKind": index < 14 ? "agent" : "command",
+                "runnerModel": index < 14 ? "gpt-test" : NSNull(),
+                "engineHooks": index == 0 ? ["context_summary"] : [],
+                "clientActions": index == 1 ? ["speech_transcription"] : [],
+                "clientDeliveries": index == 2 ? ["notification_delivery"] : [],
+                "triggerKinds": ["manual"],
+                "calls": index == 3
+                    ? [[
+                        "kind": "agent_tool",
+                        "label": "worker_4",
+                        "targetWorkerId": "worker-4",
+                        "responseOwner": NSNull(),
+                    ]]
+                    : [],
+                "presentation": [
+                    "suiteId": index == 3 ? "research" : NSNull(),
+                    "componentRole": NSNull(),
+                    "primary": index == 3,
+                ],
+                "provenance": [],
+            ]
+        }
+        let data = try JSONSerialization.data(withJSONObject: nodes)
+
+        let decoded = try JSONDecoder().decode([WorkerArchitectureNodeDTO].self, from: data)
+
+        #expect(decoded.count == 26)
+        #expect(decoded.filter { $0.modelExposure == "direct" }.count == 18)
+        #expect(decoded.filter { $0.runnerKind == "agent" }.count == 14)
+        #expect(decoded[3].calls.first?.targetWorkerId == "worker-4")
     }
 }

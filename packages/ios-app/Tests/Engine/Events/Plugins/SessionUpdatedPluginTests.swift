@@ -13,7 +13,11 @@ final class SessionUpdatedPluginTests: XCTestCase {
             "messageCount": 2,
             "inputTokens": 5449,
             "outputTokens": 78,
-            "cost": 0.0
+            "cost": 0.0,
+            "labels": ["Work", "Completed"],
+            "organizationGroup": null,
+            "organizationChanged": true,
+            "isArchived": false
           }
         }
         """.utf8))
@@ -27,5 +31,9 @@ final class SessionUpdatedPluginTests: XCTestCase {
         XCTAssertEqual(result?.inputTokens, 5449)
         XCTAssertEqual(result?.outputTokens, 78)
         XCTAssertEqual(result?.cost, 0)
+        XCTAssertEqual(result?.labels, ["Work", "Completed"])
+        XCTAssertNil(result?.organizationGroup)
+        XCTAssertEqual(result?.organizationChanged, true)
+        XCTAssertEqual(result?.isArchived, false)
     }
 }

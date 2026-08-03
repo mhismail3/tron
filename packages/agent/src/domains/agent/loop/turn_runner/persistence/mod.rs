@@ -3,14 +3,15 @@ use std::sync::atomic::AtomicI64;
 
 use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::EventType;
-use crate::domains::session::event_store::types::payloads::capability_invocation::{
-    CapabilityInvocationCompletedPayload, CapabilityInvocationStartedPayload,
+use crate::domains::session::event_store::types::payloads::tool_invocation::{
+    ToolInvocationCompletedPayload, ToolInvocationStartedPayload,
 };
+use crate::shared::foundation::redaction::redact_sensitive_json;
 use crate::shared::protocol::events::{
-    AssistantMessage, BaseEvent, CapabilityInvocationSummary, TronEvent,
+    AssistantMessage, BaseEvent, ToolInvocationSummary, TronEvent,
 };
 use crate::shared::protocol::messages::{Provider, TokenUsage};
-use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
+use crate::shared::protocol::model_tools::{ToolResult, ToolResultBody};
 use serde_json::{Value, json};
 use tracing::{error, warn};
 
@@ -21,10 +22,7 @@ use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister
 use crate::domains::agent::r#loop::pipeline::persistence;
 use crate::domains::agent::r#loop::types::StreamResult;
 use crate::engine::{InvocationId, TraceId};
-use crate::shared::protocol::model_audit::{
-    ModelProviderReasoningStatusEvidence, ModelProviderReasoningStatusPhase,
-    ModelProviderRequestAudit,
-};
+use crate::shared::protocol::model_audit::ModelProviderRequestAudit;
 
 fn base_event(
     session_id: &str,
@@ -54,69 +52,51 @@ fn base_event_from_row(row: &EventRow, payload: &Value) -> BaseEvent {
 }
 
 fn started_event_from_row(row: &EventRow, payload_value: &Value) -> Option<TronEvent> {
-    let payload: CapabilityInvocationStartedPayload = serde_json::from_value(payload_value.clone())
+    let payload: ToolInvocationStartedPayload = serde_json::from_value(payload_value.clone())
         .inspect_err(|error| {
             warn!(
                 event_id = %row.id,
                 error = %error,
-                "failed to decode capability start row for live broadcast"
+                "failed to decode tool start row for live broadcast"
             );
         })
         .ok()?;
-    let model_primitive_name = payload
-        .capability_identity
-        .model_primitive_name
-        .clone()
-        .unwrap_or_else(|| payload.name.clone());
     let arguments = payload.arguments.as_object().cloned();
 
-    Some(TronEvent::CapabilityInvocationStarted {
+    Some(TronEvent::ToolInvocationStarted {
         base: base_event_from_row(row, &payload_value),
         invocation_id: payload.invocation_id,
-        model_primitive_name,
+        tool_name: payload.tool_name,
         arguments,
-        capability_identity: payload.capability_identity,
+        tool_identity: payload.tool_identity,
     })
 }
 
 fn completed_event_from_row(row: &EventRow, payload_value: &Value) -> Option<TronEvent> {
-    let payload: CapabilityInvocationCompletedPayload =
-        serde_json::from_value(payload_value.clone())
-            .inspect_err(|error| {
-                warn!(
-                    event_id = %row.id,
-                    error = %error,
-                    "failed to decode capability completion row for live broadcast"
-                );
-            })
-            .ok()?;
-    let model_primitive_name = payload
-        .capability_identity
-        .model_primitive_name
-        .clone()
-        .unwrap_or_else(|| {
-            payload_value
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("execute")
-                .to_owned()
-        });
+    let payload: ToolInvocationCompletedPayload = serde_json::from_value(payload_value.clone())
+        .inspect_err(|error| {
+            warn!(
+                event_id = %row.id,
+                error = %error,
+                "failed to decode tool completion row for live broadcast"
+            );
+        })
+        .ok()?;
     let duration = u64::try_from(payload.duration).unwrap_or(0);
-    let result = CapabilityResult {
-        content: CapabilityResultBody::Text(payload.content),
+    let result = ToolResult {
+        content: ToolResultBody::Text(payload.content),
         details: payload.details,
         is_error: Some(payload.is_error),
-        stop_turn: None,
     };
 
-    Some(TronEvent::CapabilityInvocationCompleted {
+    Some(TronEvent::ToolInvocationCompleted {
         base: base_event_from_row(row, &payload_value),
         invocation_id: payload.invocation_id,
-        model_primitive_name,
+        tool_name: payload.tool_name,
         duration,
         is_error: Some(payload.is_error),
         result: Some(result),
-        capability_identity: payload.capability_identity,
+        tool_identity: payload.tool_identity,
     })
 }
 
@@ -129,13 +109,13 @@ fn emit_maybe_sequenced(emitter: &EventEmitter, event: TronEvent, counter: Optio
     }
 }
 
-/// Broadcast a persisted capability start row with the row's durable sequence.
+/// Broadcast a persisted tool start row with the row's durable sequence.
 ///
 /// INVARIANT: start broadcasts are row-backed. Callers must first persist every
 /// start in a requested execution batch, then broadcast these rows before any
 /// child execution future is polled so live clients see all chips before the
 /// first completion can arrive.
-pub(super) fn emit_persisted_capability_invocation_started(
+pub(super) fn emit_persisted_tool_invocation_started(
     emitter: &Arc<EventEmitter>,
     row: &EventRow,
     payload: &Value,
@@ -146,12 +126,12 @@ pub(super) fn emit_persisted_capability_invocation_started(
     let _ = emitter.emit(event);
 }
 
-/// Broadcast a persisted capability completion row with the row's durable sequence.
+/// Broadcast a persisted tool completion row with the row's durable sequence.
 ///
 /// INVARIANT: the executor returns a result only. The turn runner owns durable
 /// completion persistence and broadcasts this row-backed event only after the
 /// write succeeds, keeping live lifecycle order identical to reconstruction.
-pub(crate) fn emit_persisted_capability_invocation_completed(
+pub(crate) fn emit_persisted_tool_invocation_completed(
     emitter: &Arc<EventEmitter>,
     row: &EventRow,
     payload: &Value,
@@ -177,15 +157,20 @@ pub(super) fn emit_turn_start(
     persister: Option<&EventPersister>,
     session_id: &str,
     turn: u32,
+    agent_delivery_continuation: Option<Value>,
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) -> Result<(), RuntimeError> {
     if let Some(persister) = persister {
+        let mut payload = json!({ "turn": turn });
+        if let Some(continuation) = agent_delivery_continuation.as_ref() {
+            payload["agentDeliveryContinuation"] = continuation.clone();
+        }
         let row = match persister.append_with_runtime_sequence(
             session_id,
             EventType::StreamTurnStart,
-            json!({ "turn": turn }),
+            payload,
             sequence_counter,
         ) {
             Ok(row) => row,
@@ -198,6 +183,7 @@ pub(super) fn emit_turn_start(
             base: base_event(session_id, trace_id, parent_invocation_id)
                 .with_sequence(row.sequence),
             turn,
+            agent_delivery_continuation,
         });
         return Ok(());
     }
@@ -206,6 +192,7 @@ pub(super) fn emit_turn_start(
         TronEvent::TurnStart {
             base: base_event(session_id, trace_id, parent_invocation_id),
             turn,
+            agent_delivery_continuation,
         },
         sequence_counter,
     );
@@ -341,6 +328,7 @@ pub(super) fn emit_response_complete(
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
+    agent_delivery_continuation: Option<Value>,
 ) {
     let response_token_usage = stream_result.token_usage.as_ref().map(|u| TokenUsage {
         input_tokens: u.input_tokens,
@@ -364,10 +352,11 @@ pub(super) fn emit_response_complete(
             turn,
             stop_reason: stream_result.stop_reason.clone(),
             token_usage: response_token_usage,
-            has_capability_invocations: !stream_result.capability_invocations.is_empty(),
-            capability_invocation_count: stream_result.capability_invocations.len() as u32,
+            has_tool_invocations: !stream_result.tool_invocations.is_empty(),
+            tool_invocation_count: stream_result.tool_invocations.len() as u32,
             token_record: token_record_json,
             model: Some(model_name.to_owned()),
+            agent_delivery_continuation,
         },
         sequence_counter,
     );
@@ -376,6 +365,7 @@ pub(super) fn emit_response_complete(
 pub(super) fn add_assistant_message_to_context(
     context_manager: &mut ContextManager,
     stream_result: &StreamResult,
+    event_id: Option<String>,
 ) -> bool {
     let has_thinking = stream_result.message.content.iter().any(|c| {
         matches!(
@@ -389,7 +379,7 @@ pub(super) fn add_assistant_message_to_context(
         content_types = ?stream_result.message.content.iter().map(|c| match c {
             crate::shared::protocol::content::AssistantContent::Text { .. } => "Text",
             crate::shared::protocol::content::AssistantContent::Thinking { .. } => "Thinking",
-            crate::shared::protocol::content::AssistantContent::CapabilityInvocation { .. } => "CapabilityInvocation",
+            crate::shared::protocol::content::AssistantContent::ToolInvocation { .. } => "ToolInvocation",
         }).collect::<Vec<_>>(),
         "persistence: add_assistant_message_to_context"
     );
@@ -417,13 +407,23 @@ pub(super) fn add_assistant_message_to_context(
             }
         };
 
-    context_manager.add_message(crate::shared::protocol::messages::Message::Assistant {
-        content: stream_result.message.content.clone(),
-        usage: stream_result.token_usage.clone().map(Box::new),
-        cost: None,
-        stop_reason: stop_reason_for_context,
-        thinking: thinking_text,
-    });
+    context_manager.add_message_with_source(
+        crate::shared::protocol::messages::Message::Assistant {
+            content: stream_result.message.content.clone(),
+            usage: stream_result.token_usage.clone().map(Box::new),
+            cost: None,
+            stop_reason: stop_reason_for_context,
+            thinking: thinking_text,
+        },
+        event_id.map_or_else(
+            crate::domains::agent::context::message_store::MessageAuditSource::generated,
+            |event_id| {
+                crate::domains::agent::context::message_store::MessageAuditSource::events(vec![
+                    event_id,
+                ])
+            },
+        ),
+    );
 
     has_thinking
 }
@@ -437,22 +437,7 @@ pub(super) fn build_completed_assistant_payload(
     provider_type: Provider,
     token_record_json: Option<&Value>,
     cost: Option<f64>,
-    requested_reasoning_level: Option<String>,
-    trace_id: Option<String>,
-    parent_invocation_id: Option<String>,
 ) -> Value {
-    let reasoning_status_evidence = ModelProviderReasoningStatusEvidence::response(
-        ModelProviderReasoningStatusPhase::MessageAssistant,
-        provider_type,
-        provider_type.as_str(),
-        model,
-        requested_reasoning_level,
-        &stream_result.stop_reason,
-        has_thinking,
-        stream_result.token_usage.as_ref(),
-        trace_id,
-        parent_invocation_id,
-    );
     let mut payload = json!({
         "content": persistence::build_content_json(&stream_result.message.content),
         "turn": turn,
@@ -461,7 +446,6 @@ pub(super) fn build_completed_assistant_payload(
         "stopReason": &stream_result.stop_reason,
         "hasThinking": has_thinking,
         "providerType": provider_type.as_str(),
-        "reasoningStatusEvidence": reasoning_status_evidence,
     });
     if let Some(token_usage) = stream_result.token_usage.as_ref() {
         payload["tokenUsage"] = persistence::build_token_usage_json(token_usage);
@@ -486,9 +470,9 @@ pub(super) fn persist_completed_assistant_message(
     session_id: &str,
     payload: Value,
     sequence_counter: Option<&AtomicI64>,
-) -> Result<(), crate::domains::agent::r#loop::errors::RuntimeError> {
+) -> Result<Option<EventRow>, crate::domains::agent::r#loop::errors::RuntimeError> {
     let Some(persister) = persister else {
-        return Ok(());
+        return Ok(None);
     };
     persister
         .append_with_runtime_sequence(
@@ -497,7 +481,7 @@ pub(super) fn persist_completed_assistant_message(
             payload,
             sequence_counter,
         )
-        .map(|_| ())
+        .map(Some)
         .inspect_err(|error| {
             error!(
                 session_id,
@@ -522,8 +506,6 @@ pub(super) fn emit_turn_end(
     cost: Option<f64>,
     context_limit: u64,
     model_name: &str,
-    provider_type: Provider,
-    requested_reasoning_level: Option<&str>,
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
@@ -544,28 +526,10 @@ pub(super) fn emit_turn_end(
     });
 
     if let Some(persister) = persister {
-        let reasoning_status_evidence = ModelProviderReasoningStatusEvidence::response(
-            ModelProviderReasoningStatusPhase::TurnEnd,
-            provider_type,
-            provider_type.as_str(),
-            model_name,
-            requested_reasoning_level.map(str::to_owned),
-            &stream_result.stop_reason,
-            stream_result.message.content.iter().any(|content| {
-                matches!(
-                    content,
-                    crate::shared::protocol::content::AssistantContent::Thinking { .. }
-                )
-            }),
-            stream_result.token_usage.as_ref(),
-            trace_id.map(|id| id.as_str().to_owned()),
-            parent_invocation_id.map(|id| id.as_str().to_owned()),
-        );
         let mut payload = json!({
             "turn": turn,
             "stopReason": &stream_result.stop_reason,
             "contextLimit": context_limit,
-            "reasoningStatusEvidence": reasoning_status_evidence,
         });
         if let Some(token_usage) = stream_result.token_usage.as_ref() {
             payload["tokenUsage"] = persistence::build_token_usage_json(token_usage);
@@ -622,28 +586,31 @@ pub(super) fn emit_turn_end(
     Ok(())
 }
 
-pub(super) fn emit_capability_invocation_batch(
+pub(super) fn emit_tool_invocation_batch(
     emitter: &Arc<EventEmitter>,
     session_id: &str,
-    capability_invocations: &[crate::shared::protocol::messages::CapabilityInvocationDraft],
+    tool_invocations: &[crate::shared::protocol::messages::ToolInvocationDraft],
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) {
-    let summaries: Vec<CapabilityInvocationSummary> = capability_invocations
+    let summaries: Vec<ToolInvocationSummary> = tool_invocations
         .iter()
-        .map(|capability_invocation| CapabilityInvocationSummary {
-            id: capability_invocation.id.clone(),
-            name: capability_invocation.name.clone(),
-            arguments: capability_invocation.arguments.clone(),
+        .map(|tool_invocation| ToolInvocationSummary {
+            id: tool_invocation.id.clone(),
+            name: tool_invocation.name.clone(),
+            arguments: redact_sensitive_json(&Value::Object(tool_invocation.arguments.clone()))
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
         })
         .collect();
 
     emit_maybe_sequenced(
         emitter,
-        TronEvent::CapabilityInvocationBatch {
+        TronEvent::ToolInvocationBatch {
             base: base_event(session_id, trace_id, parent_invocation_id),
-            capability_invocations: summaries,
+            tool_invocations: summaries,
         },
         sequence_counter,
     );

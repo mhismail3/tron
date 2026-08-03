@@ -8,7 +8,7 @@ use super::EventStore;
 const MAX_CLIENT_LOG_INGEST_ENTRIES: usize = 10_000;
 const MAX_CLIENT_LOG_MESSAGE_BYTES: usize = 8 * 1024;
 
-/// A single client log entry accepted by the logs capability.
+/// A single client log entry accepted by the logs tool.
 #[derive(Debug, Clone, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientLogEntry {
@@ -308,7 +308,7 @@ mod tests {
         .expect("pool");
         {
             let conn = pool.get().expect("conn");
-            crate::domains::session::event_store::run_migrations(&conn).expect("migrate");
+            crate::domains::session::event_store::ensure_schema(&conn).expect("schema");
         }
         EventStore::new(pool)
     }

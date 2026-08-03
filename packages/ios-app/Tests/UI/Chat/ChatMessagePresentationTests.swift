@@ -94,6 +94,39 @@ final class ChatMessagePresentationTests: XCTestCase {
         XCTAssertFalse(streamingSource.contains("accentLine"))
         XCTAssertFalse(streamingSource.contains(".frame(width: 2)"))
         XCTAssertFalse(thinkingSource.contains(".frame(width: 2)"))
+        XCTAssertFalse(thinkingSource.contains("Text(kind.title)"))
+        XCTAssertFalse(thinkingSource.contains("PulsingIcon("))
+        XCTAssertFalse(thinkingSource.contains("TronIconView("))
+    }
+
+    func testThinkingPresentationPreservesSeparateSummaryParagraphsWithoutBoldMarkup() {
+        let content = """
+        **Planning schema validation worker**
+
+        **Investigating internal schema test endpoint**
+        """
+
+        XCTAssertEqual(
+            ThinkingTextPresentation.displayText(content),
+            "Planning schema validation worker\n\nInvestigating internal schema test endpoint"
+        )
+        XCTAssertEqual(
+            ThinkingTextPresentation.previewText(content),
+            "Planning schema validation worker\nInvestigating internal schema test endpoint"
+        )
+    }
+
+    func testThinkingPresentationDoesNotFlattenProviderListsOrInlinePunctuation() {
+        let content = """
+        # Review
+        - First item
+          - Nested item with `code` and 2 * 3
+        """
+
+        XCTAssertEqual(
+            ThinkingTextPresentation.displayText(content),
+            "Review\n- First item\n  - Nested item with `code` and 2 * 3"
+        )
     }
 
     func testMessageBubbleUsesFinalResponsePolicyForItsOnlyMetadataFooter() throws {
@@ -102,6 +135,21 @@ final class ChatMessagePresentationTests: XCTestCase {
         XCTAssertTrue(source.contains("message.finalAssistantResponseMetadata"))
         XCTAssertFalse(source.contains("hasMetadata"))
         XCTAssertFalse(source.contains("else if let record = message.tokenRecord"))
+    }
+
+    func testDeliveryPreludeUsesCompactSpacingBeforeTurnContent() {
+        XCTAssertEqual(
+            ChatMessageLayout.bottomSpacingAdjustment(
+                isDeliveryProvenanceOnly: true
+            ),
+            -4
+        )
+        XCTAssertEqual(
+            ChatMessageLayout.bottomSpacingAdjustment(
+                isDeliveryProvenanceOnly: false
+            ),
+            0
+        )
     }
 
     func testStreamingRevealFadesOnlyTheNewCharacterTailAndConverges() {

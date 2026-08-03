@@ -2,10 +2,10 @@
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
-use crate::domains::agent::r#loop::profile_runtime::ProfileRuntime;
 use crate::domains::model::responder::ModelResponderFactory;
-use crate::domains::registration::worker::DomainRegistrationContext;
+use crate::domains::registration::composition::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
+use crate::domains::settings::SettingsRuntime;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ pub(crate) struct Deps {
     pub(super) event_store: Arc<EventStore>,
     pub(super) orchestrator: Arc<Orchestrator>,
     pub(super) origin: String,
-    pub(super) profile_runtime: Arc<ProfileRuntime>,
+    pub(super) settings_runtime: Arc<SettingsRuntime>,
     pub(super) session_manager: Arc<SessionManager>,
     pub(super) shutdown_coordinator:
         Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
@@ -32,7 +32,7 @@ impl Deps {
             event_store: deps.event_store.clone(),
             orchestrator: deps.orchestrator.clone(),
             origin: deps.origin.clone(),
-            profile_runtime: deps.profile_runtime.clone(),
+            settings_runtime: deps.settings_runtime.clone(),
             session_manager: deps.session_manager.clone(),
             shutdown_coordinator: deps.shutdown_coordinator.clone(),
         }
@@ -45,7 +45,7 @@ impl Deps {
             orchestrator: self.orchestrator.clone(),
             session_manager: self.session_manager.clone(),
             event_store: self.event_store.clone(),
-            settings: self.profile_runtime.current().settings.clone(),
+            settings: self.settings_runtime.current().settings.clone(),
             shutdown_coordinator: self.shutdown_coordinator.clone(),
             engine_host: self.engine_host.clone(),
             origin: self.origin.clone(),

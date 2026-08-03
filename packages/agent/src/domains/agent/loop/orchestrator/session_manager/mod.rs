@@ -9,15 +9,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::domains::session::event_store::{
-    AppendOptions, EventStore, EventType, ListSessionsOptions,
-};
+use crate::domains::session::event_store::EventStore;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 use parking_lot::Mutex;
-use serde_json::json;
-
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument};
 
 use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::orchestrator::session_reconstructor::{
@@ -75,10 +71,34 @@ impl SessionManager {
         workspace_path: &str,
         title: Option<&str>,
     ) -> Result<String, RuntimeError> {
-        let result = self
-            .event_store
-            .create_session(model, workspace_path, title, None)
-            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+        self.create_session_for_owner(model, workspace_path, title, false)
+    }
+
+    /// Create a durable model session owned by one worker invocation.
+    pub(in crate::domains) fn create_worker_session(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+    ) -> Result<String, RuntimeError> {
+        self.create_session_for_owner(model, workspace_path, title, true)
+    }
+
+    fn create_session_for_owner(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        worker_owned: bool,
+    ) -> Result<String, RuntimeError> {
+        let result = if worker_owned {
+            self.event_store
+                .create_worker_session(model, workspace_path, title, None)
+        } else {
+            self.event_store
+                .create_session(model, workspace_path, title, None)
+        }
+        .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
         let session_id = result.session.id.clone();
 
@@ -140,28 +160,6 @@ impl SessionManager {
         }
     }
 
-    /// End a session (remove it from the active map, persist `session.end`).
-    fn end_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        let _ = self.cached_sessions.remove(session_id);
-
-        // Persist session.end event before marking the session as ended
-        let _ = self
-            .event_store
-            .append(&AppendOptions {
-                session_id,
-                event_type: EventType::SessionEnd,
-                payload: json!({"reason": "completed"}),
-                parent_id: None,
-                sequence: None,
-            })
-            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
-        let _ = self
-            .event_store
-            .end_session(session_id)
-            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
-        Ok(())
-    }
-
     /// Archive a session.
     pub(in crate::domains) fn archive_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         let _ = self.cached_sessions.remove(session_id);
@@ -182,28 +180,10 @@ impl SessionManager {
         Ok(())
     }
 
-    /// End every unarchived durable session while preserving cache/event cleanup.
-    pub(super) fn end_unarchived_sessions_for_shutdown(&self) {
-        let sessions = match self.event_store.list_sessions(&ListSessionsOptions {
-            ended: Some(false),
-            ..Default::default()
-        }) {
-            Ok(sessions) => sessions,
-            Err(error) => {
-                warn!(%error, "failed to list unarchived sessions during shutdown");
-                return;
-            }
-        };
-
-        for session in sessions {
-            if let Err(error) = self.end_session(&session.id) {
-                warn!(
-                    session_id = %session.id,
-                    error = %error,
-                    "failed to end session during shutdown"
-                );
-            }
-        }
+    /// Drop reconstructed runtime projections without changing durable session
+    /// lifecycle. Every retained session remains resumable after restart.
+    pub(super) fn clear_cache_for_shutdown(&self) {
+        self.cached_sessions.clear();
     }
 
     /// Check whether a reconstructed session projection is cached.

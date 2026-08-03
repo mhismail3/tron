@@ -13,28 +13,29 @@
 //!
 //! # Context Injection
 //!
-//! Primitive context parts (agent soul, agent-owned state, environment, and the
-//! single `execute` primitive guidance) are compiled into the Responses
-//! `instructions` field. The `input` array carries only conversation and
-//! capability-result items.
+//! Stable agent instructions and environment are compiled into the Responses
+//! `instructions` field. Authoritative tool contracts travel only through the
+//! native `tools` field. Request-local automatic context is appended once to
+//! `input` as an ephemeral reference message.
 
 use async_trait::async_trait;
 use base64::Engine as _;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
+use sha2::{Digest, Sha256};
 use tracing::{debug, error, info, instrument};
 
 use crate::domains::auth::credentials::OpenAIAuthPath;
-use crate::domains::model::providers::shared::compose_context_parts;
 use crate::domains::model::providers::shared::provider::ReasoningEffort;
 use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
+use crate::domains::model::providers::shared::{
+    compose_context_parts, messages_with_request_context,
+};
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
 
-use super::message_converter::{
-    convert_to_responses_input, convert_tools_v2, generate_capability_instruction_text,
-};
+use super::message_converter::{convert_to_responses_input, convert_tools_v2};
 use super::stream_handler::{create_stream_state, process_provider_stream_event};
 use super::types::{
     ApiEndpoint, OpenAIApiSettings, OpenAIAuth, OpenAIConfig, OpenAIModelProfile, ReasoningConfig,
@@ -400,15 +401,11 @@ impl OpenAIProvider {
 
     /// Build the Responses API input array from conversation history.
     fn build_input(context: &Context) -> Vec<ResponsesInputItem> {
-        convert_to_responses_input(&context.messages)
+        convert_to_responses_input(&messages_with_request_context(context))
     }
 
     /// Build the Responses API instructions from primitive context.
-    fn build_instructions(
-        context: &Context,
-        options: &ProviderStreamOptions,
-        include_capability_guidance: bool,
-    ) -> Option<String> {
+    fn build_instructions(context: &Context, options: &ProviderStreamOptions) -> Option<String> {
         let mut parts = Vec::new();
 
         if let Some(provider_instructions) = options
@@ -427,18 +424,35 @@ impl OpenAIProvider {
                 .filter(|text| !text.is_empty()),
         );
 
-        if include_capability_guidance
-            && let Some(ref ctx_capabilities) = context.capabilities
-            && !ctx_capabilities.is_empty()
-        {
-            parts.push(generate_capability_instruction_text(ctx_capabilities));
-        }
-
         if parts.is_empty() {
             None
         } else {
             Some(parts.join("\n\n"))
         }
+    }
+
+    /// Stable, content-derived cache routing for the public Platform API.
+    ///
+    /// The private Codex endpoint has no independently verified contract for
+    /// this field. The key excludes session and request-local identities.
+    fn prompt_cache_key(
+        &self,
+        context: &Context,
+        options: &ProviderStreamOptions,
+    ) -> Option<String> {
+        if self.api_endpoint != ApiEndpoint::Platform {
+            return None;
+        }
+        let tools = context.tools.as_deref().unwrap_or_default();
+        let fixed_len = context.cache_layout.fixed_tool_prefix_len.min(tools.len());
+        let stable = serde_json::json!({
+            "model":openai_request_model_id(&self.config.model),
+            "instructions":Self::build_instructions(context, options),
+            "fixedTools":&tools[..fixed_len],
+        });
+        let bytes = serde_json::to_vec(&stable).ok()?;
+        let digest = hex::encode(Sha256::digest(bytes));
+        Some(format!("tron-{}", &digest[..48]))
     }
 
     /// Resolve and clamp max output tokens for the active profile.
@@ -471,13 +485,12 @@ impl OpenAIProvider {
     ) -> ResponsesRequest {
         let reasoning_effort = self.resolve_reasoning_effort(options);
         let active_profile = self.active_profile();
-        let supports_capabilities =
-            active_profile.is_none_or(|profile| profile.supports_capabilities);
+        let supports_tools = active_profile.is_none_or(|profile| profile.supports_tools);
         let input = Self::build_input(context);
-        let capabilities = context
-            .capabilities
+        let tools = context
+            .tools
             .as_ref()
-            .filter(|_| supports_capabilities)
+            .filter(|_| supports_tools)
             .map(|t| convert_tools_v2(t));
         let reasoning = self
             .active_profile()
@@ -490,14 +503,15 @@ impl OpenAIProvider {
         ResponsesRequest {
             model: openai_request_model_id(&self.config.model),
             input,
-            instructions: Self::build_instructions(context, options, supports_capabilities),
+            instructions: Self::build_instructions(context, options),
             stream: true,
             store: false,
             temperature: options.temperature,
-            capabilities,
+            tools,
             max_output_tokens: self.resolve_max_output_tokens(options),
             reasoning,
             text: self.resolve_text_config(),
+            prompt_cache_key: self.prompt_cache_key(context, options),
         }
     }
 
@@ -522,7 +536,7 @@ impl OpenAIProvider {
         debug!(
             model = %self.config.model,
             message_count = context.messages.len(),
-            tool_count = context.capabilities.as_ref().map_or(0, Vec::len),
+            tool_count = context.tools.as_ref().map_or(0, Vec::len),
             "Starting OpenAI stream"
         );
 

@@ -147,10 +147,10 @@ extension EventStoreManager {
         // Update counts
         session.eventCount = events.count
         let maxPayloadTurn = events.compactMap { $0.payload["turn"]?.intValue }.max() ?? 0
-        let streamTurnEndCount = events.filter { $0.type == PersistedEventType.streamTurnEnd.rawValue }.count
+        let streamTurnEndCount = events.filter { $0.type == SessionEventType.streamTurnEnd.rawValue }.count
         session.turnCount = max(session.turnCount, maxPayloadTurn, streamTurnEndCount)
         session.messageCount = events.filter {
-            $0.type == PersistedEventType.messageUser.rawValue || $0.type == PersistedEventType.messageAssistant.rawValue
+            $0.type == SessionEventType.messageUser.rawValue || $0.type == SessionEventType.messageAssistant.rawValue
         }.count
 
         // Update head/root events
@@ -191,13 +191,13 @@ extension EventStoreManager {
         session.isFork = info.isFork
         session.archivedAt = info.isArchived == true ? (info.lastActivity ?? info.createdAt) : nil
         session.serverOrigin = serverOrigin
-        session.source = info.source
-        session.profile = info.profile
         session.isProcessing = info.isRunning ?? false
         session.lastUserPrompt = info.lastUserPrompt
         session.lastAssistantResponse = info.lastAssistantResponse
+        session.labels = info.labels ?? []
+        session.organizationGroup = info.organizationGroup
         if let serverLines = info.activityLines {
-            session.lastActivityLines = serverLines.map { $0.toActivityLine() }
+            session.lastActivityLines = serverLines.compactMap { $0.toActivityLine() }
         }
         return session
     }
@@ -235,13 +235,13 @@ extension EventStoreManager {
             ? (existing.archivedAt ?? serverInfo.lastActivity ?? serverInfo.createdAt)
             : nil
         session.serverOrigin = serverOrigin
-        session.source = serverInfo.source ?? existing.source
-        session.profile = serverInfo.profile ?? existing.profile
         session.isProcessing = serverInfo.isRunning ?? existing.isProcessing
         session.lastUserPrompt = serverInfo.lastUserPrompt ?? existing.lastUserPrompt
         session.lastAssistantResponse = serverInfo.lastAssistantResponse ?? existing.lastAssistantResponse
+        session.labels = serverInfo.labels ?? existing.labels
+        session.organizationGroup = serverInfo.organizationGroup
         if let serverLines = serverInfo.activityLines {
-            session.lastActivityLines = serverLines.map { $0.toActivityLine() }
+            session.lastActivityLines = serverLines.compactMap { $0.toActivityLine() }
         } else {
             session.lastActivityLines = existing.lastActivityLines
         }

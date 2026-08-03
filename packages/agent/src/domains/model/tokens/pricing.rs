@@ -129,6 +129,17 @@ fn openai_cached_tier(input: f64, output: f64, cached_input: f64) -> PricingTier
     }
 }
 
+/// Create an `OpenAI` GPT-5.6 tier with explicit cache-write pricing.
+fn openai_56_tier(input: f64, output: f64, cached_input: f64) -> PricingTier {
+    PricingTier {
+        input_per_million: input,
+        output_per_million: output,
+        cache_write_5m_multiplier: 1.25,
+        cache_write_1h_multiplier: 1.25,
+        cache_read_multiplier: cached_input / input,
+    }
+}
+
 /// Create an `OpenAI` pricing tier for models without cached-input discount.
 fn openai_uncached_tier(input: f64, output: f64) -> PricingTier {
     PricingTier {
@@ -143,11 +154,17 @@ fn openai_uncached_tier(input: f64, output: f64) -> PricingTier {
 /// Exact model name matching.
 fn exact_match(model: &str) -> Option<PricingTier> {
     Some(match model {
-        // Anthropic — Opus 4.5/4.6
-        "claude-opus-4-6" | "claude-opus-4-5" => anthropic_tier(5.0, 25.0),
+        // Anthropic — current frontier models.
+        "claude-fable-5" => anthropic_tier(10.0, 50.0),
+        "claude-opus-4-8"
+        | "claude-opus-4-7"
+        | "claude-opus-4-6"
+        | "claude-opus-4-5"
+        | "claude-opus-4-5-20251101" => anthropic_tier(5.0, 25.0),
 
         // Anthropic — Sonnet family ($3/$15)
-        "claude-sonnet-4-6"
+        "claude-sonnet-5"
+        | "claude-sonnet-4-6"
         | "claude-sonnet-4-5-20250929"
         | "claude-sonnet-4-5"
         | "claude-sonnet-4-0-20250514"
@@ -167,16 +184,24 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         // Anthropic — Claude 3 Haiku
         "claude-3-haiku-20240307" | "claude-3-haiku" => anthropic_tier(0.25, 1.25),
 
-        // Google — Gemini Pro
-        "gemini-3-pro-preview" | "gemini-2-5-pro" | "gemini-2.5-pro" => google_tier(1.25, 5.0),
+        // Google — current Gemini 3 Flash families
+        "gemini-3.6-flash" => google_tier(1.50, 7.50),
+        "gemini-3.5-flash" | "gemini-flash-latest" => google_tier(1.50, 9.0),
+        "gemini-3.5-flash-lite" => google_tier(0.30, 2.50),
 
-        // Google — Gemini 3.1 Flash Lite
-        "gemini-3.1-flash-lite-preview" => google_tier(0.25, 1.50),
-
-        // Google — Gemini Flash
-        "gemini-3-flash-preview" | "gemini-2-5-flash" | "gemini-2.5-flash" => {
-            google_tier(0.075, 0.3)
+        // Google — Gemini 3.1
+        "gemini-3.1-pro-preview" | "gemini-3-pro-preview" | "gemini-pro-latest" => {
+            google_tier(2.0, 12.0)
         }
+        "gemini-3.1-flash-lite" | "gemini-3.1-flash-lite-preview" | "gemini-flash-lite-latest" => {
+            google_tier(0.25, 1.50)
+        }
+        "gemini-3-flash-preview" => google_tier(0.50, 3.0),
+
+        // Google — Gemini 2.5 standard pricing at <=200K input tokens.
+        "gemini-2-5-pro" | "gemini-2.5-pro" => google_tier(1.25, 10.0),
+        "gemini-2-5-flash" | "gemini-2.5-flash" => google_tier(0.30, 2.50),
+        "gemini-2-5-flash-lite" | "gemini-2.5-flash-lite" => google_tier(0.10, 0.40),
 
         // OpenAI
         "o3" | "o3-2025-04-16" => openai_cached_tier(2.0, 8.0, 0.50),
@@ -203,6 +228,9 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         "gpt-3.5-turbo" | "gpt-3.5-turbo-0125" | "gpt-3.5-turbo-1106" => {
             openai_uncached_tier(0.50, 1.50)
         }
+        "gpt-5.6" | "gpt-5.6-sol" => openai_56_tier(5.0, 30.0, 0.50),
+        "gpt-5.6-terra" => openai_56_tier(2.50, 15.0, 0.25),
+        "gpt-5.6-luna" => openai_56_tier(1.0, 6.0, 0.10),
         "gpt-5.5" | "gpt-5.5-2026-04-23" => openai_cached_tier(5.0, 30.0, 0.50),
         "gpt-5.5-pro" | "gpt-5.5-pro-2026-04-23" => openai_uncached_tier(30.0, 180.0),
         "gpt-5.4" | "gpt-5.4-2026-03-05" => openai_cached_tier(2.50, 15.0, 0.25),
@@ -349,16 +377,23 @@ mod tests {
     #[test]
     fn pricing_gemini_pro() {
         let tier = get_pricing_tier("gemini-3-pro-preview").unwrap();
-        assert_float_eq(tier.input_per_million, 1.25);
-        assert_float_eq(tier.output_per_million, 5.0);
+        assert_float_eq(tier.input_per_million, 2.0);
+        assert_float_eq(tier.output_per_million, 12.0);
         assert_float_eq(tier.cache_read_multiplier, 0.25);
     }
 
     #[test]
     fn pricing_gemini_flash() {
+        let tier = get_pricing_tier("gemini-3.6-flash").unwrap();
+        assert_float_eq(tier.input_per_million, 1.50);
+        assert_float_eq(tier.output_per_million, 7.50);
+    }
+
+    #[test]
+    fn pricing_gemini_25_flash() {
         let tier = get_pricing_tier("gemini-2-5-flash").unwrap();
-        assert_float_eq(tier.input_per_million, 0.075);
-        assert_float_eq(tier.output_per_million, 0.3);
+        assert_float_eq(tier.input_per_million, 0.30);
+        assert_float_eq(tier.output_per_million, 2.50);
     }
 
     #[test]

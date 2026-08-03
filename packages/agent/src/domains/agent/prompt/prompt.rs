@@ -1,14 +1,12 @@
 //! Agent workflow operations.
 use std::sync::Arc;
 
-use super::{
-    AgentCommandService, ENGINE_INTERNAL_INVOKE_SCOPE, PromptEngineCausality, PromptRequest, errors,
-};
+use super::{AgentCommandService, PromptEngineCausality, PromptRequest, errors};
 use crate::domains::agent::Deps;
 use crate::domains::agent::runtime::service::spawn_prompt_run;
 use crate::domains::model::responder::ModelResponderFactory;
 use crate::engine::{FunctionId, Invocation};
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use crate::shared::server::params::opt_array;
 use crate::shared::server::params::opt_string;
 use crate::shared::server::params::require_string_param;
@@ -23,15 +21,12 @@ pub(crate) struct PromptSubmission {
     attachments: Option<Vec<Value>>,
 }
 
-pub(crate) async fn prompt_value(
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
+pub(crate) async fn prompt_value(invocation: &Invocation, deps: &Deps) -> Result<Value, ToolError> {
     let (submission, _, _) = validate_prompt_submission(Some(&invocation.payload), deps).await?;
     let run_id = uuid::Uuid::now_v7().to_string();
     let mut apply_payload = invocation.payload.clone();
     let Some(object) = apply_payload.as_object_mut() else {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: "agent.prompt params must be an object".into(),
         });
     };
@@ -59,7 +54,7 @@ pub(crate) async fn prompt_apply_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &Deps,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let run_id = require_string_param(params, "runId")?;
     let (submission, _session, _responder_factory) =
         validate_prompt_submission(params, deps).await?;
@@ -87,14 +82,14 @@ pub(crate) async fn run_turn_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &Deps,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let run_id = require_string_param(params, "runId")?;
     let (submission, session, responder_factory) = validate_prompt_submission(params, deps).await?;
 
     let started_run = deps
         .orchestrator
         .begin_run(&submission.session_id, &run_id)
-        .map_err(|e| CapabilityError::Custom {
+        .map_err(|e| ToolError::Custom {
             code: e.category().to_uppercase(),
             message: e.to_string(),
             details: None,
@@ -119,7 +114,9 @@ pub(crate) async fn run_turn_value(
         run_id.clone(),
         PromptRequest {
             session_id: submission.session_id,
-            prompt: submission.prompt,
+            trigger: crate::domains::agent::r#loop::types::AgentRunTrigger::UserPrompt {
+                prompt: submission.prompt,
+            },
             reasoning_level: submission.reasoning_level,
             attachments: submission.attachments,
             engine_causality: Some(PromptEngineCausality::from_invocation(invocation)),
@@ -132,6 +129,90 @@ pub(crate) async fn run_turn_value(
     }))
 }
 
+pub(crate) async fn delivery_wake_value(
+    params: Option<&Value>,
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, ToolError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    if deps.orchestrator.has_active_run(&session_id) {
+        return Ok(json!({
+            "acknowledged":false,
+            "reason":"session_busy",
+        }));
+    }
+    let event_store = deps.event_store.clone();
+    let wake_session_id = session_id.clone();
+    let delivery_ids = crate::shared::server::context::run_blocking_task(
+        "agent.delivery_wake.pending",
+        move || {
+            event_store
+                .pending_agent_wakes_for_session(
+                    &wake_session_id,
+                    crate::domains::session::event_store::MAX_DELIVERIES_PER_TURN,
+                )
+                .map_err(crate::shared::server::error_mapping::map_event_store_error)
+        },
+    )
+    .await?;
+    if delivery_ids.is_empty() {
+        return Ok(json!({
+            "acknowledged":false,
+            "reason":"no_pending_wake",
+        }));
+    }
+    let session = AgentCommandService::load_prompt_session(deps, &session_id).await?;
+    if session.ended_at.is_some() {
+        return Ok(json!({
+            "acknowledged":false,
+            "reason":"session_archived",
+        }));
+    }
+    let responder_factory =
+        deps.responder_factory
+            .clone()
+            .ok_or_else(|| ToolError::NotAvailable {
+                message: "Agent execution dependencies are not configured".into(),
+            })?;
+    let run_id = uuid::Uuid::now_v7().to_string();
+    let started_run = match deps.orchestrator.begin_run(&session_id, &run_id) {
+        Ok(started) => started,
+        Err(crate::domains::agent::r#loop::errors::RuntimeError::SessionBusy(_)) => {
+            return Ok(json!({
+                "acknowledged":false,
+                "reason":"session_busy",
+            }));
+        }
+        Err(error) => {
+            return Err(ToolError::Custom {
+                code: error.category().to_uppercase(),
+                message: error.to_string(),
+                details: None,
+            });
+        }
+    };
+    spawn_prompt_run(
+        &deps.prompt_runtime(),
+        responder_factory,
+        &session,
+        started_run,
+        run_id.clone(),
+        PromptRequest {
+            session_id,
+            trigger: crate::domains::agent::r#loop::types::AgentRunTrigger::DeliveryWake {
+                delivery_ids,
+            },
+            reasoning_level: None,
+            attachments: None,
+            engine_causality: Some(PromptEngineCausality::from_invocation(invocation)),
+        },
+    );
+    Ok(json!({
+        "acknowledged":true,
+        "runId":run_id,
+    }))
+}
+
 pub(crate) async fn validate_prompt_submission(
     params: Option<&Value>,
     deps: &Deps,
@@ -141,7 +222,7 @@ pub(crate) async fn validate_prompt_submission(
         crate::domains::session::event_store::SessionRow,
         Arc<dyn ModelResponderFactory>,
     ),
-    CapabilityError,
+    ToolError,
 > {
     let session_id = require_string_param(params, "sessionId")?;
     let prompt = require_string_param(params, "prompt")?;
@@ -149,7 +230,7 @@ pub(crate) async fn validate_prompt_submission(
     let attachments = opt_array(params, "attachments").cloned();
 
     if let Some(active_run_id) = deps.orchestrator.get_run_id(&session_id) {
-        return Err(CapabilityError::Custom {
+        return Err(ToolError::Custom {
             code: errors::SESSION_BUSY.into(),
             message: format!("Session '{session_id}' is already processing run '{active_run_id}'"),
             details: Some(json!({ "runId": active_run_id })),
@@ -165,7 +246,7 @@ pub(crate) async fn validate_prompt_submission(
             &session.latest_model,
             auth_path,
         )
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: format!(
                 "Attachments are unavailable because model '{}' has no attachment policy",
                 session.latest_model
@@ -176,7 +257,7 @@ pub(crate) async fn validate_prompt_submission(
     let responder_factory =
         deps.responder_factory
             .clone()
-            .ok_or_else(|| CapabilityError::NotAvailable {
+            .ok_or_else(|| ToolError::NotAvailable {
                 message: "Agent execution dependencies are not configured".into(),
             })?;
     Ok((
@@ -194,45 +275,45 @@ pub(crate) async fn validate_prompt_submission(
 pub(crate) fn validate_attachment_array(
     attachments: Option<&[Value]>,
     policy: &crate::domains::model::routing::attachments::AttachmentPolicy,
-) -> Result<(), CapabilityError> {
+) -> Result<(), ToolError> {
     if let Some(attachments) = attachments {
         for attachment in attachments {
             let data = attachment
                 .get("data")
                 .and_then(Value::as_str)
-                .ok_or_else(|| CapabilityError::InvalidParams {
+                .ok_or_else(|| ToolError::InvalidParams {
                     message: "Attachment is missing base64 data".into(),
                 })?;
             let mime_type = attachment
                 .get("mimeType")
                 .and_then(Value::as_str)
-                .ok_or_else(|| CapabilityError::InvalidParams {
+                .ok_or_else(|| ToolError::InvalidParams {
                     message: "Attachment is missing mimeType".into(),
                 })?;
 
             let max_bytes = if mime_type.starts_with("image/") {
                 if policy.max_image_bytes == 0 || !policy.accepts_image_mime_type(mime_type) {
-                    return Err(CapabilityError::InvalidParams {
+                    return Err(ToolError::InvalidParams {
                         message: format!("Model does not accept attachment type '{mime_type}'"),
                     });
                 }
                 policy.max_image_bytes
             } else if mime_type == "application/pdf" {
                 if !policy.supports_pdf_content {
-                    return Err(CapabilityError::InvalidParams {
+                    return Err(ToolError::InvalidParams {
                         message: "Model does not accept PDF content".into(),
                     });
                 }
                 policy.max_document_bytes
             } else if matches!(mime_type, "text/plain" | "application/json") {
                 if !policy.supports_text_files {
-                    return Err(CapabilityError::InvalidParams {
+                    return Err(ToolError::InvalidParams {
                         message: "Model does not accept text file content".into(),
                     });
                 }
                 policy.max_document_bytes
             } else {
-                return Err(CapabilityError::InvalidParams {
+                return Err(ToolError::InvalidParams {
                     message: format!("Unsupported attachment type '{mime_type}'"),
                 });
             };
@@ -250,8 +331,8 @@ pub(crate) async fn invoke_agent_function_sync(
     function_id: &str,
     idempotency_prefix: &str,
     payload: Value,
-) -> Result<Value, CapabilityError> {
-    let function_id = FunctionId::new(function_id).map_err(|e| CapabilityError::Internal {
+) -> Result<Value, ToolError> {
+    let function_id = FunctionId::new(function_id).map_err(|e| ToolError::Internal {
         message: e.to_string(),
     })?;
     let context = trusted_agent_internal_child_context(invocation, idempotency_prefix);
@@ -274,7 +355,7 @@ pub(crate) async fn invoke_agent_function_sync(
         deps.engine_host.invoke(child),
     )
     .await
-    .map_err(|_| CapabilityError::Internal {
+    .map_err(|_| ToolError::Internal {
         message: format!("Timed out waiting for prompt command {idempotency_prefix}"),
     })?;
     if let Some(error) = &result.error {
@@ -289,30 +370,43 @@ pub(crate) async fn invoke_agent_function_sync(
         )
         .await;
     }
-    crate::shared::server::error_mapping::result_to_capability_value(result)
+    crate::shared::server::error_mapping::result_to_tool_value(result)
 }
 
 fn trusted_agent_internal_child_context(
     invocation: &Invocation,
     idempotency_prefix: &str,
 ) -> crate::engine::CausalContext {
-    let mut context = invocation.causal_context.clone();
-    context.actor_id = crate::engine::ActorId::new("system:agent-runtime").expect("valid actor id");
-    context.actor_kind = crate::engine::ActorKind::System;
-    context.authority_grant_id =
-        crate::engine::AuthorityGrantId::new("engine-system").expect("valid grant id");
-    context.parent_invocation_id = Some(invocation.id.clone());
-    if !context
-        .authority_scopes
-        .iter()
-        .any(|scope| scope == ENGINE_INTERNAL_INVOKE_SCOPE)
-    {
-        context
-            .authority_scopes
-            .push(ENGINE_INTERNAL_INVOKE_SCOPE.to_owned());
+    let parent = &invocation.causal_context;
+    let mut context = crate::engine::CausalContext::new(
+        crate::engine::ActorId::new("system:agent-runtime").expect("valid actor id"),
+        crate::engine::ActorKind::System,
+        parent.trace_id.clone(),
+    )
+    .with_parent_invocation(invocation.id.clone())
+    .with_idempotency_key(format!("{idempotency_prefix}:{}", invocation.id))
+    .with_trigger_depth(parent.trigger_depth());
+    if let Some(session_id) = &parent.session_id {
+        context = context.with_session_id(session_id.clone());
     }
-    context.idempotency_key = Some(format!("{idempotency_prefix}:{}", invocation.id));
-    context.delivery_mode = crate::engine::DeliveryMode::Sync;
+    if let Some(workspace_id) = &parent.workspace_id {
+        context = context.with_workspace_id(workspace_id.clone());
+    }
+    if let Some(working_directory) = parent.working_directory() {
+        context = context.with_working_directory(working_directory);
+    }
+    if let Some(worker_id) = parent.origin_worker_id() {
+        context = context.with_origin_worker_id(worker_id.to_owned());
+    }
+    if let Some(invocation_id) = parent.origin_worker_invocation_id() {
+        context = context.with_origin_worker_invocation_id(invocation_id.to_owned());
+    }
+    if let Some(max_turns) = parent.worker_max_agent_turns() {
+        context = context.with_worker_max_agent_turns(max_turns);
+    }
+    if let Some(agent_tools) = parent.worker_agent_tools() {
+        context = context.with_worker_agent_tools(agent_tools.to_vec());
+    }
     context
 }
 
@@ -331,8 +425,8 @@ pub(crate) async fn publish_prompt_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::registration::worker::DomainRegistrationContext;
-    use crate::engine::{ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, TraceId};
+    use crate::domains::registration::composition::DomainRegistrationContext;
+    use crate::engine::{ActorId, ActorKind, CausalContext, FunctionId, TraceId};
     use crate::shared::server::test_support::make_test_context;
 
     #[tokio::test]
@@ -350,7 +444,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(CapabilityError::NotAvailable { message })
+            Err(ToolError::NotAvailable { message })
                 if message == "Agent execution dependencies are not configured"
         ));
     }
@@ -363,33 +457,67 @@ mod tests {
             CausalContext::new(
                 ActorId::new("engine-client").expect("actor id"),
                 ActorKind::Client,
-                AuthorityGrantId::new("engine-transport").expect("grant id"),
                 TraceId::new("prompt-parent").expect("trace id"),
             )
-            .with_scope("agent.write")
             .with_session_id("session-a")
-            .with_workspace_id("workspace-a"),
+            .with_workspace_id("workspace-a")
+            .with_working_directory("/tmp/session-a")
+            .with_advertised_function(
+                crate::engine::FunctionRevision(7),
+                Some("parent-worker-version".to_owned()),
+            )
+            .with_trigger_depth(3),
         );
 
         let child = trusted_agent_internal_child_context(&parent, "agent::prompt_apply");
 
         assert_eq!(child.actor_id.as_str(), "system:agent-runtime");
         assert_eq!(child.actor_kind, ActorKind::System);
-        assert_eq!(child.authority_grant_id.as_str(), "engine-system");
         assert_eq!(child.parent_invocation_id, Some(parent.id));
         assert_eq!(child.session_id.as_deref(), Some("session-a"));
         assert_eq!(child.workspace_id.as_deref(), Some("workspace-a"));
-        assert!(
-            child
-                .authority_scopes
-                .iter()
-                .any(|scope| scope == ENGINE_INTERNAL_INVOKE_SCOPE)
-        );
+        assert_eq!(child.working_directory(), Some("/tmp/session-a"));
+        assert_eq!(child.origin_worker_id(), None);
+        assert_eq!(child.trigger_depth(), 3);
+        assert_eq!(child.advertised_function_revision(), None);
+        assert_eq!(child.advertised_worker_version(), None);
         assert!(
             child
                 .idempotency_key
                 .as_deref()
                 .is_some_and(|key| key.starts_with("agent::prompt_apply:"))
+        );
+    }
+
+    #[test]
+    fn hidden_prompt_child_context_preserves_worker_origin_as_causal_evidence() {
+        let parent = Invocation::new_sync(
+            FunctionId::new("agent::prompt").expect("function id"),
+            json!({"sessionId": "worker-child", "prompt": "run"}),
+            CausalContext::new(
+                ActorId::new("worker:research-coordinator").expect("actor id"),
+                ActorKind::Worker,
+                TraceId::new("worker-prompt-parent").expect("trace id"),
+            )
+            .with_session_id("worker-child")
+            .with_origin_worker_invocation_id("worker_run_parent")
+            .with_worker_max_agent_turns(7)
+            .with_worker_agent_tools(vec!["web_fetch".to_owned()]),
+        );
+
+        let child = trusted_agent_internal_child_context(&parent, "agent::prompt_apply");
+
+        assert_eq!(child.actor_id.as_str(), "system:agent-runtime");
+        assert_eq!(child.actor_kind, ActorKind::System);
+        assert_eq!(child.origin_worker_id(), Some("research-coordinator"));
+        assert_eq!(
+            child.origin_worker_invocation_id(),
+            Some("worker_run_parent")
+        );
+        assert_eq!(child.worker_max_agent_turns(), Some(7));
+        assert_eq!(
+            child.worker_agent_tools(),
+            Some(["web_fetch".to_owned()].as_slice())
         );
     }
 

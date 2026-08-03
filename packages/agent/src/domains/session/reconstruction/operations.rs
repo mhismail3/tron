@@ -1,12 +1,12 @@
 use crate::domains::session::Deps;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use crate::shared::server::params::{opt_string, require_string_param};
 use serde_json::Value;
 
 pub(crate) async fn session_reconstruct_value(
     params: Option<&Value>,
     deps: &Deps,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let session_id = require_string_param(params, "sessionId")?;
     let limit = params
         .and_then(|p| p.get("limit"))

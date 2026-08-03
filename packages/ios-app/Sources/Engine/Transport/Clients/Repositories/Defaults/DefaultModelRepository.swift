@@ -10,6 +10,8 @@ final class DefaultModelRepository: ModelRepository {
     private let modelClient: ModelClient
     private var cacheTime: Date?
     private let cacheTTL: TimeInterval = 300
+    private var refreshTask: Task<[ModelInfo], Error>?
+    private var refreshID: UUID?
 
     // MARK: - Observable State
 
@@ -31,11 +33,36 @@ final class DefaultModelRepository: ModelRepository {
             return cachedModels
         }
 
-        let models = try await modelClient.list()
-        ModelNameFormatter.updateFromServer(models)
-        cachedModels = models
-        cacheTime = Date()
-        return models
+        // INVARIANT: all concurrent catalog readers share one transport call.
+        // Settings prefetch, Providers, and model pickers commonly appear in
+        // the same navigation interval; issuing duplicate `model.list` reads
+        // would repeat live Ollama discovery without producing newer truth.
+        if let refreshTask {
+            return try await refreshTask.value
+        }
+
+        let modelClient = modelClient
+        let task = Task { try await modelClient.list() }
+        let refreshID = UUID()
+        refreshTask = task
+        self.refreshID = refreshID
+        do {
+            let models = try await task.value
+            if self.refreshID == refreshID {
+                ModelNameFormatter.updateFromServer(models)
+                cachedModels = models
+                cacheTime = Date()
+                refreshTask = nil
+                self.refreshID = nil
+            }
+            return models
+        } catch {
+            if self.refreshID == refreshID {
+                refreshTask = nil
+                self.refreshID = nil
+            }
+            throw error
+        }
     }
 
     func switchModel(
@@ -59,6 +86,9 @@ final class DefaultModelRepository: ModelRepository {
     }
 
     func invalidateCache() {
+        refreshTask?.cancel()
+        refreshTask = nil
+        refreshID = nil
         cachedModels = []
         cacheTime = nil
     }

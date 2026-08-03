@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tracing::warn;
 
-use crate::domains::agent::context::soul::AGENT_SOUL;
+use crate::domains::agent::context::seed::AGENT_SEED;
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::shared::server::failure::FailureEnvelope;
 
@@ -25,8 +25,10 @@ pub(super) async fn build_prompt_agent(
     working_dir: &str,
     server_origin: String,
     messages: Vec<crate::shared::protocol::messages::Message>,
+    message_sources: Vec<crate::domains::agent::context::message_store::MessageAuditSource>,
     initial_turn_offset: u32,
     resolved_workspace_id: Option<String>,
+    worker_max_agent_turns: Option<u32>,
 ) -> Result<BuiltPromptAgent, FailureEnvelope> {
     let responder = match responder_factory
         .create_for_model(model, &settings.api)
@@ -54,9 +56,9 @@ pub(super) async fn build_prompt_agent(
         model: model.to_owned(),
         working_directory: Some(working_dir.to_owned()),
         server_origin: Some(server_origin),
-        system_prompt: Some(AGENT_SOUL.to_owned()),
+        system_prompt: Some(AGENT_SEED.to_owned()),
         enable_thinking: true,
-        max_turns: settings.agent.max_turns,
+        max_turns: resolved_max_turns(settings.agent.max_turns, worker_max_agent_turns),
         compaction: crate::domains::agent::context::types::CompactionConfig {
             threshold: compactor_settings.compaction_threshold,
             preserve_recent_turns: compactor_settings.preserve_recent_count,
@@ -79,6 +81,7 @@ pub(super) async fn build_prompt_agent(
         CreateAgentOpts::primitive(
             responder,
             messages,
+            message_sources,
             initial_turn_offset,
             compactor_settings.into(),
             invocation_abort_registry,
@@ -90,4 +93,20 @@ pub(super) async fn build_prompt_agent(
         agent,
         provider_type,
     })
+}
+
+fn resolved_max_turns(global_limit: u32, worker_limit: Option<u32>) -> u32 {
+    worker_limit.map_or(global_limit, |limit| global_limit.min(limit))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolved_max_turns;
+
+    #[test]
+    fn worker_turn_limit_can_only_tighten_the_global_ceiling() {
+        assert_eq!(resolved_max_turns(250, Some(7)), 7);
+        assert_eq!(resolved_max_turns(10, Some(20)), 10);
+        assert_eq!(resolved_max_turns(250, None), 250);
+    }
 }

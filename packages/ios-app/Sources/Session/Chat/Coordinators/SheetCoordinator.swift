@@ -8,16 +8,7 @@ import Observation
 @MainActor
 final class SheetCoordinator {
     /// Currently active sheet (nil = no sheet presented)
-    var activeSheet: ChatSheet? {
-        didSet {
-            if oldValue != activeSheet {
-                lastActiveSheet = oldValue
-            }
-        }
-    }
-
-    /// Last active sheet before dismissal/change (used to infer what was dismissed)
-    var lastActiveSheet: ChatSheet?
+    var activeSheet: ChatSheet?
 
     /// Dismissal callback (called by SwiftUI when sheet dismisses)
     var onDismiss: (() -> Void)?
@@ -43,8 +34,21 @@ final class SheetCoordinator {
     /// Dismiss the current sheet
     func dismiss() {
         activeSheet = nil
-        onDismiss?()
+        finishDismissal()
+    }
+
+    /// SwiftUI calls this after interactive or programmatic dismissal. It is
+    /// idempotent so an explicit dismiss followed by the framework callback
+    /// cannot invoke or retain the payload callback twice.
+    func presentationDidDismiss() {
+        activeSheet = nil
+        finishDismissal()
+    }
+
+    private func finishDismissal() {
+        let callback = onDismiss
         onDismiss = nil
+        callback?()
     }
 
     /// Dismiss only when the requested sheet is currently presented.
@@ -58,6 +62,11 @@ final class SheetCoordinator {
     /// Show settings sheet
     func showSettings() {
         present(.settings)
+    }
+
+    /// Show the session's current context telemetry and supported controls.
+    func showSessionContext() {
+        present(.sessionContext)
     }
 
     /// Show compaction detail sheet
@@ -90,23 +99,18 @@ final class SheetCoordinator {
     }
 
     /// Show thinking detail sheet
-    func showThinkingDetail(_ content: String) {
-        present(.thinkingDetail(content))
+    func showThinkingDetail(_ content: String, kind: ThinkingDisplayKind = .thinking) {
+        present(.thinkingDetail(ThinkingDetailData(content: content, kind: kind)))
     }
 
-    /// Show context-control overview or a specific action audit detail.
-    func showContextControl(actionResourceId: String? = nil) {
-        present(.contextControl(ContextControlSheetData(initialActionResourceId: actionResourceId)))
+    /// Show tool invocation detail sheet
+    func showToolInvocationDetail(_ data: ToolInvocationData) {
+        present(.toolInvocationDetail(data))
     }
 
-    /// Show capability invocation detail sheet
-    func showCapabilityInvocationDetail(_ data: CapabilityInvocationData) {
-        present(.capabilityInvocationDetail(data))
-    }
-
-    /// Show a grouped capability invocation detail sheet.
-    func showCapabilityInvocationGroupDetail(_ data: CapabilityInvocationGroupData) {
-        present(.capabilityInvocationGroupDetail(data))
+    /// Show a grouped tool invocation detail sheet.
+    func showToolInvocationGroupDetail(_ data: ToolInvocationGroupData) {
+        present(.toolInvocationGroupDetail(data))
     }
 
 }

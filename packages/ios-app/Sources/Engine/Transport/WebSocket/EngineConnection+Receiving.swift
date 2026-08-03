@@ -1,5 +1,39 @@
 import Foundation
 
+enum EngineInboundWireKind: String, Sendable {
+    case binary
+    case text
+}
+
+struct EngineDecodedInboundFrame: Sendable {
+    let data: Data
+    let message: EngineConnection.ParsedInboundMessage
+    let wireKind: EngineInboundWireKind
+}
+
+/// One serial executor owns raw frame normalization and routing decode for the
+/// life of a connection. Awaiting it preserves wire order while keeping UTF-8
+/// conversion and JSON scanning off the main actor without allocating one
+/// detached task per frame.
+actor EngineInboundFrameDecoder {
+    func decode(data: Data) -> EngineDecodedInboundFrame {
+        EngineDecodedInboundFrame(
+            data: data,
+            message: EngineConnection.parseInboundMessage(data),
+            wireKind: .binary
+        )
+    }
+
+    func decode(text: String) -> EngineDecodedInboundFrame {
+        let data = Data(text.utf8)
+        return EngineDecodedInboundFrame(
+            data: data,
+            message: EngineConnection.parseInboundMessage(data),
+            wireKind: .text
+        )
+    }
+}
+
 @MainActor
 extension EngineConnection {
     // MARK: - Receive Loop
@@ -10,47 +44,63 @@ extension EngineConnection {
         failedTask: URLSessionWebSocketTask
     ) async {
         guard isConnectedFlag, engineConnectionTask === failedTask else { return }
+        let generation = transportGeneration
         logger.warning("Send failure indicates connection loss for \(operation): \(error.localizedDescription)", category: .websocket)
-        await handleDisconnect()
+        await handleDisconnect(
+            expectedTask: failedTask,
+            expectedGeneration: generation
+        )
     }
 
-    func receiveLoop() async {
+    func receiveLoop(
+        on task: URLSessionWebSocketTask,
+        generation: UInt64
+    ) async {
         logger.verbose("Receive loop running...", category: .websocket)
         var messageCount = 0
 
-        while isConnectedFlag {
+        while ownsTransport(task, generation: generation), !Task.isCancelled {
             do {
-                guard let message = try await engineConnectionTask?.receive() else {
-                    logger.warning("Receive returned nil, exiting loop", category: .websocket)
+                let message = try await task.receive()
+                guard ownsTransport(task, generation: generation),
+                      !Task.isCancelled else {
+                    logger.debug("Receive loop retired before message delivery", category: .websocket)
                     break
                 }
 
-                messageCount += 1
-                let data: Data
+                let frame: EngineDecodedInboundFrame
                 switch message {
                 case .data(let d):
-                    data = d
-                    logger.verbose("Received binary message #\(messageCount): \(d.count) bytes", category: .websocket)
+                    frame = await inboundFrameDecoder.decode(data: d)
                 case .string(let text):
-                    guard let d = text.data(using: .utf8) else {
-                        logger.warning("Failed to convert string message to data", category: .websocket)
-                        continue
-                    }
-                    data = d
-                    logger.verbose("Received string message #\(messageCount): \(text.prefix(200))", category: .websocket)
+                    frame = await inboundFrameDecoder.decode(text: text)
                 @unknown default:
                     logger.warning("Received unknown message type", category: .websocket)
                     continue
                 }
 
-                handleMessage(data)
+                guard ownsTransport(task, generation: generation),
+                      !Task.isCancelled else {
+                    logger.debug("Receive loop retired during frame decoding", category: .websocket)
+                    break
+                }
+                messageCount += 1
+                logger.verbose(
+                    "Received \(frame.wireKind.rawValue) frame #\(messageCount): \(frame.data.count) bytes",
+                    category: .websocket
+                )
+                handleParsedMessage(frame.message, rawData: frame.data)
 
             } catch {
-                if isConnectedFlag {
+                if ownsTransport(task, generation: generation),
+                   !Task.isCancelled {
                     logger.error("Receive loop error: \(error.localizedDescription)", category: .websocket)
-                    await handleDisconnect()
+                    await handleDisconnect(
+                        expectedTask: task,
+                        expectedGeneration: generation
+                    )
                 } else {
-                    logger.debug("Receive loop ended (disconnected)", category: .websocket)
+                    logger.debug("Receive loop ended (retired transport)", category: .websocket)
                 }
                 break
             }
@@ -58,58 +108,115 @@ extension EngineConnection {
         logger.verbose("Receive loop exited after \(messageCount) messages", category: .websocket)
     }
 
-    func handleMessage(_ data: Data) {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            logger.warning("Received non-JSON message: \(String(data: data, encoding: .utf8) ?? "binary")", category: .websocket)
-            return
+    enum ParsedInboundMessage: Sendable {
+        case event(EngineEventDelivery)
+        case response(id: String)
+        case invalid(reason: InvalidInboundMessageReason)
+    }
+
+    enum InvalidInboundMessageReason: Sendable {
+        case malformedJSON
+        case malformedEvent
+        case missingRouting
+    }
+
+    private struct InboundRoutingFrame: Decodable, Sendable {
+        let type: String?
+        let id: String?
+        let topic: String?
+        let subscriptionId: String?
+        let cursor: UInt64?
+        let event: ServerEventPayload?
+    }
+
+    /// Decode potentially large response/event frames away from the main
+    /// actor. The receive loop still awaits each parse in order, so event
+    /// ordering and request correlation remain deterministic.
+    nonisolated static func parseInboundMessage(_ data: Data) -> ParsedInboundMessage {
+        guard let frame = try? JSONDecoder().decode(InboundRoutingFrame.self, from: data) else {
+            return .invalid(reason: .malformedJSON)
         }
 
-        if let type = json["type"] as? String, type == "event" {
-            guard let eventValue = json["event"],
-                  JSONSerialization.isValidJSONObject(eventValue),
-                  let eventData = try? JSONSerialization.data(withJSONObject: eventValue),
-                  let event = try? JSONDecoder().decode(ServerEventPayload.self, from: eventData) else {
-                logger.warning("Received malformed engine event frame", category: .websocket)
-                return
+        if frame.type == "event" {
+            guard let event = frame.event,
+                  let eventData = try? JSONEncoder().encode(event) else {
+                return .invalid(reason: .malformedEvent)
             }
-            #if DEBUG || BETA
-            logger.logEvent(type: event.type, sessionId: event.sessionId, data: event.data.map { String(describing: $0.value).prefix(300).description })
-            #endif
-            let cursor = (json["cursor"] as? UInt64).map(EngineStreamCursor.init(rawValue:))
-            let delivery = EngineEventDelivery(
-                topic: json["topic"] as? String,
-                subscriptionId: json["subscriptionId"] as? String,
-                cursor: cursor,
-                event: event,
-                eventData: eventData
+            return .event(
+                EngineEventDelivery(
+                    topic: frame.topic,
+                    subscriptionId: frame.subscriptionId,
+                    cursor: frame.cursor.map(EngineStreamCursor.init(rawValue:)),
+                    event: event,
+                    eventData: eventData
+                )
             )
-            onEvent?(delivery)
-        } else if let id = json["id"] as? String {
-            timeoutTasks[id]?.cancel()
-            timeoutTasks.removeValue(forKey: id)
+        }
 
-            if let continuation = pendingRequests.removeValue(forKey: id) {
-                continuation.resume(returning: data)
+        if let id = frame.id {
+            return .response(id: id)
+        }
+        return .invalid(reason: .missingRouting)
+    }
+
+    func handleMessage(_ data: Data) async {
+        let frame = await inboundFrameDecoder.decode(data: data)
+        handleParsedMessage(frame.message, rawData: frame.data)
+    }
+
+    private func handleParsedMessage(_ parsed: ParsedInboundMessage, rawData data: Data) {
+        switch parsed {
+        case .invalid(.malformedJSON):
+            logger.warning(
+                "Received malformed non-JSON message (\(data.count) bytes)",
+                category: .websocket
+            )
+        case .invalid(.malformedEvent):
+            logger.warning("Received malformed engine event frame", category: .websocket)
+        case .invalid(.missingRouting):
+            logger.warning("Received message without id or type", category: .websocket)
+        case .event(let delivery):
+            #if DEBUG || BETA
+            logger.logEvent(
+                type: delivery.event.type,
+                sessionId: delivery.event.sessionId,
+                payloadBytes: delivery.eventData.count
+            )
+            #endif
+            onEvent?(delivery)
+        case .response(let id):
+            if finishPendingRequest(id: id, result: .success(data)) {
                 #if DEBUG || BETA
                 logger.debug("Resolved engine response for id=\(id), remaining pending: \(pendingRequests.count)", category: .websocket)
                 #endif
             } else {
-                logger.warning("Received response for unknown/expired id=\(id)", category: .websocket)
+                // Late responses are expected after a caller cancellation or
+                // request-local timeout. They do not imply protocol damage.
+                logger.debug(
+                    "Ignored response for retired or unknown request id=\(id)",
+                    category: .websocket
+                )
             }
-        } else {
-            logger.warning("Received message without id or type", category: .websocket)
         }
     }
 
     // MARK: - Heartbeat
 
-    func heartbeatLoop() async {
+    func heartbeatLoop(
+        on task: URLSessionWebSocketTask,
+        generation: UInt64
+    ) async {
         logger.verbose("Heartbeat loop running (interval: \(String(format: "%.0f", Self.heartbeatInterval))s)...", category: .websocket)
         var pingCount = 0
 
-        while isConnectedFlag {
-            try? await Task.sleep(for: .seconds(Self.heartbeatInterval))
-            guard isConnectedFlag else { break }
+        while ownsTransport(task, generation: generation), !Task.isCancelled {
+            do {
+                try await Task.sleep(for: .seconds(Self.heartbeatInterval))
+            } catch {
+                break
+            }
+            guard ownsTransport(task, generation: generation),
+                  !Task.isCancelled else { break }
 
             if isInBackground {
                 logger.verbose("Skipping ping - app in background", category: .websocket)
@@ -118,11 +225,12 @@ extension EngineConnection {
 
             pingCount += 1
             do {
-                guard let task = engineConnectionTask else {
-                    throw EngineConnectionError.notConnected
-                }
                 let pingStart = CFAbsoluteTimeGetCurrent()
                 try await sendPing(on: task, timeout: Self.connectionVerificationTimeout)
+                guard ownsTransport(task, generation: generation),
+                      !Task.isCancelled else {
+                    break
+                }
                 let pingDuration = (CFAbsoluteTimeGetCurrent() - pingStart) * 1000
                 logger.verbose("Ping #\(pingCount) successful (\(String(format: "%.1f", pingDuration))ms)", category: .websocket)
 
@@ -131,8 +239,16 @@ extension EngineConnection {
                     reconnectAttempts = 0
                 }
             } catch {
+                guard ownsTransport(task, generation: generation),
+                      !Task.isCancelled else {
+                    logger.debug("Ignoring ping failure from retired transport", category: .websocket)
+                    break
+                }
                 logger.warning("Ping #\(pingCount) failed: \(error.localizedDescription)", category: .websocket)
-                await handleDisconnect()
+                await handleDisconnect(
+                    expectedTask: task,
+                    expectedGeneration: generation
+                )
                 break
             }
         }
@@ -142,23 +258,22 @@ extension EngineConnection {
     // MARK: - Pending Request Cleanup
 
     func failPendingRequest(id: String, error: Error) {
-        timeoutTasks.removeValue(forKey: id)?.cancel()
-        pendingRequests.removeValue(forKey: id)?.resume(throwing: error)
+        finishPendingRequest(id: id, result: .failure(error))
     }
 
     /// Fail all pending engine requests and cancel their timeout tasks.
     func failPendingRequests(error: Error) {
         let pendingCount = pendingRequests.count
-        for (id, continuation) in pendingRequests {
+        let requests = pendingRequests
+        pendingRequests.removeAll(keepingCapacity: true)
+        for (id, pending) in requests {
             logger.debug("Failing pending request id=\(id)", category: .websocket)
-            continuation.resume(throwing: error)
+            pending.finish(.failure(error))
         }
-        pendingRequests.removeAll()
-
-        let timeoutCount = timeoutTasks.count
-        timeoutTasks.values.forEach { $0.cancel() }
-        timeoutTasks.removeAll()
-        logger.debug("Cleared \(pendingCount) pending requests and \(timeoutCount) timeout tasks", category: .websocket)
+        logger.debug(
+            "Cleared \(pendingCount) pending requests and owned deadlines",
+            category: .websocket
+        )
     }
 
 }

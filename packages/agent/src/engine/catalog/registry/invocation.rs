@@ -5,8 +5,6 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use super::LiveCatalog;
-use super::output_contract::validate_output_contract;
-use crate::engine::authority::grants::ConsumeGrantInvocationBudget;
 use crate::engine::durability::ledger::{
     IdempotencyReservation, IdempotencyReservationOutcome, StoredInvocationOutcome,
 };
@@ -15,14 +13,18 @@ use crate::engine::invocation::model::{
 };
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::WorkerId;
-use crate::engine::kernel::types::{FunctionDefinition, FunctionRevision, IdempotencyScope};
+use crate::engine::kernel::types::{
+    CatalogRevision, FunctionDefinition, FunctionRevision, IdempotencyScope,
+};
 use crate::engine::kernel::{policy, schema};
 
 /// A sync invocation that passed routing, policy, schema, and idempotency
 /// reservation checks and is ready to execute outside the catalog lock.
 pub(in crate::engine) struct PreparedSyncInvocation {
-    /// Invocation with its causal catalog revision captured at prepare time.
+    /// Invocation accepted at prepare time.
     pub invocation: Invocation,
+    /// Catalog revision captured at prepare time.
+    pub catalog_revision: CatalogRevision,
     /// Function contract captured at prepare time.
     pub function: FunctionDefinition,
     /// In-process handler captured at prepare time.
@@ -42,6 +44,7 @@ pub(in crate::engine) enum PreparedSyncInvocationDecision {
 
 impl LiveCatalog {
     /// Invoke an in-process function synchronously.
+    #[cfg(test)]
     pub async fn invoke_sync(&mut self, invocation: Invocation) -> InvocationResult {
         match self.prepare_sync_invocation(invocation) {
             PreparedSyncInvocationDecision::Finished(result) => *result,
@@ -57,22 +60,10 @@ impl LiveCatalog {
         &mut self,
         invocation: Invocation,
     ) -> PreparedSyncInvocationDecision {
-        self.prepare_invocation(invocation, policy::validate_invocation)
+        self.prepare_invocation(invocation)
     }
 
-    /// Prepare a trigger runtime target invocation without executing the handler.
-    pub(in crate::engine) fn prepare_trigger_target_invocation(
-        &mut self,
-        invocation: Invocation,
-    ) -> PreparedSyncInvocationDecision {
-        self.prepare_invocation(invocation, policy::validate_trigger_target_invocation)
-    }
-
-    fn prepare_invocation(
-        &mut self,
-        mut invocation: Invocation,
-        validate_policy: fn(&FunctionDefinition, &Invocation) -> Result<()>,
-    ) -> PreparedSyncInvocationDecision {
+    fn prepare_invocation(&mut self, invocation: Invocation) -> PreparedSyncInvocationDecision {
         let Some(entry) = self.functions.get(&invocation.function_id) else {
             let worker_id = WorkerId::new("missing").expect("valid static id");
             let result = InvocationResult::error(
@@ -92,12 +83,10 @@ impl LiveCatalog {
             )));
         };
         let function = entry.definition.clone();
-        let handler = entry.handler.clone();
+        let handler = Arc::clone(&entry.handler);
 
-        invocation.causal_context.catalog_revision = self.revision;
-
-        if let Err(err) = validate_policy(&function, &invocation)
-            .and_then(|_| self.validate_invocation_grant(&function, &invocation))
+        if let Err(err) = validate_advertised_surface(&function, &invocation)
+            .and_then(|_| policy::validate_invocation(&function, &invocation))
         {
             let result = InvocationResult::error(
                 &invocation,
@@ -197,96 +186,13 @@ impl LiveCatalog {
             }
         }
 
-        let Some(handler) = handler else {
-            let mut result = InvocationResult::error(
-                &invocation,
-                function.owner_worker.clone(),
-                function.revision,
-                self.revision,
-                EngineError::NotRoutable {
-                    function_id: invocation.function_id.to_string(),
-                    reason: "no in-process handler".to_owned(),
-                },
-            );
-            if let Some(reservation) = &idempotency
-                && let Some(completion_error) = self.complete_invocation_idempotency(
-                    reservation,
-                    &invocation,
-                    &function,
-                    &result,
-                )
-            {
-                result = completion_error;
-            }
-            let idempotency_scope = idempotency.map(|reservation| reservation.key.scope);
-            return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
-                &invocation,
-                result,
-                idempotency_scope,
-            )));
-        };
-
-        if let Err(err) = self.consume_invocation_budget(&function, &invocation) {
-            let mut result = InvocationResult::error(
-                &invocation,
-                function.owner_worker.clone(),
-                function.revision,
-                self.revision,
-                err,
-            );
-            if let Some(reservation) = &idempotency
-                && let Some(completion_error) = self.complete_invocation_idempotency(
-                    reservation,
-                    &invocation,
-                    &function,
-                    &result,
-                )
-            {
-                result = completion_error;
-            }
-            let idempotency_scope = idempotency.map(|reservation| reservation.key.scope);
-            return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
-                &invocation,
-                result,
-                idempotency_scope,
-            )));
-        }
-
         PreparedSyncInvocationDecision::Execute(Box::new(PreparedSyncInvocation {
             invocation,
+            catalog_revision: self.revision,
             function,
             handler,
             idempotency,
         }))
-    }
-
-    fn validate_invocation_grant(
-        &self,
-        function: &FunctionDefinition,
-        invocation: &Invocation,
-    ) -> Result<()> {
-        self.grants
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
-            .authorize_invocation(function, invocation)
-            .map(|_| ())
-    }
-
-    fn consume_invocation_budget(
-        &mut self,
-        function: &FunctionDefinition,
-        invocation: &Invocation,
-    ) -> Result<()> {
-        self.grants
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
-            .consume_invocation_budget(ConsumeGrantInvocationBudget {
-                grant_id: invocation.causal_context.authority_grant_id.clone(),
-                invocation_id: invocation.id.clone(),
-                function_id: function.id.clone(),
-                trace_id: invocation.causal_context.trace_id.clone(),
-            })
-            .map(|_| ())
     }
 
     /// Finish an invocation whose handler already executed outside the catalog
@@ -296,41 +202,17 @@ impl LiveCatalog {
         prepared: PreparedSyncInvocation,
         handler_result: Result<Value>,
     ) -> InvocationResult {
-        self.finish_prepared_sync_invocation_with_contracts(
-            prepared,
-            handler_result,
-            Vec::new(),
-            None,
-        )
-    }
-
-    /// Finish an invocation with host-enforced contract bookkeeping.
-    pub(in crate::engine) fn finish_prepared_sync_invocation_with_contracts(
-        &mut self,
-        prepared: PreparedSyncInvocation,
-        handler_result: Result<Value>,
-        resource_lease_ids: Vec<String>,
-        compensation_status: Option<String>,
-    ) -> InvocationResult {
         let PreparedSyncInvocation {
             invocation,
+            catalog_revision: captured_revision,
             function,
             idempotency,
             ..
         } = prepared;
-        let captured_revision = invocation.causal_context.catalog_revision;
 
         let result = match handler_result {
             Ok(value) => {
-                if let Err(err) = validate_output_contract(&function, &invocation, &value) {
-                    InvocationResult::error(
-                        &invocation,
-                        function.owner_worker.clone(),
-                        function.revision,
-                        captured_revision,
-                        err,
-                    )
-                } else if let Some(schema) = &function.response_schema {
+                if let Some(schema) = &function.response_schema {
                     if let Err(err) =
                         schema::validate_payload(&function.id, "response", schema, &value)
                     {
@@ -382,23 +264,15 @@ impl LiveCatalog {
                     captured_revision,
                     err,
                 );
-                return self.finish_invocation_with_contracts(
+                return self.finish_invocation(
                     &invocation,
                     result,
                     Some(reservation.key.scope.clone()),
-                    resource_lease_ids,
-                    compensation_status,
                 );
             }
         }
         let idempotency_scope = idempotency.map(|reservation| reservation.key.scope);
-        self.finish_invocation_with_contracts(
-            &invocation,
-            result,
-            idempotency_scope,
-            resource_lease_ids,
-            compensation_status,
-        )
+        self.finish_invocation(&invocation, result, idempotency_scope)
     }
 
     fn finish_invocation(
@@ -410,23 +284,6 @@ impl LiveCatalog {
         self.record_invocation_result(invocation, result, idempotency_scope)
     }
 
-    fn finish_invocation_with_contracts(
-        &mut self,
-        invocation: &Invocation,
-        result: InvocationResult,
-        idempotency_scope: Option<IdempotencyScope>,
-        resource_lease_ids: Vec<String>,
-        compensation_status: Option<String>,
-    ) -> InvocationResult {
-        self.record_invocation_result_with_contracts(
-            invocation,
-            result,
-            idempotency_scope,
-            resource_lease_ids,
-            compensation_status,
-        )
-    }
-
     /// Record an invocation result produced by a privileged host path.
     pub fn record_invocation_result(
         &mut self,
@@ -434,26 +291,7 @@ impl LiveCatalog {
         result: InvocationResult,
         idempotency_scope: Option<IdempotencyScope>,
     ) -> InvocationResult {
-        self.record_invocation_result_with_contracts(
-            invocation,
-            result,
-            idempotency_scope,
-            Vec::new(),
-            None,
-        )
-    }
-
-    /// Record an invocation result with host-enforced contract metadata.
-    pub fn record_invocation_result_with_contracts(
-        &mut self,
-        invocation: &Invocation,
-        result: InvocationResult,
-        idempotency_scope: Option<IdempotencyScope>,
-        resource_lease_ids: Vec<String>,
-        compensation_status: Option<String>,
-    ) -> InvocationResult {
-        let record = InvocationRecord::from_result(invocation, &result, idempotency_scope)
-            .with_contracts(resource_lease_ids, compensation_status);
+        let record = InvocationRecord::from_result(invocation, &result, idempotency_scope);
         if let Err(err) = self.ledger.append_invocation(&record) {
             return InvocationResult::error(
                 invocation,
@@ -465,4 +303,33 @@ impl LiveCatalog {
         }
         result
     }
+}
+
+fn validate_advertised_surface(
+    function: &FunctionDefinition,
+    invocation: &Invocation,
+) -> Result<()> {
+    let Some(expected_revision) = invocation.causal_context.advertised_function_revision() else {
+        return Ok(());
+    };
+    let expected_worker_version = invocation
+        .causal_context
+        .advertised_worker_version()
+        .map(ToOwned::to_owned);
+    let actual_worker_version = function
+        .model_tool
+        .as_ref()
+        .and_then(|tool| tool.worker.as_ref())
+        .map(|worker| worker.worker_version.as_str())
+        .map(ToOwned::to_owned);
+    if expected_revision == function.revision && expected_worker_version == actual_worker_version {
+        return Ok(());
+    }
+    Err(EngineError::StaleFunctionSurface {
+        function_id: function.id.to_string(),
+        expected_revision: expected_revision.0,
+        actual_revision: function.revision.0,
+        expected_worker_version,
+        actual_worker_version,
+    })
 }

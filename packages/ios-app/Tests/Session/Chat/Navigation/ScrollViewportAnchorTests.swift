@@ -69,7 +69,7 @@ struct ScrollViewportAnchorTests {
     }
 
     @Test("does not fabricate anchor without loaded messages")
-    func noFallbackWithoutLoadedMessages() {
+    func noRecoveryAnchorWithoutLoadedMessages() {
         let anchor = ScrollViewportAnchorResolver.captureOrFirstLoaded(
             frames: [:],
             viewportHeight: 700,

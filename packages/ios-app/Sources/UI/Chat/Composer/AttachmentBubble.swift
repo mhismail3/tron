@@ -4,14 +4,14 @@ import UIKit
 /// Compact chip for displaying staged attachments above the input bar.
 struct AttachmentBubble: View {
     let attachment: Attachment
-    let capability: AttachmentCapability
+    let tool: AttachmentSupport
     let onRemove: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
 
     private let fileNameMaxWidth: CGFloat = 76
     private var tint: TintedColors { TintedColors(accent: .tronSlate, colorScheme: colorScheme) }
-    private var warning: String? { attachment.warningText(for: capability) }
+    private var warning: String? { attachment.warningText(for: tool) }
     private var fileNameWidth: CGFloat {
         let font = TronTypography.uiFont(mono: false, size: TronTypography.sizeBody2, weight: .medium)
         let width = (attachment.displayName as NSString).size(withAttributes: [.font: font]).width.rounded(.up)

@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import Observation
+import SwiftUI
 @testable import TronMobile
 
 /// Tests for ModelPickerState
@@ -70,6 +71,29 @@ struct ModelPickerStateTests {
         enum TestError: Error {
             case mockError
         }
+    }
+
+    // MARK: - Presentation Policy Tests
+
+    @Test("Model picker chrome uses the emerald product accent")
+    func modelPickerChromeUsesEmeraldAccent() {
+        #expect(ModelPickerPresentation.primaryAccent == Color.tronEmerald)
+    }
+
+    @Test("OpenAI uses a readable neutral accent only in dark mode")
+    func openAIUsesReadableNeutralAccentOnlyInDarkMode() {
+        #expect(ModelPickerPresentation.usesHighContrastNeutral(
+            providerId: "openai-codex",
+            isDark: true
+        ))
+        #expect(!ModelPickerPresentation.usesHighContrastNeutral(
+            providerId: "openai-codex",
+            isDark: false
+        ))
+        #expect(!ModelPickerPresentation.usesHighContrastNeutral(
+            providerId: "anthropic",
+            isDark: true
+        ))
     }
 
     /// Create test model info
@@ -144,6 +168,19 @@ struct ModelPickerStateTests {
         let result = state.currentModelInfo(current: "claude-opus-4-20250514")
 
         #expect(result == nil)
+    }
+
+    @Test("Current model info resolves a provider-local restored identifier")
+    func testCurrentModelInfo_resolvesProviderLocalIdentifier() {
+        let repository = MockModelRepository()
+        let state = ModelPickerState(modelRepository: repository)
+        repository.cachedModels = [
+            Self.makeModelInfo(id: "openai/gpt-5.6-sol", name: "GPT-5.6 Sol")
+        ]
+
+        let result = state.currentModelInfo(current: "gpt-5.6-sol")
+
+        #expect(result?.contextWindow == 200_000)
     }
 
     @Test("Repository catalog observation flows through picker metadata lookup")

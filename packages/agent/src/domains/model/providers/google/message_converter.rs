@@ -1,16 +1,17 @@
 //! Converts [`Context`] messages to Gemini API format.
 //!
-//! Handles text, images, PDFs, capability invocations (with `thoughtSignature`), and capability results.
+//! Handles text, images, PDFs, tool invocations (with `thoughtSignature`), and tool results.
 //! Sanitizes JSON schemas by removing unsupported properties (`additionalProperties`, `$schema`).
 
 use crate::domains::model::providers::id_remapping::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
+use crate::domains::model::providers::shared::messages_with_request_context;
 use crate::shared::protocol::content::{AssistantContent, UserContent};
 use crate::shared::protocol::messages::{
-    CapabilityResultMessageContent, Context, Message, UserMessageContent,
+    Context, Message, ToolResultMessageContent, UserMessageContent,
 };
-use crate::shared::protocol::model_capabilities::ModelCapability;
+use crate::shared::protocol::model_tools::ModelTool;
 
 use super::types::{
     FunctionCallData, FunctionDeclaration, FunctionResponseData, GeminiContent, GeminiPart,
@@ -19,11 +20,11 @@ use super::types::{
 
 /// Placeholder thought signature for historical function calls from other providers.
 ///
-/// When a capability invocation doesn't have a thought signature (e.g., it came from Anthropic
+/// When a tool invocation doesn't have a thought signature (e.g., it came from Anthropic
 /// or `OpenAI`), this placeholder is used to satisfy the Gemini 3 validator.
 const SKIP_THOUGHT_SIGNATURE: &str = "skip_thought_signature_validator";
 
-/// Collect all capability invocation IDs from assistant messages for cross-provider remapping.
+/// Collect all tool invocation IDs from assistant messages for cross-provider remapping.
 fn collect_invocation_ids(messages: &[Message]) -> Vec<String> {
     messages
         .iter()
@@ -32,7 +33,7 @@ fn collect_invocation_ids(messages: &[Message]) -> Vec<String> {
                 let ids: Vec<String> = content
                     .iter()
                     .filter_map(|c| match c {
-                        AssistantContent::CapabilityInvocation { id, .. } => Some(id.clone()),
+                        AssistantContent::ToolInvocation { id, .. } => Some(id.clone()),
                         _ => None,
                     })
                     .collect();
@@ -46,24 +47,24 @@ fn collect_invocation_ids(messages: &[Message]) -> Vec<String> {
 
 /// Convert context messages to Gemini API content format.
 ///
-/// Builds a capability invocation ID mapping for cross-provider remapping, then converts
+/// Builds a tool invocation ID mapping for cross-provider remapping, then converts
 /// each message to `GeminiContent` with appropriate parts.
 pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
-    let messages = &context.messages;
+    let messages = messages_with_request_context(context);
     if messages.is_empty() {
         return vec![];
     }
 
-    let all_invocation_ids = collect_invocation_ids(messages);
+    let all_invocation_ids = collect_invocation_ids(&messages);
     let id_refs: Vec<&str> = all_invocation_ids.iter().map(String::as_str).collect();
     let id_mapping = build_invocation_id_mapping(&id_refs, IdFormat::OpenAi);
 
     let mut contents = Vec::new();
 
-    for message in messages.iter() {
+    for message in &messages {
         match message {
             Message::User { content, .. } => {
-                let parts = convert_user_content(content);
+                let parts = convert_user_content(&content);
                 if !parts.is_empty() {
                     contents.push(GeminiContent {
                         role: "user".into(),
@@ -85,7 +86,7 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
                                 });
                             }
                         }
-                        AssistantContent::CapabilityInvocation {
+                        AssistantContent::ToolInvocation {
                             name,
                             arguments,
                             thought_signature,
@@ -118,19 +119,19 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
                     });
                 }
             }
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id,
                 content,
                 ..
             } => {
-                let remapped_id = remap_invocation_id(invocation_id, &id_mapping);
-                let result_text = extract_capability_result_text(content);
+                let remapped_id = remap_invocation_id(&invocation_id, &id_mapping);
+                let result_text = extract_tool_result_text(&content);
 
                 contents.push(GeminiContent {
                     role: "user".into(),
                     parts: vec![GeminiPart::FunctionResponse {
                         function_response: FunctionResponseData {
-                            name: "capability_result".into(),
+                            name: "tool_result".into(),
                             response: serde_json::json!({
                                 "result": result_text,
                                 "invocation_id": remapped_id,
@@ -145,17 +146,17 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
     contents
 }
 
-/// Extract text from capability result message content.
-fn extract_capability_result_text(content: &CapabilityResultMessageContent) -> String {
+/// Extract text from tool result message content.
+fn extract_tool_result_text(content: &ToolResultMessageContent) -> String {
     match content {
-        CapabilityResultMessageContent::Text(text) => text.clone(),
-        CapabilityResultMessageContent::Blocks(blocks) => blocks
+        ToolResultMessageContent::Text(text) => text.clone(),
+        ToolResultMessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|b| match b {
-                crate::shared::protocol::content::CapabilityResultContent::Text { text } => {
+                crate::shared::protocol::content::ToolResultContent::Text { text } => {
                     Some(text.as_str())
                 }
-                crate::shared::protocol::content::CapabilityResultContent::Image { .. } => None,
+                crate::shared::protocol::content::ToolResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -218,11 +219,11 @@ fn convert_user_content(content: &UserMessageContent) -> Vec<GeminiPart> {
     }
 }
 
-/// Convert capabilities to Gemini API format.
+/// Convert tools to Gemini API format.
 ///
 /// Returns a single-element array with all function declarations.
-pub fn convert_tools(capabilities: &[ModelCapability]) -> Vec<GeminiTool> {
-    let declarations: Vec<FunctionDeclaration> = capabilities
+pub fn convert_tools(tools: &[ModelTool]) -> Vec<GeminiTool> {
+    let declarations: Vec<FunctionDeclaration> = tools
         .iter()
         .map(|tool| {
             let schema = serde_json::to_value(&tool.parameters).unwrap_or_default();
@@ -285,10 +286,10 @@ mod tests {
         Context {
             messages: messages.into(),
             system_prompt: None,
-            capabilities: None,
+            tools: None,
+            request_context: Vec::new(),
+            cache_layout: Default::default(),
             working_directory: None,
-            agent_state_context: None,
-            memory_prompt_context: None,
             server_origin: None,
         }
     }
@@ -332,13 +333,13 @@ mod tests {
     }
 
     #[test]
-    fn converts_assistant_capability_invocations_with_thought_signature() {
+    fn converts_assistant_tool_invocations_with_thought_signature() {
         let mut args = Map::new();
         args.insert("command".into(), serde_json::json!("ls"));
         let context = ctx(vec![Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "call_123".into(),
-                name: "execute".into(),
+                name: "test_tool".into(),
                 arguments: args,
                 thought_signature: Some("sig-abc".into()),
             }],
@@ -354,7 +355,7 @@ mod tests {
                 function_call,
                 thought_signature,
             } => {
-                assert_eq!(function_call.name, "execute");
+                assert_eq!(function_call.name, "test_tool");
                 assert_eq!(thought_signature.as_deref(), Some("sig-abc"));
             }
             _ => panic!("Expected function call part"),
@@ -362,9 +363,9 @@ mod tests {
     }
 
     #[test]
-    fn capability_invocation_without_signature_uses_placeholder() {
+    fn tool_invocation_without_signature_uses_placeholder() {
         let context = ctx(vec![Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "toolu_123".into(),
                 name: "inspect".into(),
                 arguments: Map::new(),
@@ -387,14 +388,14 @@ mod tests {
     }
 
     #[test]
-    fn converts_capability_result() {
+    fn converts_tool_result() {
         let output_envelope = format!(
-            "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+            "{{\"summary\":\"{}\",\"kind\":\"test\"}}",
             "safe-évidence-".repeat(1_400)
         );
-        let context = ctx(vec![Message::CapabilityResult {
+        let context = ctx(vec![Message::ToolResult {
             invocation_id: "call_abc".into(),
-            content: CapabilityResultMessageContent::Text(output_envelope.clone()),
+            content: ToolResultMessageContent::Text(output_envelope.clone()),
             is_error: None,
         }]);
         let contents = convert_messages(&context);
@@ -404,7 +405,7 @@ mod tests {
             GeminiPart::FunctionResponse {
                 function_response, ..
             } => {
-                assert_eq!(function_response.name, "capability_result");
+                assert_eq!(function_response.name, "tool_result");
                 assert_eq!(
                     function_response.response["result"].as_str(),
                     Some(output_envelope.as_str())
@@ -459,10 +460,10 @@ mod tests {
     fn converts_tools_to_gemini_format() {
         let mut props = serde_json::Map::new();
         props.insert("command".into(), serde_json::json!({"type": "string"}));
-        let capabilities = vec![ModelCapability {
-            name: "execute".into(),
+        let tools = vec![ModelTool {
+            name: "test_tool".into(),
             description: "Run a command".into(),
-            parameters: crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
+            parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some(props),
                 required: Some(vec!["command".into()]),
@@ -470,16 +471,16 @@ mod tests {
                 extra: serde_json::Map::new(),
             },
         }];
-        let gemini_tools = convert_tools(&capabilities);
+        let gemini_tools = convert_tools(&tools);
         assert_eq!(gemini_tools.len(), 1);
         assert_eq!(gemini_tools[0].function_declarations.len(), 1);
-        assert_eq!(gemini_tools[0].function_declarations[0].name, "execute");
+        assert_eq!(gemini_tools[0].function_declarations[0].name, "test_tool");
     }
 
     #[test]
     fn empty_tools_returns_empty() {
-        let capabilities: Vec<ModelCapability> = vec![];
-        assert!(convert_tools(&capabilities).is_empty());
+        let tools: Vec<ModelTool> = vec![];
+        assert!(convert_tools(&tools).is_empty());
     }
 
     // ── sanitize_schema ──────────────────────────────────────────────

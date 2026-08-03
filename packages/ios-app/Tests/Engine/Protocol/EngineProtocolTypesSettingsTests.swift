@@ -5,31 +5,28 @@ import Foundation
 @Suite("ServerSettings Tests")
 struct ServerSettingsTests {
 
-    @Test("full profile response projects mobile settings and ignores server-only fields")
-    func fullProfileResponseProjectsMobileSettings() throws {
+    @Test("full settings response projects mobile settings and ignores server-only fields")
+    func fullSettingsResponseProjectsMobileSettings() throws {
         let json = """
         {
-            "version": "0.1.0",
-            "name": "tron",
-            "api": { "anthropic": { "authUrl": "https://example.invalid" } },
+            "api": {
+                "anthropic": { "authUrl": "https://example.invalid" },
+                "ollama": { "baseUrl": "http://192.168.1.5:11434" }
+            },
             "retry": { "maxRetries": 3 },
             "agent": { "maxTurns": 250 },
             "server": {
                 "heartbeatIntervalMs": 30000,
                 "defaultModel": "claude-opus-4-6",
                 "defaultWorkspace": "/projects",
-                "tailscaleIp": "100.64.0.7",
-                "transcription": { "enabled": true }
+                "tailscaleIp": "100.64.0.7"
             },
             "context": {
                 "compactor": {
-                    "maxTokens": 25000,
                     "preserveRecentCount": 3,
                     "triggerTokenThreshold": 0.80
                 }
-            },
-            "tmux": { "commandTimeoutMs": 30000 },
-            "ui": { "theme": "forest_green" }
+            }
         }
         """
 
@@ -37,7 +34,7 @@ struct ServerSettingsTests {
         #expect(settings.defaultModel == "claude-opus-4-6")
         #expect(settings.defaultWorkspace == "/projects")
         #expect(settings.tailscaleIp == "100.64.0.7")
-        #expect(settings.transcriptionEnabled == true)
+        #expect(settings.ollamaBaseUrl == "http://192.168.1.5:11434")
         #expect(settings.compaction.preserveRecentCount == 3)
         #expect(settings.compaction.triggerTokenThreshold == 0.80)
     }
@@ -48,7 +45,7 @@ struct ServerSettingsTests {
         #expect(settings.defaultModel == "claude-sonnet-4-6")
         #expect(settings.defaultWorkspace == nil)
         #expect(settings.tailscaleIp == nil)
-        #expect(settings.transcriptionEnabled == false)
+        #expect(settings.ollamaBaseUrl == "http://localhost:11434")
         #expect(settings.compaction.preserveRecentCount == 5)
         #expect(settings.compaction.triggerTokenThreshold == 0.70)
     }
@@ -58,7 +55,6 @@ struct ServerSettingsTests {
         let json = #"{"server":{"defaultModel":"claude-opus-4-6"}}"#
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.defaultModel == "claude-opus-4-6")
-        #expect(settings.transcriptionEnabled == false)
     }
 
     @Test("settings payload decodes without diagnostic policy blocks")
@@ -82,23 +78,6 @@ struct ServerSettingsTests {
         }
     }
 
-    @Test("ServerSettings decoder rejects missing server transcription policy")
-    func serverSettingsDecoderRejectsMissingTranscriptionPolicy() throws {
-        let json = """
-        {
-            "server": {
-                "defaultModel": "claude-opus-4-6"
-            },
-            "context": {
-                "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 }
-            }
-        }
-        """
-        #expect(throws: DecodingError.self) {
-            _ = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
-        }
-    }
-
     @Test("ServerSettings decoder rejects malformed server field type")
     func serverSettingsDecoderRejectsMalformedTypes() throws {
         let json = """
@@ -107,8 +86,7 @@ struct ServerSettingsTests {
                 "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 }
             },
             "server": {
-                "defaultModel": 42,
-                "transcription": { "enabled": false }
+                "defaultModel": 42
             }
         }
         """
@@ -117,20 +95,11 @@ struct ServerSettingsTests {
         }
     }
 
-    @Test("ServerSettings decoder rejects malformed transcription setting")
-    func serverSettingsDecoderRejectsMalformedTranscriptionSetting() throws {
-        let json = #"{"server":{"transcription":"yes"}}"#
-        #expect(throws: DecodingError.self) {
-            _ = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
-        }
-    }
-
     @Test("ServerSettingsUpdate encodes primitive structure")
     func settingsUpdateEncode() throws {
         var update = ServerSettingsUpdate()
         update.server = .init(
-            defaultModel: "claude-opus-4-6",
-            transcription: .init(enabled: true)
+            defaultModel: "claude-opus-4-6"
         )
 
         let data = try JSONEncoder().encode(update)
@@ -139,31 +108,21 @@ struct ServerSettingsTests {
         let server = json["server"] as? [String: Any]
         #expect(server?["defaultModel"] as? String == "claude-opus-4-6")
         #expect(server?["tailscaleIp"] == nil)
-        let transcription = server?["transcription"] as? [String: Any]
-        #expect(transcription?["enabled"] as? Bool == true)
+        #expect(server?["transcription"] == nil)
 
         #expect(json["session"] == nil)
         #expect(json["observability"] == nil)
         #expect(json["storage"] == nil)
         #expect(json["transcription"] == nil)
-    }
 
-    @Test("transcription-only update encodes exact nested server shape")
-    func transcriptionOnlyUpdateEncode() throws {
-        let update = ServerSettingsUpdate(
-            server: .init(transcription: .init(enabled: true))
+        let ollamaUpdate = ServerSettingsUpdate(
+            api: .init(ollama: .init(baseUrl: "http://192.168.1.8:11434"))
         )
-
-        let data = try JSONEncoder().encode(update)
-        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-        #expect(Set(json.keys) == Set(["server"]))
-
-        let server = json["server"] as? [String: Any]
-        #expect(server.map { Set($0.keys) } == Set(["transcription"]))
-
-        let transcription = server?["transcription"] as? [String: Any]
-        #expect(transcription.map { Set($0.keys) } == Set(["enabled"]))
-        #expect(transcription?["enabled"] as? Bool == true)
+        let ollamaData = try JSONEncoder().encode(ollamaUpdate)
+        let ollamaJson = try JSONSerialization.jsonObject(with: ollamaData) as! [String: Any]
+        let api = ollamaJson["api"] as? [String: Any]
+        let ollama = api?["ollama"] as? [String: Any]
+        #expect(ollama?["baseUrl"] as? String == "http://192.168.1.8:11434")
     }
 
 }

@@ -3,6 +3,10 @@
 //! Server startup stays in [`crate::app::bootstrap`]; this module owns only the
 //! terminal surface that can short-circuit before database, logging, or network
 //! startup.
+//! `notifications` owns relay/direct APNs configuration, `oauth` owns bearer
+//! rotation and contributor OAuth completion, and `snapshots` owns offline
+//! profile snapshot operations. All three route through this single parser and
+//! dispatcher; none starts the server or maintains another command registry.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -10,9 +14,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail, ensure};
 use clap::Parser;
 
-/// Tron agent — server and CLI capabilities.
+/// Tron agent — server and offline operator commands.
 #[derive(Parser, Debug)]
-#[command(name = "tron", about = "Tron agent server and capability runtime")]
+#[command(name = "tron", about = "Tron agent server and worker runtime")]
 pub struct Cli {
     #[command(subcommand)]
     pub(crate) command: Option<Command>,
@@ -53,12 +57,40 @@ pub(crate) enum Command {
         #[command(subcommand)]
         action: AuthAction,
     },
+    /// Verified profile backup and offline restoration.
+    State {
+        #[command(subcommand)]
+        action: StateAction,
+    },
+    /// Chrome-owned closed Native Messaging host for the Browser Operator.
+    #[command(name = "browser-native-host", hide = true)]
+    BrowserNativeHost {
+        /// Owner-only Unix socket used by the ordinary Browser Operator worker.
+        #[arg(long)]
+        socket: PathBuf,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub(crate) enum StateAction {
+    /// Create and verify an owner-only compressed profile snapshot.
+    Snapshot {
+        /// Also mark this as the required backup before a worker schema opens.
+        #[arg(long, hide = true)]
+        for_worker_schema: Option<u32>,
+    },
+    /// List available profile snapshot archives.
+    Snapshots,
+    /// Verify one snapshot without changing active state.
+    Verify { snapshot: PathBuf },
+    /// Restore one verified snapshot. Tron must be stopped.
+    Restore { snapshot: PathBuf },
 }
 
 #[derive(clap::Subcommand, Debug)]
 pub(crate) enum AuthAction {
     /// Generate a fresh bearer token, persist it to
-    /// `~/.tron/profiles/auth.json` as `bearerToken` (atomic, 0o600), and print it
+    /// `~/.tron/auth.json` as `bearerToken` (atomic, 0o600), and print it
     /// to stdout. After this completes, every paired iOS device must
     /// re-pair (their cached token is invalidated).
     ///
@@ -66,15 +98,59 @@ pub(crate) enum AuthAction {
     /// cache picks the new value up within a few seconds and starts
     /// rejecting upgrade requests carrying the old token with HTTP 401.
     Rotate,
+    /// Configure, inspect, or clear Apple Push provider-token credentials.
+    Apns {
+        #[command(subcommand)]
+        action: ApnsAction,
+    },
+    /// Configure, inspect, or select native-notification transport.
+    Notifications {
+        #[command(subcommand)]
+        action: NotificationsAction,
+    },
     /// Internal provider-policy bridge for the contributor OAuth shell.
     #[command(name = "begin-oauth", hide = true)]
     BeginOauth { provider: String },
     /// Internal stdin-only exchange bridge for the contributor OAuth shell.
     #[command(name = "complete-oauth", hide = true)]
     CompleteOauth,
-    /// Compatibility completion for a login begun by the pre-transaction CLI.
-    #[command(name = "store-oauth", hide = true)]
-    StoreOauth,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub(crate) enum ApnsAction {
+    /// Store an Apple team ID, key ID, and PKCS#8 `.p8` private key.
+    Configure {
+        #[arg(long)]
+        team_id: String,
+        #[arg(long)]
+        key_id: String,
+        #[arg(long)]
+        private_key_file: PathBuf,
+    },
+    /// Print a redacted APNs configuration status.
+    Status,
+    /// Remove APNs provider-token credentials.
+    Clear,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub(crate) enum NotificationsAction {
+    /// Store Cloudflare notification-relay credentials and select relay mode.
+    ConfigureRelay {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        secret_file: PathBuf,
+    },
+    /// Print redacted relay/direct transport readiness.
+    Status,
+    /// Select relay or direct transport without copying credentials.
+    Use { mode: String },
+    /// Remove relay credentials and select direct transport.
+    ClearRelay,
+    /// Import the contributor development relay environment once.
+    #[command(name = "import-legacy-environment", hide = true)]
+    ImportLegacyEnvironment,
 }
 
 #[derive(Debug)]
@@ -88,15 +164,6 @@ struct OAuthCompletionInput {
     returned_state: String,
 }
 
-#[derive(Debug)]
-struct LegacyOAuthCredentialInput {
-    provider: String,
-    label: String,
-    access_token: String,
-    refresh_token: String,
-    expires_at: i64,
-}
-
 /// Dispatch a CLI subcommand without starting the server.
 ///
 /// Kept separate from `main` so the dispatch + side-effect surface stays
@@ -108,427 +175,35 @@ pub(crate) async fn run_subcommand(cmd: &Command) -> Result<()> {
     match cmd {
         Command::Auth { action } => match action {
             AuthAction::Rotate => rotate_bearer_token_cli(),
+            AuthAction::Apns { action } => apns_auth_cli(action),
+            AuthAction::Notifications { action } => notifications_auth_cli(action),
             AuthAction::BeginOauth { provider } => begin_oauth_cli(provider),
             AuthAction::CompleteOauth => complete_oauth_cli().await,
-            AuthAction::StoreOauth => store_legacy_oauth_cli(),
         },
-    }
-}
-
-fn rotate_bearer_token_cli() -> Result<()> {
-    let path = crate::app::lifecycle::onboarding::bearer_token_path();
-    let token = crate::app::lifecycle::onboarding::rotate_bearer_token(&path)
-        .with_context(|| format!("Failed to rotate bearer token at {}", path.display()))?;
-    eprintln!("Bearer token rotated. All paired iOS devices must re-pair with the new token.");
-    println!("{token}");
-    Ok(())
-}
-
-fn begin_oauth_cli(provider: &str) -> Result<()> {
-    ensure!(
-        matches!(provider, "anthropic" | "openai-codex"),
-        "Contributor OAuth supports anthropic and openai-codex"
-    );
-    let path = crate::app::lifecycle::onboarding::bearer_token_path();
-    let flow = crate::domains::auth::oauth::flows::prepare_oauth_flow_with_state(provider, &path)
-        .context("Failed to prepare contributor OAuth")?
-        .context("Contributor OAuth supports anthropic and openai-codex")?;
-    let state = flow
-        .state
-        .context("Contributor OAuth flow did not include callback state")?;
-    println!(
-        "{}\t{}\t{}\t{}",
-        flow.verifier, state, flow.auth_url, flow.redirect_uri
-    );
-    Ok(())
-}
-
-async fn complete_oauth_cli() -> Result<()> {
-    let stdin = std::io::stdin();
-    complete_oauth_from_reader_at(
-        &crate::app::lifecycle::onboarding::bearer_token_path(),
-        stdin.lock(),
-    )
-    .await
-}
-
-fn read_nul_fields<const N: usize>(
-    mut reader: impl Read,
-    description: &str,
-) -> Result<[String; N]> {
-    let mut raw = Vec::new();
-    reader
-        .read_to_end(&mut raw)
-        .with_context(|| format!("Failed to read {description} from stdin"))?;
-    let fields = (|| -> Result<[String; N]> {
-        let payload = raw
-            .strip_suffix(&[0])
-            .with_context(|| format!("{description} input must end with a NUL delimiter"))?;
-        let decoded = payload
-            .split(|byte| *byte == 0)
-            .map(|field| {
-                String::from_utf8(field.to_vec())
-                    .with_context(|| format!("{description} fields must be valid UTF-8"))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        decoded.try_into().map_err(|values: Vec<String>| {
-            anyhow::anyhow!(
-                "{description} input must contain exactly {N} NUL-delimited fields; got {}",
-                values.len()
-            )
-        })
-    })();
-    raw.fill(0);
-    fields
-}
-
-fn read_oauth_completion(reader: impl Read) -> Result<OAuthCompletionInput> {
-    let [
-        provider,
-        label,
-        code,
-        verifier,
-        expected_state,
-        completion_kind,
-        returned_state,
-    ] = read_nul_fields(reader, "OAuth completion")?;
-    Ok(OAuthCompletionInput {
-        provider,
-        label,
-        code,
-        verifier,
-        expected_state,
-        completion_kind,
-        returned_state,
-    })
-}
-
-fn auth_storage_is_initialized(path: &Path) -> Result<bool> {
-    let initialized = crate::domains::auth::oauth::contributor_auth_storage_is_initialized(path)
-        .with_context(|| format!("Failed to load auth storage at {}", path.display()))?;
-    Ok(initialized)
-}
-
-fn save_oauth_tokens_at(
-    path: &Path,
-    provider: &str,
-    label: &str,
-    tokens: &crate::domains::auth::credentials::OAuthTokens,
-) -> Result<()> {
-    ensure!(
-        crate::domains::auth::oauth::save_contributor_oauth_tokens(path, provider, label, tokens,)
-            .with_context(|| format!(
-                "Failed to persist OAuth credentials at {}",
-                path.display()
-            ))?,
-        "Auth storage is not initialized; start the Tron server once and retry login"
-    );
-    Ok(())
-}
-
-fn store_legacy_oauth_cli() -> Result<()> {
-    let stdin = std::io::stdin();
-    store_legacy_oauth_from_reader_at(
-        &crate::app::lifecycle::onboarding::bearer_token_path(),
-        stdin.lock(),
-    )
-}
-
-fn store_legacy_oauth_from_reader_at(path: &Path, reader: impl Read) -> Result<()> {
-    let [provider, label, access_token, refresh_token, expires_at] =
-        read_nul_fields(reader, "Legacy OAuth credential")?;
-    let input = LegacyOAuthCredentialInput {
-        provider,
-        label,
-        access_token,
-        refresh_token,
-        expires_at: expires_at
-            .parse()
-            .context("Legacy OAuth expiry must be a signed integer")?,
-    };
-    ensure!(
-        matches!(input.provider.as_str(), "anthropic" | "openai-codex"),
-        "Unsupported legacy OAuth provider: {}",
-        input.provider
-    );
-    ensure!(
-        !input.label.trim().is_empty(),
-        "Legacy OAuth label must not be empty"
-    );
-    ensure!(
-        !input.access_token.trim().is_empty(),
-        "Legacy OAuth access token must not be empty"
-    );
-    ensure!(input.expires_at > 0, "Legacy OAuth expiry must be positive");
-    save_oauth_tokens_at(
-        path,
-        &input.provider,
-        &input.label,
-        &crate::domains::auth::credentials::OAuthTokens {
-            access_token: input.access_token,
-            refresh_token: input.refresh_token,
-            expires_at: input.expires_at,
+        Command::State { action } => match action {
+            StateAction::Snapshot { for_worker_schema } => {
+                create_profile_snapshot_cli(*for_worker_schema)
+            }
+            StateAction::Snapshots => list_profile_snapshots_cli(),
+            StateAction::Verify { snapshot } => verify_profile_snapshot_cli(snapshot),
+            StateAction::Restore { snapshot } => restore_profile_snapshot_cli(snapshot),
         },
-    )
-}
-
-async fn complete_oauth_from_reader_at(path: &Path, reader: impl Read) -> Result<()> {
-    let input = read_oauth_completion(reader)?;
-    validate_oauth_completion(&input)?;
-    ensure!(
-        auth_storage_is_initialized(path)?,
-        "Auth storage is not initialized; start the Tron server once and retry login"
-    );
-
-    let tokens = crate::domains::auth::oauth::flows::exchange_oauth_code(
-        &input.provider,
-        path,
-        &input.code,
-        &input.verifier,
-        Some(&input.expected_state),
-    )
-    .await
-    .context("OAuth authorization code exchange failed")?
-    .context("Contributor OAuth supports anthropic and openai-codex")?;
-    let expires_at = tokens.expires_at;
-    save_oauth_tokens_at(path, &input.provider, &input.label, &tokens)?;
-    println!("{expires_at}");
-    Ok(())
-}
-
-fn validate_oauth_completion(input: &OAuthCompletionInput) -> Result<()> {
-    ensure!(
-        matches!(input.provider.as_str(), "anthropic" | "openai-codex"),
-        "Contributor OAuth supports anthropic and openai-codex"
-    );
-    ensure!(
-        !input.label.trim().is_empty(),
-        "OAuth label must not be empty"
-    );
-    ensure!(
-        !input.code.trim().is_empty(),
-        "OAuth authorization code must not be empty"
-    );
-    ensure!(
-        !input.verifier.trim().is_empty(),
-        "OAuth verifier must not be empty"
-    );
-    ensure!(
-        !input.expected_state.trim().is_empty(),
-        "OAuth expected state must not be empty"
-    );
-    match input.completion_kind.as_str() {
-        "callback" => ensure!(
-            input.returned_state == input.expected_state,
-            "OAuth state parameter mismatch; refusing authorization code exchange"
-        ),
-        "manual" => {
-            ensure!(
-                input.provider == "anthropic",
-                "Manual OAuth completion is supported only for Anthropic"
-            );
-            ensure!(
-                input.returned_state.is_empty(),
-                "Manual OAuth completion must not synthesize callback state"
-            );
+        Command::BrowserNativeHost { socket } => {
+            crate::app::browser_operator::run_native_host(socket).await
         }
-        _ => bail!("OAuth completion kind must be callback or manual"),
     }
-    Ok(())
 }
+
+mod notifications;
+mod oauth;
+mod snapshots;
+
+use notifications::{apns_auth_cli, notifications_auth_cli};
+use oauth::{begin_oauth_cli, complete_oauth_cli, rotate_bearer_token_cli};
+use snapshots::{
+    create_profile_snapshot_cli, list_profile_snapshots_cli, restore_profile_snapshot_cli,
+    verify_profile_snapshot_cli,
+};
 
 #[cfg(test)]
-mod tests {
-    use std::io::Cursor;
-    use std::sync::{Arc, Barrier};
-
-    use serde_json::json;
-
-    use super::*;
-    use crate::domains::auth::credentials::{AuthStorage, load_auth_storage, save_auth_storage};
-
-    fn initialized_auth(path: &Path) {
-        let mut storage = AuthStorage::new();
-        storage.bearer_token = Some("existing-bearer".into());
-        save_auth_storage(path, &mut storage).unwrap();
-    }
-
-    fn oauth_completion_input(completion_kind: &str, returned_state: &str) -> Vec<u8> {
-        let mut input = Vec::new();
-        for field in [
-            "anthropic",
-            "shell-login",
-            "authorization-code",
-            "pkce-verifier",
-            "csrf-state",
-            completion_kind,
-            returned_state,
-        ] {
-            input.extend_from_slice(field.as_bytes());
-            input.push(0);
-        }
-        input
-    }
-
-    fn legacy_oauth_input() -> Vec<u8> {
-        let mut input = Vec::new();
-        for field in [
-            "anthropic",
-            "pre-upgrade-login",
-            "legacy-access-token",
-            "legacy-refresh-token",
-            "4102444800000",
-        ] {
-            input.extend_from_slice(field.as_bytes());
-            input.push(0);
-        }
-        input
-    }
-
-    #[test]
-    fn hidden_oauth_actions_are_wired() {
-        let cli = Cli::parse_from(["tron", "auth", "begin-oauth", "anthropic"]);
-        assert!(matches!(
-            cli.command,
-            Some(Command::Auth {
-                action: AuthAction::BeginOauth { provider }
-            }) if provider == "anthropic"
-        ));
-        let cli = Cli::parse_from(["tron", "auth", "complete-oauth"]);
-        assert!(matches!(
-            cli.command,
-            Some(Command::Auth {
-                action: AuthAction::CompleteOauth
-            })
-        ));
-        let cli = Cli::parse_from(["tron", "auth", "store-oauth"]);
-        assert!(matches!(
-            cli.command,
-            Some(Command::Auth {
-                action: AuthAction::StoreOauth
-            })
-        ));
-    }
-
-    #[test]
-    fn pre_transaction_oauth_completion_remains_stdin_compatible() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles/auth.json");
-        initialized_auth(&path);
-
-        store_legacy_oauth_from_reader_at(&path, Cursor::new(legacy_oauth_input())).unwrap();
-
-        let stored = load_auth_storage(&path).unwrap().unwrap();
-        let provider = stored.get_provider_auth("anthropic").unwrap();
-        let account = &provider.accounts.as_ref().unwrap()[0];
-        assert_eq!(account.label, "pre-upgrade-login");
-        assert_eq!(account.oauth.access_token, "legacy-access-token");
-    }
-
-    #[test]
-    fn oauth_save_rereads_after_canonical_auth_lock() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles/auth.json");
-        initialized_auth(&path);
-
-        let lock = crate::domains::auth::credentials::acquire_auth_file_lock(&path).unwrap();
-        let barrier = Arc::new(Barrier::new(2));
-        let thread_path = path.clone();
-        let thread_barrier = Arc::clone(&barrier);
-        let writer = std::thread::spawn(move || {
-            thread_barrier.wait();
-            save_oauth_tokens_at(
-                &thread_path,
-                "anthropic",
-                "shell-login",
-                &crate::domains::auth::credentials::OAuthTokens {
-                    access_token: "access-token".into(),
-                    refresh_token: "refresh-token".into(),
-                    expires_at: 4_102_444_800_000,
-                },
-            )
-            .unwrap();
-        });
-        barrier.wait();
-
-        let mut concurrent = load_auth_storage(&path).unwrap().unwrap();
-        concurrent
-            .extra
-            .insert("concurrentMarker".into(), json!("preserved"));
-        save_auth_storage(&path, &mut concurrent).unwrap();
-        drop(lock);
-        writer.join().unwrap();
-
-        let stored = load_auth_storage(&path).unwrap().unwrap();
-        assert_eq!(stored.extra["concurrentMarker"], "preserved");
-        assert_eq!(stored.bearer_token.as_deref(), Some("existing-bearer"));
-        let provider = stored.get_provider_auth("anthropic").unwrap();
-        assert_eq!(provider.accounts.unwrap()[0].label, "shell-login");
-    }
-
-    #[tokio::test]
-    async fn oauth_completion_requires_matching_state_before_exchange() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles/auth.json");
-        initialized_auth(&path);
-
-        let error = complete_oauth_from_reader_at(
-            &path,
-            Cursor::new(oauth_completion_input("callback", "wrong-state")),
-        )
-        .await
-        .unwrap_err();
-
-        assert!(error.to_string().contains("state parameter mismatch"));
-        assert!(
-            load_auth_storage(&path)
-                .unwrap()
-                .unwrap()
-                .get_provider_auth("anthropic")
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn manual_oauth_completion_is_explicit_and_has_no_callback_state() {
-        let input =
-            read_oauth_completion(Cursor::new(oauth_completion_input("manual", ""))).unwrap();
-        validate_oauth_completion(&input).unwrap();
-
-        let error = read_oauth_completion(Cursor::new(oauth_completion_input(
-            "manual",
-            "synthesized-state",
-        )))
-        .and_then(|input| validate_oauth_completion(&input))
-        .unwrap_err();
-        assert!(error.to_string().contains("must not synthesize"));
-
-        let mut openai =
-            read_oauth_completion(Cursor::new(oauth_completion_input("manual", ""))).unwrap();
-        openai.provider = "openai-codex".into();
-        let error = validate_oauth_completion(&openai).unwrap_err();
-        assert!(error.to_string().contains("only for Anthropic"));
-    }
-
-    #[test]
-    fn oauth_save_requires_server_initialized_auth() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles/auth.json");
-        let mut storage = AuthStorage::new();
-        save_auth_storage(&path, &mut storage).unwrap();
-
-        let error = save_oauth_tokens_at(
-            &path,
-            "anthropic",
-            "shell-login",
-            &crate::domains::auth::credentials::OAuthTokens {
-                access_token: "access-token".into(),
-                refresh_token: "refresh-token".into(),
-                expires_at: 4_102_444_800_000,
-            },
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("not initialized"));
-    }
-}
+mod tests;

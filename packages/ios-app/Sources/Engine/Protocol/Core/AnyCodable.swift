@@ -259,7 +259,7 @@ extension Dictionary where Key == String, Value == AnyCodable {
         self[key]?.arrayValue?.compactMap { $0 as? String }
     }
 
-    /// Get an array of nested dictionaries for key. Used by capabilities that
+    /// Get an array of nested dictionaries for key. Used by tools that
     /// emit structured per-item records (e.g. `Wait.details.jobs`,
     /// `Search.details.matches`).
     func dictArray(_ key: String) -> [[String: Any]]? {

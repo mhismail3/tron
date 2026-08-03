@@ -1,15 +1,13 @@
-//! OAuth 2.0 and API key authentication for LLM providers.
+//! OAuth 2.0 and named API-key authentication for model and search providers.
 //!
 //! Supports two auth modes:
 //! - **API key**: Direct key-based auth
 //! - **OAuth**: Token-based auth with auto-refresh (Anthropic, Google, `OpenAI`)
 //!
-//! Auth state is persisted to `~/.tron/profiles/auth.json` with secure file
-//! permissions. Constitution creates an exact empty compatibility sentinel at
-//! mode `0o600` for profile validation; the first auth-domain write materializes
-//! the full schema. Storage loading retains that sentinel interpretation for
-//! interrupted or older installs. Non-empty malformed auth files remain hard
-//! errors so real credentials are never silently overwritten.
+//! Auth state is created on first use at `~/.tron/auth.json` with
+//! secure file permissions. Every present file must match the current schema;
+//! malformed auth files are hard errors so real credentials are never silently
+//! overwritten.
 //! `OAuthTokens::expires_at` stores the provider's actual expiry; provider
 //! refresh paths apply their safety buffer once when deciding to renew.
 //!
@@ -21,11 +19,17 @@
 //! - [`google`]: Cloud Code Assist OAuth + API key
 //! - [`openai`]: OAuth + API key (provider key: `"openai-codex"`);
 //!   auth-path inference yields [`OpenAIAuthPath`] for model catalog filtering.
+//! - [`apple_push`]: typed APNs ES256 provider-token credentials used only by
+//!   native notification transport (provider key: `"apple-push"`)
+//! - [`notification_push`]: typed relay/direct transport selection and relay
+//!   credentials (provider key: `"notification-push"`)
 
 mod accounts;
 pub mod anthropic;
+pub(crate) mod apple_push;
 pub mod errors;
 pub mod google;
+pub(crate) mod notification_push;
 pub mod openai;
 pub mod pkce;
 mod provider_state;
@@ -56,25 +60,43 @@ pub(crate) fn shared_auth_client() -> &'static reqwest::Client {
 
 pub(crate) use crate::shared::server::error_mapping::map_auth_error;
 pub(crate) use accounts::*;
+pub(crate) use apple_push::{
+    ApplePushCredentials, clear_apple_push_credentials, load_apple_push_credentials,
+    save_apple_push_credentials,
+};
 pub use errors::AuthError;
+pub(crate) use notification_push::{
+    NotificationPushConfig, NotificationRelayCredentials, NotificationTransportMode,
+    clear_notification_relay_credentials, load_notification_push_config,
+    save_notification_relay_credentials, set_notification_transport_mode,
+};
 pub use pkce::{PkcePair, generate_pkce};
 pub(crate) use provider_state::*;
 pub(crate) use storage::{
     acquire_auth_file_lock, clear_provider_auth, get_google_provider_auth, get_provider_auth,
     load_or_init_for_write, save_named_api_key,
 };
-pub use storage::{auth_file_path, load_auth_storage, save_auth_storage};
+pub use storage::{
+    auth_file_path, load_all_provider_api_keys, load_auth_storage, load_provider_api_key,
+    save_auth_storage,
+};
 pub(crate) use types::calculate_expires_at;
 pub use types::{
     AccountEntry, ActiveCredential, ApiKeyEntry, AuthStorage, GoogleAuth, GoogleProviderAuth,
     OAuthConfig, OAuthTokenRefreshResponse, OAuthTokens, OpenAIAuthPath, ProviderAuth, ServerAuth,
-    ServiceAuth, now_ms, should_refresh,
+    now_ms, should_refresh,
 };
 
 pub(crate) const DEFAULT_API_KEY_LABEL: &str = "Default";
-pub(crate) const KNOWN_PROVIDERS: &[&str] =
-    &["anthropic", "openai-codex", "google", "minimax", "kimi"];
-pub(crate) const KNOWN_SERVICES: &[&str] = &["brave", "exa"];
+pub(crate) const KNOWN_PROVIDERS: &[&str] = &[
+    "anthropic",
+    "openai-codex",
+    "google",
+    "minimax",
+    "kimi",
+    "brave",
+    "exa",
+];
 
 // ─── Credential resolution ──────────────────────────────────────────────────
 
@@ -160,6 +182,22 @@ mod tests {
         let _pair = generate_pkce();
         let _storage = AuthStorage::new();
         let _pa = ProviderAuth::default();
+    }
+
+    #[test]
+    fn credential_provider_inventory_includes_model_and_search_keys() {
+        assert_eq!(
+            KNOWN_PROVIDERS,
+            [
+                "anthropic",
+                "openai-codex",
+                "google",
+                "minimax",
+                "kimi",
+                "brave",
+                "exa",
+            ]
+        );
     }
 
     #[test]

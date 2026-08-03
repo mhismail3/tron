@@ -67,24 +67,6 @@ struct EngineProtocolTypesAuthTests {
         #expect(info.hasRefreshToken == false)
     }
 
-    // MARK: - ServiceAuthInfo
-
-    @Test("ServiceAuthInfo decode with missing hasApiKey defaults to false")
-    func serviceAuthDefaults() throws {
-        let json = "{}"
-        let info = try JSONDecoder().decode(ServiceAuthInfo.self, from: json.data(using: .utf8)!)
-        #expect(info.hasApiKey == false)
-        #expect(info.apiKeyHint == nil)
-    }
-
-    @Test("ServiceAuthInfo decode with fields present")
-    func serviceAuthFull() throws {
-        let json = #"{"hasApiKey":true,"apiKeyHint":"sk-...abc"}"#
-        let info = try JSONDecoder().decode(ServiceAuthInfo.self, from: json.data(using: .utf8)!)
-        #expect(info.hasApiKey == true)
-        #expect(info.apiKeyHint == "sk-...abc")
-    }
-
     // MARK: - ActiveCredentialInfo
 
     @Test("ActiveCredentialInfo oauth type")
@@ -123,21 +105,17 @@ struct EngineProtocolTypesAuthTests {
 
     // MARK: - AuthState
 
-    @Test("AuthState decode with providers and services")
+    @Test("AuthState decodes provider state")
     func authStateDecode() throws {
         let json = """
         {
             "providers": {
                 "anthropic": {"hasApiKey":true,"hasOAuth":false}
-            },
-            "services": {
-                "github": {"hasApiKey":false}
             }
         }
         """
         let state = try JSONDecoder().decode(AuthState.self, from: json.data(using: .utf8)!)
         #expect(state.providers["anthropic"]?.hasApiKey == true)
-        #expect(state.services["github"]?.hasApiKey == false)
     }
 
     // MARK: - ApiKeyInfo

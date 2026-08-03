@@ -1,24 +1,22 @@
 import Foundation
 
 /// Lightweight server-side activity summary line.
-/// Enriched client-side with capability identity metadata.
+/// Enriched client-side with tool identity metadata.
 struct ServerActivityLine: Decodable, Hashable, Sendable {
     let kind: String
     let text: String?
-    let capabilityArgs: AnyCodable?
+    let toolArgs: AnyCodable?
     let durationMs: Int?
     let isError: Bool?
     let turns: Int?
-    let modelPrimitiveName: String?
-    let operationName: String?
-    let operation: String?
+    let toolName: String?
     let traceId: String?
     let rootInvocationId: String?
     let themeColor: String?
     let presentationHints: [String: AnyCodable]?
     let summary: String?
 
-    func toActivityLine() -> ActivityLine {
+    func toActivityLine() -> ActivityLine? {
         switch kind {
         case "userPrompt":
             return ActivityLine(kind: .userPrompt, text: text ?? "")
@@ -26,35 +24,34 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
             return ActivityLine(kind: .text, text: text ?? "")
         case "thinking":
             return ActivityLine(kind: .thinking, text: "Thinking")
-        case "capability":
-            let identity = capabilityIdentity
-            let name = identity.stableCapabilityId
+        case "tool":
+            let identity = toolIdentity
+            guard let name = identity.toolName?.nilIfEmpty else { return nil }
             let durationStr = durationMs.map { SessionStreamBuffer.formatDuration($0) }
             return ActivityLine(
-                kind: .capabilityInvocationStarted,
+                kind: .toolInvocationStarted,
                 text: name,
-                icon: CapabilityActivityPresentation.symbol(for: identity, arguments: capabilityArgs),
-                iconColor: CapabilityColor.fromCapability(identity),
-                modelPrimitiveName: name,
-                displayName: CapabilityActivityPresentation.title(for: identity, arguments: capabilityArgs),
-                summary: CapabilityActivityPresentation.summary(
+                icon: ToolActivityPresentation.symbol(for: identity, arguments: toolArgs),
+                iconColor: ToolColor.fromTool(identity),
+                toolName: name,
+                displayName: ToolActivityPresentation.title(for: identity, arguments: toolArgs),
+                summary: ToolActivityPresentation.summary(
                     explicit: summary,
-                    arguments: capabilityArgs,
+                    arguments: toolArgs,
                     identity: identity
                 ),
                 duration: durationStr,
                 status: (isError == true) ? .error : .success,
-                capabilityIdentity: identity
+                toolIdentity: identity
             )
         default:
             return ActivityLine(kind: .text, text: text ?? "")
         }
     }
 
-    private var capabilityIdentity: CapabilityIdentity {
-        CapabilityIdentity(
-            modelPrimitiveName: modelPrimitiveName,
-            operationName: operationName ?? operation,
+    private var toolIdentity: ToolIdentity {
+        ToolIdentity(
+            toolName: toolName,
             traceId: traceId,
             rootInvocationId: rootInvocationId,
             themeColor: themeColor,

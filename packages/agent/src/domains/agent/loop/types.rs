@@ -1,11 +1,38 @@
 //! Runtime configuration and result types.
 
+use std::collections::BTreeMap;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
 use crate::domains::agent::context::types::CompactionConfig;
 pub use crate::domains::model::responder::ModelReasoningLevel as ReasoningLevel;
 use crate::shared::protocol::messages::TokenUsage;
 use serde::{Deserialize, Serialize};
 
 use crate::domains::agent::r#loop::errors::StopReason;
+
+/// Per-run deterministic occurrence allocator for nested model tools.
+///
+/// A recovered agent-runner starts from the same empty allocator, so the first
+/// call to each tool maps to occurrence zero again even when the provider emits
+/// different transient call IDs or valid-but-different arguments.
+#[derive(Clone, Debug, Default)]
+pub struct NestedToolOrdinalAllocator(Arc<Mutex<BTreeMap<String, u32>>>);
+
+impl NestedToolOrdinalAllocator {
+    #[must_use]
+    pub fn next(&self, tool_name: &str) -> u32 {
+        let mut ordinals = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let next = ordinals.entry(tool_name.to_owned()).or_default();
+        let ordinal = *next;
+        *next = next.saturating_add(1);
+        ordinal
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent configuration
@@ -53,7 +80,7 @@ pub struct AgentConfig {
     /// Retry configuration for provider stream failures.
     #[serde(skip)]
     pub retry: Option<crate::shared::foundation::retry::RetryConfig>,
-    /// Workspace ID for scoping memory recall (resolved from working directory).
+    /// Workspace observation resolved from the working directory.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
 }
@@ -83,42 +110,93 @@ impl Default for AgentConfig {
     }
 }
 
-/// Per-turn volatile token estimates for context accounting.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VolatileTokens {}
-
 /// Per-prompt execution context.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunContext {
+    /// Monotonic admission-start timestamp used once for the existing metrics
+    /// pipeline. It is process-local and never enters durable context.
+    #[serde(skip)]
+    pub prompt_run_started_at: Option<Instant>,
+    /// Shared one-shot guard because `RunContext` is cloned between loop
+    /// layers and only the first provider turn measures prompt-to-provider
+    /// admission latency.
+    #[serde(skip)]
+    pub prompt_to_provider_metric_recorded: Arc<AtomicBool>,
     /// Stable runtime run id for causal/idempotency metadata. This is assigned
     /// by the prompt runtime and is intentionally not serialized into prompt
     /// context snapshots.
     #[serde(skip)]
     pub run_id: Option<String>,
+    /// Durable `message.user` event admitted before this run started.
+    #[serde(skip)]
+    pub user_event_id: Option<String>,
+    /// Delivery IDs that caused a delivery-only run. Only the first provider
+    /// turn of that run may lease this exact set.
+    #[serde(skip)]
+    pub delivery_wake_ids: Option<Vec<String>>,
+    /// Session turn ordinal on which `delivery_wake_ids` are admissible.
+    #[serde(skip)]
+    pub delivery_wake_turn: Option<u32>,
+    /// Delivery provenance retained until the first assistant turn that does
+    /// not hand control to tools. This lets a tool-first delivery wake render
+    /// its eventual visible assistant continuation with the same provenance.
+    #[serde(skip)]
+    pub pending_delivery_provenance: Arc<parking_lot::Mutex<Vec<serde_json::Value>>>,
     /// Engine trace inherited from the hidden `agent::run_turn` invocation.
     #[serde(skip)]
     pub engine_trace_id: Option<crate::engine::TraceId>,
-    /// Parent engine invocation id for child capability/function invocations.
+    /// Parent engine invocation id for child tool/function invocations.
     #[serde(skip)]
     pub parent_invocation_id: Option<crate::engine::InvocationId>,
+    /// Worker-dispatch causal depth inherited by an agent-runner child. This
+    /// stays out of provider prompt snapshots but must be copied onto every
+    /// direct tool invocation so an agent hop cannot reset the depth ceiling.
+    #[serde(skip)]
+    pub worker_causal_depth: u32,
+    /// Worker that originated an agent-runner session. Semantic hook routing
+    /// uses this only to avoid recursively invoking a worker as its own policy.
+    #[serde(skip)]
+    pub origin_worker_id: Option<String>,
+    /// Durable worker invocation that owns this delegated agent run. Child
+    /// worker tools preserve it as their canonical parent.
+    #[serde(skip)]
+    pub origin_worker_invocation_id: Option<String>,
+    /// Exact model tools selected by the immutable agent-runner bundle.
+    ///
+    /// `None` preserves the migration surface; `Some([])` intentionally
+    /// projects no callable tools. This is trusted engine metadata.
+    #[serde(skip)]
+    pub worker_agent_tools: Option<Vec<String>>,
+    /// Stable per-tool call occurrences for one worker attempt. Recovery
+    /// deliberately starts from zero and replays durable child slots.
+    #[serde(skip)]
+    pub nested_tool_ordinals: NestedToolOrdinalAllocator,
     /// Reasoning level override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<ReasoningLevel>,
-    /// Compact projection of agent-owned state loaded through engine state primitives.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_state_context: Option<String>,
-    /// Provider-safe memory prompt inclusion audit/status text.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub memory_prompt_context: Option<String>,
     /// Override user message content (e.g., multimodal blocks with images).
     /// When set, `run()` uses this instead of creating a text-only message.
     #[serde(skip)]
     pub user_content_override: Option<crate::shared::protocol::messages::UserMessageContent>,
-    /// Volatile token estimates for context breakdown accounting.
-    #[serde(default)]
-    pub volatile_tokens: VolatileTokens,
+}
+
+/// Closed trigger for one agent run.
+///
+/// Only `UserPrompt` is allowed to create provider-visible conversation
+/// history. `DeliveryWake` starts from already-durable delivery rows.
+#[derive(Clone, Debug)]
+pub enum AgentRunTrigger {
+    /// A user-authored prompt already admitted as a durable user event.
+    UserPrompt {
+        /// Plain-text prompt used when no multimodal override is present.
+        prompt: String,
+    },
+    /// A delivery-only continuation with no synthetic user message.
+    DeliveryWake {
+        /// Exact durable deliveries that won wake admission.
+        delivery_ids: Vec<String>,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -135,8 +213,8 @@ pub struct TurnResult {
     /// Error message if turn failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// Number of capability invocations executed.
-    pub capability_invocations_executed: usize,
+    /// Number of tool invocations executed.
+    pub tool_invocations_executed: usize,
     /// Token usage for this turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<TokenUsage>,
@@ -148,8 +226,6 @@ pub struct TurnResult {
     /// Content captured before interruption.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partial_content: Option<String>,
-    /// Whether a capability requested turn stop.
-    pub stop_turn_requested: bool,
     /// LLM model ID used for this turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -157,7 +233,7 @@ pub struct TurnResult {
     pub latency_ms: u64,
     /// Whether the response contained thinking blocks.
     pub has_thinking: bool,
-    /// Raw LLM stop reason string (e.g. `end_turn`, `capability_invocation`).
+    /// Raw LLM stop reason string (e.g. `end_turn`, `tool_invocation`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_stop_reason: Option<String>,
     /// Context window tokens this turn (for cross-turn baseline tracking).
@@ -170,12 +246,11 @@ impl Default for TurnResult {
         Self {
             success: true,
             error: None,
-            capability_invocations_executed: 0,
+            tool_invocations_executed: 0,
             token_usage: None,
             stop_reason: None,
             interrupted: false,
             partial_content: None,
-            stop_turn_requested: false,
             model: None,
             latency_ms: 0,
             has_thinking: false,
@@ -218,15 +293,13 @@ impl Default for RunResult {
     }
 }
 
-/// Result of a primitive capability invocation.
+/// Result of a primitive tool invocation.
 #[derive(Clone, Debug)]
-pub struct CapabilityInvocationExecutionResult {
-    /// Capability result.
-    pub result: crate::shared::protocol::model_capabilities::CapabilityResult,
+pub struct ToolInvocationExecutionResult {
+    /// Tool result.
+    pub result: crate::shared::protocol::model_tools::ToolResult,
     /// Execution duration in milliseconds.
     pub duration_ms: u64,
-    /// Whether this capability requested a turn stop.
-    pub stops_turn: bool,
 }
 
 /// Accumulated result from stream processing.
@@ -234,8 +307,8 @@ pub struct CapabilityInvocationExecutionResult {
 pub struct StreamResult {
     /// Full assistant message.
     pub message: crate::shared::protocol::events::AssistantMessage,
-    /// Extracted capability invocations.
-    pub capability_invocations: Vec<crate::shared::protocol::messages::CapabilityInvocationDraft>,
+    /// Extracted tool invocations.
+    pub tool_invocations: Vec<crate::shared::protocol::messages::ToolInvocationDraft>,
     /// Stop reason string from LLM.
     pub stop_reason: String,
     /// Token usage.
@@ -295,24 +368,31 @@ mod tests {
     #[test]
     fn run_context_default() {
         let ctx = RunContext::default();
-        assert!(ctx.agent_state_context.is_none());
-        assert!(ctx.memory_prompt_context.is_none());
         assert!(ctx.reasoning_level.is_none());
     }
 
     #[test]
     fn run_context_serde_roundtrip() {
         let ctx = RunContext {
-            agent_state_context: Some("state ctx".into()),
-            memory_prompt_context: Some("memory ctx".into()),
             reasoning_level: Some(ReasoningLevel::High),
             ..Default::default()
         };
         let json = serde_json::to_string(&ctx).unwrap();
         let back: RunContext = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.agent_state_context.as_deref(), Some("state ctx"));
-        assert_eq!(back.memory_prompt_context.as_deref(), Some("memory ctx"));
         assert_eq!(back.reasoning_level, Some(ReasoningLevel::High));
+    }
+
+    #[test]
+    fn nested_tool_ordinals_are_per_tool_and_restart_deterministic() {
+        let first_attempt = NestedToolOrdinalAllocator::default();
+        assert_eq!(first_attempt.next("worker_search"), 0);
+        assert_eq!(first_attempt.next("worker_citation"), 0);
+        assert_eq!(first_attempt.next("worker_citation"), 1);
+
+        let recovered_attempt = NestedToolOrdinalAllocator::default();
+        assert_eq!(recovered_attempt.next("worker_search"), 0);
+        assert_eq!(recovered_attempt.next("worker_citation"), 0);
+        assert_eq!(recovered_attempt.next("worker_citation"), 1);
     }
 
     #[test]
@@ -320,9 +400,8 @@ mod tests {
         let tr = TurnResult::default();
         assert!(tr.success);
         assert!(tr.error.is_none());
-        assert_eq!(tr.capability_invocations_executed, 0);
+        assert_eq!(tr.tool_invocations_executed, 0);
         assert!(!tr.interrupted);
-        assert!(!tr.stop_turn_requested);
         assert!(tr.model.is_none());
         assert_eq!(tr.latency_ms, 0);
         assert!(!tr.has_thinking);
@@ -350,7 +429,7 @@ mod tests {
         let tr = TurnResult {
             success: false,
             error: Some("provider timeout".into()),
-            capability_invocations_executed: 3,
+            tool_invocations_executed: 3,
             token_usage: Some(TokenUsage {
                 input_tokens: 100,
                 output_tokens: 50,
@@ -366,7 +445,7 @@ mod tests {
         let json = serde_json::to_string(&tr).unwrap();
         let back: TurnResult = serde_json::from_str(&json).unwrap();
         assert!(!back.success);
-        assert_eq!(back.capability_invocations_executed, 3);
+        assert_eq!(back.tool_invocations_executed, 3);
         assert_eq!(back.stop_reason, Some(StopReason::Error));
         assert_eq!(back.model.as_deref(), Some("claude-opus-4-6"));
         assert_eq!(back.latency_ms, 2000);

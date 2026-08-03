@@ -115,7 +115,7 @@ final class ContextTrackingState {
 
     /// Update context window based on available model info
     func updateContextWindow(from models: [ModelInfo], currentModel: String) {
-        if let model = models.first(where: { $0.id == currentModel }) {
+        if let model = ModelInfo.matching(currentModel, in: models) {
             currentContextWindow = model.contextWindow
         }
     }

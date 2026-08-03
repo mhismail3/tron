@@ -34,7 +34,7 @@ open TronMobile.xcodeproj
 
 1. Select the TronMobile project in the navigator
 2. Select the TronMobile target
-3. Go to "Signing & Capabilities"
+3. Go to "Signing & Tools"
 4. Enable "Automatically manage signing"
 5. Select your Personal Team (your Apple ID)
 
@@ -99,11 +99,10 @@ packages/ios-app/
 │   │   ├── Events/                 # Live events, plugins, payloads, reconstruction
 │   │   └── Persistence/            # Local SQLite cache, repositories, sync cursor
 │   ├── Session/                    # Chat workflow, timeline, parsing, attachments
-│   ├── UI/                         # Chat, settings, onboarding, runtime surfaces
+│   ├── UI/                         # Chat, Engine Dashboard, settings, onboarding
 │   ├── Support/                    # Composition, diagnostics, pairing, storage
 │   ├── Assets.xcassets/            # App icons and image assets
 │   └── Resources/                  # Bundled fonts
-├── scripts/generate-icons.mjs      # SVG-to-asset-catalog icon generator
 ├── Tests/
 │   ├── Engine/
 │   ├── Session/
@@ -112,6 +111,9 @@ packages/ios-app/
 │   └── Infrastructure/
 └── TronMobile.xcodeproj     # Generated locally by XcodeGen (ignored)
 ```
+
+The repository-level `scripts/generate-ios-icons.mjs` owns the generated app
+icons and documentation preview.
 
 ## Building from Command Line
 
@@ -148,7 +150,7 @@ xcodegen generate
 ## Features
 
 - Real-time streaming responses
-- Capability invocation visualization
+- Tool invocation visualization
 - Session management
 - Image attachments
 - Thinking indicator

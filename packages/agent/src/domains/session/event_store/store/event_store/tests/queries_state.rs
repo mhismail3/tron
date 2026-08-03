@@ -36,81 +36,6 @@ fn get_session_message_previews_basic() {
     );
 }
 
-// ── Batch event queries ───────────────────────────────────────────
-
-#[test]
-fn get_events_by_ids_basic() {
-    let store = setup();
-    let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None)
-        .unwrap();
-    let evt = store
-        .append(&AppendOptions {
-            session_id: &cr.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "Hello"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-
-    let ids = [cr.root_event.id.as_str(), evt.id.as_str()];
-    let result = store.get_events_by_ids(&ids).unwrap();
-    assert_eq!(result.len(), 2);
-    assert!(result.contains_key(&cr.root_event.id));
-    assert!(result.contains_key(&evt.id));
-}
-
-#[test]
-fn get_events_by_sessions_and_types_returns_all_matching_events() {
-    let store = setup();
-    let first = store
-        .create_session("claude-opus-4-6", "/tmp/project-a", None, None)
-        .unwrap();
-    let second = store
-        .create_session("claude-opus-4-6", "/tmp/project-b", None, None)
-        .unwrap();
-
-    let first_user = store
-        .append(&AppendOptions {
-            session_id: &first.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "first"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-    let _ = store
-        .append(&AppendOptions {
-            session_id: &first.session.id,
-            event_type: EventType::MessageAssistant,
-            payload: serde_json::json!({"content": "reply"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-    let second_user = store
-        .append(&AppendOptions {
-            session_id: &second.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "second"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-
-    let events = store
-        .get_events_by_sessions_and_types(
-            &[&first.session.id, &second.session.id],
-            &["message.user"],
-        )
-        .unwrap();
-
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0].id, first_user.id);
-    assert_eq!(events[1].id, second_user.id);
-}
-
 #[test]
 fn get_events_by_type_basic() {
     let store = setup();
@@ -191,41 +116,6 @@ fn turn_queries_use_denormalized_session_ordinals() {
         Some(first_start.id)
     );
     assert_eq!(second_start.turn, Some(21));
-}
-
-#[test]
-fn get_events_by_workspace_and_types_cross_session() {
-    let store = setup();
-    let cr1 = store
-        .create_session("claude-opus-4-6", "/tmp/proj", None, None)
-        .unwrap();
-    let cr2 = store
-        .create_session("claude-opus-4-6", "/tmp/proj", None, None)
-        .unwrap();
-
-    store
-        .append(&AppendOptions {
-            session_id: &cr1.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "A"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-    store
-        .append(&AppendOptions {
-            session_id: &cr2.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "B"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-
-    let result = store
-        .get_events_by_workspace_and_types(&cr1.session.workspace_id, &["message.user"], None, None)
-        .unwrap();
-    assert_eq!(result.len(), 2);
 }
 
 #[test]
@@ -333,7 +223,7 @@ fn get_messages_at_head_resolves_blob_backed_event_payloads() {
 }
 
 #[test]
-fn resolve_event_payloads_expands_blob_backed_capability_events() {
+fn resolve_event_payloads_expands_blob_backed_tool_events() {
     let store = setup();
     let cr = store
         .create_session("claude-opus-4-6", "/tmp/project", None, None)
@@ -342,10 +232,10 @@ fn resolve_event_payloads_expands_blob_backed_capability_events() {
     let event = store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::CapabilityInvocationCompleted,
+            event_type: EventType::ToolInvocationCompleted,
             payload: serde_json::json!({
                 "invocationId": "call_inspect",
-                "modelPrimitiveName": "inspect",
+                "toolName": "inspect",
                 "content": large_content,
                 "isError": false,
                 "duration": 33
@@ -363,7 +253,7 @@ fn resolve_event_payloads_expands_blob_backed_capability_events() {
     let payloads = store.resolve_event_payloads(&[event]).unwrap();
 
     assert_eq!(payloads[0]["invocationId"], "call_inspect");
-    assert_eq!(payloads[0]["modelPrimitiveName"], "inspect");
+    assert_eq!(payloads[0]["toolName"], "inspect");
     assert_eq!(payloads[0]["content"], large_content);
     assert!(
         payloads[0]
@@ -454,7 +344,6 @@ fn get_state_at_head_basic() {
         .unwrap();
 
     let state = store.get_state_at_head(&cr.session.id).unwrap();
-    assert_eq!(state.session_id, cr.session.id);
     assert_eq!(state.model, "claude-opus-4-6");
     assert_eq!(state.working_directory, "/tmp/project");
     assert_eq!(state.messages_with_event_ids.len(), 2);
@@ -477,40 +366,6 @@ fn get_state_at_head_ended_session() {
 }
 
 #[test]
-fn get_state_at_specific_event() {
-    let store = setup();
-    let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None)
-        .unwrap();
-    let user_evt = store
-        .append(&AppendOptions {
-            session_id: &cr.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "Hello"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-    store
-        .append(&AppendOptions {
-            session_id: &cr.session.id,
-            event_type: EventType::MessageAssistant,
-            payload: serde_json::json!({
-                "content": [{"type": "text", "text": "Hi"}],
-                "turn": 1,
-            }),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-
-    let state = store.get_state_at(&cr.session.id, &user_evt.id).unwrap();
-    assert_eq!(state.head_event_id, user_evt.id);
-    assert_eq!(state.messages_with_event_ids.len(), 1);
-    assert_eq!(state.messages_with_event_ids[0].message.role, "user");
-}
-
-#[test]
 fn get_state_at_head_nonexistent_session_fails() {
     let store = setup();
     let result = store.get_state_at_head("sess_nonexistent");
@@ -528,7 +383,7 @@ fn get_state_at_head_with_agentic_loop() {
         .append(&AppendOptions {
             session_id: &cr.session.id,
             event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "Use a capability"}),
+            payload: serde_json::json!({"content": "Use a tool"}),
             parent_id: None,
             sequence: None,
         })
@@ -538,7 +393,7 @@ fn get_state_at_head_with_agentic_loop() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
-                "content": [{"type": "capability_invocation", "id": "c1", "name": "execute", "arguments": {"operation": "observe", "input": "ok"}}],
+                "content": [{"type": "tool_invocation", "id": "c1", "name": "test_tool", "arguments": {"operation": "observe", "input": "ok"}}],
                 "turn": 1,
             }),
             parent_id: None,
@@ -548,7 +403,7 @@ fn get_state_at_head_with_agentic_loop() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::CapabilityInvocationCompleted,
+            event_type: EventType::ToolInvocationCompleted,
             payload: serde_json::json!({"invocationId": "c1", "content": "output", "isError": false}),
             parent_id: None,
             sequence: None,
@@ -568,14 +423,11 @@ fn get_state_at_head_with_agentic_loop() {
         .unwrap();
 
     let state = store.get_state_at_head(&cr.session.id).unwrap();
-    // user, assistant, capabilityResult, assistant
+    // user, assistant, toolResult, assistant
     assert_eq!(state.messages_with_event_ids.len(), 4);
     assert_eq!(state.messages_with_event_ids[0].message.role, "user");
     assert_eq!(state.messages_with_event_ids[1].message.role, "assistant");
-    assert_eq!(
-        state.messages_with_event_ids[2].message.role,
-        "capabilityResult"
-    );
+    assert_eq!(state.messages_with_event_ids[2].message.role, "toolResult");
     assert_eq!(state.messages_with_event_ids[3].message.role, "assistant");
 }
 
@@ -657,7 +509,7 @@ fn event_rows_to_session_events_converts_correctly() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        model_primitive_name: None,
+        tool_name: None,
         invocation_id: None,
         turn: None,
         input_tokens: None,
@@ -696,7 +548,7 @@ fn event_rows_to_session_events_rejects_invalid_json() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        model_primitive_name: None,
+        tool_name: None,
         invocation_id: None,
         turn: None,
         input_tokens: None,
@@ -738,7 +590,7 @@ fn event_rows_to_session_events_rejects_unknown_event_types() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        model_primitive_name: None,
+        tool_name: None,
         invocation_id: None,
         turn: None,
         input_tokens: None,
@@ -765,7 +617,7 @@ fn event_rows_to_session_events_rejects_unknown_event_types() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        model_primitive_name: None,
+        tool_name: None,
         invocation_id: None,
         turn: None,
         input_tokens: None,
@@ -791,20 +643,20 @@ fn event_rows_to_session_events_rejects_unknown_event_types() {
 }
 
 #[test]
-fn event_rows_to_session_events_rejects_unmatched_malformed_capability_completion() {
+fn event_rows_to_session_events_rejects_unmatched_malformed_tool_completion() {
     let row = EventRow {
         id: "evt_bad_completion".to_string(),
         session_id: "sess_1".to_string(),
         parent_id: None,
         sequence: 0,
         depth: 0,
-        event_type: "capability.invocation.completed".to_string(),
+        event_type: "tool.invocation.completed".to_string(),
         timestamp: "2025-01-01T00:00:00Z".to_string(),
         payload: r#"{"content":"output","isError":false}"#.to_string(),
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        model_primitive_name: None,
+        tool_name: None,
         invocation_id: None,
         turn: None,
         input_tokens: None,

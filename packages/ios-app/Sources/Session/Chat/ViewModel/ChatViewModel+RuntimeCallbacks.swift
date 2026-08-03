@@ -44,21 +44,21 @@ extension ChatViewModel {
                 switch update {
                 case .turnBoundary(let data):
                     // Turn boundaries are handled directly in handleTurnStart/handleTurnEnd
-                    // This callback is for capability ordering confirmation
+                    // This callback is for tool ordering confirmation
                     logger.verbose("UIUpdateQueue: Turn boundary processed (turn=\(data.turnNumber), isStart=\(data.isStart))", category: .events)
 
-                case .capabilityInvocationStarted(let data):
-                    // Capability start was already added to messages in handleCapabilityInvocationStarted
+                case .toolInvocationStarted(let data):
+                    // Tool start was already added to messages in handleToolInvocationStarted
                     // Here we trigger the staggered animation appearance
-                    animationCoordinator.queueCapabilityInvocationStart(invocationId: data.invocationId)
-                    logger.verbose("UIUpdateQueue: Capability start queued for animation: \(data.modelPrimitiveName)", category: .events)
+                    animationCoordinator.queueToolInvocationStart(invocationId: data.invocationId)
+                    logger.verbose("UIUpdateQueue: Tool start queued for animation: \(data.toolName)", category: .events)
 
-                case .capabilityInvocationCompleted(let data):
-                    // Capability end arrives here in guaranteed order (earlier capabilities first)
-                    // Find and update the capability message
-                    processOrderedCapabilityInvocationCompleted(data)
-                    animationCoordinator.markCapabilityInvocationComplete(invocationId: data.invocationId)
-                    logger.verbose("UIUpdateQueue: Capability end processed in order: \(data.invocationId)", category: .events)
+                case .toolInvocationCompleted(let data):
+                    // Tool end arrives here in guaranteed order (earlier tools first)
+                    // Find and update the tool message
+                    processOrderedToolInvocationCompleted(data)
+                    animationCoordinator.markToolInvocationComplete(invocationId: data.invocationId)
+                    logger.verbose("UIUpdateQueue: Tool end processed in order: \(data.invocationId)", category: .events)
 
                 case .messageAppend, .textDelta:
                     // These are handled separately via direct streaming path
@@ -68,27 +68,27 @@ extension ChatViewModel {
         }
     }
 
-    /// Process a capability end update that has been ordered by UIUpdateQueue
-    private func processOrderedCapabilityInvocationCompleted(_ data: UIUpdateQueue.CapabilityInvocationEndData) {
-        // Find the capability message by invocationId (O(1) via index, then a bounded scan)
-        if let index = messageIndex.index(forCapabilityInvocationId: data.invocationId)
-            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: data.invocationId, in: messages) {
-            if case .capabilityInvocation(var invocation) = messages[index].content {
+    /// Process a tool end update that has been ordered by UIUpdateQueue
+    private func processOrderedToolInvocationCompleted(_ data: UIUpdateQueue.ToolInvocationEndData) {
+        // Find the tool message by invocationId (O(1) via index, then a bounded scan)
+        if let index = messageIndex.index(forToolInvocationId: data.invocationId)
+            ?? MessageFinder.lastIndexOfToolInvocation(id: data.invocationId, in: messages) {
+            if case .toolInvocation(var invocation) = messages[index].content {
                 invocation.status = data.success ? .success : .error
                 invocation.result = data.result
                 invocation.durationMs = data.durationMs
                 invocation.completedAt = data.timestamp
                 invocation.details = data.details
-                invocation.errorClassification = data.failure.map(CapabilityErrorClassification.init(failure:))
+                invocation.errorClassification = data.failure.map(ToolErrorClassification.init(failure:))
                 invocation.progressMessage = nil
                 invocation.progressPercent = nil
-                invocation.identity = data.identity
+                invocation.identity = invocation.identity.merging(data.identity)
                 updateMessage(at: index) { message in
-                    message.content = .capabilityInvocation(invocation)
+                    message.content = .toolInvocation(invocation)
                 }
 
-                // Decrement running capability counter (clamp to 0 for catch-up scenarios)
-                runningCapabilityInvocationCount = max(0, runningCapabilityInvocationCount - 1)
+                // Decrement running tool counter (clamp to 0 for catch-up scenarios)
+                runningToolInvocationCount = max(0, runningToolInvocationCount - 1)
             }
         }
     }

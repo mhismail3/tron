@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 
 use crate::domains::auth::contract;
-use crate::engine::{EngineHostHandle, Invocation, PublishStreamEvent, VisibilityScope};
+use crate::engine::{EngineHostHandle, Invocation, PublishStreamEvent, StreamVisibility};
 use crate::shared::server::events::ServerEventPayload;
 
 /// Typed publisher for auth account/credential changes.
@@ -21,13 +21,13 @@ impl<'a> AuthStreamPublisher<'a> {
         if let Err(error) = self
             .engine_host
             .publish_stream_event(PublishStreamEvent {
-                topic: contract::STREAM_TOPICS[0].to_owned(),
+                topic: contract::ACCOUNTS_STREAM_TOPIC.to_owned(),
                 payload: json!({
                     "serverEvent": event,
                     "__broadcastScope": { "kind": "all" },
                     "sourceEventType": "auth.updated",
                 }),
-                visibility: VisibilityScope::System,
+                visibility: StreamVisibility::System,
                 session_id: invocation.causal_context.session_id.clone(),
                 workspace_id: invocation.causal_context.workspace_id.clone(),
                 producer: "auth".to_owned(),

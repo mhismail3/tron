@@ -8,21 +8,18 @@ struct ServerSettingsReaderTests {
     func missingFile() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("profile.toml", isDirectory: false)
+        let path = tmp.appendingPathComponent("settings.toml", isDirectory: false)
         #expect(ServerSettingsReader.tailscaleIP(at: path) == nil)
     }
 
-    @Test("happy path: tailscale IP read from profile TOML")
+    @Test("happy path: tailscale IP read from engine settings")
     func happyPath() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("profile.toml", isDirectory: false)
+        let path = tmp.appendingPathComponent("settings.toml", isDirectory: false)
         try Data(
             """
-            version = "2"
-            name = "user"
-
-            [settings.server]
+            [server]
             tailscaleIp = "100.64.0.1"
             port = 9847
             """.utf8
@@ -34,10 +31,10 @@ struct ServerSettingsReaderTests {
     func missingField() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("profile.toml", isDirectory: false)
+        let path = tmp.appendingPathComponent("settings.toml", isDirectory: false)
         try Data(
             """
-            [settings.server]
+            [server]
             port = 9847
             """.utf8
         ).write(to: path)
@@ -48,10 +45,10 @@ struct ServerSettingsReaderTests {
     func emptyValue() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("profile.toml", isDirectory: false)
+        let path = tmp.appendingPathComponent("settings.toml", isDirectory: false)
         try Data(
             """
-            [settings.server]
+            [server]
             tailscaleIp = "   "
             """.utf8
         ).write(to: path)
@@ -62,7 +59,7 @@ struct ServerSettingsReaderTests {
     func malformedTOML() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("profile.toml", isDirectory: false)
+        let path = tmp.appendingPathComponent("settings.toml", isDirectory: false)
         try Data("not toml at all".utf8).write(to: path)
         #expect(ServerSettingsReader.tailscaleIP(at: path) == nil)
     }
@@ -71,10 +68,10 @@ struct ServerSettingsReaderTests {
     func ignoresExtras() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("profile.toml", isDirectory: false)
+        let path = tmp.appendingPathComponent("settings.toml", isDirectory: false)
         try Data(
             """
-            [settings.server]
+            [server]
             tailscaleIp = "100.1.2.3"
 
             [providerPolicies.default]
@@ -87,38 +84,33 @@ struct ServerSettingsReaderTests {
 
 @Suite("ServerSettingsWriter")
 struct ServerSettingsWriterTests {
-    @Test("creates missing profile with Tailscale IP cache")
+    @Test("creates missing settings file with Tailscale IP cache")
     func createsMissingSettings() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("nested/profile.toml", isDirectory: false)
+        let path = tmp.appendingPathComponent("nested/settings.toml", isDirectory: false)
 
         try ServerSettingsWriter.cacheTailscaleIP(" 100.95.255.62 ", at: path)
 
         #expect(ServerSettingsReader.tailscaleIP(at: path) == "100.95.255.62")
         let text = try String(contentsOf: path, encoding: .utf8)
-        #expect(text.contains(#"version = "3""#))
-        #expect(text.contains(#"inherits = []"#))
-        #expect(text.contains(#"authProfile = "default""#))
-        #expect(!text.contains("[settings.context.compactor]"))
+        #expect(text.contains("[server]"))
+        #expect(!text.contains("profileClass"))
+        #expect(!text.contains("authProfile"))
     }
 
-    @Test("preserves existing profile while updating Tailscale IP")
+    @Test("preserves unrelated settings while updating Tailscale IP")
     func preservesExistingSettings() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("profile.toml", isDirectory: false)
+        let path = tmp.appendingPathComponent("settings.toml", isDirectory: false)
         try Data(
             """
-            version = "2"
-            name = "user"
-            inherits = ["normal"]
-
-            [settings.server]
+            [server]
             defaultModel = "claude-sonnet-4-6"
 
-            [toolPolicies.default]
-            allowed = ["Bash"]
+            [agent]
+            maxTurns = 64
             """.utf8
         ).write(to: path)
 
@@ -128,55 +120,34 @@ struct ServerSettingsWriterTests {
 
         #expect(ServerSettingsReader.tailscaleIP(at: path) == "100.64.0.9")
         #expect(text.contains(#"defaultModel = "claude-sonnet-4-6""#))
-        #expect(text.contains(#"allowed = ["Bash"]"#))
+        #expect(text.contains("maxTurns = 64"))
     }
 
-    @Test("removes settings overlay without deleting profile behavior")
-    func removesSettingsOverlayOnly() throws {
+    @Test("explicit settings reset deletes the sparse file")
+    func deletesSettings() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("profile.toml", isDirectory: false)
+        let path = tmp.appendingPathComponent("settings.toml", isDirectory: false)
         try Data(
             """
-            version = "2"
-            name = "user"
-            inherits = ["normal"]
-
-            [settings.server]
+            [server]
             tailscaleIp = "100.64.0.9"
-
-            [toolPolicies.default]
-            allowed = ["Bash"]
             """.utf8
         ).write(to: path)
 
-        try ServerSettingsWriter.removeSettingsOverlay(at: path)
+        try ServerSettingsWriter.deleteSettings(at: path)
 
-        let text = try String(contentsOf: path, encoding: .utf8)
-        #expect(!text.contains("[settings.server]"))
-        #expect(text.contains("[toolPolicies.default]"))
+        #expect(!FileManager.default.fileExists(atPath: path.path))
     }
 
-    @Test("settings overlay removal stops at array tables")
-    func removeSettingsOverlayStopsAtArrayTables() throws {
+    @Test("deleting absent settings is idempotent")
+    func deleteAbsentSettings() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("profile.toml", isDirectory: false)
-        try Data(
-            """
-            [settings.server]
-            tailscaleIp = "100.64.0.9"
+        let path = tmp.appendingPathComponent("settings.toml", isDirectory: false)
 
-            [[profileNotes]]
-            text = "keep me"
-            """.utf8
-        ).write(to: path)
+        try ServerSettingsWriter.deleteSettings(at: path)
 
-        try ServerSettingsWriter.removeSettingsOverlay(at: path)
-
-        let text = try String(contentsOf: path, encoding: .utf8)
-        #expect(!text.contains("[settings.server]"))
-        #expect(text.contains("[[profileNotes]]"))
-        #expect(text.contains(#"text = "keep me""#))
+        #expect(!FileManager.default.fileExists(atPath: path.path))
     }
 }

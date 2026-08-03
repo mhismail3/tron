@@ -19,7 +19,7 @@ async fn server_boots_and_responds() {
     let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+        let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
     }
     let event_store = Arc::new(EventStore::new(pool));
 
@@ -30,9 +30,7 @@ async fn server_boots_and_responds() {
         session_manager,
         event_store,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
-        transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine::new(),
-        apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
-        profile_runtime: test_profile_runtime(&home),
+        settings_runtime: test_settings_runtime(&home),
         settings_path,
         responder_factory: None,
         server_start_time: std::time::Instant::now(),
@@ -40,8 +38,6 @@ async fn server_boots_and_responds() {
         origin: "localhost:9847".to_string(),
         auth_path: dir.path().join("auth.json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
-        onboarded_marker_path: dir.path().join(".onboarded"),
     };
 
     let config = ServerConfig::default();
@@ -81,7 +77,7 @@ async fn server_graceful_shutdown() {
     let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+        let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
     }
     let event_store = Arc::new(EventStore::new(pool));
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
@@ -94,9 +90,7 @@ async fn server_graceful_shutdown() {
         session_manager,
         event_store,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
-        transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine::new(),
-        apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
-        profile_runtime: test_profile_runtime(&home),
+        settings_runtime: test_settings_runtime(&home),
         settings_path,
         responder_factory: None,
         server_start_time: std::time::Instant::now(),
@@ -104,8 +98,6 @@ async fn server_graceful_shutdown() {
         origin: "localhost:9847".to_string(),
         auth_path: dir.path().join("auth.json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
-        onboarded_marker_path: dir.path().join(".onboarded"),
     };
 
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -139,11 +131,11 @@ fn startup_ensures_bearer_token_exists() {
     assert_eq!(read_back, token);
 }
 #[test]
-fn constitution_startup_creates_internal_run_for_ephemeral_locks() {
+fn initialization_creates_runtime_roots_without_inert_auth_state() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path().join(".tron");
-    crate::shared::foundation::constitution::ensure_tron_home_at(&home)
-        .expect("seed Constitution home");
+    crate::shared::foundation::home::ensure_tron_home_at(&home)
+        .expect("recover Constitution home directories");
 
     assert!(
         home.join(crate::shared::foundation::paths::dirs::INTERNAL)
@@ -152,10 +144,11 @@ fn constitution_startup_creates_internal_run_for_ephemeral_locks() {
         "internal/run/ holds runtime locks that normal server startup may create"
     );
     assert!(
-        home.join(crate::shared::foundation::paths::dirs::PROFILES)
-            .join(crate::shared::foundation::profile::DEFAULT_PROFILE)
-            .join(crate::shared::foundation::paths::files::PROFILE_TOML)
-            .exists(),
-        "default profile must be seeded for auditable profile-owned settings"
+        !home.join("auth.json").exists(),
+        "bearer-token startup owns first auth-state creation"
+    );
+    assert!(
+        !home.join("settings.toml").exists(),
+        "compiled defaults must not create a self-referential settings fixture"
     );
 }

@@ -5,17 +5,19 @@
 //! This is the largest subsystem, responsible for:
 //!
 //! - **Event types**: branch-local [`EventType`] enum for retained loop events
-//! - **Session events**: [`SessionEvent`] flat struct with typed payload access
+//! - **Session events**: [`SessionEvent`] flat struct with opaque JSON payloads
 //! - **Event store**: High-level API for session creation, event append, ancestor walk, fork
 //! - **`SQLite` backend**: `rusqlite` facade with repository pattern
 //! - **Replay identities**: Explicit IDs/timestamps for deterministic replay/import tests
-//! - **Provider request audits**: bounded `model.provider_request` structure and
-//!   digest evidence persisted before model streams without duplicating bulk media
-//! - **Logs and traces**: bounded log queries plus Agent Trace-style records
-//!   keyed by session, workspace, trace, invocation, and provider identifiers
+//! - **Provider request audits**: bounded `tron.model_provider_request.v4`
+//!   manifests plus redacted request evidence persisted before model streams
+//!   without duplicating bulk media or message bodies
+//! - **Agent deliveries and waits**: session/mailbox addressing, result grants,
+//!   safe-turn leasing, observation, wake retries, and crash recovery
+//! - **Logs**: bounded operational log queries
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
-//!   history, preserving separate client display text and model-facing capability result text
-//! - **Migrations**: Version-tracked SQL schema evolution
+//!   history, preserving separate client display text and model-facing tool result text
+//! - **Schema**: Transactional installation of the one current SQL shape
 //!
 //! ## Submodules
 //!
@@ -24,7 +26,7 @@
 //! | `envelope` | Broadcast envelope creation and event type cataloging. |
 //! | `identity` | Explicit event/session/workspace identities for replay-critical constructors. |
 //! | `reconstruction` | Provider-context reconstruction from persisted event history. |
-//! | `sqlite` | Connection, migration, repository, lock, and row-type boundary. |
+//! | `sqlite` | Connection, schema, repository, lock, and row-type boundary. |
 //! | `store` | High-level transactional `EventStore` facade. |
 //! | `trace` | Agent trace record types and query options. |
 //! | `types` | Event payload, state, token, and generated event definitions. |
@@ -49,19 +51,32 @@
 //!
 //! - This root uses normal folder-backed modules only and must not hide
 //!   ownership behind `#[path]` aliases.
-//! - SQLite row shape and migrations stay under the SQLite owner.
+//! - SQLite row shape and schema installation stay under the SQLite owner.
 //! - Public event DTOs stay shared-protocol-owned; crate-private session-list
 //!   projections are not reexported through the persistence owner.
 //! - Reconstruction is deterministic over persisted event order.
 //! - Persisted event rows are decoded through the owning SQLite connection so
 //!   inline and blob-backed payloads share one resolution path.
 //! - `model.provider_request` is written before any provider stream opens.
+//! - The append-only event is the sole durable request-context ledger. V4
+//!   records ordered instructions, automatic-context provenance, message
+//!   source sidecars, Agent Deliveries, environment, and exact tool selection;
+//!   v2/v3 remain readable and no parallel context cache is installed.
+//! - `agent_deliveries`, waits, and wait members remain EventStore-owned state.
+//!   A delivery lease is preparation, not observation; only durable assistant
+//!   completion observes it, while setup failure or restart clears the lease
+//!   for at-least-once redelivery.
+//! - Sender expiry is durably reconciled before delivery, mailbox, wake, and
+//!   result-grant reads. Expired rows remain audit evidence but confer no
+//!   result authority.
 //! - Provider audit events project bulk strings to byte-count and digest
 //!   evidence; provider request bytes remain owned by the model boundary.
 //! - Log query filters are applied in the storage owner so diagnostics callers
 //!   cannot silently broaden session/workspace/trace scope.
 //! - Durable event payloads and client logs call the shared foundation
-//!   redaction policy directly; the session domain does not shadow that owner.
+//!   redaction policy directly. JSON redaction retains field context so opaque
+//!   values under exact credential keys are masked before storage; the session
+//!   domain does not shadow that owner.
 //! - Session roots, forks, and generic appends are created only through
 //!   `EventStore`; no parallel factory or manual chain-head owner exists.
 //! - Replay/import paths use explicit identities instead of ambient time or
@@ -70,6 +85,15 @@
 //!   sets session-row `ended_at`, message deletion appends `message.deleted`,
 //!   and physical event cleanup happens only when the owning session is
 //!   explicitly deleted.
+//! - Asynchronous worker-owned session naming uses a storage-level
+//!   compare-and-set that updates only a null or blank title, so a delayed
+//!   policy result cannot overwrite an explicit concurrent user/model title.
+//! - Session organization remains canonical session-row state: ordinary tags
+//!   are labels, exactly one reserved tag encodes the group, and archive state
+//!   remains `ended_at`. Closed worker intents acquire sorted session locks and
+//!   commit the entire target batch or none of it while preserving system tags.
+//!   Omitted label/group patches preserve canonical values; explicit null is
+//!   reserved for clearing the group.
 //!
 //! ## Test Ownership
 //!
@@ -85,7 +109,6 @@ pub mod identity;
 pub mod reconstruction;
 pub mod sqlite;
 pub mod store;
-pub mod trace;
 pub mod types;
 
 pub use envelope::{
@@ -102,16 +125,21 @@ pub use sqlite::repositories::event::ListEventsOptions;
 pub use sqlite::repositories::session::ListSessionsOptions;
 pub use sqlite::row_types::{BlobRow, EventRow, SessionRow, WorkspaceRow};
 pub use sqlite::{
-    ConnectionConfig, ConnectionPool, DatabaseLock, LockError, MigrationResult, PooledConnection,
-    acquire_database_lock, check_integrity, new_file, new_in_memory, run_migrations,
+    ConnectionConfig, ConnectionPool, DatabaseLock, LockError, PooledConnection,
+    acquire_database_lock, check_integrity, ensure_schema, new_file, new_in_memory,
 };
-pub(crate) use store::AppendBatchItem;
+pub(crate) use store::{
+    AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliveryRecord, AgentDeliverySourceKind,
+    AgentDeliveryTarget, AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode,
+    AppendBatchItem, MAX_DELIVERIES_PER_TURN, NewAgentDelivery, NewAgentTaskDelivery, NewAgentWait,
+    WorkerTerminalEvidence,
+};
 pub use store::{
     AppendOptions, ClientLogEntry, ClientLogIngestResult, CreateSessionResult, EventStore,
     ForkOptions, ForkResult, LogEntry, LogSessionFilter, RecentLogQuery,
+    SESSION_ORGANIZATION_GROUP_TAG_PREFIX, SessionOrganizationArchiveAction,
+    SessionOrganizationMutation, SessionOrganizationSnapshot, session_organization_from_tags,
 };
-pub use trace::{AGENT_TRACE_VERSION, AgentTraceListOptions, AgentTraceRecord};
 pub use types::{
-    ALL_EVENT_TYPES, Branch, EventType, Message, MessageWithEventId, SessionEvent,
-    SessionEventPayload, SessionState, SessionSummary, TokenTotals, TokenUsage, Workspace,
+    EventType, Message, MessageWithEventId, SessionEvent, SessionState, TokenTotals, TokenUsage,
 };

@@ -59,16 +59,16 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.thinkingStateModelUsed, "claude-3-opus")
     }
 
-    func testTurnStartClearsPreviousTurnCapabilityTracking() {
+    func testTurnStartClearsPreviousTurnToolTracking() {
         // Given
-        mockContext.currentTurnCapabilityMessageIds = [UUID()]
+        mockContext.currentTurnToolMessageIds = [UUID()]
 
         // When
         let pluginResult = TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
-        XCTAssertTrue(mockContext.currentTurnCapabilityMessageIds.isEmpty)
+        XCTAssertTrue(mockContext.currentTurnToolMessageIds.isEmpty)
     }
 
     func testTurnStartEnqueuesTurnBoundary() {
@@ -81,13 +81,13 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.enqueuedTurnBoundary?.isStart ?? false)
     }
 
-    func testTurnStartResetsAnimationCoordinatorCapabilityState() {
+    func testTurnStartResetsAnimationCoordinatorToolState() {
         // When
         let pluginResult = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
-        XCTAssertTrue(mockContext.animationCoordinatorResetCapabilityStateCalled)
+        XCTAssertTrue(mockContext.animationCoordinatorResetToolStateCalled)
     }
 
     func testTurnStartTracksTurnBoundaryIndex() {
@@ -104,6 +104,57 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         // Then
         XCTAssertEqual(mockContext.turnStartMessageIndex, 2) // Count of existing messages
         XCTAssertNil(mockContext.firstTextMessageIdForTurn)
+    }
+
+    func testTurnStartPlacesDeliveryContinuationBeforeTurnContent() {
+        let prior = makeTextMessage("prior response")
+        mockContext.messages = [prior]
+        let provenance = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-1",
+            sourceKind: "worker_result",
+            sourceWorkerId: "general-delegate",
+            sourceWorkerName: "General Delegate",
+            sourceSessionId: nil,
+            sourceInvocationId: "worker-run-1",
+            wakePolicy: "wake",
+            boundary: "next_run",
+            triggeredWake: true,
+            redelivery: false,
+            includedInThisTurn: true
+        )
+
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 2,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [provenance]
+            ),
+            context: mockContext
+        )
+        mockContext.messages.append(
+            ChatMessage(
+                role: .assistant,
+                content: .thinking(
+                    visible: "Inspecting result",
+                    isExpanded: false,
+                    isStreaming: true,
+                    kind: .thinking
+                )
+            )
+        )
+
+        XCTAssertEqual(mockContext.turnStartMessageIndex, 1)
+        XCTAssertTrue(mockContext.messages[1].isDeliveryProvenanceOnly)
+        XCTAssertEqual(mockContext.messages[1].agentDeliveryProvenance, [provenance])
+        XCTAssertEqual(
+            AgentDeliveryContinuationPresentation.label(
+                mockContext.messages[1].agentDeliveryProvenance
+            ),
+            "Resumed from General Delegate"
+        )
+        guard case .thinking = mockContext.messages[2].content else {
+            return XCTFail("thinking must follow delivery provenance")
+        }
     }
 
     // MARK: - handleTurnEnd Tests
@@ -149,7 +200,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.messages = [
             ChatMessage(id: messageId, role: .assistant, content: .text("response"))
         ]
-        markResponseComplete(turnNumber: 2, hasCapabilityInvocations: false)
+        markResponseComplete(turnNumber: 2, hasToolInvocations: false)
 
         // When
         let pluginResult = makeTurnEndPluginResult(
@@ -169,8 +220,256 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(msg.turnNumber, 2)
     }
 
+    func testResponseCompleteAttachesDeliveryContinuationProvenance() {
+        let messageId = UUID()
+        mockContext.streamingMessageId = messageId
+        mockContext.messages = [
+            ChatMessage(id: messageId, role: .assistant, content: .text("Worker finished."))
+        ]
+        let provenance = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-1",
+            sourceKind: "worker_result",
+            sourceWorkerId: "research-worker",
+            sourceWorkerName: "Research Specialist",
+            sourceSessionId: "source-session",
+            sourceInvocationId: "worker-run-1",
+            wakePolicy: "wake",
+            boundary: "next_run",
+            triggeredWake: true,
+            redelivery: false,
+            includedInThisTurn: true
+        )
+
+        markResponseComplete(
+            turnNumber: 2,
+            hasToolInvocations: false,
+            agentDeliveryProvenance: [provenance]
+        )
+
+        XCTAssertEqual(mockContext.messages[0].agentDeliveryProvenance, [provenance])
+        XCTAssertEqual(
+            AgentDeliveryContinuationPresentation.label([provenance]),
+            "Resumed from Research Specialist"
+        )
+        XCTAssertEqual(
+            AgentDeliveryContinuationPresentation.label([provenance, provenance]),
+            "Resumed with 2 updates"
+        )
+        let natural = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-2",
+            sourceKind: "agent_message",
+            sourceWorkerId: nil,
+            sourceWorkerName: nil,
+            sourceSessionId: "source-session",
+            sourceInvocationId: nil,
+            wakePolicy: "passive",
+            boundary: "next_turn",
+            triggeredWake: false,
+            redelivery: false,
+            includedInThisTurn: true
+        )
+        XCTAssertEqual(
+            AgentDeliveryContinuationPresentation.label([natural]),
+            "Update included · Agent Message"
+        )
+        let carried = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-3",
+            sourceKind: "worker_result",
+            sourceWorkerId: "automation-reminders",
+            sourceWorkerName: "Automation Reminders",
+            sourceSessionId: nil,
+            sourceInvocationId: "worker-run-3",
+            wakePolicy: "passive",
+            boundary: "next_turn",
+            triggeredWake: false,
+            redelivery: false,
+            includedInThisTurn: false
+        )
+        XCTAssertEqual(
+            AgentDeliveryContinuationPresentation.label([carried]),
+            "Update used earlier · Automation Reminders"
+        )
+    }
+
+    func testResponseCompleteEnrichesTurnStartDeliveryContinuationInPlace() {
+        let wake = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-wake",
+            sourceKind: "worker_result",
+            sourceWorkerId: "general-delegate",
+            sourceWorkerName: "General Delegate",
+            sourceSessionId: nil,
+            sourceInvocationId: "worker-run-1",
+            wakePolicy: "wake",
+            boundary: "next_run",
+            triggeredWake: true,
+            redelivery: false,
+            includedInThisTurn: true
+        )
+        let passive = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-passive",
+            sourceKind: "agent_message",
+            sourceWorkerId: nil,
+            sourceWorkerName: nil,
+            sourceSessionId: "peer-session",
+            sourceInvocationId: nil,
+            wakePolicy: "passive",
+            boundary: "next_turn",
+            triggeredWake: false,
+            redelivery: false,
+            includedInThisTurn: true
+        )
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 2,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [wake]
+            ),
+            context: mockContext
+        )
+        let responseId = UUID()
+        mockContext.streamingMessageId = responseId
+        mockContext.messages.append(
+            ChatMessage(
+                id: responseId,
+                role: .assistant,
+                content: .text("Used both updates.")
+            )
+        )
+
+        markResponseComplete(
+            turnNumber: 2,
+            hasToolInvocations: false,
+            agentDeliveryProvenance: [wake, passive]
+        )
+
+        XCTAssertTrue(mockContext.messages[0].isDeliveryProvenanceOnly)
+        XCTAssertEqual(
+            mockContext.messages[0].agentDeliveryProvenance,
+            [wake, passive]
+        )
+        XCTAssertTrue(mockContext.messages[1].agentDeliveryProvenance.isEmpty)
+    }
+
+    func testDeliveryContinuationAppearsOnceAcrossResumedProviderTurns() {
+        let wake = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-wake",
+            sourceKind: "worker_result",
+            sourceWorkerId: "wait-ux-smoke",
+            sourceWorkerName: "Wait UX Smoke Test",
+            sourceSessionId: nil,
+            sourceInvocationId: "worker-run-1",
+            wakePolicy: "wake",
+            boundary: "next_run",
+            triggeredWake: true,
+            redelivery: false,
+            includedInThisTurn: true
+        )
+
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 4,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [wake]
+            ),
+            context: mockContext
+        )
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 5,
+                agentPhase: "processing"
+            ),
+            context: mockContext
+        )
+        let responseId = UUID()
+        mockContext.streamingMessageId = responseId
+        mockContext.messages.append(
+            ChatMessage(
+                id: responseId,
+                role: .assistant,
+                content: .text("The worker completed.")
+            )
+        )
+
+        markResponseComplete(
+            turnNumber: 5,
+            hasToolInvocations: false,
+            agentDeliveryProvenance: [wake]
+        )
+
+        XCTAssertEqual(
+            mockContext.messages.filter {
+                !$0.agentDeliveryProvenance.isEmpty
+            }.count,
+            1
+        )
+        XCTAssertTrue(
+            mockContext.messages.last?.agentDeliveryProvenance.isEmpty == true
+        )
+
+        coordinator.handleComplete(streamingText: "", context: mockContext)
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 6,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [wake]
+            ),
+            context: mockContext
+        )
+        XCTAssertEqual(
+            mockContext.messages.filter {
+                !$0.agentDeliveryProvenance.isEmpty
+            }.count,
+            2,
+            "A later run may present the same durable delivery again."
+        )
+    }
+
+    func testActiveReconstructionSeedsDeliveryPresentationState() {
+        let wake = AgentDeliveryMessageProvenance(
+            deliveryId: "delivery-wake",
+            sourceKind: "worker_result",
+            sourceWorkerId: "wait-ux-smoke",
+            sourceWorkerName: "Wait UX Smoke Test",
+            sourceSessionId: nil,
+            sourceInvocationId: "worker-run-1",
+            wakePolicy: "wake",
+            boundary: "next_run",
+            triggeredWake: true,
+            redelivery: false,
+            includedInThisTurn: true
+        )
+        coordinator.restoreDeliveryPresentationState(
+            from: [.deliveryContinuation([wake])],
+            runIsActive: true
+        )
+
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 5,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [wake]
+            ),
+            context: mockContext
+        )
+        XCTAssertTrue(mockContext.messages.isEmpty)
+
+        coordinator.restoreDeliveryPresentationState(
+            from: [.deliveryContinuation([wake])],
+            runIsActive: false
+        )
+        coordinator.handleTurnStart(
+            TurnStartPlugin.Result(
+                turnNumber: 6,
+                agentPhase: "processing",
+                agentDeliveryProvenance: [wake]
+            ),
+            context: mockContext
+        )
+        XCTAssertEqual(mockContext.messages.count, 1)
+    }
+
     func testTurnEndUsesFirstTextMessageIdWhenStreamingFinalizedEarly() {
-        // Given - streaming was finalized before turn end (e.g., before capability invocation)
+        // Given - streaming was finalized before turn end (e.g., before tool invocation)
         let firstTextId = UUID()
         mockContext.streamingMessageId = nil
         mockContext.firstTextMessageIdForTurn = firstTextId
@@ -178,7 +477,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.messages = [
             ChatMessage(id: firstTextId, role: .assistant, content: .text("response"))
         ]
-        markResponseComplete(turnNumber: 1, hasCapabilityInvocations: false)
+        markResponseComplete(turnNumber: 1, hasToolInvocations: false)
 
         // When
         let pluginResult = makeTurnEndPluginResult(
@@ -199,7 +498,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.messages = [
             ChatMessage(id: messageId, role: .assistant, content: .text("response"))
         ]
-        markResponseComplete(turnNumber: 1, hasCapabilityInvocations: false)
+        markResponseComplete(turnNumber: 1, hasToolInvocations: false)
 
         // When
         let tokenRecord = makeTokenRecord(
@@ -257,32 +556,32 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.contextStateCurrentContextWindow, 200000)
     }
 
-    func testCapabilityResponseDoesNotAttachMetadataToInvocation() {
-        // Given - intermediate turn: [thinking, capability_invocation] with NO visible text
+    func testToolResponseDoesNotAttachMetadataToInvocation() {
+        // Given - intermediate turn: [thinking, tool_invocation] with NO visible text
         // streamingMessageId and firstTextMessageIdForTurn are both nil
         mockContext.streamingMessageId = nil
         mockContext.firstTextMessageIdForTurn = nil
         mockContext.turnStartMessageIndex = 0
         mockContext.currentModel = "claude-opus-4-6"
 
-        let capabilityInvocationMessage = ChatMessage(
+        let toolInvocationMessage = ChatMessage(
             role: .assistant,
-            content: .capabilityInvocation(testCapabilityInvocation(id: "tc-1", status: .running))
+            content: .toolInvocation(testToolInvocation(id: "tc-1", status: .running))
         )
-        mockContext.messages = [capabilityInvocationMessage]
-        markResponseComplete(turnNumber: 1, hasCapabilityInvocations: true)
+        mockContext.messages = [toolInvocationMessage]
+        markResponseComplete(turnNumber: 1, hasToolInvocations: true)
 
         // When
         let tokenRecord = makeTokenRecord(inputTokens: 100, outputTokens: 50)
         let pluginResult = makeTurnEndPluginResult(
             turnNumber: 1,
-            stopReason: "capability_invocation",
+            stopReason: "tool_invocation",
             tokenRecord: tokenRecord,
             duration: 500
         )
         coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
-        // Then - capability items never own a response metadata row.
+        // Then - tool items never own a response metadata row.
         XCTAssertNil(mockContext.messages[0].tokenRecord)
         XCTAssertNil(mockContext.messages[0].model)
         XCTAssertNil(mockContext.messages[0].latencyMs)
@@ -308,7 +607,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         )
         let textMessage = ChatMessage(id: textId, role: .assistant, content: .text("some response"))
         mockContext.messages = [thinkingMessage, textMessage]
-        markResponseComplete(turnNumber: 1, hasCapabilityInvocations: false)
+        markResponseComplete(turnNumber: 1, hasToolInvocations: false)
 
         // When
         let tokenRecord = makeTokenRecord(inputTokens: 200, outputTokens: 100)
@@ -326,20 +625,20 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.messages[1].isFinalAssistantResponse)
     }
 
-    func testCapabilityBearingResponseSuppressesMetadataEvenWithEndTurnStopReason() {
+    func testToolBearingResponseSuppressesMetadataEvenWithEndTurnStopReason() {
         // Given - provider stop reason says end_turn, but the exact response
-        // contract reports capability invocations.
+        // contract reports tool invocations.
         mockContext.streamingMessageId = nil
         mockContext.firstTextMessageIdForTurn = nil
         mockContext.turnStartMessageIndex = 0
         mockContext.currentModel = "claude-opus-4-6"
 
         let textMessage = ChatMessage(role: .assistant, content: .text("Let me search for that."))
-        let invocation1 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-1", status: .success)))
-        let invocation2 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-2", status: .success)))
-        let invocation3 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-3", status: .success)))
+        let invocation1 = ChatMessage(role: .assistant, content: .toolInvocation(testToolInvocation(id: "tc-1", status: .success)))
+        let invocation2 = ChatMessage(role: .assistant, content: .toolInvocation(testToolInvocation(id: "tc-2", status: .success)))
+        let invocation3 = ChatMessage(role: .assistant, content: .toolInvocation(testToolInvocation(id: "tc-3", status: .success)))
         mockContext.messages = [textMessage, invocation1, invocation2, invocation3]
-        markResponseComplete(turnNumber: 1, hasCapabilityInvocations: true, capabilityInvocationCount: 3)
+        markResponseComplete(turnNumber: 1, hasToolInvocations: true, toolInvocationCount: 3)
 
         // When
         let tokenRecord = makeTokenRecord(inputTokens: 500, outputTokens: 200)
@@ -360,29 +659,29 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         }
     }
 
-    func testCapabilityOnlyTurnHasNoPresentationMetadata() {
-        // Given - capability-only turn: [invocation1, invocation2] — no text at all
+    func testToolOnlyTurnHasNoPresentationMetadata() {
+        // Given - tool-only turn: [invocation1, invocation2] — no text at all
         mockContext.streamingMessageId = nil
         mockContext.firstTextMessageIdForTurn = nil
         mockContext.turnStartMessageIndex = 0
         mockContext.currentModel = "claude-opus-4-6"
 
-        let invocation1 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-1", status: .success)))
-        let invocation2 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-2", status: .success)))
+        let invocation1 = ChatMessage(role: .assistant, content: .toolInvocation(testToolInvocation(id: "tc-1", status: .success)))
+        let invocation2 = ChatMessage(role: .assistant, content: .toolInvocation(testToolInvocation(id: "tc-2", status: .success)))
         mockContext.messages = [invocation1, invocation2]
-        markResponseComplete(turnNumber: 2, hasCapabilityInvocations: true, capabilityInvocationCount: 2)
+        markResponseComplete(turnNumber: 2, hasToolInvocations: true, toolInvocationCount: 2)
 
         // When
         let tokenRecord = makeTokenRecord(inputTokens: 300, outputTokens: 100)
         let pluginResult = makeTurnEndPluginResult(
             turnNumber: 2,
-            stopReason: "capability_invocation",
+            stopReason: "tool_invocation",
             tokenRecord: tokenRecord,
             duration: 600
         )
         coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
-        // Then - capability-only turns have no final textual response footer.
+        // Then - tool-only turns have no final textual response footer.
         XCTAssertNil(mockContext.messages[0].tokenRecord)
         XCTAssertNil(mockContext.messages[1].tokenRecord)
     }
@@ -411,7 +710,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.uiUpdateQueueFlushCalled)
         XCTAssertTrue(mockContext.flushPendingTextUpdatesCalled)
         XCTAssertTrue(mockContext.uiUpdateQueueResetCalled)
-        XCTAssertTrue(mockContext.animationCoordinatorResetCapabilityStateCalled)
+        XCTAssertTrue(mockContext.animationCoordinatorResetToolStateCalled)
         XCTAssertTrue(mockContext.streamingManagerResetCalled)
     }
 
@@ -426,15 +725,15 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.agentPhase, .processing)
     }
 
-    func testCompleteClearsCapabilityTracking() {
+    func testCompleteClearsToolTracking() {
         // Given
-        mockContext.currentTurnCapabilityMessageIds = [UUID()]
+        mockContext.currentTurnToolMessageIds = [UUID()]
 
         // When
         coordinator.handleComplete(streamingText: "", context: mockContext)
 
         // Then
-        XCTAssertTrue(mockContext.currentTurnCapabilityMessageIds.isEmpty)
+        XCTAssertTrue(mockContext.currentTurnToolMessageIds.isEmpty)
     }
 
     // MARK: - Helpers
@@ -461,14 +760,16 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     private func markResponseComplete(
         turnNumber: Int,
-        hasCapabilityInvocations: Bool,
-        capabilityInvocationCount: Int? = nil
+        hasToolInvocations: Bool,
+        toolInvocationCount: Int? = nil,
+        agentDeliveryProvenance: [AgentDeliveryMessageProvenance] = []
     ) {
         coordinator.handleResponseComplete(
             AgentResponseCompletePlugin.Result(
                 turnNumber: turnNumber,
-                hasCapabilityInvocations: hasCapabilityInvocations,
-                capabilityInvocationCount: capabilityInvocationCount ?? (hasCapabilityInvocations ? 1 : 0)
+                hasToolInvocations: hasToolInvocations,
+                toolInvocationCount: toolInvocationCount ?? (hasToolInvocations ? 1 : 0),
+                agentDeliveryProvenance: agentDeliveryProvenance
             ),
             context: mockContext
         )
@@ -517,7 +818,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     // MARK: - State
     var messages: [ChatMessage] = []
     let messageIndex = MessageIndex()
-    var currentTurnCapabilityMessageIds: Set<UUID> = []
+    var currentTurnToolMessageIds: Set<UUID> = []
     var thinkingMessageId: UUID?
     var turnStartMessageIndex: Int?
     var firstTextMessageIdForTurn: UUID?
@@ -537,7 +838,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var thinkingStateStartTurnCalled: Int?
     var thinkingStateModelUsed: String?
     var enqueuedTurnBoundary: UIUpdateQueue.TurnBoundaryData?
-    var animationCoordinatorResetCapabilityStateCalled = false
+    var animationCoordinatorResetToolStateCalled = false
     var uiUpdateQueueFlushCalled = false
     var uiUpdateQueueResetCalled = false
     var streamingManagerResetCalled = false
@@ -566,8 +867,8 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
         enqueuedTurnBoundary = data
     }
 
-    func resetAnimationCoordinatorCapabilityState() {
-        animationCoordinatorResetCapabilityStateCalled = true
+    func resetAnimationCoordinatorToolState() {
+        animationCoordinatorResetToolStateCalled = true
     }
 
     func flushUIUpdateQueue() {

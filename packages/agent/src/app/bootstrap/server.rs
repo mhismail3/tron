@@ -6,14 +6,13 @@ use std::time::{Duration, Instant};
 
 use crate::shared::server::context::ServerRuntimeContext;
 use axum::Router;
-use axum::extract::ConnectInfo;
 use axum::extract::Request as AxumRequest;
-use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use tokio::net::TcpListener;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
@@ -32,9 +31,6 @@ use crate::app::health::{self, HealthResponse};
 use crate::app::lifecycle::shutdown::ShutdownCoordinator;
 use crate::transport::engine::socket::{EngineClientRegistry, run_engine_ws_session};
 use crate::transport::http::auth::{BearerTokenStore, verify_bearer_header};
-use crate::transport::runtime::external_workers::{
-    SharedExternalWorkerRuntime, run_external_worker_socket,
-};
 
 /// Generates `UUIDv7` request IDs.
 #[derive(Clone)]
@@ -64,8 +60,6 @@ pub struct AppState {
     pub metrics_handle: Arc<PrometheusHandle>,
     /// Bearer-token verifier for engine WebSocket upgrades.
     pub auth_store: Arc<BearerTokenStore>,
-    /// Shared local external-worker runtime.
-    pub external_workers: SharedExternalWorkerRuntime,
     /// Connected `/engine` clients.
     pub engine_clients: Arc<EngineClientRegistry>,
 }
@@ -77,7 +71,6 @@ pub struct TronServer {
     runtime_context: Arc<ServerRuntimeContext>,
     metrics_handle: Arc<PrometheusHandle>,
     auth_store: Arc<BearerTokenStore>,
-    external_workers: SharedExternalWorkerRuntime,
     engine_clients: Arc<EngineClientRegistry>,
     start_time: Instant,
 }
@@ -92,11 +85,7 @@ impl TronServer {
         let shutdown = Arc::new(ShutdownCoordinator::new());
         // Inject shutdown coordinator into context so handlers can register tasks
         runtime_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
-        runtime_context.set_ws_port(config.port);
         let auth_store = Arc::new(BearerTokenStore::new(runtime_context.auth_path.clone()));
-        let external_workers = Arc::new(tokio::sync::Mutex::new(
-            crate::engine::EngineExternalWorkerRuntime::new(runtime_context.engine_host.clone()),
-        ));
         let engine_clients = Arc::new(EngineClientRegistry::new());
         Self {
             config,
@@ -104,7 +93,6 @@ impl TronServer {
             runtime_context: Arc::new(runtime_context),
             metrics_handle: Arc::new(metrics_handle),
             auth_store,
-            external_workers,
             engine_clients,
             start_time: Instant::now(),
         }
@@ -119,7 +107,6 @@ impl TronServer {
             config: self.config.clone(),
             metrics_handle: self.metrics_handle.clone(),
             auth_store: self.auth_store.clone(),
-            external_workers: self.external_workers.clone(),
             engine_clients: self.engine_clients.clone(),
         };
 
@@ -132,9 +119,8 @@ impl TronServer {
                     .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
             )
             .route(
-                "/engine/workers",
-                get(engine_worker_upgrade_handler)
-                    .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
+                "/engine/webhooks/workers/{worker_id}/{trigger_id}",
+                post(worker_webhook_handler),
             )
             .route("/health/deep", get(deep_health_handler))
             .with_state(state)
@@ -159,8 +145,6 @@ impl TronServer {
         let addr = format!("{}:{}", self.config.host, self.config.port);
         let listener = TcpListener::bind(&addr).await?;
         let bound_addr = listener.local_addr()?;
-        self.runtime_context.set_ws_port(bound_addr.port());
-
         info!(addr = %bound_addr, "engine server started");
 
         let router = self.router();
@@ -197,15 +181,98 @@ impl TronServer {
         &self.runtime_context
     }
 
-    /// Get the local external-worker runtime.
-    pub fn external_workers(&self) -> &SharedExternalWorkerRuntime {
-        &self.external_workers
-    }
-
     /// Get the connected engine client registry.
     pub fn engine_clients(&self) -> &Arc<EngineClientRegistry> {
         &self.engine_clients
     }
+}
+
+async fn worker_webhook_handler(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path((worker_id, trigger_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(input): Json<serde_json::Value>,
+) -> Response {
+    if !peer.ip().is_loopback() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error":"worker webhooks accept loopback requests only"})),
+        )
+            .into_response();
+    }
+    let token = headers
+        .get("x-tron-worker-token")
+        .and_then(|value| value.to_str().ok())
+        .or_else(|| {
+            headers
+                .get(axum::http::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.strip_prefix("Bearer "))
+        });
+    let Some(token) = token else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error":"missing worker webhook token"})),
+        )
+            .into_response();
+    };
+    let idempotency_key = headers
+        .get("x-tron-idempotency-key")
+        .or_else(|| headers.get("idempotency-key"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("worker-webhook:{}", uuid::Uuid::now_v7()));
+    let context = crate::engine::CausalContext::new(
+        match crate::engine::ActorId::new("worker:webhook") {
+            Ok(id) => id,
+            Err(error) => return internal_webhook_error(error.to_string()),
+        },
+        crate::engine::ActorKind::System,
+        crate::engine::TraceId::generate(),
+    )
+    .with_idempotency_key(idempotency_key.clone());
+    let function_id = match crate::engine::FunctionId::new("worker_kernel::webhook_invoke") {
+        Ok(id) => id,
+        Err(error) => return internal_webhook_error(error.to_string()),
+    };
+    let outcome = state
+        .runtime_context
+        .engine_host
+        .invoke(crate::engine::Invocation::new_sync(
+            function_id,
+            serde_json::json!({
+                "workerId":worker_id,
+                "triggerId":trigger_id,
+                "token":token,
+                "input":input,
+                "idempotencyKey":idempotency_key,
+            }),
+            context,
+        ))
+        .await;
+    if let Some(error) = outcome.error {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error":error.to_string()})),
+        )
+            .into_response();
+    }
+    (
+        StatusCode::ACCEPTED,
+        Json(outcome.value.unwrap_or_default()),
+    )
+        .into_response()
+}
+
+fn internal_webhook_error(error: String) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({"error":error})),
+    )
+        .into_response()
 }
 
 /// GET /engine — public engine client WebSocket protocol.
@@ -252,47 +319,10 @@ async fn engine_upgrade_handler(
         }))
 }
 
-/// GET /engine/workers — local engine worker WebSocket upgrade handler.
-async fn engine_worker_upgrade_handler(
-    ws: WebSocketUpgrade,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, StatusCode> {
-    ensure_worker_peer_is_loopback(addr)?;
-    let shutdown = state.shutdown;
-    let shutdown_token = shutdown.token();
-    let runtime = state.external_workers;
-    let (socket_tx, socket_rx) = tokio::sync::oneshot::channel();
-    let session_shutdown = shutdown_token.clone();
-    let session_task = tokio::spawn(async move {
-        tokio::select! {
-            biased;
-            () = shutdown_token.cancelled() => {}
-            socket = socket_rx => {
-                if let Ok(socket) = socket {
-                    run_external_worker_socket(socket, runtime, session_shutdown).await;
-                }
-            }
-        }
-    });
-    shutdown.register_task(session_task);
-    Ok(ws.on_upgrade(move |socket| async move {
-        let _ = socket_tx.send(socket);
-    }))
-}
-
-fn ensure_worker_peer_is_loopback(addr: SocketAddr) -> Result<(), StatusCode> {
-    if !addr.ip().is_loopback() {
-        tracing::warn!(%addr, "rejected non-loopback engine worker connection");
-        return Err(StatusCode::FORBIDDEN);
-    }
-    Ok(())
-}
-
 /// GET /health
 async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
     let connections = state.engine_clients.connection_count();
-    // Wire compatibility: `active_sessions` reports cached session projections.
+    // `active_sessions` reports cached session projections.
     let cached_sessions = state.runtime_context.orchestrator.cached_session_count();
     let resp = health::health_check(state.start_time, connections, cached_sessions);
     Json(resp)
@@ -301,10 +331,10 @@ async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
 /// GET /health/deep — Deep health check with per-subsystem results.
 async fn deep_health_handler(State(state): State<AppState>) -> Json<health::DeepHealthResponse> {
     let connections = state.engine_clients.connection_count();
-    // Wire compatibility: `active_sessions` reports cached session projections.
+    // `active_sessions` reports cached session projections.
     let cached_sessions = state.runtime_context.orchestrator.cached_session_count();
     let event_store = state.runtime_context.event_store.clone();
-    let tron_home = crate::domains::settings::profile::tron_home_dir();
+    let tron_home = crate::shared::foundation::paths::tron_home();
     let response = state
         .runtime_context
         .run_blocking("http.health.deep", move || {
@@ -397,12 +427,6 @@ mod tests {
         ws_upgrade_request_to("/engine", auth)
     }
 
-    fn worker_ws_upgrade_request(auth: Option<String>, addr: SocketAddr) -> Request<Body> {
-        let mut request = ws_upgrade_request_to("/engine/workers", auth);
-        request.extensions_mut().insert(ConnectInfo(addr));
-        request
-    }
-
     #[tokio::test]
     async fn server_with_default_config() {
         let server = make_server();
@@ -453,7 +477,6 @@ mod tests {
     #[tokio::test]
     async fn engine_endpoint_requires_upgrade() {
         let (server, _dir, token) = make_server_with_auth();
-        let marker = server.runtime_context().onboarded_marker_path.clone();
         let app = server.router();
 
         // GET /engine without WebSocket upgrade headers → should return an error
@@ -467,7 +490,6 @@ mod tests {
         // Without upgrade headers, axum returns a non-success status
         assert_ne!(resp.status(), StatusCode::OK);
         assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
-        assert!(!marker.exists(), "invalid upgrades must not mark paired");
     }
 
     #[tokio::test]
@@ -496,33 +518,194 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn engine_worker_endpoint_requires_bearer_before_loopback_upgrade() {
-        let (server, _dir, token) = make_server_with_auth();
+    async fn worker_webhook_is_loopback_token_authenticated_and_durably_dispatched() {
+        let server = make_server();
+        let created = server
+            .runtime_context()
+            .engine_host
+            .invoke(crate::engine::Invocation::new_sync(
+                crate::engine::FunctionId::new("worker_kernel::upsert").unwrap(),
+                serde_json::json!({
+                    "bundle":{
+                        "schemaVersion":"tron.worker_bundle.v1",
+                        "workerId":"http-webhook-fixture",
+                        "name":"HTTP Webhook Fixture",
+                        "description":"Exercises the authenticated loopback HTTP trigger",
+                        "toolName":"worker_http_webhook_fixture",
+                        "modelExposure":"internal",
+                        "inputSchema":{"type":"object","additionalProperties":false,"properties":{"configured":{"type":"boolean"},"requestValue":{"type":"integer"}}},
+                        "outputSchema":{"type":"object"},
+                        "runner":{"kind":"command","command":["sh","-c","cat"]},
+                        "triggers":[{
+                            "kind":"webhook",
+                            "id":"incoming",
+                            "input":{"configured":true}
+                        }],
+                        "smokeTests":[],
+                        "healthChecks":[],
+                        "provenance":[{"source":"test:http-webhook"}]
+                    }
+                }),
+                crate::engine::CausalContext::new(
+                    crate::engine::ActorId::new("agent:webhook-http-test").unwrap(),
+                    crate::engine::ActorKind::Agent,
+                    crate::engine::TraceId::new("webhook-http-create").unwrap(),
+                )
+                .with_session_id("webhook-http-session")
+                .with_idempotency_key("webhook-http-create"),
+            ))
+            .await;
+        assert!(
+            created.error.is_none(),
+            "worker upsert failed: {:?}",
+            created.error
+        );
+        let created = created.value.unwrap();
+        let token = created["webhooks"][0]["token"].as_str().unwrap();
+        let path = created["webhooks"][0]["path"].as_str().unwrap();
         let app = server.router();
-        let loopback: SocketAddr = "127.0.0.1:41000".parse().unwrap();
 
-        let missing = worker_ws_upgrade_request(None, loopback);
-        let missing_resp = app.clone().oneshot(missing).await.unwrap();
-        assert_eq!(missing_resp.status(), StatusCode::UNAUTHORIZED);
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/json")
+            .header("x-tron-worker-token", token)
+            .header("x-tron-idempotency-key", "http-delivery-1")
+            .body(Body::from(r#"{"requestValue":7}"#))
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:41001".parse::<SocketAddr>().unwrap(),
+        ));
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = axum::body::to_bytes(response.into_body(), 100_000)
+            .await
+            .unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result["status"], "queued");
+        assert_eq!(result["idempotencyKey"], "webhook:incoming:http-delivery-1");
 
-        let authorized = worker_ws_upgrade_request(Some(format!("Bearer {token}")), loopback);
-        let authorized_resp = app.oneshot(authorized).await.unwrap();
-        assert_ne!(authorized_resp.status(), StatusCode::UNAUTHORIZED);
-        assert_ne!(authorized_resp.status(), StatusCode::FORBIDDEN);
-    }
-
-    #[test]
-    fn engine_worker_loopback_guard_rejects_non_loopback_peer() {
-        let non_loopback: SocketAddr = "203.0.113.7:41000".parse().unwrap();
-        let loopback_v4: SocketAddr = "127.0.0.1:41000".parse().unwrap();
-        let loopback_v6: SocketAddr = "[::1]:41000".parse().unwrap();
-
+        let completed = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let outcome = server
+                    .runtime_context()
+                    .engine_host
+                    .invoke(crate::engine::Invocation::new_sync(
+                        crate::engine::FunctionId::new("worker_kernel::runs").unwrap(),
+                        serde_json::json!({"workerId":"http-webhook-fixture","limit":10,"detail":"full"}),
+                        crate::engine::CausalContext::new(
+                            crate::engine::ActorId::new("agent:webhook-http-test").unwrap(),
+                            crate::engine::ActorKind::Agent,
+                            crate::engine::TraceId::new("webhook-http-runs").unwrap(),
+                        )
+                        .with_session_id("webhook-http-session")
+                        .with_idempotency_key(format!(
+                            "webhook-http-runs:{}",
+                            uuid::Uuid::now_v7()
+                        )),
+                    ))
+                    .await;
+                assert!(
+                    outcome.error.is_none(),
+                    "worker runs failed: {:?}",
+                    outcome.error
+                );
+                let runs = outcome.value.unwrap();
+                if let Some(run) = runs["runs"]
+                    .as_array()
+                    .and_then(|runs| runs.first())
+                    .filter(|run| run["status"] == "completed")
+                {
+                    break run.clone();
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("webhook invocation should be dispatched from its durable queue");
+        assert_eq!(completed["attemptCount"], 1);
         assert_eq!(
-            ensure_worker_peer_is_loopback(non_loopback).unwrap_err(),
+            completed["output"]["kind"], "worker_result_reference",
+            "run history must not hydrate a durable worker result"
+        );
+        let completed_invocation_id = completed["invocationId"]
+            .as_str()
+            .expect("completed run must retain invocation identity")
+            .to_owned();
+        let exact = server
+            .runtime_context()
+            .engine_host
+            .invoke(crate::engine::Invocation::new_sync(
+                crate::engine::FunctionId::new("worker_kernel::result_read").unwrap(),
+                serde_json::json!({"invocationId":completed_invocation_id}),
+                crate::engine::CausalContext::new(
+                    crate::engine::ActorId::new("system:webhook-http-test").unwrap(),
+                    crate::engine::ActorKind::System,
+                    crate::engine::TraceId::new("webhook-http-result").unwrap(),
+                )
+                .with_idempotency_key(format!("webhook-http-result:{}", uuid::Uuid::now_v7())),
+            ))
+            .await;
+        assert!(
+            exact.error.is_none(),
+            "engine-owned recovery must be able to inspect a sessionless webhook result: {:?}",
+            exact.error
+        );
+        assert_eq!(exact.value.unwrap()["value"]["requestValue"], 7);
+
+        let denied = server
+            .runtime_context()
+            .engine_host
+            .invoke(crate::engine::Invocation::new_sync(
+                crate::engine::FunctionId::new("worker_kernel::result_read").unwrap(),
+                serde_json::json!({"invocationId":completed_invocation_id}),
+                crate::engine::CausalContext::new(
+                    crate::engine::ActorId::new("agent:webhook-http-test").unwrap(),
+                    crate::engine::ActorKind::Agent,
+                    crate::engine::TraceId::new("webhook-http-result-denied").unwrap(),
+                )
+                .with_idempotency_key(format!(
+                    "webhook-http-result-denied:{}",
+                    uuid::Uuid::now_v7()
+                )),
+            ))
+            .await;
+        let denied_error = format!("{:?}", denied.error);
+        assert!(
+            denied_error.contains("originating-session or delivery-granted session"),
+            "sessionless agent reads must still require the narrow delivery grant: {:?}",
+            denied.error
+        );
+
+        let mut wrong = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/json")
+            .header("x-tron-worker-token", "wrong-token")
+            .body(Body::from("{}"))
+            .unwrap();
+        wrong.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:41002".parse::<SocketAddr>().unwrap(),
+        ));
+        assert_eq!(
+            app.clone().oneshot(wrong).await.unwrap().status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        let mut remote = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/json")
+            .header("x-tron-worker-token", token)
+            .body(Body::from("{}"))
+            .unwrap();
+        remote.extensions_mut().insert(ConnectInfo(
+            "203.0.113.7:41003".parse::<SocketAddr>().unwrap(),
+        ));
+        assert_eq!(
+            app.oneshot(remote).await.unwrap().status(),
             StatusCode::FORBIDDEN
         );
-        assert!(ensure_worker_peer_is_loopback(loopback_v4).is_ok());
-        assert!(ensure_worker_peer_is_loopback(loopback_v6).is_ok());
     }
 
     #[tokio::test]
@@ -670,7 +853,6 @@ mod tests {
         let (addr, handle) = server.listen().await.unwrap();
 
         assert_ne!(addr.port(), 0); // auto-assigned
-        assert_eq!(server.runtime_context().ws_port(), addr.port());
         assert_eq!(addr.ip().to_string(), "0.0.0.0");
 
         // Shutdown

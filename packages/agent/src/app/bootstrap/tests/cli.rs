@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::cli::{AuthAction, Cli, Command};
+use crate::app::cli::{AuthAction, Cli, Command, StateAction};
 use clap::Parser;
 
 #[test]
@@ -86,11 +86,11 @@ fn shutdown_signal_surface_includes_process_manager_stop_signal() {
 
 // ── CLI subcommand dispatch ──────────────────────────────────────────
 //
-// These tests cover Phase 2.7 — the `tron auth rotate` surface. The
+// These tests cover the `tron auth rotate` surface. The
 // goal is twofold: (a) the clap parse tree exists exactly as documented,
 // and (b) the dispatch helper writes a fresh token to disk and prints
 // it on stdout. The end-to-end path uses the public `onboarding`
-// helpers, so the on-disk side effect lands in `~/.tron/profiles/`; the
+// helpers, so the on-disk side effect lands in `~/.tron/auth.json`; the
 // tests below avoid that by exercising the helper directly with a temp
 // path. The clap layer is tested in isolation.
 
@@ -103,6 +103,43 @@ fn cli_parses_auth_rotate_subcommand() {
         }) => {}
         other => panic!("expected Some(Auth {{ Rotate }}), got {other:?}"),
     }
+}
+
+#[test]
+fn cli_parses_profile_snapshot_and_restore_commands() {
+    let snapshot = Cli::parse_from(["tron", "state", "snapshot"]);
+    assert!(matches!(
+        snapshot.command,
+        Some(Command::State {
+            action: StateAction::Snapshot {
+                for_worker_schema: None
+            }
+        })
+    ));
+
+    let restore = Cli::parse_from(["tron", "state", "restore", "/tmp/profile.tar.zst"]);
+    assert!(matches!(
+        restore.command,
+        Some(Command::State {
+            action: StateAction::Restore { snapshot }
+        }) if snapshot == std::path::Path::new("/tmp/profile.tar.zst")
+    ));
+}
+
+#[test]
+fn cli_parses_closed_browser_native_host_command() {
+    let cli = Cli::parse_from([
+        "tron",
+        "browser-native-host",
+        "--socket",
+        "/tmp/tron-browser-operator.sock",
+    ]);
+    assert!(matches!(
+        cli.command,
+        Some(Command::BrowserNativeHost { socket })
+            if socket == std::path::Path::new("/tmp/tron-browser-operator.sock")
+    ));
+    assert!(Cli::try_parse_from(["tron", "browser-native-host"]).is_err());
 }
 
 #[test]
@@ -132,8 +169,8 @@ fn cli_auth_unknown_action_fails() {
 
 #[test]
 fn run_subcommand_auth_rotate_writes_token_to_default_path() {
-    // The default path for `auth.json` is under `~/.tron/profiles/`,
-    // which would clobber the user's real token on a dev machine. The
+    // The default path is `~/.tron/auth.json`, which would clobber the
+    // user's real token on a dev machine. The
     // test writes through the lower-level `rotate_bearer_token` helper
     // with a temp path instead — same code path the dispatch hits, just
     // with the path injected. The clap dispatch test above guarantees

@@ -5,29 +5,12 @@ use sha2::{Digest, Sha256};
 
 use super::LiveCatalog;
 use crate::engine::durability::ledger::{
-    IdempotencyEntry, IdempotencyKey, IdempotencyReservation, IdempotencyReservationOutcome,
-    IdempotencyStatus, StoredInvocationOutcome,
+    IdempotencyEntry, IdempotencyKey, IdempotencyReservation, IdempotencyStatus,
+    StoredInvocationOutcome,
 };
 use crate::engine::invocation::model::{Invocation, InvocationResult};
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::types::{
-    FunctionDefinition, IdempotencyScope, LedgerKind, ReplayBehavior, VisibilityScope,
-};
-
-/// Idempotency decision for an invocation before the handler or built-in runs.
-pub(in crate::engine) enum InvocationIdempotencyDecision {
-    /// No idempotency reservation is required.
-    None,
-    /// This invocation owns a fresh reservation and may execute.
-    Reserved(IdempotencyReservation),
-    /// A replay/conflict/error result has already been determined.
-    Finished {
-        /// Result to record and return.
-        result: InvocationResult,
-        /// Concrete idempotency scope, if one was resolved.
-        scope: Option<IdempotencyScope>,
-    },
-}
+use crate::engine::kernel::types::{DedupeScope, FunctionDefinition, IdempotencyScope};
 
 impl LiveCatalog {
     pub(super) fn result_for_existing_idempotency(
@@ -76,123 +59,30 @@ impl LiveCatalog {
                     reason: "previous attempt is still in progress".to_owned(),
                 },
             ),
-            IdempotencyStatus::Unknown => InvocationResult::error(
-                invocation,
-                function.owner_worker.clone(),
-                function.revision,
-                self.revision,
-                EngineError::IdempotencyConflict {
-                    function_id: function.id.to_string(),
-                    key: existing.key.key.clone(),
-                    reason: "previous attempt has unknown outcome".to_owned(),
-                },
-            ),
-            IdempotencyStatus::Completed => match existing.replay_behavior {
-                ReplayBehavior::ReturnPrevious => existing.outcome.as_ref().map_or_else(
-                    || {
-                        InvocationResult::error(
-                            invocation,
-                            function.owner_worker.clone(),
-                            function.revision,
-                            self.revision,
-                            EngineError::IdempotencyConflict {
-                                function_id: function.id.to_string(),
-                                key: existing.key.key.clone(),
-                                reason: "completed reservation is missing outcome".to_owned(),
-                            },
-                        )
-                    },
-                    |outcome| {
-                        outcome.to_replay_result(
-                            invocation,
-                            function.owner_worker.clone(),
-                            function.revision,
-                            self.revision,
-                            existing.first_invocation_id.clone(),
-                        )
-                    },
-                ),
-                ReplayBehavior::NoOp => InvocationResult::noop_replay(
-                    invocation,
-                    function.owner_worker.clone(),
-                    function.revision,
-                    self.revision,
-                    existing.first_invocation_id.clone(),
-                ),
-                ReplayBehavior::Reject => InvocationResult::error(
-                    invocation,
-                    function.owner_worker.clone(),
-                    function.revision,
-                    self.revision,
-                    EngineError::IdempotencyConflict {
-                        function_id: function.id.to_string(),
-                        key: existing.key.key.clone(),
-                        reason: "duplicate key is configured to reject".to_owned(),
-                    },
-                ),
-                ReplayBehavior::Compensate => InvocationResult::error(
-                    invocation,
-                    function.owner_worker.clone(),
-                    function.revision,
-                    self.revision,
-                    EngineError::IdempotencyConflict {
-                        function_id: function.id.to_string(),
-                        key: existing.key.key.clone(),
-                        reason: "compensation replay is not executable in phase 1".to_owned(),
-                    },
-                ),
-            },
-        }
-    }
-
-    /// Reserve or replay an invocation idempotency key before executing work.
-    pub(in crate::engine) fn begin_invocation_idempotency(
-        &mut self,
-        function: &FunctionDefinition,
-        invocation: &Invocation,
-    ) -> InvocationIdempotencyDecision {
-        let reservation = match self.idempotency_lookup(function, invocation) {
-            Ok(Some(reservation)) => reservation,
-            Ok(None) => return InvocationIdempotencyDecision::None,
-            Err(err) => {
-                return InvocationIdempotencyDecision::Finished {
-                    result: InvocationResult::error(
+            IdempotencyStatus::Completed => existing.outcome.as_ref().map_or_else(
+                || {
+                    InvocationResult::error(
                         invocation,
                         function.owner_worker.clone(),
                         function.revision,
                         self.revision,
-                        err,
-                    ),
-                    scope: None,
-                };
-            }
-        };
-
-        match self.ledger.reserve_idempotency(reservation.clone()) {
-            Ok(IdempotencyReservationOutcome::Reserved(_)) => {
-                InvocationIdempotencyDecision::Reserved(reservation)
-            }
-            Ok(IdempotencyReservationOutcome::Existing(existing)) => {
-                InvocationIdempotencyDecision::Finished {
-                    result: self.result_for_existing_idempotency(
-                        function,
+                        EngineError::IdempotencyConflict {
+                            function_id: function.id.to_string(),
+                            key: existing.key.key.clone(),
+                            reason: "completed reservation is missing outcome".to_owned(),
+                        },
+                    )
+                },
+                |outcome| {
+                    outcome.to_replay_result(
                         invocation,
-                        &existing,
-                        &reservation.payload_fingerprint,
-                    ),
-                    scope: Some(existing.key.scope.clone()),
-                }
-            }
-            Err(err) => InvocationIdempotencyDecision::Finished {
-                result: InvocationResult::error(
-                    invocation,
-                    function.owner_worker.clone(),
-                    function.revision,
-                    self.revision,
-                    err,
-                ),
-                scope: Some(reservation.key.scope),
-            },
+                        function.owner_worker.clone(),
+                        function.revision,
+                        self.revision,
+                        existing.first_invocation_id.clone(),
+                    )
+                },
+            ),
         }
     }
 
@@ -233,16 +123,6 @@ impl LiveCatalog {
         let Some(key) = &invocation.causal_context.idempotency_key else {
             return Ok(None);
         };
-        if !matches!(
-            contract.ledger_kind,
-            LedgerKind::InMemory | LedgerKind::EngineLedger
-        ) {
-            return Err(EngineError::PolicyViolation(format!(
-                "idempotency ledger {:?} is not executable in phase 1",
-                contract.ledger_kind
-            )));
-        }
-
         let scope = idempotency_scope_value(&contract.dedupe_scope, invocation)?;
         Ok(Some(IdempotencyReservation {
             key: IdempotencyKey {
@@ -252,58 +132,27 @@ impl LiveCatalog {
             },
             payload_fingerprint: payload_fingerprint(&invocation.payload),
             function_revision: function.revision,
-            replay_behavior: contract.replay_behavior.clone(),
             invocation_id: invocation.id.clone(),
         }))
     }
 }
 
 fn idempotency_scope_value(
-    scope: &VisibilityScope,
+    scope: &DedupeScope,
     invocation: &Invocation,
 ) -> Result<IdempotencyScope> {
     match scope {
-        VisibilityScope::Session => invocation
+        DedupeScope::Session => invocation
             .causal_context
             .session_id
             .clone()
-            .map(|session| IdempotencyScope::new("session", session))
+            .map(IdempotencyScope::session)
             .ok_or_else(|| {
                 EngineError::PolicyViolation(
                     "session-scoped idempotency requires a session id".to_owned(),
                 )
             }),
-        VisibilityScope::Workspace => invocation
-            .causal_context
-            .workspace_id
-            .clone()
-            .map(|workspace| IdempotencyScope::new("workspace", workspace))
-            .ok_or_else(|| {
-                EngineError::PolicyViolation(
-                    "workspace-scoped idempotency requires a workspace id".to_owned(),
-                )
-            }),
-        VisibilityScope::System => Ok(IdempotencyScope::new("system", "system")),
-        VisibilityScope::Agent => Ok(IdempotencyScope::new(
-            "agent",
-            invocation.causal_context.actor_id.to_string(),
-        )),
-        VisibilityScope::Client => Ok(IdempotencyScope::new(
-            "client",
-            invocation.causal_context.actor_id.to_string(),
-        )),
-        VisibilityScope::Worker => Ok(IdempotencyScope::new(
-            "worker",
-            invocation.causal_context.actor_id.to_string(),
-        )),
-        VisibilityScope::Admin => Ok(IdempotencyScope::new(
-            "admin",
-            invocation.causal_context.actor_id.to_string(),
-        )),
-        VisibilityScope::Internal => Ok(IdempotencyScope::new(
-            "internal",
-            invocation.causal_context.authority_grant_id.to_string(),
-        )),
+        DedupeScope::Profile => Ok(IdempotencyScope::Profile),
     }
 }
 

@@ -1,0 +1,99 @@
+import Foundation
+
+// MARK: - Settings Methods
+
+/// Server-authoritative settings decoded from `settings::get`.
+///
+/// The server returns its complete validated engine settings. This DTO intentionally
+/// admits only the mobile product-settings projection, ignores unrelated
+/// provider/runtime/TUI keys, and decodes every admitted field strictly.
+struct ServerSettings: Decodable {
+    let defaultModel: String
+    let defaultWorkspace: String?
+    let tailscaleIp: String?
+    let ollamaBaseUrl: String
+
+    let compaction: CompactionSettings
+
+    private enum CodingKeys: String, CodingKey {
+        case api, server, context
+    }
+
+    private enum ApiKeys: String, CodingKey {
+        case ollama
+    }
+
+    private enum OllamaKeys: String, CodingKey {
+        case baseUrl
+    }
+
+    private enum ServerKeys: String, CodingKey {
+        case defaultModel, defaultWorkspace, tailscaleIp
+    }
+
+    private enum ContextKeys: String, CodingKey {
+        case compactor
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        let serverContainer = try container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server)
+        defaultModel = try serverContainer.decode(String.self, forKey: .defaultModel)
+        defaultWorkspace = try serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
+        tailscaleIp = try serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
+        let apiContainer = try container.nestedContainer(keyedBy: ApiKeys.self, forKey: .api)
+        let ollamaContainer = try apiContainer.nestedContainer(keyedBy: OllamaKeys.self, forKey: .ollama)
+        ollamaBaseUrl = try ollamaContainer.decode(String.self, forKey: .baseUrl)
+        let contextContainer = try container.nestedContainer(keyedBy: ContextKeys.self, forKey: .context)
+        compaction = try contextContainer.decode(CompactionSettings.self, forKey: .compactor)
+    }
+
+    struct CompactionSettings: Decodable {
+        let preserveRecentCount: Int
+        let triggerTokenThreshold: Double
+
+        private enum CodingKeys: String, CodingKey {
+            case preserveRecentCount, triggerTokenThreshold
+        }
+
+        init(preserveRecentCount: Int, triggerTokenThreshold: Double) {
+            self.preserveRecentCount = preserveRecentCount
+            self.triggerTokenThreshold = triggerTokenThreshold
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            preserveRecentCount = try container.decode(Int.self, forKey: .preserveRecentCount)
+            triggerTokenThreshold = try container.decode(Double.self, forKey: .triggerTokenThreshold)
+        }
+    }
+}
+
+struct ServerSettingsUpdate: Encodable {
+    var api: ApiUpdate?
+    var server: ServerUpdate?
+    var context: ContextUpdate?
+
+    struct ApiUpdate: Encodable {
+        var ollama: OllamaUpdate?
+
+        struct OllamaUpdate: Encodable {
+            var baseUrl: String?
+        }
+    }
+
+    struct ServerUpdate: Encodable {
+        var defaultModel: String?
+        var defaultWorkspace: String?
+    }
+
+    struct ContextUpdate: Encodable {
+        var compactor: CompactorUpdate?
+
+        struct CompactorUpdate: Encodable {
+            var preserveRecentCount: Int?
+            var triggerTokenThreshold: Double?
+        }
+    }
+}

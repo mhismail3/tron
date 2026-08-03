@@ -19,11 +19,12 @@ fn tron_event_all_event_types() {
             base: base.clone(),
             turn: 1,
             partial_content: None,
-            active_capability: None,
+            active_tool: None,
         },
         TronEvent::TurnStart {
             base: base.clone(),
             turn: 1,
+            agent_delivery_continuation: None,
         },
         TronEvent::TurnEnd {
             base: base.clone(),
@@ -53,77 +54,60 @@ fn tron_event_all_event_types() {
             turn: 1,
             stop_reason: "end_turn".into(),
             token_usage: None,
-            has_capability_invocations: false,
-            capability_invocation_count: 0,
+            has_tool_invocations: false,
+            tool_invocation_count: 0,
             token_record: None,
             model: None,
+            agent_delivery_continuation: None,
         },
         TronEvent::MessageUpdate {
             base: base.clone(),
             content: "c".into(),
         },
-        TronEvent::CapabilityInvocationBatch {
+        TronEvent::ToolInvocationBatch {
             base: base.clone(),
-            capability_invocations: vec![],
+            tool_invocations: vec![],
         },
-        TronEvent::CapabilityInvocationStarted {
+        TronEvent::ToolInvocationStarted {
             base: base.clone(),
             invocation_id: "id".into(),
-            model_primitive_name: "n".into(),
+            tool_name: "n".into(),
             arguments: None,
-            capability_identity: CapabilityEventIdentity::default(),
+            tool_identity: ToolEventIdentity::default(),
         },
-        TronEvent::CapabilityInvocationOutput {
+        TronEvent::ToolInvocationOutput {
             base: base.clone(),
             invocation_id: "id".into(),
             update: "u".into(),
         },
-        TronEvent::CapabilityInvocationProgress {
+        TronEvent::ToolInvocationProgress {
             base: base.clone(),
             invocation_id: "id".into(),
+            tool_name: Some("worker_list".into()),
             message: Some("msg".into()),
             percent: Some(0.5),
-            capability_identity: CapabilityEventIdentity::default(),
+            tool_identity: ToolEventIdentity::default(),
         },
-        TronEvent::CapabilityRunStatus {
-            base: base.clone(),
-            run_id: "run-1".into(),
-            invocation_id: "id".into(),
-            status: "running".into(),
-            stream_topic: Some("capability.run.run-1".into()),
-            child_invocations: vec![],
-            details: None,
-            capability_identity: CapabilityEventIdentity::default(),
-        },
-        TronEvent::CapabilityInvocationCompleted {
+        TronEvent::ToolInvocationCompleted {
             base: base.clone(),
             invocation_id: "id".into(),
-            model_primitive_name: "n".into(),
+            tool_name: "n".into(),
             duration: 0,
             is_error: None,
             result: None,
-            capability_identity: CapabilityEventIdentity::default(),
+            tool_identity: ToolEventIdentity::default(),
         },
-        TronEvent::CapabilityInvocationArgumentDelta {
+        TronEvent::ToolInvocationArgumentDelta {
             base: base.clone(),
             invocation_id: "id".into(),
-            model_primitive_name: None,
+            tool_name: None,
             arguments_delta: "d".into(),
         },
-        TronEvent::CapabilityInvocationGenerating {
+        TronEvent::ToolInvocationGenerating {
             base: base.clone(),
             invocation_id: "id".into(),
-            model_primitive_name: "n".into(),
-            capability_identity: CapabilityEventIdentity::default(),
-        },
-        TronEvent::SessionSaved {
-            base: base.clone(),
-            file_path: "p".into(),
-        },
-        TronEvent::SessionLoaded {
-            base: base.clone(),
-            file_path: "p".into(),
-            message_count: 0,
+            tool_name: "n".into(),
+            tool_identity: ToolEventIdentity::default(),
         },
         TronEvent::ContextWarning {
             base: base.clone(),
@@ -214,6 +198,10 @@ fn tron_event_all_event_types() {
             last_assistant_response: None,
             parent_session_id: None,
             activity_lines: None,
+            labels: None,
+            organization_group: None,
+            organization_changed: None,
+            is_archived: None,
         },
         TronEvent::ContextCleared {
             base: base.clone(),

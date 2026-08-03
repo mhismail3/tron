@@ -2,8 +2,9 @@
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
-use crate::domains::registration::worker::DomainRegistrationContext;
+use crate::domains::registration::composition::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
+use crate::domains::settings::SettingsRuntime;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -13,6 +14,7 @@ pub(crate) struct Deps {
     pub(super) event_store: Arc<EventStore>,
     pub(super) orchestrator: Arc<Orchestrator>,
     pub(super) session_manager: Arc<SessionManager>,
+    pub(super) settings_runtime: Arc<SettingsRuntime>,
 }
 
 impl Deps {
@@ -22,6 +24,7 @@ impl Deps {
             event_store: deps.event_store.clone(),
             orchestrator: deps.orchestrator.clone(),
             session_manager: deps.session_manager.clone(),
+            settings_runtime: deps.settings_runtime.clone(),
         }
     }
 }

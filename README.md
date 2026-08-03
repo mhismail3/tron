@@ -4,56 +4,80 @@
   <img src="packages/ios-app/docs/assets/tron-logo.png" width="112" alt="Tron logo">
 </p>
 
-**A persistent, local-first coding agent for Mac and iPhone.**
+**A persistent, local-first agent for Mac and iPhone that can teach itself new workers.**
 
-Tron runs an AI agent as a background service on your Mac and gives you a
-native iOS interface for starting work, following progress, inspecting evidence,
-and controlling sessions. Conversations and execution history are durable, so
-the agent can continue across app launches without treating each message as a
-new process.
-
-The project is built around a small engine and governed capabilities. The model
-sees one execution surface, discovers the operations available through it, and
-receives structured results rather than a growing collection of unrelated
-tools. Filesystem, Git, web, jobs, memory, modules, and diagnostics remain
-separately owned behind that contract.
+Tron runs an AI agent as a background service on your Mac and provides a native
+iOS interface for conversations, durable sessions, and worker operations. The
+current worker-first POC deliberately favors useful proactive adaptation over
+permission ceremony: a model can research, author, test, activate, and reuse an
+engine-global worker through one atomic operation.
 
 ## Why Tron
 
-- **Persistent** — sessions, events, traces, and resources survive reconnects.
-- **Local-first** — the server, workspace, and durable state live on your Mac.
-- **Inspectable** — capability calls and agent activity retain bounded evidence.
-- **Modular** — operations have explicit owners, authority, lifecycle, and
-  replacement policy.
-- **Native** — SwiftUI apps provide the user experience; Rust owns the engine.
-- **Fail-closed** — unknown operations, stale authority, and unsafe routes are
-  rejected instead of silently falling back.
+- Natural-language work can become an immediately active, persistent typed tool.
+- Agent, command, and lazy resident-service workers share one durable runtime.
+- Manual calls, schedules, engine events, and authenticated local webhooks share
+  one at-least-once dispatcher.
+- Worker completions, peer-agent messages, and explicit waits share
+  one durable Agent Delivery path. Optional policy workers never block a model
+  request; delivery-only wakeups resume a task without inventing a user message.
+- Runtime-managed scheduler, reminder, and notification-policy workers divide
+  time calculation, occurrence lifecycle, and delivery relevance. The engine
+  durably hands work between them and transports narrow notification intents;
+  iOS owns permission, presentation, deep links, and read state.
+- Local agents and workers use the Mac user's normal authority without
+  per-call permission objects or proposal-only activation steps.
+- Provenance, immutable versions, dependency locks, audit history, secret
+  isolation, execution ceilings, failure disablement, rollback, and stop-all
+  remain because they improve reliability.
+- Core source changes are prepared and tested in isolated Git worktrees. A
+  later explicit user-authored message is required before application.
 
 ## System Shape
 
 ```text
- iPhone / iPad                       Mac
-┌────────────────┐          ┌─────────────────────────┐
-│ SwiftUI client │──/engine─▶│ Rust agent server       │
-│ chat + cockpit │          │ provider + capabilities │
-└────────────────┘          └────────────┬────────────┘
-                                        │
-                              ┌─────────▼─────────┐
-                              │ SQLite event store│
-                              │ traces + resources│
-                              └───────────────────┘
+ iPhone / iPad                         Mac
+┌──────────────────┐         ┌──────────────────────────┐
+│ SwiftUI client   │─/engine▶│ Rust agent + worker core │
+│ chat + workers   │         │ model, runners, dispatch │
+└──────────────────┘         └────────────┬─────────────┘
+                                         │
+                 schedules → reminders → notification policy
+                                         │
+                              relay or direct APNs transport
 ```
 
-The iOS app is a thin client. The Rust server owns provider communication,
-session orchestration, capability execution, authority, compaction, and durable
-state. SQLite records the event history used to reconstruct sessions and audit
-work. The Mac app packages the server, manages its login item, and handles
-pairing.
+The Rust server owns model execution, authenticated transport, durable session
+truth, atomic worker handoffs, Agent Delivery admission and recovery, worker
+storage, and provider-acceptance evidence.
+The iOS app is a thin client with a Worker Console for health, versions,
+triggers, typed invocation, runs, inbox, rollback, retirement, cancellation,
+and stop controls, plus synchronized native notification and Artifact Inboxes.
+Artifact content stays in engine-owned content-addressed custody until explicit
+deletion; preview, share, export, and Attach to Draft use the existing native
+attachment pipeline.
+The Mac app packages and supervises the server and owns pairing; it is not a
+second engine client. Its signed wrapper also hosts the narrow Mac Operator
+actuator for explicitly requested foreground-app work; the ordinary worker
+owns the plan and confirmation policy, while native code enforces permissions,
+fresh-window identity, serialized actions, and the user-controlled emergency
+stop.
 
-The provider-visible model tool remains `execute`. Tron can discover and invoke
-the operations behind it, while kernel and governance boundaries stay explicit.
-Module-owned replacements must pass validation, supervised runtime checks, and
-rollback policy before they can route real work.
+Worker bundles live under:
+
+```text
+~/.tron/workspace/workers/<worker-id>/versions/<content-hash>/
+```
+
+Worker-owned mutable data lives separately under
+`~/.tron/workspace/worker-state/<worker-id>/`; verified profile and purge
+archives live under `~/.tron/internal/backups/`.
+
+Each version contains its schemas, runner, source or instructions, dependency
+lock, provenance, triggers, secret-binding names, smoke tests, health checks,
+and sealed verification evidence. SQLite holds rebuildable routes and trigger
+indexes plus durable attempts, causal traces, worker results, delivery outbox
+evidence, health, and audit history.
 
 ## Install
 
@@ -72,15 +96,11 @@ the command line.
 Requirements:
 
 - macOS 15 or newer
-- Rust through `rustup` (version and components are pinned in
-  [`rust-toolchain.toml`](rust-toolchain.toml))
+- Rust through `rustup` using [`rust-toolchain.toml`](rust-toolchain.toml)
 - Xcode 26 or newer
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
-Clone this repository, then set up and start a development server:
-
 ```bash
-cd tron
 scripts/tron setup
 scripts/tron dev --background
 scripts/tron login
@@ -89,12 +109,14 @@ scripts/tron login
 Useful commands:
 
 ```bash
-scripts/tron dev --background   # start in the background
-scripts/tron dev --stop         # stop development takeover
-scripts/tron status --json      # inspect the active server
-scripts/tron logs               # query bounded local logs
-scripts/tron ci                 # run full local Rust validation
+scripts/tron status --json
+scripts/tron logs
+scripts/tron ci fmt check clippy test
 ```
+
+Worker-first execution is the engine architecture: trusted local sessions can
+create, activate, discover, and run persistent workers without enabling a
+separate mode.
 
 Build the iOS app:
 
@@ -113,49 +135,51 @@ xcodegen generate
 open TronMac.xcodeproj
 ```
 
-Use `scripts/tron dev` for development. Production deployment is deliberately
-manual and is not part of the normal contributor workflow.
+Use `scripts/tron dev` for development. Production deployment is manual-only;
+the agent must never invoke `tron deploy`.
 
 ## Validate
 
-Run the smallest focused tests while iterating. Before a broad change or PR,
-run:
+Run focused tests while iterating. For a broad checkpoint:
 
 ```bash
 scripts/tron ci fmt check clippy test
 scripts/personal-info-guard.sh
 ```
 
-GitHub Actions runs the same warning-denied Rust path plus iOS and Mac validation
-on `main`. The required branch check is `CI summary`.
+The deterministic `last30days` replay and a natural-language model-loop proof
+of proactive create → immediate typed call → report are part of the Rust
+library suite. Its real upstream dependency proof is deliberately opt-in:
+
+```bash
+TRON_WORKER_LIVE_NETWORK=1 \
+  cargo test --manifest-path packages/agent/Cargo.toml \
+  last30days_upstream_live_network_dependency_is_locked_and_activates -- --ignored
+```
 
 ## Documentation
 
-Start with the document closest to the work:
-
 - [Technical project reference](packages/agent/docs/project-reference.md) —
-  protocol, capabilities, events, settings, storage, CLI, and operations.
-- [Contributing](CONTRIBUTING.md) — development workflow, testing, commits, and
-  releases.
+  worker contracts, dispatch, storage, authority, protocol, and POC
+  acceptance.
+- [Contributing](CONTRIBUTING.md) — development, testing, commits, and releases.
 - [Rust module map](packages/agent/src/lib.rs) — server ownership and entry
-  points; each `mod.rs` progressively documents its subtree.
+  points; each `mod.rs` documents its subtree.
 - [iOS architecture](packages/ios-app/docs/architecture.md) and
   [development guide](packages/ios-app/docs/development.md).
 - [Mac architecture](packages/mac-app/docs/architecture.md) and
   [development guide](packages/mac-app/docs/development.md).
-- [Capability operation contracts](packages/agent/src/domains/capability/operations/operation_contract/mod.rs)
-  and their [ownership metadata](packages/agent/src/domains/capability/operations/operation_contract/metadata.rs).
-
-The root README intentionally stays short. Detailed contracts belong with
-their owning source or technical reference rather than on the project front
-page.
 
 ## Project Rules
 
 - Code, tests, and documentation ship together.
-- Root-cause fixes take priority over compatibility shims and fallbacks.
+- Root-cause fixes take priority over transitional adapters.
 - Secrets and personal information never belong in the repository.
-- The engine owns authority and durable truth; clients do not invent state.
+- Filesystem bundles are canonical worker state; clients do not invent truth.
+- Production code must have an independent production consumer; tests and
+  self-description do not justify inert runtime surfaces.
+- Re-hardening must respond to an observed failure and preserve accepted worker
+  workflows.
 - Production deployment is manual-only.
 
 See [AGENTS.md](AGENTS.md) for the complete engineering rules.

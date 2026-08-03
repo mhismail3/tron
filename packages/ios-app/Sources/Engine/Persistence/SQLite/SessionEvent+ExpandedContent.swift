@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Session Event Expanded Content
 
 extension SessionEvent {
-    /// Extended content for expanded view (Phase 3 enhanced)
+    /// Extended content for expanded view.
     var expandedContent: String? {
         switch eventType {
         case .messageUser:
@@ -43,7 +43,7 @@ extension SessionEvent {
                 let friendly: String
                 switch stopReason {
                 case "end_turn": friendly = "Completed"
-                case "capability_invocation": friendly = "Capability invocation"
+                case "tool_invocation": friendly = "Tool invocation"
                 case "max_tokens": friendly = "Max tokens"
                 case "interrupted": friendly = "Interrupted"
                 default: friendly = stopReason
@@ -71,10 +71,10 @@ extension SessionEvent {
 
             return lines.isEmpty ? nil : lines.joined(separator: "\n")
 
-        case .capabilityInvocationStarted:
-            let name = (payload["modelPrimitiveName"]?.value as? String) ?? "unknown"
+        case .toolInvocationStarted:
+            let name = (payload["toolName"]?.value as? String) ?? "unknown"
             let turn = (payload["turn"]?.value as? Int) ?? 0
-            var lines = ["Capability: \(name)", "Turn: \(turn)"]
+            var lines = ["Tool: \(name)", "Turn: \(turn)"]
 
             // Format arguments if present and not too long
             if let args = payload["arguments"]?.value {
@@ -85,7 +85,7 @@ extension SessionEvent {
             }
             return lines.joined(separator: "\n")
 
-        case .capabilityInvocationCompleted:
+        case .toolInvocationCompleted:
             var lines: [String] = []
 
             // Duration
@@ -107,48 +107,6 @@ extension SessionEvent {
                 let preview = String(content.prefix(200))
                 lines.append("\n\(preview)")
             }
-            return lines.joined(separator: "\n")
-
-        case .errorAgent, .errorProvider, .errorCapability:
-            var lines: [String] = []
-            let failure = CanonicalFailurePayload.fromDetails(payload.anyCodableDict("details"))
-
-            // Error message
-            if let error = failure?.message ?? payload.string("error") {
-                lines.append("Error: \(error)")
-            }
-
-            // Error code
-            if let code = failure?.code ?? payload.string("code") {
-                lines.append("Code: \(code)")
-            }
-
-            if let category = failure?.category ?? payload.string("category") {
-                lines.append("Category: \(category)")
-            }
-
-            if let origin = failure?.origin ?? payload.string("origin") {
-                lines.append("Origin: \(origin)")
-            }
-
-            // Recoverable
-            if let recoverable = failure?.recoverable ?? payload.bool("recoverable") {
-                lines.append("Recoverable: \(recoverable ? "Yes" : "No")")
-            }
-
-            // Retryable
-            if let retryable = failure?.retryable ?? payload.bool("retryable") {
-                lines.append("Retryable: \(retryable ? "Yes" : "No")")
-            }
-
-            // Retry after
-            if let retryAfter = payload["retryAfter"]?.value as? Int {
-                lines.append("Retry after: \(retryAfter)ms")
-            }
-            if let retryAfter = failure?.retryAfterMs ?? payload.int("retryAfterMs") {
-                lines.append("Retry after: \(retryAfter)ms")
-            }
-
             return lines.joined(separator: "\n")
 
         case .streamTurnEnd:

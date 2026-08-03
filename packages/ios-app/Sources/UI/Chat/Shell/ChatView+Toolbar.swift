@@ -7,7 +7,9 @@ extension ChatView {
     @ToolbarContentBuilder
     var leadingToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            if let onToggleSidebar = onToggleSidebar {
+            if presentationMode == .workerAudit {
+                EmptyView()
+            } else if let onToggleSidebar = onToggleSidebar {
                 // iPad - show sidebar toggle
                 Button(action: onToggleSidebar) {
                     Image(systemName: "sidebar.leading")
@@ -34,10 +36,12 @@ extension ChatView {
         ToolbarItem(placement: .principal) {
             HStack(alignment: .center, spacing: 6) {
                 SessionTitleIcons(
-                    isFork: eventStoreManager.activeSession?.isFork == true
+                    isFork: presentedSession?.isFork == true
                 )
                 TypewriterText(
-                    text: eventStoreManager.activeSession?.displayTitle ?? "Chat",
+                    text: presentationMode == .workerAudit
+                        ? readOnlyTitle ?? "Worker Session"
+                        : presentedSession?.displayTitle ?? "Chat",
                     font: TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold),
                     color: .tronEmerald
                 )
@@ -53,7 +57,7 @@ extension ChatView {
                     toolbarTitleOffsetY = 0
                 }
             }
-            .animation(.smooth(duration: 0.25), value: eventStoreManager.activeSession?.isFork)
+            .animation(.smooth(duration: 0.25), value: presentedSession?.isFork)
         }
     }
 
@@ -61,24 +65,22 @@ extension ChatView {
     @ToolbarContentBuilder
     var trailingToolbarItem: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
-            // Live stream button — visible only when a Display stream is active.
-            if viewModel.displayStreamState.isStreamActive {
+            if presentationMode == .workerAudit {
+                SheetDismissButton(color: .tronEmerald)
+            } else {
                 Button {
-                    viewModel.displayStreamState.showStreamSheet = true
+                    NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.settings.rawValue)
                 } label: {
-                    Image(systemName: "play.rectangle.fill")
+                    Image(systemName: "gearshape")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                         .foregroundStyle(.tronEmerald)
                 }
+                .accessibilityLabel("Chat settings")
             }
-            Button {
-                NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.settings.rawValue)
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                    .foregroundStyle(.tronEmerald)
-            }
-            .accessibilityLabel("Chat settings")
         }
+    }
+
+    private var presentedSession: CachedSession? {
+        eventStoreManager.sessions.first { $0.id == sessionId }
     }
 }

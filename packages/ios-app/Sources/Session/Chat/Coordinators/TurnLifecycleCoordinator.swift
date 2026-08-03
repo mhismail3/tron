@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// Responsibilities:
 /// - Handling turn start/response-complete/end events
-/// - Managing turn state (tracking indices, capability invocations)
+/// - Managing turn state (tracking indices, tool invocations)
 /// - Marking the server-identified final response and attaching its metadata
 /// - Coordinating with ThinkingState, ContextState
 /// - Managing completion state cleanup
@@ -14,10 +14,30 @@ import SwiftUI
 /// making it independently testable while maintaining the same behavior.
 @MainActor
 final class TurnLifecycleCoordinator {
+    private var deliveryPresentationTracker =
+        AgentDeliveryContinuationPresentationTracker()
 
     // MARK: - Initialization
 
     init() {}
+
+    /// Reconstruction is authoritative across reconnect. Seed presentation
+    /// state only for an active run so later live frames cannot repeat a
+    /// provenance prelude already restored from durable history.
+    func restoreDeliveryPresentationState(
+        from messages: [ChatMessage],
+        runIsActive: Bool
+    ) {
+        deliveryPresentationTracker.reset()
+        guard runIsActive else { return }
+        let currentRunStart = messages.lastIndex(where: { $0.role == .user })
+            .map { messages.index(after: $0) }
+            ?? messages.startIndex
+        let provenance = messages[currentRunStart...].flatMap(
+            \.agentDeliveryProvenance
+        )
+        _ = deliveryPresentationTracker.takeUnpresented(provenance)
+    }
 
     // MARK: - Turn Start Handling
 
@@ -45,24 +65,35 @@ final class TurnLifecycleCoordinator {
         // Notify ThinkingState of new turn (clears previous turn's thinking for sheet)
         context.startThinkingTurn(pluginResult.turnNumber, model: context.currentModel)
 
-        // Clear capability tracking for the new turn
-        if !context.currentTurnCapabilityMessageIds.isEmpty {
-            context.logDebug("Clearing \(context.currentTurnCapabilityMessageIds.count) capability message references from previous turn")
-            context.currentTurnCapabilityMessageIds.removeAll()
+        // Clear tool tracking for the new turn
+        if !context.currentTurnToolMessageIds.isEmpty {
+            context.logDebug("Clearing \(context.currentTurnToolMessageIds.count) tool message references from previous turn")
+            context.currentTurnToolMessageIds.removeAll()
         }
 
-        // Notify UIUpdateQueue of turn boundary (resets capability ordering)
+        // Notify UIUpdateQueue of turn boundary (resets tool ordering)
         context.enqueueTurnBoundary(UIUpdateQueue.TurnBoundaryData(
             turnNumber: pluginResult.turnNumber,
             isStart: true
         ))
 
-        // Reset AnimationCoordinator capability state for new turn
-        context.resetAnimationCoordinatorCapabilityState()
+        // Reset AnimationCoordinator tool state for new turn
+        context.resetAnimationCoordinatorToolState()
 
         // Track turn boundary for multi-turn metadata assignment
         context.turnStartMessageIndex = context.messages.count
         context.firstTextMessageIdForTurn = nil
+        let unpresentedProvenance = deliveryPresentationTracker.takeUnpresented(
+            pluginResult.agentDeliveryProvenance
+        )
+        if !unpresentedProvenance.isEmpty {
+            context.appendToMessages(
+                .deliveryContinuation(
+                    unpresentedProvenance,
+                    turnNumber: pluginResult.turnNumber
+                )
+            )
+        }
         context.logDebug("Turn \(pluginResult.turnNumber) boundary set at message index \(context.turnStartMessageIndex ?? -1)")
     }
 
@@ -71,16 +102,16 @@ final class TurnLifecycleCoordinator {
     /// Mark the textual response that ends the current prompt cycle.
     ///
     /// Provider stop reasons are not finality: a provider may report
-    /// `end_turn` while also returning capability invocations. A completed
+    /// `end_turn` while also returning tool invocations. A completed
     /// response with zero invocations is the conservative server-backed signal
     /// for a clean final textual response.
     func handleResponseComplete(
         _ pluginResult: AgentResponseCompletePlugin.Result,
         context: TurnLifecycleContext
     ) {
-        guard !pluginResult.hasCapabilityInvocations else {
+        guard !pluginResult.hasToolInvocations else {
             context.logDebug(
-                "Response for turn \(pluginResult.turnNumber) includes \(pluginResult.capabilityInvocationCount) capability invocation(s); omitting final-response metadata"
+                "Response for turn \(pluginResult.turnNumber) includes \(pluginResult.toolInvocationCount) tool invocation(s); omitting final-response metadata"
             )
             return
         }
@@ -92,6 +123,10 @@ final class TurnLifecycleCoordinator {
             return
         }
 
+        attachDeliveryProvenanceIfNeeded(
+            pluginResult.agentDeliveryProvenance,
+            context: context
+        )
         context.updateMessage(at: index) { message in
             message.isFinalAssistantResponse = true
             message.turnNumber = pluginResult.turnNumber
@@ -146,7 +181,7 @@ final class TurnLifecycleCoordinator {
         }
 
         // Only the response previously marked by the server's exact
-        // response-complete capability signal may own presentation metadata.
+        // response-complete tool signal may own presentation metadata.
         if let index = finalResponseIndex(
             for: pluginResult.turnNumber,
             in: context
@@ -231,6 +266,7 @@ final class TurnLifecycleCoordinator {
         if let id = context.streamingMessageId,
            let index = MessageFinder.indexById(id, in: context.messages),
            context.messages[index].role == .assistant,
+           !context.messages[index].isDeliveryProvenanceOnly,
            context.messages[index].content.isAssistantResponseText {
             return index
         }
@@ -238,6 +274,7 @@ final class TurnLifecycleCoordinator {
         if let id = context.firstTextMessageIdForTurn,
            let index = MessageFinder.indexById(id, in: context.messages),
            context.messages[index].role == .assistant,
+           !context.messages[index].isDeliveryProvenanceOnly,
            context.messages[index].content.isAssistantResponseText {
             return index
         }
@@ -250,7 +287,43 @@ final class TurnLifecycleCoordinator {
 
         return (startIndex..<context.messages.count).reversed().first {
             context.messages[$0].role == .assistant &&
+            !context.messages[$0].isDeliveryProvenanceOnly &&
             context.messages[$0].content.isAssistantResponseText
+        }
+    }
+
+    /// Older servers expose continuation metadata only at response completion.
+    /// Place that fallback on the first assistant row for the turn so its
+    /// visual order is still provenance → thinking/tools → response.
+    private func attachDeliveryProvenanceIfNeeded(
+        _ provenance: [AgentDeliveryMessageProvenance],
+        context: TurnLifecycleContext
+    ) {
+        let startIndex = context.turnStartMessageIndex ?? 0
+        let unpresentedProvenance =
+            deliveryPresentationTracker.takeUnpresented(provenance)
+        guard !unpresentedProvenance.isEmpty,
+              startIndex < context.messages.count else {
+            return
+        }
+        if let existingIndex = (startIndex..<context.messages.count).first(where: {
+            !context.messages[$0].agentDeliveryProvenance.isEmpty
+        }) {
+            context.updateMessage(at: existingIndex) { message in
+                message.agentDeliveryProvenance.append(
+                    contentsOf: unpresentedProvenance
+                )
+            }
+            return
+        }
+        guard let firstAssistantIndex = (startIndex..<context.messages.count).first(where: {
+            context.messages[$0].role == .assistant
+        })
+        else {
+            return
+        }
+        context.updateMessage(at: firstAssistantIndex) { message in
+            message.agentDeliveryProvenance = unpresentedProvenance
         }
     }
 
@@ -278,9 +351,9 @@ final class TurnLifecycleCoordinator {
         streamingText: String,
         context: TurnLifecycleContext
     ) {
-        context.logInfo("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, capabilityInvocations: \(context.currentTurnCapabilityMessageIds.count))")
+        context.logInfo("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, toolInvocations: \(context.currentTurnToolMessageIds.count))")
 
-        // Flush any pending UI updates to ensure all capability results are displayed
+        // Flush any pending UI updates to ensure all tool results are displayed
         context.flushUIUpdateQueue()
         context.flushPendingTextUpdates()
 
@@ -293,11 +366,12 @@ final class TurnLifecycleCoordinator {
             lastAssistantResponse: streamingText.isEmpty ? nil : String(streamingText.prefix(200))
         )
 
-        context.currentTurnCapabilityMessageIds.removeAll()
+        context.currentTurnToolMessageIds.removeAll()
+        deliveryPresentationTracker.reset()
 
         // Reset all manager states
         context.resetUIUpdateQueue()
-        context.resetAnimationCoordinatorCapabilityState()
+        context.resetAnimationCoordinatorToolState()
         context.resetStreamingManager()
     }
 }

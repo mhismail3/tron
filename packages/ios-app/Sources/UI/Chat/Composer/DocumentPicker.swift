@@ -4,32 +4,32 @@ import UniformTypeIdentifiers
 /// UIViewControllerRepresentable wrapper for UIDocumentPickerViewController
 struct DocumentPicker: UIViewControllerRepresentable {
     @Environment(\.dismiss) private var dismiss
-    let capability: AttachmentCapability
+    let tool: AttachmentSupport
     let onDocumentPicked: (Data, String, String?) -> Void  // data, mimeType, fileName
     let onSizeExceeded: ((Int, Int) -> Void)?  // actualSize, maxSize
 
     init(
-        capability: AttachmentCapability = .default,
+        tool: AttachmentSupport = .default,
         onDocumentPicked: @escaping (Data, String, String?) -> Void,
         onSizeExceeded: ((Int, Int) -> Void)? = nil
     ) {
-        self.capability = capability
+        self.tool = tool
         self.onDocumentPicked = onDocumentPicked
         self.onSizeExceeded = onSizeExceeded
     }
 
-    /// Supported document types filtered by provider capability.
-    static func supportedTypes(for capability: AttachmentCapability) -> [UTType] {
+    /// Supported document types filtered by provider tool.
+    static func supportedTypes(for tool: AttachmentSupport) -> [UTType] {
         var types: [UTType] = [.plainText, .json]  // always supported via text extraction
-        if capability.supportsPdfContent { types.append(.pdf) }
-        if capability.supportsImages {
+        if tool.supportsPdfContent { types.append(.pdf) }
+        if tool.supportsImages {
             types += [.image, .png, .jpeg, .gif, .webP]
         }
         return types
     }
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let types = Self.supportedTypes(for: capability)
+        let types = Self.supportedTypes(for: tool)
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: types)
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = false
@@ -68,7 +68,7 @@ struct DocumentPicker: UIViewControllerRepresentable {
             // documents must already fit the model policy.
             let mimeType = mimeTypeForURL(url)
             let isImage = mimeType.hasPrefix("image/")
-            let maxBytes = isImage ? ImageProcessor.maximumSourceBytes : parent.capability.maxDocumentBytes
+            let maxBytes = isImage ? ImageProcessor.maximumSourceBytes : parent.tool.maxDocumentBytes
             if maxBytes > 0, let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
                let fileSize = attrs[.size] as? Int, fileSize > maxBytes {
                 parent.onSizeExceeded?(fileSize, maxBytes)

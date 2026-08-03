@@ -80,7 +80,7 @@ fn multimodal_user_content_merges_with_string() {
 //
 // 1. Reconstruction completes inside a generous wall-clock budget
 //    (protects against quadratic regressions — e.g. a future
-//    "look up capability args by scanning the full list" refactor).
+//    "look up tool args by scanning the full list" refactor).
 // 2. Large chains still produce the expected aggregate message, turn,
 //    and token state. Tiny per-event timing ratios are too scheduler-
 //    sensitive for the full parallel suite, so the algorithmic guard is
@@ -97,7 +97,7 @@ fn build_synthetic_chain(count: usize) -> Vec<SessionEvent> {
     let mut events = Vec::with_capacity(count + 1);
     events.push(session_start());
     // Alternate user / assistant so the test exercises the
-    // consecutive-role merging path and capability-arg-lookup path.
+    // consecutive-role merging path and tool-arg-lookup path.
     for i in 0..count {
         if i.is_multiple_of(2) {
             events.push(ev(

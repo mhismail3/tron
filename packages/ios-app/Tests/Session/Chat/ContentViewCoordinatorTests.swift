@@ -41,6 +41,21 @@ final class ContentViewCoordinatorTests: XCTestCase {
         XCTAssertFalse(navigated, "onNavigate should not be called for nil sessionId")
     }
 
+    func testCreatedSessionIsPublishedBeforeCoordinatorReturns() async throws {
+        try await container.initialize()
+        let created = NewSessionCreated(
+            sessionId: "sess-configured",
+            workspaceId: "/tmp/tron-fixtures/configured",
+            model: "test-model",
+            workingDirectory: "/tmp/tron-fixtures/configured"
+        )
+
+        let publishedId = try await coordinator.publishCreatedSession(created)
+
+        XCTAssertEqual(publishedId, created.sessionId)
+        XCTAssertTrue(container.eventStoreManager.sessionExists(created.sessionId))
+    }
+
 }
 
 // MARK: - Pending Deep Link State
@@ -54,12 +69,59 @@ final class PendingSessionDeepLinkTests: XCTestCase {
         XCTAssertEqual(
             pendingSessionDeepLink(
                 sessionId: "sess_pending",
-                scrollTarget: .capabilityInvocation(id: "cap_123")
+                scrollTarget: .toolInvocation(id: "cap_123")
             ),
             PendingSessionDeepLink(
                 sessionId: "sess_pending",
-                scrollTarget: .capabilityInvocation(id: "cap_123")
+                scrollTarget: .toolInvocation(id: "cap_123")
             )
+        )
+    }
+}
+
+// MARK: - Compact Session Presentation
+
+final class CompactSessionRouteTests: XCTestCase {
+    func testNilSessionHasNoRoute() {
+        XCTAssertNil(makeCompactSessionRoute(sessionId: nil))
+    }
+
+    func testRepeatedOpenGetsFreshPresentationIdentity() throws {
+        let first = try XCTUnwrap(makeCompactSessionRoute(sessionId: "sess_repeat"))
+        let second = try XCTUnwrap(makeCompactSessionRoute(sessionId: "sess_repeat"))
+
+        XCTAssertEqual(first.sessionId, second.sessionId)
+        XCTAssertNotEqual(first.presentationId, second.presentationId)
+        XCTAssertNotEqual(first, second)
+    }
+
+    func testChatIdentityChangesWhenServerSelectionChanges() {
+        let first = ChatSessionPresentationIdentity(
+            sessionId: "same-session-id",
+            serverSelectionVersion: 1
+        )
+        let second = ChatSessionPresentationIdentity(
+            sessionId: "same-session-id",
+            serverSelectionVersion: 2
+        )
+
+        XCTAssertNotEqual(first, second)
+    }
+}
+
+final class SettingsServerLoadKeyTests: XCTestCase {
+    func testConnectionAndServerGenerationOwnOneSettingsLoadIdentity() {
+        let initial = SettingsServerLoadKey(
+            serverSelectionVersion: 1,
+            isConnected: false
+        )
+        XCTAssertNotEqual(
+            initial,
+            SettingsServerLoadKey(serverSelectionVersion: 1, isConnected: true)
+        )
+        XCTAssertNotEqual(
+            initial,
+            SettingsServerLoadKey(serverSelectionVersion: 2, isConnected: false)
         )
     }
 }
@@ -126,7 +188,7 @@ final class ResolveQuickSessionWorkspaceTests: XCTestCase {
         XCTAssertEqual(result, "/session/dir")
     }
 
-    // MARK: - Current Session Fallback
+    // MARK: - Current Session Selection
 
     func testCurrentSessionWorkspace() {
         let sessions = [
@@ -158,7 +220,7 @@ final class ResolveQuickSessionWorkspaceTests: XCTestCase {
         XCTAssertEqual(result, "/recent")
     }
 
-    // MARK: - Most Recent Session Fallback
+    // MARK: - Most Recent Session Selection
 
     func testMostRecentSessionWorkspace() {
         let sorted = [makeSession(id: "sess-recent", workingDirectory: "/recent")]
@@ -184,7 +246,7 @@ final class ResolveQuickSessionWorkspaceTests: XCTestCase {
         XCTAssertEqual(result, defaultWorkspace)
     }
 
-    // MARK: - Final Default Fallback
+    // MARK: - Final Default Selection
 
     func testNoSessionsFallsToDefault() {
         let result = resolveQuickSessionWorkspace(

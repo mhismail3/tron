@@ -20,8 +20,8 @@ final class InputBarContentAreaChipTests: XCTestCase {
         )
     }
 
-    private var pdfLimitedCapability: AttachmentCapability {
-        AttachmentCapability(
+    private var pdfLimitedTool: AttachmentSupport {
+        AttachmentSupport(
             supportsImages: true,
             supportsPdfContent: false,
             supportsTextFiles: true,
@@ -64,7 +64,7 @@ final class InputBarContentAreaChipTests: XCTestCase {
     func testAttachmentBubbleConstructsForDocumentChip() {
         let view = AttachmentBubble(
             attachment: makeAttachment(type: .document, mimeType: "text/plain", fileName: "test.txt"),
-            capability: .default,
+            tool: .default,
             onRemove: {}
         )
 
@@ -77,11 +77,11 @@ final class InputBarContentAreaChipTests: XCTestCase {
             mimeType: "application/pdf",
             fileName: "report.pdf"
         )
-        XCTAssertNotNil(attachment.warningText(for: pdfLimitedCapability))
+        XCTAssertNotNil(attachment.warningText(for: pdfLimitedTool))
 
         let view = AttachmentBubble(
             attachment: attachment,
-            capability: pdfLimitedCapability,
+            tool: pdfLimitedTool,
             onRemove: {}
         )
 
@@ -95,7 +95,7 @@ final class InputBarContentAreaChipTests: XCTestCase {
                 mimeType: "image/png",
                 fileName: "photo.png"
             ),
-            capability: .default,
+            tool: .default,
             onRemove: {}
         )
 
@@ -109,7 +109,7 @@ final class InputBarContentAreaChipTests: XCTestCase {
                 mimeType: "text/plain",
                 fileName: "a-very-long-file-name-that-should-truncate-in-the-chip.txt"
             ),
-            capability: .default,
+            tool: .default,
             onRemove: {}
         )
 
@@ -119,12 +119,12 @@ final class InputBarContentAreaChipTests: XCTestCase {
     func testAttachmentBubbleShrinksShortFilenamesBelowTruncationWidth() {
         let shortChip = AttachmentBubble(
             attachment: makeAttachment(fileName: "a.txt"),
-            capability: .default,
+            tool: .default,
             onRemove: {}
         )
         let longChip = AttachmentBubble(
             attachment: makeAttachment(fileName: "a-very-long-file-name-that-should-truncate.txt"),
-            capability: .default,
+            tool: .default,
             onRemove: {}
         )
 

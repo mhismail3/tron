@@ -28,50 +28,37 @@ impl SqliteEngineLedgerStore {
             actor_kind_json: row
                 .get(6)
                 .map_err(|err| sqlite_err("inv.actor_kind", err))?,
-            authority_grant_id: row.get(7).map_err(|err| sqlite_err("inv.grant", err))?,
-            authority_scopes_json: row.get(8).map_err(|err| sqlite_err("inv.scopes", err))?,
-            trace_id: row.get(9).map_err(|err| sqlite_err("inv.trace", err))?,
-            parent_invocation_id: row.get(10).map_err(|err| sqlite_err("inv.parent", err))?,
-            trigger_id: row.get(11).map_err(|err| sqlite_err("inv.trigger", err))?,
-            session_id: row.get(12).map_err(|err| sqlite_err("inv.session", err))?,
+            trace_id: row.get(7).map_err(|err| sqlite_err("inv.trace", err))?,
+            parent_invocation_id: row.get(8).map_err(|err| sqlite_err("inv.parent", err))?,
+            session_id: row.get(9).map_err(|err| sqlite_err("inv.session", err))?,
             workspace_id: row
-                .get(13)
+                .get(10)
                 .map_err(|err| sqlite_err("inv.workspace", err))?,
-            delivery_mode_json: row.get(14).map_err(|err| sqlite_err("inv.delivery", err))?,
             idempotency_scope_kind: row
-                .get(15)
+                .get(11)
                 .map_err(|err| sqlite_err("inv.scope_kind", err))?,
             idempotency_scope_value: row
-                .get(16)
+                .get(12)
                 .map_err(|err| sqlite_err("inv.scope_value", err))?,
-            resource_lease_ids_json: row
-                .get(17)
-                .map_err(|err| sqlite_err("inv.resource_leases", err))?,
-            compensation_status: row
-                .get(18)
-                .map_err(|err| sqlite_err("inv.compensation_status", err))?,
-            produced_resource_refs_json: row
-                .get(19)
-                .map_err(|err| sqlite_err("inv.produced_resource_refs", err))?,
             idempotency_key: row
-                .get(20)
+                .get(13)
                 .map_err(|err| sqlite_err("inv.idempotency_key", err))?,
             replayed_from: row
-                .get(21)
+                .get(14)
                 .map_err(|err| sqlite_err("inv.replayed_from", err))?,
             succeeded: row
-                .get(22)
+                .get(15)
                 .map_err(|err| sqlite_err("inv.succeeded", err))?,
             result_json: resolve_optional_stored_json_string(
                 &self.conn,
-                row.get(23).map_err(|err| sqlite_err("inv.result", err))?,
+                row.get(16).map_err(|err| sqlite_err("inv.result", err))?,
             )?,
             error_json: resolve_optional_stored_json_string(
                 &self.conn,
-                row.get(24).map_err(|err| sqlite_err("inv.error", err))?,
+                row.get(17).map_err(|err| sqlite_err("inv.error", err))?,
             )?,
             timestamp: row
-                .get(25)
+                .get(18)
                 .map_err(|err| sqlite_err("inv.timestamp", err))?,
         })
     }
@@ -99,33 +86,30 @@ impl SqliteEngineLedgerStore {
             function_revision: row
                 .get(5)
                 .map_err(|err| sqlite_err("idempotency.function_revision", err))?,
-            replay_behavior_json: row
-                .get(6)
-                .map_err(|err| sqlite_err("idempotency.replay_behavior", err))?,
             status_json: row
-                .get(7)
+                .get(6)
                 .map_err(|err| sqlite_err("idempotency.status", err))?,
             first_invocation_id: row
-                .get(8)
+                .get(7)
                 .map_err(|err| sqlite_err("idempotency.first_invocation_id", err))?,
             latest_invocation_id: row
-                .get(9)
+                .get(8)
                 .map_err(|err| sqlite_err("idempotency.latest_invocation_id", err))?,
             outcome_value_json: resolve_optional_stored_json_string(
                 &self.conn,
-                row.get(10)
+                row.get(9)
                     .map_err(|err| sqlite_err("idempotency.outcome_value", err))?,
             )?,
             outcome_error_json: resolve_optional_stored_json_string(
                 &self.conn,
-                row.get(11)
+                row.get(10)
                     .map_err(|err| sqlite_err("idempotency.outcome_error", err))?,
             )?,
             created_at: row
-                .get(12)
+                .get(11)
                 .map_err(|err| sqlite_err("idempotency.created_at", err))?,
             updated_at: row
-                .get(13)
+                .get(12)
                 .map_err(|err| sqlite_err("idempotency.updated_at", err))?,
         })
     }

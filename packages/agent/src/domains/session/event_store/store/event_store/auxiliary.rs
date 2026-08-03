@@ -12,12 +12,6 @@ impl EventStore {
         WorkspaceRepo::get_by_path(&conn, path)
     }
 
-    /// Find all workspaces whose path matches the given prefix (exact + children).
-    pub fn find_workspaces_by_path_prefix(&self, prefix: &str) -> Result<Vec<WorkspaceRow>> {
-        let conn = self.conn()?;
-        WorkspaceRepo::find_by_path_prefix(&conn, prefix)
-    }
-
     /// Get or create workspace by path.
     pub fn get_or_create_workspace(&self, path: &str, name: Option<&str>) -> Result<WorkspaceRow> {
         self.with_global_write_lock(|| {
@@ -65,8 +59,7 @@ mod tests {
         .expect("pool");
         let store = EventStore::new(pool);
         let conn = store.conn().expect("conn");
-        crate::domains::session::event_store::sqlite::migrations::run_migrations(&conn)
-            .expect("migrate");
+        crate::domains::session::event_store::sqlite::schema::ensure_schema(&conn).expect("schema");
         let blob_id = store
             .store_blob(b"hello", "text/plain")
             .expect("store blob");

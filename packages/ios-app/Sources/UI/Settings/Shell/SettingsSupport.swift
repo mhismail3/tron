@@ -74,12 +74,16 @@ enum MainSettingsListLayout {
 enum MainSettingsGridDestination: Hashable, Sendable {
     case engine
     case providers
+    case artifacts
     case app
+    case logs
 
     static let order: [Self] = [
         .engine,
         .providers,
+        .artifacts,
         .app,
+        .logs,
     ]
 
     var icon: String {
@@ -90,6 +94,10 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return MainSettingsLocalCategoryStyle.appIcon
         case .providers:
             return ServerSettingsCategory.providers.icon
+        case .artifacts:
+            return "tray.full"
+        case .logs:
+            return "doc.text.magnifyingglass"
         }
     }
 
@@ -101,6 +109,10 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return "App"
         case .providers:
             return ServerSettingsCategory.providers.title
+        case .artifacts:
+            return "Artifacts"
+        case .logs:
+            return "Logs"
         }
     }
 
@@ -109,9 +121,13 @@ enum MainSettingsGridDestination: Hashable, Sendable {
         case .engine:
             return ServerSettingsCategory.engine.subtitle
         case .app:
-            return "Appearance, notifications, behavior"
+            return "Appearance and behavior"
         case .providers:
             return ServerSettingsCategory.providers.subtitle
+        case .artifacts:
+            return "Worker-created files"
+        case .logs:
+            return "Local diagnostics"
         }
     }
 
@@ -123,6 +139,10 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return "Configure local app settings."
         case .providers:
             return "Configure server-held provider accounts."
+        case .artifacts:
+            return "Review, export, attach, or delete worker-created files."
+        case .logs:
+            return "Review local diagnostic entries."
         }
     }
 }
@@ -138,7 +158,6 @@ enum MainSettingsFooterLayout {
 enum EngineSettingsSection: String, CaseIterable, Sendable {
     case defaults = "Session Defaults"
     case context = "Context"
-    case transcription = "Transcription"
 }
 
 enum ContextCompactionSetting: CaseIterable, Hashable, Sendable {
@@ -165,16 +184,20 @@ enum ContextCompactionSetting: CaseIterable, Hashable, Sendable {
 }
 
 enum SettingsDangerZoneAction: CaseIterable, Hashable, Sendable {
+    case stopAllWorkers
     case archiveAllSessions
     case resetAllSettings
 
     static let order: [Self] = [
+        .stopAllWorkers,
         .archiveAllSessions,
         .resetAllSettings,
     ]
 
     var title: String {
         switch self {
+        case .stopAllWorkers:
+            return "Stop All Workers"
         case .archiveAllSessions:
             return "Archive All Sessions"
         case .resetAllSettings:
@@ -184,6 +207,8 @@ enum SettingsDangerZoneAction: CaseIterable, Hashable, Sendable {
 
     var icon: String {
         switch self {
+        case .stopAllWorkers:
+            return "stop.fill"
         case .archiveAllSessions:
             return "archivebox"
         case .resetAllSettings:
@@ -193,16 +218,27 @@ enum SettingsDangerZoneAction: CaseIterable, Hashable, Sendable {
 
     func isEnabled(
         hasSessions: Bool,
+        workerDispatchReady: Bool,
         serverSettingsReady: Bool,
         serverSettingsUnavailable: Bool,
         isInProgress: Bool
     ) -> Bool {
         switch self {
+        case .stopAllWorkers:
+            return workerDispatchReady && !isInProgress
         case .archiveAllSessions:
             return hasSessions && !serverSettingsUnavailable && !isInProgress
         case .resetAllSettings:
             return true
         }
+    }
+
+    func displayTitle(workersStopped: Bool) -> String {
+        self == .stopAllWorkers && workersStopped ? "Resume All Workers" : title
+    }
+
+    func displayIcon(workersStopped: Bool) -> String {
+        self == .stopAllWorkers && workersStopped ? "play.fill" : icon
     }
 }
 

@@ -16,12 +16,7 @@ impl EngineHostHandle {
     /// Wrap an initialized host.
     #[must_use]
     fn from_host(host: EngineHost) -> Self {
-        let stores = host.primitives.clone();
-        let handle = Self::from_inner(Arc::new(Mutex::new(host)));
-        stores
-            .install_engine_host(Arc::downgrade(&handle.inner))
-            .expect("engine host handle is installed exactly once");
-        handle
+        Self::from_inner(Arc::new(Mutex::new(host)))
     }
 
     pub(in crate::engine) fn from_inner(inner: Arc<Mutex<EngineHost>>) -> Self {

@@ -16,7 +16,13 @@ struct MessageBubble: View {
                 AttachedFileThumbnails(attachments: attachments)
             }
 
-            contentView
+            if !message.agentDeliveryProvenance.isEmpty {
+                agentDeliveryProvenance
+            }
+
+            if !message.isDeliveryProvenanceOnly {
+                contentView
+            }
 
             if let metadata = message.finalAssistantResponseMetadata {
                 MessageMetadataBadge(metadata: metadata)
@@ -32,6 +38,22 @@ struct MessageBubble: View {
 
     // MARK: - Content
 
+    private var agentDeliveryProvenance: some View {
+        Label(
+            AgentDeliveryContinuationPresentation.label(message.agentDeliveryProvenance),
+            systemImage: message.agentDeliveryProvenance.contains {
+                $0.triggeredWake == true
+            } ? "arrow.clockwise.circle.fill" : "tray.and.arrow.down.fill"
+        )
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            .foregroundStyle(.tronEmerald)
+            .accessibilityHint(
+                message.agentDeliveryProvenance.contains { $0.triggeredWake == true }
+                    ? "The task resumed automatically from a durable update."
+                    : "A durable update was included in this model turn."
+            )
+    }
+
     @ViewBuilder
     private var contentView: some View {
         switch message.content {
@@ -41,25 +63,23 @@ struct MessageBubble: View {
         case .streaming(let text):
             StreamingContentView(text: text)
 
-        case .thinking(let visible, let isExpanded, let isStreaming, let kind):
+        case .thinking(let visible, let isExpanded, _, let kind):
             ThinkingContentView(
                 content: visible,
-                isExpanded: isExpanded,
-                isStreaming: isStreaming,
-                kind: kind
+                isExpanded: isExpanded
             ) {
-                onTap?(.thinking(visible))
+                onTap?(.thinking(visible, kind: kind))
             }
 
-        case .capabilityInvocation(let invocation):
-            CapabilityInvocationChip(
+        case .toolInvocation(let invocation):
+            ToolInvocationChip(
                 data: invocation,
-                onTap: { onTap?(.capabilityInvocation(invocation)) },
-                onCancel: { onTap?(.cancelCapabilityInvocation(id: invocation.id)) }
+                onTap: { onTap?(.toolInvocation(invocation)) },
+                onCancel: { onTap?(.cancelToolInvocation(id: invocation.id)) }
             )
 
-        case .capabilityResult(let result):
-            CapabilityInvocationResultView(result: result)
+        case .toolResult(let result):
+            ToolInvocationResultView(result: result)
 
         case .error(let errorMessage):
             ErrorContentView(message: errorMessage)
@@ -85,6 +105,17 @@ struct MessageBubble: View {
         }
     }
 
+}
+
+enum ChatMessageLayout {
+    /// The transcript stack contributes 12 points between ordinary rows.
+    /// Provenance is a compact prelude to the resumed turn, so it uses an
+    /// eight-point effective gap before the following thinking/tool/text row.
+    static func bottomSpacingAdjustment(
+        isDeliveryProvenanceOnly: Bool
+    ) -> CGFloat {
+        isDeliveryProvenanceOnly ? -4 : 0
+    }
 }
 
 // MARK: - Confirmed Action Chip View
@@ -146,9 +177,9 @@ private struct ErrorContentView: View {
 
             // Test markdown table rendering
             MessageBubble(message: .assistant("""
-            All capabilities working! Here's a summary:
+            All tools working! Here's a summary:
 
-            | Capability | Status | What it did |
+            | Tool | Status | What it did |
             |------|--------|-------------|
             | ls | OK | Listed 8 files/folders |
             | read | OK | Read README.md |

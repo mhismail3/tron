@@ -10,13 +10,12 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use serde_json::Value;
 
-use crate::domains::registration::catalog::{CapabilitySpec, function_definition_for_capability};
-use crate::domains::registration::worker::DomainFunctionRegistration;
-use crate::engine::{EngineError, InProcessFunctionHandler, Invocation};
-use crate::shared::server::error_mapping::capability_error_to_engine;
-use crate::shared::server::errors::CapabilityError;
+use crate::domains::registration::composition::DomainFunctionRegistration;
+use crate::engine::{EngineError, FunctionDefinition, InProcessFunctionHandler, Invocation};
+use crate::shared::server::error_mapping::tool_error_to_engine;
+use crate::shared::server::errors::ToolError;
 
-pub(crate) type OperationFuture<'a> = BoxFuture<'a, Result<Value, CapabilityError>>;
+pub(crate) type OperationFuture<'a> = BoxFuture<'a, Result<Value, ToolError>>;
 
 type OperationHandler<D> =
     Arc<dyn for<'a> Fn(&'a Invocation, &'a D) -> OperationFuture<'a> + Send + Sync>;
@@ -48,21 +47,21 @@ impl<D> OperationBinding<D> {
 }
 
 pub(crate) fn function_registrations<D>(
-    specs: Vec<CapabilitySpec>,
+    definitions: Vec<FunctionDefinition>,
     deps: D,
     bindings: Vec<OperationBinding<D>>,
 ) -> crate::engine::Result<Vec<DomainFunctionRegistration>>
 where
     D: Clone + Send + Sync + 'static,
 {
-    validate_bindings(&specs, &bindings)?;
-    specs
+    validate_bindings(&definitions, &bindings)?;
+    definitions
         .into_iter()
-        .map(|spec| {
+        .map(|definition| {
             let handler =
-                handler_for_operation(&spec.operation_key, deps.clone(), bindings.clone())?;
+                handler_for_operation(operation_key(&definition), deps.clone(), bindings.clone())?;
             Ok(DomainFunctionRegistration {
-                definition: function_definition_for_capability(&spec),
+                definition,
                 handler,
             })
         })
@@ -87,15 +86,16 @@ where
 }
 
 fn validate_bindings<D>(
-    specs: &[CapabilitySpec],
+    definitions: &[FunctionDefinition],
     bindings: &[OperationBinding<D>],
 ) -> crate::engine::Result<()> {
     let mut spec_keys = BTreeSet::new();
-    for spec in specs {
-        if !spec_keys.insert(spec.operation_key.as_str()) {
+    for definition in definitions {
+        let operation_key = operation_key(definition);
+        if !spec_keys.insert(operation_key) {
             return Err(EngineError::PolicyViolation(format!(
                 "duplicate contract operation key '{}'",
-                spec.operation_key
+                operation_key
             )));
         }
     }
@@ -116,15 +116,24 @@ fn validate_bindings<D>(
         }
     }
 
-    for spec in specs {
-        if !binding_keys.contains(spec.operation_key.as_str()) {
+    for definition in definitions {
+        let operation_key = operation_key(definition);
+        if !binding_keys.contains(operation_key) {
             return Err(EngineError::PolicyViolation(format!(
                 "domain contract operation key '{}' has no handler binding",
-                spec.operation_key
+                operation_key
             )));
         }
     }
     Ok(())
+}
+
+fn operation_key(definition: &FunctionDefinition) -> &str {
+    definition
+        .id
+        .as_str()
+        .rsplit_once("::")
+        .map_or(definition.id.as_str(), |(_, operation)| operation)
 }
 
 struct LocalOperationHandler<D> {
@@ -140,7 +149,7 @@ where
     async fn invoke(&self, invocation: Invocation) -> Result<Value, EngineError> {
         (self.binding.handler)(&invocation, &self.deps)
             .await
-            .map_err(capability_error_to_engine)
+            .map_err(tool_error_to_engine)
     }
 }
 
@@ -154,12 +163,12 @@ macro_rules! operation_bindings {
             ),+ $(,)?
         ];
     ) => {
-        pub(crate) fn function_registrations(
-            specs: Vec<$crate::domains::registration::catalog::CapabilitySpec>,
+        pub(crate) fn bind_functions(
+            definitions: Vec<$crate::engine::FunctionDefinition>,
             deps: $deps_ty,
-        ) -> $crate::engine::Result<Vec<$crate::domains::registration::worker::DomainFunctionRegistration>> {
+        ) -> $crate::engine::Result<Vec<$crate::domains::registration::composition::DomainFunctionRegistration>> {
             $crate::domains::registration::bindings::function_registrations(
-                specs,
+                definitions,
                 deps,
                 operation_bindings(),
             )
@@ -187,14 +196,14 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
-    use crate::domains::registration::contract::CapabilityContract;
+    use crate::domains::registration::contract::FunctionContract;
     use crate::engine::{EffectClass, RiskLevel};
 
     #[derive(Clone)]
     struct DummyDeps;
 
-    fn spec(operation_key: &'static str) -> crate::domains::registration::catalog::CapabilitySpec {
-        CapabilityContract::new(
+    fn definition(operation_key: &'static str) -> FunctionDefinition {
+        FunctionContract::new(
             match operation_key {
                 "one" => "dummy::one",
                 "two" => "dummy::two",
@@ -204,10 +213,9 @@ mod tests {
             "dummy",
             EffectClass::PureRead,
             RiskLevel::Low,
-            Some("dummy.read"),
         )
         .build()
-        .expect("valid test capability")
+        .expect("valid test tool")
     }
 
     fn binding(operation_key: &'static str) -> OperationBinding<DummyDeps> {
@@ -219,7 +227,7 @@ mod tests {
     #[test]
     fn registrations_require_every_contract_to_have_one_binding() {
         let err = match function_registrations(
-            vec![spec("one"), spec("two")],
+            vec![definition("one"), definition("two")],
             DummyDeps,
             vec![binding("one")],
         ) {
@@ -236,7 +244,7 @@ mod tests {
     #[test]
     fn registrations_reject_uncontracted_bindings() {
         let err = match function_registrations(
-            vec![spec("one")],
+            vec![definition("one")],
             DummyDeps,
             vec![binding("one"), binding("two")],
         ) {

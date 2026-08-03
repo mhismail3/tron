@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tron-ios-device
+source "$root_dir/scripts/tron-ios-device"
+
+sample_processes=$'PID   Executable Path\n31188   /private/var/containers/Bundle/Application/ABC/TronMobile.app/TronMobile   \n42      /usr/libexec/example'
+actual="$(printf '%s\n' "$sample_processes" | tronmobile_pids_from_input)"
+
+if [[ "$actual" != "31188" ]]; then
+    printf 'expected padded TronMobile process row to yield PID 31188, got %q\n' "$actual" >&2
+    exit 1
+fi
+
+printf 'tron-ios-device process parsing tests passed\n'

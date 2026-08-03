@@ -7,7 +7,7 @@ extension ChatViewModel {
     private static let maxDeepLinkPaginationBatches = 100
 
     /// Find the message UUID for a given scroll target.
-    /// Used by deep linking to scroll to a specific capability invocation or event.
+    /// Used by deep linking to scroll to a specific tool invocation or event.
     ///
     /// This method searches displayed messages first, then falls back to
     /// the full history (`allReconstructedMessages`). If the target is found
@@ -17,14 +17,14 @@ extension ChatViewModel {
     /// - Returns: The message UUID if found, nil otherwise
     func findMessageId(for target: ScrollTarget) -> UUID? {
         switch target {
-        case .capabilityInvocation(let invocationId):
+        case .toolInvocation(let invocationId):
             // First search displayed messages
-            if let id = findCapabilityInvocationInMessages(invocationId, messages: messages) {
+            if let id = findToolInvocationInMessages(invocationId, messages: messages) {
                 return id
             }
 
             // Fall back to full history if not in displayed window
-            if let (id, index) = findCapabilityInvocationInMessagesWithIndex(invocationId, messages: allReconstructedMessages) {
+            if let (id, index) = findToolInvocationInMessagesWithIndex(invocationId, messages: allReconstructedMessages) {
                 expandWindowToInclude(index: index)
                 return id
             }
@@ -109,32 +109,32 @@ extension ChatViewModel {
         )
     }
 
-    /// Search for a capability invocation ID in a messages array
-    private func findCapabilityInvocationInMessages(_ invocationId: String, messages: [ChatMessage]) -> UUID? {
+    /// Search for a tool invocation ID in a messages array
+    private func findToolInvocationInMessages(_ invocationId: String, messages: [ChatMessage]) -> UUID? {
         for message in messages {
-            if matchesCapabilityInvocationId(message, invocationId: invocationId) {
+            if matchesToolInvocationId(message, invocationId: invocationId) {
                 return message.id
             }
         }
         return nil
     }
 
-    /// Search for a capability invocation ID with index (for window expansion)
-    private func findCapabilityInvocationInMessagesWithIndex(_ invocationId: String, messages: [ChatMessage]) -> (UUID, Int)? {
+    /// Search for a tool invocation ID with index (for window expansion)
+    private func findToolInvocationInMessagesWithIndex(_ invocationId: String, messages: [ChatMessage]) -> (UUID, Int)? {
         for (index, message) in messages.enumerated() {
-            if matchesCapabilityInvocationId(message, invocationId: invocationId) {
+            if matchesToolInvocationId(message, invocationId: invocationId) {
                 return (message.id, index)
             }
         }
         return nil
     }
 
-    /// Check if a message matches the given capability invocation ID.
-    private func matchesCapabilityInvocationId(_ message: ChatMessage, invocationId: String) -> Bool {
+    /// Check if a message matches the given tool invocation ID.
+    private func matchesToolInvocationId(_ message: ChatMessage, invocationId: String) -> Bool {
         switch message.content {
-        case .capabilityInvocation(let data) where data.id == invocationId:
+        case .toolInvocation(let data) where data.id == invocationId:
             return true
-        case .capabilityResult(let data) where data.id == invocationId:
+        case .toolResult(let data) where data.id == invocationId:
             return true
         default:
             return false

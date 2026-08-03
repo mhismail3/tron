@@ -1,30 +1,49 @@
-//! Capability contracts owned by the model domain worker.
+//! Function contracts owned by the model domain worker.
 
 use serde_json::json;
 
-use crate::domains::registration::catalog::CapabilitySpec;
-use crate::domains::registration::contract::CapabilityContract;
+use crate::domains::registration::contract::FunctionContract;
 use crate::engine::{
-    CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
-    ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
+    EffectClass, FunctionDefinition, IdempotencyContract, Result as EngineResult, RiskLevel,
 };
 
-pub(crate) const STREAM_TOPICS: &[&str] = &["model.config"];
-
-/// Canonical capability contracts exposed by this domain worker.
-pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+/// Canonical function contracts exposed by this domain worker.
+pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     Ok(vec![
-        CapabilityContract::new("model::list", "model", EffectClass::PureRead, RiskLevel::Low, Some("model.read"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"__capabilityContext":{"additionalProperties":false,"properties":{"authPath":{"type":"string"}},"type":"object"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
+        FunctionContract::new("model::list", "model", EffectClass::PureRead, RiskLevel::Low)
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"models":{"items":{"additionalProperties":true,"type":"object"},"type":"array"}},"required":["models"],"type":"object"}))
             .build()?,
-        CapabilityContract::new("model::switch", "model", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("model.write"))
+        FunctionContract::new("model::switch", "model", EffectClass::ReversibleSideEffect, RiskLevel::High)
             .request_schema(json!({"additionalProperties":false,"properties":{"model":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","model"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"newModel":{"type":"string"},"previousModel":{"type":"string"}},"required":["previousModel","newModel"],"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .resource_lease(ResourceLeaseRequirement::exclusive_template("session", "session:{sessionId}:model", 60000))
-            .compensation(CompensationContract::new(CompensationKind::ManualOnly, "latest_model is updated in the primitive session row; reversal is an explicit model switch"))
-            .stream_topics(STREAM_TOPICS.to_vec())
+            .idempotency(IdempotencyContract::session())
             .build()?
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    #[test]
+    fn list_request_contains_only_client_owned_correlation() {
+        let list = function_definitions()
+            .expect("model contracts")
+            .into_iter()
+            .find(|definition| definition.id.as_str() == "model::list")
+            .expect("model list contract");
+        let properties = list.request_schema.expect("request schema")["properties"]
+            .as_object()
+            .expect("request properties")
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            properties,
+            BTreeSet::from(["sessionId".to_owned(), "workspaceId".to_owned()])
+        );
+    }
 }

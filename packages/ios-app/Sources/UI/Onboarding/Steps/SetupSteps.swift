@@ -218,34 +218,6 @@ struct RemainingProvidersOnboardingPage: View {
     }
 }
 
-struct ServicesSetupOnboardingPage: View {
-    let state: OnboardingState
-    let dependencies: DependencyContainer
-
-    var body: some View {
-        OnboardingPage(
-            subtitle: "Add search service keys so Tron can use web search capabilities."
-        ) {
-            VStack(alignment: .leading, spacing: TronSpacing.section) {
-                ForEach(ProviderInfo.services) { service in
-                    CompactApiKeyCard(
-                        title: service.displayName,
-                        placeholder: "\(service.displayName) API key",
-                        existingSummary: state.setupSnapshot.serviceSummary(for: service.id),
-                        save: { key in
-                            try await dependencies.authRepository.update(
-                                .serviceApiKey(service: service.id, key: key),
-                                idempotencyKey: .userAction("auth.update")
-                            )
-                        },
-                        onSaved: { authState in state.refreshSetupAuth(authState) }
-                    )
-                }
-            }
-        }
-    }
-}
-
 struct ModelSetupOnboardingPage: View {
     let state: OnboardingState
     let dependencies: DependencyContainer

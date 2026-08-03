@@ -14,12 +14,9 @@ final class SettingsState {
     var defaultModel: String = ""
     var quickSessionWorkspace: String = AppConstants.defaultWorkspace
     var tailscaleIp: String?
+    var ollamaBaseUrl: String = "http://localhost:11434"
     var preserveRecentCount: Int = 5
     var triggerTokenThreshold: Double = 0.70
-
-    // MARK: - Engine Policy
-
-    var transcriptionEnabled: Bool = false
 
     @ObservationIgnored
     private var lastLoadedSettings: ServerSettingsSnapshot?
@@ -79,6 +76,7 @@ final class SettingsState {
         loadError = nil
         lastLoadedSettings = nil
         tailscaleIp = nil
+        ollamaBaseUrl = "http://localhost:11434"
     }
 
     func rollbackToLastLoadedSettings(message: String) {
@@ -99,9 +97,9 @@ final class SettingsState {
         lastLoadedSettings = settings
         defaultModel = settings.defaultModel
         tailscaleIp = settings.tailscaleIp
+        ollamaBaseUrl = settings.ollamaBaseUrl
         preserveRecentCount = settings.compactionPreserveRecentCount
         triggerTokenThreshold = settings.compactionTriggerTokenThreshold
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
-        transcriptionEnabled = settings.transcriptionEnabled
     }
 }

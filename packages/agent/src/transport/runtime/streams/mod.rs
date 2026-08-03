@@ -6,11 +6,11 @@
 //! records directly; there is no separate broadcast transport.
 //! Event projection is split by source family under `session/` so the pump stays
 //! a runtime primitive: it owns delivery policy and stream records, while domain
-//! folders own capability behavior.
+//! folders own tool behavior.
 //! Engine trace context carried by the source `TronEvent` is copied into both
 //! the persisted engine stream row and the neutral payload so observability can
-//! follow an agent turn through streamed UI events, capability invocation, queues, and
-//! downstream capabilities.
+//! follow an agent turn through streamed UI events, tool invocation, queues, and
+//! downstream tools.
 //! If the bounded runtime receiver ever lags, the missing records cannot be
 //! inferred from sequence gaps because durable-only events legitimately consume
 //! sequences. The pump therefore publishes a system-scoped
@@ -20,7 +20,9 @@
 //! cannot be stored, the pump stops instead of continuing with an undisclosed
 //! continuity break.
 
-use crate::engine::{EngineHostHandle, InvocationId, PublishStreamEvent, TraceId, VisibilityScope};
+use crate::engine::{
+    EngineHostHandle, InvocationId, PublishStreamEvent, StreamVisibility, TraceId,
+};
 use crate::shared::protocol::events::TronEvent;
 use crate::shared::server::events::ServerEventPayload;
 use serde_json::json;
@@ -30,11 +32,11 @@ use tokio_util::sync::CancellationToken;
 use routed::StreamScope;
 use tron::tron_event_to_projected;
 
-mod capability_call;
 mod message;
 mod routed;
 mod session;
 mod streaming;
+mod tool_call;
 mod tron;
 mod turn;
 
@@ -130,7 +132,7 @@ impl EngineStreamEventPump {
                     "sourceEventType": STREAM_RECOVERY_REQUIRED_EVENT_TYPE,
                     "sourceSequence": null,
                 }),
-                visibility: VisibilityScope::System,
+                visibility: StreamVisibility::System,
                 session_id: None,
                 workspace_id: None,
                 producer: "agent-runtime".to_owned(),
@@ -157,9 +159,9 @@ impl EngineStreamEventPump {
         tracing::debug!(event_type, "projecting event to engine stream");
         let projected = tron_event_to_projected(event);
         let (visibility, session_id) = match &projected.scope {
-            StreamScope::All => (VisibilityScope::System, None),
+            StreamScope::All => (StreamVisibility::System, None),
             StreamScope::Session(session_id) => {
-                (VisibilityScope::Session, Some(session_id.clone()))
+                (StreamVisibility::Session, Some(session_id.clone()))
             }
         };
         let trace_id = event

@@ -2,53 +2,22 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
-};
-use crate::engine::kernel::types::{
-    CatalogRevision, DeliveryMode, FunctionRevision, IdempotencyScope,
-};
-
-/// Runtime metadata key carrying the trusted session working directory.
-///
-/// This is engine-owned context, not model-supplied payload. Domain workers use it
-/// when a relative path needs to resolve against the active session workspace.
-pub const RUNTIME_METADATA_WORKING_DIRECTORY: &str = "agent.workingDirectory";
-/// Runtime metadata key carrying the provider/model tool-call id that caused an
-/// engine invocation.
-pub const RUNTIME_METADATA_PROVIDER_INVOCATION_ID: &str = "agent.providerInvocationId";
-/// Runtime metadata key carrying the resolved model provider type.
-pub const RUNTIME_METADATA_PROVIDER_TYPE: &str = "agent.providerType";
-/// Runtime metadata key carrying the current agent run id.
-pub const RUNTIME_METADATA_RUN_ID: &str = "agent.runId";
-/// Runtime metadata key carrying the model-facing primitive name.
-pub const RUNTIME_METADATA_MODEL_PRIMITIVE_NAME: &str = "agent.modelPrimitiveName";
-/// Runtime metadata key carrying the current model turn number.
-pub const RUNTIME_METADATA_TURN: &str = "agent.turn";
-/// Runtime metadata key carrying the current trigger cascade depth.
-pub const RUNTIME_METADATA_TRIGGER_DEPTH: &str = "engine.triggerDepth";
-/// Runtime metadata key carrying the JSON trigger-id path for loop detection.
-pub const RUNTIME_METADATA_TRIGGER_PATH: &str = "engine.triggerPath";
+use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, WorkerId};
+use crate::engine::kernel::types::{CatalogRevision, FunctionRevision, IdempotencyScope};
 
 /// Causal context carried by every invocation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CausalContext {
     /// Actor id.
     pub actor_id: ActorId,
     /// Actor kind.
     pub actor_kind: ActorKind,
-    /// Authority grant id.
-    pub authority_grant_id: AuthorityGrantId,
-    /// Granted authority scopes.
-    pub authority_scopes: Vec<String>,
     /// Trace id.
     pub trace_id: TraceId,
     /// Parent invocation.
@@ -57,51 +26,70 @@ pub struct CausalContext {
     pub session_id: Option<String>,
     /// Optional workspace id.
     pub workspace_id: Option<String>,
-    /// Catalog revision observed at dispatch.
-    pub catalog_revision: CatalogRevision,
-    /// Trigger id, if trigger-caused.
-    pub trigger_id: Option<TriggerId>,
-    /// Delivery mode.
-    pub delivery_mode: DeliveryMode,
     /// Idempotency key.
     pub idempotency_key: Option<String>,
-    /// Engine-internal runtime metadata. This is not model-supplied payload and
-    /// is used to carry trusted run context into primitive workers.
-    #[serde(default)]
-    pub runtime_metadata: BTreeMap<String, String>,
+    /// Trusted session directory used to resolve relative host paths.
+    working_directory: Option<String>,
+    /// Persistent worker that owns an agent execution crossing engine-owned
+    /// internal transport hops.
+    origin_worker_id: Option<String>,
+    /// Durable worker invocation that owns this delegated agent execution.
+    ///
+    /// This is causal identity for run-tree reconstruction and generic
+    /// child-invocation ceilings. It is not authority or routing input.
+    origin_worker_invocation_id: Option<String>,
+    /// Zero-based occurrence of this tool within the owning worker run.
+    ///
+    /// Agent-runner recovery resets this counter and deterministically replays
+    /// already admitted nested worker calls through their durable call slot.
+    /// It is trusted engine metadata, never provider input or authority.
+    origin_worker_tool_ordinal: Option<u32>,
+    /// Generic agent-turn ceiling selected by the owning immutable worker.
+    /// The agent runtime may only tighten its global ceiling with this value.
+    worker_max_agent_turns: Option<u32>,
+    /// Exact model-tool names selected by the owning immutable agent worker.
+    ///
+    /// This is trusted provider-surface custody, not semantic authority.
+    /// Absence preserves the migration surface; an explicit empty vector
+    /// projects no callable model tools.
+    worker_agent_tools: Option<Vec<String>>,
+    /// Provider/model tool-call id that originated this engine invocation.
+    ///
+    /// This is transient observation metadata used to correlate live progress
+    /// with the exact conversation chip. It is never an authorization,
+    /// routing, persistence, or idempotency input.
+    model_tool_invocation_id: Option<String>,
+    /// Function revision advertised to the model that produced this call.
+    advertised_function_revision: Option<FunctionRevision>,
+    /// Immutable worker version advertised with the projected worker tool.
+    advertised_worker_version: Option<String>,
+    /// Current worker-trigger cascade depth.
+    trigger_depth: u32,
 }
 
 impl CausalContext {
     /// Create a causal context.
     #[must_use]
-    pub fn new(
-        actor_id: ActorId,
-        actor_kind: ActorKind,
-        authority_grant_id: AuthorityGrantId,
-        trace_id: TraceId,
-    ) -> Self {
+    pub fn new(actor_id: ActorId, actor_kind: ActorKind, trace_id: TraceId) -> Self {
         Self {
             actor_id,
             actor_kind,
-            authority_grant_id,
-            authority_scopes: Vec::new(),
             trace_id,
             parent_invocation_id: None,
             session_id: None,
             workspace_id: None,
-            catalog_revision: CatalogRevision(0),
-            trigger_id: None,
-            delivery_mode: DeliveryMode::Sync,
             idempotency_key: None,
-            runtime_metadata: BTreeMap::new(),
+            working_directory: None,
+            origin_worker_id: None,
+            origin_worker_invocation_id: None,
+            origin_worker_tool_ordinal: None,
+            worker_max_agent_turns: None,
+            worker_agent_tools: None,
+            model_tool_invocation_id: None,
+            advertised_function_revision: None,
+            advertised_worker_version: None,
+            trigger_depth: 0,
         }
-    }
-
-    /// Add an authority scope.
-    #[must_use]
-    pub fn with_scope(mut self, scope: impl Into<String>) -> Self {
-        self.authority_scopes.push(scope.into());
-        self
     }
 
     /// Set the session id.
@@ -125,13 +113,6 @@ impl CausalContext {
         self
     }
 
-    /// Set the trigger id.
-    #[must_use]
-    pub fn with_trigger_id(mut self, trigger_id: TriggerId) -> Self {
-        self.trigger_id = Some(trigger_id);
-        self
-    }
-
     /// Add an idempotency key.
     #[must_use]
     pub fn with_idempotency_key(mut self, key: impl Into<String>) -> Self {
@@ -139,39 +120,148 @@ impl CausalContext {
         self
     }
 
-    /// Whether this context has a scope.
+    /// Set the trusted session directory used by host path primitives.
     #[must_use]
-    pub fn has_scope(&self, scope: &str) -> bool {
-        self.authority_scopes.iter().any(|s| s == scope)
-    }
-
-    /// Attach engine-internal runtime metadata.
-    #[must_use]
-    pub fn with_runtime_metadata(
-        mut self,
-        key: impl Into<String>,
-        value: impl Into<String>,
-    ) -> Self {
-        let _ = self.runtime_metadata.insert(key.into(), value.into());
+    pub fn with_working_directory(mut self, working_directory: impl Into<String>) -> Self {
+        self.working_directory = Some(working_directory.into());
         self
     }
 
-    /// Read engine-internal runtime metadata.
+    /// Read the trusted session directory used by host path primitives.
     #[must_use]
-    pub fn runtime_metadata(&self, key: &str) -> Option<&str> {
-        self.runtime_metadata.get(key).map(String::as_str)
+    pub fn working_directory(&self) -> Option<&str> {
+        self.working_directory.as_deref()
+    }
+
+    /// Preserve the persistent worker that owns a delegated agent execution.
+    #[must_use]
+    pub fn with_origin_worker_id(mut self, worker_id: impl Into<String>) -> Self {
+        self.origin_worker_id = Some(worker_id.into());
+        self
+    }
+
+    /// Resolve the persistent worker that owns this causal chain.
+    #[must_use]
+    pub fn origin_worker_id(&self) -> Option<&str> {
+        self.origin_worker_id.as_deref().or_else(|| {
+            (self.actor_kind == ActorKind::Worker)
+                .then(|| self.actor_id.as_str().strip_prefix("worker:"))
+                .flatten()
+        })
+    }
+
+    /// Preserve the durable invocation that owns a delegated agent execution.
+    #[must_use]
+    pub fn with_origin_worker_invocation_id(mut self, invocation_id: impl Into<String>) -> Self {
+        self.origin_worker_invocation_id = Some(invocation_id.into());
+        self
+    }
+
+    /// Resolve the durable parent worker invocation for a child tool call.
+    #[must_use]
+    pub fn origin_worker_invocation_id(&self) -> Option<&str> {
+        self.origin_worker_invocation_id.as_deref()
+    }
+
+    /// Preserve the deterministic nested-tool occurrence within a worker run.
+    #[must_use]
+    pub fn with_origin_worker_tool_ordinal(mut self, ordinal: u32) -> Self {
+        self.origin_worker_tool_ordinal = Some(ordinal);
+        self
+    }
+
+    /// Resolve the deterministic nested-tool occurrence within a worker run.
+    #[must_use]
+    pub fn origin_worker_tool_ordinal(&self) -> Option<u32> {
+        self.origin_worker_tool_ordinal
+    }
+
+    /// Tighten the delegated agent run to a worker-selected turn ceiling.
+    #[must_use]
+    pub fn with_worker_max_agent_turns(mut self, max_turns: u32) -> Self {
+        self.worker_max_agent_turns = Some(max_turns);
+        self
+    }
+
+    /// Read the worker-selected agent-turn ceiling.
+    #[must_use]
+    pub fn worker_max_agent_turns(&self) -> Option<u32> {
+        self.worker_max_agent_turns
+    }
+
+    /// Restrict a delegated agent worker to exact model-tool names.
+    #[must_use]
+    pub fn with_worker_agent_tools(mut self, tools: Vec<String>) -> Self {
+        self.worker_agent_tools = Some(tools);
+        self
+    }
+
+    /// Read the immutable worker's exact provider tool allowlist.
+    #[must_use]
+    pub fn worker_agent_tools(&self) -> Option<&[String]> {
+        self.worker_agent_tools.as_deref()
+    }
+
+    /// Preserve the originating provider/model tool-call id for live
+    /// presentation correlation.
+    #[must_use]
+    pub fn with_model_tool_invocation_id(mut self, invocation_id: impl Into<String>) -> Self {
+        self.model_tool_invocation_id = Some(invocation_id.into());
+        self
+    }
+
+    /// Read the originating provider/model tool-call id.
+    #[must_use]
+    pub fn model_tool_invocation_id(&self) -> Option<&str> {
+        self.model_tool_invocation_id.as_deref()
+    }
+
+    /// Pin execution to the exact function and worker versions advertised to
+    /// the model that produced the call.
+    #[must_use]
+    pub fn with_advertised_function(
+        mut self,
+        function_revision: FunctionRevision,
+        worker_version: Option<String>,
+    ) -> Self {
+        self.advertised_function_revision = Some(function_revision);
+        self.advertised_worker_version = worker_version;
+        self
+    }
+
+    /// Read the advertised function revision pin.
+    #[must_use]
+    pub fn advertised_function_revision(&self) -> Option<FunctionRevision> {
+        self.advertised_function_revision
+    }
+
+    /// Read the advertised immutable worker version pin.
+    #[must_use]
+    pub fn advertised_worker_version(&self) -> Option<&str> {
+        self.advertised_worker_version.as_deref()
+    }
+
+    /// Set the worker-trigger cascade depth.
+    #[must_use]
+    pub fn with_trigger_depth(mut self, trigger_depth: u32) -> Self {
+        self.trigger_depth = trigger_depth;
+        self
+    }
+
+    /// Read the worker-trigger cascade depth.
+    #[must_use]
+    pub fn trigger_depth(&self) -> u32 {
+        self.trigger_depth
     }
 }
 
 /// Invocation request.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Invocation {
     /// Invocation id.
     pub id: InvocationId,
     /// Target function id.
     pub function_id: FunctionId,
-    /// Delivery mode.
-    pub delivery_mode: DeliveryMode,
     /// Payload.
     pub payload: Value,
     /// Causal context.
@@ -189,18 +279,9 @@ impl Invocation {
         Self {
             id: InvocationId::generate(),
             function_id,
-            delivery_mode: DeliveryMode::Sync,
             payload,
             causal_context,
         }
-    }
-
-    /// Set delivery mode.
-    #[must_use]
-    pub fn with_delivery_mode(mut self, mode: DeliveryMode) -> Self {
-        self.delivery_mode = mode;
-        self.causal_context.delivery_mode = mode;
-        self
     }
 }
 
@@ -271,47 +352,9 @@ impl InvocationResult {
             replayed_from: None,
         }
     }
-
-    /// Build a result by replaying a previous idempotent result.
-    #[must_use]
-    pub fn replay_previous(invocation: &Invocation, previous: &Self) -> Self {
-        Self {
-            invocation_id: invocation.id.clone(),
-            function_id: invocation.function_id.clone(),
-            worker_id: previous.worker_id.clone(),
-            function_revision: previous.function_revision,
-            catalog_revision: previous.catalog_revision,
-            trace_id: invocation.causal_context.trace_id.clone(),
-            value: previous.value.clone(),
-            error: previous.error.clone(),
-            replayed_from: Some(previous.invocation_id.clone()),
-        }
-    }
-
-    /// Build a duplicate no-op result.
-    #[must_use]
-    pub fn noop_replay(
-        invocation: &Invocation,
-        worker_id: WorkerId,
-        function_revision: FunctionRevision,
-        catalog_revision: CatalogRevision,
-        replayed_from: InvocationId,
-    ) -> Self {
-        Self {
-            invocation_id: invocation.id.clone(),
-            function_id: invocation.function_id.clone(),
-            worker_id,
-            function_revision,
-            catalog_revision,
-            trace_id: invocation.causal_context.trace_id.clone(),
-            value: Some(Value::Null),
-            error: None,
-            replayed_from: Some(replayed_from),
-        }
-    }
 }
 
-/// Durable shape of an invocation attempt in the Phase 1 in-memory ledger.
+/// Durable shape of an invocation attempt.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InvocationRecord {
     /// Invocation id.
@@ -328,32 +371,18 @@ pub struct InvocationRecord {
     pub actor_id: ActorId,
     /// Actor kind.
     pub actor_kind: ActorKind,
-    /// Authority grant id.
-    pub authority_grant_id: AuthorityGrantId,
-    /// Granted authority scopes.
-    pub authority_scopes: Vec<String>,
     /// Trace id.
     pub trace_id: TraceId,
     /// Parent invocation.
     pub parent_invocation_id: Option<InvocationId>,
-    /// Trigger id.
-    pub trigger_id: Option<TriggerId>,
     /// Session scope active when the invocation completed.
     pub session_id: Option<String>,
     /// Workspace scope active when the invocation completed.
     pub workspace_id: Option<String>,
-    /// Delivery mode.
-    pub delivery_mode: DeliveryMode,
     /// Idempotency key.
     pub idempotency_key: Option<String>,
     /// Concrete idempotency scope.
     pub idempotency_scope: Option<IdempotencyScope>,
-    /// Resource leases acquired by the engine for this invocation.
-    pub resource_lease_ids: Vec<String>,
-    /// Durable compensation record status for this invocation.
-    pub compensation_status: Option<String>,
-    /// Resource references produced by the capability result.
-    pub produced_resource_refs: Vec<Value>,
     /// Replayed invocation, when this was an idempotency replay/no-op.
     pub replayed_from: Option<InvocationId>,
     /// Whether the result was successful.
@@ -393,47 +422,37 @@ impl InvocationRecord {
             catalog_revision: result.catalog_revision,
             actor_id: invocation.causal_context.actor_id.clone(),
             actor_kind: invocation.causal_context.actor_kind.clone(),
-            authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
-            authority_scopes: invocation.causal_context.authority_scopes.clone(),
             trace_id: invocation.causal_context.trace_id.clone(),
             parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
-            trigger_id: invocation.causal_context.trigger_id.clone(),
             session_id: invocation.causal_context.session_id.clone(),
             workspace_id: invocation.causal_context.workspace_id.clone(),
-            delivery_mode: invocation.delivery_mode,
             idempotency_key: invocation.causal_context.idempotency_key.clone(),
             idempotency_scope,
-            resource_lease_ids: Vec::new(),
-            compensation_status: None,
-            produced_resource_refs: produced_resource_refs_from_result(&result.value),
             replayed_from: result.replayed_from.clone(),
             succeeded: result.error.is_none(),
-            result_value: result.value.clone(),
+            result_value: result
+                .value
+                .as_ref()
+                .map(crate::shared::foundation::redaction::redact_sensitive_json),
             error: result.error.clone(),
             timestamp,
         }
     }
 
-    /// Attach host-enforced contract bookkeeping.
+    /// Return the audit-safe projection accepted by any ledger implementation.
+    ///
+    /// Callers normally construct records through [`Self::from_result_at`],
+    /// which already applies this policy. Stores call it again as a boundary
+    /// backstop for manually constructed records.
     #[must_use]
-    pub fn with_contracts(
-        mut self,
-        resource_lease_ids: Vec<String>,
-        compensation_status: Option<String>,
-    ) -> Self {
-        self.resource_lease_ids = resource_lease_ids;
-        self.compensation_status = compensation_status;
-        self
+    pub(crate) fn redacted_for_storage(&self) -> Self {
+        let mut record = self.clone();
+        record.result_value = record
+            .result_value
+            .as_ref()
+            .map(crate::shared::foundation::redaction::redact_sensitive_json);
+        record
     }
-}
-
-fn produced_resource_refs_from_result(value: &Option<Value>) -> Vec<Value> {
-    value
-        .as_ref()
-        .and_then(|value| value.get("resourceRefs"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -441,12 +460,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn causal_context_owns_explicit_runtime_inputs() {
+        let context = CausalContext::new(
+            ActorId::new("agent:runtime-context-test").unwrap(),
+            ActorKind::Agent,
+            TraceId::new("runtime-context-test").unwrap(),
+        )
+        .with_working_directory("/tmp/runtime-context-test")
+        .with_advertised_function(FunctionRevision(3), Some("worker-version".to_owned()))
+        .with_trigger_depth(4);
+
+        assert_eq!(
+            context.working_directory(),
+            Some("/tmp/runtime-context-test")
+        );
+        assert_eq!(
+            context.advertised_function_revision(),
+            Some(FunctionRevision(3))
+        );
+        assert_eq!(context.advertised_worker_version(), Some("worker-version"));
+        assert_eq!(context.trigger_depth(), 4);
+    }
+
+    #[test]
     fn invocation_record_from_result_at_pins_timestamp() {
         let trace_id = TraceId::new("trace-fixed").unwrap();
         let causal_context = CausalContext::new(
             ActorId::new("actor-fixed").unwrap(),
             ActorKind::Agent,
-            AuthorityGrantId::new("grant-fixed").unwrap(),
             trace_id,
         )
         .with_session_id("sess-fixed")
@@ -454,7 +495,6 @@ mod tests {
         let invocation = Invocation {
             id: InvocationId::new("inv-fixed").unwrap(),
             function_id: FunctionId::new("demo::echo").unwrap(),
-            delivery_mode: DeliveryMode::Sync,
             payload: serde_json::json!({"input": "hello"}),
             causal_context,
         };
@@ -473,6 +513,33 @@ mod tests {
         assert_eq!(record.session_id.as_deref(), Some("sess-fixed"));
         assert_eq!(record.workspace_id.as_deref(), Some("ws-fixed"));
         assert_eq!(record.timestamp, timestamp);
+    }
+
+    #[test]
+    fn invocation_record_redacts_credentials_without_mutating_live_result() {
+        let invocation = Invocation::new_sync(
+            FunctionId::new("worker_kernel::webhook_rotate").unwrap(),
+            serde_json::json!({}),
+            CausalContext::new(
+                ActorId::new("agent-secret").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-secret").unwrap(),
+            ),
+        );
+        let token = "trwh_0123456789abcdef0123456789abcdef";
+        let result = InvocationResult::success(
+            &invocation,
+            WorkerId::new("worker-kernel").unwrap(),
+            FunctionRevision(1),
+            CatalogRevision(1),
+            serde_json::json!({"token":token,"path":"/hooks/research"}),
+        );
+
+        let record = InvocationRecord::from_result(&invocation, &result, None);
+
+        assert_eq!(record.result_value.as_ref().unwrap()["token"], "****");
+        assert!(!record.result_value.unwrap().to_string().contains(token));
+        assert_eq!(result.value.as_ref().unwrap()["token"], token);
     }
 }
 

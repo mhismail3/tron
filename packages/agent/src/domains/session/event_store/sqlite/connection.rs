@@ -145,7 +145,7 @@ pub fn new_file(path: &str, config: &ConnectionConfig) -> Result<ConnectionPool>
 /// than continuing on silently-damaged data.
 ///
 /// INVARIANT: every production startup path calls this after opening the
-/// connection pool, before running migrations or accepting any writes.
+/// connection pool, before installing the schema or accepting any writes.
 pub fn check_integrity(conn: &Connection) -> Result<()> {
     let row: String = conn
         .query_row("PRAGMA integrity_check", [], |r| r.get(0))
@@ -376,12 +376,12 @@ mod tests {
     }
 
     #[test]
-    fn check_integrity_passes_after_migrations() {
+    fn check_integrity_passes_after_schema_installation() {
         let config = ConnectionConfig::default();
         let pool = new_in_memory(&config).unwrap();
         let conn = pool.get().unwrap();
-        crate::domains::session::event_store::sqlite::migrations::run_migrations(&conn).unwrap();
-        check_integrity(&conn).expect("migrated DB must pass integrity check");
+        crate::domains::session::event_store::sqlite::schema::ensure_schema(&conn).unwrap();
+        check_integrity(&conn).expect("initialized DB must pass integrity check");
     }
 
     #[test]

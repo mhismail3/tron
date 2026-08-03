@@ -4,8 +4,28 @@ struct ProviderInfo: Identifiable {
     let id: String
     let displayName: String
     let assetIcon: String
+    let systemIcon: String?
     let color: Color
     let supportsOAuth: Bool
+    let supportsCredentials: Bool
+
+    init(
+        id: String,
+        displayName: String,
+        assetIcon: String = "",
+        systemIcon: String? = nil,
+        color: Color,
+        supportsOAuth: Bool,
+        supportsCredentials: Bool = true
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.assetIcon = assetIcon
+        self.systemIcon = systemIcon
+        self.color = color
+        self.supportsOAuth = supportsOAuth
+        self.supportsCredentials = supportsCredentials
+    }
 
     static let modelProviders: [ProviderInfo] = [
         ProviderInfo(id: "anthropic", displayName: "Anthropic", assetIcon: "IconAnthropic", color: .tronCoral, supportsOAuth: true),
@@ -13,15 +33,32 @@ struct ProviderInfo: Identifiable {
         ProviderInfo(id: "google", displayName: "Google", assetIcon: "IconGoogle", color: .tronCyan, supportsOAuth: true),
         ProviderInfo(id: "minimax", displayName: "MiniMax", assetIcon: "IconMiniMax", color: .tronRose, supportsOAuth: false),
         ProviderInfo(id: "kimi", displayName: "Kimi", assetIcon: "IconKimi", color: .tronIndigo, supportsOAuth: false),
+        ProviderInfo(id: "ollama", displayName: "Ollama", assetIcon: "IconOllama", color: .tronAmber, supportsOAuth: false, supportsCredentials: false),
     ]
 
-    static let services: [ProviderInfo] = [
-        ProviderInfo(id: "brave", displayName: "Brave Search", assetIcon: "", color: .tronAmber, supportsOAuth: false),
-        ProviderInfo(id: "exa", displayName: "Exa", assetIcon: "", color: .tronAmber, supportsOAuth: false),
+    /// Search credentials share the provider credential store but are not
+    /// offered as model choices.
+    static let searchProviders: [ProviderInfo] = [
+        ProviderInfo(
+            id: "brave",
+            displayName: "Brave Search",
+            systemIcon: "magnifyingglass.circle.fill",
+            color: .tronAmber,
+            supportsOAuth: false
+        ),
+        ProviderInfo(
+            id: "exa",
+            displayName: "Exa",
+            systemIcon: "sparkle.magnifyingglass",
+            color: .tronPurple,
+            supportsOAuth: false
+        ),
     ]
+
+    static let credentialProviders = modelProviders.filter(\.supportsCredentials) + searchProviders
 
     static func displayName(for id: String) -> String {
-        modelProviders.first { $0.id == id }?.displayName ?? id
+        (modelProviders + searchProviders).first { $0.id == id }?.displayName ?? id
     }
 
     static func settingsOptions(including currentProvider: String) -> [(value: String, label: String)] {
@@ -31,13 +68,5 @@ struct ProviderInfo: Identifiable {
             options.append((value: trimmed, label: trimmed))
         }
         return options
-    }
-
-    var serviceSystemIcon: String {
-        switch id {
-        case "brave": return "magnifyingglass"
-        case "exa": return "doc.text.magnifyingglass"
-        default: return "key"
-        }
     }
 }

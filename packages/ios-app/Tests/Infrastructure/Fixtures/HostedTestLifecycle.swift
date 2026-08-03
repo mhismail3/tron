@@ -1,6 +1,6 @@
 import Foundation
 
-/// Synchronous process fallback for task-owned hosted-test state. Normal test
+/// Synchronous process-exit cleanup for task-owned hosted-test state. Normal test
 /// cleanup still uses the fixture's ordered async drain.
 final class HostedTestCleanupRegistry: @unchecked Sendable {
     static let shared = HostedTestCleanupRegistry(registerProcessExit: true)

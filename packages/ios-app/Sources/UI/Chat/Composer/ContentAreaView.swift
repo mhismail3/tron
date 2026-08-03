@@ -20,7 +20,7 @@ enum ContentAreaChipItem: Identifiable, Equatable {
 /// Main content area showing selected attachments with wrapping.
 struct ContentAreaView: View {
     let attachments: [Attachment]
-    let attachmentCapability: AttachmentCapability
+    let attachmentSupport: AttachmentSupport
     let onRemoveAttachment: (Attachment) -> Void
 
     var body: some View {
@@ -28,7 +28,7 @@ struct ContentAreaView: View {
             ForEach(ContentAreaChipItem.items(attachments: attachments)) { item in
                 switch item {
                 case .attachment(let attachment):
-                    AttachmentBubble(attachment: attachment, capability: attachmentCapability) {
+                    AttachmentBubble(attachment: attachment, tool: attachmentSupport) {
                         onRemoveAttachment(attachment)
                     }
                     .transition(chipTransition)

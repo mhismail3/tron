@@ -2,6 +2,111 @@ import Foundation
 
 // MARK: - Chat Message Model
 
+struct AgentDeliveryMessageProvenance: Decodable, Equatable, Sendable {
+    let deliveryId: String
+    let sourceKind: String
+    let sourceWorkerId: String?
+    let sourceWorkerName: String?
+    let sourceSessionId: String?
+    let sourceInvocationId: String?
+    let wakePolicy: String?
+    let boundary: String?
+    let triggeredWake: Bool?
+    let redelivery: Bool
+    let includedInThisTurn: Bool?
+}
+
+struct AgentDeliveryContinuationPayload: Decodable, Sendable {
+    let deliveries: [AgentDeliveryMessageProvenance]
+}
+
+fileprivate struct AgentDeliveryContinuationPresentationKey: Hashable {
+    let deliveryId: String
+    let redelivery: Bool
+}
+
+enum AgentDeliveryContinuationPresentation {
+    static func label(_ deliveries: [AgentDeliveryMessageProvenance]) -> String {
+        guard !deliveries.isEmpty else { return "Agent update included" }
+        let resumed = deliveries.contains(where: { $0.triggeredWake == true })
+        if deliveries.count > 1 {
+            let carriedOnly = deliveries.allSatisfy {
+                $0.includedInThisTurn == false
+            }
+            return resumed
+                ? "Resumed with \(deliveries.count) updates"
+                : carriedOnly
+                    ? "Response informed by \(deliveries.count) earlier updates"
+                    : "\(deliveries.count) updates included"
+        }
+        let sources = Array(Set(deliveries.map {
+            $0.sourceWorkerName
+                ?? WorkerConsolePresentation.displayLabel($0.sourceWorkerId ?? $0.sourceKind)
+        })).sorted()
+        let source = sources.isEmpty ? "agent update" : sources.joined(separator: " + ")
+        if resumed {
+            return "Resumed from \(source)"
+        }
+        if deliveries[0].includedInThisTurn == false {
+            return "Update used earlier · \(source)"
+        }
+        return "Update included · \(source)"
+    }
+
+    /// Persisted assistant events retain delivery metadata on every provider
+    /// turn that belongs to one resumed run. Chat presents that durable
+    /// evidence once per logical run while preserving a later explicit
+    /// redelivery of the same delivery ID.
+    static func deduplicatingTranscript(_ messages: [ChatMessage]) -> [ChatMessage] {
+        var tracker = AgentDeliveryContinuationPresentationTracker()
+        return messages.compactMap { original in
+            if original.role == .user {
+                tracker.reset()
+                return original
+            }
+            guard !original.agentDeliveryProvenance.isEmpty else {
+                return original
+            }
+            var message = original
+            message.agentDeliveryProvenance = tracker.takeUnpresented(
+                original.agentDeliveryProvenance
+            )
+            if message.agentDeliveryProvenance.isEmpty,
+               message.isDeliveryProvenanceOnly {
+                return nil
+            }
+            return message
+        }
+    }
+
+    fileprivate static func presentationKey(
+        _ provenance: AgentDeliveryMessageProvenance
+    ) -> AgentDeliveryContinuationPresentationKey {
+        AgentDeliveryContinuationPresentationKey(
+            deliveryId: provenance.deliveryId,
+            redelivery: provenance.redelivery
+        )
+    }
+}
+
+struct AgentDeliveryContinuationPresentationTracker {
+    private var presented = Set<AgentDeliveryContinuationPresentationKey>()
+
+    mutating func takeUnpresented(
+        _ deliveries: [AgentDeliveryMessageProvenance]
+    ) -> [AgentDeliveryMessageProvenance] {
+        deliveries.filter {
+            presented.insert(
+                AgentDeliveryContinuationPresentation.presentationKey($0)
+            ).inserted
+        }
+    }
+
+    mutating func reset() {
+        presented.removeAll(keepingCapacity: true)
+    }
+}
+
 struct ChatMessage: Identifiable, Equatable {
     let id: UUID
     let role: MessageRole
@@ -15,8 +120,7 @@ struct ChatMessage: Identifiable, Equatable {
     /// Files attached to this message (unified model - images, PDFs, documents)
     var attachments: [Attachment]?
 
-    // MARK: - Enriched Metadata (Phase 1)
-    // These fields come from server-side event store enhancements
+    // MARK: - Server Metadata
 
     /// Model that generated this response (e.g., "claude-sonnet-4-20250514")
     var model: String?
@@ -30,9 +134,18 @@ struct ChatMessage: Identifiable, Equatable {
     /// Whether extended thinking was used
     var hasThinking: Bool?
 
+    /// Minimal durable provenance for a delivery-only assistant continuation.
+    /// Content remains inspectable through Session Context; chat carries only
+    /// enough identity to explain why the assistant resumed without a user row.
+    var agentDeliveryProvenance: [AgentDeliveryMessageProvenance]
+
+    /// A zero-content row whose only visual purpose is to place durable
+    /// delivery provenance before thinking, tools, and response text.
+    var isDeliveryProvenanceOnly: Bool
+
     /// Server-backed finality for the textual response that ends a prompt
     /// cycle. Live events set this from `agent.response_complete`; replay sets
-    /// it from the persisted assistant payload's capability blocks.
+    /// it from the persisted assistant payload's tool blocks.
     var isFinalAssistantResponse: Bool
 
     /// Event ID from the server's event store (for deletion, forking, etc.)
@@ -51,6 +164,8 @@ struct ChatMessage: Identifiable, Equatable {
         latencyMs: Int? = nil,
         turnNumber: Int? = nil,
         hasThinking: Bool? = nil,
+        agentDeliveryProvenance: [AgentDeliveryMessageProvenance] = [],
+        isDeliveryProvenanceOnly: Bool = false,
         isFinalAssistantResponse: Bool = false,
         eventId: String? = nil
     ) {
@@ -66,8 +181,25 @@ struct ChatMessage: Identifiable, Equatable {
         self.latencyMs = latencyMs
         self.turnNumber = turnNumber
         self.hasThinking = hasThinking
+        self.agentDeliveryProvenance = agentDeliveryProvenance
+        self.isDeliveryProvenanceOnly = isDeliveryProvenanceOnly
         self.isFinalAssistantResponse = isFinalAssistantResponse
         self.eventId = eventId
+    }
+
+    static func deliveryContinuation(
+        _ provenance: [AgentDeliveryMessageProvenance],
+        timestamp: Date = Date(),
+        turnNumber: Int? = nil
+    ) -> ChatMessage {
+        ChatMessage(
+            role: .assistant,
+            content: .text(""),
+            timestamp: timestamp,
+            turnNumber: turnNumber,
+            agentDeliveryProvenance: provenance,
+            isDeliveryProvenanceOnly: true
+        )
     }
 
     var formattedTimestamp: String {
@@ -137,7 +269,7 @@ struct ChatMessage: Identifiable, Equatable {
         // Must have an eventId (from server)
         guard eventId != nil else { return false }
 
-        // Must be a user or assistant message (not system, capabilityResult, etc.)
+        // Must be a user or assistant message (not system, toolResult, etc.)
         guard role == .user || role == .assistant else { return false }
 
         // Don't allow deleting streaming messages

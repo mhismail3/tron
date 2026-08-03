@@ -2,7 +2,7 @@
 //!
 //! [`StreamAccumulator`] encapsulates the repeated delta-processing logic shared
 //! across Anthropic, OpenAI, and Google stream handlers: text accumulation,
-//! thinking accumulation, capability invocation argument buffering, and token tracking.
+//! thinking accumulation, tool invocation argument buffering, and token tracking.
 //!
 //! Each provider handler owns a `StreamAccumulator` and delegates the mechanical
 //! accumulation work to it, keeping only provider-specific event parsing and
@@ -10,26 +10,26 @@
 
 use serde_json::Map;
 
-use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
+use crate::domains::model::protocol::{ToolCallContext, parse_tool_call_arguments};
 use crate::shared::protocol::content::ThinkingContentKind;
 use crate::shared::protocol::events::StreamEvent;
-use crate::shared::protocol::messages::CapabilityInvocationDraft;
+use crate::shared::protocol::messages::ToolInvocationDraft;
 
 /// Maximum text buffered for a single provider content block.
 pub const MAX_STREAM_ACCUMULATED_TEXT_BYTES: usize = 8 * 1024 * 1024;
 /// Maximum thinking/reasoning buffered for a single provider content block.
 pub const MAX_STREAM_ACCUMULATED_THINKING_BYTES: usize = 8 * 1024 * 1024;
-/// Maximum streamed capability argument JSON buffered before parsing.
-pub const MAX_STREAM_CAPABILITY_ARGUMENT_BYTES: usize = 1024 * 1024;
-/// Maximum simultaneously open streamed capability invocations.
-pub const MAX_ACTIVE_STREAM_CAPABILITY_INVOCATIONS: usize = 128;
+/// Maximum streamed tool argument JSON buffered before parsing.
+pub const MAX_STREAM_TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
+/// Maximum simultaneously open streamed tool invocations.
+pub const MAX_ACTIVE_STREAM_TOOL_INVOCATIONS: usize = 128;
 
-/// In-progress capability invocation being accumulated from streaming deltas.
+/// In-progress tool invocation being accumulated from streaming deltas.
 #[derive(Clone, Debug)]
-pub struct CapabilityInvocationAccumulator {
-    /// Capability invocation ID.
+pub struct ToolInvocationAccumulator {
+    /// Tool invocation ID.
     pub id: String,
-    /// Capability name.
+    /// Tool name.
     pub name: String,
     /// Accumulated JSON arguments string.
     pub args: String,
@@ -37,7 +37,7 @@ pub struct CapabilityInvocationAccumulator {
 
 /// Shared accumulator for LLM stream delta processing.
 ///
-/// Tracks text, thinking, signature, and capability invocation state across streaming
+/// Tracks text, thinking, signature, and tool invocation state across streaming
 /// deltas, emitting the appropriate [`StreamEvent`]s at each transition.
 #[derive(Clone, Debug)]
 pub struct StreamAccumulator {
@@ -51,8 +51,8 @@ pub struct StreamAccumulator {
     pub text_started: bool,
     /// Whether a `ThinkingStart` event has been emitted.
     pub thinking_started: bool,
-    /// In-progress capability invocations keyed by capability invocation ID.
-    capability_invocations: Vec<CapabilityInvocationAccumulator>,
+    /// In-progress tool invocations keyed by tool invocation ID.
+    tool_invocations: Vec<ToolInvocationAccumulator>,
     /// Input token count.
     pub input_tokens: u64,
     /// Output token count.
@@ -75,7 +75,7 @@ impl StreamAccumulator {
             accumulated_signature: String::new(),
             text_started: false,
             thinking_started: false,
-            capability_invocations: Vec::new(),
+            tool_invocations: Vec::new(),
             input_tokens: 0,
             output_tokens: 0,
             cache_read_tokens: 0,
@@ -190,44 +190,39 @@ impl StreamAccumulator {
         self.accumulated_signature.push_str(sig);
     }
 
-    /// Start tracking a new capability invocation. Emits `CapabilityInvocationDraftStart`.
-    pub fn start_capability_invocation(&mut self, id: String, name: String) -> Vec<StreamEvent> {
-        if self.capability_invocations.len() >= MAX_ACTIVE_STREAM_CAPABILITY_INVOCATIONS {
+    /// Start tracking a new tool invocation. Emits `ToolInvocationDraftStart`.
+    pub fn start_tool_invocation(&mut self, id: String, name: String) -> Vec<StreamEvent> {
+        if self.tool_invocations.len() >= MAX_ACTIVE_STREAM_TOOL_INVOCATIONS {
             return vec![StreamEvent::Error {
                 error: format!(
-                    "active stream capability invocation limit exceeded ({MAX_ACTIVE_STREAM_CAPABILITY_INVOCATIONS})"
+                    "active stream tool invocation limit exceeded ({MAX_ACTIVE_STREAM_TOOL_INVOCATIONS})"
                 ),
             }];
         }
-        let events = vec![StreamEvent::CapabilityInvocationDraftStart {
+        let events = vec![StreamEvent::ToolInvocationDraftStart {
             invocation_id: id.clone(),
             name: name.clone(),
         }];
-        self.capability_invocations
-            .push(CapabilityInvocationAccumulator {
-                id,
-                name,
-                args: String::new(),
-            });
+        self.tool_invocations.push(ToolInvocationAccumulator {
+            id,
+            name,
+            args: String::new(),
+        });
         events
     }
 
-    /// Append argument JSON delta to a capability invocation. Emits `CapabilityInvocationDraftDelta`.
+    /// Append argument JSON delta to a tool invocation. Emits `ToolInvocationDraftDelta`.
     pub fn append_tool_args(&mut self, id: &str, delta: &str) -> Vec<StreamEvent> {
-        if let Some(tc) = self
-            .capability_invocations
-            .iter_mut()
-            .find(|tc| tc.id == id)
-        {
+        if let Some(tc) = self.tool_invocations.iter_mut().find(|tc| tc.id == id) {
             if let Some(error) = append_with_limit(
                 &mut tc.args,
                 delta,
-                MAX_STREAM_CAPABILITY_ARGUMENT_BYTES,
-                "stream capability argument buffer",
+                MAX_STREAM_TOOL_ARGUMENT_BYTES,
+                "stream tool argument buffer",
             ) {
                 return vec![error];
             }
-            vec![StreamEvent::CapabilityInvocationDraftDelta {
+            vec![StreamEvent::ToolInvocationDraftDelta {
                 invocation_id: id.to_string(),
                 arguments_delta: delta.to_string(),
             }]
@@ -236,37 +231,34 @@ impl StreamAccumulator {
         }
     }
 
-    /// Finish a capability invocation by ID. Parses accumulated args and emits `CapabilityInvocationDraftEnd`.
+    /// Finish a tool invocation by ID. Parses accumulated args and emits `ToolInvocationDraftEnd`.
     ///
-    /// Returns the events and removes the capability invocation from the active set.
+    /// Returns the events and removes the tool invocation from the active set.
     #[cfg(test)]
-    pub fn finish_capability_invocation(&mut self, id: &str) -> Vec<StreamEvent> {
-        self.finish_capability_invocation_with_provider(id, None)
+    pub fn finish_tool_invocation(&mut self, id: &str) -> Vec<StreamEvent> {
+        self.finish_tool_invocation_with_provider(id, None)
     }
 
-    /// Finish a capability invocation by ID with provider context for parse diagnostics.
+    /// Finish a tool invocation by ID with provider context for parse diagnostics.
     ///
-    /// Returns the events and removes the capability invocation from the active set.
-    pub fn finish_capability_invocation_with_provider(
+    /// Returns the events and removes the tool invocation from the active set.
+    pub fn finish_tool_invocation_with_provider(
         &mut self,
         id: &str,
         provider: Option<&str>,
     ) -> Vec<StreamEvent> {
-        let pos = self
-            .capability_invocations
-            .iter()
-            .position(|tc| tc.id == id);
+        let pos = self.tool_invocations.iter().position(|tc| tc.id == id);
         let Some(idx) = pos else {
             return vec![];
         };
-        let tc = self.capability_invocations.remove(idx);
-        let ctx = CapabilityCallContext {
+        let tc = self.tool_invocations.remove(idx);
+        let ctx = ToolCallContext {
             invocation_id: Some(tc.id.clone()),
-            model_primitive_name: Some(tc.name.clone()),
+            tool_name: Some(tc.name.clone()),
             provider: provider.map(str::to_owned),
         };
         let arguments: Map<String, serde_json::Value> =
-            match parse_capability_call_arguments(Some(&tc.args), Some(&ctx)) {
+            match parse_tool_call_arguments(Some(&tc.args), Some(&ctx)) {
                 Ok(arguments) => arguments,
                 Err(error) => {
                     return vec![StreamEvent::Error {
@@ -274,35 +266,8 @@ impl StreamAccumulator {
                     }];
                 }
             };
-        let capability_invocation = CapabilityInvocationDraft::new(tc.id, tc.name, arguments);
-        vec![StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation,
-        }]
-    }
-
-    /// Finish a capability invocation with pre-parsed arguments and optional thought signature.
-    #[cfg(test)]
-    pub fn finish_capability_invocation_with(
-        &mut self,
-        id: &str,
-        arguments: Map<String, serde_json::Value>,
-        thought_signature: Option<String>,
-    ) -> Vec<StreamEvent> {
-        let pos = self
-            .capability_invocations
-            .iter()
-            .position(|tc| tc.id == id);
-        let Some(idx) = pos else {
-            return vec![];
-        };
-        let tc = self.capability_invocations.remove(idx);
-        let mut capability_invocation = CapabilityInvocationDraft::new(tc.id, tc.name, arguments);
-        if let Some(sig) = thought_signature {
-            capability_invocation = capability_invocation.with_thought_signature(&sig);
-        }
-        vec![StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation,
-        }]
+        let tool_invocation = ToolInvocationDraft::new(tc.id, tc.name, arguments);
+        vec![StreamEvent::ToolInvocationDraftEnd { tool_invocation }]
     }
 
     /// Emit `ThinkingEnd` if thinking was started, closing the thinking block.
@@ -365,21 +330,10 @@ impl StreamAccumulator {
         }
     }
 
-    /// Get a reference to the accumulated capability invocations.
+    /// Get a reference to the accumulated tool invocations.
     #[cfg(test)]
-    pub fn capability_invocations(&self) -> &[CapabilityInvocationAccumulator] {
-        &self.capability_invocations
-    }
-
-    /// Get a mutable reference to a capability invocation by ID.
-    #[cfg(test)]
-    pub fn capability_invocation_mut(
-        &mut self,
-        id: &str,
-    ) -> Option<&mut CapabilityInvocationAccumulator> {
-        self.capability_invocations
-            .iter_mut()
-            .find(|tc| tc.id == id)
+    pub fn tool_invocations(&self) -> &[ToolInvocationAccumulator] {
+        &self.tool_invocations
     }
 
     /// Set input and output token counts.

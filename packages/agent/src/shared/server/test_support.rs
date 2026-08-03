@@ -1,10 +1,12 @@
-//! Shared test fixtures for server capability tests.
+//! Shared test fixtures for server tool tests.
 //!
-//! Mock providers, responder factories, and an in-memory `ServerRuntimeContext` builder
+//! Mock providers, responder factories, and in-memory `ServerRuntimeContext` builders
 //! are used by engine and service tests via
 //! `crate::shared::server::test_support::*`. Keeping the helpers in
 //! their own file (instead of an inline `#[cfg(test)] mod` in `mod.rs`)
-//! keeps setup code out of production modules.
+//! keeps setup code out of production modules. Worker-runtime tests receive the
+//! exact runtime bound into the test engine catalog so nested tool calls cannot
+//! accidentally cross between unrelated temporary stores.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,25 +37,20 @@ pub(crate) fn unique_test_path(name: &str, extension: &str) -> PathBuf {
 pub(crate) fn unique_tron_home() -> PathBuf {
     let dir = unique_test_path("tron-home", "dir");
     let home = dir.join(".tron");
-    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::home::ensure_tron_home_at(&home).unwrap();
     home
 }
 
-pub(crate) fn test_user_profile_path(home: &Path) -> PathBuf {
-    home.join(crate::shared::foundation::paths::dirs::PROFILES)
-        .join(crate::shared::foundation::profile::USER_PROFILE)
-        .join(crate::shared::foundation::paths::files::PROFILE_TOML)
+pub(crate) fn test_settings_path(home: &Path) -> PathBuf {
+    crate::shared::foundation::paths::settings_path_for_home(home)
 }
 
 pub(crate) fn test_auth_path(home: &Path) -> PathBuf {
-    home.join(crate::shared::foundation::paths::dirs::PROFILES)
-        .join(crate::shared::foundation::paths::files::AUTH_JSON)
+    crate::shared::foundation::paths::auth_path_for_home(home)
 }
 
-pub(crate) fn test_profile_runtime(
-    home: &Path,
-) -> Arc<crate::domains::agent::r#loop::ProfileRuntime> {
-    Arc::new(crate::domains::agent::r#loop::ProfileRuntime::load(home).unwrap())
+pub(crate) fn test_settings_runtime(home: &Path) -> Arc<crate::domains::settings::SettingsRuntime> {
+    Arc::new(crate::domains::settings::SettingsRuntime::load(home).unwrap())
 }
 
 /// A no-op model responder for tests.
@@ -135,41 +132,64 @@ impl ModelResponderFactory for StrictMockFactory {
 
 /// Build an `ServerRuntimeContext` backed by an in-memory event store.
 pub fn make_test_context() -> ServerRuntimeContext {
+    make_test_context_with_responder(None)
+}
+
+pub fn make_test_context_with_responder(
+    responder_factory: Option<Arc<dyn ModelResponderFactory>>,
+) -> ServerRuntimeContext {
+    let home = unique_tron_home();
+    let ctx = build_test_context(&home, responder_factory);
+    crate::transport::runtime::setup::register_server_domains_for_context(&ctx).unwrap();
+    ctx
+}
+
+pub(crate) fn make_test_context_and_worker_runtime_at(
+    home: &Path,
+    responder_factory: Option<Arc<dyn ModelResponderFactory>>,
+) -> (
+    ServerRuntimeContext,
+    Arc<crate::domains::worker_kernel::WorkerRuntime>,
+) {
+    crate::shared::foundation::home::ensure_tron_home_at(home).unwrap();
+    let ctx = build_test_context(home, responder_factory);
+    let activation = crate::domains::registration::register_domains_for_context(&ctx).unwrap();
+    let worker_runtime = activation.into_worker_kernel_without_activation();
+    (ctx, worker_runtime)
+}
+
+fn build_test_context(
+    home: &Path,
+    responder_factory: Option<Arc<dyn ModelResponderFactory>>,
+) -> ServerRuntimeContext {
     let pool = crate::domains::session::event_store::new_in_memory(
         &crate::domains::session::event_store::ConnectionConfig::default(),
     )
     .unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+        let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
     }
     let store = Arc::new(EventStore::new(pool));
     let mgr = Arc::new(SessionManager::new(store.clone()));
     let orch = Arc::new(Orchestrator::new(mgr.clone()));
-    let home = unique_tron_home();
-    let settings_path = test_user_profile_path(&home);
-    let auth_path = test_auth_path(&home);
-    let profile_runtime = test_profile_runtime(&home);
-    let ctx = ServerRuntimeContext {
+    let settings_path = test_settings_path(home);
+    let auth_path = test_auth_path(home);
+    let settings_runtime = test_settings_runtime(home);
+    ServerRuntimeContext {
         orchestrator: orch,
         session_manager: mgr,
         event_store: store,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
-        transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine::new(),
-        apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         settings_path,
-        profile_runtime,
-        responder_factory: None,
+        settings_runtime,
+        responder_factory,
         server_start_time: Instant::now(),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         auth_path,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
-        onboarded_marker_path: unique_test_path("onboarded", "marker"),
-    };
-    crate::transport::runtime::setup::register_server_domains_for_context(&ctx).unwrap();
-    ctx
+    }
 }
 
 #[cfg(test)]
@@ -177,16 +197,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn make_test_context_owns_isolated_profile_runtime() {
+    fn make_test_context_owns_isolated_settings_runtime() {
         let ctx = make_test_context();
         assert!(
             ctx.settings_path.starts_with(std::env::temp_dir()),
-            "test settings path must be isolated from the live user profile"
+            "test settings path must be isolated from live engine settings"
         );
-        assert!(ctx.profile_runtime.home().starts_with(std::env::temp_dir()));
+        assert!(
+            ctx.settings_runtime
+                .home()
+                .starts_with(std::env::temp_dir())
+        );
         assert_eq!(
-            ctx.profile_runtime.current().settings.name,
-            crate::domains::settings::TronSettings::default().name
+            ctx.settings_runtime
+                .current()
+                .settings
+                .server
+                .heartbeat_interval_ms,
+            crate::domains::settings::TronSettings::default()
+                .server
+                .heartbeat_interval_ms
         );
     }
 }

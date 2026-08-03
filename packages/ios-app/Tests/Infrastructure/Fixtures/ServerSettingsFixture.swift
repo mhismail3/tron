@@ -18,11 +18,13 @@ enum ServerSettingsFixture {
     private static func defaultObject() throws -> [String: Any] {
         let json = """
         {
-            "server": {
-                "defaultModel": "claude-sonnet-4-6",
-                "transcription": {
-                    "enabled": false
+            "api": {
+                "ollama": {
+                    "baseUrl": "http://localhost:11434"
                 }
+            },
+            "server": {
+                "defaultModel": "claude-sonnet-4-6"
             },
             "context": {
                 "compactor": {

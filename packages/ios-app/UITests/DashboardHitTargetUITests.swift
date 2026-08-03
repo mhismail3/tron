@@ -17,27 +17,27 @@ final class DashboardHitTargetUITests: XCTestCase {
         cockpitBand.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
 
         XCTAssertTrue(app.staticTexts["Dashboard"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Capabilities"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Tools"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Activity"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Core"].exists)
         XCTAssertFalse(app.buttons["Discovery"].exists)
         XCTAssertTrue(
-            app.descendants(matching: .any)["dashboard-summary-capabilities"]
+            app.descendants(matching: .any)["dashboard-summary-tools"]
                 .firstMatch
                 .waitForExistence(timeout: 10)
         )
-        XCTAssertTrue(app.buttons["Check capabilities"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Check tools"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Operations verified"].exists)
-        keepScreenshot(named: "engine-cockpit-capabilities")
+        keepScreenshot(named: "engine-cockpit-tools")
 
-        let coreEngineGroup = app.buttons["capability-group-core_engine"].firstMatch
+        let coreEngineGroup = app.buttons["tool-group-core_engine"].firstMatch
         XCTAssertTrue(coreEngineGroup.waitForExistence(timeout: 10))
         let dashboardScroll = app.scrollViews.firstMatch
         for _ in 0..<4 where !coreEngineGroup.isHittable {
             dashboardScroll.swipeUp()
         }
         XCTAssertTrue(coreEngineGroup.isHittable)
-        keepScreenshot(named: "engine-cockpit-capability-card-alignment")
+        keepScreenshot(named: "engine-cockpit-tool-card-alignment")
         coreEngineGroup.tap()
         XCTAssertTrue(app.staticTexts["Core Engine"].waitForExistence(timeout: 10))
         XCTAssertTrue(
@@ -47,16 +47,16 @@ final class DashboardHitTargetUITests: XCTestCase {
             app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Operation ID:"))
                 .firstMatch
                 .waitForExistence(timeout: 10),
-            "Capability detail should expose at least one current server-owned operation"
+            "Tool detail should expose at least one current server-owned operation"
         )
-        keepScreenshot(named: "engine-cockpit-capability-detail")
+        keepScreenshot(named: "engine-cockpit-tool-detail")
 
         let operation = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "operation-row-")
         ).firstMatch
         XCTAssertTrue(
             operation.waitForExistence(timeout: 10),
-            "Capability detail should provide a disclosure row for its current operation"
+            "Tool detail should provide a disclosure row for its current operation"
         )
         operation.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
         XCTAssertTrue(app.staticTexts["Operation Detail"].waitForExistence(timeout: 10))

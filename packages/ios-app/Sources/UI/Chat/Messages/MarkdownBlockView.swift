@@ -1,5 +1,22 @@
 import SwiftUI
 
+enum MarkdownListLayout {
+    /// A bullet only reserves enough room for its glyph. Ordered markers can
+    /// grow beyond this minimum when their number needs more horizontal space.
+    static let minimumMarkerWidth: CGFloat = 8
+    static let markerSpacing: CGFloat = 5
+    /// Every nested bullet begins at the preceding level's minimum text origin.
+    static let depthIndent: CGFloat = minimumMarkerWidth + markerSpacing
+
+    static func leadingIndent(forDepth depth: Int) -> CGFloat {
+        CGFloat(max(depth, 0)) * depthIndent
+    }
+
+    static func minimumContentLeadingIndent(forDepth depth: Int) -> CGFloat {
+        leadingIndent(forDepth: depth) + minimumMarkerWidth + markerSpacing
+    }
+}
+
 // MARK: - Inline Markdown Helper
 
 /// Parses inline markdown and fixes bold rendering by using explicit variable font weights
@@ -150,17 +167,26 @@ struct MarkdownBlockView: View {
     private func listView(items: [MarkdownListItem]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: MarkdownListLayout.markerSpacing) {
                     Text(markerText(for: item.marker))
                         .font(Font(TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .regular)))
                         .foregroundStyle(.tronTextSecondary)
-                        .frame(width: 22, alignment: .trailing)
+                        .fixedSize(horizontal: true, vertical: false)
+                        // Keep ordinary bullets compact while allowing ordered
+                        // markers such as "10." to occupy their natural width.
+                        .frame(
+                            minWidth: MarkdownListLayout.minimumMarkerWidth,
+                            alignment: .leading
+                        )
                     Text(inlineMarkdown(from: item.content))
                         .foregroundStyle(textColor)
                         .selectableText(!textSelectionDisabled)
                         .lineSpacing(4)
                 }
-                .padding(.leading, 8 + CGFloat(item.depth) * 22)
+                // Root markers begin on the message's leading edge. Only actual
+                // nesting adds indentation, so list depth remains stable for
+                // ordered, unordered, and mixed lists.
+                .padding(.leading, MarkdownListLayout.leadingIndent(forDepth: item.depth))
             }
         }
     }

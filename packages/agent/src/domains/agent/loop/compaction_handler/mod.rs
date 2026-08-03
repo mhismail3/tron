@@ -2,10 +2,9 @@
 //!
 //! The handler owns the runtime commit boundary for compaction. A summarizer
 //! strategy may be injected, but an effective compaction is not committed unless
-//! the server records the context-control action/snapshot proof first. If that
-//! proof path is unavailable or fails, the handler restores the pre-compaction
-//! context checkpoint and emits a failed live event instead of appending a bare
-//! boundary. Turn cancellation is handled inside this owner: if Stop arrives
+//! the server records the session-owned compact boundary first. If persistence
+//! is unavailable or fails, the handler restores the pre-compaction context
+//! checkpoint and emits a failed live event. Turn cancellation is handled inside this owner: if Stop arrives
 //! while the summarizer is awaited, the handler restores its checkpoint and
 //! pairs the already-emitted start with a failed completion before returning
 //! `RuntimeError::Cancelled` to the turn runner.
@@ -14,52 +13,58 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
-use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::domains::agent::context::compaction_trigger::CompactionTrigger;
 use crate::domains::agent::context::context_manager::ContextManager;
-use crate::domains::agent::context::summarizer::{KeywordSummarizer, Summarizer};
-use crate::domains::agent::context::types::{CompactionTriggerConfig, CompactionTriggerInput};
+use crate::domains::agent::context::summarizer::{
+    Summarizer, SummaryContext, WorkerHookSummarizer,
+};
+use crate::domains::agent::context::types::CompactionTriggerConfig;
 use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
+use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
+use crate::domains::session::event_store::EventType;
 use crate::shared::protocol::events::{BaseEvent, CompactionReason, TronEvent};
 use metrics::{counter, histogram};
+use serde_json::json;
 use tracing::{debug, warn};
 
 pub struct CompactionHandler {
     is_compacting: AtomicBool,
-    compaction_done: Arc<Notify>,
     persister: Mutex<
         Option<Arc<crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister>>,
     >,
-    context_control: Mutex<Option<crate::domains::context_control::Deps>>,
-    trigger: Mutex<CompactionTrigger>,
+    session_manager: Mutex<Option<Arc<SessionManager>>>,
+    trigger: CompactionTrigger,
     summarizer: Arc<dyn Summarizer>,
 }
 
 struct CompactionGuard<'a> {
     is_compacting: &'a AtomicBool,
-    done: &'a Notify,
 }
 
 impl Drop for CompactionGuard<'_> {
     fn drop(&mut self) {
         self.is_compacting.store(false, Ordering::SeqCst);
-        self.done.notify_waiters();
     }
 }
 
 impl CompactionHandler {
-    pub fn new(trigger_config: CompactionTriggerConfig) -> Self {
-        Self::with_summarizer(trigger_config, Arc::new(KeywordSummarizer::new()))
+    pub fn new(
+        trigger_config: CompactionTriggerConfig,
+        engine_host: crate::engine::EngineHostHandle,
+    ) -> Self {
+        Self::with_summarizer(
+            trigger_config,
+            Arc::new(WorkerHookSummarizer::new(engine_host)),
+        )
     }
 
     /// Build a compaction handler with an explicit summarizer strategy.
     ///
-    /// Production uses [`KeywordSummarizer`] through [`Self::new`]. This
-    /// constructor keeps the loop boundary replaceable so a future
-    /// engine-owned compaction strategy can be injected without changing
+    /// Production resolves a worker-owned summary hook through [`Self::new`].
+    /// This constructor keeps focused tests replaceable without changing
     /// context-control records, session persistence, or iOS presentation code.
     /// Replacement strategies still commit through the same server-owned proof
     /// path; the strategy seam is summary generation, not custody.
@@ -69,10 +74,9 @@ impl CompactionHandler {
     ) -> Self {
         Self {
             is_compacting: AtomicBool::new(false),
-            compaction_done: Arc::new(Notify::new()),
             persister: Mutex::new(None),
-            context_control: Mutex::new(None),
-            trigger: Mutex::new(CompactionTrigger::new(trigger_config)),
+            session_manager: Mutex::new(None),
+            trigger: CompactionTrigger::new(trigger_config),
             summarizer,
         }
     }
@@ -86,19 +90,8 @@ impl CompactionHandler {
         *self.persister.lock().unwrap() = Some(persister);
     }
 
-    pub(crate) fn set_context_control(&self, deps: crate::domains::context_control::Deps) {
-        *self.context_control.lock().unwrap() = Some(deps);
-    }
-
-    pub fn is_compacting(&self) -> bool {
-        self.is_compacting.load(Ordering::Relaxed)
-    }
-
-    pub async fn wait_for_compaction(&self, timeout: std::time::Duration) {
-        if !self.is_compacting.load(Ordering::SeqCst) {
-            return;
-        }
-        let _ = tokio::time::timeout(timeout, self.compaction_done.notified()).await;
+    pub(crate) fn set_session_manager(&self, session_manager: Arc<SessionManager>) {
+        *self.session_manager.lock().unwrap() = Some(session_manager);
     }
 
     pub async fn check_and_compact(
@@ -108,6 +101,7 @@ impl CompactionHandler {
         emitter: &Arc<EventEmitter>,
         sequence_counter: Option<&AtomicI64>,
         cancel: &CancellationToken,
+        run_context: &crate::domains::agent::r#loop::types::RunContext,
     ) -> Result<bool, RuntimeError> {
         let context_limit = context_manager.get_context_limit();
         if context_limit == 0 {
@@ -117,15 +111,7 @@ impl CompactionHandler {
         let current_tokens = context_manager.get_current_tokens();
         #[allow(clippy::cast_precision_loss)]
         let token_ratio = current_tokens as f64 / context_limit as f64;
-        let trigger_result = self
-            .trigger
-            .lock()
-            .unwrap()
-            .should_compact(&CompactionTriggerInput {
-                current_token_ratio: token_ratio,
-                recent_event_types: Vec::new(),
-                recent_capability_invocations: Vec::new(),
-            });
+        let trigger_result = self.trigger.should_compact(token_ratio);
         if !trigger_result.compact {
             return Ok(false);
         }
@@ -141,20 +127,22 @@ impl CompactionHandler {
             "compaction triggered"
         );
 
-        let success = self
-            .execute_compaction_inner(
-                context_manager,
-                session_id,
-                emitter,
-                CompactionReason::ThresholdExceeded,
-                sequence_counter,
-                Some(cancel),
-            )
-            .await?;
-        if success {
-            self.trigger.lock().unwrap().reset();
-        }
-        Ok(success)
+        self.execute_compaction_inner(
+            context_manager,
+            session_id,
+            emitter,
+            CompactionReason::ThresholdExceeded,
+            sequence_counter,
+            Some(cancel),
+            SummaryContext {
+                session_id: session_id.to_owned(),
+                trace_id: run_context.engine_trace_id.clone(),
+                parent_invocation_id: run_context.parent_invocation_id.clone(),
+                worker_causal_depth: run_context.worker_causal_depth,
+                origin_worker_id: run_context.origin_worker_id.clone(),
+            },
+        )
+        .await
     }
 
     pub async fn execute_compaction(
@@ -172,6 +160,10 @@ impl CompactionHandler {
             reason,
             sequence_counter,
             None,
+            SummaryContext {
+                session_id: session_id.to_owned(),
+                ..SummaryContext::default()
+            },
         )
         .await
     }
@@ -184,6 +176,7 @@ impl CompactionHandler {
         reason: CompactionReason,
         sequence_counter: Option<&AtomicI64>,
         cancel: Option<&CancellationToken>,
+        summary_context: SummaryContext,
     ) -> Result<bool, RuntimeError> {
         if cancel.is_some_and(CancellationToken::is_cancelled) {
             return Err(RuntimeError::Cancelled);
@@ -197,7 +190,6 @@ impl CompactionHandler {
         }
         let _guard = CompactionGuard {
             is_compacting: &self.is_compacting,
-            done: &self.compaction_done,
         };
 
         let tokens_before = context_manager.get_current_tokens();
@@ -224,23 +216,23 @@ impl CompactionHandler {
                         1.0,
                         Some(reason),
                         Some("Compaction cancelled; the original context was restored.".to_owned()),
+                        None,
                         sequence_counter,
                     );
                     return Err(RuntimeError::Cancelled);
                 }
-                result = context_manager.execute_compaction(self.summarizer.as_ref(), None) => result,
+                result = context_manager.execute_compaction(self.summarizer.as_ref(), None, &summary_context) => result,
             }
         } else {
             context_manager
-                .execute_compaction(self.summarizer.as_ref(), None)
+                .execute_compaction(self.summarizer.as_ref(), None, &summary_context)
                 .await
         };
         let effective_result = result.as_ref().is_ok_and(is_effective_compaction_result);
         let tokens_after = context_manager.get_current_tokens();
 
-        // Once proof recording begins it is allowed to finish so cancellation
-        // cannot drop a partially committed context-control action. A stop
-        // observed here rolls back before that commit boundary.
+        // Once boundary persistence begins it is allowed to finish so
+        // cancellation cannot drop a partially committed context transition.
         if cancel.is_some_and(CancellationToken::is_cancelled) {
             context_manager.restore_compaction_checkpoint(checkpoint);
             emit_complete(
@@ -252,6 +244,7 @@ impl CompactionHandler {
                 1.0,
                 Some(reason),
                 Some("Compaction cancelled; the original context was restored.".to_owned()),
+                None,
                 sequence_counter,
             );
             return Err(RuntimeError::Cancelled);
@@ -265,7 +258,7 @@ impl CompactionHandler {
         }
 
         let persister = self.persister.lock().unwrap().clone();
-        let context_control = self.context_control.lock().unwrap().clone();
+        let session_manager = self.session_manager.lock().unwrap().clone();
         let persisted = Self::emit_compaction_events(
             result,
             compaction_start,
@@ -274,7 +267,7 @@ impl CompactionHandler {
             session_id,
             emitter,
             reason,
-            context_control.as_ref(),
+            session_manager.as_ref(),
             persister.as_ref(),
             sequence_counter,
         )
@@ -296,7 +289,7 @@ impl CompactionHandler {
         session_id: &str,
         emitter: &Arc<EventEmitter>,
         reason: CompactionReason,
-        context_control: Option<&crate::domains::context_control::Deps>,
+        session_manager: Option<&Arc<SessionManager>>,
         persister: Option<
             &Arc<crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister>,
         >,
@@ -315,6 +308,7 @@ impl CompactionHandler {
                         1.0,
                         Some(reason),
                         Some("Compaction skipped: no durable context reduction.".to_owned()),
+                        None,
                         sequence_counter,
                     );
                     return false;
@@ -323,11 +317,11 @@ impl CompactionHandler {
                 let duration = compaction_start.elapsed().as_millis();
                 let reason_label = compaction_reason_label(&reason);
 
-                let Some(deps) = context_control else {
+                let Some(session_manager) = session_manager else {
                     counter!("compaction_total", "status" => "proof_missing").increment(1);
                     warn!(
                         session_id,
-                        "compaction proof missing because context-control deps are not configured"
+                        "compaction boundary unavailable because the session manager is not configured"
                     );
                     emit_complete(
                         emitter,
@@ -338,9 +332,10 @@ impl CompactionHandler {
                         1.0,
                         Some(reason),
                         Some(
-                            "Compaction failed closed: context-control proof is unavailable."
+                            "Compaction failed closed: session boundary custody is unavailable."
                                 .to_owned(),
                         ),
+                        None,
                         sequence_counter,
                     );
                     return false;
@@ -363,33 +358,33 @@ impl CompactionHandler {
                             "Compaction failed closed: event persistence is unavailable."
                                 .to_owned(),
                         ),
+                        None,
                         sequence_counter,
                     );
                     return false;
                 };
 
-                if let Err(error) =
-                    crate::domains::context_control::service::record_runtime_compaction_action(
-                        deps,
-                        crate::domains::context_control::service::RuntimeCompactionInput {
-                            session_id,
-                            reason: &reason_label,
-                            summary: &compaction_result.summary,
-                            tokens_before,
-                            tokens_after,
-                            compression_ratio: compaction_result.compression_ratio,
-                            persister,
-                            sequence_counter,
-                            operation_at: chrono::Utc::now(),
-                        },
-                    )
-                    .await
-                {
+                let boundary = persister.append_with_runtime_sequence(
+                    session_id,
+                    EventType::CompactBoundary,
+                    json!({
+                        "originalTokens": tokens_before,
+                        "compactedTokens": tokens_after,
+                        "compressionRatio": compaction_result.compression_ratio,
+                        "reason": reason_label,
+                        "summary": compaction_result.summary.clone(),
+                        "estimatedContextTokens": tokens_after,
+                        "preservedTurns": compaction_result.preserved_turns,
+                        "summarizedTurns": compaction_result.summarized_turns
+                    }),
+                    sequence_counter,
+                );
+                if let Err(error) = boundary {
                     counter!("compaction_total", "status" => "proof_error").increment(1);
                     warn!(
                         session_id,
                         error = %error,
-                        "failed to record automatic compaction context-control action"
+                        "failed to record automatic compaction boundary"
                     );
                     emit_complete(
                         emitter,
@@ -399,11 +394,13 @@ impl CompactionHandler {
                         tokens_before,
                         1.0,
                         Some(reason),
-                        Some("Compaction failed closed: context-control proof failed.".to_owned()),
+                        Some("Compaction failed closed: boundary persistence failed.".to_owned()),
+                        None,
                         sequence_counter,
                     );
                     return false;
                 }
+                session_manager.invalidate_session(session_id);
 
                 counter!("compaction_total", "status" => "success").increment(1);
                 histogram!("compaction_duration_seconds").record(duration as f64 / 1000.0);
@@ -417,6 +414,10 @@ impl CompactionHandler {
                     compaction_result.compression_ratio,
                     Some(reason),
                     Some(compaction_result.summary),
+                    Some((
+                        compaction_result.preserved_turns,
+                        compaction_result.summarized_turns,
+                    )),
                     sequence_counter,
                 );
                 true
@@ -432,6 +433,7 @@ impl CompactionHandler {
                     1.0,
                     Some(reason),
                     Some(format!("Compaction failed: {error}")),
+                    None,
                     sequence_counter,
                 );
                 false
@@ -482,8 +484,12 @@ fn emit_complete(
     compression_ratio: f64,
     reason: Option<CompactionReason>,
     summary: Option<String>,
+    turn_counts: Option<(usize, usize)>,
     sequence_counter: Option<&AtomicI64>,
 ) {
+    let (preserved_turns, summarized_turns) = turn_counts
+        .map(|(preserved, summarized)| (Some(preserved), Some(summarized)))
+        .unwrap_or((None, None));
     let event = TronEvent::CompactionComplete {
         base: BaseEvent::now(session_id),
         success,
@@ -493,8 +499,8 @@ fn emit_complete(
         reason,
         summary,
         estimated_context_tokens: Some(tokens_after),
-        preserved_turns: None,
-        summarized_turns: None,
+        preserved_turns,
+        summarized_turns,
     };
     if let Some(counter) = sequence_counter {
         let _ = emitter.emit_sequenced(event, counter);

@@ -1,4 +1,4 @@
-//! Capability error codes and error type.
+//! Tool error codes and error type.
 //!
 //! Domain code uses these typed errors without knowing which transport will
 //! serialize them. Transport conversion lives at the client protocol boundary.
@@ -24,14 +24,11 @@ pub const SESSION_BUSY: &str = "SESSION_BUSY";
 pub const IDEMPOTENCY_CONFLICT: &str = "IDEMPOTENCY_CONFLICT";
 /// Engine catalog mutation targeted an item owned by a different worker.
 pub const ENGINE_OWNER_MISMATCH: &str = "ENGINE_OWNER_MISMATCH";
-/// Engine visibility promotion request is not allowed.
-pub const INVALID_VISIBILITY_PROMOTION: &str = "INVALID_VISIBILITY_PROMOTION";
-
 // ── Typed event-store errors ─────────────────────────────────────────
 //
 // `EventStoreError` variants get mapped to these codes via
-// `map_event_store_error`. Most events/session/memory/blob capabilities should
-// use it rather than wrapping into `CapabilityError::Internal`.
+// `map_event_store_error`. Most events/session/memory/blob tools should
+// use it rather than wrapping into `ToolError::Internal`.
 
 /// Requested event was not found.
 pub const EVENT_NOT_FOUND: &str = "EVENT_NOT_FOUND";
@@ -71,9 +68,9 @@ pub const AUTH_TRANSPORT_ERROR: &str = "AUTH_TRANSPORT_ERROR";
 /// requests; the client must upgrade.
 pub const CLIENT_VERSION_UNSUPPORTED: &str = "CLIENT_VERSION_UNSUPPORTED";
 
-/// Transport-neutral error type returned by canonical capabilities and services.
+/// Transport-neutral error type returned by canonical tools and services.
 #[derive(Debug, thiserror::Error)]
-pub enum CapabilityError {
+pub enum ToolError {
     /// Required parameter missing or wrong type.
     #[error("{message}")]
     InvalidParams {
@@ -116,7 +113,7 @@ pub enum CapabilityError {
     },
 }
 
-impl CapabilityError {
+impl ToolError {
     /// Machine-readable error code for this variant.
     pub fn code(&self) -> &str {
         match self {
@@ -135,21 +132,21 @@ impl CapabilityError {
         }
     }
 
-    /// Convert this capability error to the canonical failure envelope.
+    /// Convert this tool error to the canonical failure envelope.
     pub fn to_failure(&self, origin: FailureOrigin) -> FailureEnvelope {
         if let Some(failure) = self.embedded_failure() {
             return failure;
         }
         let message = self.public_message();
         let code = self.code().to_owned();
-        let category = category_for_capability_code(&code);
+        let category = category_for_tool_code(&code);
         let (retryable, recoverable) = retry_recover_for_category(category, &code);
         FailureEnvelope::new(code, category, message, retryable, recoverable, origin)
             .with_details(self.details())
     }
 
-    /// Build a capability error that preserves a canonical failure envelope in
-    /// structured details for capability and engine result paths.
+    /// Build a tool error that preserves a canonical failure envelope in
+    /// structured details for tool and engine result paths.
     pub fn from_failure(failure: FailureEnvelope) -> Self {
         let code = failure.code.clone();
         let message = failure.message.clone();
@@ -205,11 +202,9 @@ impl CapabilityError {
     }
 }
 
-fn category_for_capability_code(code: &str) -> FailureCategory {
+fn category_for_tool_code(code: &str) -> FailureCategory {
     match code {
-        INVALID_PARAMS | CLIENT_VERSION_UNSUPPORTED | INVALID_VISIBILITY_PROMOTION => {
-            FailureCategory::InvalidRequest
-        }
+        INVALID_PARAMS | CLIENT_VERSION_UNSUPPORTED => FailureCategory::InvalidRequest,
         SESSION_NOT_FOUND | EVENT_NOT_FOUND | WORKSPACE_NOT_FOUND | BLOB_NOT_FOUND | NOT_FOUND => {
             FailureCategory::NotFound
         }
@@ -238,9 +233,9 @@ fn retry_recover_for_category(category: FailureCategory, code: &str) -> (bool, b
     }
 }
 
-/// Serialize a value to JSON, mapping errors to [`CapabilityError::Internal`].
-pub fn to_json_value<T: serde::Serialize>(val: &T) -> Result<serde_json::Value, CapabilityError> {
-    serde_json::to_value(val).map_err(|e| CapabilityError::Internal {
+/// Serialize a value to JSON, mapping errors to [`ToolError::Internal`].
+pub fn to_json_value<T: serde::Serialize>(val: &T) -> Result<serde_json::Value, ToolError> {
+    serde_json::to_value(val).map_err(|e| ToolError::Internal {
         message: e.to_string(),
     })
 }
@@ -251,7 +246,7 @@ mod tests {
 
     #[test]
     fn invalid_params_code() {
-        let err = CapabilityError::InvalidParams {
+        let err = ToolError::InvalidParams {
             message: "bad".into(),
         };
         assert_eq!(err.code(), INVALID_PARAMS);
@@ -260,7 +255,7 @@ mod tests {
 
     #[test]
     fn not_found_code() {
-        let err = CapabilityError::NotFound {
+        let err = ToolError::NotFound {
             code: SESSION_NOT_FOUND.into(),
             message: "gone".into(),
         };
@@ -269,7 +264,7 @@ mod tests {
 
     #[test]
     fn internal_code() {
-        let err = CapabilityError::Internal {
+        let err = ToolError::Internal {
             message: "boom".into(),
         };
         assert_eq!(err.code(), INTERNAL_ERROR);
@@ -277,7 +272,7 @@ mod tests {
 
     #[test]
     fn custom_code_and_details() {
-        let err = CapabilityError::Custom {
+        let err = ToolError::Custom {
             code: "MY_CODE".into(),
             message: "custom".into(),
             details: Some(serde_json::json!({"x": 1})),
@@ -288,7 +283,7 @@ mod tests {
 
     #[test]
     fn session_busy_code() {
-        let err = CapabilityError::Custom {
+        let err = ToolError::Custom {
             code: SESSION_BUSY.into(),
             message: "Session is processing a prompt from another connection".into(),
             details: None,
@@ -326,8 +321,8 @@ mod tests {
     }
 
     #[test]
-    fn capability_error_without_details() {
-        let err = CapabilityError::NotAvailable {
+    fn tool_error_without_details() {
+        let err = ToolError::NotAvailable {
             message: "nope".into(),
         };
         assert_eq!(err.code(), NOT_AVAILABLE);
@@ -336,8 +331,8 @@ mod tests {
     }
 
     #[test]
-    fn capability_error_to_failure_preserves_code_and_details() {
-        let err = CapabilityError::Custom {
+    fn tool_error_to_failure_preserves_code_and_details() {
+        let err = ToolError::Custom {
             code: SESSION_BUSY.into(),
             message: "Session is busy".into(),
             details: Some(serde_json::json!({"sessionId": "s1"})),
@@ -355,8 +350,8 @@ mod tests {
     }
 
     #[test]
-    fn capability_internal_failure_uses_sanitized_public_message() {
-        let err = CapabilityError::Internal {
+    fn tool_internal_failure_uses_sanitized_public_message() {
+        let err = ToolError::Internal {
             message: "disk path /tmp/secret failed".into(),
         };
 
@@ -370,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn capability_error_from_failure_embeds_envelope_details() {
+    fn tool_error_from_failure_embeds_envelope_details() {
         let failure = FailureEnvelope::new(
             IDEMPOTENCY_CONFLICT,
             FailureCategory::Conflict,
@@ -381,7 +376,7 @@ mod tests {
         )
         .with_details(Some(serde_json::json!({"key": "abc"})));
 
-        let err = CapabilityError::from_failure(failure);
+        let err = ToolError::from_failure(failure);
 
         assert_eq!(err.code(), IDEMPOTENCY_CONFLICT);
         let details = err.details().expect("failure details");
@@ -391,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn capability_error_to_failure_reuses_embedded_canonical_envelope() {
+    fn tool_error_to_failure_reuses_embedded_canonical_envelope() {
         let embedded = FailureEnvelope::new(
             "ENGINE_SCHEMA_VIOLATION",
             FailureCategory::InvalidRequest,
@@ -404,7 +399,7 @@ mod tests {
             "functionId": "system::ping",
             "path": "$.protocolVersion"
         })));
-        let err = CapabilityError::Custom {
+        let err = ToolError::Custom {
             code: embedded.code.clone(),
             message: embedded.message.clone(),
             details: Some(embedded.details_with_failure()),
@@ -418,10 +413,10 @@ mod tests {
     }
 
     #[test]
-    fn malformed_embedded_failure_uses_plain_capability_classification() {
-        let err = CapabilityError::Custom {
-            code: "UNMAPPED_CAPABILITY_CODE".to_owned(),
-            message: "plain capability error".to_owned(),
+    fn malformed_embedded_failure_uses_plain_tool_classification() {
+        let err = ToolError::Custom {
+            code: "UNMAPPED_TOOL_CODE".to_owned(),
+            message: "plain tool error".to_owned(),
             details: Some(serde_json::json!({
                 "failure": {
                     "code": "BROKEN",
@@ -433,7 +428,7 @@ mod tests {
 
         let failure = err.to_failure(FailureOrigin::Transport);
 
-        assert_eq!(failure.code, "UNMAPPED_CAPABILITY_CODE");
+        assert_eq!(failure.code, "UNMAPPED_TOOL_CODE");
         assert_eq!(failure.category, FailureCategory::Unknown);
         assert_eq!(failure.origin, FailureOrigin::Transport);
         assert_eq!(failure.details.unwrap()["safe"], true);

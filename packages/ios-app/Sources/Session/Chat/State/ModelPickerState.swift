@@ -29,7 +29,7 @@ final class ModelPickerState {
     /// Find model info by current model name (uses optimistic if set)
     func currentModelInfo(current: String) -> ModelInfo? {
         let displayName = displayModelName(current: current)
-        return modelRepository.cachedModels.first { $0.id == displayName }
+        return ModelInfo.matching(displayName, in: modelRepository.cachedModels)
     }
 
     // MARK: - Model Operations
@@ -77,7 +77,7 @@ final class ModelPickerState {
         } catch {
             // Revert optimistic update on failure
             optimisticModelName = nil
-            let revertModel = modelRepository.cachedModels.first { $0.id == previousModel }
+            let revertModel = ModelInfo.matching(previousModel, in: modelRepository.cachedModels)
             onError(error.localizedDescription, revertModel)
         }
     }

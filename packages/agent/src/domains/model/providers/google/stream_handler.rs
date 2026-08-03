@@ -6,15 +6,15 @@
 //!
 //! Delegates text/thinking delta accumulation to [`StreamAccumulator`] from the
 //! shared `stream_common` module. Final `Done` content is built from Gemini part
-//! order rather than aggregate buckets. Capability invocation handling remains
+//! order rather than aggregate buckets. Tool invocation handling remains
 //! provider-specific because Gemini delivers complete function calls (not
 //! streamed argument deltas).
 
-use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
+use crate::domains::model::protocol::{ToolCallContext, parse_tool_call_arguments};
 use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
 use crate::shared::protocol::content::{AssistantContent, ThinkingContentKind};
 use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
-use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
+use crate::shared::protocol::messages::{Provider, TokenUsage, ToolInvocationDraft};
 use serde_json::Map;
 
 use super::types::{GeminiPart, GeminiStreamChunk, HarmProbability, SafetyRating};
@@ -23,11 +23,11 @@ use super::types::{GeminiPart, GeminiStreamChunk, HarmProbability, SafetyRating}
 pub struct StreamState {
     /// Shared delta accumulator for text, thinking, and token tracking.
     pub acc: StreamAccumulator,
-    /// Accumulated capability invocations (Google-specific: complete, not streamed).
-    pub capability_invocations: Vec<CapabilityInvocationDraftState>,
-    /// Counter for generating unique capability invocation IDs.
-    pub capability_invocation_index: u32,
-    /// Unique prefix for capability invocation ID generation (Gemini doesn't provide IDs).
+    /// Accumulated tool invocations (Google-specific: complete, not streamed).
+    pub tool_invocations: Vec<ToolInvocationDraftState>,
+    /// Counter for generating unique tool invocation IDs.
+    pub tool_invocation_index: u32,
+    /// Unique prefix for tool invocation ID generation (Gemini doesn't provide IDs).
     pub unique_prefix: String,
     /// Token count for tool-use prompt scaffolding.
     pub tool_use_prompt_tokens: u64,
@@ -37,9 +37,9 @@ pub struct StreamState {
     pub ordered_content: Vec<AssistantContent>,
 }
 
-/// State for an in-progress capability invocation.
-pub struct CapabilityInvocationDraftState {
-    /// Generated capability invocation ID.
+/// State for an in-progress tool invocation.
+pub struct ToolInvocationDraftState {
+    /// Generated tool invocation ID.
     pub id: String,
     /// Function name.
     pub name: String,
@@ -55,8 +55,8 @@ pub fn create_stream_state() -> StreamState {
     let prefix = format!("{:08x}", rand_u32());
     StreamState {
         acc: StreamAccumulator::new(),
-        capability_invocations: Vec::new(),
-        capability_invocation_index: 0,
+        tool_invocations: Vec::new(),
+        tool_invocation_index: 0,
         unique_prefix: prefix,
         tool_use_prompt_tokens: 0,
         total_tokens: 0,
@@ -205,18 +205,18 @@ fn process_function_call(
 
     let id = format!(
         "call_{}_{}",
-        state.unique_prefix, state.capability_invocation_index
+        state.unique_prefix, state.tool_invocation_index
     );
-    state.capability_invocation_index += 1;
+    state.tool_invocation_index += 1;
 
     let args_str = serde_json::to_string(&fc.args).unwrap_or_else(|_| "{}".into());
-    let ctx = CapabilityCallContext {
+    let ctx = ToolCallContext {
         invocation_id: Some(id.clone()),
-        model_primitive_name: Some(fc.name.clone()),
+        tool_name: Some(fc.name.clone()),
         provider: Some("google".into()),
     };
     let arguments: Map<String, serde_json::Value> =
-        match parse_capability_call_arguments(Some(&args_str), Some(&ctx)) {
+        match parse_tool_call_arguments(Some(&args_str), Some(&ctx)) {
             Ok(arguments) => arguments,
             Err(error) => {
                 return vec![StreamEvent::Error {
@@ -225,40 +225,35 @@ fn process_function_call(
             }
         };
 
-    events.push(StreamEvent::CapabilityInvocationDraftStart {
+    events.push(StreamEvent::ToolInvocationDraftStart {
         invocation_id: id.clone(),
         name: fc.name.clone(),
     });
 
-    events.push(StreamEvent::CapabilityInvocationDraftDelta {
+    events.push(StreamEvent::ToolInvocationDraftDelta {
         invocation_id: id.clone(),
         arguments_delta: args_str,
     });
 
-    let capability_invocation =
-        CapabilityInvocationDraft::new(id.clone(), fc.name.clone(), arguments.clone());
-    let capability_invocation = if let Some(sig) = thought_signature {
-        capability_invocation.with_thought_signature(sig)
+    let tool_invocation = ToolInvocationDraft::new(id.clone(), fc.name.clone(), arguments.clone());
+    let tool_invocation = if let Some(sig) = thought_signature {
+        tool_invocation.with_thought_signature(sig)
     } else {
-        capability_invocation
+        tool_invocation
     };
 
-    events.push(StreamEvent::CapabilityInvocationDraftEnd {
-        capability_invocation,
-    });
+    events.push(StreamEvent::ToolInvocationDraftEnd { tool_invocation });
 
     let ordered_id = id.clone();
-    state
-        .capability_invocations
-        .push(CapabilityInvocationDraftState {
-            id,
-            name: fc.name.clone(),
-            args: fc.args.clone(),
-            thought_signature: thought_signature.map(String::from),
-        });
+    state.tool_invocations.push(ToolInvocationDraftState {
+        id,
+        name: fc.name.clone(),
+        args: fc.args.clone(),
+        thought_signature: thought_signature.map(String::from),
+    });
     state
         .ordered_content
-        .push(AssistantContent::CapabilityInvocation {
+        .push(AssistantContent::ToolInvocation {
             id: ordered_id,
             name: fc.name.clone(),
             arguments,
@@ -347,12 +342,12 @@ fn build_bucketed_content(state: &StreamState) -> Vec<AssistantContent> {
         content.push(AssistantContent::text(&state.acc.accumulated_text));
     }
 
-    for tc in &state.capability_invocations {
+    for tc in &state.tool_invocations {
         let arguments: Map<String, serde_json::Value> = match &tc.args {
             serde_json::Value::Object(map) => map.clone(),
             _ => Map::new(),
         };
-        content.push(AssistantContent::CapabilityInvocation {
+        content.push(AssistantContent::ToolInvocation {
             id: tc.id.clone(),
             name: tc.name.clone(),
             arguments,
@@ -370,7 +365,7 @@ fn nonzero(value: u64) -> Option<u64> {
 fn map_google_stop_reason(reason: &str) -> &'static str {
     match reason {
         "MAX_TOKENS" => "max_tokens",
-        "TOOL_USE" => "capability_invocation",
+        "TOOL_USE" => "tool_invocation",
         _ => "end_turn",
     }
 }
@@ -399,12 +394,12 @@ mod tests {
         let state = create_stream_state();
         assert!(state.acc.accumulated_text.is_empty());
         assert!(state.acc.accumulated_thinking.is_empty());
-        assert!(state.capability_invocations.is_empty());
+        assert!(state.tool_invocations.is_empty());
         assert_eq!(state.acc.input_tokens, 0);
         assert_eq!(state.acc.output_tokens, 0);
         assert!(!state.acc.text_started);
         assert!(!state.acc.thinking_started);
-        assert_eq!(state.capability_invocation_index, 0);
+        assert_eq!(state.tool_invocation_index, 0);
         assert!(!state.unique_prefix.is_empty());
         assert!(state.ordered_content.is_empty());
     }
@@ -564,7 +559,7 @@ mod tests {
                 content: Some(GeminiCandidateContent {
                     parts: vec![GeminiPart::FunctionCall {
                         function_call: FunctionCallData {
-                            name: "execute".into(),
+                            name: "test_tool".into(),
                             args: serde_json::json!({"command": "ls"}),
                         },
                         thought_signature: Some("sig-123".into()),
@@ -580,12 +575,12 @@ mod tests {
         let events = process_stream_chunk(&chunk, &mut state);
         assert_eq!(events.len(), 3); // start, delta, end
         assert!(
-            matches!(&events[0], StreamEvent::CapabilityInvocationDraftStart { name, .. } if name == "execute")
+            matches!(&events[0], StreamEvent::ToolInvocationDraftStart { name, .. } if name == "test_tool")
         );
         assert!(
-            matches!(&events[2], StreamEvent::CapabilityInvocationDraftEnd { capability_invocation } if capability_invocation.thought_signature.as_deref() == Some("sig-123"))
+            matches!(&events[2], StreamEvent::ToolInvocationDraftEnd { tool_invocation } if tool_invocation.thought_signature.as_deref() == Some("sig-123"))
         );
-        assert_eq!(state.capability_invocations.len(), 1);
+        assert_eq!(state.tool_invocations.len(), 1);
     }
 
     #[test]
@@ -601,7 +596,7 @@ mod tests {
                         },
                         GeminiPart::FunctionCall {
                             function_call: FunctionCallData {
-                                name: "execute".into(),
+                                name: "test_tool".into(),
                                 args: serde_json::json!({"operation": "inspect"}),
                             },
                             thought_signature: None,
@@ -638,7 +633,7 @@ mod tests {
         ));
         assert!(matches!(
             &done.content[1],
-            AssistantContent::CapabilityInvocation { id, .. } if id == "call_order_0"
+            AssistantContent::ToolInvocation { id, .. } if id == "call_order_0"
         ));
         assert!(matches!(
             &done.content[2],
@@ -650,19 +645,19 @@ mod tests {
     fn non_object_function_call_arguments_fail_closed() {
         let mut state = create_stream_state();
         let fc = FunctionCallData {
-            name: "execute".into(),
+            name: "test_tool".into(),
             args: serde_json::json!(["not", "an", "object"]),
         };
         let events = process_function_call(&fc, None, &mut state);
         assert_eq!(events.len(), 1);
         match &events[0] {
             StreamEvent::Error { error } => {
-                assert!(error.contains("google capability invocation arguments"));
+                assert!(error.contains("google tool invocation arguments"));
                 assert!(error.contains("received array"));
             }
             _ => panic!("expected Error"),
         }
-        assert!(state.capability_invocations.is_empty());
+        assert!(state.tool_invocations.is_empty());
     }
 
     #[test]
@@ -675,7 +670,7 @@ mod tests {
         };
         let events = process_function_call(&fc, None, &mut state);
         match &events[0] {
-            StreamEvent::CapabilityInvocationDraftStart { invocation_id, .. } => {
+            StreamEvent::ToolInvocationDraftStart { invocation_id, .. } => {
                 assert!(invocation_id.starts_with("call_abcd1234_"));
             }
             _ => panic!("Expected toolcall start"),
@@ -760,36 +755,34 @@ mod tests {
     }
 
     #[test]
-    fn done_includes_capability_invocations() {
+    fn done_includes_tool_invocations() {
         let mut state = create_stream_state();
-        state
-            .capability_invocations
-            .push(CapabilityInvocationDraftState {
-                id: "call_123".into(),
-                name: "execute".into(),
-                args: serde_json::json!({"cmd": "ls"}),
-                thought_signature: Some("sig".into()),
-            });
+        state.tool_invocations.push(ToolInvocationDraftState {
+            id: "call_123".into(),
+            name: "test_tool".into(),
+            args: serde_json::json!({"cmd": "ls"}),
+            thought_signature: Some("sig".into()),
+        });
         let events = handle_finish("STOP", None, &mut state);
         match events.last().unwrap() {
             StreamEvent::Done { message, .. } => {
-                // Capability invocations appear in the content as CapabilityInvocation blocks
-                let capability_invocations: Vec<_> = message
+                // Tool invocations appear in the content as ToolInvocation blocks
+                let tool_invocations: Vec<_> = message
                     .content
                     .iter()
-                    .filter(|c| c.is_capability_invocation())
+                    .filter(|c| c.is_tool_invocation())
                     .collect();
-                assert_eq!(capability_invocations.len(), 1);
-                match &capability_invocations[0] {
-                    AssistantContent::CapabilityInvocation {
+                assert_eq!(tool_invocations.len(), 1);
+                match &tool_invocations[0] {
+                    AssistantContent::ToolInvocation {
                         name,
                         thought_signature,
                         ..
                     } => {
-                        assert_eq!(name, "execute");
+                        assert_eq!(name, "test_tool");
                         assert_eq!(thought_signature.as_deref(), Some("sig"));
                     }
-                    _ => panic!("Expected CapabilityInvocation"),
+                    _ => panic!("Expected ToolInvocation"),
                 }
             }
             _ => panic!("Expected done"),
@@ -804,7 +797,7 @@ mod tests {
         assert_eq!(map_google_stop_reason("MAX_TOKENS"), "max_tokens");
         assert_eq!(map_google_stop_reason("SAFETY"), "end_turn");
         assert_eq!(map_google_stop_reason("RECITATION"), "end_turn");
-        assert_eq!(map_google_stop_reason("TOOL_USE"), "capability_invocation");
+        assert_eq!(map_google_stop_reason("TOOL_USE"), "tool_invocation");
         assert_eq!(map_google_stop_reason("UNKNOWN"), "end_turn");
     }
 }

@@ -7,17 +7,18 @@
 //! # Thinking Configuration
 //!
 //! Gemini 3 models use discrete `thinkingLevel` values (minimal/low/medium/high).
-//! Gemini 2.5 models use a `thinkingBudget` in tokens (0-32768).
+//! Gemini 2.5 models use a `thinkingBudget` in tokens (`-1` for dynamic,
+//! `0` for disabled where supported, or an explicit positive budget).
 //! The provider detects the model family and applies the correct format.
 //!
-//! # Temperature Enforcement
+//! # Sampling Parameters
 //!
-//! Gemini 3 models require `temperature=1.0`. Any other value is overridden
-//! with a warning.
+//! Gemini 3 requests omit deprecated sampling parameters and never end with a
+//! prefilled model turn. These constraints are enforced at the provider boundary.
 
 use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 
 use crate::domains::auth::credentials::{OAuthTokens, calculate_expires_at, should_refresh};
 use crate::domains::model::providers::shared::compose_context_parts;
@@ -44,6 +45,63 @@ const DEFAULT_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 
 /// Token refresh buffer in milliseconds (5 minutes).
 const TOKEN_REFRESH_BUFFER_MS: i64 = 300_000;
+
+fn normalize_gemini_thinking_level(
+    requested: Option<&str>,
+    model_info: Option<&super::types::GeminiModelInfo>,
+) -> String {
+    let default = model_info
+        .and_then(|info| info.default_thinking_level.as_ref())
+        .map_or("high", super::types::GeminiThinkingLevel::to_api_string);
+    let normalized = requested.unwrap_or(default).to_ascii_lowercase();
+    let normalized = normalized
+        .strip_prefix("thinking_level_")
+        .or_else(|| normalized.strip_prefix("thinking_"))
+        .unwrap_or(&normalized);
+    let candidate = match normalized {
+        "disabled" | "none"
+            if model_info
+                .is_some_and(|info| info.supported_thinking_levels.contains(&"minimal")) =>
+        {
+            "minimal"
+        }
+        "disabled" | "none" => "low",
+        "xhigh" | "x_high" | "max" => "high",
+        "minimal" | "low" | "medium" | "high" => normalized,
+        _ => default,
+    };
+    let supported = model_info.map(|info| info.supported_thinking_levels);
+    if supported.is_some_and(|levels| levels.contains(&candidate)) {
+        candidate.to_string()
+    } else if supported.is_some_and(|levels| levels.contains(&default)) {
+        default.to_string()
+    } else {
+        supported
+            .and_then(|levels| levels.first().copied())
+            .unwrap_or(default)
+            .to_string()
+    }
+}
+
+fn gemini_25_budget_for_level(level: &str, model: &str) -> i32 {
+    let normalized = level.to_ascii_lowercase();
+    let normalized = normalized
+        .strip_prefix("thinking_level_")
+        .or_else(|| normalized.strip_prefix("thinking_"))
+        .unwrap_or(&normalized);
+    match normalized {
+        "disabled" | "none" | "minimal" if model.contains("pro") => 128,
+        "disabled" | "none" | "minimal" => 0,
+        "low" => 1_024,
+        "medium" => 8_192,
+        "high" | "xhigh" | "x_high" | "max" => 24_576,
+        _ => default_gemini_25_budget(model),
+    }
+}
+
+fn default_gemini_25_budget(model: &str) -> i32 {
+    if model.contains("flash-lite") { 0 } else { -1 }
+}
 
 /// SSE parser options for the Gemini API.
 ///
@@ -258,16 +316,7 @@ impl GoogleProvider {
             });
 
         let temperature = if is_gemini3 {
-            let temp = options.temperature.or(self.config.temperature);
-            if let Some(t) = temp
-                && (t - 1.0).abs() > f64::EPSILON
-            {
-                warn!(
-                    requested = t,
-                    "Gemini 3 requires temperature=1.0, overriding"
-                );
-            }
-            Some(1.0)
+            None
         } else {
             options.temperature.or(self.config.temperature)
         };
@@ -300,30 +349,36 @@ impl GoogleProvider {
         }
 
         if is_gemini3 {
-            // Per-request thinking_level overrides provider config
-            let level = if let Some(ref level_str) = options.thinking_level {
-                level_str.clone()
+            let requested = if let Some(ref level) = options.thinking_level {
+                Some(level.as_str())
             } else {
-                self.config.thinking_level.as_ref().map_or_else(
-                    || {
-                        model_info
-                            .and_then(|m| m.default_thinking_level.as_ref())
-                            .map_or_else(|| "HIGH".to_string(), |l| l.to_api_string().to_string())
-                    },
-                    |l| l.to_api_string().to_string(),
-                )
+                self.config
+                    .thinking_level
+                    .as_ref()
+                    .map(super::types::GeminiThinkingLevel::to_api_string)
             };
+            let level = normalize_gemini_thinking_level(requested, model_info);
             Some(ThinkingConfig {
                 include_thoughts: Some(true),
                 thinking_level: Some(level),
                 thinking_budget: None,
             })
         } else {
-            // Per-request budget overrides provider config
             let budget = options
                 .gemini_thinking_budget
-                .or(self.config.thinking_budget)
-                .unwrap_or(10_000);
+                .map(|value| i32::try_from(value).unwrap_or(i32::MAX))
+                .or_else(|| {
+                    options
+                        .thinking_level
+                        .as_deref()
+                        .map(|level| gemini_25_budget_for_level(level, &self.config.model))
+                })
+                .or_else(|| {
+                    self.config
+                        .thinking_budget
+                        .map(|value| i32::try_from(value).unwrap_or(i32::MAX))
+                })
+                .unwrap_or_else(|| default_gemini_25_budget(&self.config.model));
             Some(ThinkingConfig {
                 include_thoughts: Some(true),
                 thinking_level: None,
@@ -340,8 +395,15 @@ impl GoogleProvider {
         context: &Context,
         gen_config: &GenerationConfig,
     ) -> serde_json::Value {
-        let contents = convert_messages(context);
-        let capabilities = context.capabilities.as_ref().map(|t| convert_tools(t));
+        let mut contents = convert_messages(context);
+        if is_gemini_3_model(&self.config.model)
+            && contents
+                .last()
+                .is_some_and(|content| content.role == "model")
+        {
+            let _ = contents.pop();
+        }
+        let tools = context.tools.as_ref().map(|t| convert_tools(t));
         let safety_settings = self
             .config
             .safety_settings
@@ -356,8 +418,8 @@ impl GoogleProvider {
             "safetySettings": safety_settings,
         });
 
-        if let Some(capabilities) = capabilities {
-            body["tools"] = serde_json::to_value(capabilities).unwrap_or_default();
+        if let Some(tools) = tools {
+            body["tools"] = serde_json::to_value(tools).unwrap_or_default();
         }
 
         if let Some(si) = system_instruction {
@@ -393,7 +455,7 @@ impl GoogleProvider {
         debug!(
             model = %self.config.model,
             message_count = context.messages.len(),
-            tool_count = context.capabilities.as_ref().map_or(0, Vec::len),
+            tool_count = context.tools.as_ref().map_or(0, Vec::len),
             max_tokens = ?gen_config.max_output_tokens,
             "Starting Gemini stream"
         );

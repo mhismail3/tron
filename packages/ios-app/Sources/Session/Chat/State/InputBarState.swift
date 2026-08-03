@@ -15,12 +15,12 @@ final class InputBarState {
 
     var reasoningLevel: String = "medium"
 
-    /// Remove attachments incompatible with the given capability.
+    /// Remove attachments incompatible with the given tool.
     /// Returns count of removed attachments.
     @discardableResult
-    func removeIncompatibleAttachments(for capability: AttachmentCapability) -> Int {
+    func removeIncompatibleAttachments(for tool: AttachmentSupport) -> Int {
         let before = attachments.count
-        attachments.removeAll { !$0.isCompatible(with: capability) }
+        attachments.removeAll { !$0.isCompatible(with: tool) }
         return before - attachments.count
     }
 
@@ -80,23 +80,19 @@ struct InputBarConfig {
 
     /// Whether the agent is currently processing (convenience).
     var isProcessing: Bool { agentPhase.isProcessing }
-    /// Whether composer audio is currently recording.
+    /// Native composer capture is active.
     let isRecording: Bool
-    /// Normalized microphone energy owned by the recorder (0...1).
+    /// Smoothed normalized microphone energy (0...1).
     let recordingAudioLevel: Double
-    /// Whether a captured recording is being transcribed.
+    /// Captured audio is being processed by the speech worker.
     let isTranscribing: Bool
+    /// A healthy enabled worker owns the validated speech client action.
+    let speechTranscriptionAvailable: Bool
 
-    /// Session Briefing yields its composer slot throughout the authoritative
-    /// voice lifecycle so capture/transcription status stays adjacent to the
-    /// trailing action.
     var showsContextBriefingControl: Bool {
         !isRecording && !isTranscribing
     }
 
-    /// Voice capture owns the trailing composer action until recording and
-    /// transcription have both finished, even when a draft already has text
-    /// or attachments.
     func canSend(hasContent: Bool) -> Bool {
         guard agentPhase.isIdle, showsContextBriefingControl else { return false }
         return hasContent && sendBlockReason == nil
@@ -122,6 +118,7 @@ struct InputBarConfig {
     let placeholderText: String
     /// Whether the placeholder represents a shell-owned loading state.
     let placeholderShowsProgress: Bool
+    /// Server-derived percentage of the selected model's context window in use.
     let contextPercentage: Int
 
     // MARK: - Model / Attachments
@@ -138,9 +135,9 @@ struct InputBarConfig {
     var providerImageLimits: ProviderImageLimits {
         currentModelInfo?.providerImageLimits ?? .default
     }
-    /// Attachment capability derived from current model.
-    var attachmentCapability: AttachmentCapability {
-        AttachmentCapability.from(model: currentModelInfo)
+    /// Attachment tool derived from current model.
+    var attachmentSupport: AttachmentSupport {
+        AttachmentSupport.from(model: currentModelInfo)
     }
 
     // MARK: - Drag Hint
@@ -154,6 +151,7 @@ struct InputBarConfig {
         isRecording: Bool = false,
         recordingAudioLevel: Double = 0,
         isTranscribing: Bool = false,
+        speechTranscriptionAvailable: Bool = false,
         placeholderText: String = "Type here",
         placeholderShowsProgress: Bool = false,
         contextPercentage: Int = 0,
@@ -168,6 +166,7 @@ struct InputBarConfig {
         self.isRecording = isRecording
         self.recordingAudioLevel = min(max(recordingAudioLevel, 0), 1)
         self.isTranscribing = isTranscribing
+        self.speechTranscriptionAvailable = speechTranscriptionAvailable
         self.placeholderText = placeholderText
         self.placeholderShowsProgress = placeholderShowsProgress
         self.contextPercentage = contextPercentage
@@ -188,12 +187,13 @@ struct InputBarActions {
     let onAddAttachment: (Attachment) -> Void
     let onRemoveAttachment: (Attachment) -> Void
     let onAttachmentError: (String, String) -> Void
+    /// Starts or stops the native capture actuator. The captured audio is
+    /// routed through the current speech worker by the chat view model.
     let onMicTap: () -> Void
-
     // MARK: - History
     let onHistoryNavigate: ((String) -> Void)?
 
-    // MARK: - Context
+    // MARK: - Session Context
     let onContextTap: (() -> Void)?
 
     init(

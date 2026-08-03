@@ -109,8 +109,8 @@ branded_id! {
 }
 
 branded_id! {
-    /// Unique identifier for a capability invocation within a turn.
-    CapabilityInvocationDraftId
+    /// Unique identifier for a tool invocation within a turn.
+    ToolInvocationDraftId
 }
 
 branded_id! {

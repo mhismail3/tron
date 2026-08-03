@@ -7,8 +7,6 @@ struct NewSessionCreated: Equatable, Sendable {
     let workspaceId: String
     let model: String
     let workingDirectory: String
-    let source: String?
-    let profile: String?
 }
 
 struct NewSessionCreateIntent: Equatable, Sendable {

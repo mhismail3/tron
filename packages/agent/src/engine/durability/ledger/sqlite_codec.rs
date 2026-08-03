@@ -1,80 +1,23 @@
 //! SQLite schema, row codecs, and stored JSON helpers for the engine ledger.
 
 use chrono::{DateTime, Utc};
-use rusqlite::Connection;
 use serde::{Serialize, de::DeserializeOwned};
 
 use super::{IdempotencyEntry, IdempotencyKey, StoredEngineError, StoredInvocationOutcome};
 use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
-};
-use crate::engine::kernel::types::{
-    CatalogChange, CatalogChangeClass, CatalogRevision, CatalogSubjectKind, DeliveryMode,
-    FunctionRevision, IdempotencyScope, VisibilityScope,
-};
+use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, WorkerId};
+use crate::engine::kernel::types::{CatalogRevision, FunctionRevision, IdempotencyScope};
 
 pub(super) const SQLITE_SCHEMA: &str = r#"
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE IF NOT EXISTS engine_catalog_changes (
-  id              TEXT PRIMARY KEY,
-  before_revision INTEGER NOT NULL,
-  after_revision  INTEGER NOT NULL,
-  kind_json       TEXT NOT NULL,
-  subject_id      TEXT NOT NULL,
-  subject_kind_json TEXT NOT NULL,
-  class_json      TEXT NOT NULL,
-  visibility_json TEXT NOT NULL,
-  session_id      TEXT,
-  workspace_id    TEXT,
-  owner_worker_id TEXT,
-  timestamp       TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS engine_catalog_revision (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  revision  INTEGER NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS engine_catalog_workers (
-  worker_id       TEXT PRIMARY KEY,
-  definition_json TEXT NOT NULL,
-  updated_at      TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS engine_catalog_functions (
-  function_id     TEXT PRIMARY KEY,
-  owner_worker_id TEXT NOT NULL,
-  definition_json TEXT NOT NULL,
-  updated_at      TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS engine_invocations (
-  invocation_id            TEXT PRIMARY KEY,
-  function_id              TEXT NOT NULL,
-  worker_id                TEXT NOT NULL,
-  function_revision        INTEGER NOT NULL,
-  catalog_revision         INTEGER NOT NULL,
-  actor_id                 TEXT NOT NULL,
-  actor_kind_json          TEXT NOT NULL,
-  authority_grant_id       TEXT NOT NULL,
-  authority_scopes_json    TEXT NOT NULL,
-  trace_id                 TEXT NOT NULL,
-  parent_invocation_id     TEXT,
-  trigger_id               TEXT,
-  session_id               TEXT,
-  workspace_id             TEXT,
-  delivery_mode_json       TEXT NOT NULL,
-  idempotency_scope_kind   TEXT,
-  idempotency_scope_value  TEXT,
-  resource_lease_ids_json  TEXT NOT NULL DEFAULT '[]',
-  compensation_status      TEXT,
-  produced_resource_refs_json TEXT NOT NULL DEFAULT '[]',
-  idempotency_key          TEXT,
-  replayed_from            TEXT,
-  succeeded                INTEGER NOT NULL CHECK (succeeded IN (0, 1)),
-  result_json              TEXT,
-  error_json               TEXT,
-  timestamp                TEXT NOT NULL
-);
+INSERT OR IGNORE INTO engine_catalog_revision(singleton, revision) VALUES (1, 0);
 
 CREATE TABLE IF NOT EXISTS engine_idempotency_entries (
   function_id           TEXT NOT NULL,
@@ -83,7 +26,6 @@ CREATE TABLE IF NOT EXISTS engine_idempotency_entries (
   idempotency_key       TEXT NOT NULL,
   payload_fingerprint   TEXT NOT NULL,
   function_revision     INTEGER NOT NULL,
-  replay_behavior_json  TEXT NOT NULL,
   status_json           TEXT NOT NULL,
   first_invocation_id   TEXT NOT NULL,
   latest_invocation_id  TEXT NOT NULL,
@@ -94,30 +36,37 @@ CREATE TABLE IF NOT EXISTS engine_idempotency_entries (
   PRIMARY KEY (function_id, scope_kind, scope_value, idempotency_key)
 );
 
-CREATE INDEX IF NOT EXISTS idx_engine_invocations_trace
-  ON engine_invocations(trace_id);
-
-CREATE INDEX IF NOT EXISTS idx_engine_catalog_changes_after
-  ON engine_catalog_changes(after_revision);
-
-CREATE INDEX IF NOT EXISTS idx_engine_catalog_functions_owner
-  ON engine_catalog_functions(owner_worker_id);
 "#;
 
-pub(super) struct RawCatalogChangeRow {
-    pub(super) id: String,
-    pub(super) before_revision: u64,
-    pub(super) after_revision: u64,
-    pub(super) kind_json: String,
-    pub(super) subject_id: String,
-    pub(super) subject_kind_json: String,
-    pub(super) class_json: String,
-    pub(super) visibility_json: String,
-    pub(super) session_id: Option<String>,
-    pub(super) workspace_id: Option<String>,
-    pub(super) owner_worker_id: Option<String>,
-    pub(super) timestamp: String,
-}
+/// Canonical invocation table SQL.
+pub(super) const INVOCATION_TABLE_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS engine_invocations (
+  invocation_id            TEXT PRIMARY KEY,
+  function_id              TEXT NOT NULL,
+  worker_id                TEXT NOT NULL,
+  function_revision        INTEGER NOT NULL,
+  catalog_revision         INTEGER NOT NULL,
+  actor_id                 TEXT NOT NULL,
+  actor_kind_json          TEXT NOT NULL,
+  trace_id                 TEXT NOT NULL,
+  parent_invocation_id     TEXT,
+  session_id               TEXT,
+  workspace_id             TEXT,
+  idempotency_scope_kind   TEXT,
+  idempotency_scope_value  TEXT,
+  idempotency_key          TEXT,
+  replayed_from            TEXT,
+  succeeded                INTEGER NOT NULL CHECK (succeeded IN (0, 1)),
+  result_json              TEXT,
+  error_json               TEXT,
+  timestamp                TEXT NOT NULL
+);
+"#;
+
+pub(super) const INVOCATION_INDEX_SCHEMA: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_engine_invocations_trace
+  ON engine_invocations(trace_id);
+"#;
 
 pub(super) struct RawInvocationRow {
     pub(super) invocation_id: String,
@@ -127,19 +76,12 @@ pub(super) struct RawInvocationRow {
     pub(super) catalog_revision: u64,
     pub(super) actor_id: String,
     pub(super) actor_kind_json: String,
-    pub(super) authority_grant_id: String,
-    pub(super) authority_scopes_json: String,
     pub(super) trace_id: String,
     pub(super) parent_invocation_id: Option<String>,
-    pub(super) trigger_id: Option<String>,
     pub(super) session_id: Option<String>,
     pub(super) workspace_id: Option<String>,
-    pub(super) delivery_mode_json: String,
     pub(super) idempotency_scope_kind: Option<String>,
     pub(super) idempotency_scope_value: Option<String>,
-    pub(super) resource_lease_ids_json: String,
-    pub(super) compensation_status: Option<String>,
-    pub(super) produced_resource_refs_json: String,
     pub(super) idempotency_key: Option<String>,
     pub(super) replayed_from: Option<String>,
     pub(super) succeeded: i64,
@@ -155,7 +97,6 @@ pub(super) struct RawIdempotencyRow {
     pub(super) idempotency_key: String,
     pub(super) payload_fingerprint: String,
     pub(super) function_revision: u64,
-    pub(super) replay_behavior_json: String,
     pub(super) status_json: String,
     pub(super) first_invocation_id: String,
     pub(super) latest_invocation_id: String,
@@ -163,29 +104,6 @@ pub(super) struct RawIdempotencyRow {
     pub(super) outcome_error_json: Option<String>,
     pub(super) created_at: String,
     pub(super) updated_at: String,
-}
-
-pub(super) fn raw_catalog_change(row: RawCatalogChangeRow) -> Result<CatalogChange> {
-    Ok(CatalogChange {
-        id: row.id,
-        before: CatalogRevision(row.before_revision),
-        after: CatalogRevision(row.after_revision),
-        kind: from_json_string("catalog_change.kind", &row.kind_json)?,
-        subject_id: row.subject_id,
-        subject_kind: from_json_string::<CatalogSubjectKind>(
-            "catalog_change.subject_kind",
-            &row.subject_kind_json,
-        )?,
-        class: from_json_string::<CatalogChangeClass>("catalog_change.class", &row.class_json)?,
-        visibility: from_json_string::<VisibilityScope>(
-            "catalog_change.visibility",
-            &row.visibility_json,
-        )?,
-        session_id: row.session_id,
-        workspace_id: row.workspace_id,
-        owner_worker: row.owner_worker_id.map(WorkerId::new).transpose()?,
-        timestamp: parse_time("catalog_change.timestamp", &row.timestamp)?,
-    })
 }
 
 pub(super) fn raw_invocation_record(row: RawInvocationRow) -> Result<InvocationRecord> {
@@ -199,36 +117,17 @@ pub(super) fn raw_invocation_record(row: RawInvocationRow) -> Result<InvocationR
         catalog_revision: CatalogRevision(row.catalog_revision),
         actor_id: ActorId::new(row.actor_id)?,
         actor_kind: from_json_string::<ActorKind>("invocation.actor_kind", &row.actor_kind_json)?,
-        authority_grant_id: AuthorityGrantId::new(row.authority_grant_id)?,
-        authority_scopes: from_json_string(
-            "invocation.authority_scopes",
-            &row.authority_scopes_json,
-        )?,
         trace_id: TraceId::new(row.trace_id)?,
         parent_invocation_id: row
             .parent_invocation_id
             .map(InvocationId::new)
             .transpose()?,
-        trigger_id: row.trigger_id.map(TriggerId::new).transpose()?,
         session_id: row.session_id,
         workspace_id: row.workspace_id,
-        delivery_mode: from_json_string::<DeliveryMode>(
-            "invocation.delivery_mode",
-            &row.delivery_mode_json,
-        )?,
         idempotency_key: row.idempotency_key,
-        idempotency_scope: match (row.idempotency_scope_kind, row.idempotency_scope_value) {
-            (Some(kind), Some(value)) => Some(IdempotencyScope::new(kind, value)),
-            _ => None,
-        },
-        resource_lease_ids: from_json_string(
-            "invocation.resource_lease_ids",
-            &row.resource_lease_ids_json,
-        )?,
-        compensation_status: row.compensation_status,
-        produced_resource_refs: from_json_string(
-            "invocation.produced_resource_refs",
-            &row.produced_resource_refs_json,
+        idempotency_scope: decode_optional_idempotency_scope(
+            row.idempotency_scope_kind,
+            row.idempotency_scope_value,
         )?,
         replayed_from: row.replayed_from.map(InvocationId::new).transpose()?,
         succeeded: row.succeeded == 1,
@@ -242,15 +141,11 @@ pub(super) fn raw_idempotency_entry(row: RawIdempotencyRow) -> Result<Idempotenc
     Ok(IdempotencyEntry {
         key: IdempotencyKey {
             function_id: FunctionId::new(row.function_id)?,
-            scope: IdempotencyScope::new(row.scope_kind, row.scope_value),
+            scope: decode_idempotency_scope(row.scope_kind, row.scope_value)?,
             key: row.idempotency_key,
         },
         payload_fingerprint: row.payload_fingerprint,
         function_revision: FunctionRevision(row.function_revision),
-        replay_behavior: from_json_string(
-            "idempotency.replay_behavior",
-            &row.replay_behavior_json,
-        )?,
         status: from_json_string("idempotency.status", &row.status_json)?,
         first_invocation_id: InvocationId::new(row.first_invocation_id)?,
         latest_invocation_id: InvocationId::new(row.latest_invocation_id)?,
@@ -264,6 +159,33 @@ pub(super) fn raw_idempotency_entry(row: RawIdempotencyRow) -> Result<Idempotenc
         created_at: parse_time("idempotency.created_at", &row.created_at)?,
         updated_at: parse_time("idempotency.updated_at", &row.updated_at)?,
     })
+}
+
+fn decode_optional_idempotency_scope(
+    kind: Option<String>,
+    value: Option<String>,
+) -> Result<Option<IdempotencyScope>> {
+    match (kind, value) {
+        (None, None) => Ok(None),
+        (Some(kind), Some(value)) => decode_idempotency_scope(kind, value).map(Some),
+        _ => Err(EngineError::LedgerFailure {
+            operation: "idempotency.scope",
+            message: "idempotency scope kind and value must both be present".to_owned(),
+        }),
+    }
+}
+
+fn decode_idempotency_scope(kind: String, value: String) -> Result<IdempotencyScope> {
+    match (kind.as_str(), value.as_str()) {
+        ("profile", "profile") => Ok(IdempotencyScope::Profile),
+        ("session", session_id) if !session_id.trim().is_empty() => {
+            Ok(IdempotencyScope::session(session_id))
+        }
+        _ => Err(EngineError::LedgerFailure {
+            operation: "idempotency.scope",
+            message: format!("invalid idempotency scope {kind}:{value}"),
+        }),
+    }
 }
 
 pub(super) fn optional_stored_error_json(
@@ -365,37 +287,6 @@ pub(super) fn from_json_string<T: DeserializeOwned>(
         operation,
         message: err.to_string(),
     })
-}
-
-pub(super) fn ensure_column(
-    conn: &Connection,
-    table: &'static str,
-    column: &'static str,
-    declaration: &'static str,
-) -> Result<()> {
-    let mut stmt = conn
-        .prepare(&format!("PRAGMA table_info({table})"))
-        .map_err(|err| sqlite_err("ensure_column.prepare", err))?;
-    let mut rows = stmt
-        .query([])
-        .map_err(|err| sqlite_err("ensure_column.query", err))?;
-    while let Some(row) = rows
-        .next()
-        .map_err(|err| sqlite_err("ensure_column.next", err))?
-    {
-        let name: String = row
-            .get(1)
-            .map_err(|err| sqlite_err("ensure_column.name", err))?;
-        if name == column {
-            return Ok(());
-        }
-    }
-    conn.execute(
-        &format!("ALTER TABLE {table} ADD COLUMN {column} {declaration}"),
-        [],
-    )
-    .map_err(|err| sqlite_err("ensure_column.alter", err))?;
-    Ok(())
 }
 
 fn parse_time(operation: &'static str, value: &str) -> Result<DateTime<Utc>> {

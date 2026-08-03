@@ -1,27 +1,33 @@
 //! Durable ledger contracts for engine causality and idempotency.
 //!
 //! The ledger is intentionally narrower than the live catalog. It persists
-//! audit records, invocation attempts, idempotency reservations/results, catalog
-//! changes, and the current durable external-worker catalog definitions needed
-//! to fail closed across process restarts without pretending disconnected
-//! sockets still have executable handlers. Session replay reads invocation rows
-//! and idempotency entries through this ledger boundary so replay does not query
-//! SQLite internals from domain code.
+//! invocation attempts, idempotency reservations/results, and one monotonic
+//! catalog revision. Callable definitions are rebuilt from fixed bootstrap contracts and
+//! canonical worker bundles rather than duplicated in this ledger. Session
+//! replay reads invocation rows and idempotency entries through this boundary so
+//! replay does not query SQLite internals from domain code.
 //!
 //! The SQLite implementation keeps schema and query operations in
 //! `sqlite_store`, with row decoding helpers split into `sqlite_store::rows` so
 //! persistence behavior remains owned by this module without oversized files.
+//! Live invocation results are returned unchanged to the current caller. Audit
+//! rows and idempotency outcomes use a field-aware redacted copy, so one-time
+//! credentials cannot enter SQLite, payload blobs, replay exports, or later
+//! idempotent replays. Both ledger implementations apply that policy at their
+//! storage boundary even when a caller manually constructs a record.
+//! Duplicate handling has one contract: a matching key, payload, and function
+//! revision returns the stored result; conflicts and unfinished attempts fail.
+//! There is no configurable replay-policy plane.
+//! The concrete scope codec accepts only profile-global and non-empty session
+//! values; every unknown or partial persisted pair fails closed.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
-use crate::engine::kernel::ids::{FunctionId, InvocationId, WorkerId};
-use crate::engine::kernel::types::{
-    CatalogChange, CatalogRevision, FunctionDefinition, FunctionRevision, IdempotencyScope,
-    ReplayBehavior, WorkerDefinition,
-};
+use crate::engine::kernel::ids::{FunctionId, InvocationId};
+use crate::engine::kernel::types::{CatalogRevision, FunctionRevision, IdempotencyScope};
 
 mod memory;
 mod outcome;
@@ -32,10 +38,8 @@ pub use memory::InMemoryEngineLedgerStore;
 pub use outcome::{StoredEngineError, StoredInvocationOutcome};
 pub use sqlite_store::SqliteEngineLedgerStore;
 
-use sqlite_codec::ledger_failure;
-
 /// Fully scoped idempotency key.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IdempotencyKey {
     /// Function the key belongs to.
     pub function_id: FunctionId,
@@ -52,12 +56,10 @@ pub enum IdempotencyStatus {
     InProgress,
     /// A final outcome is persisted.
     Completed,
-    /// The outcome is intentionally unknown and duplicates must not re-run.
-    Unknown,
 }
 
 /// Persisted idempotency reservation/result.
-#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct IdempotencyEntry {
     /// Fully scoped key.
     pub key: IdempotencyKey,
@@ -65,8 +67,6 @@ pub struct IdempotencyEntry {
     pub payload_fingerprint: String,
     /// Function revision used for the original attempt.
     pub function_revision: FunctionRevision,
-    /// Duplicate replay behavior.
-    pub replay_behavior: ReplayBehavior,
     /// Current reservation status.
     pub status: IdempotencyStatus,
     /// First invocation that reserved the key.
@@ -90,8 +90,6 @@ pub struct IdempotencyReservation {
     pub payload_fingerprint: String,
     /// Function revision.
     pub function_revision: FunctionRevision,
-    /// Duplicate replay behavior.
-    pub replay_behavior: ReplayBehavior,
     /// Invocation attempting the reservation.
     pub invocation_id: InvocationId,
 }
@@ -107,37 +105,15 @@ pub enum IdempotencyReservationOutcome {
 
 /// Storage boundary for engine audit, invocation, and idempotency records.
 pub trait EngineLedgerStore: Send {
-    /// Append a catalog change record.
-    fn append_catalog_change(&mut self, change: &CatalogChange) -> Result<()>;
+    /// Read the durable monotonic catalog revision.
+    fn catalog_revision(&self) -> Result<CatalogRevision>;
 
-    /// List all catalog changes in revision order.
-    fn list_catalog_changes(&self) -> Result<Vec<CatalogChange>>;
-
-    /// List catalog changes after a revision, up to `limit`.
-    fn catalog_changes_after(
-        &self,
-        revision: CatalogRevision,
-        limit: usize,
-    ) -> Result<Vec<CatalogChange>>;
-
-    /// Store the current definition for a durable external worker.
-    fn upsert_durable_worker_definition(&mut self, definition: &WorkerDefinition) -> Result<()>;
-
-    /// Remove a durable external worker definition and its owned functions.
-    fn remove_durable_worker_definition(&mut self, worker_id: &WorkerId) -> Result<()>;
-
-    /// List durable external worker definitions persisted for restart.
-    fn list_durable_worker_definitions(&self) -> Result<Vec<WorkerDefinition>>;
-
-    /// Store the current definition for a durable external function.
-    fn upsert_durable_function_definition(&mut self, definition: &FunctionDefinition)
-    -> Result<()>;
-
-    /// Remove a durable external function definition.
-    fn remove_durable_function_definition(&mut self, function_id: &FunctionId) -> Result<()>;
-
-    /// List durable external function definitions persisted for restart.
-    fn list_durable_function_definitions(&self) -> Result<Vec<FunctionDefinition>>;
+    /// Atomically advance the durable catalog revision.
+    fn advance_catalog_revision(
+        &mut self,
+        expected: CatalogRevision,
+        next: CatalogRevision,
+    ) -> Result<()>;
 
     /// Append an invocation record.
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()>;
