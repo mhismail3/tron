@@ -4,7 +4,9 @@
 //! locks, logs, journals, WAL/SHM sidecars, and other reconstructible process
 //! state are deliberately excluded. Archive entries are regular files; source
 //! symlinks are represented as checked target text and recreated only after a
-//! verified archive is selected for restoration.
+//! verified archive is selected for restoration. Verification extracts the
+//! archive and replays every manifest-declared length and digest before any
+//! durable profile path can be replaced.
 
 use std::fs::{self, File};
 use std::io::{self, Read};
@@ -928,11 +930,22 @@ mod tests {
         fs::create_dir_all(home.join("workspace/vault")).unwrap();
         fs::write(home.join("settings.toml"), "before").unwrap();
         let snapshot = create_profile_snapshot(&home).unwrap();
-        let mut bytes = fs::read(&snapshot.path).unwrap();
-        let middle = bytes.len() / 2;
-        bytes[middle] ^= 0xff;
-        fs::write(&snapshot.path, bytes).unwrap();
-        assert!(verify_profile_snapshot(&snapshot.path).is_err());
+
+        // Repack a valid archive after changing one declared payload member,
+        // leaving its manifest length and digest untouched. Flipping an
+        // arbitrary compressed byte is not deterministic: zstd can legally
+        // ignore changes in padding or a frame region outside the payload.
+        let extracted = extract_archive(&snapshot.path).unwrap();
+        fs::write(
+            extracted.path().join(PAYLOAD_DIR).join("settings.toml"),
+            "tampered",
+        )
+        .unwrap();
+        let corrupted = temporary.path().join("corrupted-profile.tar.zst");
+        write_archive(extracted.path(), &corrupted, MANIFEST_NAME).unwrap();
+
+        let error = verify_profile_snapshot(&corrupted).unwrap_err();
+        assert!(error.contains("snapshot checksum mismatch for settings.toml"));
         assert_eq!(
             fs::read_to_string(home.join("settings.toml")).unwrap(),
             "before"
