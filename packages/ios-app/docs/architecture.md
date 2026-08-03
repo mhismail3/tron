@@ -97,7 +97,9 @@ sheet names. `Engine/Protocol/WorkerKernel/` separates summary/lifecycle,
 invocation, run-graph, result, inbox, artifact, and request DTOs without
 creating another protocol registry. `UI/WorkerConsole/` separates overview,
 detail, run graph, presentation/shared components, and domain experiences while
-retaining one `WorkerConsoleViewModel` and repository truth.
+retaining one `WorkerConsoleViewModel` and repository truth. Source-level layout
+guards resolve these owning subdirectories directly so a clean checkout cannot
+silently rely on a removed pre-decomposition facade.
 
 `Assets.xcassets/TronLogoVector.imageset/tron-logo.svg` is the authoritative
 logo. The repository-owned `scripts/generate-ios-icons.mjs` derives app icons

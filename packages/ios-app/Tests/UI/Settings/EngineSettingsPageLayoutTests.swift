@@ -206,10 +206,10 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
 
     func testEngineCoreUsesAlwaysVisibleCompactRowsAndSeparateDetailSheet() throws {
         let shell = try source(pathComponents: [
-            "Sources", "UI", "WorkerConsole", "WorkerConsoleViews.swift",
+            "Sources", "UI", "WorkerConsole", "Overview", "WorkerConsoleViews.swift",
         ])
         let views = try source(pathComponents: [
-            "Sources", "UI", "WorkerConsole", "EngineDashboardViews.swift",
+            "Sources", "UI", "WorkerConsole", "Domains", "EngineDashboardViews.swift",
         ])
         let compactRow = try XCTUnwrap(
             views.components(separatedBy: "private struct EngineCoreToolRow").last?
@@ -362,7 +362,9 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         let settingsView = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView.swift"])
         let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
         let settingsSupport = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsSupport.swift"])
-        let engine = try source(pathComponents: ["Sources", "UI", "WorkerConsole", "WorkerConsoleViews.swift"])
+        let engine = try source(pathComponents: [
+            "Sources", "UI", "WorkerConsole", "Overview", "WorkerConsoleViews.swift",
+        ])
 
         XCTAssertTrue(settingsSupport.contains("case stopAllWorkers"))
         XCTAssertTrue(settingsMain.contains("showWorkerDispatchConfirmation = true"))
