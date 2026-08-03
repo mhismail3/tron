@@ -2801,9 +2801,12 @@ that exists only to wrap one file. The only narrow exceptions are layouts with
 a concrete external or canonical contract: Codex environment and skill
 packages, benchmark baselines, the canonical agent reference
 directory, the iOS documentation asset directory, Apple color sets, the bundled
-font directory, and generated helper-app `MacOS` payload directories. The
-hierarchy guard walks these repository-owned trees so deleted planes cannot
-leave empty shells and speculative single-file folders cannot accumulate again.
+font directory, the required helper-app `Contents` directories containing each
+tracked `Info.plist`, and their generated `MacOS` payload directories. The
+guard admits the same helper layout before or after its ignored executable is
+staged. The hierarchy guard walks these repository-owned trees so deleted
+planes cannot leave empty shells and speculative single-file folders cannot
+accumulate again.
 It also requires every Rust source or test file to have an adjacent module
 owner, preventing a deleted registration edge from leaving compilationally
 invisible source behind. Generated build trees are deliberately outside this

@@ -31,7 +31,9 @@ const REQUIRED_SINGLE_FILE_LAYOUTS: &[&str] = &[
     "packages/ios-app/Sources/Assets.xcassets/AccentColor.colorset",
     "packages/ios-app/Sources/Assets.xcassets/LaunchScreenBackground.colorset",
     "packages/mac-app/Sources/Resources/Fonts",
+    "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents",
     "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS",
+    "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server.app/Contents",
     "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS",
 ];
 
@@ -112,15 +114,12 @@ fn required_single_file_layout_exceptions_are_narrow_and_real() {
         let files = std::fs::read_dir(&directory)
             .unwrap()
             .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_file())
             .collect::<Vec<PathBuf>>();
         assert_eq!(
             files.len(),
             1,
-            "single-file layout exception no longer matches its narrow purpose: {relative}"
-        );
-        assert!(
-            files[0].is_file(),
-            "exception must contain one file: {relative}"
+            "required layout must contain exactly one direct file: {relative}"
         );
     }
 }
