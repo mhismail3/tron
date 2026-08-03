@@ -646,11 +646,35 @@ mod tests {
                 .with_idempotency_key(format!("webhook-http-result:{}", uuid::Uuid::now_v7())),
             ))
             .await;
-        let exact_error = format!("{:?}", exact.error);
         assert!(
-            exact_error.contains("originating-session or delivery-granted session"),
-            "sessionless webhook results must retain the narrow delivery grant: {:?}",
+            exact.error.is_none(),
+            "engine-owned recovery must be able to inspect a sessionless webhook result: {:?}",
             exact.error
+        );
+        assert_eq!(exact.value.unwrap()["value"]["requestValue"], 7);
+
+        let denied = server
+            .runtime_context()
+            .engine_host
+            .invoke(crate::engine::Invocation::new_sync(
+                crate::engine::FunctionId::new("worker_kernel::result_read").unwrap(),
+                serde_json::json!({"invocationId":completed_invocation_id}),
+                crate::engine::CausalContext::new(
+                    crate::engine::ActorId::new("agent:webhook-http-test").unwrap(),
+                    crate::engine::ActorKind::Agent,
+                    crate::engine::TraceId::new("webhook-http-result-denied").unwrap(),
+                )
+                .with_idempotency_key(format!(
+                    "webhook-http-result-denied:{}",
+                    uuid::Uuid::now_v7()
+                )),
+            ))
+            .await;
+        let denied_error = format!("{:?}", denied.error);
+        assert!(
+            denied_error.contains("originating-session or delivery-granted session"),
+            "sessionless agent reads must still require the narrow delivery grant: {:?}",
+            denied.error
         );
 
         let mut wrong = Request::builder()
