@@ -647,6 +647,31 @@ struct WorkerConsoleInteractionTests {
         #expect(source.contains("Create through chat"))
         #expect(source.contains("ArtifactChatDraftRequest("))
         #expect(source.contains(".disabled(draftSessionId == nil)"))
+        #expect(source.contains("private struct ArtifactPreviewSheet: View"))
+        #expect(source.contains("SheetTitle(title: \"Preview\", color: .tronEmerald)"))
+        #expect(source.contains("SheetDismissButton(color: .tronEmerald)"))
+        #expect(source.contains(".workerConsoleSheetPresentation()"))
+        #expect(source.contains(".safeAreaInset(edge: .bottom"))
+        #expect(source.contains("ShareLink(item: url)"))
+        #expect(!source.contains("ArtifactQuickLookView(url: url)\n                    .ignoresSafeArea()"))
+    }
+
+    @Test("Engine dashboard renders retired workers in a final dedicated section")
+    func engineDashboardSeparatesRetiredWorkers() throws {
+        let source = try String(
+            contentsOf: iosAppRoot().appendingPathComponent(
+                "Sources/UI/WorkerConsole/Overview/WorkerConsoleViews.swift"
+            ),
+            encoding: .utf8
+        )
+
+        let activeRange = try #require(source.range(of: "workerRows(viewModel.activeWorkers)"))
+        let retiredTitleRange = try #require(source.range(of: "title: \"Retired workers\""))
+        let retiredRowsRange = try #require(source.range(of: "workerRows(viewModel.retiredWorkers)"))
+
+        #expect(activeRange.lowerBound < retiredTitleRange.lowerBound)
+        #expect(retiredTitleRange.lowerBound < retiredRowsRange.lowerBound)
+        #expect(source.contains("Inactive workers retained for audit, version history, and restoration."))
     }
 
     @Test("Worker sessions stay read only and inside dashboard sheets")

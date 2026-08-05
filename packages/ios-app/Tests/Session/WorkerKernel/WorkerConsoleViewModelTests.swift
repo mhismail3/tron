@@ -65,6 +65,20 @@ struct WorkerConsoleViewModelTests {
         #expect(viewModel.activityAttention.count == 1)
     }
 
+    @Test("Dashboard inventory separates active and retired workers")
+    func dashboardInventorySeparatesRetiredWorkers() async {
+        let repository = MockWorkerKernelRepository()
+        repository.includeRetiredFixture = true
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+
+        #expect(viewModel.workers.map(\.workerId) == ["retired-research", "research"])
+        #expect(viewModel.activeWorkers.map(\.workerId) == ["research"])
+        #expect(viewModel.retiredWorkers.map(\.workerId) == ["retired-research"])
+        #expect(viewModel.enabledCount == 1)
+    }
+
     @Test("Architecture metadata resolves beside canonical worker state")
     func architectureMetadataResolvesWithWorkerInspection() async throws {
         let repository = MockWorkerKernelRepository()
@@ -164,6 +178,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var inboxAttentionFilters: [Bool] = []
     var runOffsets: [UInt64?] = []
     var pagedActivity = false
+    var includeRetiredFixture = false
 
     private var worker: WorkerSummaryDTO {
         WorkerSummaryDTO(
@@ -178,6 +193,23 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
             health: enabled ? health : "disabled",
             triggerCount: 1,
             updatedAt: "2026-07-19T12:00:00Z",
+            presentation: nil
+        )
+    }
+
+    private var retiredWorker: WorkerSummaryDTO {
+        WorkerSummaryDTO(
+            workerId: "retired-research",
+            name: "Retired Research",
+            description: "Retained research worker",
+            toolName: "retired_research",
+            runnerKind: "agent",
+            activeVersion: "retired-v1",
+            enabled: false,
+            retired: true,
+            health: "retired",
+            triggerCount: 0,
+            updatedAt: "2026-07-18T12:00:00Z",
             presentation: nil
         )
     }
@@ -213,7 +245,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
                     )
                 ]
             ),
-            workers: [worker],
+            workers: includeRetiredFixture ? [retiredWorker, worker] : [worker],
             workerArchitecture: [
                 WorkerArchitectureNodeDTO(
                     workerId: "research",
