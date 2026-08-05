@@ -666,6 +666,13 @@ offline self-test. The scheduled performance workflow is advisory and uploads
 raw 100-sample benchmark evidence; it is not a release gate until a stable
 baseline is calibrated.
 
+On a pristine Xcode 26.3 runner, hosted unit-test planning can resolve
+`TronMobileTests` before its `Test`-configuration app host exists. CI therefore
+builds the `Tron Beta` scheme once with `-configuration Test` and then runs the
+test action from the same default DerivedData. Keep that explicit host build
+until the pinned Xcode version is advanced and a clean-runner test proves the
+single command reliable.
+
 Historical-session changes use the Beta simulator and the focused deterministic
 tests below. Local timing evidence is emitted as `[SESSION_LOAD]` log entries
 and OS signposts without message content or identifiers:

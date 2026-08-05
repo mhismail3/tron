@@ -1081,6 +1081,13 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
             "{path} must use checksum-pinned release tools"
         );
     }
+    let ci = read_repo_file(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("Build hosted-test app")
+            && ci.contains("xcodebuild build \\")
+            && ci.contains("-configuration Test"),
+        "Xcode 26.3 CI must materialize the hosted-test app before testing"
+    );
 }
 
 #[test]
