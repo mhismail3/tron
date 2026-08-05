@@ -430,7 +430,9 @@ final class WorkerConsoleViewModel {
 
     func invoke(
         repository: any WorkerKernelRepository,
-        connectionState: ConnectionState
+        connectionState: ConnectionState,
+        model: String? = nil,
+        reasoningLevel: String? = nil
     ) async {
         guard let worker = selectedWorker else { return }
         await mutate(repository: repository, connectionState: connectionState) {
@@ -438,15 +440,20 @@ final class WorkerConsoleViewModel {
             let result = try await repository.invokeWorker(
                 workerId: worker.workerId,
                 input: input,
+                model: model,
+                reasoningLevel: reasoningLevel,
                 idempotencyKey: .userAction("worker.invoke")
             )
-            invocationResult = Self.prettyJSON(
-                result.output?.presentationValue
-                    ?? AnyCodable([
-                        "status": result.status,
-                        "invocationId": result.invocationId,
-                    ])
-            )
+            var receipt: [String: Any] = [
+                "status": result.status,
+                "invocationId": result.invocationId,
+            ]
+            receipt["requestedModel"] = result.requestedModel
+            receipt["effectiveModel"] = result.effectiveModel
+            receipt["requestedReasoningLevel"] = result.requestedReasoningLevel
+            receipt["effectiveReasoningLevel"] = result.effectiveReasoningLevel
+            receipt["output"] = result.output?.presentationValue.value
+            invocationResult = Self.prettyJSON(AnyCodable(receipt))
         }
     }
 

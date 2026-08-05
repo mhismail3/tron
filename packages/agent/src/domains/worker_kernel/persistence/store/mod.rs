@@ -18,7 +18,8 @@
 //! writer intent before reading causal lineage, so concurrent engine hooks wait
 //! at the transaction boundary instead of failing a deferred read-to-write
 //! upgrade.
-//! Worker schema v16 adds the immutable worker-to-agent terminal/effect outbox.
+//! Worker schema v17 adds durable requested/effective invocation model policy;
+//! v16 added the immutable worker-to-agent terminal/effect outbox.
 //! Lifecycle transitions terminalize affected work with that evidence, and
 //! purge rechecks nonterminal/outbox custody under SQLite writer intent.
 //! Permanent rejection and its deterministic operator Attention row commit in
@@ -50,7 +51,7 @@ use super::super::types::{
     WorkerRunStage, WorkerRunner, WorkerState, WorkerSummary, WorkerTrigger,
 };
 use super::super::wakeups::PreparedWorkerWakeup;
-pub(super) use state::validate_bundle;
+pub(super) use state::{validate_bundle, validate_publishable_bundle};
 use support::*;
 
 mod agent_delivery_outbox;
@@ -113,7 +114,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 16)?;
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 17)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
@@ -288,6 +289,10 @@ impl WorkerStore {
                     parent_worker_invocation_id TEXT,
                     parent_worker_tool_ordinal INTEGER,
                     retry_of_invocation_id TEXT,
+                    requested_model TEXT,
+                    requested_reasoning_level TEXT,
+                    effective_model TEXT,
+                    effective_reasoning_level TEXT,
                     not_before TEXT,
                     wake_source_invocation_id TEXT,
                     created_at TEXT NOT NULL,
@@ -432,37 +437,14 @@ impl WorkerStore {
                 )
                 .map_err(|error| format!("add originating session linkage: {error}"))?;
         }
-        for (column, definition) in [
-            (
-                "interaction_mode",
-                "interaction_mode TEXT NOT NULL DEFAULT 'foreground'",
-            ),
-            ("detached_at", "detached_at TEXT"),
-            ("model_tool_invocation_id", "model_tool_invocation_id TEXT"),
-            (
-                "parent_worker_invocation_id",
-                "parent_worker_invocation_id TEXT",
-            ),
-            (
-                "parent_worker_tool_ordinal",
-                "parent_worker_tool_ordinal INTEGER",
-            ),
-            ("retry_of_invocation_id", "retry_of_invocation_id TEXT"),
-            ("not_before", "not_before TEXT"),
-            (
-                "wake_source_invocation_id",
-                "wake_source_invocation_id TEXT",
-            ),
-        ] {
-            if !table_has_column(&connection, "worker_invocations", column)? {
-                connection
-                    .execute(
-                        &format!("ALTER TABLE worker_invocations ADD COLUMN {definition}"),
-                        [],
-                    )
-                    .map_err(|error| format!("add worker invocation {column}: {error}"))?;
-            }
-        }
+        ensure_invocation_optional_columns(&connection)?;
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                 VALUES (17, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                [],
+            )
+            .map_err(|error| format!("record invocation model policy schema v17: {error}"))?;
         connection
             .execute_batch(
                 "CREATE INDEX IF NOT EXISTS worker_invocations_origin_session
@@ -978,21 +960,6 @@ impl WorkerStore {
             .commit()
             .map_err(|error| format!("commit interrupted worker recovery: {error}"))
     }
-}
-
-fn table_has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, String> {
-    let mut statement = connection
-        .prepare(&format!("PRAGMA table_info({table})"))
-        .map_err(|error| format!("inspect {table} columns: {error}"))?;
-    let columns = statement
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(|error| format!("query {table} columns: {error}"))?;
-    for candidate in columns {
-        if candidate.map_err(|error| format!("decode {table} column: {error}"))? == column {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 #[cfg(test)]

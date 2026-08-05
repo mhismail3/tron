@@ -553,7 +553,7 @@ struct WorkerConsoleInteractionTests {
         #expect(!context.contains("workerSystemSection"))
     }
 
-    @Test("Covered worker sheets freeze observation and dense content renders lazily")
+    @Test("Covered production worker sheets freeze observation and render lazily")
     func coveredWorkerSheetsFreezeAndRenderLazily() throws {
         let root = iosAppRoot()
         let components = try String(
@@ -577,12 +577,6 @@ struct WorkerConsoleInteractionTests {
         let research = try String(
             contentsOf: root.appendingPathComponent(
                 "Sources/UI/WorkerConsole/Domains/ResearchSuiteSheet.swift"
-            ),
-            encoding: .utf8
-        )
-        let workLedger = try String(
-            contentsOf: root.appendingPathComponent(
-                "Sources/UI/WorkerConsole/Domains/WorkLedgerSheet.swift"
             ),
             encoding: .utf8
         )
@@ -624,7 +618,7 @@ struct WorkerConsoleInteractionTests {
         #expect(console.contains("LazyVStack(alignment: .leading"))
         #expect(delegation.contains("LazyVStack(alignment: .leading"))
         #expect(research.contains("LazyVStack(alignment: .leading"))
-        #expect(workLedger.contains("LazyVStack(alignment: .leading"))
+        #expect(!console.contains(".workLedger"))
 
         #expect(console.contains("isCovered: isPresentingChildSheet"))
         #expect(console.contains("guard !isPresentingChildSheet else { return }"))
@@ -632,12 +626,27 @@ struct WorkerConsoleInteractionTests {
         #expect(delegation.contains("guard !isPresentingChildSheet else { return }"))
         #expect(research.contains(#"workerProjection: "covered""#))
         #expect(research.contains("guard !isPresentingChildSheet else { return }"))
-        #expect(workLedger.contains(".task(id: isPresentingChildSheet)"))
-        #expect(workLedger.contains("guard !isPresentingChildSheet else { return }"))
         #expect(runDetail.contains("refreshRevision):\\(isPresentingChildSheet)"))
         #expect(runDetail.contains("if !isPresentingChildSheet,"))
         #expect(toolRun.contains("refreshRevision):\\(isPresentingChildSheet)"))
         #expect(toolRun.contains("if !isPresentingChildSheet,"))
+    }
+
+    @Test("Artifact inbox uses Settings styling and targeted chat creation")
+    func artifactInboxUsesStandardSettingsPresentation() throws {
+        let source = try String(
+            contentsOf: iosAppRoot().appendingPathComponent(
+                "Sources/UI/WorkerConsole/Domains/ArtifactInboxViews.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("SettingsPageContainer(title: \"Artifacts\""))
+        #expect(source.contains("SettingsCard(accent: .tronEmerald"))
+        #expect(source.contains("TronTypography.sans"))
+        #expect(source.contains("Create through chat"))
+        #expect(source.contains("ArtifactChatDraftRequest("))
+        #expect(source.contains(".disabled(draftSessionId == nil)"))
     }
 
     @Test("Worker sessions stay read only and inside dashboard sheets")

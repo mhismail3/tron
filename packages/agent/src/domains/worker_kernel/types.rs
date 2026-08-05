@@ -307,6 +307,7 @@ pub enum WorkerEngineHook {
     MailboxCuration,
     SessionOrganization,
     SessionTitle,
+    /// Historical decode-only tag; fresh bundle publication rejects it.
     WorkerRelevance,
 }
 
@@ -318,7 +319,6 @@ impl WorkerEngineHook {
             Self::MailboxCuration,
             Self::SessionOrganization,
             Self::SessionTitle,
-            Self::WorkerRelevance,
         ]
     }
 
@@ -684,6 +684,21 @@ pub struct InvocationRecord {
     /// Terminal invocation retried by this run, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_of_invocation_id: Option<String>,
+    /// Caller-supplied one-run model override. This never mutates the worker
+    /// bundle's immutable default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_model: Option<String>,
+    /// Caller-supplied one-run reasoning override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_reasoning_level: Option<String>,
+    /// Model pinned at admission for an agent runner. Command and service
+    /// runners retain `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_model: Option<String>,
+    /// Explicit reasoning level pinned at admission. `None` means the selected
+    /// model/provider owns its normal default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_reasoning_level: Option<String>,
     /// Durable delivery attempts made for this invocation. Values greater than
     /// one are explicit at-least-once redelivery evidence.
     pub attempt_count: u32,
@@ -713,6 +728,8 @@ impl WorkerInteractionMode {
 pub struct InvokeRequest {
     pub worker_id: String,
     pub input: Value,
+    pub model: Option<String>,
+    pub reasoning_level: Option<String>,
     pub idempotency_key: String,
     pub trace_id: String,
     pub causal_depth: u32,

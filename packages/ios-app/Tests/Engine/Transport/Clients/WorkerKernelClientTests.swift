@@ -218,6 +218,10 @@ struct WorkerKernelClientTests {
             "triggerKind": "manual",
             "originSessionId": "session-fresh",
             "agentSessionId": NSNull(),
+            "requestedModel": "claude-sonnet-4-6",
+            "requestedReasoningLevel": "high",
+            "effectiveModel": "claude-sonnet-4-6",
+            "effectiveReasoningLevel": "high",
             "attemptCount": 1,
             "createdAt": "2026-07-29T19:34:35Z",
             "startedAt": "2026-07-29T19:34:38Z",
@@ -249,6 +253,10 @@ struct WorkerKernelClientTests {
         let output = try await repository.resolvedWorkerResult(invocation)
 
         #expect(output.dictionaryValue?["text"] as? String == "hello tron")
+        #expect(invocation.requestedModel == "claude-sonnet-4-6")
+        #expect(invocation.effectiveModel == "claude-sonnet-4-6")
+        #expect(invocation.requestedReasoningLevel == "high")
+        #expect(invocation.effectiveReasoningLevel == "high")
     }
 
     @Test("Artifact inbox uses closed metadata content and delete operations")
@@ -504,6 +512,8 @@ struct WorkerKernelClientTests {
                 #expect(request.workerId == "research")
                 #expect(request.idempotencyKey == key.rawValue)
                 #expect(request.mode == (functions.count == 1 ? .wait : .enqueue))
+                #expect(request.model == (functions.count == 1 ? "claude-sonnet-4-6" : nil))
+                #expect(request.reasoningLevel == (functions.count == 1 ? "high" : nil))
                 return WorkerInvocationDTO(
                     invocationId: "run-1",
                     workerId: "research",
@@ -559,7 +569,9 @@ struct WorkerKernelClientTests {
         _ = try await client.invokeWorker(
             workerId: "research",
             input: AnyCodable(["query": "Tron"]),
-            idempotencyKey: key
+            idempotencyKey: key,
+            model: "claude-sonnet-4-6",
+            reasoningLevel: "high"
         )
         _ = try await client.invokeWorker(
             workerId: "research",

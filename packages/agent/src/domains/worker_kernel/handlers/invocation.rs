@@ -33,7 +33,9 @@ pub(super) async fn invoke_worker(
             deps.runtime
                 .validate_active_input_contract(&worker_id, &input)
                 .map_err(worker_input_contract_error)?;
-            Some((worker_id, input))
+            let model = optional_trimmed_string(&invocation.payload, "model")?;
+            let reasoning_level = optional_trimmed_string(&invocation.payload, "reasoningLevel")?;
+            Some((worker_id, input, model, reasoning_level))
         } else {
             None
         };
@@ -77,26 +79,32 @@ pub(super) async fn invoke_worker(
                 )
                 .await
         }
-        ("enqueue", None, Some((worker_id, input))) => deps.runtime.enqueue_from_provider_tool(
-            InvokeRequest {
-                worker_id,
-                input,
-                idempotency_key: key,
-                trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
-                causal_depth: invocation.causal_context.trigger_depth(),
-                trigger_kind: "manual".to_owned(),
-                origin_session_id: invocation.causal_context.session_id.clone(),
-            },
-            model_tool_invocation_id,
-            parent_worker_invocation_id,
-            parent_worker_tool_ordinal,
-        ),
-        ("wait", None, Some((worker_id, input))) => {
+        ("enqueue", None, Some((worker_id, input, model, reasoning_level))) => {
+            deps.runtime.enqueue_from_provider_tool(
+                InvokeRequest {
+                    worker_id,
+                    input,
+                    model,
+                    reasoning_level,
+                    idempotency_key: key,
+                    trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
+                    causal_depth: invocation.causal_context.trigger_depth(),
+                    trigger_kind: "manual".to_owned(),
+                    origin_session_id: invocation.causal_context.session_id.clone(),
+                },
+                model_tool_invocation_id,
+                parent_worker_invocation_id,
+                parent_worker_tool_ordinal,
+            )
+        }
+        ("wait", None, Some((worker_id, input, model, reasoning_level))) => {
             deps.runtime
                 .invoke_from_provider_tool(
                     InvokeRequest {
                         worker_id,
                         input,
+                        model,
+                        reasoning_level,
                         idempotency_key: key,
                         trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
                         causal_depth: invocation.causal_context.trigger_depth(),
@@ -115,10 +123,38 @@ pub(super) async fn invoke_worker(
             });
         }
     };
-    let record = record.map_err(|message| ToolError::Internal { message })?;
+    let record = record.map_err(worker_invocation_error)?;
     deps.runtime
         .provider_invocation_record(record)
         .map_err(|message| ToolError::Internal { message })
+}
+
+fn optional_trimmed_string(payload: &Value, key: &str) -> Result<Option<String>, ToolError> {
+    let Some(value) = payload.get(key) else {
+        return Ok(None);
+    };
+    let value = value.as_str().ok_or_else(|| ToolError::InvalidParams {
+        message: format!("{key} must be a string"),
+    })?;
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ToolError::InvalidParams {
+            message: format!("{key} must be a non-empty string"),
+        });
+    }
+    Ok(Some(value.to_owned()))
+}
+
+fn worker_invocation_error(message: String) -> ToolError {
+    if message.contains("model")
+        || message.contains("reasoning")
+        || message.contains("idempotency conflict")
+        || message.contains("cannot accept model overrides")
+    {
+        ToolError::InvalidParams { message }
+    } else {
+        ToolError::Internal { message }
+    }
 }
 
 fn worker_input_contract_error(error: WorkerInputContractError) -> ToolError {

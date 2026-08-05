@@ -25,13 +25,32 @@ struct ArtifactInboxView: View {
                 }
 
                 if viewModel.artifacts.isEmpty, !viewModel.isLoading {
-                    ContentUnavailableView(
-                        "No artifacts yet",
-                        systemImage: "tray.full",
-                        description: Text(
-                            "Documents and files delivered by workers will remain here until you delete them."
-                        )
-                    )
+                    ContentUnavailableView {
+                        Label("No artifacts yet", systemImage: "tray.full")
+                            .font(TronTypography.sans(
+                                size: TronTypography.sizeBody,
+                                weight: .semibold
+                            ))
+                    } description: {
+                        Text("Documents and files delivered by workers will remain here until you delete them.")
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    } actions: {
+                        Button("Create through chat") {
+                            guard let draftSessionId else { return }
+                            NotificationCenter.default.post(
+                                name: .createArtifactInChat,
+                                object: ArtifactChatDraftRequest(
+                                    sessionId: draftSessionId,
+                                    prompt: "Create a document artifact for me. Ask what content and format I need before generating it."
+                                )
+                            )
+                        }
+                        .font(TronTypography.sans(
+                            size: TronTypography.sizeBodySM,
+                            weight: .semibold
+                        ))
+                        .disabled(draftSessionId == nil)
+                    }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .listRowInsets(rowInsets)

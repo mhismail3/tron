@@ -26,6 +26,16 @@ enum ChatTranscriptRevealPolicy {
         initialLoadComplete ? 1 : 0
     }
 
+    /// A delayed authoritative snapshot must never look like an empty chat.
+    /// Cached messages are useful immediately while the server refreshes them;
+    /// a genuinely empty session is known only after reconstruction commits.
+    static func showsHistoryLoadingState(
+        hasAuthoritativeSnapshot: Bool,
+        hasMessages: Bool
+    ) -> Bool {
+        !hasAuthoritativeSnapshot && !hasMessages
+    }
+
     static func bottomDistance(
         contentHeight: CGFloat,
         contentOffsetY: CGFloat,

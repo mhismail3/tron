@@ -157,7 +157,8 @@
 //! later rows.
 //! The Engine Dashboard exposes active hook ownership. `continuity_context`,
 //! `context_summary`, `mailbox_curation`, `session_organization`,
-//! `session_title`, and `worker_relevance` are production hooks. Context
+//! and `session_title` are production hooks. Worker selection is deterministic
+//! kernel policy rather than a worker-owned semantic hook. Context
 //! summary retains deterministic recovery because compaction is required for
 //! the provider bound. Continuity and semantic relevance run asynchronously
 //! and may affect only a later safe turn in their originating run. Session
@@ -200,18 +201,11 @@
 //! intent exposure may keep an actuator out of unrelated provider turns.
 //! Worker-first operation is the engine architecture rather than an editable
 //! mode or secondary lifecycle.
-//! Explicit discovery and automatic projection use one worker-owned relevance
-//! hook when installed. Its bounded candidate contract carries canonical worker
-//! metadata and operational evidence without exposing provider internals. The
-//! candidate description comes directly from the immutable bundle; the longer
-//! provider-facing function description may retain version, provenance, and
-//! interaction instructions without inflating or biasing semantic routing.
-//! The
-//! local recovery scorer uses exact field-weighted tokens and bounded adjacent
-//! phrases, so conversation framing and substring collisions cannot manufacture
-//! relevance when the hook is absent, unhealthy, or any agent-runner worker is
-//! resolving its own surface. Optional relevance, mailbox curation, and
-//! continuity hooks are user-session context only; this prevents cross-hook
+//! Explicit discovery and automatic projection share one deterministic local
+//! scorer using exact field-weighted tokens and bounded adjacent phrases.
+//! Conversation framing and substring collisions therefore cannot manufacture
+//! relevance, and provider admission never depends on another worker run.
+//! Mailbox curation and continuity hooks are user-session context only; this prevents cross-hook
 //! recursion and keeps internal worker protocols isolated. Mutable
 //! run/health evidence is a rebuildable engine-state overlay, not
 //! function-contract text; successful work therefore cannot churn catalog
@@ -374,12 +368,12 @@
 //! counts canonical parent links in the same SQLite transaction as insertion
 //! so a concurrent tool batch cannot race beyond its parent's ceiling. Source,
 //! claim, citation, model, and repair policy remain worker-owned.
-//! Agent runners may also select one canonical provider-neutral
-//! `reasoningLevel`. This narrow execution seam has independent production
-//! callers in the latency-bounded relevance and inbox curators: the engine
-//! merely authenticates and projects the declared level into its existing
-//! model request, while the worker owns which level is sufficient. It adds no
-//! semantic branch, credential access, storage owner, or secondary model path.
+//! Agent runners may select default `model` and provider-neutral
+//! `reasoningLevel` values. A normal manual invocation may override either;
+//! admission validates the exact model capability, records requested and
+//! effective policy, and pins the effective pair across retries. Command and
+//! service runners reject model overrides. Execution still uses the existing
+//! authenticated model path and adds no secondary credential owner.
 //! Lazy resident processes remain supervised between invocations: an exit or three
 //! consecutive health-check failures disables routing and creates a durable
 //! high-visibility inbox result. System inbox failures without invocation rows
@@ -559,8 +553,8 @@ pub(crate) fn restore_profile_snapshot(
 
 pub(crate) use contract::{
     CONTEXT_SUMMARY_FUNCTION, CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES, CONTINUITY_CONTEXT_FUNCTION,
-    SESSION_TITLE_FUNCTION, WORKER_RELEVANCE_FUNCTION, WORKER_RESULT_PROJECTION_FUNCTION,
-    estimate_context_summary_tokens, validate_context_summary_narrative,
+    SESSION_TITLE_FUNCTION, WORKER_RESULT_PROJECTION_FUNCTION, estimate_context_summary_tokens,
+    validate_context_summary_narrative,
 };
 
 pub(crate) use notifications::apns::validate_private_key as validate_apns_private_key;
@@ -569,7 +563,6 @@ pub(crate) use runtime::WorkerRuntime;
 pub(crate) use surface::{AvailableWorkerToolSnapshot, SurfaceToolSnapshot};
 pub(crate) use surface::{
     EngineSurfaceSnapshot, ResolvedToolSurface, promote_worker_for_session, resolve_tool_surface,
-    resolve_tool_surface_semantic,
 };
 
 pub(crate) struct Registration {

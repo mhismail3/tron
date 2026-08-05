@@ -116,6 +116,9 @@ struct ContentView: View {
                 }
                     .environment(\.dependencies, dependencies)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .createArtifactInChat)) { _ in
+                showSettings = false
+            }
             .onAppear {
                 // Initialize coordinator on first appear
                 if coordinator == nil {

@@ -104,7 +104,6 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
             "failed to stale late run-scoped continuity delivery"
         );
     }
-    crate::domains::agent::r#loop::surface::clear_semantic_surface(&session_id, &run_id);
     // INVARIANT: the active-run slot owns every event that consumes its shared
     // sequence counter. Publish the final session metadata first. Terminal
     // error/idle/ready events and matching run release then share one registry

@@ -79,7 +79,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Resolve version
         id: ver
@@ -127,7 +127,7 @@ jobs:
           echo "Dry-run=$flag"
 
       - name: Pin Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: latest-stable
 
@@ -237,7 +237,7 @@ jobs:
 
       - name: Upload xcresult on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ios-release-test-results
           path: packages/ios-app/TestResults.xcresult
@@ -535,7 +535,7 @@ jobs:
 
       - name: Upload archive dSYMs
         if: steps.drymode.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ios-dsyms-${{ steps.ver.outputs.version }}
           path: packages/ios-app/build/TronMobile.xcarchive/dSYMs
@@ -691,7 +691,7 @@ jobs:
 
       - name: Upload dry-run IPA artifact
         if: steps.drymode.outputs.dry_run == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ios-dry-run-ipa-${{ steps.ver.outputs.version }}
           path: packages/ios-app/build/TronMobile.ipa

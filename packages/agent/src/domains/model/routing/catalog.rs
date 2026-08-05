@@ -22,9 +22,11 @@ use crate::domains::model::providers::google::types::{
 use crate::domains::model::providers::kimi::types::all_kimi_models_api_json;
 use crate::domains::model::providers::minimax::types::all_minimax_models_api_json;
 use crate::domains::model::providers::ollama::discovery::all_ollama_models_api_json_with_availability;
-use crate::domains::model::providers::openai::types::openai_model_available_for_auth_path;
 use crate::domains::model::providers::openai::types::{
     all_openai_models_api_json_for_auth_path, get_openai_model,
+};
+use crate::domains::model::providers::openai::types::{
+    get_openai_model_profile, openai_model_available_for_auth_path,
 };
 use crate::domains::model::routing::models::registry::strip_provider_prefix;
 use crate::shared::server::errors::{self, ToolError};
@@ -76,6 +78,74 @@ pub(crate) fn is_model_retired(model_id: &str) -> bool {
     }
     // MiniMax, Kimi, and Ollama models currently have no deprecation field.
     false
+}
+
+/// Validate an explicit model selection at a durable admission boundary.
+///
+/// This shares the same support, retirement, and OpenAI auth-path policy as a
+/// normal session model switch without requiring a session to exist first.
+pub(crate) fn validate_explicit_model(
+    model_id: &str,
+    auth_path: &std::path::Path,
+) -> Result<(), String> {
+    let model_id = model_id.trim();
+    if model_id.is_empty() {
+        return Err("model override must be a non-empty string".to_owned());
+    }
+    if !is_model_supported(model_id) {
+        return Err(format!("unknown model '{model_id}'"));
+    }
+    if is_model_retired(model_id) {
+        return Err(format!("model '{model_id}' is retired"));
+    }
+    let bare = strip_provider_prefix(model_id);
+    if get_openai_model(bare).is_some() {
+        let active_auth_path =
+            crate::domains::auth::credentials::openai::infer_auth_path(auth_path, None)
+                .unwrap_or(OpenAIAuthPath::ChatGptCodex);
+        if !openai_model_available_for_auth_path(bare, active_auth_path) {
+            return Err(format!(
+                "OpenAI model '{model_id}' is not available for the active auth path ({})",
+                active_auth_path.as_str()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Reject reasoning overrides the resolved model cannot represent exactly.
+pub(crate) fn validate_explicit_reasoning_level(
+    model_id: &str,
+    reasoning_level: &str,
+    auth_path: &std::path::Path,
+) -> Result<(), String> {
+    let level = reasoning_level.trim();
+    if level.is_empty() {
+        return Err("reasoningLevel override must be a non-empty string".to_owned());
+    }
+    validate_explicit_model(model_id, auth_path)?;
+    let bare = strip_provider_prefix(model_id);
+    let supported = if get_openai_model(bare).is_some() {
+        let active_auth_path =
+            crate::domains::auth::credentials::openai::infer_auth_path(auth_path, None)
+                .unwrap_or(OpenAIAuthPath::ChatGptCodex);
+        get_openai_model_profile(bare, active_auth_path)
+            .is_some_and(|(_, profile)| profile.reasoning_levels.contains(&level))
+    } else if let Some(model) = get_claude_model(bare) {
+        model
+            .reasoning_levels
+            .is_some_and(|levels| levels.contains(&level))
+    } else if let Some(model) = get_gemini_model(bare) {
+        model.supported_thinking_levels.contains(&level)
+    } else {
+        false
+    };
+    if !supported {
+        return Err(format!(
+            "reasoning level '{level}' is not supported by model '{model_id}'"
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn active_openai_auth_path(deps: &Deps) -> OpenAIAuthPath {

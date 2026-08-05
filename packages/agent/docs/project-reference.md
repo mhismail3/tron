@@ -202,18 +202,12 @@ the complete 12,000-character engine query boundary against the bundle schema,
 and the active worker's own smoke test exercises that boundary so its executable
 cannot accept less than it advertises.
 
-The `worker_relevance` hook accepts the latest user task query plus only the
-bounded canonical candidate summaries that the local scorer found meaningful,
-and returns typed worker ids and scores. Sending zero-score catalog entries
-would add prompt latency without improving the policy decision.
-Every provider turn has an immediately available deterministic surface.
-Semantic ranking begins only after admission and may alter a later safe turn in
-the same run; a late result becomes stale. Explicit `worker_discover` may still
-request the same worker-owned ranking policy. The engine validates unique
-candidate IDs, preserves version-bound promotion precedence, and disables an
-owner that returns invalid output. Agent-runner worker turns use only the local
-weighted scorer and skip optional continuity and mailbox curation, preventing
-cross-hook recursion.
+Worker selection is deterministic kernel policy. Automatic projection and
+`worker_discover` use the same bounded weighted-token and adjacent-phrase
+scorer, with version-bound explicit promotions first and recent success/recency
+only as later tie-breakers. Provider admission never waits for a router worker.
+The historical `worker_relevance` bundle tag remains decode-only so retained
+versions can be inspected, but publication, enable, and rollback reject it.
 
 Worker results, peer-agent messages, and explicit waits use
 the durable Agent Delivery primitive. Core code owns addressing, workspace and
@@ -319,8 +313,8 @@ wake; a result already leased into provider context is reused.
 Automatic worker-result delivery is deliberately narrower than “all
 background invocations.” It applies only to detached, top-level, background,
 session-originated agent work. Every `engine_hook:*` invocation is excluded:
-Continuity and semantic ranking remain scoped to their originating run, Session
-Title applies directly, and mailbox curation uses its explicit claim path. The
+Continuity remains scoped to its originating run, Session Title applies
+directly, and mailbox curation uses its explicit claim path. The
 same predicate governs success, failure, cancellation, subtree cancellation,
 lifecycle interruption, and integrity failure.
 
@@ -392,18 +386,16 @@ engine-contract gap instead of guessing or probing for hidden machinery.
 
 Worker hooks have a sixty-second default lifecycle ceiling. An
 immutable worker may tighten that boundary with the generic
-`executionLimits.maxInvocationSeconds` field. Timeout and failure of continuity,
-semantic ranking, or mailbox curation remain ordinary durable worker evidence
-outside provider latency. A request-scoped execution failure from an optional
-semantic hook fails only that invocation and does not globally disable its
-worker. Activation, artifact integrity, and invalid typed output remain
+`executionLimits.maxInvocationSeconds` field. Timeout and failure of continuity
+or mailbox curation remain ordinary durable worker evidence outside provider
+latency. A request-scoped hook failure fails only that invocation and does not
+globally disable its worker. Activation, artifact integrity, and invalid typed output remain
 structural failures and still quarantine the broken version.
-Agent-runner bundles can declare one canonical provider-neutral
-`reasoningLevel`, projected through the existing authenticated model path.
-Exact canonical relevance input may reuse the durable invocation ledger inside
-one aligned 30-second window. Hook identity, owner version, input, and window
-form the key, so an update or expired window never replays stale policy and no
-separate cache subsystem exists. Session title, compaction, continuity, and
+Agent-runner bundles can declare default `model` and provider-neutral
+`reasoningLevel` values. Normal invocations may override either value; admission
+validates support, records requested and effective policy, and pins the
+effective pair across retry. Command and service runners reject overrides.
+Session title, compaction, continuity, and
 mailbox curation preserve causal idempotency because their result may be bound
 to a session or trace.
 
@@ -554,10 +546,10 @@ Omission preserves the migration surface; an explicit empty list exposes no
 tools. Activation accepts only names in the current fixed model catalog,
 enabled direct or internal worker functions, or the candidate's own declared
 tool.
-Engine Steward, Software Workspace, Browser Operator, Mac Operator, Research
-Coordinator, General Delegate, Worker Evaluator, and Worker Forge are the
-production callers that require different narrow actuator sets. The immutable
-bundle remains the single owner. Its list travels as trusted causal metadata
+Different agent-worker roles require different narrow actuator sets; those
+allowlists are justified by the worker's executable contract, not by a
+hard-coded role inventory. The immutable bundle remains the single owner. Its
+list travels as trusted causal metadata
 into the existing agent run and filters both fixed and dynamic tools exactly at
 provider-surface resolution; it does not add routing, relevance, workflow, or
 retry semantics. If a named dynamic tool later disappears, projection simply
@@ -857,9 +849,9 @@ Attention projection contains only unresolved failures and setup blockers.
 Successful informational outcomes never become current Attention, including
 completed schedule, dispatch, reminder-reconciliation, or other background
 history. Detached top-level results may separately produce durable Agent
-Deliveries. An exact immutable-version invocation timeout from
-`worker_relevance`, or from the removed historical `inbox_context` hook, remains
-failed run/result history without becoming current operator Attention. This
+Deliveries. Retained timeout evidence from the removed historical
+`worker_relevance` or `inbox_context` hooks remains failed run/result history
+without becoming current operator Attention. This
 exception is derived from the hook trigger, failed invocation, result error,
 and declared version timeout; invalid typed output, command failure, and every
 other hook error remain actionable. A later verified healthy activation or rollback
@@ -1444,11 +1436,9 @@ Legacy v2 rows retain their redacted provider audit and counts while
 request-specific provenance is explicitly labeled unavailable.
 
 At each provider request boundary, the worker-kernel-owned resolver captures the
-catalog revision and ranks dynamic workers by explicit session promotion, the
-active `worker_relevance` hook, semantic score, recent successes, recency, and
-identity.
-`worker_discover` uses the same hook and local recovery scorer; there is no
-second discovery policy. An ordinary top-level
+catalog revision and ranks dynamic workers by explicit session promotion,
+deterministic relevance score, recent successes, recency, and identity.
+`worker_discover` uses the same scorer; there is no second discovery policy. An ordinary top-level
 dynamic provider surface selects at most 12 workers: recent explicit
 promotions enter first, then relevant/default candidates fill remaining slots.
 Promotion records are version-bound, recency-ordered, and retained to a bounded
@@ -1516,30 +1506,22 @@ mistaken for provider availability. The operation is deliberately not projected
 as model vocabulary. The architecture graph is introspection only. It does not
 create hierarchy, routing policy, or a second worker registry.
 
-### Current worker profile and shape
+### Worker retention and profile audit
 
-Worker identity is profile-owned and dynamically loaded; neither Rust nor iOS
-compiles this list as permanent product vocabulary. At this checkpoint the
-development profile contains 26 enabled workers: 18 direct and 8 internal; 14
-agent runners and 12 deterministic command runners.
+Worker identity is profile-owned and dynamically loaded; Rust and iOS do not
+compile a profile inventory as permanent product vocabulary. Current state must
+be inspected with authenticated `worker_list`, `worker_inspect`, `worker_runs`,
+and `worker_inbox` rather than copied into source documentation.
 
-| Family | Workers |
-|---|---|
-| Core policy | Compaction Worker (internal/agent), Continuity Curator (direct/command), Mailbox Curator (internal/agent), Session Organizer (direct/command), Session Title Curator (internal/agent), Worker Relevance Router (internal/agent) |
-| Automation | Automation Schedules (internal/command), Automation Reminders (direct/command), Notification Policy (direct/command), Automation Workflows (direct/command) |
-| Native boundary | Local Transcription (internal/command), Artifact Studio (direct/command), Browser Operator (direct/agent), Mac Operator (direct/agent) |
-| Research | Research Search (direct/command), Research Source Review (internal/agent), Research Citation (internal/agent), Research Coordinator (direct/agent) |
-| Worker lifecycle | Engine Steward (direct/agent), Procedure Library (direct/command), Worker Evaluator (direct/agent), Worker Forge (direct/agent) |
-| Domain | Work Ledger (direct/command), Knowledge Index (direct/command), Software Workspace (direct/agent), General Delegate (direct/agent) |
-
-The shape follows four rules. One worker owns each independent domain state,
-lifecycle, or reusable policy; deterministic behavior uses command runners
-while semantic interpretation uses bounded agent runners; direct exposure is
-reserved for concise chat outcomes while hooks/specialists/protocol workers
-stay internal; fixed code owns only custody, authentication, native permission,
-canonical mutation, and durable dispatch. Notification transport, artifact
-custody, microphone delivery, and host actuation therefore remain closed
-engine/native boundaries rather than semantic workers.
+A production worker is retained only when an independent runtime caller or
+observed user task justifies it. The August 2026 audit retired Procedure
+Library, Worker Relevance Router, Software Workspace, and Work Ledger without
+purging their versions or history. Procedure and software capabilities may be
+created again from observed work with fresh contracts. Worker relevance is now
+deterministic kernel policy, and Work Ledger no longer has dedicated iOS code.
+The former Artifact Studio was replaced only after the fresh Document Export
+worker passed smoke validation, completed a public invocation, and delivered a
+real inbox artifact.
 
 Worker lifecycle access follows the same split. Engine Steward is a read-only
 diagnostic agent with only `worker_list`, `worker_inspect`, `worker_runs`,
@@ -1610,11 +1592,9 @@ background-result narrative are projected from live typed surfaces or
 worker-owned hooks on every turn instead of being duplicated in a second
 hardcoded instruction set.
 
-Automatic worker projection begins from the exact weighted-term and
-adjacent-phrase scorer, so provider setup never waits for a policy worker. The
-active `worker_relevance` worker may asynchronously refine a later safe turn in
-the same run, while explicit `worker_discover` can request its typed ranking
-directly. Session promotions remain version-bound and outrank both paths.
+Automatic worker projection and explicit discovery both use the exact
+weighted-term and adjacent-phrase scorer, so neither path waits for a policy
+worker. Session promotions remain version-bound and outrank relevance.
 
 Three unrelated runtime boundaries use three deliberately separate closed
 types:
@@ -1712,17 +1692,16 @@ not qualify as workers. Completion means a real worker performs a useful
 outcome through a concise typed contract and survives independent testing,
 versioning, disabling, inspection, and improvement.
 
-Restoration order is deliberate:
+Restoration order remains evidence-driven:
 
 1. close concrete kernel gaps and refresh providers/models;
-2. collaboratively author and field-prove Work Ledger, the four-worker
-   Research suite, and General Delegate one worker at a time;
-3. after explicit user confidence, generalize the presentation contract from
-   those three real experiences;
-4. build Evaluator, Procedure Library, Worker Forge, and Provider Steward;
-5. restore Continuity/Knowledge, Software, Automation, Artifacts/Interactive,
-   Connectors, then Engine Steward;
-6. consolidate overlaps, remove unused adapters/helpers/fixtures, and confirm
+2. keep independently useful, production-backed workers and retire contracts
+   that lack observed callers;
+3. create a fresh worker only when a real task establishes its trigger,
+   contract, and acceptance evidence;
+4. generalize native presentation only after multiple active workers prove a
+   stable shared contract;
+5. consolidate overlaps, remove unused adapters/helpers/fixtures, and confirm
    no legacy administrative plane returned.
 
 There is no elapsed-day or concurrent-creation gate. Each worker still needs
@@ -1821,14 +1800,14 @@ engine-side desktop policy. Manual signing, Accessibility permission, Screen
 Recording permission, and physical acceptance remain required before
 activation.
 
-### Guided Work Ledger proof
+### Historical guided Work Ledger proof (retired)
 
-The first restoration capability was authored by Tron from a natural-language
+Work Ledger was authored by Tron from a natural-language
 request in an ordinary `gpt-5.5` session; it is profile state, not a
 repository-managed built-in. Tron researched the live worker contracts, wrote
 and smoke-tested a command-runner bundle, activated it with `worker_upsert`, and
 used the newly projected `worker_work_ledger` direct tool in the same session.
-The current profile retains three immutable versions; each update named the
+Its retained history contains three immutable versions; each update named the
 same predecessor and preserved mutable state. The current contract has one
 flat, typed action discriminator and explicit optional action fields rather
 than an opaque parameter bag. Its bounded `snapshot` action returns goals,
@@ -1856,14 +1835,9 @@ Acceptance evidence on the fresh restoration profile covers:
 - healthy bundle verification, direct routing, durable run/inbox evidence, and
   continued generic-console access.
 
-iOS recognizes only immutable `work-ledger` presentation contract version 1 as
-the native Work Ledger experience. It uses the worker contract rather than
-reading worker storage, offers summaries, filters, creation/editing and record
-lifecycle, linked detail, empty/error/offline states, and recent activity, and
-keeps the generic technical console one tap away. Unknown contract versions
-fall back to the generic console. Work Ledger is therefore ready for ordinary
-field use; the next guided capability is the Research suite, not an additional
-kernel abstraction.
+iOS routes only independently active, production-backed presentation contracts.
+The retired Work Ledger contract now falls back to the generic console; its
+dedicated view model and sheets were removed rather than retained ceremonially.
 
 ### Guided Research Search proof
 
@@ -2450,10 +2424,11 @@ these bullets as one tool apiece.
   compare worker contracts, validate scenario coverage, and recommend worker
   consolidation. `engine::surface_snapshot` supplies the operator truth; higher
   level analysis should be a worker.
-- **Core maintenance:** Software Workspace may investigate source, author
-  bounded changes, and run tests through the ordinary host primitives. Tron
-  retains no separate proposal store or apply actuator; normal repository
-  history and the user's explicit request remain the review boundary.
+- **Core maintenance:** a fresh software-maintenance worker may be authored
+  when an observed workflow establishes a bounded contract. The retired
+  Software Workspace is not an automatic source-editing trigger. Tron retains
+  no separate proposal store or apply actuator; normal repository history and
+  the user's explicit request remain the review boundary.
 
 ### Kernel substrate already replacing separate behavior
 
@@ -2463,9 +2438,9 @@ these bullets as one tool apiece.
   secrets; manual, schedule, event, and webhook triggers; queueing; retries;
   timeouts; causal traces; inbox; health; disable; rollback; retirement; purge;
   stop; and stop-all are worker-kernel custody.
-- Worker discovery, semantic relevance hooks, live provider projection,
-  version-bound promotion, dynamic surface revisions, and stale-contract
-  rejection provide same-session adaptation without a separate catalog plane.
+- Deterministic worker discovery, live provider projection, version-bound
+  promotion, dynamic surface revisions, and stale-contract rejection provide
+  same-session adaptation without a separate relevance worker or catalog plane.
 - Durable sessions, provider/model turns, `tool.invocation.*` evidence,
   compaction mechanics, authenticated transport, settings, credentials, and
   blobs remain fixed because they custody the runtime that workers depend on.
@@ -2507,7 +2482,7 @@ indexes and durable operational history.
 | `engine_idempotency_entries` | engine invocation idempotency ledger |
 | `engine_invocations` | generic engine invocation history |
 | `engine_state_entries` | engine-owned state values |
-| `engine_stream_events` | durable engine stream records |
+| `engine_stream_events` | durable engine stream records; topic-tail polling and session replay are cursor-indexed |
 | `events` | session event log |
 | `logs` | structured session logs |
 | `sessions` | session metadata |
@@ -2523,7 +2498,7 @@ operational evidence:
 
 | Table | Ownership |
 |---|---|
-| `worker_schema` | worker index schema version; v12 adds atomic worker handoffs and split notification ownership; v13 adds self-only delayed invocation custody; v14 adds artifact custody and storage attention; v15 adds the exact session-organization mutation outbox; v16 adds the immutable worker-to-agent terminal/effect outbox |
+| `worker_schema` | worker index schema version; v12 adds atomic worker handoffs and split notification ownership; v13 adds self-only delayed invocation custody; v14 adds artifact custody and storage attention; v15 adds the exact session-organization mutation outbox; v16 adds the immutable worker-to-agent terminal/effect outbox; v17 adds requested/effective invocation model and reasoning policy |
 | `blobs` | generic content-addressed compressed result bodies larger than 8 KiB |
 | `storage_payload_refs` | one generic ownership/integrity row for every successful invocation output |
 | `workers` | rebuildable current catalog |

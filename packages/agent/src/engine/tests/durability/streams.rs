@@ -70,3 +70,42 @@ async fn topic_poll_advances_past_invisible_rows_in_sqlite() {
     )
     .await;
 }
+
+#[test]
+fn sqlite_stream_hot_paths_are_cursor_indexed() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = SqliteEngineStreamStore::open(dir.path().join("tron.sqlite")).unwrap();
+
+    let latest_cursor_plan = store
+        .connection()
+        .query_row(
+            "EXPLAIN QUERY PLAN
+             SELECT COALESCE(MAX(cursor), 0)
+             FROM engine_stream_events
+             WHERE topic = 'events.session'",
+            [],
+            |row| row.get::<_, String>(3),
+        )
+        .unwrap();
+    assert!(
+        latest_cursor_plan.contains("idx_engine_stream_events_topic_cursor"),
+        "latest topic cursor must use its bounded index: {latest_cursor_plan}"
+    );
+
+    let session_replay_plan = store
+        .connection()
+        .query_row(
+            "EXPLAIN QUERY PLAN
+             SELECT cursor
+             FROM engine_stream_events
+             WHERE session_id = 'session-a'
+             ORDER BY cursor ASC",
+            [],
+            |row| row.get::<_, String>(3),
+        )
+        .unwrap();
+    assert!(
+        session_replay_plan.contains("idx_engine_stream_events_session_cursor"),
+        "session replay must use its bounded index: {session_replay_plan}"
+    );
+}

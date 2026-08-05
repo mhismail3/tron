@@ -49,17 +49,6 @@ pub(super) async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Val
             description: worker.description.clone(),
             intents: active.bundle.routing.intents.clone(),
             examples: active.bundle.routing.examples.clone(),
-            provenance: active
-                .bundle
-                .provenance
-                .iter()
-                .map(|source| {
-                    source.revision.as_ref().map_or_else(
-                        || source.source.clone(),
-                        |revision| format!("{}@{revision}", source.source),
-                    )
-                })
-                .collect(),
             completed_runs: evidence
                 .get("completedRuns")
                 .and_then(Value::as_u64)
@@ -69,21 +58,10 @@ pub(super) async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Val
         let _ = payloads.insert(worker.worker_id.clone(), (worker, active.bundle, evidence));
     }
     let include_unmatched = retrieval::query_is_empty(Some(&query));
-    let origin_worker_id = invocation.causal_context.origin_worker_id();
-    let ranking = retrieval::rank_workers_with_hook_evidence(
-        deps.runtime.host(),
-        invocation
-            .causal_context
-            .session_id
-            .as_deref()
-            .unwrap_or("worker-discover"),
-        origin_worker_id,
-        documents,
-        Some(&query),
-        &promoted,
-        limit,
-    )
-    .await;
+    let ranking = retrieval::WorkerRankingOutcome::deterministic(
+        retrieval::rank_workers(documents, Some(&query), &promoted),
+        "deterministic_relevance",
+    );
     let ranking_mechanism = ranking.mechanism.clone();
     let ranked = ranking
         .ranks
@@ -113,7 +91,6 @@ pub(super) async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Val
                 "score":rank.relevance_score,
                 "match":{
                     "score":rank.relevance_score,
-                    "reason":rank.explanation,
                     "mechanism":ranking_mechanism.clone(),
                 },
                 "promoted":rank.promoted,

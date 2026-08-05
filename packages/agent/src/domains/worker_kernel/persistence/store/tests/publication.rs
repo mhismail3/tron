@@ -58,6 +58,30 @@ fn internal_worker_rejects_unused_direct_tool_schema() {
 }
 
 #[test]
+fn retired_worker_relevance_hook_is_decode_only() {
+    let mut candidate = bundle();
+    candidate.engine_hooks = vec![WorkerEngineHook::WorkerRelevance];
+
+    let decoded: WorkerBundle = serde_json::from_value(serde_json::to_value(&candidate).unwrap())
+        .expect("historical hook tag remains decodable");
+    assert_eq!(decoded.engine_hooks, candidate.engine_hooks);
+    assert_eq!(
+        validate_publishable_bundle(&candidate).unwrap_err(),
+        "engine hook 'worker_relevance' is retired; use deterministic worker routing"
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let error = match store.prepare(candidate, None) {
+        Ok(_) => panic!("fresh worker relevance publication must stay retired"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error,
+        "engine hook 'worker_relevance' is retired; use deterministic worker routing"
+    );
+}
+
+#[test]
 fn agent_tool_allowlist_is_agent_only_unique_and_bounded() {
     let mut command = bundle();
     command.agent_tools = Some(vec!["web_fetch".to_owned()]);

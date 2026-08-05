@@ -55,8 +55,6 @@ pub(crate) struct AvailableWorkerToolSnapshot {
     pub(crate) omission_reason: Option<String>,
     pub(crate) ranking_mechanism: String,
     pub(crate) relevance_score: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) router_explanation: Option<String>,
     pub(crate) completed_runs: u64,
 }
 
@@ -73,12 +71,6 @@ pub(crate) struct EngineSurfaceSnapshot {
     pub(crate) projected_worker_count: usize,
     pub(crate) available_worker_count: usize,
     pub(crate) ranking_mechanism: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) router_worker_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) router_worker_version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) router_invocation_id: Option<String>,
     pub(crate) tools: Vec<SurfaceToolSnapshot>,
     pub(crate) fixed_tools: Vec<SurfaceToolSnapshot>,
     pub(crate) available_workers: Vec<AvailableWorkerToolSnapshot>,

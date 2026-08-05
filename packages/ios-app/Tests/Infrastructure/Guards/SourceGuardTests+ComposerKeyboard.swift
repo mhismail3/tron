@@ -2,6 +2,28 @@ import Testing
 import Foundation
 
 extension SourceGuardTests {
+    @Test("Chat shell keeps its SwiftUI modifier graph compiler-bounded")
+    func testChatShellModifierGraphRemainsDecomposed() throws {
+        let source = try String(
+            contentsOf: iosAppRoot().appendingPathComponent(
+                "Sources/UI/Chat/Shell/ChatView.swift"
+            ),
+            encoding: .utf8
+        )
+        let notificationContent = try #require(
+            source.range(of: "private var notificationContent: some View")
+        )
+        let lifecycleContent = try #require(
+            source.range(of: "private var lifecycleContent: some View")
+        )
+        let body = try #require(source.range(of: "var body: some View"))
+
+        #expect(notificationContent.lowerBound < lifecycleContent.lowerBound)
+        #expect(lifecycleContent.lowerBound < body.lowerBound)
+        #expect(source.contains("private var lifecycleContent: some View {\n        notificationContent"))
+        #expect(source.contains("var body: some View {\n        lifecycleContent"))
+    }
+
     @Test("Chat composer owns one bottom inset and transient thinking follows without layout animation")
     func testChatComposerAndTransientTailHaveSingleLayoutOwners() throws {
         let iosRoot = iosAppRoot()

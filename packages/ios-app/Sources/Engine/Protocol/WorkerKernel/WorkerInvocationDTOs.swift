@@ -70,6 +70,10 @@ struct WorkerInvocationDTO: Codable, Equatable, Identifiable, Sendable {
     let modelToolInvocationId: String?
     let parentWorkerInvocationId: String?
     let retryOfInvocationId: String?
+    let requestedModel: String?
+    let requestedReasoningLevel: String?
+    let effectiveModel: String?
+    let effectiveReasoningLevel: String?
     let attemptCount: UInt32
     let createdAt: String
     let startedAt: String?
@@ -96,6 +100,10 @@ struct WorkerInvocationDTO: Codable, Equatable, Identifiable, Sendable {
         modelToolInvocationId: String? = nil,
         parentWorkerInvocationId: String? = nil,
         retryOfInvocationId: String? = nil,
+        requestedModel: String? = nil,
+        requestedReasoningLevel: String? = nil,
+        effectiveModel: String? = nil,
+        effectiveReasoningLevel: String? = nil,
         attemptCount: UInt32,
         createdAt: String,
         startedAt: String?,
@@ -119,6 +127,10 @@ struct WorkerInvocationDTO: Codable, Equatable, Identifiable, Sendable {
         self.modelToolInvocationId = modelToolInvocationId
         self.parentWorkerInvocationId = parentWorkerInvocationId
         self.retryOfInvocationId = retryOfInvocationId
+        self.requestedModel = requestedModel
+        self.requestedReasoningLevel = requestedReasoningLevel
+        self.effectiveModel = effectiveModel
+        self.effectiveReasoningLevel = effectiveReasoningLevel
         self.attemptCount = attemptCount
         self.createdAt = createdAt
         self.startedAt = startedAt

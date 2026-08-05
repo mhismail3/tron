@@ -143,6 +143,13 @@ relevant labels. Both run on `main` and manual dispatch. `CI summary` requires
 successful change detection and all unconditional jobs; it accepts a skipped
 client job only on a successfully path-filtered pull request.
 
+Every external GitHub Action is pinned to a full commit SHA, and container
+actions are pinned to an OCI digest. Keep the readable release line in the
+trailing comment (for example, `# v4`). Dependabot remains the update owner;
+its PR must move the immutable revision and pass the same aggregate gate. A
+repository invariant scans every workflow so mutable action tags cannot enter
+through CI or either release lane.
+
 ## Commits
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/) loosely:
@@ -163,6 +170,11 @@ The pre-commit hook (`scripts/install-hooks.sh`) runs Rust formatting check
 `scripts/personal-info-guard.sh --staged` before each commit. It catches both
 Rust formatting drift and hardcoded usernames, home paths, and
 developer-machine identifiers from sneaking into source.
+
+`main` is protected by the repository ruleset: changes enter through a pull
+request whose branch is current with `main`, and the single required `CI
+summary` check must pass. Local hooks are an early feedback layer, not a
+substitute for that remote merge boundary.
 
 ## Code style
 

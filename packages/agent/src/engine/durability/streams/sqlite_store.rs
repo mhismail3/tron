@@ -49,6 +49,12 @@ CREATE TABLE IF NOT EXISTS engine_stream_events (
 
 CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
   ON engine_stream_events(trace_id, cursor);
+
+CREATE INDEX IF NOT EXISTS idx_engine_stream_events_topic_cursor
+  ON engine_stream_events(topic, cursor);
+
+CREATE INDEX IF NOT EXISTS idx_engine_stream_events_session_cursor
+  ON engine_stream_events(session_id, cursor);
 "#,
             )
             .map_err(|err| sqlite_err("stream.init", err.to_string()))

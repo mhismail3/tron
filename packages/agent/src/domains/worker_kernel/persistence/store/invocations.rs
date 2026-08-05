@@ -16,7 +16,7 @@ impl WorkerStore {
         trigger_kind: &str,
         origin_session_id: Option<&str>,
     ) -> Result<(InvocationRecord, bool), String> {
-        self.begin_invocation_with_context(
+        self.begin_invocation_with_model_context(
             worker_id,
             worker_version,
             input,
@@ -31,9 +31,14 @@ impl WorkerStore {
             None,
             None,
             None,
+            None,
+            None,
+            None,
+            None,
         )
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn begin_invocation_with_context(
         &self,
@@ -50,6 +55,50 @@ impl WorkerStore {
         parent_worker_invocation_id: Option<&str>,
         parent_worker_tool_ordinal: Option<u32>,
         retry_of_invocation_id: Option<&str>,
+        max_sibling_invocations: Option<u32>,
+    ) -> Result<(InvocationRecord, bool), String> {
+        self.begin_invocation_with_model_context(
+            worker_id,
+            worker_version,
+            input,
+            idempotency_key,
+            trace_id,
+            causal_depth,
+            trigger_kind,
+            origin_session_id,
+            interaction_mode,
+            model_tool_invocation_id,
+            parent_worker_invocation_id,
+            parent_worker_tool_ordinal,
+            retry_of_invocation_id,
+            None,
+            None,
+            None,
+            None,
+            max_sibling_invocations,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_invocation_with_model_context(
+        &self,
+        worker_id: &str,
+        worker_version: &str,
+        input: &Value,
+        idempotency_key: &str,
+        trace_id: &str,
+        causal_depth: u32,
+        trigger_kind: &str,
+        origin_session_id: Option<&str>,
+        interaction_mode: WorkerInteractionMode,
+        model_tool_invocation_id: Option<&str>,
+        parent_worker_invocation_id: Option<&str>,
+        parent_worker_tool_ordinal: Option<u32>,
+        retry_of_invocation_id: Option<&str>,
+        requested_model: Option<&str>,
+        requested_reasoning_level: Option<&str>,
+        effective_model: Option<&str>,
+        effective_reasoning_level: Option<&str>,
         max_sibling_invocations: Option<u32>,
     ) -> Result<(InvocationRecord, bool), String> {
         validate_runtime_identifier(idempotency_key, "idempotency key", 256)?;
@@ -83,6 +132,15 @@ impl WorkerStore {
             return Ok((existing, true));
         }
         if let Some(existing) = self.invocation_by_key(worker_id, idempotency_key)? {
+            // INVARIANT: provider retries may regenerate equivalent tool arguments,
+            // but an explicit execution-policy change must never reuse the old run.
+            if existing.requested_model.as_deref() != requested_model
+                || existing.requested_reasoning_level.as_deref() != requested_reasoning_level
+            {
+                return Err(format!(
+                    "worker invocation idempotency conflict for worker '{worker_id}'"
+                ));
+            }
             self.record_result_association(&existing.invocation_id, model_tool_invocation_id)?;
             self.record_suppressed_delivery(
                 trace_id,
@@ -157,9 +215,11 @@ impl WorkerStore {
                     idempotency_key,trace_id,causal_depth,trigger_kind,
                     origin_session_id,interaction_mode,detached_at,
                     model_tool_invocation_id,parent_worker_invocation_id,
-                    parent_worker_tool_ordinal,retry_of_invocation_id,created_at
+                    parent_worker_tool_ordinal,retry_of_invocation_id,
+                    requested_model,requested_reasoning_level,effective_model,
+                    effective_reasoning_level,created_at
                  )
-                 VALUES (?1,?2,?3,'queued',?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+                 VALUES (?1,?2,?3,'queued',?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
             params![
                 invocation_id,
                 worker_id,
@@ -176,6 +236,10 @@ impl WorkerStore {
                 parent_worker_invocation_id,
                 parent_worker_tool_ordinal,
                 retry_of_invocation_id,
+                requested_model,
+                requested_reasoning_level,
+                effective_model,
+                effective_reasoning_level,
                 created_at,
             ],
         );
@@ -197,6 +261,13 @@ impl WorkerStore {
                 return Ok((existing, true));
             }
             if let Some(existing) = self.invocation_by_key(worker_id, idempotency_key)? {
+                if existing.requested_model.as_deref() != requested_model
+                    || existing.requested_reasoning_level.as_deref() != requested_reasoning_level
+                {
+                    return Err(format!(
+                        "worker invocation idempotency conflict for worker '{worker_id}'"
+                    ));
+                }
                 self.record_result_association(&existing.invocation_id, model_tool_invocation_id)?;
                 self.record_suppressed_delivery(
                     trace_id,

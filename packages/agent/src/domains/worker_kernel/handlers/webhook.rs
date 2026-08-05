@@ -33,6 +33,8 @@ pub(super) async fn webhook(invocation: &Invocation, deps: &Deps) -> Result<Valu
     serde_json::to_value(deps.runtime.enqueue(InvokeRequest {
         worker_id,
         input,
+        model: None,
+        reasoning_level: None,
         idempotency_key: format!(
             "webhook:{trigger_id}:{}",
             required_string(&invocation.payload, "idempotencyKey")?

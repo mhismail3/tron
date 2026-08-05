@@ -324,10 +324,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             causal_depth: engine_causality
                 .as_ref()
                 .map_or(0, |causality| causality.context.trigger_depth()),
-            allow_semantic_ranking: engine_causality
-                .as_ref()
-                .and_then(|causality| causality.context.origin_worker_id())
-                .is_none(),
         });
     }
     let messages = state.messages.clone();

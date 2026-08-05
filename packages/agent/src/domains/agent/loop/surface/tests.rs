@@ -680,10 +680,7 @@ fn surface_primer_is_stable_and_omits_volatile_catalog_evidence() {
         conditional_fixed_tool_count: 1,
         projected_worker_count: 1,
         available_worker_count: 7,
-        ranking_mechanism: "semantic_hook".to_owned(),
-        router_worker_id: Some("worker-relevance-router".to_owned()),
-        router_worker_version: Some("abcdef1234567890".to_owned()),
-        router_invocation_id: Some("invocation-1".to_owned()),
+        ranking_mechanism: "deterministic_relevance".to_owned(),
         tools: vec![
             crate::domains::worker_kernel::SurfaceToolSnapshot {
                 model_name: "worker_discover".to_owned(),
@@ -739,9 +736,8 @@ fn surface_primer_is_stable_and_omits_volatile_catalog_evidence() {
             projected: true,
             selection_reason: Some("relevance".to_owned()),
             omission_reason: None,
-            ranking_mechanism: "semantic_hook".to_owned(),
+            ranking_mechanism: "deterministic_relevance".to_owned(),
             relevance_score: 8,
-            router_explanation: Some("Matches recent research".to_owned()),
             completed_runs: 4,
         }],
     });

@@ -176,6 +176,7 @@ struct SessionSidebar: View {
             WorkerConsoleSheet(
                 viewModel: workerConsole,
                 repository: dependencies.workerKernelRepository,
+                modelRepository: dependencies.modelRepository,
                 connectionState: dependencies.connectionRepository.connectionState
             )
         }

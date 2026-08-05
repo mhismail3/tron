@@ -1,7 +1,5 @@
 //! Engine introspection and semantic policy hooks.
 
-use std::collections::BTreeSet;
-
 use serde_json::{Value, json};
 
 use crate::engine::Invocation;
@@ -133,68 +131,6 @@ fn project_continuity_sources(value: Option<&Value>) -> Vec<Value> {
 
 pub(super) async fn session_title(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
     deps.runtime.enqueue_session_title_hook(invocation).await
-}
-
-pub(super) async fn worker_relevance(
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, String> {
-    let candidates = invocation
-        .payload
-        .get("candidates")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "worker relevance candidates must be an array".to_owned())?;
-    let candidate_ids = candidates
-        .iter()
-        .filter_map(|candidate| candidate.get("workerId").and_then(Value::as_str))
-        .collect::<BTreeSet<_>>();
-    let query = invocation.payload.get("query").and_then(Value::as_str);
-    if candidate_ids.len() <= 1 || super::super::retrieval::query_is_empty(query) {
-        return Ok(json!({"handled":false,"rankings":[]}));
-    }
-    let Some(execution) = deps
-        .runtime
-        .execute_engine_hook(
-            WorkerEngineHook::WorkerRelevance,
-            json!({
-                "query":invocation.payload["query"].clone(),
-                "candidates":candidates,
-            }),
-            invocation
-                .payload
-                .get("originWorkerId")
-                .and_then(Value::as_str),
-            invocation,
-        )
-        .await?
-    else {
-        return Ok(json!({"handled":false,"rankings":[]}));
-    };
-    let rankings = execution.output["rankings"]
-        .as_array()
-        .ok_or_else(|| "worker relevance hook returned no rankings array".to_owned())?;
-    let mut seen = BTreeSet::new();
-    for ranking in rankings {
-        let worker_id = ranking["workerId"].as_str().unwrap_or_default();
-        if !candidate_ids.contains(worker_id) || !seen.insert(worker_id) {
-            let reason = deps
-                .runtime
-                .reject_engine_hook_output(
-                    &execution,
-                    WorkerEngineHook::WorkerRelevance,
-                    "rankings must contain unique IDs from the supplied candidate set",
-                )
-                .await;
-            return Err(reason);
-        }
-    }
-    Ok(json!({
-        "handled":true,
-        "workerId":execution.worker_id,
-        "workerVersion":execution.worker_version,
-        "invocationId":execution.invocation_id,
-        "rankings":rankings,
-    }))
 }
 
 #[cfg(test)]

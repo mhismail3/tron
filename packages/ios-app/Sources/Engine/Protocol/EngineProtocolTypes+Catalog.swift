@@ -120,9 +120,6 @@ struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
     let availableWorkerCount: UInt64
     let availableWorkers: [AvailableWorkerToolDTO]
     let rankingMechanism: String?
-    let routerWorkerId: String?
-    let routerWorkerVersion: String?
-    let routerInvocationId: String?
 
     init(
         catalogRevision: UInt64,
@@ -134,10 +131,7 @@ struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
         projectedWorkerCount: UInt64,
         availableWorkerCount: UInt64,
         availableWorkers: [AvailableWorkerToolDTO],
-        rankingMechanism: String? = nil,
-        routerWorkerId: String? = nil,
-        routerWorkerVersion: String? = nil,
-        routerInvocationId: String? = nil
+        rankingMechanism: String? = nil
     ) {
         self.catalogRevision = catalogRevision
         self.surfaceHash = surfaceHash
@@ -149,9 +143,6 @@ struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
         self.availableWorkerCount = availableWorkerCount
         self.availableWorkers = availableWorkers
         self.rankingMechanism = rankingMechanism
-        self.routerWorkerId = routerWorkerId
-        self.routerWorkerVersion = routerWorkerVersion
-        self.routerInvocationId = routerInvocationId
     }
 }
 

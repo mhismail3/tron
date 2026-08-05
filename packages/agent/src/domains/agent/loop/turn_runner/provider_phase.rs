@@ -33,7 +33,7 @@ use crate::shared::server::failure::{
 
 use super::failure::emit_turn_failure;
 use super::persistence::persist_model_provider_request_audit;
-use super::turn_context::{FreshWorkerResults, build_turn_context, worker_relevance_query};
+use super::turn_context::{FreshWorkerResults, build_turn_context, worker_routing_query};
 use super::{interrupted_turn_result, terminalization_error_result, terminalize_cancellation};
 
 pub(super) struct ProviderPhaseParams<'a> {
@@ -154,7 +154,7 @@ struct ProviderContextAssembly {
 
 fn bounded_selection_mechanism(mechanism: &str) -> &'static str {
     match mechanism {
-        "semantic_hook" => "semantic_hook",
+        "deterministic_relevance" => "deterministic_relevance",
         "deterministic_trivial" => "deterministic_trivial",
         "deterministic_within_limit" => "deterministic_within_limit",
         "deterministic_fallback" => "deterministic_fallback",
@@ -329,7 +329,7 @@ pub(super) async fn open_provider_response(
         .as_ref()
         .map(|id| id.as_str())
         .unwrap_or("none");
-    let relevance_query = worker_relevance_query(params.context_manager.messages_slice());
+    let relevance_query = worker_routing_query(params.context_manager.messages_slice());
     let primitive_surface = match surface::resolve_provider_primitive_surface_for_run(
         params.engine_host,
         params.session_id,

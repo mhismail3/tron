@@ -48,7 +48,6 @@ pub(crate) const CONTEXT_SUMMARY_FUNCTION: &str = "worker_kernel::context_summar
 pub(crate) const CONTEXT_SUMMARY_MAX_ESTIMATED_TOKENS: usize = 10_000;
 pub(crate) const CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES: usize = 40_000;
 pub(crate) const SESSION_TITLE_FUNCTION: &str = "worker_kernel::session_title";
-pub(crate) const WORKER_RELEVANCE_FUNCTION: &str = "worker_kernel::worker_relevance";
 pub(crate) const WORKER_RESULT_PROJECTION_FUNCTION: &str = "worker_kernel::result_projection";
 pub(super) const DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 5;
 pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
@@ -359,13 +358,15 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
             "properties":{
                 "workerId":{"type":"string"},
                 "input":{},
+                "model":{"type":"string","minLength":1,"description":"Optional model override for this invocation of an agent runner."},
+                "reasoningLevel":{"type":"string","minLength":1,"description":"Optional reasoning override validated against the resolved model."},
                 "idempotencyKey":{"type":"string"},
                 "retryOfInvocationId":{"type":"string","description":"Retry one terminal invocation using its immutable worker version and original typed input."},
                 "mode":{"type":"string","enum":["wait","enqueue"],"description":"wait uses the interaction budget and may return a detached running record; enqueue returns immediately after durable admission."}
             },
             "oneOf":[
                 {"required":["workerId","input"],"not":{"required":["retryOfInvocationId"]}},
-                {"required":["retryOfInvocationId"],"not":{"anyOf":[{"required":["workerId"]},{"required":["input"]},{"required":["idempotencyKey"]}]}}
+                {"required":["retryOfInvocationId"],"not":{"anyOf":[{"required":["workerId"]},{"required":["input"]},{"required":["idempotencyKey"]},{"required":["model"]},{"required":["reasoningLevel"]}]}}
             ]
         }),
         "Invoke an enabled persistent worker by id with typed JSON input, or retry one terminal invocation from its immutable contract. Predicted or unexpectedly slow top-level waits return the same durable invocation in background mode; nested worker calls remain synchronous.",
@@ -826,64 +827,6 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }))
         .idempotency(IdempotencyContract::session())
         .description("Durably enqueue the active worker-owned title policy after the first successful exchange of an untitled ordinary session. The admission receipt never waits for execution; explicit titles and worker audit sessions are never eligible.")
-        .build()?,
-    );
-    specs.push(
-        FunctionContract::new(
-            WORKER_RELEVANCE_FUNCTION,
-            WORKER,
-            EffectClass::ExternalSideEffect,
-            RiskLevel::Medium)
-        .visibility(FunctionVisibility::Internal)
-        .request_schema(json!({
-            "type":"object",
-            "additionalProperties":false,
-            "required":["query","candidates"],
-            "properties":{
-                "originWorkerId":{"type":"string"},
-                "query":{"type":"string","maxLength":12000},
-                "candidates":{
-                    "type":"array","maxItems":256,
-                    "items":{
-                        "type":"object","additionalProperties":false,
-                        "required":["workerId","name","description","intents","examples","provenance","completedRuns","updatedAt"],
-                        "properties":{
-                            "workerId":{"type":"string","minLength":1},
-                            "name":{"type":"string"},
-                            "description":{"type":"string"},
-                            "intents":{"type":"array","items":{"type":"string"}},
-                            "examples":{"type":"array","items":{"type":"string"}},
-                            "provenance":{"type":"array","items":{"type":"string"}},
-                            "completedRuns":{"type":"integer","minimum":0},
-                            "updatedAt":{"type":"string"}
-                        }
-                    }
-                }
-            }
-        }))
-        .response_schema(json!({
-            "type":"object","additionalProperties":false,"required":["handled","rankings"],
-            "properties":{
-                "handled":{"type":"boolean"},
-                "workerId":{"type":"string"},
-                "workerVersion":{"type":"string"},
-                "invocationId":{"type":"string"},
-                "rankings":{
-                    "type":"array","maxItems":256,
-                    "items":{
-                        "type":"object","additionalProperties":false,
-                        "required":["workerId","score"],
-                        "properties":{
-                            "workerId":{"type":"string","minLength":1},
-                            "score":{"type":"integer","minimum":0,"maximum":1000000000},
-                            "reason":{"type":"string"}
-                        }
-                    }
-                }
-            }
-        }))
-        .idempotency(IdempotencyContract::session())
-        .description("Invoke the active worker-owned semantic relevance policy, if any. Kernel callers retain deterministic local ranking as recovery.")
         .build()?,
     );
     specs.push(

@@ -15,6 +15,7 @@ private enum WorkerDetailSection: Hashable {
 struct WorkerDetailSheet: View {
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
+    let modelRepository: any ModelRepository
     let connectionState: ConnectionState
     var mode: WorkerDetailMode = .operational
 
@@ -24,6 +25,9 @@ struct WorkerDetailSheet: View {
     @State private var showTechnicalDetails = false
     @State private var showInboxAudit = false
     @State private var selectedSection = WorkerDetailSection.overview
+    @State private var availableModels: [ModelInfo] = []
+    @State private var invocationModel = ""
+    @State private var invocationReasoningLevel = ""
 
     var body: some View {
         NavigationStack {
@@ -78,6 +82,10 @@ struct WorkerDetailSheet: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("The worker will stop receiving work but its versions and durable history will be retained.")
+            }
+            .task {
+                availableModels = (try? await modelRepository.list(forceRefresh: false))
+                    ?? modelRepository.cachedModels
             }
             .confirmationDialog(
                 "Archive and purge this worker?",
@@ -322,6 +330,8 @@ struct WorkerDetailSheet: View {
     private func invocation(_ inspection: WorkerInspectResultDTO) -> some View {
         let schema = inspection.bundle["inputSchema"]
         let fields = WorkerConsolePresentation.schemaFields(from: schema)
+        let selectedModel = availableModels.first { $0.id == invocationModel }
+        let reasoningLevels = selectedModel?.reasoningLevels ?? []
 
         return WorkerConsoleSection(
             title: "New invocation",
@@ -329,6 +339,45 @@ struct WorkerDetailSheet: View {
             accent: .tronEmerald
         ) {
             VStack(alignment: .leading, spacing: 13) {
+                HStack(spacing: 10) {
+                    Menu {
+                        Button("Worker default") {
+                            invocationModel = ""
+                            invocationReasoningLevel = ""
+                        }
+                        ForEach(availableModels.filter { !$0.isDisabled }) { model in
+                            Button(model.name) {
+                                invocationModel = model.id
+                                invocationReasoningLevel = model.defaultReasoningLevel ?? ""
+                            }
+                        }
+                    } label: {
+                        WorkerInvocationOptionLabel(
+                            title: "Model",
+                            value: selectedModel?.name ?? "Worker default",
+                            symbol: "cpu"
+                        )
+                    }
+
+                    if selectedModel?.supportsReasoning == true, !reasoningLevels.isEmpty {
+                        Menu {
+                            ForEach(reasoningLevels, id: \.self) { level in
+                                Button(level.capitalized) {
+                                    invocationReasoningLevel = level
+                                }
+                            }
+                        } label: {
+                            WorkerInvocationOptionLabel(
+                                title: "Reasoning",
+                                value: invocationReasoningLevel.isEmpty
+                                    ? "Model default"
+                                    : invocationReasoningLevel.capitalized,
+                                symbol: "brain"
+                            )
+                        }
+                    }
+                }
+
                 if fields.isEmpty {
                     WorkerConsoleInlineEmptyState(
                         symbol: "curlybraces",
@@ -407,7 +456,11 @@ struct WorkerDetailSheet: View {
                     Task {
                         await viewModel.invoke(
                             repository: repository,
-                            connectionState: connectionState
+                            connectionState: connectionState,
+                            model: invocationModel.isEmpty ? nil : invocationModel,
+                            reasoningLevel: invocationReasoningLevel.isEmpty
+                                ? nil
+                                : invocationReasoningLevel
                         )
                     }
                 }
@@ -421,6 +474,27 @@ struct WorkerDetailSheet: View {
                     }
                 }
             }
+        }
+    }
+
+    private struct WorkerInvocationOptionLabel: View {
+        let title: String
+        let value: String
+        let symbol: String
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 3) {
+                Label(title, systemImage: symbol)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
+                Text(value)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .sectionFill(.tronEmerald, cornerRadius: 10, subtle: true, interactive: true)
         }
     }
 
