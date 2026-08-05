@@ -159,18 +159,6 @@ jobs:
       - name: List available iOS simulators
         run: xcrun simctl list devices available | head -60
 
-      # Xcode 26.3 resolves a hosted unit-test bundle before scheduling its app
-      # dependency on a pristine runner. Materialize the Test host explicitly
-      # in the same default DerivedData before the test action.
-      - name: Build hosted-test app
-        run: |
-          xcodebuild build \
-            -project TronMobile.xcodeproj \
-            -scheme 'Tron Beta' \
-            -configuration Test \
-            -destination 'platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro' \
-            -quiet
-
       - name: xcodebuild test
         run: |
           set -o pipefail

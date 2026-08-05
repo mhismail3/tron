@@ -42,6 +42,10 @@ install_xcodegen() {
         rm -r "$prefix.unpack"
     fi
     ln -sfn "$prefix/bin/xcodegen" "$bin_dir/xcodegen"
+    mkdir -p "$tools_root/share"
+    # XcodeGen resolves SettingPresets beside the invoked bin directory. The
+    # release binary alone appears healthy but generates empty product names.
+    ln -sfn "$prefix/share/xcodegen" "$tools_root/share/xcodegen"
 }
 
 install_create_dmg() {

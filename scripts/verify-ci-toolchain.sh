@@ -17,6 +17,15 @@ require_contains() {
 
 verify_xcodegen() {
     require_contains XcodeGen "$TRON_CI_XCODEGEN_VERSION" "$(xcodegen --version 2>&1)"
+    local executable_root presets
+    executable_root="$(cd "$(dirname "$(command -v xcodegen)")/.." && pwd)"
+    presets="$executable_root/share/xcodegen/SettingPresets"
+    for required in base.yml Configs/debug.yml Configs/release.yml Platforms/iOS.yml Platforms/macOS.yml; do
+        if [[ ! -f "$presets/$required" ]]; then
+            echo "error: XcodeGen setting preset is missing: $presets/$required" >&2
+            return 1
+        fi
+    done
 }
 
 verify_create_dmg() {
