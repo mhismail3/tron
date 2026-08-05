@@ -447,8 +447,10 @@ kinds leave the standard console intact.
 Loading, disconnected, empty, partial-error, and section-empty states all use
 the same compact semantic cards instead of raw list placeholders. An empty
 console explicitly directs the user to create workers conversationally. A
-retired worker does not show the invalid ordinary Enable action; its version
-rows become Restore actions that reactivate canonical server state. Stop-all,
+retired worker appears only in the final dedicated Retired workers section,
+after the active persistent inventory, so historical state cannot compete with
+operational workers. It does not show the invalid ordinary Enable action; its
+version rows become Restore actions that reactivate canonical server state. Stop-all,
 retirement, and archive-backed purge use explicit destructive affordances and
 confirmation; ordinary stop/disable controls explain their durable-state
 semantics. Webhook credentials are shown only from the mutation response that
@@ -1094,6 +1096,10 @@ reminders; they are not a general device-control surface.
   The inbox and detail use the same Settings page container, cards,
   typography, toolbar hierarchy, and medium/large sheet detents as the other
   Settings sheets; artifact ownership does not introduce a visual subsystem.
+  Preview presents Quick Look inside a Tron-owned navigation sheet with the
+  standard title, explicit dismiss and share controls, safe-area content, a
+  compact verified-file caption, and the same medium/large detents. The native
+  renderer never extends underneath or replaces Tron sheet chrome.
 - Attach to Draft is the only bridge from Artifact Inbox into chat. It converts
   already-verified bytes into the existing `Attachment` value and sends an
   explicit app-local intent carrying the target session ID. Only the matching

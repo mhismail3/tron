@@ -233,8 +233,7 @@ private struct ArtifactDetailView: View {
         }
         .sheet(isPresented: $showPreview) {
             if let url = content?.fileURL {
-                ArtifactQuickLookView(url: url)
-                    .ignoresSafeArea()
+                ArtifactPreviewSheet(artifact: artifact, url: url)
             }
         }
         .fileExporter(
@@ -377,6 +376,75 @@ private struct ArtifactDetailView: View {
     private var exportType: UTType {
         let pathExtension = URL(fileURLWithPath: artifact.displayName).pathExtension
         return UTType(filenameExtension: pathExtension) ?? .data
+    }
+}
+
+/// Standard Tron presentation around Quick Look's native artifact renderer.
+///
+/// Quick Look owns the format-specific content surface, while this sheet owns
+/// navigation, dismissal, sharing, safe-area layout, and detent behavior. Keep
+/// the controller out of `ignoresSafeArea()` so it cannot cover sheet chrome.
+private struct ArtifactPreviewSheet: View {
+    let artifact: WorkerArtifactDTO
+    let url: URL
+
+    var body: some View {
+        NavigationStack {
+            ArtifactQuickLookView(url: url)
+                .background(Color.tronSurface)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        ShareLink(item: url) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(.tronEmerald)
+                        }
+                        .accessibilityLabel("Share artifact")
+                    }
+                    ToolbarItem(placement: .principal) {
+                        SheetTitle(title: "Preview", color: .tronEmerald)
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        SheetDismissButton(color: .tronEmerald)
+                    }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    previewCaption
+                }
+        }
+        .workerConsoleSheetPresentation()
+        .tint(.tronEmerald)
+    }
+
+    private var previewCaption: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "doc")
+                .foregroundStyle(.tronEmerald)
+            Text(artifact.displayName)
+                .font(TronTypography.sans(
+                    size: TronTypography.sizeCaption,
+                    weight: .medium
+                ))
+                .foregroundStyle(.tronTextSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+            Text(
+                ByteCountFormatter.string(
+                    fromByteCount: Int64(artifact.sizeBytes),
+                    countStyle: .file
+                )
+            )
+            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+            .foregroundStyle(.tronTextMuted)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(.regularMaterial)
+        .overlay(alignment: .top) {
+            Divider()
+        }
     }
 }
 

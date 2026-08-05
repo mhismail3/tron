@@ -395,45 +395,63 @@ struct WorkerConsoleSheet: View {
 
     @ViewBuilder
     private var workersContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            WorkerConsoleSectionHeader(
-                title: "Persistent workers",
+        VStack(alignment: .leading, spacing: 18) {
+            WorkerConsoleGroup(
+                title: "Active workers",
                 detail: "Direct chat tools and internal policy specialists share one durable runtime."
-            )
-
-            if !connectionState.isConnected {
-                WorkerConsoleEmptyState(
-                    symbol: "network.slash",
-                    title: "Worker state is offline",
-                    detail: "Reconnect to the paired server to inspect and operate persistent workers."
-                )
-            } else if !viewModel.hasLoaded && viewModel.isRefreshing {
-                WorkerConsoleLoadingState(title: "Loading workers")
-            } else if viewModel.workers.isEmpty {
-                WorkerConsoleEmptyState(
-                    symbol: "bolt.badge.clock",
-                    title: "No workers yet",
-                    detail: "Ask Tron to create a persistent worker. It will appear here once the server activates it."
-                )
-            } else {
-                LazyVStack(spacing: 10) {
-                    ForEach(viewModel.workers) { worker in
-                        let surface = viewModel.availableWorkerTools.first {
-                            $0.workerId == worker.workerId
-                        }
-                        let architecture = viewModel.architecture(for: worker.workerId)
-                        Button {
-                            Task { await viewModel.select(worker.workerId, repository: repository) }
-                        } label: {
-                            WorkerConsoleRow(
-                                worker: worker,
-                                surface: surface,
-                                architecture: architecture
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
+            ) {
+                if !connectionState.isConnected {
+                    WorkerConsoleEmptyState(
+                        symbol: "network.slash",
+                        title: "Worker state is offline",
+                        detail: "Reconnect to the paired server to inspect and operate persistent workers."
+                    )
+                } else if !viewModel.hasLoaded && viewModel.isRefreshing {
+                    WorkerConsoleLoadingState(title: "Loading workers")
+                } else if viewModel.workers.isEmpty {
+                    WorkerConsoleEmptyState(
+                        symbol: "bolt.badge.clock",
+                        title: "No workers yet",
+                        detail: "Ask Tron to create a persistent worker. It will appear here once the server activates it."
+                    )
+                } else if viewModel.activeWorkers.isEmpty {
+                    WorkerConsoleInlineEmptyState(
+                        symbol: "bolt.slash",
+                        text: "No active workers. Restore a retired worker or create one through chat."
+                    )
+                } else {
+                    workerRows(viewModel.activeWorkers)
                 }
+            }
+
+            if connectionState.isConnected, !viewModel.retiredWorkers.isEmpty {
+                WorkerConsoleGroup(
+                    title: "Retired workers",
+                    detail: "Inactive workers retained for audit, version history, and restoration."
+                ) {
+                    workerRows(viewModel.retiredWorkers)
+                }
+            }
+        }
+    }
+
+    private func workerRows(_ workers: [WorkerSummaryDTO]) -> some View {
+        LazyVStack(spacing: 10) {
+            ForEach(workers) { worker in
+                let surface = viewModel.availableWorkerTools.first {
+                    $0.workerId == worker.workerId
+                }
+                let architecture = viewModel.architecture(for: worker.workerId)
+                Button {
+                    Task { await viewModel.select(worker.workerId, repository: repository) }
+                } label: {
+                    WorkerConsoleRow(
+                        worker: worker,
+                        surface: surface,
+                        architecture: architecture
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
     }

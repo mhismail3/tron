@@ -36,6 +36,16 @@ final class WorkerConsoleViewModel {
         workers.first { $0.workerId == selectedWorkerId }
     }
 
+    /// Current operational inventory, preserving the engine's canonical order.
+    var activeWorkers: [WorkerSummaryDTO] {
+        workers.filter { !$0.retired }
+    }
+
+    /// Retained historical workers shown separately after the active inventory.
+    var retiredWorkers: [WorkerSummaryDTO] {
+        workers.filter(\.retired)
+    }
+
     var selectedWorkerArchitecture: WorkerArchitectureNodeDTO? {
         guard let selectedWorkerId else { return nil }
         return architecture(for: selectedWorkerId)
