@@ -748,11 +748,11 @@ The export step supports two signing modes. If all local signing secrets are
 present, CI imports an Apple Distribution `.p12` into a temporary keychain,
 installs App Store Connect provisioning profiles for the app and share
 extension, and uses those same assets for both archive and export. Manually
-managed profiles resolve separate target-level profile specifiers for the app
-and share extension. Xcode-managed App Store profiles remain under automatic
-selection, but CI pins the installed Apple Distribution identity and does not
-allow provisioning updates, so the archive cannot create development
-certificates or profiles in the Apple account. Export then uses
+managed and Xcode-managed profiles both resolve separate target-level profile
+specifiers for the app and share extension during archive. CI pins the
+installed Apple Distribution identity and uses manual archive signing without
+provisioning updates, so Xcode cannot fall back to development signing or
+create certificates and profiles in the Apple account. Export then uses
 `signingStyle=manual` or `signingStyle=automatic` to match the installed profile
 kind. If the local signing secrets are absent, CI falls back to automatic Xcode
 cloud signing with the ASC API key. Cloud signing requires Apple to allow that
