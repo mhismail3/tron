@@ -2752,6 +2752,16 @@ For fast production-identity testing, the `Tron Fast` scheme uses the
 and Just Launch Installed variants, target a deduplicated production app, and
 the rebuild action installs the requested configuration's `iphoneos` artifact.
 
+Hosted iOS distribution uses one App-Store-eligible `Tron` / `Prod` archive
+path for two TestFlight channels. Every successful main-branch CI push uploads
+the exact tested commit to the configured automatic internal group; release
+tags independently advance their build through external Beta App Review and
+the public group. The persistent workflow's `GITHUB_RUN_NUMBER` owns hosted
+iOS `CFBundleVersion` monotonicity and remains stable on reruns, while
+`VERSION.env` continues to own canonical product versions and local/Mac Apple
+build mirrors. Pull-request CI never receives distribution credentials or
+triggers TestFlight delivery.
+
 ## Validation
 
 Deterministic tests cover:

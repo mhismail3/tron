@@ -74,8 +74,10 @@ open TronMobile.xcodeproj
 # or: xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-Beta TestFlight builds are published by the tag-triggered iOS release workflow
-for App ID `6761511764`; contributor PRs do not need App Store Connect access.
+Every successful main-branch CI push is published to the private automatic
+internal TestFlight group for App ID `6761511764`. Release tags independently
+advance selected builds through the public TestFlight path; contributor PRs do
+not deploy and do not need App Store Connect access.
 
 ### Mac wrapper
 
@@ -258,17 +260,20 @@ changes.
 
 ## Releasing
 
-Two release lanes:
+Three distribution lanes:
 
 | What | How | Cadence |
 |---|---|---|
-| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, exports an App Store Connect IPA with automatic cloud signing or configured local signing secrets, uploads to App ID `6761511764`, waits for processing, resolves export compliance, submits TestFlight beta review when external testing requires it, exits successfully as pending review for first-build/new-version review waits, or assigns externally-ready builds to the public TestFlight group. | Same tag as server release. |
+| iOS internal TestFlight | A successful `CI` workflow for a `main` push triggers `release-ios.yml` for the exact tested SHA. It archives the `Tron` / `Prod` app, uploads it with the workflow's monotonic Apple build number, and waits until the configured all-build internal group can install it. | Every green main push. |
+| iOS public TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. The same workflow submits Beta App Review when required and assigns externally-ready builds to the public group. | Same tag as server release. |
 | Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds and notarizes the macOS DMG, creates a draft release when absent, or refreshes assets on an existing release without changing its publish state. | Same tag as iOS release. |
 
 Versioning sources:
 - **Source of truth** — root `VERSION.env`. `TRON_VERSION` is canonical
-  SemVer, `TRON_APPLE_BUILD` is the numeric Apple build, and
-  `TRON_DISPLAY_VERSION` is the human-facing label.
+  SemVer, `TRON_APPLE_BUILD` is the checked-in local/Mac Apple build, and
+  `TRON_DISPLAY_VERSION` is the human-facing label. Hosted iOS TestFlight
+  delivery overrides `CFBundleVersion` with the existing workflow's monotonic
+  `GITHUB_RUN_NUMBER`; internal, public, and rerun uploads share that owner.
 - **Generated mirrors** — `packages/agent/Cargo.toml`, `packages/agent/Cargo.lock`,
   Mac/iOS `project.yml`, and custom `TRONCanonicalVersion` bundle keys.
   Run `scripts/tron version sync` after editing `VERSION.env`; CI runs
@@ -296,15 +301,16 @@ git push && git push --tags
 #    - release-ios.yml: archive Prod iOS app → export/sign App Store IPA →
 #      upload to App Store Connect → wait for processing → resolve export
 #      compliance / beta review → either stop as pending Apple review or assign
-#      to internal + public TestFlight groups.
+#      to the public TestFlight group. The green main commit already triggered
+#      its independent internal TestFlight build.
 #    Verify the generated GitHub release notes, DMG artifact, SHA256 manifest,
 #    and TestFlight build before announcing the release.
 
 # 5. To test the pipeline without cutting a real release, use
-#    Actions → Release (Mac DMG) and Actions → Release (iOS TestFlight)
-#    with `dry_run=true`; this explicit manual mode can run without Apple
-#    credentials. Tag runs and manual `dry_run=false` runs fail before the
-#    build when any required release secret is missing.
+#    Actions → Release (Mac DMG) with dry_run=true and Actions → Release (iOS
+#    TestFlight) with channel=dry-run. The iOS workflow also exposes internal
+#    and external manual recovery channels, both restricted to main. Live runs
+#    fail before the build when a required release secret is missing.
 ```
 
 **Required GitHub Actions secrets** for notarized releases:
@@ -324,11 +330,11 @@ git push && git push --tags
 | `IOS_APPSTORE_PROFILE_BASE64` | App Store Connect distribution profile for `com.tron.mobile` |
 | `IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64` | App Store Connect distribution profile for `com.tron.mobile.ShareExtension` |
 
-**Optional GitHub Actions variables** for iOS TestFlight group assignment:
+**GitHub Actions variables** for iOS TestFlight group assignment:
 
 | Variable | What |
 |---|---|
-| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Existing internal TestFlight group id; omitted when CI should skip that explicit assignment |
+| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Required all-build internal TestFlight group id for automatic main delivery |
 | `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Existing public TestFlight group id behind the onboarding QR link; CI can auto-discover a single public-link group |
 
 Rotate by regenerating the relevant `.p12` or profile, re-encoding

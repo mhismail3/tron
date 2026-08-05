@@ -430,24 +430,24 @@ fn mac_release_workflow_notarizes_dmg_before_stapling() {
 }
 
 #[test]
-fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
+fn ios_delivery_separates_strict_internal_and_tolerant_external_groups() {
     let root = repo_root();
     let workflow_path = root.join(".github/workflows/release-ios.yml");
     let workflow = std::fs::read_to_string(&workflow_path).unwrap();
 
     let validate = workflow
-        .find("- name: Validate TestFlight groups")
+        .find("- name: Validate external TestFlight group")
         .unwrap_or_else(|| {
             panic!(
-                "{} should validate TestFlight groups",
+                "{} should validate the external TestFlight group",
                 workflow_path.display()
             )
         });
     let distribute = workflow
-        .find("- name: Distribute to TestFlight groups")
+        .find("- name: Distribute to external TestFlight group")
         .unwrap_or_else(|| {
             panic!(
-                "{} should distribute processed builds to TestFlight groups",
+                "{} should distribute processed builds to the external TestFlight group",
                 workflow_path.display()
             )
         });
@@ -456,7 +456,7 @@ fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
     assert_eq!(
         body.matches("asc testflight groups list").count(),
         1,
-        "current Homebrew asc must be the single TestFlight group-list owner"
+        "external distribution must list TestFlight groups once"
     );
     assert!(
         !body.contains("asc testflight beta-groups list"),
@@ -471,15 +471,31 @@ fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
         "unresolvable TestFlight group config should not fail an uploaded/processed release"
     );
     assert!(
-        body.contains("::warning::ASC_TESTFLIGHT_INTERNAL_GROUP_ID"),
-        "stale internal TestFlight group config should warn instead of failing release"
-    );
-    assert!(
-        !body.contains("::error::ASC_TESTFLIGHT_INTERNAL_GROUP_ID"),
-        "internal TestFlight group validation must not block an otherwise successful public release"
-    );
-    assert!(
         body.contains("echo \"external_group_ids=$public_group_id\""),
         "workflow should publish only the resolved public TestFlight group through the ASC API"
     );
+
+    let internal = workflow
+        .find("- name: Validate internal TestFlight group")
+        .expect("iOS delivery should validate its automatic internal group");
+    assert!(
+        internal < validate,
+        "internal preflight must run before external distribution"
+    );
+    let internal_body = &workflow[internal..validate];
+    for required in [
+        "ASC_TESTFLIGHT_INTERNAL_GROUP_ID is required",
+        ".attributes.isInternalGroup // false",
+        ".attributes.hasAccessToAllBuilds // false",
+        "must have automatic all-build access enabled",
+        "/betaTesters?limit=1",
+        "has no testers",
+        "Wait for internal TestFlight availability",
+        "/relationships/betaGroups",
+    ] {
+        assert!(
+            internal_body.contains(required),
+            "internal TestFlight delivery missing {required}"
+        );
+    }
 }
