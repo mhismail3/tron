@@ -616,6 +616,22 @@ fn worker_upsert_exposes_only_the_closed_declarative_presentation_vocabulary() {
             .len(),
         9
     );
+    let runs = function_definitions()
+        .unwrap()
+        .into_iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::runs")
+        .expect("worker runs contract");
+    let requested = &runs.response_schema.unwrap()["properties"]["graphs"]["items"]["properties"]["requestedInvocation"];
+    assert_eq!(
+        requested["properties"]["usage"]["properties"]["includesDescendants"]["type"],
+        "boolean"
+    );
+    assert!(
+        requested["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("effectiveModel"))
+    );
 }
 
 #[test]

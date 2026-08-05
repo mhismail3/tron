@@ -26,7 +26,7 @@
 # (cheap on push to main — only one run can be in flight there anyway).
 #
 # Adding a new ecosystem:
-#   1. Add a filter under `changes.steps.filter`.
+#   1. Add a path rule in `scripts/ci-change-flags.sh`.
 #   2. Add a `<name>_required` output combining non-PR, filter, and label rules;
 #      gate the new job only on that output.
 #   3. List the job under `ci.needs` and expose both its result and required
@@ -59,27 +59,21 @@ jobs:
       ios_required: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ios == 'true' || contains(github.event.pull_request.labels.*.name, 'ios') }}
       mac_required: ${{ github.event_name != 'pull_request' || steps.filter.outputs.mac == 'true' || contains(github.event.pull_request.labels.*.name, 'mac') }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
-        id: filter
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          filters: |
-            ios:
-              - 'packages/ios-app/**'
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/release-ios.yml'
-            mac:
-              - 'rust-toolchain.toml'
-              - 'packages/agent/**'
-              - 'packages/mac-app/**'
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/release-mac.yml'
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: filter
+        env:
+          TRON_DIFF_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          TRON_DIFF_HEAD_SHA: ${{ github.sha }}
+        run: scripts/ci-change-flags.sh
 
   personal-info-guard:
     name: Personal-info guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Run personal-info-guard
         run: ./scripts/personal-info-guard.sh
 
@@ -87,20 +81,25 @@ jobs:
     name: Version drift
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Check centralized version mirrors
         run: ./scripts/tron version check
       - name: Run version helper tests
         run: ./scripts/tron version test
       - name: Run release notes helper tests
         run: ./scripts/tron-release-notes --test
+      - name: Run deterministic CI helper tests
+        run: |
+          ./scripts/ci-change-flags.sh --self-test
+          python3 scripts/benchmarks/bench.py --self-test
+          python3 scripts/evaluation/whole-agent.py --self-test
 
   workflow-lint:
     name: Workflow lint
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Validate GitHub Actions workflows
         uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
 
@@ -109,7 +108,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
@@ -142,22 +141,17 @@ jobs:
       run:
         working-directory: packages/ios-app
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      # Pin to the latest stable Xcode the runner image has installed. The
-      # iOS app's project.yml requires Xcode 26+ (xcodeVersion: "2640"); when
-      # this fails on a runner upgrade, bump to a runner image that ships it.
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
-          xcode-version: latest-stable
+          xcode-version: "26.3"
 
-      - name: Toolchain info
-        run: |
-          xcodebuild -version
-          swift --version
+      - name: Install checksum-pinned tools
+        run: ../../scripts/install-ci-tools.sh xcodegen
 
-      - name: Install xcodegen
-        run: brew install xcodegen
+      - name: Verify pinned toolchain
+        run: ../../scripts/verify-ci-toolchain.sh ios xcodegen
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -165,15 +159,13 @@ jobs:
       - name: List available iOS simulators
         run: xcrun simctl list devices available | head -60
 
-      # Keep the runtime current with `OS=latest`; the runner must provide the
-      # same pinned iPhone 17 Pro device named in contributor commands.
       - name: xcodebuild test
         run: |
           set -o pipefail
           xcodebuild test \
             -project TronMobile.xcodeproj \
-            -scheme Tron \
-            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17 Pro' \
+            -scheme 'Tron Beta' \
+            -destination 'platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro' \
             -resultBundlePath TestResults.xcresult \
             -quiet
 
@@ -194,11 +186,11 @@ jobs:
       run:
         working-directory: packages/mac-app
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
-          xcode-version: latest-stable
+          xcode-version: "26.3"
 
       # The Rust agent is embedded as a Resource in the Mac app bundle.
       # CI builds a debug-profile copy so `scripts/bundle-agent.sh`
@@ -213,8 +205,11 @@ jobs:
         working-directory: packages/agent
         run: cargo build --bin tron --locked
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install checksum-pinned tools
+        run: ../../scripts/install-ci-tools.sh xcodegen create-dmg
+
+      - name: Verify pinned toolchain
+        run: ../../scripts/verify-ci-toolchain.sh xcode xcodegen create-dmg
 
       - name: Stage agent helper binary
         run: ./scripts/bundle-agent.sh --skip-build --profile debug
@@ -274,7 +269,6 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
-          brew install create-dmg
           mkdir -p build
           # Xcode 26 adds an unsigned __preview.dylib to generic Debug builds;
           # packaging validation does not need previews and re-signs the app.

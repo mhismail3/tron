@@ -663,16 +663,17 @@ impl WorkerRuntime {
                     .or(reasoning_level.as_deref());
                 let auth_path =
                     crate::shared::foundation::paths::auth_path_for_home(self.store.home());
-                if requested_model.is_some() {
-                    crate::domains::model::routing::catalog::validate_explicit_model(
-                        effective_model,
-                        &auth_path,
-                    )?;
-                }
-                if requested_reasoning_level.is_some() {
+                // INVARIANT: every durable agent-worker invocation validates
+                // the exact effective pair, regardless of whether it came
+                // from an override, immutable bundle, retry pin, or fallback.
+                crate::domains::model::routing::catalog::validate_explicit_model(
+                    effective_model,
+                    &auth_path,
+                )?;
+                if let Some(effective_reasoning_level) = effective_reasoning_level {
                     crate::domains::model::routing::catalog::validate_explicit_reasoning_level(
                         effective_model,
-                        effective_reasoning_level.expect("requested reasoning is effective"),
+                        effective_reasoning_level,
                         &auth_path,
                     )?;
                 }

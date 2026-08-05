@@ -901,32 +901,34 @@ fi
 #[test]
 fn github_ci_schedules_clients_and_aggregates_fail_closed() {
     let workflow = read_repo_file(".github/workflows/ci.yml");
-    let ios_filter = workflow
-        .split_once("            ios:\n")
-        .and_then(|(_, rest)| rest.split_once("            mac:\n"))
-        .map(|(filter, _)| filter)
-        .expect("CI must define the iOS path filter before the Mac filter");
+    let classifier = read_repo_file("scripts/ci-change-flags.sh");
     assert!(
-        ios_filter.contains("packages/ios-app/**")
-            && ios_filter.contains(".github/workflows/release-ios.yml"),
+        classifier.contains("packages/ios-app/*")
+            && classifier.contains(".github/workflows/release-ios.yml"),
         "iOS source and release changes must schedule iOS validation"
     );
-    let mac_filter = workflow
-        .split_once("            mac:\n")
-        .and_then(|(_, rest)| rest.split_once("\n\n  personal-info-guard:\n"))
-        .map(|(filter, _)| filter)
-        .expect("CI must define the Mac path filter before validation jobs");
     for required in [
         "rust-toolchain.toml",
-        "packages/agent/**",
-        "packages/mac-app/**",
+        "packages/agent/*",
+        "packages/mac-app/*",
         ".github/workflows/release-mac.yml",
     ] {
         assert!(
-            mac_filter.contains(required),
+            classifier.contains(required),
             "Mac validation filter is missing {required}"
         );
     }
+    assert!(
+        workflow.contains("run: scripts/ci-change-flags.sh")
+            && !workflow.contains("dorny/paths-filter"),
+        "CI must use the repository-owned deterministic change classifier"
+    );
+    let classifier_test = Command::new("bash")
+        .args(["scripts/ci-change-flags.sh", "--self-test"])
+        .current_dir(repo_root())
+        .output()
+        .expect("change classifier self-test should start");
+    assert!(classifier_test.status.success());
 
     let ci_summary = workflow
         .split_once("\n  ci:\n")
@@ -992,6 +994,7 @@ fn github_ci_schedules_clients_and_aggregates_fail_closed() {
 fn github_workflow_dependencies_are_immutable() {
     for path in [
         ".github/workflows/ci.yml",
+        ".github/workflows/performance.yml",
         ".github/workflows/release-ios.yml",
         ".github/workflows/release-mac.yml",
     ] {
@@ -1036,6 +1039,53 @@ fn github_workflow_dependencies_are_immutable() {
                 index + 1
             );
         }
+    }
+}
+
+#[test]
+fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
+    let manifest = read_repo_file("config/ci-toolchain.env");
+    for required in [
+        "TRON_CI_XCODE_VERSION=26.3",
+        "TRON_CI_IOS_RUNTIME_VERSION=26.2",
+        "TRON_CI_XCODEGEN_VERSION=2.45.3",
+        "TRON_CI_CREATE_DMG_VERSION=1.3.0",
+        "TRON_CI_ASC_VERSION=3.5.0",
+    ] {
+        assert!(
+            manifest.contains(required),
+            "toolchain manifest lost {required}"
+        );
+    }
+    assert_eq!(manifest.matches("_SHA256=").count(), 4);
+
+    let installer = read_repo_file("scripts/install-ci-tools.sh");
+    assert!(installer.contains("verify_sha256"));
+    assert!(installer.contains("shasum -a 256"));
+    assert!(installer.contains("share/xcodegen"));
+
+    let verifier = read_repo_file("scripts/verify-ci-toolchain.sh");
+    assert!(verifier.contains("SettingPresets"));
+    assert!(verifier.contains("Platforms/iOS.yml"));
+    assert!(verifier.contains("Platforms/macOS.yml"));
+
+    for path in [
+        ".github/workflows/ci.yml",
+        ".github/workflows/release-ios.yml",
+        ".github/workflows/release-mac.yml",
+    ] {
+        let workflow = read_repo_file(path);
+        assert!(!workflow.contains("latest-stable"), "{path} must pin Xcode");
+        assert!(
+            !workflow.contains("OS=latest"),
+            "{path} must pin iOS runtime"
+        );
+        assert!(
+            !workflow.contains("brew install xcodegen")
+                && !workflow.contains("brew install create-dmg")
+                && !workflow.contains("brew install xcodegen asc"),
+            "{path} must use checksum-pinned release tools"
+        );
     }
 }
 

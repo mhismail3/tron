@@ -15,12 +15,20 @@ extension ChatViewModel {
         guard !hasInitiallyLoaded,
               messages.isEmpty,
               let manager = eventStoreManager else {
+            sessionLoadDiagnostics.recordCache(
+                hit: false,
+                eventCount: 0,
+                messageCount: messages.count
+            )
             return false
         }
 
         do {
             let sessionEvents = try await manager.eventDB.events.getBySession(sessionId)
-            guard !sessionEvents.isEmpty else { return false }
+            guard !sessionEvents.isEmpty else {
+                sessionLoadDiagnostics.recordCache(hit: false, eventCount: 0, messageCount: 0)
+                return false
+            }
 
             let cachedEvents: [SessionEvent]
             if let cachedSession = try await manager.eventDB.sessions.get(sessionId),
@@ -35,7 +43,14 @@ extension ChatViewModel {
                 from: cachedEvents,
                 presorted: true
             )
-            guard !state.messages.isEmpty else { return false }
+            guard !state.messages.isEmpty else {
+                sessionLoadDiagnostics.recordCache(
+                    hit: false,
+                    eventCount: cachedEvents.count,
+                    messageCount: 0
+                )
+                return false
+            }
 
             allReconstructedMessages = state.messages
             let batchSize = min(Self.initialMessageBatchSize, state.messages.count)
@@ -61,12 +76,18 @@ extension ChatViewModel {
                 "[CACHE] Restored \(cachedEvents.count) events as \(state.messages.count) messages while server reconstruction continues",
                 category: .session
             )
+            sessionLoadDiagnostics.recordCache(
+                hit: true,
+                eventCount: cachedEvents.count,
+                messageCount: state.messages.count
+            )
             return true
         } catch {
             logger.warning(
                 "[CACHE] Could not restore cached session history: \(error.localizedDescription)",
                 category: .session
             )
+            sessionLoadDiagnostics.recordCache(hit: false, eventCount: 0, messageCount: 0)
             return false
         }
     }
@@ -175,6 +196,11 @@ extension ChatViewModel {
 
         hasInitiallyLoaded = true
         messageIndex.rebuild(from: messages)
+        sessionLoadDiagnostics.recordAuthoritative(
+            eventCount: result.events.count,
+            messageCount: state.messages.count
+        )
+        sessionLoadDiagnostics.recordInteractive()
 
         // Resolve any streaming-recovery snapshot that wasn't consumed by
         // processInFlightState. Two legitimate cases:

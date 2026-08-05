@@ -81,7 +81,7 @@ pub(super) async fn inbox(invocation: &Invocation, deps: &Deps) -> Result<Value,
     let detail = HistoryDetail::parse(invocation)?;
     let (limit, request_truncated) = history_limit(invocation, detail);
     let offset = history_offset(invocation);
-    let worker_id = invocation.payload.get("workerId").and_then(Value::as_str);
+    let worker_id = optional_filter_string(invocation, "workerId");
     let context_attached = invocation
         .payload
         .get("contextAttached")
@@ -127,19 +127,10 @@ pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, 
     let detail = HistoryDetail::parse(invocation)?;
     let (limit, request_truncated) = history_limit(invocation, detail);
     let offset = history_offset(invocation);
-    let worker_id = invocation.payload.get("workerId").and_then(Value::as_str);
-    let origin_session_id = invocation
-        .payload
-        .get("originSessionId")
-        .and_then(Value::as_str);
-    let invocation_id = invocation
-        .payload
-        .get("invocationId")
-        .and_then(Value::as_str);
-    let model_tool_invocation_id = invocation
-        .payload
-        .get("modelToolInvocationId")
-        .and_then(Value::as_str);
+    let worker_id = optional_filter_string(invocation, "workerId");
+    let origin_session_id = optional_filter_string(invocation, "originSessionId");
+    let invocation_id = optional_filter_string(invocation, "invocationId");
+    let model_tool_invocation_id = optional_filter_string(invocation, "modelToolInvocationId");
     let status = optional_enum(
         invocation,
         "status",
@@ -276,6 +267,17 @@ fn is_worker_result_reference(value: &Value) -> bool {
     value.get("kind").and_then(Value::as_str) == Some("worker_result_reference")
 }
 
+/// Provider tool calls can materialize omitted optional string fields as empty
+/// strings. An empty exact-match filter means "not supplied"; treating it as a
+/// real identifier makes otherwise exact run lookups silently return no rows.
+fn optional_filter_string<'a>(invocation: &'a Invocation, field: &str) -> Option<&'a str> {
+    invocation
+        .payload
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+}
+
 fn optional_enum<'a>(
     invocation: &'a Invocation,
     field: &str,
@@ -332,5 +334,30 @@ mod tests {
             assert_eq!(projected, receipt);
             assert!(!truncated);
         }
+    }
+
+    #[test]
+    fn empty_optional_filters_are_absent() {
+        let invocation = Invocation::new_sync(
+            crate::engine::FunctionId::new("worker_kernel::runs").unwrap(),
+            json!({
+                "workerId":"",
+                "originSessionId":"   ",
+                "invocationId":"worker_run_exact",
+                "modelToolInvocationId":""
+            }),
+            crate::engine::CausalContext::new(
+                crate::engine::ActorId::new("agent:filter-test").unwrap(),
+                crate::engine::ActorKind::Agent,
+                crate::engine::TraceId::new("trace-filter-test").unwrap(),
+            ),
+        );
+        assert_eq!(optional_filter_string(&invocation, "workerId"), None);
+        assert_eq!(optional_filter_string(&invocation, "originSessionId"), None);
+        assert_eq!(
+            optional_filter_string(&invocation, "invocationId"),
+            Some("worker_run_exact")
+        );
+        assert_eq!(optional_filter_string(&invocation, "missing"), None);
     }
 }

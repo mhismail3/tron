@@ -248,6 +248,7 @@ struct ChatView: View {
             // Model prefetch is independent and doesn't block UI
 
             logger.debug("[INIT] task started, messages=\(viewModel.messages.count) scrollProxy=\(scrollProxy != nil) initialLoadComplete=\(initialLoadComplete)", category: .ui)
+            viewModel.sessionLoadDiagnostics.recordShellPresented()
 
             let workspaceId = eventStoreManager.sessions.first { $0.id == sessionId }?.workspaceId ?? ""
             viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)

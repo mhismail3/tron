@@ -1,6 +1,6 @@
 # Tron Worker-First Technical Reference
 
-> Last verified: 2026-07-26 on the worker-first POC branch.
+> Last verified: 2026-08-05 on the worker-first implementation.
 
 This document describes the active worker-first implementation.
 
@@ -393,8 +393,20 @@ globally disable its worker. Activation, artifact integrity, and invalid typed o
 structural failures and still quarantine the broken version.
 Agent-runner bundles can declare default `model` and provider-neutral
 `reasoningLevel` values. Normal invocations may override either value; admission
-validates support, records requested and effective policy, and pins the
-effective pair across retry. Command and service runners reject overrides.
+validates the effective pair regardless of whether it came from the invocation,
+bundle, server fallback, or a retry pin, records requested and effective policy,
+and pins the effective pair across retry. Provider-neutral `x_high` remains the
+bundle and evidence spelling; OpenAI catalog validation maps it to the
+provider's `xhigh` capability name only at the admission boundary. Command and
+service runners reject overrides.
+
+Model selection policy remains worker-owned. The current GPT-5.6 convention is
+Luna for routine, narrow, high-volume agent workers and Sol at medium reasoning
+for complex research, evaluation, or worker authoring. A measured invocation
+may explicitly override that default. The engine does not contain a complexity
+router, does not automatically escalate Luna to Sol, and does not reserve the
+policy for OpenAI: future provider and open-source models enter through the same
+catalog-validated bundle default and invocation override contract.
 Session title, compaction, continuity, and
 mailbox curation preserve causal idempotency because their result may be bound
 to a session or trace.
@@ -1279,10 +1291,12 @@ the same result without copying it or rewriting history.
 
 `worker_result_read` retrieves one RFC 6901 JSON pointer from that exact result.
 Array/object pages are limited to twenty entries and each response is bounded
-to 32 KiB; oversized objects return child pointers before content. Agent and
-worker reads must remain in the originating session or carry an explicit Agent
-Delivery grant, while authenticated paired operator clients and system recovery
-can inspect profile-local results without fabricating a chat-session context. A
+to 32 KiB; oversized objects return child pointers before content. An agent
+worker may read an exact direct child that its own durable invocation admitted.
+Other agent and worker reads must remain in the originating session or carry an
+explicit Agent Delivery grant, while authenticated paired operator clients and
+system recovery can inspect profile-local results without fabricating a
+chat-session context. A
 worker may accept and forward a result reference in its own input schema so a
 coordinator does not have to copy one specialist's complete output into every
 later child and model turn. That schema can constrain downstream reads to
@@ -1487,7 +1501,7 @@ Authenticated clients may call `engine::surface_snapshot` with optional session
 invocation context. The typed response returns the same provider-neutral surface
 evidence plus operational inventories:
 
-- all 25 model-addressable fixed functions with their exact schemas,
+- all 30 model-addressable fixed functions with their exact schemas,
   revisions, effect/risk, audience, access path, primitive group, and
   request-specific projected/omitted reason;
 - every published direct worker tool, including its promoted/projected state,
@@ -1540,6 +1554,36 @@ Engine Steward completed with `no_change`, identified Steward version
 `5f106d9d221d9df58e97a8ddd43b14910a10e13bb41724a28cdd944fe1fa542a`
 as healthy and read-only, and produced completed durable run evidence for both
 workers without mutating either worker.
+
+### Evaluation without an evaluation engine
+
+Evaluation semantics remain outside the fixed kernel. A profile-owned Worker
+Evaluator can keep immutable suite revisions and hashes, rotate bounded cases,
+invoke target workers, apply closed deterministic assertions, ask an internal
+Evaluation Judge only for declared semantic rubrics, record human reviews, and
+export reports through Document Export. Its schedule, budget, model policy,
+calibration thresholds, suite contents, and SQLite state are worker-owned
+runtime state. The judge is not considered calibrated until stored human-review
+evidence meets explicit agreement, Cohen's kappa, score-error, safety
+false-pass, and repeated-case stability thresholds; insufficient evidence is a
+first-class status.
+
+The kernel contributes only generic evidence. An exact
+`worker_runs(detail=graph)` lookup returns a closed `requestedInvocation`
+projection containing the requested worker ID/version, requested and effective
+model/reasoning pair, wall time, and descendant-inclusive usage. Empty optional
+string filters materialized by a provider are normalized to omission before
+exact matching. These two guarantees let evaluator workers measure a target
+without confusing it with their own causal-root cost or silently losing an
+exact lookup.
+
+Source-controlled whole-agent acceptance remains an external harness at
+`scripts/evaluation/whole-agent.py`, backed by twenty synthetic scenarios in
+`whole-agent-suite.json`. It validates normalized evidence offline and adds no
+engine API, evaluator registry, deployment gate, or model call. The scheduled
+server benchmark is likewise advisory until stable-runner calibration provides
+a defensible baseline; raw samples and p50/p95/p99 provenance are retained, and
+p99 is reported only with at least 100 samples.
 
 For an ordinary chat request, the provider receives the intent-gated fixed
 primitive surface plus at most 12 of the enabled direct workers. Session

@@ -644,6 +644,48 @@ Release builds must keep
 `DEBUG_INFORMATION_FORMAT = dwarf-with-dsym`; App Store/TestFlight crashes are
 retrieved through Apple's Xcode Organizer diagnostics path.
 
+## Deterministic CI toolchain
+
+`config/ci-toolchain.env` is the repository-owned Apple/release tool manifest.
+GitHub CI selects Xcode 26.3, iOS 26.2, and iPhone 17 Pro, then downloads exact
+XcodeGen, create-dmg, and App Store Connect CLI releases whose SHA-256 values are
+checked before execution. Workflows must not select `latest`, install these
+tools through Homebrew, or maintain a second version list.
+
+The installer writes only to an isolated runner directory and appends its bin
+directory to `GITHUB_PATH`:
+
+```bash
+scripts/install-ci-tools.sh xcodegen
+scripts/verify-ci-toolchain.sh ios xcodegen
+```
+
+The Mac lane adds `create-dmg`; the iOS release lane adds `asc`. Pull-request
+path classification is owned by `scripts/ci-change-flags.sh`, including its
+offline self-test. The scheduled performance workflow is advisory and uploads
+raw 100-sample benchmark evidence; it is not a release gate until a stable
+baseline is calibrated.
+
+XcodeGen requires both its executable and version-matched `SettingPresets`
+data. The checksum installer links both into its isolated tool root, and the
+verifier rejects an executable-only installation before project generation;
+without those presets, XcodeGen can appear healthy while emitting empty Apple
+product settings.
+
+Historical-session changes use the Beta simulator and the focused deterministic
+tests below. Local timing evidence is emitted as `[SESSION_LOAD]` log entries
+and OS signposts without message content or identifiers:
+
+```bash
+cd packages/ios-app
+xcodegen generate
+xcodebuild test -scheme 'Tron Beta' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/SessionLoadDiagnosticsTests \
+  -only-testing:TronMobileTests/ChatViewModelCachedTranscriptTests \
+  -only-testing:TronMobileTests/ChatTranscriptRevealPolicyTests
+```
+
 ## TestFlight Release CI
 
 The iOS beta is published by `.github/workflows/release-ios.yml` on the same

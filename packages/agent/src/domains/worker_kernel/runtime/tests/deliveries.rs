@@ -599,6 +599,19 @@ async fn exact_worker_results_require_origin_or_delivery_grant() {
         .create_session("mock", "/tmp/foreign", Some("Foreign"), None)
         .unwrap()
         .session;
+    let (parent, _) = runtime
+        .store
+        .begin_invocation(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({}),
+            "result-access-parent",
+            "trace-result-access",
+            0,
+            "manual",
+            Some(&source.id),
+        )
+        .unwrap();
     let (run, _) = runtime
         .store
         .begin_invocation_with_context(
@@ -607,12 +620,12 @@ async fn exact_worker_results_require_origin_or_delivery_grant() {
             &json!({}),
             "result-access",
             "trace-result-access",
-            0,
+            1,
             "manual",
             Some(&source.id),
             WorkerInteractionMode::Foreground,
             None,
-            None,
+            Some(&parent.invocation_id),
             None,
             None,
             None,
@@ -652,6 +665,21 @@ async fn exact_worker_results_require_origin_or_delivery_grant() {
             .error
             .is_some()
     );
+    let parent_read = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::result_read").unwrap(),
+            json!({"invocationId":run.invocation_id,"pointer":"/summary"}),
+            CausalContext::new(
+                ActorId::new("agent:parent-result-reader").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-parent-read").unwrap(),
+            )
+            .with_session_id(&target.id)
+            .with_origin_worker_invocation_id(&parent.invocation_id),
+        ))
+        .await;
+    assert_eq!(parent_read.error, None);
 
     runtime
         .event_store

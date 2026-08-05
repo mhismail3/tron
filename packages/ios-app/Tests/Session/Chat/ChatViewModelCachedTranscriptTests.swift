@@ -30,6 +30,9 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
         await writer.processReconstructionResult(
             reconstructionResult(content: "cached hello")
         )
+        XCTAssertEqual(writer.sessionLoadDiagnostics.snapshot.authoritativeEventCount, 1)
+        XCTAssertEqual(writer.sessionLoadDiagnostics.snapshot.authoritativeMessageCount, 1)
+        XCTAssertNotNil(writer.sessionLoadDiagnostics.snapshot.interactiveMs)
 
         let cachedEvents = try await database.events.getBySession("cached-session")
         XCTAssertEqual(cachedEvents.map(\.id), ["cached-user-message"])
@@ -42,6 +45,9 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
         let restored = await reader.restoreCachedTranscript()
 
         XCTAssertTrue(restored)
+        XCTAssertEqual(reader.sessionLoadDiagnostics.snapshot.cacheHit, true)
+        XCTAssertEqual(reader.sessionLoadDiagnostics.snapshot.cachedEventCount, 1)
+        XCTAssertEqual(reader.sessionLoadDiagnostics.snapshot.cachedMessageCount, 1)
         XCTAssertFalse(
             reader.hasInitiallyLoaded,
             "Only a server snapshot may declare authoritative initial history"
@@ -78,6 +84,7 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
 
         let restored = await viewModel.restoreCachedTranscript()
         XCTAssertFalse(restored)
+        XCTAssertEqual(viewModel.sessionLoadDiagnostics.snapshot.cacheHit, false)
         XCTAssertTrue(viewModel.messages.isEmpty)
         XCTAssertFalse(viewModel.hasInitiallyLoaded)
     }

@@ -29,15 +29,7 @@ import tempfile
 import time
 import urllib.request
 
-try:
-    import websockets
-except ImportError:
-    print("Installing websockets...", file=sys.stderr)
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "websockets", "-q"],
-        stdout=subprocess.DEVNULL,
-    )
-    import websockets
+websockets = None
 
 
 # ── Server lifecycle ─────────────────────────────────────────────────────────
@@ -117,6 +109,16 @@ def read_bearer_token(home_dir=None):
 
 async def ws_connect(port, home_dir=None):
     """Connect to the authenticated /engine WebSocket and perform hello."""
+    global websockets
+    if websockets is None:
+        try:
+            import websockets as websockets_module
+        except ImportError as error:
+            raise RuntimeError(
+                "websockets is required for live benchmarks; run with "
+                "`uv run --with websockets==15.0.1 python3 scripts/benchmarks/bench.py ...`"
+            ) from error
+        websockets = websockets_module
     token = read_bearer_token(home_dir)
     headers = {"Authorization": f"Bearer {token}"}
     url = f"ws://127.0.0.1:{port}/engine"
@@ -241,12 +243,25 @@ def resolve_scenario_names(name):
 
 def summarize(latencies):
     if not latencies:
-        return {"p50": 0, "p95": 0, "mean": 0, "min": 0, "max": 0}
+        return {
+            "sample_count": 0,
+            "samples": [],
+            "p50": None,
+            "p95": None,
+            "p99": None,
+            "mean": None,
+            "min": None,
+            "max": None,
+        }
     s = sorted(latencies)
     n = len(s)
+    percentile = lambda fraction: s[max(0, math.ceil(n * fraction) - 1)]
     return {
-        "p50": s[int(n * 0.50)],
-        "p95": s[min(int(n * 0.95), n - 1)],
+        "sample_count": n,
+        "samples": latencies,
+        "p50": percentile(0.50),
+        "p95": percentile(0.95),
+        "p99": percentile(0.99) if n >= 100 else None,
         "mean": sum(s) / n,
         "min": s[0],
         "max": s[-1],
@@ -261,6 +276,40 @@ def current_environment():
     if arch == "arm64":
         arch = "aarch64"
     return {"os": os_name, "arch": arch, "cpu_count": os.cpu_count() or 1}
+
+
+def current_provenance():
+    try:
+        repository_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=repository_root, text=True
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        git_sha = "unknown"
+    return {
+        "git_sha": git_sha,
+        "python": platform.python_version(),
+        "runner_image": os.environ.get("ImageOS", "local"),
+    }
+
+
+def self_test():
+    short = summarize([4.0, 1.0, 3.0, 2.0])
+    assert short["sample_count"] == 4
+    assert short["samples"] == [4.0, 1.0, 3.0, 2.0]
+    assert short["p50"] == 2.0 and short["p95"] == 4.0
+    assert short["p99"] is None
+    large = summarize([float(value) for value in range(1, 101)])
+    assert large["p50"] == 50.0 and large["p95"] == 95.0 and large["p99"] == 99.0
+    assert summarize([])["p50"] is None
+    legacy = {
+        "environment": {"os": "macos", "arch": "aarch64", "cpu_count": 10},
+        "config": {"requested_scenario": "gate", "iterations": 1},
+        "scenarios": [{"name": "ping", "latency_ms": {"p95": 10.0, "mean": 8.0}}],
+    }
+    current = json.loads(json.dumps(legacy))
+    current["schema_version"] = 2
+    assert compare_reports(legacy, current, {"p95": 15.0, "mean": 35.0})[0]
 
 
 # ── Gate comparison ──────────────────────────────────────────────────────────
@@ -341,7 +390,13 @@ def main():
     )
     parser.add_argument("--port", type=int, default=BENCH_PORT, help="Server port")
     parser.add_argument("--external", action="store_true", help="Connect to existing server")
+    parser.add_argument("--self-test", action="store_true", help="Run deterministic schema/statistics tests")
     args = parser.parse_args()
+
+    if args.self_test:
+        self_test()
+        print("benchmark self-test passed")
+        return
 
     scenario_names = resolve_scenario_names(args.scenario)
     binary = None
@@ -374,8 +429,10 @@ def main():
         results = asyncio.run(run_benchmarks(args.port, scenario_names, args.iterations, tmpdir))
 
         report = {
+            "schema_version": 2,
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "environment": current_environment(),
+            "provenance": current_provenance(),
             "config": {
                 "requested_scenario": args.scenario,
                 "iterations": args.iterations,

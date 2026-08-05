@@ -390,6 +390,52 @@ fn worker_run_graph_response_schema() -> Value {
             "cost":{"type":"number"}
         }
     });
+    let requested_timing = json!({
+        "type":"object","additionalProperties":false,
+        "required":["queueMs","executionMs","wallMs"],
+        "properties":{
+            "queueMs":{"type":"integer"},"executionMs":{"type":"integer"},
+            "wallMs":{"type":"integer"}
+        }
+    });
+    let requested_usage = json!({
+        "type":"object","additionalProperties":false,
+        "required":["inputTokens","outputTokens","cacheReadTokens","cacheCreationTokens","cost","includesDescendants"],
+        "properties":{
+            "inputTokens":{"type":"integer"},"outputTokens":{"type":"integer"},
+            "cacheReadTokens":{"type":"integer"},"cacheCreationTokens":{"type":"integer"},
+            "cost":{"type":"number"},"includesDescendants":{"type":"boolean"}
+        }
+    });
+    let mut requested_invocation = json!({
+        "type":"object","additionalProperties":false,
+        "required":[
+            "invocationId","workerId","workerName","workerVersion","status",
+            "requestedModel","requestedReasoningLevel","effectiveModel",
+            "effectiveReasoningLevel","timing","usage"
+        ],
+        "properties":{
+            "invocationId":{"type":"string"},"workerId":{"type":"string"},
+            "workerName":{"type":"string"},"workerVersion":{"type":"string"},
+            "status":{"type":"string"},"timing":requested_timing,"usage":requested_usage
+        }
+    });
+    if let Some(properties) = requested_invocation
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+    {
+        for field in [
+            "requestedModel",
+            "requestedReasoningLevel",
+            "effectiveModel",
+            "effectiveReasoningLevel",
+        ] {
+            properties.insert(
+                field.to_owned(),
+                json!({"oneOf":[{"type":"string"},{"type":"null"}]}),
+            );
+        }
+    }
     let mut node = json!({
         "type":"object","additionalProperties":false,
         "required":["id","kind","parentId","status","elapsedMs"],
@@ -442,6 +488,7 @@ fn worker_run_graph_response_schema() -> Value {
             "originSessionId","workerId","workerName","requestPreview","status",
             "mode","stage","stageLabel","expectedNextTransition","createdAt",
             "startedAt","completedAt","elapsedMs","counts","timing","usage",
+            "requestedInvocation",
             "nodes","timeline","resultPreview","errorPreview","truncated"
         ],
         "properties":{
@@ -452,6 +499,7 @@ fn worker_run_graph_response_schema() -> Value {
             "stage":stage,"stageLabel":{"type":"string"},"expectedNextTransition":{},
             "createdAt":{"type":"string"},"startedAt":{},"completedAt":{},
             "elapsedMs":{"type":"integer"},"counts":counts,"timing":timing,"usage":usage,
+            "requestedInvocation":requested_invocation,
             "nodes":{"type":"array","items":node},"timeline":{"type":"array","items":timeline},
             "resultPreview":{},"errorPreview":{},"truncated":{"type":"boolean"}
         }

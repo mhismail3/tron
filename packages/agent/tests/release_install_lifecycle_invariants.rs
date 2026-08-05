@@ -836,15 +836,10 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
     ] {
         assert!(ci.contains(required), "CI missing {required}");
     }
-    let mac_filter = ci
-        .split_once("            mac:\n")
-        .expect("CI must define a Mac path filter")
-        .1
-        .split_once("\n\n  personal-info-guard:")
-        .expect("Mac path filter must end before the first validation job")
-        .0;
+    let change_classifier = read_repo_file("scripts/ci-change-flags.sh");
     assert!(
-        mac_filter.contains("- '.github/workflows/release-mac.yml'"),
+        ci.contains("run: scripts/ci-change-flags.sh")
+            && change_classifier.contains(".github/workflows/release-mac.yml"),
         "Mac release workflow changes must schedule Mac CI"
     );
 
