@@ -522,15 +522,13 @@ jobs:
               echo "::notice::installed temporary App Store profile '$name' for $bundle_id" >&2
             fi
             rm -f "$profile_path" "$decoded_plist"
-            printf '%s\t%s' "$uuid" "$xcode_managed"
+            printf '%s\t%s\t%s' "$uuid" "$xcode_managed" "$name"
           }
 
-          app_profile_info="$(install_profile app "$IOS_BUNDLE_ID" "$IOS_APPSTORE_PROFILE_BASE64")"
-          share_profile_info="$(install_profile share-extension "$IOS_SHARE_EXTENSION_BUNDLE_ID" "$IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64")"
-          app_profile_uuid="${app_profile_info%%$'\t'*}"
-          app_profile_xcode_managed="${app_profile_info##*$'\t'}"
-          share_profile_uuid="${share_profile_info%%$'\t'*}"
-          share_profile_xcode_managed="${share_profile_info##*$'\t'}"
+          IFS=$'\t' read -r app_profile_uuid app_profile_xcode_managed app_profile_name \
+            <<< "$(install_profile app "$IOS_BUNDLE_ID" "$IOS_APPSTORE_PROFILE_BASE64")"
+          IFS=$'\t' read -r share_profile_uuid share_profile_xcode_managed share_profile_name \
+            <<< "$(install_profile share-extension "$IOS_SHARE_EXTENSION_BUNDLE_ID" "$IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64")"
 
           if [[ "$app_profile_xcode_managed" != "$share_profile_xcode_managed" ]]; then
             echo "::error::iOS App Store profiles must both be Xcode-managed or both be manually managed"
@@ -547,6 +545,8 @@ jobs:
           {
             echo "IOS_APP_PROFILE_UUID=$app_profile_uuid"
             echo "IOS_SHARE_PROFILE_UUID=$share_profile_uuid"
+            echo "IOS_APP_PROFILE_SPECIFIER=$app_profile_name"
+            echo "IOS_SHARE_PROFILE_SPECIFIER=$share_profile_name"
             echo "IOS_EXPORT_SIGNING_STYLE=$export_signing_style"
           } >> "$GITHUB_ENV"
 
@@ -568,6 +568,36 @@ jobs:
               CODE_SIGN_STYLE=Manual \
               CODE_SIGN_IDENTITY="-" \
               CODE_SIGNING_ALLOWED=NO \
+              CURRENT_PROJECT_VERSION="${{ steps.ver.outputs.apple_build }}" \
+              -quiet
+          elif [[ "${IOS_SIGNING_MODE:-automatic}" == "manual" && "${IOS_EXPORT_SIGNING_STYLE:-manual}" == "manual" ]]; then
+            xcodebuild archive \
+              -project TronMobile.xcodeproj \
+              -scheme "$IOS_SCHEME" \
+              -configuration "$IOS_CONFIGURATION" \
+              -archivePath "$archive_path" \
+              -destination 'generic/platform=iOS' \
+              DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="$IOS_DISTRIBUTION_IDENTITY" \
+              "PROVISIONING_PROFILE_SPECIFIER=\$(TRON_APPSTORE_PROFILE_SPECIFIER)" \
+              IOS_APP_PROFILE_SPECIFIER="$IOS_APP_PROFILE_SPECIFIER" \
+              IOS_SHARE_PROFILE_SPECIFIER="$IOS_SHARE_PROFILE_SPECIFIER" \
+              CURRENT_PROJECT_VERSION="${{ steps.ver.outputs.apple_build }}" \
+              -quiet
+          elif [[ "${IOS_SIGNING_MODE:-automatic}" == "manual" ]]; then
+            # Xcode-managed App Store profiles stay under automatic selection,
+            # but the installed distribution identity prevents Xcode from
+            # trying to create development signing assets in Apple's account.
+            xcodebuild archive \
+              -project TronMobile.xcodeproj \
+              -scheme "$IOS_SCHEME" \
+              -configuration "$IOS_CONFIGURATION" \
+              -archivePath "$archive_path" \
+              -destination 'generic/platform=iOS' \
+              DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+              CODE_SIGN_STYLE=Automatic \
+              CODE_SIGN_IDENTITY="$IOS_DISTRIBUTION_IDENTITY" \
               CURRENT_PROJECT_VERSION="${{ steps.ver.outputs.apple_build }}" \
               -quiet
           else
