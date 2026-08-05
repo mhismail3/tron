@@ -477,6 +477,7 @@ jobs:
           install_profile() {
             local label="$1" bundle_id="$2" base64_value="$3"
             local profile_path decoded_plist uuid name application_id provisions_all xcode_managed destination
+            local expiration expiration_epoch now_epoch remaining_days
             profile_path="$RUNNER_TEMP/$label.mobileprovision"
             decoded_plist="$RUNNER_TEMP/$label-profile.plist"
             printf '%s' "$base64_value" | base64 -d > "$profile_path"
@@ -487,6 +488,7 @@ jobs:
             application_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$decoded_plist" 2>/dev/null || true)"
             provisions_all="$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$decoded_plist" 2>/dev/null || true)"
             xcode_managed="$(/usr/libexec/PlistBuddy -c 'Print :IsXcodeManaged' "$decoded_plist" 2>/dev/null || true)"
+            expiration="$(plutil -extract ExpirationDate raw -o - "$decoded_plist" 2>/dev/null || true)"
             [[ "$xcode_managed" == "true" ]] || xcode_managed="false"
 
             if [[ -z "$uuid" ]]; then
@@ -504,6 +506,20 @@ jobs:
             if [[ "$provisions_all" == "true" ]] || /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$decoded_plist" >/dev/null 2>&1; then
               echo "::error::$label provisioning profile is not an App Store Connect distribution profile" >&2
               return 1
+            fi
+            expiration_epoch="$(date -j -f '%Y-%m-%dT%H:%M:%SZ' "$expiration" '+%s' 2>/dev/null || true)"
+            if [[ -z "$expiration_epoch" ]]; then
+              echo "::error::$label provisioning profile has a missing or invalid expiration date" >&2
+              return 1
+            fi
+            now_epoch="$(date -u '+%s')"
+            if (( expiration_epoch <= now_epoch )); then
+              echo "::error::$label provisioning profile expired at $expiration" >&2
+              return 1
+            fi
+            remaining_days=$(( (expiration_epoch - now_epoch) / 86400 ))
+            if (( remaining_days <= 30 )); then
+              echo "::warning::$label provisioning profile expires within 30 days at $expiration; rotate the certificate, .p12, and both profile secrets" >&2
             fi
 
             destination="$profiles_dir/$uuid.mobileprovision"
@@ -1021,12 +1037,40 @@ jobs:
           }
 
           detail_json="$ASC_DIAGNOSTICS_DIR/internal-build-detail.json"
-          groups_json="$ASC_DIAGNOSTICS_DIR/internal-build-groups.json"
+          group_builds_json="$ASC_DIAGNOSTICS_DIR/internal-group-builds.json"
+          group_has_build() {
+            local url next_url
+            url="https://api.appstoreconnect.apple.com/v1/betaGroups/$INTERNAL_GROUP_ID/relationships/builds?limit=200"
+            for _ in {1..50}; do
+              if ! asc_get "$url" "$group_builds_json"; then
+                exit 1
+              fi
+              if ! jq -e '(.data // null) | type == "array"' "$group_builds_json" >/dev/null; then
+                echo "::error::could not read build relationships for internal TestFlight group $INTERNAL_GROUP_ID"
+                exit 1
+              fi
+              if jq -e --arg id "$BUILD_ID" 'any((.data // [])[]; .id == $id)' "$group_builds_json" >/dev/null; then
+                return 0
+              fi
+              next_url="$(jq -r '.links.next // empty' "$group_builds_json")"
+              [[ -n "$next_url" ]] || return 1
+              if [[ "$next_url" != https://api.appstoreconnect.apple.com/* ]]; then
+                echo "::error::refusing unexpected App Store Connect pagination URL: $next_url"
+                exit 1
+              fi
+              url="$next_url"
+            done
+            echo "::error::internal TestFlight group build relationship exceeded 50 pages"
+            exit 1
+          }
           for _ in {1..90}; do
             asc_get "https://api.appstoreconnect.apple.com/v1/builds/$BUILD_ID/buildBetaDetail" "$detail_json"
-            asc_get "https://api.appstoreconnect.apple.com/v1/builds/$BUILD_ID/relationships/betaGroups?limit=200" "$groups_json"
             internal_state="$(jq -r '.data.attributes.internalBuildState // empty' "$detail_json")"
-            group_attached="$(jq -r --arg id "$INTERNAL_GROUP_ID" 'any((.data // [])[]; .id == $id)' "$groups_json")"
+            if group_has_build; then
+              group_attached=true
+            else
+              group_attached=false
+            fi
             echo "::notice::internal TestFlight state=$internal_state group_attached=$group_attached"
             case "$internal_state" in
               READY_FOR_BETA_TESTING|IN_BETA_TESTING)
