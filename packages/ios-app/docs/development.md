@@ -686,37 +686,50 @@ xcodebuild test -scheme 'Tron Beta' \
   -only-testing:TronMobileTests/ChatTranscriptRevealPolicyTests
 ```
 
-## TestFlight Release CI
+## TestFlight Delivery CI
 
-The iOS beta is published by `.github/workflows/release-ios.yml` on the same
-`server-v*` tag that cuts the Mac DMG. The workflow always regenerates the
-Xcode project with XcodeGen before building, so `project.yml` and `VERSION.env`
-are the release sources of truth.
+`.github/workflows/release-ios.yml` owns two independent TestFlight lanes. A
+successful `CI` workflow for a push to `main` publishes that workflow's exact
+tested commit to the private internal group. A `server-v*` tag publishes to the
+external/public TestFlight path used by Mac onboarding. Pull requests, failed
+or cancelled CI runs, and CI runs for other branches never trigger delivery.
+The workflow always regenerates the Xcode project with XcodeGen, so
+`project.yml` and `VERSION.env` remain the marketing-version sources of truth.
+Hosted iOS builds override `CURRENT_PROJECT_VERSION` with this retained
+workflow's monotonic `GITHUB_RUN_NUMBER`; reruns reuse the same number and the
+checked-in `TRON_APPLE_BUILD` remains the local and Mac build-number source.
 
 The upload lane uses the `Tron` scheme with the `Prod` configuration. That is
 the App Store Connect bundle (`com.tron.mobile`, App ID `6761511764`); the
 `Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
-CI creates or selects an available iPhone simulator, runs the simulator tests,
-archives for `generic/platform=iOS`, exports an App Store Connect IPA with
-Xcode's `app-store-connect` export method, validates the exported app/extension
+Tag, manual, and dry-run deliveries create or select an available iPhone
+simulator and run the simulator tests. Automatic internal delivery relies on
+the already-successful upstream CI test run instead of repeating it. All live
+lanes archive for `generic/platform=iOS`, export an App Store Connect IPA with
+Xcode's `app-store-connect` export method, validate the exported app/extension
 bundle IDs, entitlements, and export-compliance plist keys, uploads with
 `asc builds upload`, waits for the build to become valid, resolves TestFlight
-export compliance, updates the What to Test notes, submits TestFlight beta
-review when Apple marks the build `READY_FOR_BETA_SUBMISSION`, and then branches
-on the returned App Store Connect state. If Apple reports `WAITING_FOR_BETA_REVIEW`
-or `WAITING_FOR_REVIEW`, CI exits successfully as a pending-review checkpoint
-instead of waiting for the 1-2 day first-build review window. If the build is
-already externally testable, CI prefers the configured public-link group used by
-Mac onboarding, but can auto-discover a single public-link group when the stored
-repository variable is stale. Missing, stale, or ambiguous group variables are
-warnings after the build is uploaded and processed: CI skips API group assignment
-rather than failing an otherwise successful TestFlight release checkpoint. The
-optional internal group id is diagnostic only. App Store Connect does not allow
-direct API assignment to an internal group, so CI warns when the configured
-internal group is stale or lacks all-build access. The group validation step
-uses the current `asc testflight groups list` command. Reruns use
-`asc builds list` to reuse an existing Apple build number instead of uploading
-a duplicate binary.
+export compliance, and updates the What to Test notes. Reruns use
+`asc builds list` to reuse an existing Apple build instead of uploading a
+duplicate binary.
+
+The internal lane fails before archive unless the configured group exists, is
+internal, has automatic all-build access, and contains at least one tester. It
+does not log or retain tester identity data. After upload, it waits until App
+Store Connect reports an internally testable build and confirms the build's
+relationship to that group. Internal builds remain normal App Store Connect
+builds, so a selected build can later be promoted through external TestFlight
+or App Review without rebuilding.
+
+The external lane submits TestFlight beta review when Apple marks the build
+`READY_FOR_BETA_SUBMISSION`, then branches on App Store Connect state. If Apple
+reports `WAITING_FOR_BETA_REVIEW` or `WAITING_FOR_REVIEW`, CI exits successfully
+as a pending-review checkpoint instead of waiting for the first-build review
+window. Once externally testable, CI prefers the configured public-link group
+used by Mac onboarding, but can auto-discover a single public-link group when
+the repository variable is stale. Missing, stale, or ambiguous public-group
+configuration is a warning after upload and processing; CI skips API group
+assignment rather than failing the external release checkpoint.
 
 The app and share extension Info.plists set
 `ITSAppUsesNonExemptEncryption=false`, which is the current release assertion
@@ -724,9 +737,12 @@ for TronMobile's use of platform networking and non-encryption hashing. Revisit
 that assertion before adding non-exempt cryptography. The workflow verifies the
 key in archives and exported IPAs; for already-uploaded builds that are stuck in
 `MISSING_EXPORT_COMPLIANCE`, it uses the App Store Connect API to set
-`usesNonExemptEncryption=false` before distribution. Build beta-detail and beta
-review state are also read directly from the App Store Connect API because local
-and CI `asc` installations can expose different TestFlight subcommand names.
+`usesNonExemptEncryption=false` before distribution. The API request retries
+transient failures, tolerates Apple's update-in-progress conflict, and saves
+sanitized response diagnostics as a failed-run artifact. Build beta-detail and
+beta review state are also read directly from the App Store Connect API because
+local and CI `asc` installations can expose different TestFlight subcommand
+names.
 
 The export step supports two signing modes. If all local signing secrets are
 present, CI imports an Apple Distribution `.p12` into a temporary keychain,
@@ -767,12 +783,21 @@ Optional local signing secrets:
 | `IOS_APPSTORE_PROFILE_BASE64` | base64-encoded App Store Connect provisioning profile for `com.tron.mobile` |
 | `IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64` | base64-encoded App Store Connect provisioning profile for `com.tron.mobile.ShareExtension` |
 
-Optional repository variables:
+Repository variables:
 
 | Variable | Purpose |
 |---|---|
-| `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Public TestFlight group id used by the Mac onboarding QR link; CI auto-discovers a single public-link group when this is stale |
-| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Internal TestFlight group id; warnings only because public TestFlight distribution does not assign internal groups directly |
+| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | **Required for live internal delivery.** Private internal group with automatic all-build access and at least one tester |
+| `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Optional public TestFlight group used by the Mac onboarding QR link; external delivery auto-discovers a single public-link group when this is stale |
+
+One-time internal setup requires a manual App Store Connect checkpoint: create
+or select an Internal Testing group, enable automatic distribution of all
+builds, add the intended App Store Connect user as a tester, and store that
+group's id as `ASC_TESTFLIGHT_INTERNAL_GROUP_ID`. After the first CI build is
+available, that tester must accept the TestFlight invitation on the iPhone and
+should enable TestFlight automatic updates. Those Apple UI actions cannot be
+performed by repository automation; subsequent builds require no nearby Mac or
+device connection.
 
 To reuse the local App Store Connect API key, `asc auth status --verbose` shows
 the current profile and key id, and `asc auth doctor` shows the `.p8` path. The
@@ -805,19 +830,16 @@ The workflow decodes each profile before export and fails early if the
 profile is an Ad Hoc/development profile with devices, or if the app and share
 extension mix Xcode-managed and manually managed profile styles.
 
-Manual workflow runs default to `dry_run=true`, which builds and tests but skips
-App Store Connect upload and TestFlight distribution. A manual run with
-`dry_run=false` exercises the full upload/distribution path without creating a
-new tag, but it must have all three required ASC secrets and use a unique Apple
-build number or an existing build that is safe to redistribute. Tag runs and
-manual `dry_run=false` runs reject a missing ASC secret before the build; only
-the explicit manual dry-run may omit them. For the first external build of a
-new marketing version, the expected successful outcome is a workflow summary
-that says distribution is pending Apple Beta App Review. Rerun the same
-workflow after App Store Connect shows the build as approved; duplicate-build
-detection will reuse the existing upload and continue distribution. Later
-builds in the same approved marketing version normally skip that review wait
-and move straight to group assignment.
+Manual workflow runs expose a `channel` choice. `dry-run` builds and tests but
+skips App Store Connect; `internal` exercises private delivery from `main`; and
+`external` exercises the public path from `main` without creating a tag. Live
+manual runs require the ASC secrets and consume the workflow run's Apple build
+number. For the first external build of a new marketing version, the expected
+successful outcome is a summary that says distribution is pending Apple Beta
+App Review. Rerun the same workflow after App Store Connect shows the build as
+approved; duplicate-build detection reuses the existing upload and continues
+distribution. Later builds in the same approved marketing version normally
+move straight to public-group assignment.
 
 ## Common Tasks
 

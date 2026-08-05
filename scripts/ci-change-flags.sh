@@ -8,12 +8,12 @@ classify_paths() {
     while IFS= read -r path; do
         [[ -n "$path" ]] || continue
         case "$path" in
-            packages/ios-app/*|.github/workflows/ci.yml|.github/workflows/release-ios.yml|config/ci-toolchain.env|scripts/install-ci-tools.sh|scripts/verify-ci-toolchain.sh)
+            packages/ios-app/*|.github/workflows/ci.yml|.github/workflows/release-ios.yml|config/ci-toolchain.env|scripts/tron-version|scripts/install-ci-tools.sh|scripts/verify-ci-toolchain.sh)
                 ios=true
                 ;;
         esac
         case "$path" in
-            rust-toolchain.toml|packages/agent/*|packages/mac-app/*|.github/workflows/ci.yml|.github/workflows/release-mac.yml|config/ci-toolchain.env|scripts/install-ci-tools.sh|scripts/verify-ci-toolchain.sh)
+            rust-toolchain.toml|packages/agent/*|packages/mac-app/*|.github/workflows/ci.yml|.github/workflows/release-mac.yml|config/ci-toolchain.env|scripts/tron-version|scripts/install-ci-tools.sh|scripts/verify-ci-toolchain.sh)
                 mac=true
                 ;;
         esac
@@ -27,6 +27,8 @@ if [[ "${1:-}" == "--self-test" ]]; then
     result="$(printf '%s\n' packages/agent/src/lib.rs | classify_paths)"
     [[ "$result" == $'ios=false\nmac=true' ]]
     result="$(printf '%s\n' config/ci-toolchain.env | classify_paths)"
+    [[ "$result" == $'ios=true\nmac=true' ]]
+    result="$(printf '%s\n' scripts/tron-version | classify_paths)"
     [[ "$result" == $'ios=true\nmac=true' ]]
     result="$(printf '%s\n' README.md | classify_paths)"
     [[ "$result" == $'ios=false\nmac=false' ]]

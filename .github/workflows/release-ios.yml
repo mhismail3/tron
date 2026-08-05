@@ -1,11 +1,11 @@
-# iOS TestFlight Release Pipeline
+# iOS TestFlight Delivery Pipeline
 #
-# Uploads the production iOS bundle (`com.tron.mobile`) to App Store Connect
-# and advances it through the TestFlight release states. Externally testable
-# builds are assigned to the public TestFlight group; first-build/new-version
-# review waits exit successfully as pending Apple Beta App Review. Triggered by
-# the same `server-v*` tags that cut the Mac DMG release, so one release tag
-# advances both Apple build numbers from VERSION.env.
+# Every successful main-branch CI push uploads the exact tested production iOS
+# bundle (`com.tron.mobile`) to the all-build internal TestFlight group. Release
+# tags retain the external/public TestFlight path and Beta App Review handling.
+# Both channels use this workflow's monotonic GITHUB_RUN_NUMBER as the hosted
+# iOS CFBundleVersion; reruns reuse their original number. VERSION.env remains
+# the product-version and local/Mac build source.
 #
 # Required secrets:
 #   ASC_KEY_ID        App Store Connect API key id
@@ -19,9 +19,9 @@
 #   IOS_APPSTORE_PROFILE_BASE64                 base64-encoded App Store profile for com.tron.mobile
 #   IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64 base64-encoded App Store profile for com.tron.mobile.ShareExtension
 #
-# Optional repository variables:
+# Repository variables:
 #   ASC_TESTFLIGHT_PUBLIC_GROUP_ID   existing public TestFlight group id
-#   ASC_TESTFLIGHT_INTERNAL_GROUP_ID existing internal TestFlight group id
+#   ASC_TESTFLIGHT_INTERNAL_GROUP_ID all-build internal TestFlight group id
 #
 # Real releases archive the Prod app, export with Apple's app-store-connect
 # method, then upload with `asc builds upload`. Exports use explicit manual
@@ -31,8 +31,8 @@
 # uploaded before that key existed so idempotent reruns can still distribute.
 # Dry-runs still create an unsigned IPA from the archive to validate package
 # layout without requiring Apple signing credentials. Only an explicit manual
-# dry-run may omit the ASC credentials; release tags fail before the build when
-# any required credential is missing.
+# dry-run may omit the ASC credentials; live internal/external deliveries fail
+# before the build when any required credential is missing.
 #
 # Credential lifecycle invariant: ASC uses the job's environment-backed key
 # directly. Manual signing snapshots the user keychain preferences before it
@@ -46,17 +46,21 @@ on:
   push:
     tags:
       - "server-v*"
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Build/test only; skip ASC upload + TestFlight distribution."
-        required: false
-        default: true
-        type: boolean
-
-concurrency:
-  group: release-ios-${{ github.ref }}
-  cancel-in-progress: false
+      channel:
+        description: "Delivery channel. Live modes are restricted to main."
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - internal
+          - external
 
 permissions:
   contents: read
@@ -64,6 +68,11 @@ permissions:
 jobs:
   testflight:
     name: Build + upload + distribute
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: macos-15
     timeout-minutes: 90
 
@@ -80,51 +89,49 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Resolve version
+      - name: Resolve iOS delivery
         id: ver
         shell: bash
+        env:
+          TRON_IOS_CHANNEL_INPUT: ${{ inputs.channel }}
+          TRON_UPSTREAM_WORKFLOW: ${{ github.event.workflow_run.name }}
+          TRON_UPSTREAM_EVENT: ${{ github.event.workflow_run.event }}
+          TRON_UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          TRON_UPSTREAM_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          TRON_UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          ./scripts/tron version github-output
+          ./scripts/tron version github-ios-output
 
-      - name: Resolve dry-run flag
-        id: drymode
+      - name: Initialize ASC diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          diagnostics_dir="$RUNNER_TEMP/ios-asc-diagnostics"
+          mkdir -p "$diagnostics_dir"
+          echo "ASC_DIAGNOSTICS_DIR=$diagnostics_dir" >> "$GITHUB_ENV"
+
+      - name: Require live iOS credentials
+        if: steps.ver.outputs.dry_run != 'true'
         shell: bash
         env:
-          DRY_RUN_INPUT: ${{ inputs.dry_run }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
         run: |
           set -euo pipefail
-          case "$GITHUB_EVENT_NAME" in
-            workflow_dispatch) flag="${DRY_RUN_INPUT:-true}" ;;
-            push) flag="false" ;;
-            *)
-              echo "::error::unsupported release event: $GITHUB_EVENT_NAME"
-              exit 1
-              ;;
-          esac
-          case "$flag" in
-            true|false) ;;
-            *)
-              echo "::error::dry_run must be true or false, got: $flag"
-              exit 1
-              ;;
-          esac
-          if [[ "$flag" == "false" ]]; then
-            required_secrets=(ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64)
-            missing_secrets=()
-            for secret_name in "${required_secrets[@]}"; do
-              [[ -n "${!secret_name:-}" ]] || missing_secrets+=("$secret_name")
-            done
-            if (( ${#missing_secrets[@]} > 0 )); then
-              echo "::error::live iOS release requires secrets: ${missing_secrets[*]}"
-              exit 1
-            fi
+          required_secrets=(ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64)
+          missing_secrets=()
+          for secret_name in "${required_secrets[@]}"; do
+            [[ -n "${!secret_name:-}" ]] || missing_secrets+=("$secret_name")
+          done
+          if (( ${#missing_secrets[@]} > 0 )); then
+            echo "::error::live iOS delivery requires secrets: ${missing_secrets[*]}"
+            exit 1
           fi
-          echo "dry_run=$flag" >> "$GITHUB_OUTPUT"
-          echo "Dry-run=$flag"
+          echo "Live iOS credentials are configured for ${{ steps.ver.outputs.channel }} delivery"
 
       - name: Pin Xcode
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
@@ -151,13 +158,15 @@ jobs:
             -project TronMobile.xcodeproj \
             -scheme "$IOS_SCHEME" \
             -configuration "$IOS_CONFIGURATION" \
-            -destination 'generic/platform=iOS' > "$settings"
+            -destination 'generic/platform=iOS' \
+            CURRENT_PROJECT_VERSION="${{ steps.ver.outputs.apple_build }}" > "$settings"
           grep -q "PRODUCT_BUNDLE_IDENTIFIER = $IOS_BUNDLE_ID" "$settings"
           grep -q "MARKETING_VERSION = ${{ steps.ver.outputs.marketing_version }}" "$settings"
           grep -q "CURRENT_PROJECT_VERSION = ${{ steps.ver.outputs.apple_build }}" "$settings"
           grep -q "TRON_CANONICAL_VERSION = ${{ steps.ver.outputs.version }}" "$settings"
 
       - name: Prepare iOS simulator
+        if: steps.ver.outputs.run_tests == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -210,6 +219,7 @@ jobs:
           echo "IOS_TEST_DESTINATION=platform=iOS Simulator,id=$udid" >> "$GITHUB_ENV"
 
       - name: xcodebuild test
+        if: steps.ver.outputs.run_tests == 'true'
         working-directory: ${{ env.IOS_APP_DIR }}
         shell: bash
         run: |
@@ -224,7 +234,7 @@ jobs:
             -quiet
 
       - name: Upload xcresult on failure
-        if: failure()
+        if: failure() && steps.ver.outputs.run_tests == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ios-release-test-results
@@ -232,7 +242,7 @@ jobs:
           retention-days: 7
 
       - name: Prepare ASC API key
-        if: steps.drymode.outputs.dry_run != 'true'
+        if: steps.ver.outputs.dry_run != 'true'
         shell: bash
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -259,9 +269,79 @@ jobs:
             echo "ASC_BYPASS_KEYCHAIN=true"
           } >> "$GITHUB_ENV"
 
+      - name: Validate internal TestFlight group
+        id: internal_group
+        if: steps.ver.outputs.channel == 'internal'
+        shell: bash
+        env:
+          INTERNAL_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_INTERNAL_GROUP_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$ASC_DIAGNOSTICS_DIR"
+          [[ -n "${INTERNAL_GROUP_ID:-}" ]] || {
+            echo "::error::ASC_TESTFLIGHT_INTERNAL_GROUP_ID is required for automatic internal delivery"
+            exit 1
+          }
+
+          groups_json="$ASC_DIAGNOSTICS_DIR/internal-groups.json"
+          asc testflight groups list \
+            --app "$ASC_APP_ID" \
+            --output json > "$groups_json"
+          group="$(
+            jq -c --arg id "$INTERNAL_GROUP_ID" '
+              (.data // [])
+              | map(select(.id == $id))
+              | .[0] // empty
+            ' "$groups_json"
+          )"
+          [[ -n "$group" ]] || {
+            echo "::error::ASC_TESTFLIGHT_INTERNAL_GROUP_ID does not match a TestFlight group"
+            exit 1
+          }
+          internal_kind="$(jq -r '.attributes.isInternalGroup // false' <<< "$group")"
+          all_builds="$(jq -r '.attributes.hasAccessToAllBuilds // false' <<< "$group")"
+          group_name="$(jq -r '.attributes.name // "<unnamed internal group>"' <<< "$group")"
+          [[ "$internal_kind" == "true" ]] || {
+            echo "::error::configured internal TestFlight group '$group_name' is external"
+            exit 1
+          }
+          [[ "$all_builds" == "true" ]] || {
+            echo "::error::internal TestFlight group '$group_name' must have automatic all-build access enabled"
+            exit 1
+          }
+
+          asc_token() {
+            ./scripts/asc-jwt \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer-id "$APPLE_API_ISSUER_ID" \
+              --key-path "$APPLE_API_KEY_PATH"
+          }
+          testers_json="$RUNNER_TEMP/internal-group-testers.json"
+          http_code="$(
+            curl -sS --retry 4 --retry-delay 3 \
+              -o "$testers_json" \
+              -w "%{http_code}" \
+              -H "Authorization: Bearer $(asc_token)" \
+              -H "Accept: application/json" \
+              "https://api.appstoreconnect.apple.com/v1/betaGroups/$INTERNAL_GROUP_ID/betaTesters?limit=1"
+          )"
+          [[ "$http_code" == 2* ]] || {
+            rm -f "$testers_json"
+            echo "::error::failed to verify internal TestFlight group membership (HTTP $http_code)"
+            exit 1
+          }
+          tester_count="$(jq -r '(.data // []) | length' "$testers_json")"
+          rm -f "$testers_json"
+          (( tester_count > 0 )) || {
+            echo "::error::internal TestFlight group '$group_name' has no testers; add the intended App Store Connect user before retrying"
+            exit 1
+          }
+          echo "group_id=$INTERNAL_GROUP_ID" >> "$GITHUB_OUTPUT"
+          echo "::notice::internal TestFlight group '$group_name' is configured for automatic all-build access"
+
       - name: Check for existing ASC build
         id: existing
-        if: steps.drymode.outputs.dry_run != 'true'
+        if: steps.ver.outputs.dry_run != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -287,7 +367,7 @@ jobs:
 
       - name: Resolve iOS signing mode
         id: signing
-        if: steps.drymode.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
+        if: steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
         shell: bash
         env:
           IOS_DISTRIBUTION_CERT_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERT_P12_BASE64 }}
@@ -319,7 +399,7 @@ jobs:
           fi
 
       - name: Prepare manual iOS signing assets
-        if: steps.drymode.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true' && steps.signing.outputs.mode == 'manual'
+        if: steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true' && steps.signing.outputs.mode == 'manual'
         shell: bash
         env:
           IOS_DISTRIBUTION_CERT_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERT_P12_BASE64 }}
@@ -471,14 +551,14 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: xcodebuild archive
-        if: steps.drymode.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
+        if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
         working-directory: ${{ env.IOS_APP_DIR }}
         shell: bash
         run: |
           set -euo pipefail
           archive_path="$(pwd)/build/TronMobile.xcarchive"
           rm -rf "$archive_path"
-          if [[ "${{ steps.drymode.outputs.dry_run }}" == "true" ]]; then
+          if [[ "${{ steps.ver.outputs.dry_run }}" == "true" ]]; then
             xcodebuild archive \
               -project TronMobile.xcodeproj \
               -scheme "$IOS_SCHEME" \
@@ -488,6 +568,7 @@ jobs:
               CODE_SIGN_STYLE=Manual \
               CODE_SIGN_IDENTITY="-" \
               CODE_SIGNING_ALLOWED=NO \
+              CURRENT_PROJECT_VERSION="${{ steps.ver.outputs.apple_build }}" \
               -quiet
           else
             xcodebuild archive \
@@ -501,12 +582,13 @@ jobs:
               -authenticationKeyID "$APPLE_API_KEY_ID" \
               -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
               DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+              CURRENT_PROJECT_VERSION="${{ steps.ver.outputs.apple_build }}" \
               -quiet
           fi
           echo "ARCHIVE_PATH=$archive_path" >> "$GITHUB_ENV"
 
       - name: Verify archive
-        if: steps.drymode.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
+        if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -522,16 +604,16 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$appex_plist")" = "false"
 
       - name: Upload archive dSYMs
-        if: steps.drymode.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
+        if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ios-dsyms-${{ steps.ver.outputs.version }}
+          name: ios-dsyms-${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.apple_build }}
           path: packages/ios-app/build/TronMobile.xcarchive/dSYMs
           retention-days: 30
           if-no-files-found: warn
 
       - name: Export App Store IPA
-        if: steps.drymode.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
+        if: steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
         working-directory: ${{ env.IOS_APP_DIR }}
         shell: bash
         run: |
@@ -661,7 +743,7 @@ jobs:
           echo "IPA_PATH=$ipa_path" >> "$GITHUB_ENV"
 
       - name: Package dry-run IPA
-        if: steps.drymode.outputs.dry_run == 'true'
+        if: steps.ver.outputs.dry_run == 'true'
         working-directory: ${{ env.IOS_APP_DIR }}
         shell: bash
         run: |
@@ -678,16 +760,16 @@ jobs:
           echo "IPA_PATH=$ipa_path" >> "$GITHUB_ENV"
 
       - name: Upload dry-run IPA artifact
-        if: steps.drymode.outputs.dry_run == 'true'
+        if: steps.ver.outputs.dry_run == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ios-dry-run-ipa-${{ steps.ver.outputs.version }}
+          name: ios-dry-run-ipa-${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.apple_build }}
           path: packages/ios-app/build/TronMobile.ipa
           retention-days: 7
           if-no-files-found: error
 
       - name: Upload to App Store Connect
-        if: steps.drymode.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
+        if: steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -702,7 +784,7 @@ jobs:
             --pretty
 
       - name: Wait for ASC processing
-        if: steps.drymode.outputs.dry_run != 'true'
+        if: steps.ver.outputs.dry_run != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -718,7 +800,7 @@ jobs:
 
       - name: Resolve processed ASC build
         id: asc_build
-        if: steps.drymode.outputs.dry_run != 'true'
+        if: steps.ver.outputs.dry_run != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -735,14 +817,15 @@ jobs:
           echo "::notice::resolved ASC build ${{ steps.ver.outputs.apple_build }} as $build_id"
 
       - name: Resolve export compliance
-        if: steps.drymode.outputs.dry_run != 'true'
+        if: steps.ver.outputs.dry_run != 'true'
         shell: bash
         env:
           BUILD_ID: ${{ steps.asc_build.outputs.build_id }}
         run: |
           set -euo pipefail
+          mkdir -p "$ASC_DIAGNOSTICS_DIR"
 
-          detail_json="$RUNNER_TEMP/build-beta-detail.json"
+          detail_json="$ASC_DIAGNOSTICS_DIR/build-beta-detail.json"
           asc_token() {
             ./scripts/asc-jwt \
               --key-id "$APPLE_API_KEY_ID" \
@@ -750,20 +833,27 @@ jobs:
               --key-path "$APPLE_API_KEY_PATH"
           }
           asc_get() {
-            local url="$1" output="$2" http_code
-            http_code="$(
-              curl -sS \
-                -o "$output" \
-                -w "%{http_code}" \
-                -H "Authorization: Bearer $(asc_token)" \
-                -H "Accept: application/json" \
-                "$url"
-            )"
-            if [[ "$http_code" != 2* ]]; then
-              cat "$output"
+            local url="$1" output="$2" http_code attempt
+            for attempt in {1..5}; do
+              http_code="$(
+                curl -sS \
+                  -o "$output" \
+                  -w "%{http_code}" \
+                  -H "Authorization: Bearer $(asc_token)" \
+                  -H "Accept: application/json" \
+                  "$url"
+              )"
+              [[ "$http_code" == 2* ]] && return 0
+              if [[ "$http_code" == "429" || "$http_code" == 5* ]]; then
+                echo "::warning::App Store Connect GET returned HTTP $http_code (attempt $attempt/5)"
+                sleep $((attempt * 5))
+                continue
+              fi
               echo "::error::App Store Connect API GET failed (HTTP $http_code): $url"
-              exit 1
-            fi
+              return 1
+            done
+            echo "::error::App Store Connect API GET exhausted retries: $url"
+            return 1
           }
           fetch_detail() {
             asc_get "https://api.appstoreconnect.apple.com/v1/builds/$BUILD_ID/buildBetaDetail" "$detail_json"
@@ -775,7 +865,6 @@ jobs:
             )"
             if [[ -z "$internal_state" || -z "$external_state" ]]; then
               echo "::error::could not read TestFlight build beta detail for $BUILD_ID"
-              cat "$detail_json"
               exit 1
             fi
           }
@@ -787,8 +876,8 @@ jobs:
           fi
 
           echo "::notice::ASC build $BUILD_ID is missing export compliance; setting usesNonExemptEncryption=false"
-          request_body="$RUNNER_TEMP/build-export-compliance.json"
-          response_body="$RUNNER_TEMP/build-export-compliance-response.json"
+          request_body="$ASC_DIAGNOSTICS_DIR/build-export-compliance-request.json"
+          response_body="$ASC_DIAGNOSTICS_DIR/build-export-compliance-response.json"
           jq -n --arg id "$BUILD_ID" '{
             data: {
               type: "builds",
@@ -798,24 +887,38 @@ jobs:
               }
             }
           }' > "$request_body"
-          http_code="$(
-            curl -sS \
-              -o "$response_body" \
-              -w "%{http_code}" \
-              -X PATCH \
-              -H "Authorization: Bearer $(asc_token)" \
-              -H "Content-Type: application/json" \
-              -H "Accept: application/json" \
-              --data-binary "@$request_body" \
-              "https://api.appstoreconnect.apple.com/v1/builds/$BUILD_ID"
-          )"
-          if [[ "$http_code" != 2* ]]; then
-            cat "$response_body"
+          patch_accepted=false
+          for attempt in {1..5}; do
+            http_code="$(
+              curl -sS \
+                -o "$response_body" \
+                -w "%{http_code}" \
+                -X PATCH \
+                -H "Authorization: Bearer $(asc_token)" \
+                -H "Content-Type: application/json" \
+                -H "Accept: application/json" \
+                --data-binary "@$request_body" \
+                "https://api.appstoreconnect.apple.com/v1/builds/$BUILD_ID"
+            )"
+            if [[ "$http_code" == 2* || "$http_code" == "409" ]]; then
+              patch_accepted=true
+              [[ "$http_code" == "409" ]] && echo "::notice::export-compliance update is already in progress; polling authoritative state"
+              break
+            fi
+            if [[ "$http_code" == "429" || "$http_code" == 5* ]]; then
+              echo "::warning::export-compliance PATCH returned HTTP $http_code (attempt $attempt/5)"
+              sleep $((attempt * 5))
+              continue
+            fi
             echo "::error::failed to set usesNonExemptEncryption=false for ASC build $BUILD_ID (HTTP $http_code)"
             exit 1
-          fi
+          done
+          [[ "$patch_accepted" == "true" ]] || {
+            echo "::error::export-compliance PATCH exhausted retries for ASC build $BUILD_ID"
+            exit 1
+          }
 
-          for _ in {1..20}; do
+          for _ in {1..30}; do
             fetch_detail
             echo "::notice::TestFlight states after export-compliance update: internal=$internal_state external=$external_state"
             if [[ "$internal_state" != "MISSING_EXPORT_COMPLIANCE" && "$external_state" != "MISSING_EXPORT_COMPLIANCE" ]]; then
@@ -824,18 +927,21 @@ jobs:
             sleep 15
           done
 
-          echo "::error::ASC build $BUILD_ID is still missing export compliance after setting usesNonExemptEncryption=false"
+          echo "::error::ASC build $BUILD_ID is still missing export compliance after 7.5 minutes"
           exit 1
 
       - name: Update TestFlight notes
-        if: steps.drymode.outputs.dry_run != 'true'
+        if: steps.ver.outputs.dry_run != 'true'
         shell: bash
         env:
           BUILD_ID: ${{ steps.asc_build.outputs.build_id }}
         run: |
           set -euo pipefail
-          notes="Tron ${{ steps.ver.outputs.display_version }} (${{ steps.ver.outputs.version }}), Apple build ${{ steps.ver.outputs.apple_build }}."
-          notes_error="$RUNNER_TEMP/testflight-notes-error.log"
+          mkdir -p "$ASC_DIAGNOSTICS_DIR"
+          short_sha="${{ steps.ver.outputs.source_sha }}"
+          short_sha="${short_sha:0:12}"
+          notes="Tron ${{ steps.ver.outputs.display_version }} (${{ steps.ver.outputs.version }}), Apple build ${{ steps.ver.outputs.apple_build }}, commit $short_sha, GitHub run $GITHUB_RUN_NUMBER."
+          notes_error="$ASC_DIAGNOSTICS_DIR/testflight-notes-error.log"
           if asc builds test-notes update \
               --build "$BUILD_ID" \
               --locale en-US \
@@ -856,9 +962,74 @@ jobs:
           echo "::error::failed to create or update TestFlight What to Test notes"
           exit 1
 
+      - name: Wait for internal TestFlight availability
+        id: internal_availability
+        if: steps.ver.outputs.channel == 'internal'
+        shell: bash
+        env:
+          BUILD_ID: ${{ steps.asc_build.outputs.build_id }}
+          INTERNAL_GROUP_ID: ${{ steps.internal_group.outputs.group_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$ASC_DIAGNOSTICS_DIR"
+          asc_token() {
+            ./scripts/asc-jwt \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer-id "$APPLE_API_ISSUER_ID" \
+              --key-path "$APPLE_API_KEY_PATH"
+          }
+          asc_get() {
+            local url="$1" output="$2" http_code attempt
+            for attempt in {1..5}; do
+              http_code="$(
+                curl -sS \
+                  -o "$output" \
+                  -w "%{http_code}" \
+                  -H "Authorization: Bearer $(asc_token)" \
+                  -H "Accept: application/json" \
+                  "$url"
+              )"
+              [[ "$http_code" == 2* ]] && return 0
+              if [[ "$http_code" == "429" || "$http_code" == 5* ]]; then
+                echo "::warning::App Store Connect GET returned HTTP $http_code (attempt $attempt/5)"
+                sleep $((attempt * 5))
+                continue
+              fi
+              echo "::error::App Store Connect API GET failed (HTTP $http_code): $url"
+              return 1
+            done
+            echo "::error::App Store Connect API GET exhausted retries: $url"
+            return 1
+          }
+
+          detail_json="$ASC_DIAGNOSTICS_DIR/internal-build-detail.json"
+          groups_json="$ASC_DIAGNOSTICS_DIR/internal-build-groups.json"
+          for _ in {1..90}; do
+            asc_get "https://api.appstoreconnect.apple.com/v1/builds/$BUILD_ID/buildBetaDetail" "$detail_json"
+            asc_get "https://api.appstoreconnect.apple.com/v1/builds/$BUILD_ID/relationships/betaGroups?limit=200" "$groups_json"
+            internal_state="$(jq -r '.data.attributes.internalBuildState // empty' "$detail_json")"
+            group_attached="$(jq -r --arg id "$INTERNAL_GROUP_ID" 'any((.data // [])[]; .id == $id)' "$groups_json")"
+            echo "::notice::internal TestFlight state=$internal_state group_attached=$group_attached"
+            case "$internal_state" in
+              READY_FOR_BETA_TESTING|IN_BETA_TESTING)
+                if [[ "$group_attached" == "true" ]]; then
+                  echo "internal_state=$internal_state" >> "$GITHUB_OUTPUT"
+                  exit 0
+                fi
+                ;;
+              PROCESSING_EXCEPTION|EXPIRED)
+                echo "::error::internal TestFlight state is $internal_state for ASC build $BUILD_ID"
+                exit 1
+                ;;
+            esac
+            sleep 30
+          done
+          echo "::error::ASC build $BUILD_ID did not become available to the internal TestFlight group within 45 minutes"
+          exit 1
+
       - name: Submit TestFlight beta review when required
         id: beta_review
-        if: steps.drymode.outputs.dry_run != 'true'
+        if: steps.ver.outputs.channel == 'external'
         shell: bash
         env:
           BUILD_ID: ${{ steps.asc_build.outputs.build_id }}
@@ -1017,12 +1188,11 @@ jobs:
           echo "::error::unexpected external TestFlight state '$external_state' with review state '$review_state'"
           exit 1
 
-      - name: Validate TestFlight groups
+      - name: Validate external TestFlight group
         id: testflight_groups
-        if: steps.drymode.outputs.dry_run != 'true' && steps.beta_review.outputs.external_ready == 'true'
+        if: steps.ver.outputs.channel == 'external' && steps.beta_review.outputs.external_ready == 'true'
         shell: bash
         env:
-          INTERNAL_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_INTERNAL_GROUP_ID }}
           PUBLIC_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_PUBLIC_GROUP_ID }}
         run: |
           set -euo pipefail
@@ -1083,32 +1253,6 @@ jobs:
             fi
           fi
 
-          if [[ -n "${INTERNAL_GROUP_ID:-}" ]]; then
-            internal_group="$(
-              jq -c --arg id "$INTERNAL_GROUP_ID" '
-                (.data // [])
-                | map(select(.id == $id))
-                | .[0] // empty
-              ' "$groups_json"
-            )"
-            if [[ -z "$internal_group" ]]; then
-              echo "::warning::ASC_TESTFLIGHT_INTERNAL_GROUP_ID does not match any TestFlight group returned by ASC; public TestFlight distribution can continue"
-            else
-              internal_kind="$(jq -r '.attributes.isInternalGroup // false' <<< "$internal_group")"
-              internal_all_builds="$(jq -r '.attributes.hasAccessToAllBuilds // false' <<< "$internal_group")"
-              internal_name="$(jq -r '.attributes.name // "<unnamed internal group>"' <<< "$internal_group")"
-              if [[ "$internal_kind" != "true" ]]; then
-                echo "::warning::ASC_TESTFLIGHT_INTERNAL_GROUP_ID points at '$internal_name', which ASC reports as external; public TestFlight distribution can continue"
-              elif [[ "$internal_all_builds" != "true" ]]; then
-                echo "::warning::internal TestFlight group '$internal_name' does not have access to all builds; public TestFlight distribution can continue"
-              else
-                echo "::notice::internal TestFlight group '$internal_name' has access to all builds"
-              fi
-            fi
-          else
-            echo "::notice::ASC_TESTFLIGHT_INTERNAL_GROUP_ID not configured; relying on public TestFlight group assignment"
-          fi
-
           if [[ -n "$public_group_id" ]]; then
             public_name="$(jq -r '.attributes.name // "<unnamed public group>"' <<< "$public_group")"
             echo "::notice::assigning the processed build to public TestFlight group '$public_name'"
@@ -1117,8 +1261,8 @@ jobs:
           fi
           echo "external_group_ids=$public_group_id" >> "$GITHUB_OUTPUT"
 
-      - name: Distribute to TestFlight groups
-        if: steps.drymode.outputs.dry_run != 'true' && steps.beta_review.outputs.external_ready == 'true'
+      - name: Distribute to external TestFlight group
+        if: steps.ver.outputs.channel == 'external' && steps.beta_review.outputs.external_ready == 'true'
         shell: bash
         env:
           BUILD_ID: ${{ steps.asc_build.outputs.build_id }}
@@ -1130,7 +1274,9 @@ jobs:
             echo "::notice::no external TestFlight groups resolved; treating uploaded/processed build as the release checkpoint"
             exit 0
           fi
-          notes="Tron ${{ steps.ver.outputs.display_version }} (${{ steps.ver.outputs.version }}), Apple build ${{ steps.ver.outputs.apple_build }}."
+          short_sha="${{ steps.ver.outputs.source_sha }}"
+          short_sha="${short_sha:0:12}"
+          notes="Tron ${{ steps.ver.outputs.display_version }} (${{ steps.ver.outputs.version }}), Apple build ${{ steps.ver.outputs.apple_build }}, commit $short_sha, GitHub run $GITHUB_RUN_NUMBER."
           asc publish testflight \
             --app "$ASC_APP_ID" \
             --build "$BUILD_ID" \
@@ -1143,6 +1289,15 @@ jobs:
             --output json \
             --pretty
 
+      - name: Upload App Store Connect diagnostics on failure
+        if: failure() && steps.ver.outputs.dry_run != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-asc-diagnostics-${{ steps.ver.outputs.apple_build }}
+          path: ${{ env.ASC_DIAGNOSTICS_DIR }}
+          retention-days: 7
+          if-no-files-found: warn
+
       - name: Summary
         shell: bash
         run: |
@@ -1153,17 +1308,24 @@ jobs:
             echo "- Display: \`${{ steps.ver.outputs.display_version }}\`"
             echo "- Apple build: \`${{ steps.ver.outputs.apple_build }}\`"
             echo "- Bundle: \`$IOS_BUNDLE_ID\`"
-            echo "- Dry run: \`${{ steps.drymode.outputs.dry_run }}\`"
-            if [[ "${{ steps.drymode.outputs.dry_run }}" != "true" ]]; then
+            echo "- Channel: \`${{ steps.ver.outputs.channel }}\`"
+            echo "- Source SHA: \`${{ steps.ver.outputs.source_sha }}\`"
+            echo "- Dry run: \`${{ steps.ver.outputs.dry_run }}\`"
+            if [[ "${{ steps.ver.outputs.dry_run }}" != "true" ]]; then
               echo "- ASC app: \`$ASC_APP_ID\`"
               echo "- Existing build reused: \`${{ steps.existing.outputs.exists || 'false' }}\`"
-              echo "- External TestFlight state: \`${{ steps.beta_review.outputs.external_state || 'unknown' }}\`"
-              echo "- Beta review state: \`${{ steps.beta_review.outputs.review_state || 'unknown' }}\`"
-              echo "- Beta review disposition: \`${{ steps.beta_review.outputs.disposition || 'not-run' }}\`"
-              if [[ "${{ steps.beta_review.outputs.review_pending || 'false' }}" == "true" ]]; then
-                echo "- Distribution: pending Apple Beta App Review; rerun after approval to assign the public TestFlight group."
-              elif [[ "${{ steps.beta_review.outputs.external_ready || 'false' }}" == "true" ]]; then
-                echo "- Distribution: public TestFlight group assignment attempted."
+              if [[ "${{ steps.ver.outputs.channel }}" == "internal" ]]; then
+                echo "- Internal TestFlight state: \`${{ steps.internal_availability.outputs.internal_state || 'unknown' }}\`"
+                echo "- Distribution: available to the configured automatic internal group."
+              else
+                echo "- External TestFlight state: \`${{ steps.beta_review.outputs.external_state || 'unknown' }}\`"
+                echo "- Beta review state: \`${{ steps.beta_review.outputs.review_state || 'unknown' }}\`"
+                echo "- Beta review disposition: \`${{ steps.beta_review.outputs.disposition || 'not-run' }}\`"
+                if [[ "${{ steps.beta_review.outputs.review_pending || 'false' }}" == "true" ]]; then
+                  echo "- Distribution: pending Apple Beta App Review; rerun after approval to assign the public TestFlight group."
+                elif [[ "${{ steps.beta_review.outputs.external_ready || 'false' }}" == "true" ]]; then
+                  echo "- Distribution: public TestFlight group assignment attempted."
+                fi
               fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"

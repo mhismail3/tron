@@ -619,22 +619,16 @@ fn local_and_github_ci_share_one_fail_fast_test_schedule() {
 
 #[test]
 fn release_workflows_fail_closed_before_live_builds() {
-    let workflows: [(&str, &[&str]); 2] = [
-        (
-            ".github/workflows/release-mac.yml",
-            &[
-                "MACOS_CERT_P12_BASE64",
-                "MACOS_CERT_PASSWORD",
-                "NOTARIZE_APPLE_ID",
-                "NOTARIZE_TEAM_ID",
-                "NOTARIZE_APP_PASSWORD",
-            ],
-        ),
-        (
-            ".github/workflows/release-ios.yml",
-            &["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_P8_BASE64"],
-        ),
-    ];
+    let workflows: [(&str, &[&str]); 1] = [(
+        ".github/workflows/release-mac.yml",
+        &[
+            "MACOS_CERT_P12_BASE64",
+            "MACOS_CERT_PASSWORD",
+            "NOTARIZE_APPLE_ID",
+            "NOTARIZE_TEAM_ID",
+            "NOTARIZE_APP_PASSWORD",
+        ],
+    )];
 
     for (path, required_secrets) in workflows {
         let workflow = read_repo_file(path);
@@ -726,6 +720,64 @@ fn release_workflows_fail_closed_before_live_builds() {
             );
         }
     }
+
+    let ios = read_repo_file(".github/workflows/release-ios.yml");
+    assert_eq!(
+        workflow_step_script(&ios, "Resolve iOS delivery").trim(),
+        "./scripts/tron version github-ios-output",
+        "iOS delivery must delegate event, SHA, channel, and build resolution"
+    );
+    for required in [
+        "workflow_run:",
+        "workflows: [\"CI\"]",
+        "branches: [main]",
+        "channel:",
+        "- dry-run",
+        "- internal",
+        "- external",
+        "github.event.workflow_run.head_sha",
+        "CURRENT_PROJECT_VERSION=\"${{ steps.ver.outputs.apple_build }}\"",
+        "if: steps.ver.outputs.channel == 'internal'",
+        "if: steps.ver.outputs.channel == 'external'",
+    ] {
+        assert!(
+            ios.contains(required),
+            "iOS delivery workflow missing {required}"
+        );
+    }
+    assert!(
+        !ios.contains("\nconcurrency:\n"),
+        "automatic iOS delivery must not collapse queued main commits"
+    );
+    for required in [
+        "github.event.workflow_run.conclusion == 'success'",
+        "github.event.workflow_run.event == 'push'",
+        "github.event.workflow_run.head_branch == 'main'",
+    ] {
+        assert!(
+            ios.contains(required),
+            "automatic iOS delivery gate missing {required}"
+        );
+    }
+    let credential_environment = ios
+        .split_once("      - name: Require live iOS credentials\n")
+        .expect("iOS delivery must own a live credential gate")
+        .1
+        .split_once("        run: |\n")
+        .expect("iOS live credential gate must own a run block")
+        .0;
+    for secret in ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_P8_BASE64"] {
+        let binding = format!("{secret}: ${{{{ secrets.{secret} }}}}");
+        assert!(
+            credential_environment.contains(&binding),
+            "iOS live credential gate is missing {binding}"
+        );
+    }
+    let credential_script = workflow_step_script(&ios, "Require live iOS credentials");
+    assert!(
+        credential_script.contains("required_secrets=(ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64)")
+    );
+    assert!(credential_script.contains("live iOS delivery requires secrets"));
 }
 
 #[test]
