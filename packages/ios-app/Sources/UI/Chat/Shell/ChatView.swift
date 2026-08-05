@@ -3,7 +3,7 @@ import UIKit
 
 // ARCHITECTURE: ~844 lines — coordinates navigation, keyboard, sheet presentation,
 // and message rendering for the core chat interface. Complexity is inherent to the
-// feature. 7 extracted computed properties keep sections navigable. Pragmatic trigger
+// feature. 9 extracted computed properties keep sections navigable. Pragmatic trigger
 // for decomposition: if it exceeds ~1,000 lines or gains a fourth coordination concern.
 
 // MARK: - Chat View
@@ -87,7 +87,7 @@ struct ChatView: View {
 
     // MARK: - Body
 
-    var body: some View {
+    private var notificationContent: some View {
         chatNavigationContent
         .chatSheets(
             coordinator: sheetCoordinator,
@@ -157,6 +157,10 @@ struct ChatView: View {
                   request.sessionId == sessionId else { return }
             viewModel.inputText = request.prompt
         }
+    }
+
+    private var lifecycleContent: some View {
+        notificationContent
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             scrollCoordinator.sceneDidBecomeActive(
@@ -316,6 +320,10 @@ struct ChatView: View {
                 scheduleCoalescedRecoveryRefresh()
             }
         }
+    }
+
+    var body: some View {
+        lifecycleContent
         .onChange(of: services.connection.connectionState) { oldState, newState in
             if presentationMode == .interactiveSession {
                 if newState.isConnected {
