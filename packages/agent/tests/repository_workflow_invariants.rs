@@ -782,7 +782,6 @@ fn release_workflows_fail_closed_before_live_builds() {
     let archive_script = workflow_step_script(&ios, "xcodebuild archive");
     for required in [
         "CODE_SIGN_STYLE=Manual",
-        "CODE_SIGN_STYLE=Automatic",
         "CODE_SIGN_IDENTITY=\"$IOS_DISTRIBUTION_IDENTITY\"",
         "\"PROVISIONING_PROFILE_SPECIFIER=\\$(TRON_APPSTORE_PROFILE_SPECIFIER)\"",
         "IOS_APP_PROFILE_SPECIFIER=\"$IOS_APP_PROFILE_SPECIFIER\"",
@@ -793,6 +792,10 @@ fn release_workflows_fail_closed_before_live_builds() {
             "iOS archive must consume resolved signing assets through {required}"
         );
     }
+    assert!(
+        !archive_script.contains("CODE_SIGN_STYLE=Automatic"),
+        "installed App Store profiles must not archive through development-oriented automatic signing"
+    );
     assert_eq!(
         archive_script.matches("-allowProvisioningUpdates").count(),
         1,
