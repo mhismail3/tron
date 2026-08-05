@@ -989,6 +989,57 @@ fn github_ci_schedules_clients_and_aggregates_fail_closed() {
 }
 
 #[test]
+fn github_workflow_dependencies_are_immutable() {
+    for path in [
+        ".github/workflows/ci.yml",
+        ".github/workflows/release-ios.yml",
+        ".github/workflows/release-mac.yml",
+    ] {
+        let workflow = read_repo_file(path);
+        for (index, line) in workflow.lines().enumerate() {
+            let Some((_, declaration)) = line.split_once("uses:") else {
+                continue;
+            };
+            let dependency = declaration
+                .split_whitespace()
+                .next()
+                .expect("uses declaration must name a dependency");
+            if dependency.starts_with("./") {
+                continue;
+            }
+            if dependency.starts_with("docker://") {
+                assert!(
+                    dependency.contains("@sha256:")
+                        && dependency
+                            .rsplit_once("@sha256:")
+                            .is_some_and(|(_, digest)| {
+                                digest.len() == 64
+                                    && digest
+                                        .chars()
+                                        .all(|character| character.is_ascii_hexdigit())
+                            }),
+                    "{path}:{} must pin its container action by digest: {dependency}",
+                    index + 1
+                );
+                continue;
+            }
+            let revision = dependency
+                .rsplit_once('@')
+                .map(|(_, revision)| revision)
+                .unwrap_or_default();
+            assert!(
+                revision.len() == 40
+                    && revision
+                        .chars()
+                        .all(|character| character.is_ascii_hexdigit()),
+                "{path}:{} must pin its action to a full commit SHA: {dependency}",
+                index + 1
+            );
+        }
+    }
+}
+
+#[test]
 fn tracked_ignored_files_stay_absent() {
     let tracked = git_output(&["ls-files"]);
     for generated_prefix in [

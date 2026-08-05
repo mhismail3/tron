@@ -1,7 +1,9 @@
 # Dependabot keeps two active dependency ecosystems fresh:
 #   - cargo: the Rust agent. Weekly. Grouped: dev-deps and prod-deps split so a
 #     test-only bump can merge without re-reviewing the runtime surface.
-#   - github-actions: workflow action versions (actions/checkout, etc.). Weekly.
+#   - github-actions: immutable workflow action revisions (actions/checkout,
+#     etc.). Weekly. PRs retain full-SHA pins while advancing their version
+#     comments and pass the repository workflow invariant.
 #
 # Labels keep the queue filterable; low open-PR limits prevent a noisy backlog.
 

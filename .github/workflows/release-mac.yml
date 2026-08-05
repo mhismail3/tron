@@ -92,7 +92,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0  # needed so release notes can reference prior tags
 
@@ -152,7 +152,7 @@ jobs:
 
       # ── Rust toolchain ─────────────────────────────────────────────
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
           cache-workspaces: packages/agent
 
@@ -162,7 +162,7 @@ jobs:
 
       # ── Xcode toolchain ────────────────────────────────────────────
       - name: Pin Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: latest-stable
 
@@ -481,7 +481,7 @@ jobs:
 
       # ── Artifact upload (always) + Release publish (tag only) ─────
       - name: Upload DMG as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dmg-${{ steps.ver.outputs.version }}
           path: |
