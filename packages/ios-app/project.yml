@@ -58,6 +58,9 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_EMIT_LOC_STRINGS: YES
+        # CI supplies this indirection only for manually managed App Store
+        # archives so each target resolves its own provisioning profile.
+        TRON_APPSTORE_PROFILE_SPECIFIER: "$(IOS_APP_PROFILE_SPECIFIER)"
       configs:
         Beta:
           CODE_SIGN_ENTITLEMENTS: TronMobileBeta.entitlements
@@ -81,6 +84,7 @@ targets:
         INFOPLIST_FILE: ShareExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
         GENERATE_INFOPLIST_FILE: NO
+        TRON_APPSTORE_PROFILE_SPECIFIER: "$(IOS_SHARE_PROFILE_SPECIFIER)"
       configs:
         Beta:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.beta.ShareExtension

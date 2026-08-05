@@ -778,6 +778,37 @@ fn release_workflows_fail_closed_before_live_builds() {
         credential_script.contains("required_secrets=(ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64)")
     );
     assert!(credential_script.contains("live iOS delivery requires secrets"));
+
+    let archive_script = workflow_step_script(&ios, "xcodebuild archive");
+    for required in [
+        "CODE_SIGN_STYLE=Manual",
+        "CODE_SIGN_STYLE=Automatic",
+        "CODE_SIGN_IDENTITY=\"$IOS_DISTRIBUTION_IDENTITY\"",
+        "\"PROVISIONING_PROFILE_SPECIFIER=\\$(TRON_APPSTORE_PROFILE_SPECIFIER)\"",
+        "IOS_APP_PROFILE_SPECIFIER=\"$IOS_APP_PROFILE_SPECIFIER\"",
+        "IOS_SHARE_PROFILE_SPECIFIER=\"$IOS_SHARE_PROFILE_SPECIFIER\"",
+    ] {
+        assert!(
+            archive_script.contains(required),
+            "iOS archive must consume resolved signing assets through {required}"
+        );
+    }
+    assert_eq!(
+        archive_script.matches("-allowProvisioningUpdates").count(),
+        1,
+        "only cloud signing may ask Apple to create or update signing assets"
+    );
+
+    let project = read_repo_file("packages/ios-app/project.yml");
+    for required in [
+        "TRON_APPSTORE_PROFILE_SPECIFIER: \"$(IOS_APP_PROFILE_SPECIFIER)\"",
+        "TRON_APPSTORE_PROFILE_SPECIFIER: \"$(IOS_SHARE_PROFILE_SPECIFIER)\"",
+    ] {
+        assert!(
+            project.contains(required),
+            "iOS targets must resolve distinct App Store profiles through {required}"
+        );
+    }
 }
 
 #[test]

@@ -747,14 +747,17 @@ names.
 The export step supports two signing modes. If all local signing secrets are
 present, CI imports an Apple Distribution `.p12` into a temporary keychain,
 installs App Store Connect provisioning profiles for the app and share
-extension, and exports locally. Manually managed profiles use
-`signingStyle=manual`; Xcode-managed App Store profiles use
-`signingStyle=automatic` without cloud-signing credentials so Xcode can reuse
-the installed profiles. If the local signing secrets are absent, CI falls back
-to automatic Xcode cloud signing with the ASC API key. Cloud signing requires
-Apple to allow that key/account to manage App Store signing; a cloud signing
-permission error means either grant that access or use the local signing
-secrets.
+extension, and uses those same assets for both archive and export. Manually
+managed profiles resolve separate target-level profile specifiers for the app
+and share extension. Xcode-managed App Store profiles remain under automatic
+selection, but CI pins the installed Apple Distribution identity and does not
+allow provisioning updates, so the archive cannot create development
+certificates or profiles in the Apple account. Export then uses
+`signingStyle=manual` or `signingStyle=automatic` to match the installed profile
+kind. If the local signing secrets are absent, CI falls back to automatic Xcode
+cloud signing with the ASC API key. Cloud signing requires Apple to allow that
+key/account to manage App Store signing; a cloud signing permission error means
+either grant that access or use the local signing secrets.
 
 ASC authentication is environment-backed in CI; the workflow does not create
 a repo-local `.asc/config.json`. Before manual signing changes the user
