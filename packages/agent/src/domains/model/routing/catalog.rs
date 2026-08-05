@@ -129,8 +129,12 @@ pub(crate) fn validate_explicit_reasoning_level(
         let active_auth_path =
             crate::domains::auth::credentials::openai::infer_auth_path(auth_path, None)
                 .unwrap_or(OpenAIAuthPath::ChatGptCodex);
+        // Worker contracts use the provider-neutral `x_high` spelling owned
+        // by ModelReasoningLevel. OpenAI's catalog/wire spelling is `xhigh`;
+        // keep that translation at the model boundary.
+        let provider_level = if level == "x_high" { "xhigh" } else { level };
         get_openai_model_profile(bare, active_auth_path)
-            .is_some_and(|(_, profile)| profile.reasoning_levels.contains(&level))
+            .is_some_and(|(_, profile)| profile.reasoning_levels.contains(&provider_level))
     } else if let Some(model) = get_claude_model(bare) {
         model
             .reasoning_levels

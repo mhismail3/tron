@@ -752,6 +752,34 @@ async fn worker_result_and_run_history_surfaces_remain_available() {
             .contains("StartedFinished")
     }));
 
+    let graph_with_materialized_empty_filters = context
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::runs").unwrap(),
+            json!({
+                "workerId":"",
+                "originSessionId":"",
+                "invocationId":source_invocation_id,
+                "modelToolInvocationId":"",
+                "status":"completed",
+                "limit":1,
+                "offset":0,
+                "detail":"graph"
+            }),
+            actor().with_idempotency_key("read-graph-runs-empty-filters"),
+        ))
+        .await;
+    assert_eq!(graph_with_materialized_empty_filters.error, None);
+    let graph_with_materialized_empty_filters =
+        graph_with_materialized_empty_filters.value.unwrap();
+    assert_eq!(
+        graph_with_materialized_empty_filters["graphs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
     let filtered_runs = context
         .engine_host
         .invoke(Invocation::new_sync(

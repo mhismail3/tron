@@ -166,6 +166,60 @@ async fn invocation_override_precedes_worker_defaults_and_is_durable() {
 }
 
 #[tokio::test]
+async fn bundle_model_defaults_are_validated_before_durable_admission() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = command_bundle(Vec::new());
+    bundle.name = "Invalid Default Agent Worker".to_owned();
+    bundle.description = "Proves immutable defaults share invocation admission".to_owned();
+    bundle.tool_name = Some("worker_invalid_default_agent_test".to_owned());
+    bundle.runner = WorkerRunner::Agent {
+        instructions: "Return an object.".to_owned(),
+        model: Some("model-that-does-not-exist".to_owned()),
+        reasoning_level: Some("medium".to_owned()),
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+
+    let error = runtime
+        .enqueue(request(
+            &outcome.worker.worker_id,
+            json!({}),
+            "invalid-agent-default",
+        ))
+        .unwrap_err();
+
+    assert!(error.contains("unknown model"), "{error}");
+}
+
+#[tokio::test]
+async fn openai_x_high_bundle_default_uses_provider_neutral_spelling() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = command_bundle(Vec::new());
+    bundle.name = "OpenAI Reasoning Agent Worker".to_owned();
+    bundle.description = "Proves provider-neutral reasoning admission".to_owned();
+    bundle.tool_name = Some("worker_openai_reasoning_agent_test".to_owned());
+    bundle.runner = WorkerRunner::Agent {
+        instructions: "Return an object.".to_owned(),
+        model: Some("openai/gpt-5.6-sol".to_owned()),
+        reasoning_level: Some("x_high".to_owned()),
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+
+    let queued = runtime
+        .enqueue(request(
+            &outcome.worker.worker_id,
+            json!({}),
+            "openai-x-high-default",
+        ))
+        .unwrap();
+
+    assert_eq!(
+        queued.effective_model.as_deref(),
+        Some("openai/gpt-5.6-sol")
+    );
+    assert_eq!(queued.effective_reasoning_level.as_deref(), Some("x_high"));
+}
+
+#[tokio::test]
 async fn command_runner_rejects_model_overrides() {
     let (runtime, _home) = test_runtime(None);
     let outcome = runtime

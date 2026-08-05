@@ -117,13 +117,23 @@ impl WorkerRuntime {
         record: &InvocationRecord,
     ) -> Result<(), String> {
         // INVARIANT: authenticated operator clients and engine-owned recovery
-        // may inspect profile-local worker results. Agent and worker callers
-        // remain constrained to the originating session or an explicit
-        // Agent Delivery grant.
+        // may inspect profile-local worker results. An agent worker may read
+        // only a direct child it durably admitted. Other agent and worker
+        // callers remain constrained to the originating session or an
+        // explicit Agent Delivery grant.
         if matches!(
             invocation.causal_context.actor_kind,
             ActorKind::Client | ActorKind::System
         ) {
+            return Ok(());
+        }
+        if invocation
+            .causal_context
+            .origin_worker_invocation_id()
+            .is_some_and(|parent_id| {
+                record.parent_worker_invocation_id.as_deref() == Some(parent_id)
+            })
+        {
             return Ok(());
         }
         let Some(session_id) = invocation.causal_context.session_id.as_deref() else {

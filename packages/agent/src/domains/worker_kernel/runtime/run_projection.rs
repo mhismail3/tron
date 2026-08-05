@@ -67,6 +67,17 @@ impl WorkerRuntime {
         let mut timeline = Vec::new();
         let mut model_duration_ms = 0_u64;
         let mut usage = UsageTotals::default();
+        let mut sessions_by_invocation = HashMap::new();
+        for record in &invocations {
+            if let Some(session_id) = record.agent_session_id.as_deref()
+                && let Some(session) = self
+                    .event_store
+                    .get_session(session_id)
+                    .map_err(|error| format!("load worker agent session: {error}"))?
+            {
+                sessions_by_invocation.insert(record.invocation_id.clone(), session);
+            }
+        }
         let child_model_tool_ids = invocations
             .iter()
             .filter_map(|record| record.model_tool_invocation_id.as_deref())
@@ -82,12 +93,8 @@ impl WorkerRuntime {
                 nodes.push(attempt_node(record, &attempt, now));
                 append_attempt_timeline(record, &attempt, &mut timeline);
             }
-            if let Some(session_id) = record.agent_session_id.as_deref()
-                && let Some(session) = self
-                    .event_store
-                    .get_session(session_id)
-                    .map_err(|error| format!("load worker agent session: {error}"))?
-            {
+            if let Some(session) = sessions_by_invocation.get(&record.invocation_id) {
+                let session_id = session.id.as_str();
                 let rows = self
                     .event_store
                     .get_latest_events(session_id, Some(MAX_AGENT_EVENTS))
@@ -127,6 +134,15 @@ impl WorkerRuntime {
             .map(|record| invocation_timing(record, now).wall_ms)
             .max()
             .unwrap_or_default();
+        let requested_info = worker_info
+            .get(&requested.invocation_id)
+            .expect("requested worker projection metadata exists");
+        let requested_timing = invocation_timing(requested, now);
+        let requested_usage = subtree_usage(
+            &requested.invocation_id,
+            &invocations,
+            &sessions_by_invocation,
+        );
 
         Ok(json!({
             "rootInvocationId":root.invocation_id,
@@ -166,6 +182,30 @@ impl WorkerRuntime {
                 "cacheCreationTokens":usage.cache_creation_tokens,
                 "cost":usage.cost,
             },
+            "requestedInvocation":{
+                "invocationId":requested.invocation_id,
+                "workerId":requested.worker_id,
+                "workerName":requested_info.name,
+                "workerVersion":requested.worker_version,
+                "status":requested.status,
+                "requestedModel":requested.requested_model,
+                "requestedReasoningLevel":requested.requested_reasoning_level,
+                "effectiveModel":requested.effective_model,
+                "effectiveReasoningLevel":requested.effective_reasoning_level,
+                "timing":{
+                    "queueMs":requested_timing.queue_ms,
+                    "executionMs":requested_timing.execution_ms,
+                    "wallMs":requested_timing.wall_ms,
+                },
+                "usage":{
+                    "inputTokens":requested_usage.input_tokens,
+                    "outputTokens":requested_usage.output_tokens,
+                    "cacheReadTokens":requested_usage.cache_read_tokens,
+                    "cacheCreationTokens":requested_usage.cache_creation_tokens,
+                    "cost":requested_usage.cost,
+                    "includesDescendants":true,
+                },
+            },
             "nodes":nodes,
             "timeline":timeline,
             "resultPreview":root.output.as_ref().map(preview_result),
@@ -191,13 +231,51 @@ struct Timing {
     wall_ms: u64,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 struct UsageTotals {
     input_tokens: i64,
     output_tokens: i64,
     cache_read_tokens: i64,
     cache_creation_tokens: i64,
     cost: f64,
+}
+
+fn subtree_usage(
+    requested_invocation_id: &str,
+    invocations: &[InvocationRecord],
+    sessions_by_invocation: &HashMap<String, SessionRow>,
+) -> UsageTotals {
+    let by_id = invocations
+        .iter()
+        .map(|record| (record.invocation_id.as_str(), record))
+        .collect::<HashMap<_, _>>();
+    let mut usage = UsageTotals::default();
+    for record in invocations {
+        let mut current = Some(record);
+        let mut included = false;
+        for _ in 0..=invocations.len() {
+            let Some(candidate) = current else { break };
+            if candidate.invocation_id == requested_invocation_id {
+                included = true;
+                break;
+            }
+            current = candidate
+                .parent_worker_invocation_id
+                .as_deref()
+                .and_then(|parent| by_id.get(parent).copied());
+        }
+        if !included {
+            continue;
+        }
+        if let Some(session) = sessions_by_invocation.get(&record.invocation_id) {
+            usage.input_tokens += session.total_input_tokens;
+            usage.output_tokens += session.total_output_tokens;
+            usage.cache_read_tokens += session.total_cache_read_tokens;
+            usage.cache_creation_tokens += session.total_cache_creation_tokens;
+            usage.cost += session.total_cost;
+        }
+    }
+    usage
 }
 
 fn invocation_node(
@@ -871,119 +949,5 @@ mod tests {
         let child = record("child", "completed", Some("root"), 1);
         let (stage, _) = graph_stage(&[root, child], &[], &info);
         assert_eq!(stage, WorkerRunStage::Synthesis);
-    }
-
-    #[tokio::test]
-    async fn graph_projects_linked_agent_and_model_session_truth() {
-        use crate::domains::session::event_store::{AppendOptions, EventType};
-
-        let home = crate::shared::server::test_support::unique_tron_home();
-        let (context, runtime) =
-            crate::shared::server::test_support::make_test_context_and_worker_runtime_at(
-                &home, None,
-            );
-        let bundle = serde_json::from_value::<WorkerBundle>(json!({
-            "schemaVersion":"tron.worker_bundle.v1",
-            "workerId":"graph-agent",
-            "name":"Graph Agent",
-            "description":"Exercises authoritative agent-session graph projection",
-            "modelExposure":"internal",
-            "inputSchema":{
-                "type":"object","additionalProperties":false,
-                "required":["query"],"properties":{"query":{"type":"string"}}
-            },
-            "outputSchema":{
-                "type":"object","additionalProperties":false,
-                "required":["summary"],"properties":{"summary":{"type":"string"}}
-            },
-            "runner":{"kind":"agent","instructions":"Return a summary.","model":"mock/model"},
-            "provenance":[{"source":"test:run-graph"}]
-        }))
-        .unwrap();
-        let mut prepared = runtime.store.prepare(bundle, None).unwrap();
-        runtime.store.finalize(&mut prepared).unwrap();
-        let published = runtime.store.publish(prepared).unwrap();
-        let (invocation, _) = runtime
-            .store
-            .begin_invocation(
-                &published.worker.worker_id,
-                &published.version,
-                &json!({"query":"Inspect this run"}),
-                "graph-agent-key",
-                "graph-agent-trace",
-                0,
-                "manual",
-                Some("origin-session"),
-            )
-            .unwrap();
-        assert!(
-            runtime
-                .store
-                .claim_running(&invocation.invocation_id)
-                .unwrap()
-        );
-        let session_id = context
-            .session_manager
-            .create_worker_session("mock/model", "/tmp", Some("Worker: Graph Agent"))
-            .unwrap();
-        runtime
-            .store
-            .set_agent_session_id(&invocation.invocation_id, &session_id)
-            .unwrap();
-        context
-            .event_store
-            .append(&AppendOptions {
-                session_id: &session_id,
-                event_type: EventType::StreamTurnStart,
-                payload: json!({"turn":1}),
-                parent_id: None,
-                sequence: None,
-            })
-            .unwrap();
-        context
-            .event_store
-            .append(&AppendOptions {
-                session_id: &session_id,
-                event_type: EventType::StreamTurnEnd,
-                payload: json!({
-                    "turn":1,
-                    "model":"mock/model",
-                    "latency":125,
-                    "stopReason":"end_turn",
-                    "tokenUsage":{
-                        "inputTokens":100,
-                        "outputTokens":20,
-                        "cacheReadTokens":10,
-                        "cacheCreationTokens":5
-                    },
-                    "cost":0.0125
-                }),
-                parent_id: None,
-                sequence: None,
-            })
-            .unwrap();
-        let completed = runtime
-            .store
-            .complete_invocation(
-                &invocation.invocation_id,
-                &published.worker.worker_id,
-                Ok(&json!({"summary":"Complete"})),
-            )
-            .unwrap();
-
-        let graph = runtime.project_run_graph(&completed).unwrap();
-        assert_eq!(graph["usage"]["inputTokens"], 100);
-        assert_eq!(graph["usage"]["outputTokens"], 20);
-        assert_eq!(graph["usage"]["cost"], 0.0125);
-        assert_eq!(graph["timing"]["modelMs"], 125);
-        let nodes = graph["nodes"].as_array().unwrap();
-        assert!(
-            nodes
-                .iter()
-                .any(|node| { node["kind"] == "agent" && node["sessionId"] == session_id })
-        );
-        assert!(nodes.iter().any(|node| {
-            node["kind"] == "model" && node["model"] == "mock/model" && node["turn"] == 1
-        }));
     }
 }

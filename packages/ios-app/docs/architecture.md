@@ -736,6 +736,13 @@ loading state and a read-only composer instead of masquerading as an empty
 transcript. Transcript reveal is bounded to roughly 400 ms; any final bottom
 correction continues after content is visible.
 
+`SessionLoadDiagnostics` records local monotonic phase evidence for shell,
+cache, authoritative reconstruction, and first interactive state. OS signposts
+and structured local logs contain only elapsed milliseconds, cache outcome, and
+bounded event/message counts—never session identity or content. The clock is
+injectable for deterministic tests; the server remains authoritative and no
+analytics, engine state, or second loading state machine is introduced.
+
 The server-backed workspace browser uses its toolbar title as the current-path
 breadcrumb. The full abbreviated path remains available to accessibility, while
 compact displays truncate from the beginning so the selected folder and nearest
@@ -1084,6 +1091,9 @@ reminders; they are not a general device-control surface.
   Server custody persists until explicit Delete. Storage pressure reflects the
   whole worker database and remains Engine Attention rather than silently
   evicting user artifacts.
+  The inbox and detail use the same Settings page container, cards,
+  typography, toolbar hierarchy, and medium/large sheet detents as the other
+  Settings sheets; artifact ownership does not introduce a visual subsystem.
 - Attach to Draft is the only bridge from Artifact Inbox into chat. It converts
   already-verified bytes into the existing `Attachment` value and sends an
   explicit app-local intent carrying the target session ID. Only the matching

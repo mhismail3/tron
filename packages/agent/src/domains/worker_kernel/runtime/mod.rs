@@ -7,7 +7,9 @@
 //! projection, normalization, and redaction. Scenario tests live in `tests`.
 //! `run_projection` reconstructs bounded causal trees and structured timelines
 //! from durable invocation, attempt, stage, child-session, and model-turn truth;
-//! it never stores client-owned progress. Its request preview prefers
+//! it never stores client-owned progress. Exact lookups include a closed
+//! `requestedInvocation` projection whose timing and descendant-inclusive
+//! usage belong to the requested worker rather than the causal root. Its request preview prefers
 //! conventional user-authored question/query/task fields so clients never need
 //! to present a serialized worker input object as the run summary. Equal-time
 //! durable timeline facts retain lifecycle order (queued before detached)
@@ -16,7 +18,10 @@
 //! exact-version latency prediction, bounded foreground ownership, atomic
 //! detachment, and observational waits plus the transient bridge to an
 //! originating model-tool chip. Nested calls retain their ordinary typed-input
-//! idempotency and also receive a durable parent/per-tool occurrence slot. A
+//! idempotency and also receive a durable parent/per-tool occurrence slot.
+//! Resolved agent-runner model/reasoning pairs are validated before enqueue
+//! whether they came from an override, bundle default, fallback, or retry pin;
+//! requested and effective values remain provenance, not routing policy. A
 //! reconstructed parent restarts those occurrences at zero, observes the same
 //! child even when provider ids or valid arguments change, and waits for its
 //! typed terminal result instead of duplicating it. `invocation` owns
@@ -26,9 +31,10 @@
 //! shutdown and orphan recovery interrupt and requeue the same invocation.
 //! `result` owns generic artifact-style references for large validated worker
 //! outputs plus bounded JSON reads. Authenticated operator clients and
-//! engine-owned recovery may inspect profile-local results; agent and worker
-//! callers require the originating session or an explicit Agent Delivery
-//! grant. Task-specific result interpretation remains in workers.
+//! engine-owned recovery may inspect profile-local results. An agent worker
+//! may read only a direct child it durably admitted; other agent and worker
+//! callers require the originating session or an explicit Agent Delivery grant.
+//! Task-specific result interpretation remains in workers.
 //! Agent child-session activity is projected only as bounded, redacted stage
 //! labels; raw child content remains in its canonical audit session.
 //! `client_actions` selects the current healthy worker for narrow native

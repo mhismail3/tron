@@ -71,7 +71,7 @@ recovery directory.
 cd packages/ios-app
 xcodegen generate
 open TronMobile.xcodeproj
-# or: xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+# or: xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
 Beta TestFlight builds are published by the tag-triggered iOS release workflow
@@ -122,7 +122,7 @@ coverage gap exists.
 | Surface | Command |
 |---------|---------|
 | Rust agent | `scripts/tron ci test` |
-| iOS app | `cd packages/ios-app && xcodegen generate && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` |
+| iOS app | `cd packages/ios-app && xcodegen generate && xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` |
 | Mac wrapper | `cd packages/mac-app && xcodegen generate && xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' -configuration Debug` |
 | Personal-info guard | `scripts/personal-info-guard.sh` |
 | Rust commit milestone | `scripts/tron ci fmt check clippy test` |
@@ -142,6 +142,21 @@ iOS and Mac jobs run for their package paths, their release workflows, or
 relevant labels. Both run on `main` and manual dispatch. `CI summary` requires
 successful change detection and all unconditional jobs; it accepts a skipped
 client job only on a successfully path-filtered pull request.
+
+The path classifier is repository-owned `scripts/ci-change-flags.sh`; its
+offline self-test prevents workflow behavior from depending on a mutable
+third-party filtering action. Apple/release versions live only in
+`config/ci-toolchain.env`. CI downloads exact XcodeGen, create-dmg, and ASC
+artifacts, verifies their SHA-256 values, and checks Xcode, the iOS runtime, and
+simulator identity before building. Update the manifest and its invariant tests
+in the same PR when a toolchain moves.
+
+`performance.yml` runs a daily advisory 100-sample server benchmark and uploads
+raw samples plus git/Python/runner provenance. It does not block deployment
+until a stable runner and calibrated baseline are deliberately promoted. The
+offline whole-agent acceptance catalog is checked with
+`python3 scripts/evaluation/whole-agent.py --self-test`; external runners may
+evaluate normalized evidence without adding evaluation behavior to the engine.
 
 Every external GitHub Action is pinned to a full commit SHA, and container
 actions are pinned to an OCI digest. Keep the readable release line in the

@@ -66,6 +66,10 @@ final class ChatViewModel {
     let inputBarState = InputBarState()
     /// Model picker state (cached models, optimistic updates, switching)
     let modelPickerState: ModelPickerState
+    /// Local phase timings for cache/reconstruction presentation. This has no
+    /// analytics or server ownership and is injectable for deterministic tests.
+    @ObservationIgnored
+    let sessionLoadDiagnostics: SessionLoadDiagnostics
     // MARK: - Protocol Conformance (Context Protocols)
 
     /// Make a tool visible for rendering (ToolInvocationContext)
@@ -263,12 +267,14 @@ final class ChatViewModel {
         services: ChatSessionServices,
         sessionId: String,
         eventStoreManager: EventStoreManager? = nil,
-        photoPickerDataLoader: PhotoPickerDataLoader = .live
+        photoPickerDataLoader: PhotoPickerDataLoader = .live,
+        sessionLoadDiagnostics: SessionLoadDiagnostics = SessionLoadDiagnostics()
     ) {
         self.services = services
         self.sessionId = sessionId
         self.eventStoreManager = eventStoreManager
         self.photoPickerDataLoader = photoPickerDataLoader
+        self.sessionLoadDiagnostics = sessionLoadDiagnostics
         self.modelPickerState = ModelPickerState(modelRepository: services.models)
         micRecorder.onFinish = { [weak self] url, success in
             self?.handleRecordingFinished(url: url, success: success)

@@ -26,7 +26,7 @@ Title format: prefer Conventional Commits — e.g. `feat(ios-onboarding): add pa
 - [ ] Existing tests cover the change, or tests were added/updated for changed behavior or a genuine gap.
 - [ ] Validation is proportionate to the changed owners; exact commands and results are listed above.
 - [ ] Rust or CI changes: `scripts/tron ci fmt check clippy test` and `git diff --check` are green locally.
-- [ ] iOS changes: `cd packages/ios-app && xcodegen generate && xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` is green locally.
+- [ ] iOS changes: `cd packages/ios-app && xcodegen generate && xcodebuild test -project TronMobile.xcodeproj -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` is green locally.
 - [ ] Mac changes: `cd packages/mac-app && ./scripts/bundle-agent.sh --profile debug && xcodegen generate && xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' -configuration Debug` is green locally.
 - [ ] `scripts/personal-info-guard.sh` is green (no leaked usernames, paths, or domains).
 - [ ] Documentation updated at the narrowest owner per the [documentation maintenance map](../AGENTS.md#documentation-maintenance); the root README changed only when product-level setup or workflow changed.
