@@ -344,6 +344,10 @@ variables -> Actions. If the iOS signing secrets are absent, CI falls back to
 automatic Xcode cloud signing, which requires the ASC key/account to have
 permission to manage App Store signing assets. The local signing lane accepts
 matching manually managed profiles or matching Xcode-managed App Store profiles.
+It rejects expired profiles and warns during their final 30 days. Because a
+profile cannot outlive its selected distribution certificate, rotate the Apple
+Distribution certificate, `.p12`, and both profile secrets together before the
+earliest expiration; the TestFlight group setup does not need to be repeated.
 The iOS app and share extension declare `ITSAppUsesNonExemptEncryption=false`;
 revisit that release assertion before adding non-exempt cryptography.
 

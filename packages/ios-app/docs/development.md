@@ -717,9 +717,11 @@ The internal lane fails before archive unless the configured group exists, is
 internal, has automatic all-build access, and contains at least one tester. It
 does not log or retain tester identity data. After upload, it waits until App
 Store Connect reports an internally testable build and confirms the build's
-relationship to that group. Internal builds remain normal App Store Connect
-builds, so a selected build can later be promoted through external TestFlight
-or App Review without rebuilding.
+relationship to that group by paging through Apple's documented
+beta-group-to-builds relationship. The inverse build-to-groups relationship is
+write-only in App Store Connect and must not be used as a read check. Internal
+builds remain normal App Store Connect builds, so a selected build can later be
+promoted through external TestFlight or App Review without rebuilding.
 
 The external lane submits TestFlight beta review when Apple marks the build
 `READY_FOR_BETA_SUBMISSION`, then branches on App Store Connect state. If Apple
@@ -831,7 +833,13 @@ To create the local signing secrets:
 The workflow decodes each profile before export and fails early if the
 `application-identifier` does not match the expected team/bundle ID, if the
 profile is an Ad Hoc/development profile with devices, or if the app and share
-extension mix Xcode-managed and manually managed profile styles.
+extension mix Xcode-managed and manually managed profile styles. It also fails
+an expired profile immediately and emits a GitHub warning during the final 30
+days. Provisioning profiles cannot outlive their selected distribution
+certificate, so rotate the Apple Distribution certificate, `.p12`, and both
+profile secrets together before the earliest expiration date. This is a
+credential rotation only; the TestFlight group and workflow configuration stay
+in place.
 
 Manual workflow runs expose a `channel` choice. `dry-run` builds and tests but
 skips App Store Connect; `internal` exercises private delivery from `main`; and

@@ -491,11 +491,18 @@ fn ios_delivery_separates_strict_internal_and_tolerant_external_groups() {
         "/betaTesters?limit=1",
         "has no testers",
         "Wait for internal TestFlight availability",
-        "/relationships/betaGroups",
+        "/v1/betaGroups/$INTERNAL_GROUP_ID/relationships/builds?limit=200",
+        "refusing unexpected App Store Connect pagination URL",
+        "ExpirationDate",
+        "expires within 30 days",
     ] {
         assert!(
             internal_body.contains(required),
             "internal TestFlight delivery missing {required}"
         );
     }
+    assert!(
+        !internal_body.contains("/v1/builds/$BUILD_ID/relationships/betaGroups"),
+        "internal availability must use Apple's readable group-to-builds relationship"
+    );
 }
