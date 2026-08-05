@@ -1201,7 +1201,7 @@ fn session_organization_outbox_is_atomic_due_bounded_and_recovers_stale_claims()
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        16
+        17
     );
     connection
         .execute(
@@ -1224,14 +1224,14 @@ fn session_organization_outbox_is_atomic_due_bounded_and_recovers_stale_claims()
 }
 
 #[test]
-fn schema_v15_upgrades_to_agent_delivery_outbox_v16() {
+fn schema_v15_upgrades_through_invocation_model_policy_v17() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
     let connection = store.connection().unwrap();
     connection
         .execute_batch(
             "DROP TABLE agent_delivery_outbox;
-             DELETE FROM worker_schema WHERE version=16;",
+             DELETE FROM worker_schema WHERE version IN (16,17);",
         )
         .unwrap();
     drop(connection);
@@ -1245,7 +1245,7 @@ fn schema_v15_upgrades_to_agent_delivery_outbox_v16() {
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        16
+        17
     );
     let outbox_exists = connection
         .query_row(

@@ -208,6 +208,8 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
         let request = InvokeRequest {
             worker_id: self.worker_id.clone(),
             input: invocation.payload,
+            model: None,
+            reasoning_level: None,
             idempotency_key,
             trace_id: trace_id.clone(),
             causal_depth: depth,

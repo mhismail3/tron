@@ -9,7 +9,7 @@ impl WorkerStore {
         mut bundle: WorkerBundle,
         predecessor: Option<&str>,
     ) -> Result<PreparedWorker, String> {
-        validate_bundle(&bundle)?;
+        validate_publishable_bundle(&bundle)?;
         let explicit_worker_id = bundle.worker_id.clone();
         let explicit_worker_exists = explicit_worker_id
             .as_deref()

@@ -536,8 +536,11 @@ impl WorkerRuntime {
                     worker,
                     invocation,
                     instructions,
-                    model.as_deref(),
-                    reasoning_level.as_deref(),
+                    invocation.effective_model.as_deref().or(model.as_deref()),
+                    invocation
+                        .effective_reasoning_level
+                        .as_deref()
+                        .or(reasoning_level.as_deref()),
                     &secrets,
                 )
                 .await

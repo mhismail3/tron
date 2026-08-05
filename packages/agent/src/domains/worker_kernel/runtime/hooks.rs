@@ -171,6 +171,8 @@ impl WorkerRuntime {
         let queued = self.enqueue_and_dispatch(InvokeRequest {
             worker_id: worker.summary.worker_id.clone(),
             input,
+            model: None,
+            reasoning_level: None,
             idempotency_key,
             trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
             causal_depth: invocation.causal_context.trigger_depth(),
@@ -305,11 +307,11 @@ mod tests {
         let reordered =
             serde_json::from_str(r#"{"candidates":[{"workerId":"research"}],"query":"compiler"}"#)
                 .unwrap();
-        let key = engine_hook_cache_key(WorkerEngineHook::WorkerRelevance, "version-a", &input, 60);
+        let key = engine_hook_cache_key(WorkerEngineHook::ContextSummary, "version-a", &input, 60);
         assert_eq!(
             key,
             engine_hook_cache_key(
-                WorkerEngineHook::WorkerRelevance,
+                WorkerEngineHook::ContextSummary,
                 "version-a",
                 &reordered,
                 89,
@@ -318,7 +320,7 @@ mod tests {
         assert_ne!(
             key,
             engine_hook_cache_key(
-                WorkerEngineHook::WorkerRelevance,
+                WorkerEngineHook::ContextSummary,
                 "version-a",
                 &json!({"query":"different","candidates":[{"workerId":"research"}]}),
                 60,
@@ -326,11 +328,11 @@ mod tests {
         );
         assert_ne!(
             key,
-            engine_hook_cache_key(WorkerEngineHook::WorkerRelevance, "version-b", &input, 60,)
+            engine_hook_cache_key(WorkerEngineHook::ContextSummary, "version-b", &input, 60,)
         );
         assert_ne!(
             key,
-            engine_hook_cache_key(WorkerEngineHook::WorkerRelevance, "version-a", &input, 90,)
+            engine_hook_cache_key(WorkerEngineHook::ContextSummary, "version-a", &input, 90,)
         );
     }
 

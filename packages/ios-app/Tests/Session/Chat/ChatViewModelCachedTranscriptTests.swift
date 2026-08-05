@@ -1,0 +1,116 @@
+import XCTest
+@testable import TronMobile
+
+@MainActor
+final class ChatViewModelCachedTranscriptTests: XCTestCase {
+
+    func testSuccessfulReconstructionWarmsNextPresentationCache() async throws {
+        let testState = IsolatedTestState(label: "cached-transcript")
+        testState.registerTeardown(with: self)
+        let database = testState.makeDatabase()
+        try await database.initialize()
+
+        let engineClient = EngineClient(
+            serverURL: URL(string: "ws://localhost:8080/engine")!
+        )
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: engineClient,
+            defaults: testState.defaults
+        )
+        addTeardownBlock {
+            await manager.shutdown()
+        }
+
+        let writer = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "cached-session",
+            eventStoreManager: manager
+        )
+        await writer.processReconstructionResult(
+            reconstructionResult(content: "cached hello")
+        )
+
+        let cachedEvents = try await database.events.getBySession("cached-session")
+        XCTAssertEqual(cachedEvents.map(\.id), ["cached-user-message"])
+
+        let reader = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "cached-session",
+            eventStoreManager: manager
+        )
+        let restored = await reader.restoreCachedTranscript()
+
+        XCTAssertTrue(restored)
+        XCTAssertFalse(
+            reader.hasInitiallyLoaded,
+            "Only a server snapshot may declare authoritative initial history"
+        )
+        XCTAssertEqual(reader.messages.count, 1)
+        guard case .text(let content) = reader.messages.first?.content else {
+            return XCTFail("Expected cached text message")
+        }
+        XCTAssertEqual(content, "cached hello")
+    }
+
+    func testMissingCacheKeepsPresentationInPendingState() async throws {
+        let testState = IsolatedTestState(label: "missing-cached-transcript")
+        testState.registerTeardown(with: self)
+        let database = testState.makeDatabase()
+        try await database.initialize()
+
+        let engineClient = EngineClient(
+            serverURL: URL(string: "ws://localhost:8080/engine")!
+        )
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: engineClient,
+            defaults: testState.defaults
+        )
+        addTeardownBlock {
+            await manager.shutdown()
+        }
+        let viewModel = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "uncached-session",
+            eventStoreManager: manager
+        )
+
+        let restored = await viewModel.restoreCachedTranscript()
+        XCTAssertFalse(restored)
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        XCTAssertFalse(viewModel.hasInitiallyLoaded)
+    }
+
+    private func reconstructionResult(content: String) -> SessionReconstructResult {
+        let event = RawEvent(
+            id: "cached-user-message",
+            parentId: nil,
+            sessionId: "cached-session",
+            workspaceId: "/test/workspace",
+            type: SessionEventType.messageUser.rawValue,
+            timestamp: "2026-08-03T00:00:00Z",
+            sequence: 1,
+            payload: ["content": AnyCodable(content)]
+        )
+        return SessionReconstructResult(
+            events: [event],
+            hasMoreEvents: false,
+            oldestEventId: event.id,
+            inFlight: nil,
+            lastSequence: 1,
+            isRunning: false,
+            isCompacting: false,
+            compactionReason: nil,
+            agentPhase: "idle",
+            metadata: ReconstructMetadata(
+                model: nil,
+                turnCount: 1,
+                workingDirectory: nil,
+                title: nil,
+                tokenUsage: nil,
+                totalCost: nil
+            )
+        )
+    }
+}

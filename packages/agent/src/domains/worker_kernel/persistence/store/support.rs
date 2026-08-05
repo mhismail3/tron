@@ -5,6 +5,72 @@ use super::*;
 
 pub(super) use super::super::filesystem::{tree_version, write_json_atomic};
 
+const INVOCATION_OPTIONAL_COLUMNS: &[(&str, &str)] = &[
+    (
+        "interaction_mode",
+        "interaction_mode TEXT NOT NULL DEFAULT 'foreground'",
+    ),
+    ("detached_at", "detached_at TEXT"),
+    ("model_tool_invocation_id", "model_tool_invocation_id TEXT"),
+    (
+        "parent_worker_invocation_id",
+        "parent_worker_invocation_id TEXT",
+    ),
+    (
+        "parent_worker_tool_ordinal",
+        "parent_worker_tool_ordinal INTEGER",
+    ),
+    ("retry_of_invocation_id", "retry_of_invocation_id TEXT"),
+    ("requested_model", "requested_model TEXT"),
+    (
+        "requested_reasoning_level",
+        "requested_reasoning_level TEXT",
+    ),
+    ("effective_model", "effective_model TEXT"),
+    (
+        "effective_reasoning_level",
+        "effective_reasoning_level TEXT",
+    ),
+    ("not_before", "not_before TEXT"),
+    (
+        "wake_source_invocation_id",
+        "wake_source_invocation_id TEXT",
+    ),
+];
+
+pub(super) fn ensure_invocation_optional_columns(connection: &Connection) -> Result<(), String> {
+    for (column, definition) in INVOCATION_OPTIONAL_COLUMNS {
+        if !table_has_column(connection, "worker_invocations", column)? {
+            connection
+                .execute(
+                    &format!("ALTER TABLE worker_invocations ADD COLUMN {definition}"),
+                    [],
+                )
+                .map_err(|error| format!("add worker invocation {column}: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn table_has_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, String> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| format!("inspect {table} columns: {error}"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("query {table} columns: {error}"))?;
+    for candidate in columns {
+        if candidate.map_err(|error| format!("decode {table} column: {error}"))? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub(super) fn validate_object_schema(schema: &Value, field: &'static str) -> Result<(), String> {
     if !schema.is_object() || schema.get("type").and_then(Value::as_str) != Some("object") {
         return Err(format!("{field} must be a JSON object schema"));
@@ -352,6 +418,10 @@ pub(super) fn invocation_select_base() -> &'static str {
             worker_invocations.model_tool_invocation_id,
             worker_invocations.parent_worker_invocation_id,
             worker_invocations.retry_of_invocation_id,
+            worker_invocations.requested_model,
+            worker_invocations.requested_reasoning_level,
+            worker_invocations.effective_model,
+            worker_invocations.effective_reasoning_level,
             (SELECT COUNT(*) FROM worker_attempts a
                 WHERE a.invocation_id=worker_invocations.invocation_id),
             worker_invocations.created_at,
@@ -425,10 +495,14 @@ fn row_invocation_with_output(
         model_tool_invocation_id: row.get(15)?,
         parent_worker_invocation_id: row.get(16)?,
         retry_of_invocation_id: row.get(17)?,
-        attempt_count: row.get(18)?,
-        created_at: row.get(19)?,
-        started_at: row.get(20)?,
-        completed_at: row.get(21)?,
+        requested_model: row.get(18)?,
+        requested_reasoning_level: row.get(19)?,
+        effective_model: row.get(20)?,
+        effective_reasoning_level: row.get(21)?,
+        attempt_count: row.get(22)?,
+        created_at: row.get(23)?,
+        started_at: row.get(24)?,
+        completed_at: row.get(25)?,
     })
 }
 

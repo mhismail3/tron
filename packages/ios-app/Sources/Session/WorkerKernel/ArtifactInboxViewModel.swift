@@ -4,6 +4,12 @@ import Foundation
 extension Notification.Name {
     /// Explicit user action from the Artifact Inbox into one identified chat draft.
     static let attachArtifactToDraft = Notification.Name("tron.attachArtifactToDraft")
+    static let createArtifactInChat = Notification.Name("tron.createArtifactInChat")
+}
+
+struct ArtifactChatDraftRequest: Equatable, Sendable {
+    let sessionId: String
+    let prompt: String
 }
 
 /// App-local bridge for the explicit Attach to Draft action.

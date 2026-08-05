@@ -4,6 +4,73 @@ import Foundation
 
 extension ChatViewModel {
 
+    /// Mount the latest device-cached durable projection while the server's
+    /// authoritative reconstruction is still in flight.
+    ///
+    /// This deliberately does not set `hasInitiallyLoaded`: cached rows make
+    /// the transcript useful immediately, but only a committed server snapshot
+    /// may release reconstruction buffering or declare an empty session.
+    @discardableResult
+    func restoreCachedTranscript() async -> Bool {
+        guard !hasInitiallyLoaded,
+              messages.isEmpty,
+              let manager = eventStoreManager else {
+            return false
+        }
+
+        do {
+            let sessionEvents = try await manager.eventDB.events.getBySession(sessionId)
+            guard !sessionEvents.isEmpty else { return false }
+
+            let cachedEvents: [SessionEvent]
+            if let cachedSession = try await manager.eventDB.sessions.get(sessionId),
+               cachedSession.isFork == true,
+               let latestCachedEventId = sessionEvents.last?.id {
+                cachedEvents = try await manager.eventDB.events.getAncestors(latestCachedEventId)
+            } else {
+                cachedEvents = sessionEvents
+            }
+
+            let state = UnifiedEventTransformer.reconstructSessionState(
+                from: cachedEvents,
+                presorted: true
+            )
+            guard !state.messages.isEmpty else { return false }
+
+            allReconstructedMessages = state.messages
+            let batchSize = min(Self.initialMessageBatchSize, state.messages.count)
+            displayedMessageCount = batchSize
+            replaceAllMessages(with: Array(state.messages.suffix(batchSize)))
+            prunedLiveMessages.removeAll()
+            hasOlderServerReconstructionPages = false
+            reconstructionOldestEventId = nil
+            recomputeHasMoreMessages()
+
+            let usage = state.totalTokenUsage
+            contextState.setAccumulatedTokens(from: usage)
+            contextState.lastTurnInputTokens = state.lastTurnInputTokens
+            contextState.setTotalTokenUsage(
+                contextWindowSize: state.lastTurnInputTokens,
+                from: usage
+            )
+            if let cachedSession = try await manager.eventDB.sessions.get(sessionId) {
+                contextState.accumulatedCost = cachedSession.cost
+            }
+
+            logger.info(
+                "[CACHE] Restored \(cachedEvents.count) events as \(state.messages.count) messages while server reconstruction continues",
+                category: .session
+            )
+            return true
+        } catch {
+            logger.warning(
+                "[CACHE] Could not restore cached session history: \(error.localizedDescription)",
+                category: .session
+            )
+            return false
+        }
+    }
+
     /// Process the reconstruction result from `session::reconstruct`.
     ///
     /// Transforms persisted events into messages, updates metadata, and
@@ -54,6 +121,8 @@ extension ChatViewModel {
         recomputeHasMoreMessages()
         loadedReconstructionEvents = mergedEvents
         prunedLiveMessages.removeAll()
+
+        await cacheReconstructionEvents(mergedEvents)
 
         // 4. Update session metadata from reconstruction
         if let turnCount = result.metadata.turnCount {
@@ -141,6 +210,33 @@ extension ChatViewModel {
         }
 
         logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), loadedEvents=\(loadedReconstructionEvents.count), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil)", category: .session)
+    }
+
+    /// Keep the disposable device cache warm for the next presentation. The
+    /// server remains authoritative; rows are immutable event identities and
+    /// duplicate inserts are ignored.
+    private func cacheReconstructionEvents(_ events: [RawEvent]) async {
+        guard !events.isEmpty, let manager = eventStoreManager else { return }
+        let cachedEvents = events.map { event in
+            SessionEvent(
+                id: event.id,
+                parentId: event.parentId,
+                sessionId: event.sessionId,
+                workspaceId: event.workspaceId,
+                type: event.type,
+                timestamp: event.timestamp,
+                sequence: event.sequence,
+                payload: event.payload
+            )
+        }
+        do {
+            _ = try await manager.eventDB.events.insertIgnoringDuplicates(cachedEvents)
+        } catch {
+            logger.warning(
+                "[CACHE] Could not persist reconstructed session history: \(error.localizedDescription)",
+                category: .database
+            )
+        }
     }
 
     private struct ReconstructionEventWindow {

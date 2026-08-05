@@ -495,6 +495,8 @@ async fn session_title_replay_after_apply_before_terminal_is_safe_and_dispatches
             causal_depth: 0,
             trigger_kind: "engine_hook:session_title".to_owned(),
             origin_session_id: Some(session.id.clone()),
+            model: None,
+            reasoning_level: None,
         })
         .await
         .unwrap();
@@ -521,6 +523,8 @@ async fn session_title_replay_after_apply_before_terminal_is_safe_and_dispatches
             causal_depth: 0,
             trigger_kind: "engine_hook:session_title".to_owned(),
             origin_session_id: Some(session.id),
+            model: None,
+            reasoning_level: None,
         })
         .await
         .unwrap();

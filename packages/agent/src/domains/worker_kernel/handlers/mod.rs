@@ -87,7 +87,6 @@ operation_bindings! {
         "context_summary" => |invocation, deps| { support::response(invocation, core::context_summary(invocation, deps).await) },
         "continuity_context" => |invocation, deps| { support::response(invocation, core::continuity_context(invocation, deps).await) },
         "session_title" => |invocation, deps| { support::response(invocation, core::session_title(invocation, deps).await) },
-        "worker_relevance" => |invocation, deps| { support::response(invocation, core::worker_relevance(invocation, deps).await) },
         "surface_snapshot" => |invocation, deps| { support::response(invocation, core::engine_surface_snapshot(invocation, deps).await) },
         "webhook_invoke" => |invocation, deps| { support::response(invocation, webhook::webhook(invocation, deps).await) },
     ];

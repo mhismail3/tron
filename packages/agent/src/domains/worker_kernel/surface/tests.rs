@@ -76,7 +76,7 @@ fn surface_hash_is_stable_and_contract_sensitive() {
 }
 
 #[test]
-fn semantic_routing_uses_canonical_worker_description_not_provider_runtime_text() {
+fn deterministic_routing_uses_canonical_worker_description() {
     let mut function = FunctionDefinition::new(
         crate::engine::FunctionId::new("worker_kernel::dynamic_research").unwrap(),
         crate::engine::WorkerId::new("worker_kernel").unwrap(),
@@ -104,11 +104,7 @@ fn semantic_routing_uses_canonical_worker_description_not_provider_runtime_text(
     });
 
     let document = retrieval_document(&function, &worker, None);
-    let candidate = crate::domains::worker_kernel::retrieval::semantic_candidate_payload(&document);
-    assert_eq!(candidate["description"], "Canonical research purpose");
-    let encoded = serde_json::to_string(&candidate).unwrap();
-    assert!(!encoded.contains("activeVersion"));
-    assert!(!encoded.contains("Agent-runner work begins"));
+    assert_eq!(document.description, "Canonical research purpose");
     assert!(
         function.description.contains("activeVersion"),
         "provider-facing function description remains unchanged"

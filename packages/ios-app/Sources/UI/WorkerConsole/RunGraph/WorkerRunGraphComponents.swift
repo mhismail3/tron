@@ -292,6 +292,15 @@ struct WorkerRunGraphSummaryView: View {
                     Text(WorkerRunGraphPresentation.childSummary(graph.counts))
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
+                    if let effectiveModel = graph.effectiveModel {
+                        Text(
+                            [effectiveModel, graph.effectiveReasoningLevel]
+                                .compactMap { $0 }
+                                .joined(separator: " · ")
+                        )
+                        .font(TronTypography.code(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                    }
                 }
                 Spacer(minLength: 0)
             }

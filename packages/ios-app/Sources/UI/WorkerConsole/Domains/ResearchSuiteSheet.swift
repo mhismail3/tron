@@ -14,6 +14,7 @@ private struct ResearchSuiteRefreshKey: Equatable {
 }
 
 struct ResearchSuiteSheet: View {
+    @Environment(\.dependencies) private var dependencies
     @Bindable var consoleViewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
     let connectionState: ConnectionState
@@ -71,6 +72,7 @@ struct ResearchSuiteSheet: View {
                 WorkerDetailSheet(
                     viewModel: technicalViewModel,
                     repository: repository,
+                    modelRepository: dependencies.modelRepository,
                     connectionState: connectionState,
                     mode: .technical
                 )

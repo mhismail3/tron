@@ -333,6 +333,21 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
     Ok(())
 }
 
+pub(in crate::domains::worker_kernel::persistence) fn validate_publishable_bundle(
+    bundle: &WorkerBundle,
+) -> Result<(), String> {
+    if bundle
+        .engine_hooks
+        .contains(&WorkerEngineHook::WorkerRelevance)
+    {
+        return Err(
+            "engine hook 'worker_relevance' is retired; use deterministic worker routing"
+                .to_owned(),
+        );
+    }
+    validate_bundle(bundle)
+}
+
 const MAX_PRESENTATION_SECTIONS: usize = 24;
 const MAX_PRESENTATION_COLUMNS: usize = 8;
 const MAX_PRESENTATION_POINTER_BYTES: usize = 256;

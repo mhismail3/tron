@@ -153,6 +153,8 @@ async fn reconstructed_parent_awaits_the_same_running_child_invocation() {
         causal_depth: 1,
         trigger_kind: "manual".to_owned(),
         origin_session_id: Some("session-before-restart".to_owned()),
+        model: None,
+        reasoning_level: None,
     };
     let first_runtime = Arc::clone(&runtime);
     let first_request = child_request.clone();
@@ -347,6 +349,8 @@ async fn worker_declared_child_ceiling_is_transactional_and_causally_linked() {
                     causal_depth: 1,
                     trigger_kind: "manual".to_owned(),
                     origin_session_id: Some("session-bounded".to_owned()),
+                    model: None,
+                    reasoning_level: None,
                 },
                 ModelToolProgressTarget {
                     session_id: "session-bounded".to_owned(),
@@ -377,6 +381,8 @@ async fn worker_declared_child_ceiling_is_transactional_and_causally_linked() {
                 causal_depth: 1,
                 trigger_kind: "manual".to_owned(),
                 origin_session_id: Some("session-bounded".to_owned()),
+                model: None,
+                reasoning_level: None,
             },
             ModelToolProgressTarget {
                 session_id: "session-bounded".to_owned(),
@@ -480,6 +486,8 @@ async fn cancelling_an_invocation_cancels_only_its_durable_causal_subtree() {
             causal_depth: 0,
             trigger_kind: "manual".to_owned(),
             origin_session_id: Some("session-cancel-tree".to_owned()),
+            model: None,
+            reasoning_level: None,
         })
         .unwrap();
     let mut children = Vec::new();
@@ -495,6 +503,8 @@ async fn cancelling_an_invocation_cancels_only_its_durable_causal_subtree() {
                         causal_depth: 1,
                         trigger_kind: "manual".to_owned(),
                         origin_session_id: parent.origin_session_id.clone(),
+                        model: None,
+                        reasoning_level: None,
                     },
                     Some(&format!("provider-cancel-tree-{ordinal}")),
                     Some(&parent.invocation_id),
@@ -513,6 +523,8 @@ async fn cancelling_an_invocation_cancels_only_its_durable_causal_subtree() {
                 causal_depth: 0,
                 trigger_kind: "manual".to_owned(),
                 origin_session_id: Some("session-cancel-tree".to_owned()),
+                model: None,
+                reasoning_level: None,
             },
             Some("provider-cancel-tree-unrelated"),
             None,
@@ -810,14 +822,15 @@ async fn invalid_engine_event_projection_disables_worker_instead_of_jamming_curs
 
 #[tokio::test]
 async fn engine_and_worker_concurrency_overflow_stays_durably_queued() {
-    let (runtime, _home) = test_runtime(None);
+    let (runtime, home) = test_runtime(None);
+    let release_path = home.path().join("concurrency-release");
+    let command = format!(
+        "while [ ! -f \"{}\" ]; do sleep 0.05; done; cat",
+        release_path.display()
+    );
     let mut worker_ids = Vec::new();
     for index in 0..5 {
-        let mut bundle = command_bundle(vec![
-            "sh".to_owned(),
-            "-c".to_owned(),
-            "sleep 2; cat".to_owned(),
-        ]);
+        let mut bundle = command_bundle(vec!["sh".to_owned(), "-c".to_owned(), command.clone()]);
         bundle.worker_id = Some(format!("concurrency-{index}"));
         bundle.name = format!("Concurrency Fixture {index}");
         bundle.description =
@@ -843,7 +856,10 @@ async fn engine_and_worker_concurrency_overflow_stays_durably_queued() {
         }));
     }
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    // The full suite creates substantial concurrent SQLite and process load.
+    // Keep the fixtures blocked so admission can reach both ceilings without
+    // making this assertion depend on a short wall-clock race.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     let mut observed_limits = false;
     while tokio::time::Instant::now() < deadline {
         let runs = runtime.store().runs_filtered(None, None, 100).unwrap();
@@ -858,6 +874,7 @@ async fn engine_and_worker_concurrency_overflow_stays_durably_queued() {
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
+    std::fs::write(&release_path, b"release").unwrap();
     assert!(
         observed_limits,
         "engine overflow was not observed as queued"
@@ -1511,6 +1528,8 @@ async fn schedule_event_and_authenticated_webhook_share_the_durable_dispatch_pat
             causal_depth: 0,
             trigger_kind: "webhook".to_owned(),
             origin_session_id: None,
+            model: None,
+            reasoning_level: None,
         })
         .await
         .unwrap();

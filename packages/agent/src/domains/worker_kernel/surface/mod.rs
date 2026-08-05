@@ -46,21 +46,8 @@ pub(crate) async fn resolve_tool_surface(
         relevance_query,
         origin_worker_id,
         worker_agent_tools,
-        false,
     )
     .await
-}
-
-/// Resolve an optional semantic ranking for a later safe turn.
-///
-/// This is never called from provider admission. Callers cache the completed
-/// run-scoped surface only while the originating run remains active.
-pub(crate) async fn resolve_tool_surface_semantic(
-    host: &EngineHostHandle,
-    session_id: &str,
-    relevance_query: Option<&str>,
-) -> Result<ResolvedToolSurface, String> {
-    resolve_tool_surface_inner(host, session_id, relevance_query, None, None, true).await
 }
 
 async fn resolve_tool_surface_inner(
@@ -69,7 +56,6 @@ async fn resolve_tool_surface_inner(
     relevance_query: Option<&str>,
     origin_worker_id: Option<&str>,
     worker_agent_tools: Option<&[String]>,
-    semantic_ranking: bool,
 ) -> Result<ResolvedToolSurface, String> {
     let trusted_worker_allowlist = origin_worker_id.is_some() && worker_agent_tools.is_some();
     let (actor_id, actor_kind) = if trusted_worker_allowlist {
@@ -132,34 +118,14 @@ async fn resolve_tool_surface_inner(
         })
         .map(|promotion| promotion.worker_id.clone())
         .collect::<BTreeSet<_>>();
-    // Provider admission never awaits optional semantic policy. The local
-    // scorer is deterministic and immediately available; any semantic ranking
-    // worker is scheduled separately and may affect only a later safe turn.
-    let ranking = if semantic_ranking {
-        super::retrieval::rank_workers_with_hook_evidence(
-            host,
-            session_id,
-            origin_worker_id,
-            dynamic_documents,
-            relevance_query,
-            &applicable_promotions,
-            MAX_RELEVANT_WORKERS,
-        )
-        .await
-    } else {
-        super::retrieval::WorkerRankingOutcome::deterministic(
-            super::retrieval::rank_workers(
-                dynamic_documents,
-                relevance_query,
-                &applicable_promotions,
-            ),
-            if origin_worker_id.is_some() {
-                "child_agent_allowlist"
-            } else {
-                "deterministic_within_limit"
-            },
-        )
-    };
+    let ranking = super::retrieval::WorkerRankingOutcome::deterministic(
+        super::retrieval::rank_workers(dynamic_documents, relevance_query, &applicable_promotions),
+        if origin_worker_id.is_some() {
+            "child_agent_allowlist"
+        } else {
+            "deterministic_relevance"
+        },
+    );
     let ranked = &ranking.ranks;
     let query_is_empty = super::retrieval::query_is_empty(relevance_query);
     let worker_rank = ranked
@@ -242,7 +208,6 @@ async fn resolve_tool_surface_inner(
                 ),
                 ranking_mechanism: ranking.mechanism.clone(),
                 relevance_score: rank.relevance_score,
-                router_explanation: rank.explanation.clone(),
                 completed_runs: rank.completed_runs,
             })
         })
@@ -399,9 +364,6 @@ async fn resolve_tool_surface_inner(
             projected_worker_count,
             available_worker_count,
             ranking_mechanism: ranking.mechanism,
-            router_worker_id: ranking.router_worker_id,
-            router_worker_version: ranking.router_worker_version,
-            router_invocation_id: ranking.router_invocation_id,
             tools: snapshot_tools,
             fixed_tools,
             available_workers,

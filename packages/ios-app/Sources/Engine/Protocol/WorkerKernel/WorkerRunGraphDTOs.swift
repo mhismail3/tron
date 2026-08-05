@@ -63,6 +63,10 @@ struct WorkerRunNodeDTO: Codable, Equatable, Identifiable, Sendable {
     let attemptNumber: UInt32?
     let sessionId: String?
     let model: String?
+    let requestedModel: String?
+    let requestedReasoningLevel: String?
+    let effectiveModel: String?
+    let effectiveReasoningLevel: String?
     let turn: Int64?
     let modelToolInvocationId: String?
     let retryOfInvocationId: String?
@@ -98,6 +102,10 @@ struct WorkerRunGraphDTO: Codable, Equatable, Identifiable, Sendable {
     let workerId: String
     let workerName: String
     let requestPreview: String
+    let requestedModel: String?
+    let requestedReasoningLevel: String?
+    let effectiveModel: String?
+    let effectiveReasoningLevel: String?
     let status: String
     let mode: String
     let stage: WorkerRunStageDTO

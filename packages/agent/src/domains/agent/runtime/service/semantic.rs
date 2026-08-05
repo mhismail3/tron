@@ -30,7 +30,6 @@ pub(super) struct OptionalContextPreparation {
     pub(super) trace_id: TraceId,
     pub(super) parent_invocation_id: Option<InvocationId>,
     pub(super) causal_depth: u32,
-    pub(super) allow_semantic_ranking: bool,
 }
 
 pub(super) fn spawn_optional_context_preparation(args: OptionalContextPreparation) {
@@ -48,30 +47,7 @@ pub(super) fn spawn_optional_context_preparation(args: OptionalContextPreparatio
 }
 
 async fn run_optional_preparation(args: OptionalContextPreparation) {
-    let continuity = args.clone();
-    tokio::join!(run_continuity(continuity), run_semantic_ranking(args));
-}
-
-async fn run_semantic_ranking(args: OptionalContextPreparation) {
-    if !args.allow_semantic_ranking
-        || args.orchestrator.active_run_id(&args.session_id).as_deref()
-            != Some(args.run_id.as_str())
-    {
-        return;
-    }
-    let _ = crate::domains::agent::r#loop::surface::prepare_semantic_surface(
-        &args.host,
-        &args.session_id,
-        &args.run_id,
-        Some(&args.query),
-    )
-    .await;
-    if args.orchestrator.active_run_id(&args.session_id).as_deref() != Some(args.run_id.as_str()) {
-        crate::domains::agent::r#loop::surface::clear_semantic_surface(
-            &args.session_id,
-            &args.run_id,
-        );
-    }
+    run_continuity(args).await;
 }
 
 async fn run_continuity(args: OptionalContextPreparation) {

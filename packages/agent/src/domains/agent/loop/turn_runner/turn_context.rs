@@ -318,7 +318,7 @@ fn utf8_suffix(text: &str, max_bytes: usize) -> &str {
 /// Assistant plans and tool results are deliberately excluded: resolving the
 /// provider surface again within one prompt run must not let a model-selected
 /// tool manufacture relevance for unrelated workers.
-pub(super) fn worker_relevance_query(messages: &[Message]) -> Option<String> {
+pub(super) fn worker_routing_query(messages: &[Message]) -> Option<String> {
     let message = messages
         .iter()
         .rfind(|message| message.is_real_user_turn())?;
@@ -388,7 +388,7 @@ mod tests {
             },
         ];
 
-        let query = worker_relevance_query(&messages).expect("query");
+        let query = worker_routing_query(&messages).expect("query");
         assert!(query.contains("research current compiler changes"));
         assert!(!query.contains("recent repository research"));
         assert!(!query.contains("last30days-research"));
@@ -423,7 +423,7 @@ mod tests {
             },
         ];
 
-        let query = worker_relevance_query(&messages).expect("query");
+        let query = worker_routing_query(&messages).expect("query");
         assert!(query.chars().count() <= MAX_RELEVANCE_QUERY_CHARS);
         assert!(!query.contains("secret-binary"));
         assert!(!query.contains("hidden-plan-marker"));

@@ -215,5 +215,7 @@ fn request(worker_id: &str, input: Value, key: &str) -> InvokeRequest {
         causal_depth: 0,
         trigger_kind: "manual".to_owned(),
         origin_session_id: None,
+        model: None,
+        reasoning_level: None,
     }
 }

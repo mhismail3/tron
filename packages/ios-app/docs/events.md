@@ -6,11 +6,17 @@ The iOS app handles engine events through two paths:
 
 ```
 Live:   Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
-Stored: EventDatabase -> Session/Timeline/UnifiedEventTransformer -> ChatMessage array
+Stored: EventDatabase -> Session/Timeline/UnifiedEventTransformer -> immediate cached ChatMessage array
+Fresh:  session::reconstruct -> authoritative ChatMessage array + EventDatabase refresh
 ```
 
 The live path updates the mounted session UI. The stored path reconstructs
-history from durable event rows. Neither path owns repository workflow state,
+history from durable event rows before network reconstruction completes. A
+successful server reconstruction refreshes those immutable cached rows, and a
+connected interactive chat starts an incremental event-cache sync when its
+presentation closes. Cache projection never declares an empty session or
+releases buffered live events; only the fresh server snapshot does. Neither
+path owns repository workflow state,
 assistant-management state, curated prompt state, skill state, prompt-queue
 state, hook suggestion state, or fixed audit panels on the primitive teardown
 branch.

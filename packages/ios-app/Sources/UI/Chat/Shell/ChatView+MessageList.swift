@@ -5,7 +5,8 @@ extension ChatView {
     // MARK: - Input Area Content (extracted for type-checker)
 
     var inputAreaContent: some View {
-        VStack(spacing: 0) {
+        let hasAuthoritativeHistory = viewModel.hasInitiallyLoaded
+        return VStack(spacing: 0) {
             VStack(spacing: 8) {
                 InputBar(
                     state: viewModel.inputBarState,
@@ -17,12 +18,13 @@ extension ChatView {
                         recordingAudioLevel: viewModel.recordingAudioLevel,
                         isTranscribing: viewModel.isTranscribing,
                         speechTranscriptionAvailable: viewModel.isSpeechTranscriptionAvailable,
-                        placeholderText: initialLoadComplete ? "Type here" : "Loading latest messages",
-                        placeholderShowsProgress: !initialLoadComplete,
+                        placeholderText: hasAuthoritativeHistory ? "Type here" : "Loading latest messages",
+                        placeholderShowsProgress: !hasAuthoritativeHistory,
                         contextPercentage: viewModel.contextState.contextPercentage,
                         currentModelInfo: currentModelInfo,
                         inputHistory: inputHistory,
-                        readOnly: !(interactionPolicy?.isConnected ?? false),
+                        readOnly: !(interactionPolicy?.isConnected ?? false)
+                            || !hasAuthoritativeHistory,
                         showDragHint: false
                     ),
                     actions: InputBarActions(
@@ -94,11 +96,35 @@ extension ChatView {
 
     @ViewBuilder
     var transcriptScrollView: some View {
-        if presentationMode == .workerAudit {
-            workerAuditMessagesScrollView
-        } else {
-            messagesScrollView
+        ZStack {
+            if presentationMode == .workerAudit {
+                workerAuditMessagesScrollView
+            } else {
+                messagesScrollView
+            }
+
+            if ChatTranscriptRevealPolicy.showsHistoryLoadingState(
+                hasAuthoritativeSnapshot: viewModel.hasInitiallyLoaded,
+                hasMessages: !viewModel.messages.isEmpty
+            ) {
+                historyLoadingState
+            }
         }
+    }
+
+    private var historyLoadingState: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.regular)
+            Text("Loading conversation…")
+                .font(TronTypography.sans(
+                    size: TronTypography.sizeBodySM,
+                    weight: .medium
+                ))
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("chat-history-loading-state")
     }
 
     /// Read-only worker transcripts do not stream, own a composer, or need

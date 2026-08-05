@@ -126,6 +126,68 @@ async fn agent_runner_returns_typed_json() {
 }
 
 #[tokio::test]
+async fn invocation_override_precedes_worker_defaults_and_is_durable() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = command_bundle(Vec::new());
+    bundle.name = "Override Agent Worker".to_owned();
+    bundle.description = "Records explicit invocation model policy".to_owned();
+    bundle.tool_name = Some("worker_override_agent_test".to_owned());
+    bundle.runner = WorkerRunner::Agent {
+        instructions: "Return an object.".to_owned(),
+        model: Some("claude-sonnet-4-5".to_owned()),
+        reasoning_level: Some("low".to_owned()),
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+    let mut invocation = request(&outcome.worker.worker_id, json!({}), "agent-model-override");
+    invocation.model = Some("claude-sonnet-4-6".to_owned());
+    invocation.reasoning_level = Some("high".to_owned());
+
+    let queued = runtime.enqueue(invocation).unwrap();
+
+    assert_eq!(queued.requested_model.as_deref(), Some("claude-sonnet-4-6"));
+    assert_eq!(queued.requested_reasoning_level.as_deref(), Some("high"));
+    assert_eq!(queued.effective_model.as_deref(), Some("claude-sonnet-4-6"));
+    assert_eq!(queued.effective_reasoning_level.as_deref(), Some("high"));
+    let stored = runtime
+        .store()
+        .invocation(&queued.invocation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.requested_model, queued.requested_model);
+    assert_eq!(stored.effective_model, queued.effective_model);
+    assert_eq!(
+        stored.requested_reasoning_level,
+        queued.requested_reasoning_level
+    );
+    assert_eq!(
+        stored.effective_reasoning_level,
+        queued.effective_reasoning_level
+    );
+}
+
+#[tokio::test]
+async fn command_runner_rejects_model_overrides() {
+    let (runtime, _home) = test_runtime(None);
+    let outcome = runtime
+        .upsert(
+            command_bundle(vec!["python3".to_owned(), "worker.py".to_owned()]),
+            None,
+        )
+        .await
+        .unwrap();
+    let mut invocation = request(
+        &outcome.worker.worker_id,
+        json!({}),
+        "command-model-override",
+    );
+    invocation.model = Some("claude-sonnet-4-6".to_owned());
+
+    let error = runtime.enqueue(invocation).unwrap_err();
+
+    assert!(error.contains("does not use an agent runner"), "{error}");
+}
+
+#[tokio::test]
 async fn agent_runner_captures_a_fast_terminal_provider_failure() {
     let (runtime, _home) = test_runtime(Some(Arc::new(FailingResponderFactory)));
     let mut bundle = command_bundle(Vec::new());

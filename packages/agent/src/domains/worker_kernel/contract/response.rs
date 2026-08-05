@@ -328,7 +328,7 @@ fn invocation_response_schema() -> Value {
     json!({
         "type":"object","additionalProperties":false,
         "required":["invocationId","workerId","workerVersion","status","input","output","error","idempotencyKey","traceId","causalDepth","triggerKind","interactionMode","attemptCount","createdAt","startedAt","completedAt"],
-        "properties":{"invocationId":{"type":"string"},"workerId":{"type":"string"},"workerVersion":{"type":"string"},"status":{"type":"string"},"input":{},"output":{},"error":{},"idempotencyKey":{"type":"string"},"traceId":{"type":"string"},"causalDepth":{"type":"integer"},"triggerKind":{"type":"string"},"originSessionId":{"type":"string"},"agentSessionId":{"type":"string"},"interactionMode":{"type":"string","enum":["foreground","background"]},"detachedAt":{"type":"string"},"modelToolInvocationId":{"type":"string"},"parentWorkerInvocationId":{"type":"string"},"retryOfInvocationId":{"type":"string"},"attemptCount":{"type":"integer"},"createdAt":{"type":"string"},"startedAt":{},"completedAt":{}}
+        "properties":{"invocationId":{"type":"string"},"workerId":{"type":"string"},"workerVersion":{"type":"string"},"status":{"type":"string"},"input":{},"output":{},"error":{},"idempotencyKey":{"type":"string"},"traceId":{"type":"string"},"causalDepth":{"type":"integer"},"triggerKind":{"type":"string"},"originSessionId":{"type":"string"},"agentSessionId":{"type":"string"},"interactionMode":{"type":"string","enum":["foreground","background"]},"detachedAt":{"type":"string"},"modelToolInvocationId":{"type":"string"},"parentWorkerInvocationId":{"type":"string"},"retryOfInvocationId":{"type":"string"},"requestedModel":{"type":"string"},"requestedReasoningLevel":{"type":"string"},"effectiveModel":{"type":"string"},"effectiveReasoningLevel":{"type":"string"},"attemptCount":{"type":"integer"},"createdAt":{"type":"string"},"startedAt":{},"completedAt":{}}
     })
 }
 
@@ -390,7 +390,7 @@ fn worker_run_graph_response_schema() -> Value {
             "cost":{"type":"number"}
         }
     });
-    let node = json!({
+    let mut node = json!({
         "type":"object","additionalProperties":false,
         "required":["id","kind","parentId","status","elapsedMs"],
         "properties":{
@@ -413,6 +413,19 @@ fn worker_run_graph_response_schema() -> Value {
             }
         }
     });
+    if let Some(properties) = node.get_mut("properties").and_then(Value::as_object_mut) {
+        for field in [
+            "requestedModel",
+            "requestedReasoningLevel",
+            "effectiveModel",
+            "effectiveReasoningLevel",
+        ] {
+            properties.insert(
+                field.to_owned(),
+                json!({"oneOf":[{"type":"string"},{"type":"null"}]}),
+            );
+        }
+    }
     let timeline = json!({
         "type":"object","additionalProperties":false,
         "required":["occurredAt","nodeId","stage","status","summary","technical"],
@@ -422,7 +435,7 @@ fn worker_run_graph_response_schema() -> Value {
             "technical":{"type":"boolean"},"invocationId":{"type":"string"}
         }
     });
-    json!({
+    let mut schema = json!({
         "type":"object","additionalProperties":false,
         "required":[
             "rootInvocationId","requestedInvocationId","modelToolInvocationId",
@@ -442,7 +455,21 @@ fn worker_run_graph_response_schema() -> Value {
             "nodes":{"type":"array","items":node},"timeline":{"type":"array","items":timeline},
             "resultPreview":{},"errorPreview":{},"truncated":{"type":"boolean"}
         }
-    })
+    });
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        for field in [
+            "requestedModel",
+            "requestedReasoningLevel",
+            "effectiveModel",
+            "effectiveReasoningLevel",
+        ] {
+            properties.insert(
+                field.to_owned(),
+                json!({"oneOf":[{"type":"string"},{"type":"null"}]}),
+            );
+        }
+    }
+    schema
 }
 
 fn presentation_response_schema() -> Value {

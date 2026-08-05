@@ -64,6 +64,8 @@ struct WorkerInvokeRequestDTO: Codable, Equatable, Sendable {
     let input: AnyCodable
     let idempotencyKey: String
     let mode: WorkerInvocationMode
+    let model: String?
+    let reasoningLevel: String?
 }
 
 struct WorkerRetryRequestDTO: Codable, Equatable, Sendable {

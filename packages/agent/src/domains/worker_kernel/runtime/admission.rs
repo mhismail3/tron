@@ -19,6 +19,8 @@ struct InvocationAdmission<'a> {
     parent_worker_tool_ordinal: Option<u32>,
     retry_of_invocation_id: Option<&'a str>,
     worker_version: Option<&'a str>,
+    pinned_effective_model: Option<&'a str>,
+    pinned_effective_reasoning_level: Option<&'a str>,
 }
 
 impl Default for InvocationAdmission<'_> {
@@ -30,6 +32,8 @@ impl Default for InvocationAdmission<'_> {
             parent_worker_tool_ordinal: None,
             retry_of_invocation_id: None,
             worker_version: None,
+            pinned_effective_model: None,
+            pinned_effective_reasoning_level: None,
         }
     }
 }
@@ -127,6 +131,8 @@ impl WorkerRuntime {
             parent_worker_tool_ordinal,
             None,
             None,
+            None,
+            None,
         )
         .await
     }
@@ -159,8 +165,10 @@ impl WorkerRuntime {
         }
         self.invoke_from_provider_tool_with_admission(
             InvokeRequest {
-                worker_id: original.worker_id,
-                input: original.input,
+                worker_id: original.worker_id.clone(),
+                input: original.input.clone(),
+                model: original.requested_model.clone(),
+                reasoning_level: original.requested_reasoning_level.clone(),
                 idempotency_key,
                 trace_id,
                 causal_depth,
@@ -172,6 +180,8 @@ impl WorkerRuntime {
             parent_worker_tool_ordinal,
             Some(&original.worker_version),
             Some(retry_of_invocation_id),
+            original.effective_model.as_deref(),
+            original.effective_reasoning_level.as_deref(),
         )
         .await
     }
@@ -201,8 +211,10 @@ impl WorkerRuntime {
             ));
         }
         let request = InvokeRequest {
-            worker_id: original.worker_id,
-            input: original.input,
+            worker_id: original.worker_id.clone(),
+            input: original.input.clone(),
+            model: original.requested_model.clone(),
+            reasoning_level: original.requested_reasoning_level.clone(),
             idempotency_key,
             trace_id,
             causal_depth,
@@ -218,6 +230,8 @@ impl WorkerRuntime {
                 parent_worker_tool_ordinal,
                 retry_of_invocation_id: Some(retry_of_invocation_id),
                 worker_version: Some(&original.worker_version),
+                pinned_effective_model: original.effective_model.as_deref(),
+                pinned_effective_reasoning_level: original.effective_reasoning_level.as_deref(),
             },
         )?;
         if queued.status == "queued" {
@@ -244,6 +258,8 @@ impl WorkerRuntime {
         parent_worker_tool_ordinal: Option<u32>,
         worker_version: Option<&str>,
         retry_of_invocation_id: Option<&str>,
+        pinned_effective_model: Option<&str>,
+        pinned_effective_reasoning_level: Option<&str>,
     ) -> Result<InvocationRecord, String> {
         if parent_worker_invocation_id.is_some() {
             let (queued, _) = self.enqueue_request_with_admission(
@@ -254,6 +270,8 @@ impl WorkerRuntime {
                     parent_worker_tool_ordinal,
                     retry_of_invocation_id,
                     worker_version,
+                    pinned_effective_model,
+                    pinned_effective_reasoning_level,
                     ..Default::default()
                 },
             )?;
@@ -272,6 +290,8 @@ impl WorkerRuntime {
                 model_tool_invocation_id,
                 retry_of_invocation_id,
                 worker_version,
+                pinned_effective_model,
+                pinned_effective_reasoning_level,
                 ..Default::default()
             },
         )?;
@@ -603,6 +623,74 @@ impl WorkerRuntime {
         }
         self.validate_input_contract(&worker, &request.input)
             .map_err(|error| error.to_string())?;
+        let requested_model = request
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let requested_reasoning_level = request
+            .reasoning_level
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if request.model.is_some() && requested_model.is_none() {
+            return Err("model override must be a non-empty string".to_owned());
+        }
+        if request.reasoning_level.is_some() && requested_reasoning_level.is_none() {
+            return Err("reasoningLevel override must be a non-empty string".to_owned());
+        }
+        let (effective_model, effective_reasoning_level) = match &worker.bundle.runner {
+            WorkerRunner::Agent {
+                model,
+                reasoning_level,
+                ..
+            } => {
+                let default_model = self
+                    .settings_runtime
+                    .current()
+                    .settings
+                    .server
+                    .default_model
+                    .clone();
+                let effective_model = admission
+                    .pinned_effective_model
+                    .or(requested_model)
+                    .or(model.as_deref())
+                    .unwrap_or(default_model.as_str());
+                let effective_reasoning_level = admission
+                    .pinned_effective_reasoning_level
+                    .or(requested_reasoning_level)
+                    .or(reasoning_level.as_deref());
+                let auth_path =
+                    crate::shared::foundation::paths::auth_path_for_home(self.store.home());
+                if requested_model.is_some() {
+                    crate::domains::model::routing::catalog::validate_explicit_model(
+                        effective_model,
+                        &auth_path,
+                    )?;
+                }
+                if requested_reasoning_level.is_some() {
+                    crate::domains::model::routing::catalog::validate_explicit_reasoning_level(
+                        effective_model,
+                        effective_reasoning_level.expect("requested reasoning is effective"),
+                        &auth_path,
+                    )?;
+                }
+                (
+                    Some(effective_model.to_owned()),
+                    effective_reasoning_level.map(ToOwned::to_owned),
+                )
+            }
+            WorkerRunner::Command { .. } | WorkerRunner::Service { .. } => {
+                if requested_model.is_some() || requested_reasoning_level.is_some() {
+                    return Err(format!(
+                        "worker '{}' does not use an agent runner and cannot accept model overrides",
+                        request.worker_id
+                    ));
+                }
+                (None, None)
+            }
+        };
         let max_sibling_invocations =
             if let Some(parent_id) = admission.parent_worker_invocation_id {
                 let parent = self.store.invocation(parent_id)?.ok_or_else(|| {
@@ -616,7 +704,7 @@ impl WorkerRuntime {
             } else {
                 None
             };
-        let (queued, replayed) = self.store.begin_invocation_with_context(
+        let (queued, replayed) = self.store.begin_invocation_with_model_context(
             &request.worker_id,
             &worker.summary.active_version,
             &request.input,
@@ -630,6 +718,10 @@ impl WorkerRuntime {
             admission.parent_worker_invocation_id,
             admission.parent_worker_tool_ordinal,
             admission.retry_of_invocation_id,
+            requested_model,
+            requested_reasoning_level,
+            effective_model.as_deref(),
+            effective_reasoning_level.as_deref(),
             max_sibling_invocations,
         )?;
         Ok((queued, replayed))

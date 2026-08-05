@@ -6,8 +6,7 @@
 //! keeps only request-local projections; durable selection and promotion state
 //! remains owned by the Worker Kernel.
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{LazyLock, Mutex};
+use std::collections::BTreeMap;
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -271,10 +270,6 @@ pub struct ResolvedPrimitiveSurface {
     pub snapshot: crate::domains::worker_kernel::EngineSurfaceSnapshot,
 }
 
-static SEMANTIC_SURFACES: LazyLock<
-    Mutex<HashMap<(String, String, String), ResolvedPrimitiveSurface>>,
-> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
 impl ResolvedPrimitiveSurface {
     /// Immutable presentation classification for one exact advertised tool.
     ///
@@ -337,14 +332,8 @@ pub(crate) async fn resolve_provider_primitive_surface_for_run(
     relevance_query: Option<&str>,
     origin_worker_id: Option<&str>,
     worker_agent_tools: Option<&[String]>,
-    run_id: Option<&str>,
+    _run_id: Option<&str>,
 ) -> Result<ResolvedPrimitiveSurface, String> {
-    if origin_worker_id.is_none()
-        && let Some(run_id) = run_id
-        && let Some(surface) = cached_semantic_surface(session_id, run_id, relevance_query)
-    {
-        return Ok(surface);
-    }
     let resolved = crate::domains::worker_kernel::resolve_tool_surface(
         host,
         session_id,
@@ -354,63 +343,6 @@ pub(crate) async fn resolve_provider_primitive_surface_for_run(
     )
     .await?;
     adapt_resolved_surface(resolved)
-}
-
-pub(crate) async fn prepare_semantic_surface(
-    host: &EngineHostHandle,
-    session_id: &str,
-    run_id: &str,
-    relevance_query: Option<&str>,
-) -> Result<(), String> {
-    let resolved = crate::domains::worker_kernel::resolve_tool_surface_semantic(
-        host,
-        session_id,
-        relevance_query,
-    )
-    .await?;
-    let surface = adapt_resolved_surface(resolved)?;
-    SEMANTIC_SURFACES
-        .lock()
-        .map_err(|_| "semantic surface cache lock poisoned".to_owned())?
-        .insert(
-            (
-                session_id.to_owned(),
-                run_id.to_owned(),
-                relevance_query_digest(relevance_query),
-            ),
-            surface,
-        );
-    Ok(())
-}
-
-pub(crate) fn clear_semantic_surface(session_id: &str, run_id: &str) {
-    if let Ok(mut surfaces) = SEMANTIC_SURFACES.lock() {
-        surfaces.retain(|(stored_session, stored_run, _), _| {
-            stored_session != session_id || stored_run != run_id
-        });
-    }
-}
-
-fn cached_semantic_surface(
-    session_id: &str,
-    run_id: &str,
-    relevance_query: Option<&str>,
-) -> Option<ResolvedPrimitiveSurface> {
-    SEMANTIC_SURFACES
-        .lock()
-        .ok()?
-        .get(&(
-            session_id.to_owned(),
-            run_id.to_owned(),
-            relevance_query_digest(relevance_query),
-        ))
-        .cloned()
-}
-
-fn relevance_query_digest(relevance_query: Option<&str>) -> String {
-    hex::encode(Sha256::digest(
-        relevance_query.unwrap_or_default().as_bytes(),
-    ))
 }
 
 fn adapt_resolved_surface(

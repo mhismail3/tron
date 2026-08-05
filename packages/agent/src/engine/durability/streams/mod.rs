@@ -18,6 +18,10 @@
 //! INVARIANT: stream polling applies delivery scope before pagination. A
 //! session subscriber must never wait behind older rows owned by other
 //! sessions. Unknown persisted scope values fail closed.
+//!
+//! INVARIANT: SQLite topic-tail polling and session replay use cursor-ordered
+//! indexes. Their latency must scale with the requested topic/session window,
+//! not with the total retained stream table.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

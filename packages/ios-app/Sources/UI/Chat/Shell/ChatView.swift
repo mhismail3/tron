@@ -151,6 +151,12 @@ struct ChatView: View {
             }
             viewModel.inputBarState.attachments.append(request.attachment)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .createArtifactInChat)) { notification in
+            guard presentationMode == .interactiveSession,
+                  let request = notification.object as? ArtifactChatDraftRequest,
+                  request.sessionId == sessionId else { return }
+            viewModel.inputText = request.prompt
+        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             scrollCoordinator.sceneDidBecomeActive(
@@ -164,6 +170,19 @@ struct ChatView: View {
             if presentationMode == .interactiveSession {
                 // Persist draft state before an interactive chat is destroyed.
                 Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
+                if services.connection.connectionState.isConnected {
+                    let manager = eventStoreManager
+                    Task {
+                        do {
+                            try await manager.syncSessionEvents(sessionId: sessionId)
+                        } catch {
+                            logger.warning(
+                                "[CACHE] Session history refresh on close failed: \(error.localizedDescription)",
+                                category: .database
+                            )
+                        }
+                    }
+                }
             }
             viewModel.clearLocalNotifications()
             viewModel.deactivateMountedResources()
@@ -229,6 +248,12 @@ struct ChatView: View {
             let workspaceId = eventStoreManager.sessions.first { $0.id == sessionId }?.workspaceId ?? ""
             viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
 
+            if await viewModel.restoreCachedTranscript() {
+                guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+                await revealCachedTranscript(guardedBy: ticket)
+                guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+            }
+
             if presentationMode == .workerAudit {
                 let initialReconstructionOutcome = await viewModel.reconstructReadOnlyTranscript()
                 guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
@@ -276,7 +301,13 @@ struct ChatView: View {
             // Handle message visibility and set initialLoadComplete
             // NOTE: initialLoadComplete is set INSIDE handleInitialMessageVisibility()
             // AFTER the cascade starts, to prevent a flash where all messages are visible
-            await handleInitialMessageVisibility(guardedBy: ticket)
+            if !initialLoadComplete || scrollTarget != nil {
+                await handleInitialMessageVisibility(guardedBy: ticket)
+            } else {
+                viewModel.animationCoordinator.makeAllMessagesVisible(
+                    count: viewModel.messages.count
+                )
+            }
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             taskCoordinator.cancelTask(.initialLoadWatchdog)
             logger.debug("[INIT] handleInitialMessageVisibility done, initialLoadComplete=\(initialLoadComplete)", category: .ui)

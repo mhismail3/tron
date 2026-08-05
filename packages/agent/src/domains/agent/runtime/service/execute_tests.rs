@@ -83,7 +83,6 @@ impl ModelResponderFactory for LatchFactory {
 #[derive(Clone, Copy)]
 enum OptionalHookKind {
     Continuity,
-    Relevance,
     Mailbox,
 }
 
@@ -100,9 +99,6 @@ impl crate::engine::InProcessFunctionHandler for BlockingOptionalHook {
         self.release.acquire().await.unwrap().forget();
         Ok(match self.kind {
             OptionalHookKind::Continuity => serde_json::json!({"handled":false}),
-            OptionalHookKind::Relevance => {
-                serde_json::json!({"handled":false,"rankings":[]})
-            }
             OptionalHookKind::Mailbox => {
                 serde_json::json!({"handled":true,"selectedDeliveryIds":[]})
             }
@@ -133,44 +129,6 @@ fn register_blocking_optional_hook(
             kind,
             started,
             release,
-        }),
-    )
-    .unwrap();
-}
-
-fn register_semantic_candidate(host: &crate::engine::EngineHostHandle, suffix: &str) {
-    let mut definition = crate::engine::FunctionDefinition::new(
-        crate::engine::FunctionId::new(format!("test::{suffix}")).unwrap(),
-        crate::engine::WorkerId::new(format!("candidate-{suffix}")).unwrap(),
-        "Optional provider worker candidate",
-        crate::engine::FunctionVisibility::Public,
-        crate::engine::EffectClass::PureRead,
-    )
-    .with_request_schema(serde_json::json!({"type":"object"}))
-    .with_response_schema(serde_json::json!({"type":"object"}));
-    definition.model_tool = Some(crate::engine::ModelToolContract {
-        name: format!("candidate_{suffix}"),
-        audience: crate::engine::ModelToolAudience::Ordinary,
-        order: None,
-        group: None,
-        worker: Some(crate::engine::DirectWorkerToolContract {
-            worker_id: format!("candidate-{suffix}"),
-            worker_name: format!("Candidate {suffix}"),
-            worker_description: "Optional provider worker candidate".to_owned(),
-            worker_version: "v1".to_owned(),
-            runner_kind: "command".to_owned(),
-            updated_at: String::new(),
-            intents: vec!["optional provider worker".to_owned()],
-            examples: vec!["optional provider worker".to_owned()],
-            provenance: vec!["test".to_owned()],
-        }),
-    });
-    host.register_function_for_setup(
-        definition,
-        Arc::new(BlockingOptionalHook {
-            kind: OptionalHookKind::Mailbox,
-            started: Arc::new(tokio::sync::Semaphore::new(0)),
-            release: Arc::new(tokio::sync::Semaphore::new(0)),
         }),
     )
     .unwrap();
@@ -545,21 +503,11 @@ async fn initial_provider_call_does_not_wait_for_optional_policy_workers() {
     );
     register_blocking_optional_hook(
         &host,
-        crate::domains::worker_kernel::WORKER_RELEVANCE_FUNCTION,
-        OptionalHookKind::Relevance,
-        optional_started.clone(),
-        optional_release.clone(),
-    );
-    register_blocking_optional_hook(
-        &host,
         "worker_kernel::mailbox_curation",
         OptionalHookKind::Mailbox,
         optional_started.clone(),
         optional_release.clone(),
     );
-    for ordinal in 0..13 {
-        register_semantic_candidate(&host, &format!("optional-{ordinal}"));
-    }
 
     let mailbox_host = host.clone();
     let mailbox_session_id = session_id.clone();
@@ -615,7 +563,7 @@ async fn initial_provider_call_does_not_wait_for_optional_policy_workers() {
 
     tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        optional_started.acquire_many(3),
+        optional_started.acquire_many(2),
     )
     .await
     .expect("all optional policies should begin")
@@ -630,7 +578,7 @@ async fn initial_provider_call_does_not_wait_for_optional_policy_workers() {
     .unwrap()
     .forget();
 
-    optional_release.add_permits(3);
+    optional_release.add_permits(2);
     provider_release.add_permits(1);
     execute.await.unwrap();
     assert!(mailbox.await.unwrap().error.is_none());

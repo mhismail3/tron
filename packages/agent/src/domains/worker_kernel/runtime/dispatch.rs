@@ -122,6 +122,8 @@ impl WorkerRuntime {
             let queued = self.enqueue_request(InvokeRequest {
                 worker_id: worker_id.clone(),
                 input,
+                model: None,
+                reasoning_level: None,
                 idempotency_key: format!("schedule:{id}:{due_at}"),
                 trace_id: format!("worker-schedule-{}", uuid::Uuid::now_v7()),
                 causal_depth: 0,
@@ -260,6 +262,8 @@ impl WorkerRuntime {
                 match self.enqueue_request(InvokeRequest {
                     worker_id: event_worker,
                     input: merged,
+                    model: None,
+                    reasoning_level: None,
                     idempotency_key,
                     trace_id,
                     causal_depth,

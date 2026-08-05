@@ -14,6 +14,22 @@ struct ChatTranscriptRevealPolicyTests {
         #expect(ChatTranscriptRevealPolicy.contentOpacity(initialLoadComplete: true) == 1)
     }
 
+    @Test("Pending history shows loading instead of an empty transcript")
+    func pendingHistoryShowsLoadingState() {
+        #expect(ChatTranscriptRevealPolicy.showsHistoryLoadingState(
+            hasAuthoritativeSnapshot: false,
+            hasMessages: false
+        ))
+        #expect(!ChatTranscriptRevealPolicy.showsHistoryLoadingState(
+            hasAuthoritativeSnapshot: false,
+            hasMessages: true
+        ))
+        #expect(!ChatTranscriptRevealPolicy.showsHistoryLoadingState(
+            hasAuthoritativeSnapshot: true,
+            hasMessages: false
+        ))
+    }
+
     @Test("Transcript reveal and shell loading have hard responsiveness budgets")
     func initialLoadingBudgetsAreBounded() {
         #expect(ChatTranscriptRevealPolicy.maximumTranscriptRevealDelayMilliseconds <= 400)

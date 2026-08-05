@@ -112,6 +112,7 @@ struct WorkerConsoleDashboardBand: View {
 struct WorkerConsoleSheet: View {
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
+    let modelRepository: any ModelRepository
     let connectionState: ConnectionState
 
     @State private var selectedSection: EngineDashboardSection = .workers
@@ -158,12 +159,6 @@ struct WorkerConsoleSheet: View {
             .sheet(isPresented: selectedWorkerPresented) {
                 if let worker = viewModel.selectedWorker {
                     switch WorkerExperienceRoute.resolve(worker) {
-                    case .workLedger:
-                        WorkLedgerSheet(
-                            consoleViewModel: viewModel,
-                            repository: repository,
-                            connectionState: connectionState
-                        )
                     case .researchSuite:
                         ResearchSuiteSheet(
                             consoleViewModel: viewModel,
@@ -180,6 +175,7 @@ struct WorkerConsoleSheet: View {
                         WorkerDetailSheet(
                             viewModel: viewModel,
                             repository: repository,
+                            modelRepository: modelRepository,
                             connectionState: connectionState
                         )
                     }
@@ -187,6 +183,7 @@ struct WorkerConsoleSheet: View {
                     WorkerDetailSheet(
                         viewModel: viewModel,
                         repository: repository,
+                        modelRepository: modelRepository,
                         connectionState: connectionState
                     )
                 }

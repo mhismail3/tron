@@ -110,6 +110,39 @@ fn profile_owned_worker_mutations_do_not_require_a_session() {
 }
 
 #[test]
+fn worker_invoke_admits_normal_model_overrides_but_not_retry_overrides() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let invoke = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::invoke")
+        .expect("worker invoke contract");
+    let schema = invoke.request_schema.as_ref().expect("request schema");
+    crate::engine::validate_engine_schema_payload(
+        &invoke.id,
+        "request",
+        schema,
+        &json!({
+            "workerId":"research",
+            "input":{},
+            "idempotencyKey":"override-once",
+            "mode":"wait",
+            "model":"claude-sonnet-4-6",
+            "reasoningLevel":"high"
+        }),
+    )
+    .expect("normal invocation override");
+    let retry = json!({
+        "retryOfInvocationId":"worker_run_previous",
+        "mode":"wait",
+        "model":"claude-sonnet-4-6"
+    });
+    assert!(
+        crate::engine::validate_engine_schema_payload(&invoke.id, "request", schema, &retry,)
+            .is_err()
+    );
+}
+
+#[test]
 fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
     let upsert = function_definitions()
         .unwrap()
@@ -244,8 +277,7 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
             "context_summary",
             "mailbox_curation",
             "session_organization",
-            "session_title",
-            "worker_relevance"
+            "session_title"
         ])
     );
     let hook_description = bundle["properties"]["engineHooks"]["description"]
@@ -264,7 +296,6 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
         "narrative:string(1..40000 characters)",
         "authoritative runtime ceilings of 10000 estimated tokens and 40000 UTF-8 bytes",
         "mailbox_curation input is a closed object",
-        "worker_relevance input is a closed object",
         "do not inspect Tron databases, auth stores, binaries, runtime files, or private server endpoints",
     ] {
         assert!(
@@ -340,17 +371,6 @@ fn session_title_is_an_internal_automatic_hook_not_a_model_primitive() {
     assert_eq!(response["additionalProperties"], false);
     assert!(response["properties"]["invocationId"].is_object());
     assert!(response["properties"].get("title").is_none());
-    assert!(hook.model_tool.is_none());
-}
-
-#[test]
-fn worker_relevance_is_internal_policy_not_provider_ceremony() {
-    let definitions = function_definitions().expect("worker-kernel contracts");
-    let hook = definitions
-        .iter()
-        .find(|definition| definition.id.as_str() == WORKER_RELEVANCE_FUNCTION)
-        .expect("worker relevance contract");
-    assert_eq!(hook.visibility, FunctionVisibility::Internal);
     assert!(hook.model_tool.is_none());
 }
 

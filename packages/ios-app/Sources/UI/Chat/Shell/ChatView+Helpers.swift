@@ -73,6 +73,23 @@ extension ChatView {
 
     // MARK: - Message Visibility Animation
 
+    /// Reveal device-cached history without waiting for network reconstruction
+    /// or consuming a deep-link target that may require a newer server page.
+    func revealCachedTranscript(guardedBy ticket: ChatViewTaskTicket? = nil) async {
+        guard !viewModel.messages.isEmpty else { return }
+        _ = await waitForInitialScrollProxy()
+        guard isCurrent(ticket), !Task.isCancelled else { return }
+        scrollToBottom()
+        viewModel.animationCoordinator.makeAllMessagesVisible(
+            count: viewModel.messages.count
+        )
+        initialLoadComplete = true
+        logger.debug(
+            "[INIT] Revealed \(viewModel.messages.count) cached messages while authoritative reconstruction continues",
+            category: .ui
+        )
+    }
+
     /// Handle initial message visibility on session load.
     /// Measures while content is hidden, then reveals short transcripts at the
     /// top or settles overflowing transcripts at the bottom before fading in.

@@ -290,6 +290,11 @@ invalidation/change-feed contract only.
 
 `WorkerKernelClient` exposes:
 
+- worker invocation accepts optional model and reasoning overrides. The Worker
+  Console loads the server model catalog, offers Worker default plus supported
+  models/reasoning levels, and shows requested/effective evidence returned by
+  the invocation. Retry remains server-pinned and exposes no override control;
+
 - list and inspect;
 - bounded run history, exact invocation/model-tool graph lookup, and inbox;
 - bounded RFC 6901 result reads for a completed invocation;
@@ -492,21 +497,7 @@ to finish that user action; it rejects a mismatched reference, child
 projection, or truncated root instead of assembling client-owned result state.
 Reconnect and server switching refetch references and pages from server truth.
 
-The first supported contract is `work-ledger` version 1. `WorkLedgerViewModel`
-invokes the worker's single typed `snapshot` action to load goals, questions,
-decisions, aggregate status, and bounded recent history. It never reads the
-worker's SQLite state directly. Mutations use the same flat worker tool contract
-as agents and then refresh one authoritative snapshot. The native sheet
-provides status summaries, goal/question filters, goal/question/decision detail
-sheets, creation and editing, completion/cancellation, answer/resolution, linked
-record context, empty/offline/error states, and recent durable activity. Its
-single top-bar plus action creates the record kind for the selected domain tab;
-from Activity it offers Goal, Question, and Decision explicitly. The info
-action opens Contract and Manage. The generic console remains the
-export/import, dependency/link, operational, and recovery surface until real
-use justifies additional native controls.
-
-The second supported contract is the primary `research-suite` version 1
+The first supported contract is the primary `research-suite` version 1
 entrypoint. Its four workers remain independently versioned and independently
 operable; only the coordinator's `primary` presentation binding opens the
 grouped Research experience. `ResearchSuiteViewModel` filters the canonical
@@ -734,10 +725,16 @@ Configured session creation publishes the new local session projection before
 navigating or dismissing its sheet. Chat identity also includes the
 selected-server generation, so a deep link or server switch cannot reuse a
 view model backed by the previous server's repositories. Initial
-reconstruction has a five-second presentation watchdog: cached, empty, or
-recoverable-failure state becomes interactive instead of leaving the composer
-permanently at “Loading latest messages.” Transcript reveal is bounded to
-roughly 400 ms; any final bottom correction continues after content is visible.
+reconstruction first mounts any durable rows already held by the device event
+cache, then refreshes them from the server-authoritative snapshot. Successful
+snapshots update that cache, and leaving a connected interactive session starts
+one incremental cache refresh. This makes repeat opens local-first without
+allowing cached rows to release the live-event reconstruction gate or declare a
+session empty. A five-second presentation watchdog may reveal the shell, but a
+pending snapshot with no cached messages retains an explicit conversation
+loading state and a read-only composer instead of masquerading as an empty
+transcript. Transcript reveal is bounded to roughly 400 ms; any final bottom
+correction continues after content is visible.
 
 The server-backed workspace browser uses its toolbar title as the current-path
 breadcrumb. The full abbreviated path remains available to accessibility, while
@@ -1095,6 +1092,10 @@ reminders; they are not a general device-control surface.
   has no selected session the action stays unavailable. Merely opening,
   previewing, sharing, exporting, or deleting an artifact never mutates a draft.
   The client does not interpret worker URLs, paths, HTML, or arbitrary commands.
+- The empty Artifact Inbox offers Create through chat. It posts one
+  session-targeted request, dismisses Settings, and prefills an artifact request
+  in the matching mounted chat without sending it. The user remains in control
+  of the final content, format, and submission.
 - Open, Complete, Snooze, and clear-read mutations enter a durable per-server
   outbox, apply optimistically, retry after reconnect/foreground, and reconcile
   to the engine's first-wins terminal state. Quiet pushes refresh one server;
@@ -1180,7 +1181,6 @@ xcodebuild test \
   -only-testing:TronMobileTests/WorkerConsoleInteractionTests \
   -only-testing:TronMobileTests/WorkerConsolePresentationTests \
   -only-testing:TronMobileTests/WorkerConsoleViewModelTests \
-  -only-testing:TronMobileTests/WorkLedgerViewModelTests \
   -only-testing:TronMobileTests/ResearchSuiteViewModelTests \
   -only-testing:TronMobileTests/SettingsParityTests
 ```

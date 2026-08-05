@@ -10,6 +10,9 @@ impl WorkerStore {
         if enabled && prior.retired {
             return Err("a retired worker must be rolled back before it can be enabled".to_owned());
         }
+        if enabled {
+            validate_publishable_bundle(&self.load_active(worker_id)?.bundle)?;
+        }
         let mut state = prior.clone();
         state.enabled = enabled;
         state.health = if enabled { "healthy" } else { "disabled" }.to_owned();
@@ -169,6 +172,7 @@ impl WorkerStore {
         version: &str,
     ) -> Result<(WorkerSummary, Vec<WebhookCredential>), String> {
         let bundle = self.load_version(worker_id, version)?.bundle;
+        validate_publishable_bundle(&bundle)?;
         let prior = self
             .read_state(worker_id)?
             .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;

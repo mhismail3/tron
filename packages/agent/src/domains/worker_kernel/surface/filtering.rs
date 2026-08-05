@@ -123,7 +123,6 @@ pub(super) fn retrieval_document(
         description: worker.worker_description.clone(),
         intents: worker.intents.clone(),
         examples: worker.examples.clone(),
-        provenance: worker.provenance.clone(),
         completed_runs: evidence
             .and_then(|evidence| evidence.pointer("/successEvidence/completedRuns"))
             .and_then(Value::as_u64)

@@ -99,6 +99,7 @@ struct DelegationSheet: View {
                 WorkerDetailSheet(
                     viewModel: technicalViewModel,
                     repository: repository,
+                    modelRepository: dependencies.modelRepository,
                     connectionState: connectionState,
                     mode: .technical
                 )

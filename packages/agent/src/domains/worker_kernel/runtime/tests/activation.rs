@@ -181,6 +181,8 @@ async fn last30days_replay_activates_one_typed_worker_and_survives_restart() {
             causal_depth: 0,
             trigger_kind: "webhook".to_owned(),
             origin_session_id: None,
+            model: None,
+            reasoning_level: None,
         })
         .await
         .unwrap();
