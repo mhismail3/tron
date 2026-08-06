@@ -146,6 +146,8 @@ single fail-closed merge gate. A successful ready-PR run publishes evidence for
 the exact synthetic merge tree. The `main` run verifies that evidence and its
 GitHub artifact digest before reusing it; missing, ambiguous, stale, malformed,
 or tree-mismatched evidence automatically runs the complete matrix again.
+Artifact redirects are fetched from signed blob storage without forwarding the
+GitHub bearer credential across origins.
 
 The path classifier is repository-owned `scripts/ci-change-flags.sh`; fast
 feedback reports its result without letting path filtering weaken the merge
