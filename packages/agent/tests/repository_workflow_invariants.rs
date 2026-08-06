@@ -794,7 +794,8 @@ fn release_workflows_fail_closed_before_live_builds() {
     let archive_script = workflow_step_script(&ios, "xcodebuild archive");
     for required in [
         "CODE_SIGN_STYLE=Manual",
-        "CODE_SIGN_IDENTITY=\"$IOS_DISTRIBUTION_IDENTITY\"",
+        "CODE_SIGN_IDENTITY=\"$IOS_DISTRIBUTION_IDENTITY_HASH\"",
+        "\"OTHER_CODE_SIGN_FLAGS=--keychain $IOS_SIGNING_KEYCHAIN_PATH\"",
         "\"PROVISIONING_PROFILE_SPECIFIER=\\$(TRON_APPSTORE_PROFILE_SPECIFIER)\"",
         "IOS_APP_PROFILE_SPECIFIER=\"$IOS_APP_PROFILE_SPECIFIER\"",
         "IOS_SHARE_PROFILE_SPECIFIER=\"$IOS_SHARE_PROFILE_SPECIFIER\"",
@@ -846,11 +847,14 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "baseline_keychain=\"$HOME/Library/Keychains/tron-runner-baseline.keychain-db\"",
         "security list-keychains -d user -s \"$baseline_keychain\"",
         "security default-keychain -d user -s \"$baseline_keychain\"",
-        "security list-keychains -d user -s \"$keychain_path\" \"${original_keychains[@]}\"",
+        "keychain_path=\"$HOME/Library/Keychains/tron-ios-signing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.keychain-db\"",
+        "system_keychain=\"/Library/Keychains/System.keychain\"",
+        "system_root_keychain=\"/System/Library/Keychains/SystemRootCertificates.keychain\"",
         "security default-keychain -d user -s \"$keychain_path\"",
         "apple_root_path=\"$RUNNER_TEMP/AppleIncRootCertificate.cer\"",
         "wwdr_path=\"$RUNNER_TEMP/AppleWWDRCAG3.cer\"",
         "signing_probe=\"$RUNNER_TEMP/tron-signing-probe\"",
+        "signing_probe_error=\"$RUNNER_TEMP/tron-signing-probe.stderr\"",
         "-T /usr/bin/xcodebuild >/dev/null",
         "\"$keychain_path\" >/dev/null",
         "ios-installed-profile-uuids",
@@ -866,7 +870,7 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         .find(": > \"$snapshot_ready\"")
         .expect("manual signing must mark a complete snapshot");
     let mutation = workflow
-        .find("security list-keychains -d user -s \"$keychain_path\"")
+        .find("security list-keychains -d user -s \\\n            \"$keychain_path\"")
         .expect("manual signing must prepend its keychain");
     assert!(
         snapshot < mutation,
@@ -878,29 +882,48 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "TRON_RELEASE_APPLE_ROOT_SHA256",
         "TRON_RELEASE_APPLE_WWDR_G3_URL",
         "TRON_RELEASE_APPLE_WWDR_G3_SHA256",
-        "import_public_certificate()",
-        "security verify-cert -c \"$destination\"",
-        "security import \"$destination\" -k \"$keychain_path\" >/dev/null",
-        "codesign --force --sign \"$IOS_DISTRIBUTION_IDENTITY\"",
-        "codesign --verify --strict \"$signing_probe\"",
+        "download_public_certificate()",
+        "-N \\",
+        "-p codeSign \\",
+        "-c \"$leaf_path\" \\",
+        "-c \"$wwdr_path\" \\",
+        "-r \"$apple_root_path\" \\",
+        "security import \"$wwdr_path\" -k \"$keychain_path\" >/dev/null",
+        "-S apple-tool:,apple:",
+        "--sign \"$identity_hash\"",
+        "--keychain \"$keychain_path\"",
+        "codesign-diagnostic --log \"$signing_probe_error\"",
+        "--extract-certificates=\"$signing_probe_cert_prefix\"",
+        "embedded_wwdr_sha",
+        "embedded_root_sha",
+        "IOS_DISTRIBUTION_IDENTITY_HASH=$identity_hash",
+        "profile-certificate \\",
+        "--leaf-certificate \"$leaf_der_path\"",
     ] {
         assert!(
             signing.contains(required),
             "manual signing must validate its isolated certificate chain through {required}"
         );
     }
-    let root_import = signing
+    let root_download = signing
         .find("\"$TRON_RELEASE_APPLE_ROOT_URL\"")
-        .expect("manual signing must import Apple's root");
-    let wwdr_import = signing
+        .expect("manual signing must download Apple's root");
+    let wwdr_download = signing
         .find("\"$TRON_RELEASE_APPLE_WWDR_G3_URL\"")
-        .expect("manual signing must import Apple's intermediate");
+        .expect("manual signing must download Apple's intermediate");
+    let exact_chain = signing
+        .find("-N \\")
+        .expect("manual signing must verify the exact pinned chain");
     let signing_probe = signing
-        .find("codesign --force --sign")
+        .find("--sign \"$identity_hash\"")
         .expect("manual signing must prove non-interactive key access");
     assert!(
-        root_import < wwdr_import && wwdr_import < signing_probe,
-        "the complete pinned chain must be imported before non-interactive signing is tested"
+        root_download < wwdr_download && wwdr_download < exact_chain && exact_chain < signing_probe,
+        "the exact pinned chain must validate before non-interactive signing is tested"
+    );
+    assert!(
+        !signing.contains("security import \"$apple_root_path\""),
+        "the system-trusted Apple root must not be duplicated in a temporary user keychain"
     );
     assert!(
         signing.contains("-T /usr/bin/xcodebuild >/dev/null")
@@ -923,9 +946,13 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "security delete-keychain \"$keychain_path\"",
         "tron-asc-api-key.p8",
         "ios-distribution.p12",
+        "ios-distribution-leaf.pem",
+        "ios-distribution-leaf.cer",
         "AppleIncRootCertificate.cer",
         "AppleWWDRCAG3.cer",
         "tron-signing-probe",
+        "tron-signing-probe.stderr",
+        "tron-signing-probe-cert-0",
         "installed_profile_uuids",
         "exit \"$cleanup_failed\"",
     ] {
@@ -973,11 +1000,22 @@ fi
     std::fs::set_permissions(&security, permissions).unwrap();
 
     let uuid = "12345678-1234-1234-1234-123456789ABC";
-    let keychain = runner_temp.join("ios-signing.keychain-db");
+    let keychains = home.join("Library/Keychains");
+    std::fs::create_dir_all(&keychains).unwrap();
+    let keychain = keychains.join("tron-ios-signing-12345-1.keychain-db");
     let profile = profiles.join(format!("{uuid}.mobileprovision"));
     let transient_names = [
         "tron-asc-api-key.p8",
         "ios-distribution.p12",
+        "ios-distribution-leaf.pem",
+        "ios-distribution-leaf.cer",
+        "AppleIncRootCertificate.cer",
+        "AppleWWDRCAG3.cer",
+        "tron-signing-probe",
+        "tron-signing-probe.stderr",
+        "tron-signing-probe-cert-0",
+        "tron-signing-probe-cert-1",
+        "tron-signing-probe-cert-2",
         "app.mobileprovision",
         "share-extension.mobileprovision",
         "app-profile.plist",
@@ -1013,6 +1051,8 @@ fi
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
             .env("RUNNER_TEMP", &runner_temp)
             .env("HOME", &home)
+            .env("GITHUB_RUN_ID", "12345")
+            .env("GITHUB_RUN_ATTEMPT", "1")
             .env("GITHUB_WORKSPACE", &workspace)
             .env("SECURITY_LOG", &security_log)
             .env(
@@ -1077,6 +1117,7 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "\"$runner_user\" == \"tron-ci\"",
         "ACTIONS_RUNNER_SVC",
         "launchctl manageruid",
+        "security-session --require-non-root",
         "/usr/bin/stat -f '%Lp' \"$HOME\"",
         "id -Gn \"$runner_user\"",
         "GITHUB_WORKSPACE",

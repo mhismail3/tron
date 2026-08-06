@@ -4,20 +4,101 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import plistlib
 import re
+import sys
 import tempfile
 from pathlib import Path
 
 
 SCHEMA = "tron.ios-release-provenance.v1"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+MAX_DIAGNOSTIC_BYTES = 1024 * 1024
+
+CODESIGN_FAILURE_PATTERNS = (
+    (
+        "untrusted-certificate-chain",
+        (
+            "unable to build chain to self-signed root",
+            "cssmerr_tp_not_trusted",
+            "cssmerr_tp_invalid_anchor_cert",
+        ),
+    ),
+    (
+        "keychain-interaction-not-allowed",
+        ("user interaction is not allowed", "errsecinteractionnotallowed"),
+    ),
+    ("keychain-locked", ("errsecnotavailable", "the specified keychain is locked")),
+    (
+        "signing-identity-not-found",
+        (
+            "no identity found",
+            "the specified item could not be found in the keychain",
+        ),
+    ),
+    ("keychain-security-context", ("errsecinternalcomponent",)),
+)
 
 
 class VerificationError(RuntimeError):
     pass
+
+
+def classify_codesign_log(path: Path) -> dict:
+    if not path.is_file():
+        raise VerificationError("codesign diagnostic log is missing")
+    with path.open("rb") as handle:
+        handle.seek(0, 2)
+        size = handle.tell()
+        handle.seek(max(0, size - MAX_DIAGNOSTIC_BYTES))
+        contents = handle.read(MAX_DIAGNOSTIC_BYTES).decode("utf-8", errors="replace")
+    normalized = contents.casefold()
+    classification = "unknown"
+    for candidate, patterns in CODESIGN_FAILURE_PATTERNS:
+        if any(pattern in normalized for pattern in patterns):
+            classification = candidate
+            break
+    return {"classification": classification}
+
+
+def inspect_security_session(require_non_root: bool) -> dict:
+    if sys.platform != "darwin":
+        raise VerificationError("security-session inspection requires macOS")
+    security = ctypes.CDLL(
+        "/System/Library/Frameworks/Security.framework/Security"
+    )
+    session_get_info = security.SessionGetInfo
+    session_get_info.argtypes = (
+        ctypes.c_uint32,
+        ctypes.POINTER(ctypes.c_uint32),
+        ctypes.POINTER(ctypes.c_uint32),
+    )
+    session_get_info.restype = ctypes.c_int32
+    session_id = ctypes.c_uint32()
+    attributes = ctypes.c_uint32()
+    status = session_get_info(
+        ctypes.c_uint32(0xFFFFFFFF),
+        ctypes.byref(session_id),
+        ctypes.byref(attributes),
+    )
+    if status != 0:
+        raise VerificationError(f"SessionGetInfo failed with status {status}")
+    value = attributes.value
+    document = {
+        "session_id": session_id.value,
+        "is_root": bool(value & 0x0001),
+        "has_graphics": bool(value & 0x0010),
+        "has_tty": bool(value & 0x0020),
+        "is_remote": bool(value & 0x1000),
+    }
+    if require_non_root and document["is_root"]:
+        raise VerificationError(
+            "release runner inherited the root macOS security session"
+        )
+    return document
 
 
 def read_plist(path: Path) -> dict:
@@ -25,6 +106,24 @@ def read_plist(path: Path) -> dict:
         raise VerificationError(f"missing plist: {path}")
     with path.open("rb") as handle:
         return plistlib.load(handle)
+
+
+def verify_profile_certificate(args: argparse.Namespace) -> dict:
+    profile = read_plist(Path(args.profile_plist).resolve())
+    leaf_path = Path(args.leaf_certificate).resolve()
+    if not leaf_path.is_file():
+        raise VerificationError("validated distribution leaf is missing")
+    leaf = leaf_path.read_bytes()
+    certificates = profile.get("DeveloperCertificates")
+    if not isinstance(certificates, list) or not certificates:
+        raise VerificationError("profile has no developer certificates")
+    if any(not isinstance(certificate, bytes) for certificate in certificates):
+        raise VerificationError("profile developer certificate data is malformed")
+    if leaf not in certificates:
+        raise VerificationError(
+            "profile does not admit the validated distribution certificate"
+        )
+    return {"certificate_count": len(certificates), "leaf_admitted": True}
 
 
 def require_equal(plist: dict, key: str, expected: str, owner: str) -> None:
@@ -160,8 +259,9 @@ def fixture_archive(root: Path) -> Path:
 
 def self_test() -> None:
     with tempfile.TemporaryDirectory() as temp:
-        archive = fixture_archive(Path(temp))
-        ipa = Path(temp) / "Fixture.ipa"
+        root = Path(temp)
+        archive = fixture_archive(root)
+        ipa = root / "Fixture.ipa"
         ipa.write_bytes(b"fixture ipa")
         base = argparse.Namespace(
             archive=str(archive), app_bundle_id="com.example.app",
@@ -203,6 +303,45 @@ def self_test() -> None:
         if document["product"]["ipa_sha256"] != sha256(ipa):
             raise AssertionError("fixture provenance recorded the wrong IPA hash")
 
+        diagnostic = root / "codesign.log"
+        classifications = (
+            (
+                'Warning: unable to build chain to self-signed root for signer "Example"\n'
+                "probe: errSecInternalComponent\n",
+                "untrusted-certificate-chain",
+            ),
+            ("User interaction is not allowed.\n", "keychain-interaction-not-allowed"),
+            ("probe: errSecInternalComponent\n", "keychain-security-context"),
+            ("unrecognized signing failure\n", "unknown"),
+        )
+        for contents, expected in classifications:
+            diagnostic.write_text(contents, encoding="utf-8")
+            result = classify_codesign_log(diagnostic)
+            if result != {"classification": expected}:
+                raise AssertionError(
+                    f"codesign classification {result!r}, expected {expected!r}"
+                )
+            if "Example" in json.dumps(result):
+                raise AssertionError("codesign diagnostics leaked certificate identity")
+
+        leaf = root / "leaf.cer"
+        leaf.write_bytes(b"validated leaf")
+        profile = root / "profile.plist"
+        with profile.open("wb") as handle:
+            plistlib.dump({"DeveloperCertificates": [b"validated leaf"]}, handle)
+        profile_args = argparse.Namespace(
+            profile_plist=str(profile), leaf_certificate=str(leaf)
+        )
+        if verify_profile_certificate(profile_args)["leaf_admitted"] is not True:
+            raise AssertionError("profile rejected its validated distribution leaf")
+        leaf.write_bytes(b"other leaf")
+        try:
+            verify_profile_certificate(profile_args)
+        except VerificationError:
+            pass
+        else:
+            raise AssertionError("profile accepted an unrelated distribution leaf")
+
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser()
@@ -225,6 +364,13 @@ def parser() -> argparse.ArgumentParser:
     provenance.add_argument("--run-attempt", required=True)
     provenance.add_argument("--xcode-version", required=True)
     provenance.add_argument("--output", required=True)
+    profile = commands.add_parser("profile-certificate")
+    profile.add_argument("--profile-plist", required=True)
+    profile.add_argument("--leaf-certificate", required=True)
+    diagnostic = commands.add_parser("codesign-diagnostic")
+    diagnostic.add_argument("--log", required=True)
+    security_session = commands.add_parser("security-session")
+    security_session.add_argument("--require-non-root", action="store_true")
     commands.add_parser("self-test")
     return root
 
@@ -236,6 +382,20 @@ def main() -> int:
             print(json.dumps(verify_archive(args), sort_keys=True))
         elif args.command == "provenance":
             print(json.dumps(write_provenance(args), sort_keys=True))
+        elif args.command == "profile-certificate":
+            print(json.dumps(verify_profile_certificate(args), sort_keys=True))
+        elif args.command == "codesign-diagnostic":
+            print(
+                json.dumps(
+                    classify_codesign_log(Path(args.log).resolve()), sort_keys=True
+                )
+            )
+        elif args.command == "security-session":
+            print(
+                json.dumps(
+                    inspect_security_session(args.require_non_root), sort_keys=True
+                )
+            )
         else:
             self_test()
             print("iOS release verification self-test passed")
