@@ -798,8 +798,8 @@ reports explicitly if that rollback cannot be verified. Never register this
 label on a general-purpose user account or add it to another workflow.
 
 Before changing the Xcode beta pin, install the candidate side-by-side, confirm
-Apple currently accepts that build for TestFlight, update version, build, SDK,
-runtime, and developer-directory fields together, then run:
+Apple currently accepts that build for TestFlight, and update the version,
+build, SDK, and developer-directory fields together, then run:
 
 ```bash
 scripts/ios-release-runner-doctor.sh

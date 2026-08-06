@@ -3,8 +3,9 @@
 # Every successful main-branch CI push uploads the exact tested production iOS
 # bundle (`com.tron.mobile`) to the all-build internal TestFlight group. Archives
 # run only on the locked-down release runner with the exact Xcode 27 pin in
-# `config/ci-toolchain.env`; hosted Xcode 26 CI continues to prove the iOS 26 floor. Release
-# tags retain the external/public TestFlight path and Beta App Review handling.
+# `config/ci-toolchain.env`; hosted Xcode 26 CI continues to prove the iOS 26
+# floor. Release tags retain the external/public TestFlight path and Beta App
+# Review handling.
 # Simulator/XCTest remains on hosted CI because the isolated release runner is
 # a system-domain service with no logged-in Aqua session; its Xcode 27 archive
 # is the SDK-linked compilation and distribution proof.
