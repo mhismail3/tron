@@ -298,14 +298,14 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertEqual(removed, 1)
         let staleSession = try await database.sessions.get("session-1999")
         let preservedFutureSession = try await database.sessions.get("session-future")
-        let retainedEventExists = try await database.events.exists("retained-event")
-        let staleEventExists = try await database.events.exists("stale-event")
-        let futureEventExists = try await database.events.exists("future-event")
+        let retainedEvent = try await database.events.get("retained-event")
+        let staleEvent = try await database.events.get("stale-event")
+        let futureEvent = try await database.events.get("future-event")
         XCTAssertNil(staleSession)
         XCTAssertNotNil(preservedFutureSession)
-        XCTAssertTrue(retainedEventExists)
-        XCTAssertFalse(staleEventExists)
-        XCTAssertTrue(futureEventExists)
+        XCTAssertNotNil(retainedEvent)
+        XCTAssertNil(staleEvent)
+        XCTAssertNotNil(futureEvent)
     }
 
     func testSnapshotReconciliationPreservesSessionCreatedNanosecondsAfterBoundary() async throws {
@@ -335,12 +335,12 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertEqual(removed, 1)
         let staleSession = try await database.sessions.get(stale.id)
         let futureSession = try await database.sessions.get(future.id)
-        let staleEventExists = try await database.events.exists("stale-event-ns")
-        let futureEventExists = try await database.events.exists("future-event-ns")
+        let staleEvent = try await database.events.get("stale-event-ns")
+        let futureEvent = try await database.events.get("future-event-ns")
         XCTAssertNil(staleSession)
         XCTAssertNotNil(futureSession)
-        XCTAssertFalse(staleEventExists)
-        XCTAssertTrue(futureEventExists)
+        XCTAssertNil(staleEvent)
+        XCTAssertNotNil(futureEvent)
     }
 
     func testInvalidSnapshotTimestampRollsBackEarlierUpserts() async throws {
@@ -386,10 +386,10 @@ final class SessionRepositoryTests: XCTestCase {
         } catch {
             let newSession = try await database.sessions.get("new-upsert")
             let staleCandidate = try await database.sessions.get("stale-candidate")
-            let candidateEventExists = try await database.events.exists("candidate-event")
+            let candidateEvent = try await database.events.get("candidate-event")
             XCTAssertNil(newSession)
             XCTAssertNotNil(staleCandidate)
-            XCTAssertTrue(candidateEventExists)
+            XCTAssertNotNil(candidateEvent)
         }
     }
 

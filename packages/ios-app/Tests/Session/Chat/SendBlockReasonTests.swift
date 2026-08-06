@@ -57,6 +57,19 @@ final class SendBlockReasonTests: XCTestCase {
         XCTAssertEqual(config(readOnly: true).sendBlockReason, .readOnly)
     }
 
+    func testHistorySynchronizationBlocksSubmissionButNotDraftEditing() {
+        let c = InputBarConfig(
+            allowsTextEntry: true,
+            allowsAttachments: false,
+            allowsSubmission: false,
+            availabilityBlockReason: .historySynchronizing
+        )
+        XCTAssertTrue(c.allowsTextEntry)
+        XCTAssertFalse(c.allowsAttachments)
+        XCTAssertFalse(c.canSend(hasContent: true))
+        XCTAssertEqual(c.sendBlockReason, .historySynchronizing)
+    }
+
     // MARK: - Priority order
 
     /// Read-only wins over everything else — the session cannot accept
@@ -83,7 +96,13 @@ final class SendBlockReasonTests: XCTestCase {
     // MARK: - Description text
 
     func testEveryReasonHasUserFacingDescription() {
-        for reason in [SendBlockReason.disconnected, .compacting, .readOnly] {
+        for reason in [
+            SendBlockReason.disconnected,
+            .compacting,
+            .readOnly,
+            .historySynchronizing,
+            .historyUnavailable,
+        ] {
             XCTAssertFalse(
                 reason.description.isEmpty,
                 "\(reason) must have a non-empty description for the tooltip"

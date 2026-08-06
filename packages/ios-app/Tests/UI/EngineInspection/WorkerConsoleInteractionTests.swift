@@ -648,11 +648,12 @@ struct WorkerConsoleInteractionTests {
         #expect(source.contains("ArtifactChatDraftRequest("))
         #expect(source.contains(".disabled(draftSessionId == nil)"))
         #expect(source.contains("private struct ArtifactPreviewSheet: View"))
-        #expect(source.contains("SheetTitle(title: \"Preview\", color: .tronEmerald)"))
-        #expect(source.contains("SheetDismissButton(color: .tronEmerald)"))
+        #expect(source.contains("SettingsPageContainer(title: \"Preview\", scrollsContent: false)"))
         #expect(source.contains(".workerConsoleSheetPresentation()"))
         #expect(source.contains(".safeAreaInset(edge: .bottom"))
         #expect(source.contains("ShareLink(item: url)"))
+        #expect(source.contains("TronScrollEdgeEffects.applySoftToDescendantScrollViews"))
+        #expect(source.contains(".glassEffect("))
         #expect(!source.contains("ArtifactQuickLookView(url: url)\n                    .ignoresSafeArea()"))
     }
 

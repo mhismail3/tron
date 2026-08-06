@@ -53,7 +53,7 @@ struct SessionContextRawJSONSheet: View {
                         .padding(.top, 16)
                         .padding(.bottom, 20)
                 } else {
-                    ProgressView(selection.loadingMessage)
+                    SheetLoadingState(label: selection.loadingMessage)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }

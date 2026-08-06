@@ -22,8 +22,6 @@ final class EventDatabase: DatabaseTransport {
     @ObservationIgnored
     lazy var sessions: SessionRepository = SessionRepository(transport: self)
     @ObservationIgnored
-    lazy var sync: SyncRepository = SyncRepository(transport: self)
-    @ObservationIgnored
     lazy var thinking: ThinkingRepository = ThinkingRepository(transport: self, eventRepository: events)
     @ObservationIgnored
     lazy var drafts: DraftRepository = DraftRepository(transport: self)
@@ -80,7 +78,6 @@ final class EventDatabase: DatabaseTransport {
     func clearAll() async throws {
         try await dbActor.exec("DELETE FROM events")
         try await dbActor.exec("DELETE FROM sessions")
-        try await dbActor.exec("DELETE FROM sync_state")
         try await dbActor.exec("DELETE FROM session_drafts")
     }
 }

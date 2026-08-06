@@ -40,54 +40,6 @@ final class EventRepository: @unchecked Sendable {
         }
     }
 
-    /// Insert multiple events in a transaction.
-    /// Reuses a single prepared statement (prepare once, rebind per iteration).
-    func insertBatch(_ events: [SessionEvent]) async throws {
-        guard !events.isEmpty else { return }
-        guard let transport = transport else {
-            throw EventDatabaseError.executeFailed("Database transport not available")
-        }
-
-        logger.debug("Starting batch insert of \(events.count) events", category: .database)
-
-        try await transport.withDB { db in
-            let sql = """
-                INSERT OR REPLACE INTO events
-                (id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """
-
-            guard sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil) == SQLITE_OK else {
-                throw EventDatabaseError.executeFailed(sqliteErrorMessage(db))
-            }
-            do {
-                var stmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-                    throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
-                }
-                defer { sqlite3_finalize(stmt) }
-
-                for event in events {
-                    sqlite3_reset(stmt)
-                    sqlite3_clear_bindings(stmt)
-                    try Self.bindEvent(event, to: stmt)
-
-                    guard sqlite3_step(stmt) == SQLITE_DONE else {
-                        throw EventDatabaseError.insertFailed(sqliteErrorMessage(db))
-                    }
-                }
-                guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
-                    throw EventDatabaseError.executeFailed(sqliteErrorMessage(db))
-                }
-                logger.info("Batch insert committed: \(events.count) events", category: .database)
-            } catch {
-                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
-                logger.error("Batch insert rolled back: \(error.localizedDescription)", category: .database)
-                throw error
-            }
-        }
-    }
-
     /// Insert events, ignoring any that already exist (by ID).
     /// Returns the number of events actually inserted.
     func insertIgnoringDuplicates(_ events: [SessionEvent]) async throws -> Int {
@@ -144,7 +96,7 @@ final class EventRepository: @unchecked Sendable {
         }
     }
 
-    /// Bind event fields to a prepared statement (shared by insert, insertBatch, insertIgnoringDuplicates).
+    /// Bind event fields to a prepared statement shared by both supported insert paths.
     private static func bindEvent(_ event: SessionEvent, to stmt: OpaquePointer?) throws {
         sqlite3_bind_text(stmt, 1, event.id, -1, SQLITE_TRANSIENT_DESTRUCTOR)
         if let parentId = event.parentId {
@@ -246,63 +198,6 @@ final class EventRepository: @unchecked Sendable {
         return ancestors
     }
 
-    /// Get direct children of an event
-    func getChildren(_ eventId: String) async throws -> [SessionEvent] {
-        guard let transport = transport else {
-            throw EventDatabaseError.executeFailed("Database transport not available")
-        }
-
-        return try await transport.withDB { db in
-            let sql = """
-                SELECT id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload
-                FROM events WHERE parent_id = ?
-            """
-
-            var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-                throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
-            }
-            defer { sqlite3_finalize(stmt) }
-
-            sqlite3_bind_text(stmt, 1, eventId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-
-            var children: [SessionEvent] = []
-            var rowIndex = 0
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                do {
-                    let event = try Self.parseEventRow(stmt)
-                    children.append(event)
-                } catch {
-                    logger.warning("Failed to parse event row: parentId=\(eventId.prefix(12))..., rowIndex=\(rowIndex), error=\(error.localizedDescription)", category: .database)
-                }
-                rowIndex += 1
-            }
-
-            return children
-        }
-    }
-
-    /// Check if an event exists
-    func exists(_ id: String) async throws -> Bool {
-        guard let transport = transport else {
-            throw EventDatabaseError.executeFailed("Database transport not available")
-        }
-
-        return try await transport.withDB { db in
-            let sql = "SELECT 1 FROM events WHERE id = ? LIMIT 1"
-
-            var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-                throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
-            }
-            defer { sqlite3_finalize(stmt) }
-
-            sqlite3_bind_text(stmt, 1, id, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-
-            return sqlite3_step(stmt) == SQLITE_ROW
-        }
-    }
-
     // MARK: - Delete Operations
 
     /// Delete all events for a session
@@ -330,48 +225,6 @@ final class EventRepository: @unchecked Sendable {
 
             let deletedCount = Int(sqlite3_changes(db))
             logger.info("Deleted \(deletedCount) events for session: \(sessionId.prefix(12))...", category: .database)
-        }
-    }
-
-    /// Delete events by their IDs
-    func delete(ids: [String]) async throws {
-        guard !ids.isEmpty else { return }
-        guard let transport = transport else {
-            throw EventDatabaseError.executeFailed("Database transport not available")
-        }
-
-        logger.debug("Deleting \(ids.count) events by ID", category: .database)
-
-        try await transport.withDB { db in
-            guard sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil) == SQLITE_OK else {
-                throw EventDatabaseError.executeFailed(sqliteErrorMessage(db))
-            }
-            do {
-                let sql = "DELETE FROM events WHERE id = ?"
-                var stmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-                    throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
-                }
-                defer { sqlite3_finalize(stmt) }
-
-                for id in ids {
-                    sqlite3_reset(stmt)
-                    sqlite3_clear_bindings(stmt)
-                    sqlite3_bind_text(stmt, 1, id, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-
-                    guard sqlite3_step(stmt) == SQLITE_DONE else {
-                        throw EventDatabaseError.deleteFailed(sqliteErrorMessage(db))
-                    }
-                }
-                guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
-                    throw EventDatabaseError.executeFailed(sqliteErrorMessage(db))
-                }
-                logger.info("Deleted \(ids.count) events by ID", category: .database)
-            } catch {
-                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
-                logger.error("Delete by IDs rolled back: \(error.localizedDescription)", category: .database)
-                throw error
-            }
         }
     }
 

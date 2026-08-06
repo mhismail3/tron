@@ -699,139 +699,8 @@ final class CachedSessionTests: XCTestCase {
         await manager.shutdown()
     }
 
-    func testIncrementalSyncKeepsInitiatingClientAndCommitsCompletedPage() async throws {
-        let database = testState.makeDatabase(fileName: "captured-incremental-sync.db")
-        try await database.initialize()
-        try await database.sessions.insert(createTestSession(id: "session-a"))
-        let clientA = makeEngineClient(port: 65518)
-        let clientB = makeEngineClient(port: 65517)
-        let transportA = makeConnectedTransport(port: 65518)
-        let transportB = makeConnectedTransport(port: 65517)
-        clientA.eventSync = EventSyncClient(transport: transportA)
-        clientB.eventSync = EventSyncClient(transport: transportB)
-
-        var manager: EventStoreManager!
-        var clientAReads = 0
-        var clientBReads = 0
-        transportA.readHandler = { functionId, payload, _ in
-            guard functionId.rawValue == "events::get_since",
-                  let params = payload as? EventsGetSinceParams else {
-                throw EngineConnectionError.invalidResponse
-            }
-            clientAReads += 1
-            if clientAReads == 1 {
-                XCTAssertNil(params.afterEventId)
-                manager.updateEngineClient(clientB)
-                return EventsGetSinceResult(
-                    events: [self.makeRawEvent(id: "event-a-1", sessionId: "session-a", sequence: 1)],
-                    nextCursor: nil,
-                    hasMore: true
-                )
-            }
-            XCTAssertEqual(params.afterEventId, "event-a-1")
-            throw EngineConnectionError.invalidResponse
-        }
-        transportB.readHandler = { _, _, _ in
-            clientBReads += 1
-            throw EngineConnectionError.invalidResponse
-        }
-        manager = EventStoreManager(
-            eventDB: database,
-            engineClient: clientA,
-            defaults: testState.defaults
-        )
-
-        do {
-            try await manager.syncSessionEvents(sessionId: "session-a")
-            XCTFail("Expected the second page to fail")
-        } catch EngineConnectionError.invalidResponse {
-            // The first page is already durable and must have matching metadata.
-        }
-
-        let events = try await database.events.getBySession("session-a")
-        let syncState = try await database.sync.getState("session-a")
-        let cachedSession = try await database.sessions.get("session-a")
-        XCTAssertEqual(events.map(\.id), ["event-a-1"])
-        XCTAssertEqual(syncState?.lastSyncedEventId, "event-a-1")
-        XCTAssertEqual(cachedSession?.eventCount, 1)
-        XCTAssertEqual(cachedSession?.headEventId, "event-a-1")
-        XCTAssertEqual(clientAReads, 2)
-        XCTAssertEqual(clientBReads, 0)
-        await manager.shutdown()
-    }
-
-    func testFullSyncKeepsInitiatingClientForAncestorFetch() async throws {
-        let database = testState.makeDatabase(fileName: "captured-full-sync.db")
-        try await database.initialize()
-        try await database.events.insert(
-            makeSessionEvent(id: "stale-event", sessionId: "session-a", sequence: 0)
-        )
-        let clientA = makeEngineClient(port: 65516)
-        let clientB = makeEngineClient(port: 65515)
-        let transportA = makeConnectedTransport(port: 65516)
-        let transportB = makeConnectedTransport(port: 65515)
-        clientA.eventSync = EventSyncClient(transport: transportA)
-        clientB.eventSync = EventSyncClient(transport: transportB)
-
-        var manager: EventStoreManager!
-        var clientAAncestorReads = 0
-        var clientBReads = 0
-        transportA.readHandler = { functionId, _, _ in
-            switch functionId.rawValue {
-            case "events::get_history":
-                manager.updateEngineClient(clientB)
-                return EventsGetHistoryResult(
-                    events: [
-                        self.makeRawEvent(
-                            id: "fork-event-a",
-                            parentId: "ancestor-a",
-                            sessionId: "session-a",
-                            sequence: 1
-                        )
-                    ],
-                    hasMore: false,
-                    oldestEventId: nil
-                )
-            case "tree::get_ancestors":
-                clientAAncestorReads += 1
-                return TreeGetAncestorsResult(
-                    events: [
-                        self.makeRawEvent(
-                            id: "ancestor-a",
-                            sessionId: "source-session-a",
-                            sequence: 1
-                        )
-                    ]
-                )
-            default:
-                throw EngineConnectionError.invalidResponse
-            }
-        }
-        transportB.readHandler = { _, _, _ in
-            clientBReads += 1
-            throw EngineConnectionError.invalidResponse
-        }
-        manager = EventStoreManager(
-            eventDB: database,
-            engineClient: clientA,
-            defaults: testState.defaults
-        )
-
-        try await manager.fullSyncSession("session-a")
-
-        let staleEvent = try await database.events.get("stale-event")
-        let forkEvent = try await database.events.get("fork-event-a")
-        let ancestorEvent = try await database.events.get("ancestor-a")
-        XCTAssertNil(staleEvent)
-        XCTAssertNotNil(forkEvent)
-        XCTAssertNotNil(ancestorEvent)
-        XCTAssertEqual(clientAAncestorReads, 1)
-        XCTAssertEqual(clientBReads, 0)
-        await manager.shutdown()
-    }
-
-    func testForkKeepsInitiatingClientForForkAncestorsHistoryAndOrigin() async throws {
-        let database = testState.makeDatabase(fileName: "captured-fork-sync.db")
+    func testForkPublishesSessionWithoutCallingRemovedHistoryOperations() async throws {
+        let database = testState.makeDatabase(fileName: "canonical-fork-publication.db")
         try await database.initialize()
         var sourceSession = createTestSession(
             id: "source-session-a",
@@ -841,23 +710,14 @@ final class CachedSessionTests: XCTestCase {
         try await database.sessions.insert(sourceSession)
 
         let clientA = makeEngineClient(port: 65507)
-        let clientB = makeEngineClient(port: 65506)
         let transportA = makeConnectedTransport(port: 65507)
-        let transportB = makeConnectedTransport(port: 65506)
         clientA.session = SessionClient(transport: transportA)
-        clientA.eventSync = EventSyncClient(transport: transportA)
-        clientB.session = SessionClient(transport: transportB)
-        clientB.eventSync = EventSyncClient(transport: transportB)
 
-        var manager: EventStoreManager!
         var clientAReads: [String] = []
-        var clientBWrites = 0
-        var clientBReads = 0
         transportA.writeHandler = { functionId, _, _, _ in
             guard functionId.rawValue == "session::fork" else {
                 throw EngineConnectionError.invalidResponse
             }
-            manager.updateEngineClient(clientB)
             return SessionForkResult(
                 newSessionId: "fork-session-a",
                 forkedFromEventId: "source-event-a",
@@ -867,43 +727,9 @@ final class CachedSessionTests: XCTestCase {
         }
         transportA.readHandler = { functionId, _, _ in
             clientAReads.append(functionId.rawValue)
-            switch functionId.rawValue {
-            case "tree::get_ancestors":
-                return TreeGetAncestorsResult(
-                    events: [
-                        self.makeRawEvent(
-                            id: "source-event-a",
-                            sessionId: "source-session-a",
-                            sequence: 1
-                        )
-                    ]
-                )
-            case "events::get_history":
-                return EventsGetHistoryResult(
-                    events: [
-                        self.makeRawEvent(
-                            id: "fork-root-a",
-                            parentId: "source-event-a",
-                            sessionId: "fork-session-a",
-                            sequence: 1
-                        )
-                    ],
-                    hasMore: false,
-                    oldestEventId: nil
-                )
-            default:
-                throw EngineConnectionError.invalidResponse
-            }
-        }
-        transportB.writeHandler = { _, _, _, _ in
-            clientBWrites += 1
             throw EngineConnectionError.invalidResponse
         }
-        transportB.readHandler = { _, _, _ in
-            clientBReads += 1
-            throw EngineConnectionError.invalidResponse
-        }
-        manager = EventStoreManager(
+        let manager = EventStoreManager(
             eventDB: database,
             engineClient: clientA,
             defaults: testState.defaults
@@ -913,57 +739,14 @@ final class CachedSessionTests: XCTestCase {
 
         let cachedFork = try await database.sessions.get(forkSessionId)
         XCTAssertEqual(forkSessionId, "fork-session-a")
-        XCTAssertTrue(clientAReads.contains("tree::get_ancestors"))
-        XCTAssertTrue(clientAReads.contains("events::get_history"))
-        XCTAssertEqual(clientBWrites, 0)
-        XCTAssertEqual(clientBReads, 0)
+        XCTAssertTrue(clientAReads.isEmpty)
         XCTAssertEqual(cachedFork?.serverOrigin, clientA.serverOrigin)
-        XCTAssertEqual(cachedFork?.eventCount, 1)
+        XCTAssertEqual(cachedFork?.eventCount, 0)
         XCTAssertEqual(cachedFork?.headEventId, "fork-root-a")
-        let cachedSourceEvent = try await database.events.get("source-event-a")
-        let cachedForkEvent = try await database.events.get("fork-root-a")
-        XCTAssertNotNil(cachedSourceEvent)
-        XCTAssertNotNil(cachedForkEvent)
+        XCTAssertTrue(manager.sessionExists(forkSessionId))
+        let forkEvents = try await database.events.getBySession(forkSessionId)
+        XCTAssertTrue(forkEvents.isEmpty)
         await manager.shutdown()
-    }
-
-    func testFullSyncFetchFailurePreservesExistingProjection() async throws {
-        let database = testState.makeDatabase(fileName: "full-sync-fetch-failure.db")
-        try await database.initialize()
-        let existingEvent = makeSessionEvent(
-            id: "existing-event",
-            sessionId: "session-a",
-            sequence: 1
-        )
-        let existingSyncState = SyncState(
-            key: "session-a",
-            lastSyncedEventId: existingEvent.id,
-            lastSyncTimestamp: "2026-07-14T12:00:00Z",
-            pendingEventIds: []
-        )
-        try await database.events.insert(existingEvent)
-        try await database.sync.update(existingSyncState)
-        let client = makeEngineClient(port: 65514)
-        let transport = makeConnectedTransport(port: 65514)
-        transport.readHandler = { _, _, _ in
-            throw EngineConnectionError.invalidResponse
-        }
-        client.eventSync = EventSyncClient(transport: transport)
-        let synchronizer = SessionSynchronizer(eventDB: database)
-
-        do {
-            _ = try await synchronizer.fullSync(sessionId: "session-a", using: client)
-            XCTFail("Expected the server fetch to fail")
-        } catch EngineConnectionError.invalidResponse {
-            // Expected: the last usable local projection remains intact.
-        }
-
-        let retainedEvent = try await database.events.get("existing-event")
-        XCTAssertEqual(retainedEvent?.id, existingEvent.id)
-        XCTAssertEqual(retainedEvent?.sessionId, existingEvent.sessionId)
-        let retainedSyncState = try await database.sync.getState("session-a")
-        XCTAssertEqual(retainedSyncState?.lastSyncedEventId, existingEvent.id)
-        XCTAssertEqual(retainedSyncState?.lastSyncTimestamp, existingSyncState.lastSyncTimestamp)
     }
 
     // MARK: - Helper
@@ -983,37 +766,6 @@ final class CachedSessionTests: XCTestCase {
         transport.connectionState = .connected
         transport.serverOrigin = "127.0.0.1:\(port)"
         return transport
-    }
-
-    private func makeRawEvent(
-        id: String,
-        parentId: String? = nil,
-        sessionId: String,
-        sequence: Int
-    ) -> RawEvent {
-        RawEvent(
-            id: id,
-            parentId: parentId,
-            sessionId: sessionId,
-            workspaceId: "/tmp/tron-fixtures/workspace",
-            type: "message.user",
-            timestamp: "2026-07-14T12:00:00Z",
-            sequence: sequence,
-            payload: [:]
-        )
-    }
-
-    private func makeSessionEvent(id: String, sessionId: String, sequence: Int) -> SessionEvent {
-        SessionEvent(
-            id: id,
-            parentId: nil,
-            sessionId: sessionId,
-            workspaceId: "/tmp/tron-fixtures/workspace",
-            type: "message.user",
-            timestamp: "2026-07-14T12:00:00Z",
-            sequence: sequence,
-            payload: [:]
-        )
     }
 
     private func createTestSession(
@@ -1176,38 +928,6 @@ private actor AcceptedEventCapture {
     }
 
     var values: [String] { captured }
-}
-
-// MARK: - SyncState Tests
-
-@MainActor
-final class SyncStateTests: XCTestCase {
-
-    func testSyncStateInitialization() {
-        let state = SyncState(
-            key: "session-123",
-            lastSyncedEventId: "event-456",
-            lastSyncTimestamp: "2024-01-01T00:00:00Z",
-            pendingEventIds: ["e1", "e2"]
-        )
-
-        XCTAssertEqual(state.key, "session-123")
-        XCTAssertEqual(state.lastSyncedEventId, "event-456")
-        XCTAssertEqual(state.pendingEventIds.count, 2)
-    }
-
-    func testSyncStateWithNilValues() {
-        let state = SyncState(
-            key: "session-123",
-            lastSyncedEventId: nil,
-            lastSyncTimestamp: nil,
-            pendingEventIds: []
-        )
-
-        XCTAssertNil(state.lastSyncedEventId)
-        XCTAssertNil(state.lastSyncTimestamp)
-        XCTAssertTrue(state.pendingEventIds.isEmpty)
-    }
 }
 
 // MARK: - SessionEvent Tests

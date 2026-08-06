@@ -421,6 +421,11 @@ xcodebuild test -scheme Tron \
 
 ```
 
+The chat-affordance render retains its PNGs in the result bundle, including the
+cached-history composer and shared sheet-loading typography fixtures, so local
+and CI reviewers can export the exact successful-test images with
+`xcresulttool export attachments`.
+
 For the interactive prompt-composer glass and voice-lifecycle action ownership,
 run the focused presentation/source contracts and visual render:
 
@@ -653,10 +658,15 @@ retrieved through Apple's Xcode Organizer diagnostics path.
 ## Deterministic CI toolchain
 
 `config/ci-toolchain.env` is the repository-owned Apple/release tool manifest.
-GitHub CI selects Xcode 26.3, iOS 26.2, and iPhone 17 Pro, then downloads exact
-XcodeGen, create-dmg, and App Store Connect CLI releases whose SHA-256 values are
-checked before execution. Workflows must not select `latest`, install these
-tools through Homebrew, or maintain a second version list.
+Hosted compatibility CI selects stable Xcode 26.3, iOS 26.2, and iPhone 17 Pro.
+The isolated TestFlight runner separately pins Xcode 27.0 beta 3 build
+`27A5218g`, the iOS 27.0 SDK/runtime, and a 26.0 deployment floor. Apple's
+[App Store Connect release notes](https://developer.apple.com/help/app-store-connect/release-notes/)
+list that beta/SDK pair for internal and external TestFlight submission; recheck
+that source whenever rotating the beta. Both paths download exact
+XcodeGen, create-dmg, App Store Connect CLI, and GitHub runner releases whose
+SHA-256 values are checked before execution. Workflows must not select `latest`,
+install these tools through Homebrew, or maintain a second version list.
 
 The installer writes only to an isolated runner directory and appends its bin
 directory to `GITHUB_PATH`:
@@ -666,7 +676,8 @@ scripts/install-ci-tools.sh xcodegen
 scripts/verify-ci-toolchain.sh ios xcodegen
 ```
 
-The Mac lane adds `create-dmg`; the iOS release lane adds `asc`. Pull-request
+The Mac lane adds `create-dmg`; the iOS release lane adds `asc` and runs
+`scripts/ios-release-runner-doctor.sh` before touching credentials. Pull-request
 path classification is owned by `scripts/ci-change-flags.sh`, including its
 offline self-test. Draft PRs receive lightweight feedback; ready PRs run the
 complete Rust, iOS, and Mac matrix. The iOS lane separates
@@ -702,25 +713,83 @@ xcodebuild test -scheme 'Tron Beta' \
   -only-testing:TronMobileTests/ChatTranscriptRevealPolicyTests
 ```
 
+### Dedicated iOS release runner
+
+TestFlight archives run on the repository-scoped labels
+`self-hosted`, `macOS`, `ARM64`, and `tron-ios-release`. This public repository
+must never route pull-request or fork-authored code to that runner. The release
+workflow accepts only an exact successful `main` CI SHA, a release tag reachable
+from `main`, or a manual `main` run. The protected `ios-testflight` environment
+and the one-job dedicated runner provide the remaining release boundary. The
+workflow deliberately has no GitHub concurrency group: the runner serializes
+archives itself while GitHub preserves every successful `main` SHA in its queue
+instead of replacing an older pending release.
+
+The runner lives on a separate hidden standard macOS account named `tron-ci`.
+Its home, keychain baseline, Actions checkout, DerivedData, and signing material
+are isolated from interactive development and from every normal Tron data home.
+Create the `ios-testflight` GitHub environment first with only the `main` branch
+and `server-v*` tags admitted; the bootstrap verifies that the environment
+exists before it requests a short-lived runner registration token.
+The checked-in bootstrap downloads the checksum-pinned ARM64 Actions runner,
+removes any accidental admin membership, constrains the service home to mode
+0700, verifies it cannot read the invoking user's home, installs a launchd
+service with updates disabled, and disables AC sleep:
+
+```bash
+scripts/bootstrap-ios-release-runner.sh
+scripts/ios-release-runner-doctor.sh
+```
+
+Every Actions job reruns the doctor before any step receives release secrets.
+It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
+account with its exact home, mode-0700 ownership, baseline keychain, checkout,
+and temporary directory all inside the isolated Actions installation.
+
+The bootstrap requires an authenticated repository-admin `gh` session and an
+interactive `sudo` checkpoint. It fails rather than replacing an existing
+runner. Rotation is explicit: remove the old runner/service through GitHub's
+runner removal command, update the exact version/URL/SHA in the manifest, rerun
+the bootstrap, and confirm `gh api repos/{owner}/{repo}/actions/runners` reports
+the release label online. Never register this label on a general-purpose user
+account or add it to another workflow.
+
+Before changing the Xcode beta pin, install the candidate side-by-side, confirm
+Apple currently accepts that build for TestFlight, update version, build, SDK,
+runtime, and developer-directory fields together, then run:
+
+```bash
+scripts/ios-release-runner-doctor.sh
+python3 scripts/ios-release-verify.py self-test
+```
+
+Trigger a manual `dry-run` from `main` and inspect its provenance artifact
+before permitting a live upload. The archive verifier rejects an Xcode 26
+archive, a different Xcode 27 build, the wrong SDK, or a minimum OS above 26.0.
+
 ## TestFlight Delivery CI
 
 `.github/workflows/release-ios.yml` owns two independent TestFlight lanes. A
 successful `CI` workflow for a push to `main` publishes that workflow's exact
 tested commit to the private internal group. A `server-v*` tag publishes to the
 external/public TestFlight path used by Mac onboarding. Pull requests, failed
-or cancelled CI runs, and CI runs for other branches never trigger delivery.
+or cancelled CI runs, CI runs for other branches, and manual feature-branch
+dry-runs never trigger delivery. Every accepted SHA must be reachable from
+`main` before the self-hosted runner proceeds.
 The workflow always regenerates the Xcode project with XcodeGen, so
 `project.yml` and `VERSION.env` remain the marketing-version sources of truth.
-Hosted iOS builds override `CURRENT_PROJECT_VERSION` with this retained
+Automated iOS delivery overrides `CURRENT_PROJECT_VERSION` with this retained
 workflow's monotonic `GITHUB_RUN_NUMBER`; reruns reuse the same number and the
 checked-in `TRON_APPLE_BUILD` remains the local and Mac build-number source.
 
-The upload lane uses the `Tron` scheme with the `Prod` configuration. That is
-the App Store Connect bundle (`com.tron.mobile`, App ID `6761511764`); the
+The upload lane uses the exact Xcode 27 release pin with the `Tron` scheme and
+`Prod` configuration. That is the App Store Connect bundle
+(`com.tron.mobile`, App ID `6761511764`); the
 `Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
-Tag, manual, and dry-run deliveries create or select an available iPhone
-simulator and run the simulator tests. Automatic internal delivery relies on
-the already-successful upstream CI test run instead of repeating it. All live
+Tag and manual deliveries create or select the pinned iOS 27 iPhone simulator
+and run the simulator tests. Automatic internal delivery relies on the
+already-successful stable Xcode 26 upstream CI test run instead of repeating it.
+All live
 lanes archive for `generic/platform=iOS`, export an App Store Connect IPA with
 Xcode's `app-store-connect` export method, validate the exported app/extension
 bundle IDs, entitlements, and export-compliance plist keys, uploads with
@@ -728,6 +797,18 @@ bundle IDs, entitlements, and export-compliance plist keys, uploads with
 export compliance, and updates the What to Test notes. Reruns use
 `asc builds list` to reuse an existing Apple build instead of uploading a
 duplicate binary.
+
+Before export, `ios-release-verify.py` reads both archived Info plists and
+asserts the exact Xcode build, iPhoneOS 27 SDK, iOS 26.0 minimum, bundle IDs,
+versions, and export-compliance declarations. The exported IPA retains the
+existing signing and entitlement checks. Each newly built dry or live archive
+also uploads `tron.ios-release-provenance.v1`: exact source SHA, GitHub run and
+attempt, Xcode version/build, SDK, deployment target, canonical/marketing/build
+versions, app/extension identifiers, and app/share-extension executable plus
+IPA SHA-256 values. It
+intentionally contains no runner name, user name, path, credential, or device
+identity. Existing App Store builds are reused from their original run rather
+than receiving fabricated provenance.
 
 The internal lane fails before archive unless the configured group exists, is
 internal, has automatic all-build access, and contains at least one tester. It
@@ -785,7 +866,9 @@ certificate, and keychain, and removes only provisioning profiles the job
 created. Identical pre-existing profiles are reused, while a UUID collision
 with different content fails instead of overwriting runner state. Cleanup
 continues after individual errors but fails the job if any restoration or
-removal is incomplete.
+removal is incomplete. A final always-run step removes release build products
+and runs `git clean -ffdx` only inside the isolated Actions checkout; this
+operation is forbidden in an interactive development workspace.
 
 Required GitHub Actions secrets:
 
@@ -860,7 +943,9 @@ in place.
 Manual workflow runs expose a `channel` choice. `dry-run` builds and tests but
 skips App Store Connect; `internal` exercises private delivery from `main`; and
 `external` exercises the public path from `main` without creating a tag. Live
-manual runs require the ASC secrets and consume the workflow run's Apple build
+and dry-run manual channels are all restricted to `main`, so the release runner
+never compiles an arbitrary branch. Live manual runs require the ASC secrets
+and consume the workflow run's Apple build
 number. For the first external build of a new marketing version, the expected
 successful outcome is a summary that says distribution is pending Apple Beta
 App Review. Rerun the same workflow after App Store Connect shows the build as

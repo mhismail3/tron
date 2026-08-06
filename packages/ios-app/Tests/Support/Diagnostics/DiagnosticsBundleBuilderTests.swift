@@ -144,7 +144,9 @@ struct DiagnosticsBundleBuilderTests {
         let harness = try await makeHarness()
         let totalEvents = 5_001
         try await harness.database.sessions.insert(makeSession(eventCount: totalEvents))
-        try await harness.database.events.insertBatch((0..<totalEvents).map { makeEvent(sequence: $0) })
+        _ = try await harness.database.events.insertIgnoringDuplicates(
+            (0..<totalEvents).map { makeEvent(sequence: $0) }
+        )
 
         let attachment = try await harness.builder().build()
         let object = try JSONSerialization.jsonObject(with: attachment.data) as? [String: Any]

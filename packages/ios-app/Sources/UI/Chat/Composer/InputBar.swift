@@ -50,6 +50,7 @@ struct InputBar: View {
     private var micDisabled: Bool {
         if config.isRecording { return false }
         return config.readOnly
+            || !config.allowsSubmission
             || config.agentPhase.isActive
             || config.isTranscribing
             || !config.isConnected
@@ -98,6 +99,7 @@ struct InputBar: View {
                         isRecording: config.isRecording,
                         isTranscribing: config.isTranscribing,
                         micDisabled: micDisabled,
+                        blockedReason: config.sendBlockReason?.description,
                         onSend: actions.onSend,
                         onAbort: actions.onAbort,
                         onMicTap: {
@@ -120,13 +122,15 @@ struct InputBar: View {
             .overlay(alignment: .bottomLeading) {
                 if !config.readOnly {
                     ComposerAttachmentButton(
-                        isDisabled: config.agentPhase.isActive || config.readOnly,
+                        isDisabled: config.agentPhase.isActive || !config.allowsAttachments,
+                        disabledReason: config.sendBlockReason?.description,
                         attachmentSupport: config.attachmentSupport,
                         includeRecentInputs: shouldShowRecentInputsMenuAction,
                         onSelect: presentAttachmentAction,
                         buttonSize: actionButtonSize
                     )
                     .padding(.leading, 4)
+                    .help(config.sendBlockReason?.description ?? "")
                 }
             }
             .overlay(alignment: .top) {
@@ -221,12 +225,12 @@ struct InputBar: View {
             TextField("", text: $state.text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(TronTypography.input)
-                .foregroundStyle(config.readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
+                .foregroundStyle(config.allowsTextEntry ? .tronEmerald : .tronEmerald.opacity(0.5))
                 .padding(.horizontal, 2)
                 .padding(.vertical, 10)
                 .lineLimit(1...8)
                 .focused($isFocused)
-                .disabled(config.readOnly)
+                .disabled(!config.allowsTextEntry)
                 .accessibilityLabel("Message input")
                 .onSubmit {
                     guard canSend else { return }

@@ -195,7 +195,7 @@ extension ChatViewModelPaginationTests {
         let (viewModel, _) = makeViewModel()
         viewModel.loadedReconstructionEvents = rawMessageEvents(range: 1...100)
         viewModel.prunedLiveMessages = (0..<20).map { makeMessage("stale live \($0)") }
-        viewModel.hasInitiallyLoaded = true
+        viewModel.conversationHistoryPhase = .authoritative
         viewModel.displayedMessageCount = 100
 
         await viewModel.processReconstructionResult(

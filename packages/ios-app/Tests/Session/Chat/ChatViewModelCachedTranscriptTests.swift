@@ -32,6 +32,7 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
         )
         XCTAssertEqual(writer.sessionLoadDiagnostics.snapshot.authoritativeEventCount, 1)
         XCTAssertEqual(writer.sessionLoadDiagnostics.snapshot.authoritativeMessageCount, 1)
+        XCTAssertEqual(writer.conversationHistoryPhase, .authoritative)
         XCTAssertNotNil(writer.sessionLoadDiagnostics.snapshot.interactiveMs)
 
         let cachedEvents = try await database.events.getBySession("cached-session")
@@ -48,10 +49,8 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
         XCTAssertEqual(reader.sessionLoadDiagnostics.snapshot.cacheHit, true)
         XCTAssertEqual(reader.sessionLoadDiagnostics.snapshot.cachedEventCount, 1)
         XCTAssertEqual(reader.sessionLoadDiagnostics.snapshot.cachedMessageCount, 1)
-        XCTAssertFalse(
-            reader.hasInitiallyLoaded,
-            "Only a server snapshot may declare authoritative initial history"
-        )
+        XCTAssertEqual(reader.conversationHistoryPhase, .cachedSynchronizing)
+        XCTAssertFalse(reader.hasAuthoritativeHistory)
         XCTAssertEqual(reader.messages.count, 1)
         guard case .text(let content) = reader.messages.first?.content else {
             return XCTFail("Expected cached text message")
@@ -86,7 +85,57 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
         XCTAssertFalse(restored)
         XCTAssertEqual(viewModel.sessionLoadDiagnostics.snapshot.cacheHit, false)
         XCTAssertTrue(viewModel.messages.isEmpty)
-        XCTAssertFalse(viewModel.hasInitiallyLoaded)
+        XCTAssertEqual(viewModel.conversationHistoryPhase, .loading)
+    }
+
+    func testDelayedCachedReconstructionRetainsDraftPresentationWithoutBecomingAuthoritative() async throws {
+        let testState = IsolatedTestState(label: "delayed-cached-transcript")
+        testState.registerTeardown(with: self)
+        let database = testState.makeDatabase()
+        try await database.initialize()
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: engineClient,
+            defaults: testState.defaults
+        )
+        addTeardownBlock { await manager.shutdown() }
+        let writer = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "cached-session",
+            eventStoreManager: manager
+        )
+        await writer.processReconstructionResult(reconstructionResult(content: "cached hello"))
+        let reader = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "cached-session",
+            eventStoreManager: manager
+        )
+
+        let restored = await reader.restoreCachedTranscript()
+        XCTAssertTrue(restored)
+        reader.markInitialReconstructionDelayed()
+
+        XCTAssertEqual(
+            reader.conversationHistoryPhase,
+            .recoverableFailure(hasCachedTranscript: true)
+        )
+        XCTAssertTrue(reader.conversationHistoryPhase.allowsDraftEditing)
+        XCTAssertFalse(reader.hasAuthoritativeHistory)
+    }
+
+    func testReconnectFailurePreservesCommittedAuthoritativeHistory() async throws {
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
+        let viewModel = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "authoritative-session"
+        )
+        viewModel.conversationHistoryPhase = .authoritative
+
+        viewModel.recordReconstructionOutcome(.retryableFailure)
+
+        XCTAssertEqual(viewModel.conversationHistoryPhase, .authoritative)
+        XCTAssertTrue(viewModel.conversationHistoryPhase.allowsDraftEditing)
     }
 
     private func reconstructionResult(content: String) -> SessionReconstructResult {

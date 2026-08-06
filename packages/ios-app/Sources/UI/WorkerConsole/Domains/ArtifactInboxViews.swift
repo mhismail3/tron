@@ -70,8 +70,10 @@ struct ArtifactInboxView: View {
                 }
 
                 if viewModel.isLoading || viewModel.isLoadingMore {
-                    ProgressView(
-                        viewModel.isLoading ? "Loading artifacts" : "Loading more artifacts"
+                    SheetLoadingState(
+                        label: viewModel.isLoading
+                            ? "Loading artifacts"
+                            : "Loading more artifacts"
                     )
                         .frame(maxWidth: .infinity)
                         .listRowBackground(Color.clear)
@@ -389,26 +391,15 @@ private struct ArtifactPreviewSheet: View {
     let url: URL
 
     var body: some View {
-        NavigationStack {
+        SettingsPageContainer(title: "Preview", scrollsContent: false) {
+            ShareLink(item: url) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(TronTypography.buttonSM)
+                    .foregroundStyle(.tronEmerald)
+            }
+            .accessibilityLabel("Share artifact")
+        } content: {
             ArtifactQuickLookView(url: url)
-                .background(Color.tronSurface)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        ShareLink(item: url) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(.tronEmerald)
-                        }
-                        .accessibilityLabel("Share artifact")
-                    }
-                    ToolbarItem(placement: .principal) {
-                        SheetTitle(title: "Preview", color: .tronEmerald)
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        SheetDismissButton(color: .tronEmerald)
-                    }
-                }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     previewCaption
                 }
@@ -441,10 +432,12 @@ private struct ArtifactPreviewSheet: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
-        .background(.regularMaterial)
-        .overlay(alignment: .top) {
-            Divider()
-        }
+        .glassEffect(
+            .regular.tint(Color.tronPhthaloGreen.opacity(0.18)),
+            in: Capsule()
+        )
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
     }
 }
 
@@ -473,7 +466,7 @@ private struct ArtifactQuickLookView: UIViewControllerRepresentable {
     }
 
     func makeUIViewController(context: Context) -> QLPreviewController {
-        let controller = QLPreviewController()
+        let controller = ArtifactQuickLookController()
         controller.dataSource = context.coordinator
         return controller
     }
@@ -484,6 +477,9 @@ private struct ArtifactQuickLookView: UIViewControllerRepresentable {
     ) {
         context.coordinator.url = url
         uiViewController.reloadData()
+        TronScrollEdgeEffects.applySoftToDescendantScrollViews(
+            of: uiViewController.view
+        )
     }
 
     final class Coordinator: NSObject, QLPreviewControllerDataSource {
@@ -500,6 +496,18 @@ private struct ArtifactQuickLookView: UIViewControllerRepresentable {
             previewItemAt index: Int
         ) -> QLPreviewItem {
             url as NSURL
+        }
+    }
+
+    private final class ArtifactQuickLookController: QLPreviewController {
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            TronScrollEdgeEffects.applySoftToDescendantScrollViews(of: view)
+        }
+
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            TronScrollEdgeEffects.applySoftToDescendantScrollViews(of: view)
         }
     }
 }

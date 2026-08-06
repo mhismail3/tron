@@ -25,12 +25,16 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             ("chat-tool-chip.png", AnyView(Self.toolChipView), CGSize(width: 430, height: 180)),
             ("chat-connection-toast.png", AnyView(Self.connectionToastView), CGSize(width: 430, height: 180)),
             ("chat-composer-idle.png", AnyView(ComposerFixture()), CGSize(width: 430, height: 180)),
+            ("chat-composer-cached-syncing.png", AnyView(ComposerFixture(isSynchronizing: true)), CGSize(width: 430, height: 180)),
+            ("sheet-loading-typography.png", AnyView(Self.sheetLoadingView), CGSize(width: 430, height: 180)),
         ]
 
         for (name, view, size) in samples {
             let outputURL = try render(view: view, size: size, outputName: name)
             print("TRON_VISUAL_ARTIFACT_PATH=\(outputURL.path)")
-            add(XCTAttachment(contentsOfFile: outputURL))
+            let attachment = XCTAttachment(contentsOfFile: outputURL)
+            attachment.lifetime = .keepAlways
+            add(attachment)
         }
     }
 
@@ -115,6 +119,13 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             .background(Color(uiColor: .systemBackground))
     }
 
+    private static var sheetLoadingView: some View {
+        SheetLoadingState(label: "Loading model context…")
+            .padding(24)
+            .environment(\.dynamicTypeSize, .accessibility2)
+            .background(Color(uiColor: .systemBackground))
+    }
+
     private static var fixtureInvocation: ToolInvocationData {
         ToolInvocationData(
             id: "visual-tool",
@@ -129,6 +140,7 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
     }
 
     private struct ComposerFixture: View {
+        var isSynchronizing = false
         @State private var state = InputBarState()
 
         var body: some View {
@@ -139,7 +151,11 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
                     config: InputBarConfig(
                         contextPercentage: 68,
                         currentModelInfo: nil,
-                        readOnly: false
+                        readOnly: false,
+                        allowsTextEntry: true,
+                        allowsAttachments: !isSynchronizing,
+                        allowsSubmission: !isSynchronizing,
+                        availabilityBlockReason: isSynchronizing ? .historySynchronizing : nil
                     ),
                     actions: InputBarActions(onContextTap: {})
                 )

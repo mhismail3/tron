@@ -893,10 +893,20 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
     let runner_temp = state.path().join("runner temp");
     let home = state.path().join("home");
     let bin = state.path().join("bin");
+    let workspace = state.path().join("checkout");
     let profiles = home.join("Library/MobileDevice/Provisioning Profiles");
     std::fs::create_dir_all(&runner_temp).unwrap();
     std::fs::create_dir_all(&profiles).unwrap();
     std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(&workspace)
+            .status()
+            .unwrap()
+            .success()
+    );
     let security_log = state.path().join("security.log");
     let security = bin.join("security");
     std::fs::write(
@@ -957,6 +967,7 @@ fi
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
             .env("RUNNER_TEMP", &runner_temp)
             .env("HOME", &home)
+            .env("GITHUB_WORKSPACE", &workspace)
             .env("SECURITY_LOG", &security_log)
             .env(
                 "FAIL_SECURITY_RESTORE",
@@ -994,6 +1005,52 @@ fi
         !keychain.exists() && !profile.exists(),
         "failed restore must still clean material"
     );
+}
+
+#[test]
+fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
+    let workflow = read_repo_file(".github/workflows/release-ios.yml");
+    let doctor = read_repo_file("scripts/ios-release-runner-doctor.sh");
+    let bootstrap = read_repo_file("scripts/bootstrap-ios-release-runner.sh");
+
+    let doctor_gate = workflow
+        .find("      - name: Verify dedicated release runner\n")
+        .expect("iOS release must verify its dedicated runner");
+    let credential_gate = workflow
+        .find("      - name: Require live iOS credentials\n")
+        .expect("iOS release must own a live credential gate");
+    assert!(
+        doctor_gate < credential_gate,
+        "the isolated account and toolchain must be verified before a step receives release secrets"
+    );
+
+    for required in [
+        "runner_user=\"$(id -un)\"",
+        "\"$runner_user\" == \"tron-ci\"",
+        "stat -f '%Lp' \"$HOME\"",
+        "id -Gn \"$runner_user\"",
+        "GITHUB_WORKSPACE",
+        "RUNNER_TEMP",
+        "tron-runner-baseline.keychain-db",
+    ] {
+        assert!(
+            doctor.contains(required),
+            "release runner doctor is missing boundary check {required}"
+        );
+    }
+    for required in [
+        "TRON_RELEASE_RUNNER_SHA256",
+        "shasum -a 256",
+        "runner_user=\"tron-ci\"",
+        "sudo chmod 700 \"$runner_home\"",
+        "-t user admin",
+        "--disableupdate",
+    ] {
+        assert!(
+            bootstrap.contains(required),
+            "release runner bootstrap is missing isolation behavior {required}"
+        );
+    }
 }
 
 #[test]
@@ -1161,13 +1218,16 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
         "TRON_CI_XCODEGEN_VERSION=2.45.3",
         "TRON_CI_CREATE_DMG_VERSION=1.3.0",
         "TRON_CI_ASC_VERSION=3.5.0",
+        "TRON_RELEASE_RUNNER_VERSION=2.336.0",
+        "TRON_RELEASE_RUNNER_URL=https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-osx-arm64-2.336.0.tar.gz",
+        "TRON_RELEASE_RUNNER_SHA256=8e8839c49b7060b6b2154f4931f815df330c27f167d53ef2239ee3dfce28b079",
     ] {
         assert!(
             manifest.contains(required),
             "toolchain manifest lost {required}"
         );
     }
-    assert_eq!(manifest.matches("_SHA256=").count(), 4);
+    assert_eq!(manifest.matches("_SHA256=").count(), 5);
 
     let installer = read_repo_file("scripts/install-ci-tools.sh");
     assert!(installer.contains("verify_sha256"));

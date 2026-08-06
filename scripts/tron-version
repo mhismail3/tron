@@ -185,10 +185,9 @@ write_github_ios_outputs() {
         workflow_dispatch)
             channel="${TRON_IOS_CHANNEL_INPUT:-dry-run}"
             case "$channel" in
-                dry-run) ;;
-                internal|external)
+                dry-run|internal|external)
                     [ "${GITHUB_REF_TYPE:-}" = "branch" ] && [ "${GITHUB_REF_NAME:-}" = "main" ] \
-                        || die "manual live iOS delivery is restricted to the main branch"
+                        || die "manual iOS delivery is restricted to the main branch"
                     ;;
                 *) die "iOS TestFlight channel must be dry-run, internal, or external: $channel" ;;
             esac
@@ -451,7 +450,7 @@ self_test() {
 
     : > "$github_output"
     GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_dispatch" GITHUB_RUN_NUMBER="29" \
-        GITHUB_REF_TYPE="branch" GITHUB_REF_NAME="feature" GITHUB_SHA="$test_sha" \
+        GITHUB_REF_TYPE="branch" GITHUB_REF_NAME="main" GITHUB_SHA="$test_sha" \
         TRON_IOS_CHANNEL_INPUT="dry-run" \
         "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
     for expected in "mode=manual" "channel=dry-run" "dry_run=true" "run_tests=true"; do
@@ -476,6 +475,15 @@ self_test() {
         die "github-ios-output accepted live manual delivery outside main"
     fi
     [ ! -s "$github_output" ] || die "github-ios-output wrote fields for rejected manual delivery"
+
+    : > "$github_output"
+    if GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_dispatch" GITHUB_RUN_NUMBER="32" \
+        GITHUB_REF_TYPE="branch" GITHUB_REF_NAME="feature" GITHUB_SHA="$test_sha" \
+        TRON_IOS_CHANNEL_INPUT="dry-run" \
+        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null 2>&1; then
+        die "github-ios-output accepted manual dry-run outside main"
+    fi
+    [ ! -s "$github_output" ] || die "github-ios-output wrote fields for rejected dry-run"
     rm -f "$github_output"
 
     local invalid

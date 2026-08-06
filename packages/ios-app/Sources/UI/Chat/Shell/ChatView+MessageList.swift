@@ -5,7 +5,18 @@ extension ChatView {
     // MARK: - Input Area Content (extracted for type-checker)
 
     var inputAreaContent: some View {
-        let hasAuthoritativeHistory = viewModel.hasInitiallyLoaded
+        let historyPhase = viewModel.conversationHistoryPhase
+        let hasAuthoritativeHistory = historyPhase.hasAuthoritativeSnapshot
+        let interactionIsConnected = interactionPolicy?.isConnected ?? false
+        let historyBlockReason: SendBlockReason? = if hasAuthoritativeHistory {
+            nil
+        } else if historyPhase.showsCachedTranscript || historyPhase == .loading {
+            .historySynchronizing
+        } else {
+            .historyUnavailable
+        }
+        let composerBlockReason = historyBlockReason
+            ?? (interactionIsConnected ? nil : .disconnected)
         return VStack(spacing: 0) {
             VStack(spacing: 8) {
                 InputBar(
@@ -18,13 +29,16 @@ extension ChatView {
                         recordingAudioLevel: viewModel.recordingAudioLevel,
                         isTranscribing: viewModel.isTranscribing,
                         speechTranscriptionAvailable: viewModel.isSpeechTranscriptionAvailable,
-                        placeholderText: hasAuthoritativeHistory ? "Type here" : "Loading latest messages",
-                        placeholderShowsProgress: !hasAuthoritativeHistory,
+                        placeholderText: historyPhase.placeholderText,
+                        placeholderShowsProgress: historyPhase.placeholderShowsProgress,
                         contextPercentage: viewModel.contextState.contextPercentage,
                         currentModelInfo: currentModelInfo,
                         inputHistory: inputHistory,
-                        readOnly: !(interactionPolicy?.isConnected ?? false)
-                            || !hasAuthoritativeHistory,
+                        readOnly: presentationMode != .interactiveSession,
+                        allowsTextEntry: historyPhase.allowsDraftEditing,
+                        allowsAttachments: hasAuthoritativeHistory && interactionIsConnected,
+                        allowsSubmission: hasAuthoritativeHistory && interactionIsConnected,
+                        availabilityBlockReason: composerBlockReason,
                         showDragHint: false
                     ),
                     actions: InputBarActions(
@@ -104,10 +118,15 @@ extension ChatView {
             }
 
             if ChatTranscriptRevealPolicy.showsHistoryLoadingState(
-                hasAuthoritativeSnapshot: viewModel.hasInitiallyLoaded,
+                phase: viewModel.conversationHistoryPhase,
                 hasMessages: !viewModel.messages.isEmpty
             ) {
                 historyLoadingState
+            } else if ChatTranscriptRevealPolicy.showsHistoryRecoveryState(
+                phase: viewModel.conversationHistoryPhase,
+                hasMessages: !viewModel.messages.isEmpty
+            ) {
+                historyRecoveryState
             }
         }
     }
@@ -125,6 +144,29 @@ extension ChatView {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("chat-history-loading-state")
+    }
+
+    private var historyRecoveryState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
+                .font(TronTypography.sans(
+                    size: TronTypography.sizeTitle,
+                    weight: .medium
+                ))
+                .foregroundStyle(.tronEmerald)
+            Text("Conversation unavailable")
+                .font(TronTypography.sans(
+                    size: TronTypography.sizeBodySM,
+                    weight: .semibold
+                ))
+                .foregroundStyle(.tronTextPrimary)
+            Text("Tron will retry when the server is reachable.")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .multilineTextAlignment(.center)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("chat-history-recovery-state")
     }
 
     /// Read-only worker transcripts do not stream, own a composer, or need
@@ -518,7 +560,7 @@ extension ChatView {
             index: index,
             total: total,
             initialLoadComplete: initialLoadComplete,
-            hasReconstructedState: viewModel.hasInitiallyLoaded,
+            hasReconstructedState: viewModel.hasAuthoritativeHistory,
             isCascading: viewModel.animationCoordinator.isCascading,
             cascadeAllowsVisibility: viewModel.animationCoordinator.isCascadeVisibleFromBottom(
                 index: index,

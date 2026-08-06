@@ -250,8 +250,14 @@ final class ChatViewModel {
     static let maxPrunedBufferSize = 500
     /// Current number of messages displayed (from the end)
     var displayedMessageCount = 0
-    /// Whether initial history has been loaded (prevents redundant loads on view re-entry)
-    var hasInitiallyLoaded = false
+    /// One source of truth for transcript and composer loading presentation.
+    /// A cached projection is visible but cannot authorize server mutations.
+    var conversationHistoryPhase: ConversationHistoryPhase = .loading
+
+    /// Whether a committed server snapshot owns the current transcript.
+    var hasAuthoritativeHistory: Bool {
+        conversationHistoryPhase.hasAuthoritativeSnapshot
+    }
 
     /// Messages pruned from display during live sessions. NOT tracked by SwiftUI.
     /// Used for instant earlier-history recovery without DB reconstruction.

@@ -229,7 +229,7 @@ final class ChatViewModelPaginationTests: XCTestCase {
         viewModel.allReconstructedMessages = UnifiedEventTransformer.transformPersistedEvents(previousEvents, presorted: true)
         viewModel.replaceAllMessages(with: Array(viewModel.allReconstructedMessages.suffix(150)))
         viewModel.displayedMessageCount = 150
-        viewModel.hasInitiallyLoaded = true
+        viewModel.conversationHistoryPhase = .authoritative
         viewModel.hasOlderServerReconstructionPages = false
 
         await viewModel.processReconstructionResult(
@@ -256,7 +256,7 @@ final class ChatViewModelPaginationTests: XCTestCase {
         viewModel.allReconstructedMessages = UnifiedEventTransformer.transformPersistedEvents(previousEvents, presorted: true)
         viewModel.replaceAllMessages(with: viewModel.allReconstructedMessages)
         viewModel.displayedMessageCount = 100
-        viewModel.hasInitiallyLoaded = true
+        viewModel.conversationHistoryPhase = .authoritative
         viewModel.hasOlderServerReconstructionPages = false
 
         sessions.reconstructHandler = { _, _, beforeEventId in
@@ -297,7 +297,7 @@ final class ChatViewModelPaginationTests: XCTestCase {
         )
         viewModel.replaceAllMessages(with: Array(viewModel.allReconstructedMessages.suffix(100)))
         viewModel.displayedMessageCount = 100
-        viewModel.hasInitiallyLoaded = true
+        viewModel.conversationHistoryPhase = .authoritative
         viewModel.reconstructionOldestEventId = "event-101"
         viewModel.hasOlderServerReconstructionPages = true
 
@@ -324,7 +324,7 @@ final class ChatViewModelPaginationTests: XCTestCase {
         )
         viewModel.replaceAllMessages(with: viewModel.allReconstructedMessages)
         viewModel.displayedMessageCount = 100
-        viewModel.hasInitiallyLoaded = true
+        viewModel.conversationHistoryPhase = .authoritative
         viewModel.hasOlderServerReconstructionPages = false
         sessions.reconstructHandler = { _, _, _ in
             throw EngineConnectionError.invalidResponse
@@ -355,7 +355,7 @@ final class ChatViewModelPaginationTests: XCTestCase {
         )
         viewModel.replaceAllMessages(with: viewModel.allReconstructedMessages)
         viewModel.displayedMessageCount = 100
-        viewModel.hasInitiallyLoaded = true
+        viewModel.conversationHistoryPhase = .authoritative
         sessions.reconstructHandler = { _, _, beforeEventId in
             guard let beforeEventId,
                   let sequence = Int(beforeEventId.replacingOccurrences(of: "event-", with: "")) else {
@@ -473,7 +473,7 @@ final class ChatViewModelPaginationTests: XCTestCase {
         ).messages
         viewModel.replaceAllMessages(with: viewModel.allReconstructedMessages)
         viewModel.displayedMessageCount = viewModel.messages.count
-        viewModel.hasInitiallyLoaded = true
+        viewModel.conversationHistoryPhase = .authoritative
 
         sessions.reconstructHandler = { _, _, beforeEventId in
             XCTAssertEqual(beforeEventId, child3.id)
@@ -548,7 +548,7 @@ final class ChatViewModelPaginationTests: XCTestCase {
         ).messages
         viewModel.replaceAllMessages(with: viewModel.allReconstructedMessages)
         viewModel.displayedMessageCount = viewModel.messages.count
-        viewModel.hasInitiallyLoaded = true
+        viewModel.conversationHistoryPhase = .authoritative
 
         await viewModel.processReconstructionResult(
             reconstructResult(

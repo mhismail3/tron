@@ -17,15 +17,45 @@ struct ChatTranscriptRevealPolicyTests {
     @Test("Pending history shows loading instead of an empty transcript")
     func pendingHistoryShowsLoadingState() {
         #expect(ChatTranscriptRevealPolicy.showsHistoryLoadingState(
-            hasAuthoritativeSnapshot: false,
+            phase: .loading,
             hasMessages: false
         ))
         #expect(!ChatTranscriptRevealPolicy.showsHistoryLoadingState(
-            hasAuthoritativeSnapshot: false,
+            phase: .cachedSynchronizing,
             hasMessages: true
         ))
         #expect(!ChatTranscriptRevealPolicy.showsHistoryLoadingState(
-            hasAuthoritativeSnapshot: true,
+            phase: .authoritative,
+            hasMessages: false
+        ))
+    }
+
+    @Test("Cached history makes drafts useful without authorizing submission")
+    func cachedHistoryPresentationState() {
+        let phase = ConversationHistoryPhase.cachedSynchronizing
+        #expect(!phase.hasAuthoritativeSnapshot)
+        #expect(phase.showsCachedTranscript)
+        #expect(phase.allowsDraftEditing)
+        #expect(phase.placeholderText == "Type here")
+        #expect(!phase.placeholderShowsProgress)
+        #expect(!ChatTranscriptRevealPolicy.showsHistoryRecoveryState(
+            phase: phase,
+            hasMessages: false
+        ))
+    }
+
+    @Test("A failed uncached load ends progress presentation")
+    func failedUncachedHistoryPresentationState() {
+        let phase = ConversationHistoryPhase.recoverableFailure(
+            hasCachedTranscript: false
+        )
+        #expect(!phase.hasAuthoritativeSnapshot)
+        #expect(!phase.showsCachedTranscript)
+        #expect(!phase.allowsDraftEditing)
+        #expect(phase.placeholderText == "Conversation unavailable")
+        #expect(!phase.placeholderShowsProgress)
+        #expect(ChatTranscriptRevealPolicy.showsHistoryRecoveryState(
+            phase: phase,
             hasMessages: false
         ))
     }
@@ -143,6 +173,34 @@ struct ChatTranscriptRevealPolicyTests {
             wasVisible: false,
             isVisible: true,
             initialLoadComplete: false
+        ))
+    }
+
+    @Test("Authoritative replacement of provisional UI respects viewport ownership and deep links")
+    func authoritativeProvisionalReplacementPolicy() {
+        #expect(ChatTranscriptRevealPolicy.shouldReconcileAuthoritativeTranscript(
+            historyWasProvisional: true,
+            reconstructionCompleted: true,
+            userScrolledAway: false,
+            hasDeepLinkTarget: false
+        ))
+        #expect(!ChatTranscriptRevealPolicy.shouldReconcileAuthoritativeTranscript(
+            historyWasProvisional: true,
+            reconstructionCompleted: true,
+            userScrolledAway: true,
+            hasDeepLinkTarget: false
+        ))
+        #expect(!ChatTranscriptRevealPolicy.shouldReconcileAuthoritativeTranscript(
+            historyWasProvisional: true,
+            reconstructionCompleted: true,
+            userScrolledAway: false,
+            hasDeepLinkTarget: true
+        ))
+        #expect(!ChatTranscriptRevealPolicy.shouldReconcileAuthoritativeTranscript(
+            historyWasProvisional: false,
+            reconstructionCompleted: true,
+            userScrolledAway: false,
+            hasDeepLinkTarget: false
         ))
     }
 

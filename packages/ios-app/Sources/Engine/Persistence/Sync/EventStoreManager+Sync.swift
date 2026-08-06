@@ -14,7 +14,9 @@ extension EventStoreManager {
         logger.info("Refreshing session list from server (origin: \(serverOrigin))...", category: .session)
 
         do {
-            let snapshot = try await sessionSynchronizer.fetchServerSessions(using: operationClient)
+            let snapshot = try await sessionListSynchronizer.fetchServerSessions(
+                using: operationClient
+            )
             guard acceptsRefreshCompletion(from: operationClient) else { return }
             let serverSessions = snapshot.sessions
             let serverSessionIds = Set(serverSessions.map(\.sessionId))
@@ -105,67 +107,6 @@ extension EventStoreManager {
         !Task.isCancelled && engineClient === operationClient
     }
 
-    /// Sync events for a specific session.
-    /// Keeps pagination on one captured client and updates metadata after every committed page.
-    func syncSessionEvents(sessionId: String) async throws {
-        let operationClient = engineClient
-        var result = try await sessionSynchronizer.syncEvents(
-            sessionId: sessionId,
-            using: operationClient
-        )
-
-        while result.hasMore {
-            try await updateSessionMetadata(sessionId: sessionId)
-            result = try await sessionSynchronizer.syncEvents(
-                sessionId: sessionId,
-                using: operationClient
-            )
-        }
-
-        if result.eventCount > 0 {
-            try await updateSessionMetadata(sessionId: sessionId)
-        }
-    }
-
-    /// Full sync for a single session (fetch all events from scratch).
-    /// Delegates to SessionSynchronizer.
-    func fullSyncSession(_ sessionId: String) async throws {
-        let operationClient = engineClient
-        _ = try await sessionSynchronizer.fullSync(
-            sessionId: sessionId,
-            using: operationClient
-        )
-        try await updateSessionMetadata(sessionId: sessionId)
-    }
-
-    /// Update session metadata from event database.
-    func updateSessionMetadata(sessionId: String) async throws {
-        guard var session = try await eventDB.sessions.get(sessionId) else { return }
-
-        let events = try await eventDB.events.getBySession(sessionId)
-
-        // Update counts
-        session.eventCount = events.count
-        let maxPayloadTurn = events.compactMap { $0.payload["turn"]?.intValue }.max() ?? 0
-        let streamTurnEndCount = events.filter { $0.type == SessionEventType.streamTurnEnd.rawValue }.count
-        session.turnCount = max(session.turnCount, maxPayloadTurn, streamTurnEndCount)
-        session.messageCount = events.filter {
-            $0.type == SessionEventType.messageUser.rawValue || $0.type == SessionEventType.messageAssistant.rawValue
-        }.count
-
-        // Update head/root events
-        if let lastEvent = events.last {
-            session.headEventId = lastEvent.id
-            session.lastActivityAt = lastEvent.timestamp
-        }
-        if let firstEvent = events.first {
-            session.rootEventId = firstEvent.id
-        }
-
-        try await eventDB.sessions.insert(session)
-        loadSessions()
-    }
-
     // MARK: - Conversion Helpers
 
     /// Convert server SessionInfo to CachedSession.
@@ -248,9 +189,4 @@ extension EventStoreManager {
         return session
     }
 
-    /// Convert RawEvent to SessionEvent.
-    /// Delegates to SessionSynchronizer.
-    func rawEventToSessionEvent(_ raw: RawEvent) -> SessionEvent {
-        sessionSynchronizer.rawEventToSessionEvent(raw)
-    }
 }

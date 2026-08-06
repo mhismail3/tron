@@ -114,13 +114,3 @@ enum SessionEventType: String, Codable, Sendable, CaseIterable {
         .turnFailed
     ]
 }
-
-// MARK: - Sync State
-
-/// Tracks synchronization state with server
-struct SyncState: Codable, Sendable {
-    let key: String
-    var lastSyncedEventId: String?
-    var lastSyncTimestamp: String?
-    var pendingEventIds: [String]
-}

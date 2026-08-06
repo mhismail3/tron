@@ -87,6 +87,7 @@ jobs:
       - name: Run deterministic CI helper tests
         run: |
           ./scripts/ci-change-flags.sh --self-test
+          ./scripts/ios-release-runner-doctor.sh --self-test
           python3 scripts/ci-validation-evidence.py --self-test
           python3 scripts/ios-test-selection.py --self-test
           python3 scripts/benchmarks/bench.py --self-test

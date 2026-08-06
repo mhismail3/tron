@@ -154,7 +154,7 @@ extension SessionContextSheet {
                         )
                 }
             } else if isLoadingInspectableContext {
-                ProgressView("Loading model context…")
+                SheetLoadingState(label: "Loading model context…")
                     .frame(maxWidth: .infinity)
                     .padding(14)
                     .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)

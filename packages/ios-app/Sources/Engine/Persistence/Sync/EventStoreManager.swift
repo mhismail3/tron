@@ -36,10 +36,11 @@ final class EventStoreManager {
         engineClient.serverOrigin
     }
 
-    /// Handles synchronization of session events with the server
+    /// Loads the authoritative server session index. Transcript events are
+    /// cached only by `session::reconstruct`.
     @ObservationIgnored
-    private(set) lazy var sessionSynchronizer: SessionSynchronizer = {
-        SessionSynchronizer(eventDB: eventDB)
+    private(set) lazy var sessionListSynchronizer: SessionListSynchronizer = {
+        SessionListSynchronizer()
     }()
 
     /// Manages bounded live activity snapshots for session metadata persistence.
@@ -150,6 +151,23 @@ final class EventStoreManager {
 
     func setSessions(_ newSessions: [CachedSession]) {
         sessions = newSessions
+    }
+
+    /// Publish a session row immediately after its database write commits.
+    ///
+    /// Creation and fork coordinators may navigate as soon as their operation
+    /// returns, so the debounced projection-reload lane cannot own this edge.
+    /// Cancelling its older snapshot also prevents that snapshot from briefly
+    /// removing the newly durable row from the session list.
+    func publishDurableSession(_ session: CachedSession) {
+        cancelPendingSessionLoadForDirectPublication()
+        var publishedSessions = sessions
+        if let index = publishedSessions.firstIndex(where: { $0.id == session.id }) {
+            publishedSessions[index] = session
+        } else {
+            publishedSessions.insert(session, at: 0)
+        }
+        setSessions(publishedSessions)
     }
 
     func updateSession(at index: Int, _ update: (inout CachedSession) -> Void) {

@@ -29,7 +29,8 @@ final class ContentViewCoordinator {
     // MARK: - Deep Link Handling
 
     /// Handles deep link navigation to a session.
-    /// Returns the scroll target if session exists locally, or syncs from server first.
+    /// Returns the scroll target if the session exists locally, or refreshes the
+    /// authoritative session index before mounting canonical reconstruction.
     func handleDeepLink(
         sessionId: String?,
         scrollTarget: ScrollTarget?,
@@ -42,14 +43,15 @@ final class ContentViewCoordinator {
         } else {
             let manager = eventStoreManager
             Task {
-                do {
-                    try await manager.syncSessionEvents(sessionId: sessionId)
-                    await MainActor.run {
-                        onNavigate(sessionId, scrollTarget)
-                    }
-                } catch {
-                    TronLogger.shared.error("Failed to sync session for deep link: \(error)", category: .notification)
+                await manager.refreshSessionList()
+                guard manager.sessionExists(sessionId) else {
+                    TronLogger.shared.error(
+                        "Deep-linked session was not present in the authoritative session list",
+                        category: .notification
+                    )
+                    return
                 }
+                onNavigate(sessionId, scrollTarget)
             }
         }
     }
