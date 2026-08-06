@@ -41,6 +41,69 @@ final class ContentViewCoordinatorTests: XCTestCase {
         XCTAssertFalse(navigated, "onNavigate should not be called for nil sessionId")
     }
 
+    func testHandleDeepLinkNavigatesImmediatelyForPublishedSession() async throws {
+        try await container.eventDatabase.initialize()
+        try await container.eventStoreManager.cacheNewSession(
+            sessionId: "sess-local-deep-link",
+            workspaceId: "/tmp/tron-fixtures/deep-link",
+            model: "test-model",
+            workingDirectory: "/tmp/tron-fixtures/deep-link"
+        )
+        var navigation: (String, ScrollTarget?)?
+
+        coordinator.handleDeepLink(
+            sessionId: "sess-local-deep-link",
+            scrollTarget: .bottom
+        ) { sessionId, target in
+            navigation = (sessionId, target)
+        }
+
+        XCTAssertEqual(navigation?.0, "sess-local-deep-link")
+        XCTAssertEqual(navigation?.1, .bottom)
+    }
+
+    func testHandleDeepLinkRefreshesSessionIndexBeforeNavigation() async throws {
+        try await container.eventDatabase.initialize()
+        let transport = MockEngineTransport()
+        transport.engineConnection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:8080/engine")!
+        )
+        transport.connectionState = .connected
+        transport.serverOrigin = container.engineClient.serverOrigin
+        var listReads = 0
+        transport.readHandler = { functionId, _, _ in
+            guard functionId.rawValue == "session::list" else {
+                throw EngineConnectionError.invalidResponse
+            }
+            listReads += 1
+            return SessionListResult(
+                sessions: [Self.serverSessionInfo(id: "sess-remote-deep-link")],
+                totalCount: 1,
+                hasMore: false,
+                nextCursor: nil,
+                snapshotAsOf: "2026-08-06T00:00:00Z",
+                snapshotCanReconcile: true
+            )
+        }
+        container.engineClient.session = SessionClient(transport: transport)
+        let navigated = expectation(description: "deep link navigated after list refresh")
+        var navigation: (String, ScrollTarget?)?
+
+        coordinator.handleDeepLink(
+            sessionId: "sess-remote-deep-link",
+            scrollTarget: .event(id: "event-1")
+        ) { sessionId, target in
+            navigation = (sessionId, target)
+            navigated.fulfill()
+        }
+
+        await fulfillment(of: [navigated], timeout: 1)
+        XCTAssertEqual(listReads, 1)
+        XCTAssertEqual(navigation?.0, "sess-remote-deep-link")
+        XCTAssertEqual(navigation?.1, .event(id: "event-1"))
+        XCTAssertTrue(container.eventStoreManager.sessionExists("sess-remote-deep-link"))
+    }
+
     func testCreatedSessionIsPublishedBeforeCoordinatorReturns() async throws {
         try await container.initialize()
         let created = NewSessionCreated(
@@ -54,6 +117,33 @@ final class ContentViewCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(publishedId, created.sessionId)
         XCTAssertTrue(container.eventStoreManager.sessionExists(created.sessionId))
+    }
+
+    private static func serverSessionInfo(id: String) -> SessionInfo {
+        SessionInfo(
+            sessionId: id,
+            model: "test-model",
+            createdAt: "2026-08-06T00:00:00Z",
+            eventCount: 0,
+            turnCount: 0,
+            messageCount: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            lastTurnInputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            cost: 0,
+            lastActivity: "2026-08-06T00:00:00Z",
+            isActive: false,
+            isArchived: false,
+            workingDirectory: "/tmp/tron-fixtures/deep-link",
+            parentSessionId: nil,
+            title: nil,
+            lastUserPrompt: nil,
+            lastAssistantResponse: nil,
+            isRunning: false,
+            activityLines: nil
+        )
     }
 
 }

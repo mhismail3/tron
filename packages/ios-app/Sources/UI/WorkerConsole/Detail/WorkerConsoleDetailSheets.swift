@@ -204,7 +204,7 @@ struct WorkerRunDetailSheet: View {
                         if let loadError {
                             WorkerConsoleErrorBanner(message: loadError)
                         } else {
-                            ProgressView("Loading authoritative run…")
+                            SheetLoadingState(label: "Loading authoritative run…", accent: color)
                                 .frame(maxWidth: .infinity, alignment: .center)
                                 .padding(.vertical, 18)
                         }

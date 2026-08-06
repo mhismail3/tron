@@ -30,10 +30,17 @@ enum ChatTranscriptRevealPolicy {
     /// Cached messages are useful immediately while the server refreshes them;
     /// a genuinely empty session is known only after reconstruction commits.
     static func showsHistoryLoadingState(
-        hasAuthoritativeSnapshot: Bool,
+        phase: ConversationHistoryPhase,
         hasMessages: Bool
     ) -> Bool {
-        !hasAuthoritativeSnapshot && !hasMessages
+        phase == .loading && !hasMessages
+    }
+
+    static func showsHistoryRecoveryState(
+        phase: ConversationHistoryPhase,
+        hasMessages: Bool
+    ) -> Bool {
+        phase == .recoverableFailure(hasCachedTranscript: false) && !hasMessages
     }
 
     static func bottomDistance(
@@ -72,6 +79,18 @@ enum ChatTranscriptRevealPolicy {
         initialLoadComplete: Bool
     ) -> Bool {
         initialLoadComplete && !wasVisible && isVisible
+    }
+
+    static func shouldReconcileAuthoritativeTranscript(
+        historyWasProvisional: Bool,
+        reconstructionCompleted: Bool,
+        userScrolledAway: Bool,
+        hasDeepLinkTarget: Bool
+    ) -> Bool {
+        historyWasProvisional
+            && reconstructionCompleted
+            && !userScrolledAway
+            && !hasDeepLinkTarget
     }
 
     /// Whether the transcript has a real scroll range after accounting for the

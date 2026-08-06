@@ -9,7 +9,6 @@ protocol EventDatabaseProtocol: AnyObject {
     // MARK: - Domain Repositories
     var events: EventRepository { get }
     var sessions: SessionRepository { get }
-    var sync: SyncRepository { get }
     var thinking: ThinkingRepository { get }
 
     // MARK: - Initialization

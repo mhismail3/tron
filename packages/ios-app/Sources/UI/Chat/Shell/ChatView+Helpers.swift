@@ -77,17 +77,59 @@ extension ChatView {
     /// or consuming a deep-link target that may require a newer server page.
     func revealCachedTranscript(guardedBy ticket: ChatViewTaskTicket? = nil) async {
         guard !viewModel.messages.isEmpty else { return }
-        _ = await waitForInitialScrollProxy()
-        guard isCurrent(ticket), !Task.isCancelled else { return }
-        scrollToBottom()
-        viewModel.animationCoordinator.makeAllMessagesVisible(
-            count: viewModel.messages.count
+        await settleInitialMessageVisibility(
+            guardedBy: ticket,
+            honorsDeepLink: false
         )
-        initialLoadComplete = true
+        guard isCurrent(ticket), !Task.isCancelled else { return }
         logger.debug(
             "[INIT] Revealed \(viewModel.messages.count) cached messages while authoritative reconstruction continues",
             category: .ui
         )
+    }
+
+    /// Finish shell presentation for any reconstruction attempt that began
+    /// before an authoritative history cut existed. This owner is shared by
+    /// initial entry and later continuity retries so a slow successful retry
+    /// cannot populate visible rows without also resolving the initial
+    /// viewport and any pending deep-link target.
+    func settleTranscriptAfterReconstruction(
+        historyWasProvisional: Bool,
+        outcome: ConnectionReconstructionOutcome,
+        guardedBy ticket: ChatViewTaskTicket? = nil
+    ) async {
+        guard historyWasProvisional else {
+            if !initialLoadComplete || scrollTarget != nil {
+                await handleInitialMessageVisibility(guardedBy: ticket)
+            }
+            return
+        }
+
+        guard outcome == .completed else {
+            if !initialLoadComplete {
+                await handleInitialMessageVisibility(guardedBy: ticket)
+            }
+            return
+        }
+
+        if presentationMode == .workerAudit
+            || !initialLoadComplete
+            || scrollTarget != nil {
+            await handleInitialMessageVisibility(guardedBy: ticket)
+            return
+        }
+
+        viewModel.animationCoordinator.makeAllMessagesVisible(
+            count: viewModel.messages.count
+        )
+        if ChatTranscriptRevealPolicy.shouldReconcileAuthoritativeTranscript(
+            historyWasProvisional: historyWasProvisional,
+            reconstructionCompleted: true,
+            userScrolledAway: scrollCoordinator.userScrolledAway,
+            hasDeepLinkTarget: scrollTarget != nil
+        ) {
+            await reconcileAuthoritativeTranscriptBottom(guardedBy: ticket)
+        }
     }
 
     /// Handle initial message visibility on session load.
@@ -103,6 +145,13 @@ extension ChatView {
     /// navigation cancels the remaining settling work instead of scheduling
     /// stale scrolls back onto the main queue.
     func handleInitialMessageVisibility(guardedBy ticket: ChatViewTaskTicket? = nil) async {
+        await settleInitialMessageVisibility(guardedBy: ticket, honorsDeepLink: true)
+    }
+
+    private func settleInitialMessageVisibility(
+        guardedBy ticket: ChatViewTaskTicket?,
+        honorsDeepLink: Bool
+    ) async {
         let msgCount = viewModel.messages.count
         logger.debug("[INIT] handleInitialMessageVisibility: messages=\(msgCount) scrollProxy=\(scrollProxy != nil) hasMore=\(viewModel.hasMoreMessages) bottom=\(viewportMeasurements.initialDistanceFromBottom)", category: .ui)
 
@@ -119,7 +168,7 @@ extension ChatView {
         guard isCurrent(ticket), !Task.isCancelled else { return }
 
         // Deep link: skip animation, scroll to target
-        if let target = scrollTarget {
+        if honorsDeepLink, let target = scrollTarget {
             logger.debug("[INIT] Deep link target, skipping cascade", category: .ui)
             viewModel.animationCoordinator.makeAllMessagesVisible(count: msgCount)
             guard isCurrent(ticket), !Task.isCancelled else { return }
@@ -165,10 +214,7 @@ extension ChatView {
                 "[INIT] transcript fits viewport; revealing at top content=\(viewportMeasurements.scrollContentHeight) viewport=\(viewportMeasurements.messageViewportHeight)",
                 category: .ui
             )
-            withAnimation(.easeOut(duration: 0.3)) {
-                viewModel.animationCoordinator.makeAllMessagesVisible(count: viewModel.messages.count)
-                initialLoadComplete = true
-            }
+            revealAllMessages()
             logger.debug("[INIT] Session loaded with \(viewModel.messages.count) top-aligned messages", category: .session)
             return
         }
@@ -229,12 +275,57 @@ extension ChatView {
         // Fade in all messages from the correct scroll position
         logger.debug("[INIT] fading in \(viewModel.messages.count) messages, setting initialLoadComplete=true bottom=\(viewportMeasurements.initialDistanceFromBottom)", category: .ui)
         guard isCurrent(ticket), !Task.isCancelled else { return }
-        withAnimation(.easeOut(duration: 0.3)) {
-            viewModel.animationCoordinator.makeAllMessagesVisible(count: viewModel.messages.count)
-            initialLoadComplete = true
-        }
+        revealAllMessages()
 
         logger.debug("[INIT] Session loaded with \(viewModel.messages.count) messages", category: .session)
+    }
+
+    /// Reconcile a cached viewport after the authoritative projection changes
+    /// LazyVStack row heights. Every pass re-checks user ownership so a gesture
+    /// that begins during reconstruction is never overridden.
+    func reconcileAuthoritativeTranscriptBottom(
+        guardedBy ticket: ChatViewTaskTicket? = nil
+    ) async {
+        guard scrollTarget == nil,
+              !scrollCoordinator.userScrolledAway,
+              await waitForInitialScrollProxy() else { return }
+        _ = await waitForInitialScrollGeometry()
+        guard isCurrent(ticket), !Task.isCancelled else { return }
+        guard ChatTranscriptRevealPolicy.shouldRequestBottomPosition(
+            hasScrollGeometry: viewportMeasurements.hasScrollGeometry,
+            hasScrollableOverflow: viewportMeasurements.hasScrollableOverflow
+        ) else { return }
+
+        for _ in 0..<ChatTranscriptRevealPolicy.initialBottomSettleAttempts {
+            guard !scrollCoordinator.userScrolledAway,
+                  scrollCoordinator.shouldAutoScroll else { return }
+            scrollToBottomIfAllowed(reason: "authoritative cached transcript reconciliation")
+            guard await layoutDelay(
+                milliseconds: ChatTranscriptRevealPolicy.initialSettleDelayMilliseconds
+            ) else { return }
+            guard isCurrent(ticket), !Task.isCancelled else { return }
+            if ChatTranscriptRevealPolicy.isAtInitialBottom(
+                distanceFromBottom: viewportMeasurements.initialDistanceFromBottom
+            ) {
+                break
+            }
+        }
+    }
+
+    private func revealAllMessages() {
+        let mutation = {
+            viewModel.animationCoordinator.makeAllMessagesVisible(
+                count: viewModel.messages.count
+            )
+            initialLoadComplete = true
+        }
+        if accessibilityReduceMotion {
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction, mutation)
+        } else {
+            withAnimation(.easeOut(duration: 0.3), mutation)
+        }
     }
 
     // MARK: - Layout Delay

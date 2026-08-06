@@ -9,9 +9,12 @@ import SQLite3
 enum DatabaseSchema {
 
     static func createTables(db: OpaquePointer?) throws {
+        // Canonical reconstruction has no client-authored event cursor. Remove
+        // the obsolete table left by older app builds before admitting the
+        // current disposable-cache schema.
+        try execute(db: db, "DROP TABLE IF EXISTS sync_state")
         try createEventsTable(db: db)
         try createSessionsTable(db: db)
-        try createSyncStateTable(db: db)
         try createDraftsTable(db: db)
     }
 
@@ -80,17 +83,6 @@ enum DatabaseSchema {
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(last_activity_at)")
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_archived ON sessions(archived_at)")
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(server_origin)")
-    }
-
-    private static func createSyncStateTable(db: OpaquePointer?) throws {
-        try execute(db: db, """
-            CREATE TABLE IF NOT EXISTS sync_state (
-                key TEXT PRIMARY KEY,
-                last_synced_event_id TEXT,
-                last_sync_timestamp TEXT,
-                pending_event_ids TEXT
-            )
-        """)
     }
 
     private static func createDraftsTable(db: OpaquePointer?) throws {

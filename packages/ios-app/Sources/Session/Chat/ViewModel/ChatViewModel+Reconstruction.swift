@@ -7,12 +7,12 @@ extension ChatViewModel {
     /// Mount the latest device-cached durable projection while the server's
     /// authoritative reconstruction is still in flight.
     ///
-    /// This deliberately does not set `hasInitiallyLoaded`: cached rows make
+    /// This deliberately does not mark history authoritative: cached rows make
     /// the transcript useful immediately, but only a committed server snapshot
     /// may release reconstruction buffering or declare an empty session.
     @discardableResult
     func restoreCachedTranscript() async -> Bool {
-        guard !hasInitiallyLoaded,
+        guard !hasAuthoritativeHistory,
               messages.isEmpty,
               let manager = eventStoreManager else {
             sessionLoadDiagnostics.recordCache(
@@ -72,6 +72,8 @@ extension ChatViewModel {
                 contextState.accumulatedCost = cachedSession.cost
             }
 
+            conversationHistoryPhase = .cachedSynchronizing
+
             logger.info(
                 "[CACHE] Restored \(cachedEvents.count) events as \(state.messages.count) messages while server reconstruction continues",
                 category: .session
@@ -101,7 +103,7 @@ extension ChatViewModel {
 
         let previousEvents = loadedReconstructionEvents
         let previousDisplayedMessageCount = displayedMessageCount
-        let previousHadInitialLoad = hasInitiallyLoaded
+        let previousHadInitialLoad = hasAuthoritativeHistory
         let previousHadOlderServerPages = hasOlderServerReconstructionPages
         let eventWindow = await reconstructionEventWindow(
             from: result,
@@ -194,7 +196,7 @@ extension ChatViewModel {
             reconcileCompletedReconstructionState()
         }
 
-        hasInitiallyLoaded = true
+        conversationHistoryPhase = .authoritative
         messageIndex.rebuild(from: messages)
         sessionLoadDiagnostics.recordAuthoritative(
             eventCount: result.events.count,
@@ -282,7 +284,7 @@ extension ChatViewModel {
         var hasMoreEvents = result.hasMoreEvents && result.oldestEventId != nil
 
         var hasUnresolvedGap = false
-        if hasInitiallyLoaded,
+        if hasAuthoritativeHistory,
            let previousHighestSequence = previousEvents
                .filter({ $0.sessionId == sessionId })
                .map(\.sequence)

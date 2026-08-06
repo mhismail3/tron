@@ -1,8 +1,14 @@
 # iOS TestFlight Delivery Pipeline
 #
 # Every successful main-branch CI push uploads the exact tested production iOS
-# bundle (`com.tron.mobile`) to the all-build internal TestFlight group. Release
-# tags retain the external/public TestFlight path and Beta App Review handling.
+# bundle (`com.tron.mobile`) to the all-build internal TestFlight group. Archives
+# run only on the locked-down release runner with the exact Xcode 27 pin in
+# `config/ci-toolchain.env`; hosted Xcode 26 CI continues to prove the iOS 26
+# floor. Release tags retain the external/public TestFlight path and Beta App
+# Review handling.
+# Simulator/XCTest remains on hosted CI because the isolated release runner is
+# a system-domain service with no logged-in Aqua session; its Xcode 27 archive
+# is the SDK-linked compilation and distribution proof.
 # Both channels use this workflow's monotonic GITHUB_RUN_NUMBER as the hosted
 # iOS CFBundleVersion; reruns reuse their original number. VERSION.env remains
 # the product-version and local/Mac build source.
@@ -73,7 +79,8 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main')
-    runs-on: macos-15
+    runs-on: [self-hosted, macOS, ARM64, tron-ios-release]
+    environment: ios-testflight
     timeout-minutes: 90
 
     env:
@@ -91,6 +98,31 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          clean: true
+
+      - name: Verify trusted checkout
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          resolved_sha="$(git rev-parse HEAD)"
+          test "$resolved_sha" = "$EXPECTED_SOURCE_SHA" || {
+            echo "::error::checked-out SHA does not match the triggering event"
+            exit 1
+          }
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REF_TYPE" == "branch" && "$GITHUB_REF_NAME" == "main" ]] || {
+              echo "::error::manual iOS delivery is restricted to main"
+              exit 1
+            }
+          fi
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$resolved_sha" origin/main || {
+            echo "::error::TestFlight source must be reachable from main"
+            exit 1
+          }
 
       - name: Resolve iOS delivery
         id: ver
@@ -104,6 +136,26 @@ jobs:
           TRON_UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           ./scripts/tron version github-ios-output
+
+      - name: Verify resolved provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved_sha="$(git rev-parse HEAD)"
+          test "$resolved_sha" = "${{ steps.ver.outputs.source_sha }}" || {
+            echo "::error::checked-out SHA does not match resolved delivery provenance"
+            exit 1
+          }
+
+      - name: Select exact release Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/ci-toolchain.env
+          echo "DEVELOPER_DIR=$TRON_RELEASE_IOS_DEVELOPER_DIR" >> "$GITHUB_ENV"
+
+      - name: Verify dedicated release runner
+        run: scripts/ios-release-runner-doctor.sh
 
       - name: Initialize ASC diagnostics
         shell: bash
@@ -133,16 +185,11 @@ jobs:
           fi
           echo "Live iOS credentials are configured for ${{ steps.ver.outputs.channel }} delivery"
 
-      - name: Pin Xcode
-        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
-        with:
-          xcode-version: "26.3"
-
       - name: Install checksum-pinned tools
         run: scripts/install-ci-tools.sh xcodegen asc
 
       - name: Verify pinned toolchain
-        run: scripts/verify-ci-toolchain.sh ios xcodegen asc
+        run: scripts/verify-ci-toolchain.sh xcodegen asc
 
       - name: Generate Xcode project
         working-directory: ${{ env.IOS_APP_DIR }}
@@ -164,82 +211,6 @@ jobs:
           grep -q "MARKETING_VERSION = ${{ steps.ver.outputs.marketing_version }}" "$settings"
           grep -q "CURRENT_PROJECT_VERSION = ${{ steps.ver.outputs.apple_build }}" "$settings"
           grep -q "TRON_CANONICAL_VERSION = ${{ steps.ver.outputs.version }}" "$settings"
-
-      - name: Prepare iOS simulator
-        if: steps.ver.outputs.run_tests == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          source config/ci-toolchain.env
-          runtimes_json="$RUNNER_TEMP/sim-runtimes.json"
-          devices_json="$RUNNER_TEMP/sim-devices.json"
-          xcrun simctl list runtimes available --json > "$runtimes_json"
-          runtime_id="$(
-            jq -r --arg version "$TRON_CI_IOS_RUNTIME_VERSION" '
-              [.runtimes[]
-                | select(.platform == "iOS" and .version == $version and .isAvailable == true)
-                | select((.supportedDeviceTypes // []) | map(select(.productFamily == "iPhone")) | length > 0)]
-              | .[0].identifier // empty
-            ' "$runtimes_json"
-          )"
-          if [[ -z "$runtime_id" ]]; then
-            echo "::error::pinned iOS $TRON_CI_IOS_RUNTIME_VERSION simulator runtime is unavailable"
-            exit 1
-          fi
-          device_type="$(
-            jq -r --arg runtime_id "$runtime_id" --arg device_name "$TRON_CI_IOS_SIMULATOR_NAME" '
-              [.runtimes[] | select(.identifier == $runtime_id)][0]
-              | (.supportedDeviceTypes // []) as $types
-              | ($types | map(select(.name == $device_name)))
-              | .[0].identifier // empty
-            ' "$runtimes_json"
-          )"
-          device_name="$TRON_CI_IOS_SIMULATOR_NAME"
-          if [[ -z "$device_type" ]]; then
-            echo "::error::pinned simulator $device_name is unavailable on $runtime_id"
-            exit 1
-          fi
-
-          xcrun simctl list devices available --json > "$devices_json"
-          udid="$(
-            jq -r --arg runtime_id "$runtime_id" --arg device_name "$device_name" '
-              (.devices[$runtime_id] // [])
-              | map(select(.isAvailable == true and .name == $device_name))
-              | .[0].udid // empty
-            ' "$devices_json"
-          )"
-          if [[ -z "$udid" ]]; then
-            udid="$(xcrun simctl create "Tron CI $device_name" "$device_type" "$runtime_id")"
-            echo "::notice::created $device_name simulator $udid on $runtime_id"
-          else
-            echo "::notice::using existing $device_name simulator $udid on $runtime_id"
-          fi
-          xcrun simctl boot "$udid" >/dev/null 2>&1 || true
-          xcrun simctl bootstatus "$udid" -b
-          echo "IOS_TEST_DESTINATION=platform=iOS Simulator,id=$udid" >> "$GITHUB_ENV"
-
-      - name: xcodebuild test
-        if: steps.ver.outputs.run_tests == 'true'
-        working-directory: ${{ env.IOS_APP_DIR }}
-        shell: bash
-        run: |
-          set -o pipefail
-          xcodebuild test \
-            -project TronMobile.xcodeproj \
-            -scheme "$IOS_SCHEME" \
-            -configuration Beta \
-            -destination "$IOS_TEST_DESTINATION" \
-            -derivedDataPath build/TestDerivedData \
-            -resultBundlePath TestResults.xcresult \
-            -quiet
-
-      - name: Upload xcresult on failure
-        if: failure() && steps.ver.outputs.run_tests == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ios-release-test-results
-          path: packages/ios-app/TestResults.xcresult
-          retention-days: 7
 
       - name: Prepare ASC API key
         if: steps.ver.outputs.dry_run != 'true'
@@ -417,36 +388,21 @@ jobs:
           original_default_path="$RUNNER_TEMP/ios-original-default-keychain"
           snapshot_ready="$RUNNER_TEMP/ios-keychain-snapshot-ready"
           installed_profile_uuids="$RUNNER_TEMP/ios-installed-profile-uuids"
+          baseline_keychain="$HOME/Library/Keychains/tron-runner-baseline.keychain-db"
           profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
           mkdir -p "$profiles_dir"
           : > "$original_keychains_path"
           : > "$installed_profile_uuids"
 
-          original_keychains=()
-          keychain_list="$(security list-keychains -d user)"
-          while IFS= read -r existing_keychain; do
-            existing_keychain="${existing_keychain#"${existing_keychain%%[![:space:]]*}"}"
-            existing_keychain="${existing_keychain%"${existing_keychain##*[![:space:]]}"}"
-            existing_keychain="${existing_keychain#\"}"
-            existing_keychain="${existing_keychain%\"}"
-            if [[ -n "$existing_keychain" ]]; then
-              original_keychains+=("$existing_keychain")
-              printf '%s\n' "$existing_keychain" >> "$original_keychains_path"
-            fi
-          done <<< "$keychain_list"
-          if (( ${#original_keychains[@]} == 0 )); then
-            echo "::error::user keychain search list is empty"
+          test -f "$baseline_keychain" || {
+            echo "::error::dedicated release-runner baseline keychain is missing"
             exit 1
-          fi
-          original_default="$(security default-keychain -d user)"
-          original_default="${original_default#"${original_default%%[![:space:]]*}"}"
-          original_default="${original_default%"${original_default##*[![:space:]]}"}"
-          original_default="${original_default#\"}"
-          original_default="${original_default%\"}"
-          if [[ -z "$original_default" ]]; then
-            echo "::error::user default keychain is empty"
-            exit 1
-          fi
+          }
+          security list-keychains -d user -s "$baseline_keychain"
+          security default-keychain -d user -s "$baseline_keychain"
+          original_keychains=("$baseline_keychain")
+          original_default="$baseline_keychain"
+          printf '%s\n' "$baseline_keychain" > "$original_keychains_path"
           printf '%s\n' "$original_default" > "$original_default_path"
           : > "$snapshot_ready"
 
@@ -626,16 +582,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app_path="$ARCHIVE_PATH/Products/Applications/TronMobile.app"
-          test -d "$app_path" || { echo "::error::archive missing TronMobile.app"; exit 1; }
-          plist="$app_path/Info.plist"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = "$IOS_BUNDLE_ID"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "${{ steps.ver.outputs.marketing_version }}"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")" = "${{ steps.ver.outputs.apple_build }}"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$plist")" = "false"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :TRONCanonicalVersion' "$plist")" = "${{ steps.ver.outputs.version }}"
-          appex_plist="$app_path/PlugIns/TronShareExtension.appex/Info.plist"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$appex_plist")" = "false"
+          source config/ci-toolchain.env
+          python3 scripts/ios-release-verify.py archive \
+            --archive "$ARCHIVE_PATH" \
+            --app-bundle-id "$IOS_BUNDLE_ID" \
+            --extension-bundle-id "$IOS_SHARE_EXTENSION_BUNDLE_ID" \
+            --marketing-version "${{ steps.ver.outputs.marketing_version }}" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --canonical-version "${{ steps.ver.outputs.version }}" \
+            --xcode-build "$TRON_RELEASE_IOS_XCODE_BUILD" \
+            --sdk-version "$TRON_RELEASE_IOS_SDK_VERSION" \
+            --minimum-os "$TRON_RELEASE_IOS_DEPLOYMENT_TARGET"
 
       - name: Upload archive dSYMs
         if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
@@ -792,6 +749,32 @@ jobs:
           (cd "$work_dir" && /usr/bin/zip -qry "$ipa_path" Payload)
           unzip -tq "$ipa_path"
           echo "IPA_PATH=$ipa_path" >> "$GITHUB_ENV"
+
+      - name: Write sanitized release provenance
+        if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/ci-toolchain.env
+          provenance_path="$RUNNER_TEMP/ios-release-provenance.json"
+          python3 scripts/ios-release-verify.py provenance \
+            --archive "$ARCHIVE_PATH" \
+            --ipa "$IPA_PATH" \
+            --source-sha "${{ steps.ver.outputs.source_sha }}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --xcode-version "$TRON_RELEASE_IOS_XCODE_VERSION" \
+            --output "$provenance_path"
+          echo "IOS_RELEASE_PROVENANCE=$provenance_path" >> "$GITHUB_ENV"
+
+      - name: Upload release provenance
+        if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-release-provenance-${{ steps.ver.outputs.apple_build }}
+          path: ${{ env.IOS_RELEASE_PROVENANCE }}
+          retention-days: 90
+          if-no-files-found: error
 
       - name: Upload dry-run IPA artifact
         if: steps.ver.outputs.dry_run == 'true'
@@ -1363,6 +1346,7 @@ jobs:
       - name: Summary
         shell: bash
         run: |
+          source config/ci-toolchain.env
           {
             echo "## iOS TestFlight Release"
             echo ""
@@ -1373,6 +1357,9 @@ jobs:
             echo "- Channel: \`${{ steps.ver.outputs.channel }}\`"
             echo "- Source SHA: \`${{ steps.ver.outputs.source_sha }}\`"
             echo "- Dry run: \`${{ steps.ver.outputs.dry_run }}\`"
+            echo "- Archive Xcode: \`$TRON_RELEASE_IOS_XCODE_VERSION ($TRON_RELEASE_IOS_XCODE_BUILD)\`"
+            echo "- Archive SDK: \`iPhoneOS $TRON_RELEASE_IOS_SDK_VERSION\`"
+            echo "- Deployment target: \`iOS $TRON_RELEASE_IOS_DEPLOYMENT_TARGET\`"
             if [[ "${{ steps.ver.outputs.dry_run }}" != "true" ]]; then
               echo "- ASC app: \`$ASC_APP_ID\`"
               echo "- Existing build reused: \`${{ steps.existing.outputs.exists || 'false' }}\`"
@@ -1475,4 +1462,22 @@ jobs:
               cleanup_failed=1
             fi
           done
+
+          # A single dedicated runner naturally serializes jobs without a
+          # GitHub concurrency group, so every successful main SHA remains in
+          # the queue. Clean its isolated checkout before the next queued job.
+          if [[ -z "${GITHUB_WORKSPACE:-}" || ! -d "$GITHUB_WORKSPACE/.git" ]]; then
+            echo "::error::isolated iOS release checkout is unavailable for cleanup"
+            cleanup_failed=1
+          else
+            if [[ -d "$GITHUB_WORKSPACE/packages/ios-app/build" ]] && \
+               ! /bin/rm -rf "$GITHUB_WORKSPACE/packages/ios-app/build"; then
+              echo "::error::failed to remove iOS release build products"
+              cleanup_failed=1
+            fi
+            if ! git -C "$GITHUB_WORKSPACE" clean -ffdx; then
+              echo "::error::failed to clean the isolated release checkout"
+              cleanup_failed=1
+            fi
+          fi
           exit "$cleanup_failed"

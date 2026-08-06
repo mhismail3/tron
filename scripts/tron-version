@@ -151,7 +151,7 @@ write_github_ios_outputs() {
 
     local event_name="${GITHUB_EVENT_NAME:-}"
     local run_number="${GITHUB_RUN_NUMBER:-}"
-    local channel source_sha trigger_mode run_tests dry_run
+    local channel source_sha trigger_mode dry_run
 
     if [[ ! "$run_number" =~ ^[1-9][0-9]*$ ]]; then
         die "GITHUB_RUN_NUMBER must be a positive integer: ${run_number:-<missing>}"
@@ -170,7 +170,6 @@ write_github_ios_outputs() {
             channel="internal"
             source_sha="${TRON_UPSTREAM_SHA:-}"
             trigger_mode="main-ci"
-            run_tests="false"
             ;;
         push)
             [ "${GITHUB_REF_TYPE:-}" = "tag" ] \
@@ -180,21 +179,18 @@ write_github_ios_outputs() {
             channel="external"
             source_sha="${GITHUB_SHA:-}"
             trigger_mode="tag"
-            run_tests="true"
             ;;
         workflow_dispatch)
             channel="${TRON_IOS_CHANNEL_INPUT:-dry-run}"
             case "$channel" in
-                dry-run) ;;
-                internal|external)
+                dry-run|internal|external)
                     [ "${GITHUB_REF_TYPE:-}" = "branch" ] && [ "${GITHUB_REF_NAME:-}" = "main" ] \
-                        || die "manual live iOS delivery is restricted to the main branch"
+                        || die "manual iOS delivery is restricted to the main branch"
                     ;;
                 *) die "iOS TestFlight channel must be dry-run, internal, or external: $channel" ;;
             esac
             source_sha="${GITHUB_SHA:-}"
             trigger_mode="manual"
-            run_tests="true"
             ;;
         *)
             die "unsupported iOS TestFlight event: ${event_name:-<missing>}"
@@ -215,7 +211,6 @@ write_github_ios_outputs() {
         "apple_build=$run_number" "marketing_version=$TRON_APPLE_MARKETING_VERSION" \
         "release_title=$TRON_RELEASE_TITLE" "is_prerelease=$TRON_IS_PRERELEASE" \
         "channel=$channel" "dry_run=$dry_run" "source_sha=$source_sha" \
-        "run_tests=$run_tests" \
         >> "$GITHUB_OUTPUT"
     echo "Resolved iOS $channel delivery for ${source_sha:0:12} / Apple build $run_number from $trigger_mode"
 }
@@ -287,7 +282,7 @@ check_grep_count() {
     local pattern="$3"
     local file="$4"
     local count
-    count=$(grep -F "$pattern" "$file" | wc -l | tr -d ' ')
+    count=$(grep -Fc "$pattern" "$file" || true)
     if [ "$count" != "$expected_count" ]; then
         note_failure "$label matched $count time(s), expected $expected_count"
     fi
@@ -312,7 +307,10 @@ check_versions() {
     failures=0
     derive_version_fields
 
-    local cargo_version
+    local canonical_build_setting cargo_version
+    # This is an Xcode build-setting token, not shell interpolation.
+    # shellcheck disable=SC2016
+    canonical_build_setting='$(TRON_CANONICAL_VERSION)'
     cargo_version=$(awk -F'"' '$1 == "version = " { print $2; exit }' "$PROJECT_DIR/packages/agent/Cargo.toml")
     check_equals "Cargo.toml package version" "$cargo_version" "$TRON_VERSION"
     check_equals "Cargo.lock tron package version" "$(cargo_lock_tron_version)" "$TRON_VERSION"
@@ -331,13 +329,13 @@ check_versions() {
 
     check_equals "iOS app Info.plist TRONCanonicalVersion" \
         "$(value_after_key "$PROJECT_DIR/packages/ios-app/Sources/Info.plist" "TRONCanonicalVersion")" \
-        '$(TRON_CANONICAL_VERSION)'
+        "$canonical_build_setting"
     check_equals "iOS share extension Info.plist TRONCanonicalVersion" \
         "$(value_after_key "$PROJECT_DIR/packages/ios-app/ShareExtension/Info.plist" "TRONCanonicalVersion")" \
-        '$(TRON_CANONICAL_VERSION)'
+        "$canonical_build_setting"
     check_equals "Mac Info.plist TRONCanonicalVersion" \
         "$(value_after_key "$PROJECT_DIR/packages/mac-app/Sources/Info.plist" "TRONCanonicalVersion")" \
-        '$(TRON_CANONICAL_VERSION)'
+        "$canonical_build_setting"
 
     if [ "$failures" -ne 0 ]; then
         echo "$failures version drift issue(s) found" >&2
@@ -437,7 +435,7 @@ self_test() {
         "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
     for expected in \
         "mode=main-ci" "apple_build=27" "channel=internal" "dry_run=false" \
-        "source_sha=$test_sha" "run_tests=false"; do
+        "source_sha=$test_sha"; do
         grep -Fqx "$expected" "$github_output" || die "github-ios-output omitted $expected"
     done
 
@@ -445,16 +443,16 @@ self_test() {
     GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="push" GITHUB_RUN_NUMBER="28" \
         GITHUB_REF_TYPE="tag" GITHUB_REF_NAME="$TRON_RELEASE_TAG" GITHUB_SHA="$test_sha" \
         "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
-    for expected in "mode=tag" "apple_build=28" "channel=external" "dry_run=false" "run_tests=true"; do
+    for expected in "mode=tag" "apple_build=28" "channel=external" "dry_run=false"; do
         grep -Fqx "$expected" "$github_output" || die "github-ios-output omitted $expected"
     done
 
     : > "$github_output"
     GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_dispatch" GITHUB_RUN_NUMBER="29" \
-        GITHUB_REF_TYPE="branch" GITHUB_REF_NAME="feature" GITHUB_SHA="$test_sha" \
+        GITHUB_REF_TYPE="branch" GITHUB_REF_NAME="main" GITHUB_SHA="$test_sha" \
         TRON_IOS_CHANNEL_INPUT="dry-run" \
         "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
-    for expected in "mode=manual" "channel=dry-run" "dry_run=true" "run_tests=true"; do
+    for expected in "mode=manual" "channel=dry-run" "dry_run=true"; do
         grep -Fqx "$expected" "$github_output" || die "github-ios-output omitted $expected"
     done
 
@@ -476,6 +474,15 @@ self_test() {
         die "github-ios-output accepted live manual delivery outside main"
     fi
     [ ! -s "$github_output" ] || die "github-ios-output wrote fields for rejected manual delivery"
+
+    : > "$github_output"
+    if GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_dispatch" GITHUB_RUN_NUMBER="32" \
+        GITHUB_REF_TYPE="branch" GITHUB_REF_NAME="feature" GITHUB_SHA="$test_sha" \
+        TRON_IOS_CHANNEL_INPUT="dry-run" \
+        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null 2>&1; then
+        die "github-ios-output accepted manual dry-run outside main"
+    fi
+    [ ! -s "$github_output" ] || die "github-ios-output wrote fields for rejected dry-run"
     rm -f "$github_output"
 
     local invalid

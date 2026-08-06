@@ -59,15 +59,13 @@ extension SourceGuardTests {
             "Sources/Support/Foundation/SwiftUI/View+Extensions.swift":
                 "The adaptive presentation helper must own one soft edge for every app-owned sheet root",
         ]
-        let expectedWebViewOwners = Set([
-            "Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift",
-        ])
-        let edgeAssignments = [
-            "webView.scrollView.topEdgeEffect.style = .soft",
-            "webView.scrollView.leftEdgeEffect.style = .soft",
-            "webView.scrollView.bottomEdgeEffect.style = .soft",
-            "webView.scrollView.rightEdgeEffect.style = .soft",
-        ]
+        let expectedWebViewOwners = Set(["Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift"])
+        let edgeHelper = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/Support/Foundation/SwiftUI/TronScrollEdgeEffects.swift"
+            ),
+            encoding: .utf8
+        )
 
         for (owner, message) in swiftUISoftStyleOwners {
             let source = try String(
@@ -116,12 +114,10 @@ extension SourceGuardTests {
                 contentsOf: iosRoot.appendingPathComponent(owner),
                 encoding: .utf8
             )
-            for assignment in edgeAssignments {
-                #expect(
-                    source.components(separatedBy: assignment).count - 1 == 1,
-                    "\(owner) must configure exactly one \(assignment)"
-                )
-            }
+            #expect(source.contains("TronScrollEdgeEffects.applySoft(to: webView.scrollView)"))
+        }
+        for edge in ["topEdgeEffect", "leftEdgeEffect", "bottomEdgeEffect", "rightEdgeEffect"] {
+            #expect(edgeHelper.contains("scrollView.\(edge).style = .soft"))
         }
 
         #expect(
@@ -136,6 +132,72 @@ extension SourceGuardTests {
             hiddenNavigationBarBackgrounds.isEmpty,
             "App navigation bars must leave visibility automatic so scroll edge effects appear only during overlap: \(hiddenNavigationBarBackgrounds.sorted())"
         )
+    }
+
+    @Test("iOS uses reconstruction instead of removed event-history RPCs")
+    func testRemovedEventHistoryOperationsStayOutOfProductionSources() throws {
+        let sourcesRoot = iosAppRoot().appendingPathComponent("Sources")
+        let removedOperations = [
+            "events::get_since",
+            "events::get_history",
+            "tree::get_ancestors",
+            "EventSyncClient",
+            "SyncRepository",
+            "SyncState",
+            "updateSessionMetadata",
+        ]
+        for url in try swiftFiles(in: sourcesRoot) {
+            let source = try String(contentsOf: url, encoding: .utf8)
+            for operation in removedOperations {
+                #expect(!source.contains(operation), "\(url.lastPathComponent) references removed \(operation)")
+            }
+        }
+        let schema = try String(
+            contentsOf: sourcesRoot.appendingPathComponent(
+                "Engine/Persistence/SQLite/DatabaseSchema.swift"
+            ),
+            encoding: .utf8
+        )
+        #expect(schema.contains("DROP TABLE IF EXISTS sync_state"))
+        #expect(!schema.contains("CREATE TABLE IF NOT EXISTS sync_state"))
+
+        let eventRepository = try String(
+            contentsOf: sourcesRoot.appendingPathComponent(
+                "Engine/Persistence/Repositories/EventRepository.swift"
+            ),
+            encoding: .utf8
+        )
+        for removedDeclaration in [
+            "func insertBatch(",
+            "func getChildren(",
+            "func exists(_ id:",
+            "func delete(ids:",
+        ] {
+            #expect(
+                !eventRepository.contains(removedDeclaration),
+                "EventRepository restored test-only surface \(removedDeclaration)"
+            )
+        }
+    }
+
+    @Test("sheet loading labels use Tron typography")
+    func testSheetLoadingLabelsUseSharedComponent() throws {
+        let sourcesRoot = iosAppRoot().appendingPathComponent("Sources/UI")
+        var labeledProgressOwners: [String] = []
+        for url in try swiftFiles(in: sourcesRoot) {
+            let source = try String(contentsOf: url, encoding: .utf8)
+            if source.range(of: #"ProgressView\s*\(\s*\"Loading"#, options: .regularExpression) != nil
+                || source.range(of: #"ProgressView\s*\(\s*selection\.loadingMessage"#, options: .regularExpression) != nil {
+                labeledProgressOwners.append(url.lastPathComponent)
+            }
+        }
+        #expect(labeledProgressOwners.isEmpty)
+        let components = try String(
+            contentsOf: iosAppRoot().appendingPathComponent("Sources/UI/Components/SheetComponents.swift"),
+            encoding: .utf8
+        )
+        #expect(components.contains("struct SheetLoadingState: View"))
+        #expect(components.contains("TronTypography.sizeBodySM"))
     }
 
     @Test("feedback recipient has no tracked personal default")

@@ -26,17 +26,7 @@ extension EventStoreManager {
         )
 
         try await eventDB.sessions.insert(session)
-        cancelPendingSessionLoadForDirectPublication()
-        var publishedSessions = sessions
-        if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
-            publishedSessions[index] = session
-        } else {
-            // The creation coordinator may navigate as soon as this method
-            // returns. Publish the exact row synchronously on MainActor instead
-            // of waiting for the debounced database reload lane.
-            publishedSessions.insert(session, at: 0)
-        }
-        setSessions(publishedSessions)
+        publishDurableSession(session)
         logger.info("Cached new session: \(sessionId) with origin: \(serverOrigin)", category: .session)
     }
 
@@ -164,10 +154,10 @@ extension EventStoreManager {
 
     // MARK: - Tree Operations (Fork)
 
-    /// Fork a session at a specific event (or HEAD if nil)
-    /// This fetches the parent session's history and stores it in local DB (with original session_id).
-    /// The forked session's root event has parent_id linking to the parent history,
-    /// allowing getAncestors() to traverse the full chain across session boundaries.
+    /// Fork a session at a specific event (or HEAD if nil).
+    ///
+    /// The server owns fork ancestry. This operation publishes only the new
+    /// session row; opening it invokes canonical, fork-aware reconstruction.
     func forkSession(_ sessionId: String, fromEventId: String? = nil) async throws -> String {
         logger.info("[FORK] ========== FORK SESSION START ==========", category: .session)
         logger.info("[FORK] Starting fork: sessionId=\(sessionId), fromEventId=\(fromEventId ?? "HEAD")", category: .session)
@@ -190,61 +180,6 @@ extension EventStoreManager {
         )
         logger.info("[FORK] Server returned: newSessionId=\(result.newSessionId), rootEventId=\(result.rootEventId ?? "unknown")", category: .session)
 
-        // CRITICAL: Fetch ancestor events to ensure parent history is in local DB
-        // The server's tree.getAncestors follows parent_id across session boundaries.
-        // We store events with their ORIGINAL session_id - getAncestors() follows
-        // the parent_id chain regardless of session_id, so the fork's history will
-        // include the parent session's events.
-        if let rootEventId = result.rootEventId {
-            logger.info("[FORK] Fetching ancestor history from rootEventId=\(rootEventId)", category: .session)
-
-            do {
-                let ancestorRawEvents = try await operationClient.eventSync.getAncestors(rootEventId)
-
-                // Convert RawEvents to SessionEvents, keeping original session_id
-                // These may already exist in local DB from when parent session was active.
-                // insertEventsIgnoringDuplicates will skip any that already exist.
-                var sessionEvents: [SessionEvent] = []
-                for rawEvent in ancestorRawEvents {
-                    let event = rawEventToSessionEvent(rawEvent)
-                    sessionEvents.append(event)
-                    logger.debug("[FORK] Ancestor event: id=\(event.id.prefix(12)), type=\(event.type), sessionId=\(event.sessionId.prefix(12)), parentId=\(event.parentId?.prefix(12) ?? "nil")", category: .session)
-                }
-
-                // Store ancestor events (ignoring duplicates that already exist)
-                if !sessionEvents.isEmpty {
-                    let inserted = try await eventDB.events.insertIgnoringDuplicates(sessionEvents)
-                    logger.info("[FORK] Stored \(inserted) new ancestor events (\(sessionEvents.count - inserted) already existed)", category: .session)
-
-                    // Verify the fork event's parent is now in DB
-                    if let forkEvent = sessionEvents.last {
-                        if let parentId = forkEvent.parentId {
-                            do {
-                                if let parentEvent = try await eventDB.events.get(parentId) {
-                                    logger.info("[FORK] Fork event parent found in DB: \(parentEvent.id.prefix(12)), type=\(parentEvent.type)", category: .session)
-                                } else {
-                                    logger.warning("[FORK] Fork event parent NOT in DB: \(parentId)", category: .session)
-                                }
-                            } catch {
-                                logger.warning("[FORK] Failed to verify fork parent event \(parentId): \(error)", category: .database)
-                            }
-                        }
-                    }
-                }
-            } catch {
-                // Log but don't fail - the fork itself succeeded
-                // The parent events might already be in local DB from previous sync
-                logger.error("[FORK] Failed to fetch ancestors: \(error.localizedDescription)", category: .session)
-            }
-        }
-
-        // Sync the forked session's own events.
-        logger.info("[FORK] Syncing forked session events...", category: .session)
-        _ = try await sessionSynchronizer.fullSync(
-            sessionId: result.newSessionId,
-            using: operationClient
-        )
-
         // Create the cached session entry
         // Get source session info from local DB if available, otherwise use fork result
         let sourceSession: CachedSession?
@@ -264,20 +199,8 @@ extension EventStoreManager {
             serverOrigin: serverOrigin
         )
         try await eventDB.sessions.insert(forkedSession)
+        publishDurableSession(forkedSession)
         logger.info("[FORK] Inserted forked session into local DB", category: .session)
-
-        // Update session metadata from events
-        try await updateSessionMetadata(sessionId: result.newSessionId)
-
-        // Verify the sync worked
-        do {
-            if let newSession = try await eventDB.sessions.get(result.newSessionId) {
-                let events = try await eventDB.events.getBySession(result.newSessionId)
-                logger.info("[FORK] New session synced: headEventId=\(newSession.headEventId ?? "nil"), eventCount=\(events.count)", category: .session)
-            }
-        } catch {
-            logger.warning("[FORK] Failed to verify forked session sync: \(error)", category: .database)
-        }
 
         logger.info("[FORK] Fork complete: \(sessionId) → \(result.newSessionId) from event \(fromEventId ?? "HEAD")", category: .session)
         return result.newSessionId

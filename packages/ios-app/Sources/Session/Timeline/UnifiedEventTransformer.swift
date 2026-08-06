@@ -23,7 +23,7 @@ struct ReconstructedState {
 /// The single source of truth for transforming server events into ChatMessages.
 ///
 /// This transformer handles BOTH:
-/// 1. Persisted events (from `events::get_history` engine protocol / SQLite)
+/// 1. Persisted events (from `session::reconstruct` / SQLite cache)
 /// 2. Streaming events (from WebSocket during live agent execution)
 ///
 /// ## Architecture Principle

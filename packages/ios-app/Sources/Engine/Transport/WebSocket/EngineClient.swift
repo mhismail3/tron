@@ -41,7 +41,6 @@ final class EngineClient: EngineTransport {
 
     /// Event sync operations client
     @ObservationIgnored
-    lazy var eventSync: EventSyncClient = EventSyncClient(transport: self)
 
     /// Settings operations client (server-authoritative settings)
     @ObservationIgnored

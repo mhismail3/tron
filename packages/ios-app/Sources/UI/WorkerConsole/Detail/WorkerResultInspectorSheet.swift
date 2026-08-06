@@ -203,7 +203,7 @@ struct WorkerResultInspectorSheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     if isLoading {
-                        ProgressView("Loading durable result…")
+                        SheetLoadingState(label: "Loading durable result…")
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, 24)
                     } else if let chunk {

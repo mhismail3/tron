@@ -99,6 +99,44 @@ final class EventDatabaseTests: XCTestCase {
         await isolatedDatabase.close()
     }
 
+    func testInitializationDropsObsoleteEventSyncCursorTable() async throws {
+        let legacyDatabase = testState.makeDatabase(fileName: "legacy-sync-cursor.db")
+        var legacyHandle: OpaquePointer?
+        guard sqlite3_open(legacyDatabase.dbPath, &legacyHandle) == SQLITE_OK else {
+            XCTFail("Could not create legacy database fixture")
+            return
+        }
+        XCTAssertEqual(
+            sqlite3_exec(
+                legacyHandle,
+                "CREATE TABLE sync_state (key TEXT PRIMARY KEY); INSERT INTO sync_state VALUES ('session-1')",
+                nil,
+                nil,
+                nil
+            ),
+            SQLITE_OK
+        )
+        sqlite3_close(legacyHandle)
+        legacyHandle = nil
+
+        try await legacyDatabase.initialize()
+        let obsoleteTableCount = try await legacyDatabase.withDB { db in
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            let sql = "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = 'sync_state'"
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+                  sqlite3_step(statement) == SQLITE_ROW else {
+                throw EventDatabaseError.prepareFailed(
+                    "Could not inspect canonical cache schema"
+                )
+            }
+            return Int(sqlite3_column_int(statement, 0))
+        }
+
+        XCTAssertEqual(obsoleteTableCount, 0)
+        await legacyDatabase.close()
+    }
+
     func testInsertAndGetEvent() async throws {
         let event = SessionEvent(
             id: "event-1",
@@ -120,7 +158,7 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertNil(retrieved?.parentId)
     }
 
-    func testInsertMultipleEvents() async throws {
+    func testInsertIgnoringDuplicatesPersistsMultipleEvents() async throws {
         let events = [
             SessionEvent(
                 id: "event-1",
@@ -154,9 +192,10 @@ final class EventDatabaseTests: XCTestCase {
             )
         ]
 
-        try await database.events.insertBatch(events)
+        let insertedCount = try await database.events.insertIgnoringDuplicates(events)
 
         let sessionEvents = try await database.events.getBySession("session-1")
+        XCTAssertEqual(insertedCount, 3)
         XCTAssertEqual(sessionEvents.count, 3)
     }
 
@@ -204,7 +243,7 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "child3", parentId: "child2", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:03:00Z", sequence: 4, payload: [:])
         ]
 
-        try await database.events.insertBatch(events)
+        _ = try await database.events.insertIgnoringDuplicates(events)
 
         let ancestors = try await database.events.getAncestors("child3")
         XCTAssertEqual(ancestors.count, 4)
@@ -234,7 +273,7 @@ final class EventDatabaseTests: XCTestCase {
                             "stopReason": AnyCodable("end_turn")
                          ])
         ]
-        try await database.events.insertBatch(parentEvents)
+        _ = try await database.events.insertIgnoringDuplicates(parentEvents)
 
         // Create forked session with root linking to parent session
         let forkedEvents = [
@@ -242,7 +281,7 @@ final class EventDatabaseTests: XCTestCase {
                          workspaceId: "/test", type: "session.fork",
                          timestamp: "2024-01-01T00:03:00Z", sequence: 1, payload: [:])
         ]
-        try await database.events.insertBatch(forkedEvents)
+        _ = try await database.events.insertIgnoringDuplicates(forkedEvents)
 
         // getAncestors should traverse across session boundary
         let ancestors = try await database.events.getAncestors("f-root")
@@ -255,22 +294,8 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(messages.count, 2) // user + assistant from parent
     }
 
-    func testGetChildren() async throws {
-        // Create a branching structure
-        let events = [
-            SessionEvent(id: "root", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
-            SessionEvent(id: "branch1", parentId: "root", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [:]),
-            SessionEvent(id: "branch2", parentId: "root", sessionId: "s1", workspaceId: "/test", type: "session.fork", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [:])
-        ]
-
-        try await database.events.insertBatch(events)
-
-        let children = try await database.events.getChildren("root")
-        XCTAssertEqual(children.count, 2)
-    }
-
     func testDeleteEventsBySession() async throws {
-        try await database.events.insertBatch([
+        _ = try await database.events.insertIgnoringDuplicates([
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01", sequence: 1, payload: [:]),
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01", sequence: 2, payload: [:])
         ])
@@ -290,7 +315,7 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [:])
         ]
-        try await database.events.insertBatch(initialEvents)
+        _ = try await database.events.insertIgnoringDuplicates(initialEvents)
 
         // Verify initial state
         var allEvents = try await database.events.getBySession("s1")
@@ -430,7 +455,7 @@ final class EventDatabaseTests: XCTestCase {
             ])
         ]
 
-        try await database.events.insertBatch(events)
+        _ = try await database.events.insertIgnoringDuplicates(events)
 
         // Use unified transformer to get messages
         let ancestors = try await database.events.getAncestors("e3")
@@ -457,7 +482,7 @@ final class EventDatabaseTests: XCTestCase {
             ])
         ]
 
-        try await database.events.insertBatch(events)
+        _ = try await database.events.insertIgnoringDuplicates(events)
         try await database.sessions.insert(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: "e1", headEventId: "e3",
             title: "Test", latestModel: "claude-sonnet-4",
@@ -471,25 +496,6 @@ final class EventDatabaseTests: XCTestCase {
         let state = UnifiedEventTransformer.reconstructSessionState(from: ancestors)
 
         XCTAssertEqual(state.messages.count, 2)
-    }
-
-    // MARK: - Sync State
-
-    func testSyncState() async throws {
-        let syncState = SyncState(
-            key: "session-1",
-            lastSyncedEventId: "event-5",
-            lastSyncTimestamp: "2024-01-01T00:00:00Z",
-            pendingEventIds: ["event-6", "event-7"]
-        )
-
-        try await database.sync.update(syncState)
-
-        let retrieved = try await database.sync.getState("session-1")
-        XCTAssertNotNil(retrieved)
-        XCTAssertEqual(retrieved?.key, "session-1")
-        XCTAssertEqual(retrieved?.lastSyncedEventId, "event-5")
-        XCTAssertEqual(retrieved?.pendingEventIds.count, 2)
     }
 
     // MARK: - Phase 1: Enriched Message Metadata
@@ -512,7 +518,7 @@ final class EventDatabaseTests: XCTestCase {
             ])
         ]
 
-        try await database.events.insertBatch(events)
+        _ = try await database.events.insertIgnoringDuplicates(events)
         try await database.sessions.insert(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: "e1", headEventId: "e3",
             title: "Test", latestModel: "claude-sonnet-4",

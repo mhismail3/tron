@@ -18,6 +18,7 @@ struct ChatView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.dependencies) var dependencies
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) var accessibilityReduceMotion
     @State var viewModel: ChatViewModel
 
     // Convenience accessor
@@ -174,19 +175,6 @@ struct ChatView: View {
             if presentationMode == .interactiveSession {
                 // Persist draft state before an interactive chat is destroyed.
                 Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
-                if services.connection.connectionState.isConnected {
-                    let manager = eventStoreManager
-                    Task {
-                        do {
-                            try await manager.syncSessionEvents(sessionId: sessionId)
-                        } catch {
-                            logger.warning(
-                                "[CACHE] Session history refresh on close failed: \(error.localizedDescription)",
-                                category: .database
-                            )
-                        }
-                    }
-                }
             }
             viewModel.clearLocalNotifications()
             viewModel.deactivateMountedResources()
@@ -223,15 +211,18 @@ struct ChatView: View {
                 }
                 guard taskCoordinator.isCurrent(watchdogTicket),
                       !Task.isCancelled,
-                      !initialLoadComplete else { return }
+                      !viewModel.hasAuthoritativeHistory else { return }
                 logger.warning(
-                    "[INIT] Initial reconstruction exceeded the shell loading budget; revealing recoverable state",
+                    "[INIT] Initial reconstruction exceeded the shell loading budget; presenting recoverable state",
                     category: .ui
                 )
-                viewModel.animationCoordinator.makeAllMessagesVisible(
-                    count: viewModel.messages.count
-                )
-                initialLoadComplete = true
+                viewModel.markInitialReconstructionDelayed()
+                if !initialLoadComplete {
+                    viewModel.animationCoordinator.makeAllMessagesVisible(
+                        count: viewModel.messages.count
+                    )
+                    initialLoadComplete = true
+                }
             }
             if presentationMode == .interactiveSession,
                services.connection.connectionState.isConnected {
@@ -260,9 +251,14 @@ struct ChatView: View {
             }
 
             if presentationMode == .workerAudit {
+                let historyWasProvisional = !viewModel.hasAuthoritativeHistory
                 let initialReconstructionOutcome = await viewModel.reconstructReadOnlyTranscript()
                 guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
-                await handleInitialMessageVisibility(guardedBy: ticket)
+                await settleTranscriptAfterReconstruction(
+                    historyWasProvisional: historyWasProvisional,
+                    outcome: initialReconstructionOutcome,
+                    guardedBy: ticket
+                )
                 guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
                 taskCoordinator.cancelTask(.initialLoadWatchdog)
                 if initialReconstructionOutcome == .retryableFailure {
@@ -287,6 +283,7 @@ struct ChatView: View {
             // Connect, resume, and reconstruct session state in one flow
             logger.debug("[INIT] starting connectAndReconstruct", category: .ui)
             let recoveryGenerationBeforeReconstruction = viewModel.streamRecoveryRequestGeneration
+            let historyWasProvisional = !viewModel.hasAuthoritativeHistory
             let initialReconstructionOutcome = await viewModel.connectAndReconstruct()
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             do {
@@ -303,16 +300,14 @@ struct ChatView: View {
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             logger.debug("[INIT] connectAndReconstruct done, messages=\(viewModel.messages.count)", category: .ui)
 
-            // Handle message visibility and set initialLoadComplete
-            // NOTE: initialLoadComplete is set INSIDE handleInitialMessageVisibility()
-            // AFTER the cascade starts, to prevent a flash where all messages are visible
-            if !initialLoadComplete || scrollTarget != nil {
-                await handleInitialMessageVisibility(guardedBy: ticket)
-            } else {
-                viewModel.animationCoordinator.makeAllMessagesVisible(
-                    count: viewModel.messages.count
-                )
-            }
+            // Resolve initial visibility through the same owner used by a later
+            // continuity retry. It sets `initialLoadComplete` only after the
+            // viewport/deep-link work needed by the outcome has settled.
+            await settleTranscriptAfterReconstruction(
+                historyWasProvisional: historyWasProvisional,
+                outcome: initialReconstructionOutcome,
+                guardedBy: ticket
+            )
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             taskCoordinator.cancelTask(.initialLoadWatchdog)
             logger.debug("[INIT] handleInitialMessageVisibility done, initialLoadComplete=\(initialLoadComplete)", category: .ui)
@@ -406,9 +401,17 @@ struct ChatView: View {
         var retryIndex = 0
 
         while taskCoordinator.isCurrent(ticket), !Task.isCancelled {
+            let historyWasProvisional = !viewModel.hasAuthoritativeHistory
             let outcome = presentationMode == .workerAudit
                 ? await viewModel.reconstructReadOnlyTranscript()
                 : await viewModel.connectAndReconstruct()
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+
+            await settleTranscriptAfterReconstruction(
+                historyWasProvisional: historyWasProvisional,
+                outcome: outcome,
+                guardedBy: ticket
+            )
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
 
             switch outcome {

@@ -54,6 +54,7 @@ enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
 
 struct ComposerAttachmentButton: View {
     let isDisabled: Bool
+    var disabledReason: String? = nil
     let attachmentSupport: AttachmentSupport
     let includeRecentInputs: Bool
     let onSelect: (AttachmentMenuAction) -> Void
@@ -96,7 +97,11 @@ struct ComposerAttachmentButton: View {
             onSelect(action)
         }
         .accessibilityLabel("Add attachment")
-        .accessibilityHint(menuDisabled ? "Attachments are unavailable while the agent is active." : "")
+        .accessibilityHint(
+            menuDisabled
+                ? (disabledReason ?? "Attachments are unavailable while the agent is active.")
+                : ""
+        )
     }
 }
 
@@ -139,13 +144,16 @@ enum ComposerTrailingMode: Equatable {
         }
     }
 
-    func accessibilityHint(micDisabled: Bool) -> String {
+    func accessibilityHint(micDisabled: Bool, blockedReason: String? = nil) -> String {
         switch self {
         case .transcribing:
             return "Wait for transcription to finish."
         case .record where micDisabled:
-            return "Voice input is unavailable while the agent is active or disconnected."
-        case .stopAgent, .stopRecording, .send, .record:
+            return blockedReason
+                ?? "Voice input is unavailable while the agent is active or disconnected."
+        case .send:
+            return blockedReason ?? ""
+        case .stopAgent, .stopRecording, .record:
             return ""
         }
     }
@@ -158,6 +166,7 @@ struct ComposerTrailingButton: View {
     let isRecording: Bool
     let isTranscribing: Bool
     let micDisabled: Bool
+    var blockedReason: String? = nil
     let onSend: () -> Void
     let onAbort: () -> Void
     let onMicTap: () -> Void
@@ -224,7 +233,12 @@ struct ComposerTrailingButton: View {
         .animation(.easeInOut(duration: 0.2), value: isRecording)
         .animation(.easeInOut(duration: 0.2), value: isTranscribing)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint(mode.accessibilityHint(micDisabled: micDisabled))
+        .accessibilityHint(
+            mode.accessibilityHint(
+                micDisabled: micDisabled,
+                blockedReason: blockedReason
+            )
+        )
     }
 
     private func performAction() {

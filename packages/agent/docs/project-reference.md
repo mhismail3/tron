@@ -2760,7 +2760,11 @@ the public group. The persistent workflow's `GITHUB_RUN_NUMBER` owns hosted
 iOS `CFBundleVersion` monotonicity and remains stable on reruns, while
 `VERSION.env` continues to own canonical product versions and local/Mac Apple
 build mirrors. Pull-request CI never receives distribution credentials or
-triggers TestFlight delivery.
+triggers TestFlight delivery. The dedicated macOS release runner is a
+system-domain launchd job that drops privileges to its isolated service account;
+hosted macOS CI retains Simulator/XCTest ownership because those tools require a
+logged-in user session, while the release runner owns only Xcode 27 archive,
+export, verification, upload, and distribution.
 
 ## Validation
 

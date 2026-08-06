@@ -57,6 +57,10 @@ enum SendBlockReason: Equatable, Sendable {
     case compacting
     /// The shared interaction policy currently treats this chat view as read-only.
     case readOnly
+    /// Cached content is visible, but the authoritative session cut is not ready.
+    case historySynchronizing
+    /// No usable authoritative or cached conversation could be loaded yet.
+    case historyUnavailable
 
     /// User-facing explanation shown in the disabled-button tooltip.
     var description: String {
@@ -64,6 +68,8 @@ enum SendBlockReason: Equatable, Sendable {
         case .disconnected: return "Reconnect to the server to send messages."
         case .compacting:   return "Waiting for context compaction to finish…"
         case .readOnly:     return "This conversation is read-only."
+        case .historySynchronizing: return "Waiting for conversation sync."
+        case .historyUnavailable: return "Conversation history is unavailable."
         }
     }
 }
@@ -94,7 +100,7 @@ struct InputBarConfig {
     }
 
     func canSend(hasContent: Bool) -> Bool {
-        guard agentPhase.isIdle, showsContextBriefingControl else { return false }
+        guard allowsSubmission, agentPhase.isIdle, showsContextBriefingControl else { return false }
         return hasContent && sendBlockReason == nil
     }
 
@@ -108,6 +114,7 @@ struct InputBarConfig {
     /// regardless of what the server is doing).
     var sendBlockReason: SendBlockReason? {
         if readOnly { return .readOnly }
+        if let availabilityBlockReason { return availabilityBlockReason }
         if !isConnected { return .disconnected }
         if isCompacting { return .compacting }
         return nil
@@ -129,6 +136,14 @@ struct InputBarConfig {
 
     // MARK: - Misc
     let readOnly: Bool
+    /// Draft text can remain editable even while server-mutating actions wait.
+    let allowsTextEntry: Bool
+    /// Attachment selection is visible in interactive chats but independently gated.
+    let allowsAttachments: Bool
+    /// Submission and speech capture require an authoritative history cut.
+    let allowsSubmission: Bool
+    /// History-specific explanation for an unavailable interactive action.
+    let availabilityBlockReason: SendBlockReason?
 
     // MARK: - Attachment Limits
     /// Provider-specific image processing limits derived from current model.
@@ -158,6 +173,10 @@ struct InputBarConfig {
         currentModelInfo: ModelInfo? = nil,
         inputHistory: InputHistoryStore? = nil,
         readOnly: Bool = false,
+        allowsTextEntry: Bool = true,
+        allowsAttachments: Bool = true,
+        allowsSubmission: Bool = true,
+        availabilityBlockReason: SendBlockReason? = nil,
         showDragHint: Bool = false
     ) {
         self.agentPhase = agentPhase
@@ -173,6 +192,10 @@ struct InputBarConfig {
         self.currentModelInfo = currentModelInfo
         self.inputHistory = inputHistory
         self.readOnly = readOnly
+        self.allowsTextEntry = allowsTextEntry
+        self.allowsAttachments = allowsAttachments
+        self.allowsSubmission = allowsSubmission
+        self.availabilityBlockReason = availabilityBlockReason
         self.showDragHint = showDragHint
     }
 }

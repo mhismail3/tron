@@ -212,3 +212,30 @@ struct LoadingToolbarButton: View {
         .disabled(!isEnabled || isLoading)
     }
 }
+
+// MARK: - Sheet Loading State
+
+/// Standard sheet-level loading treatment. The label is a separate Tron-styled
+/// text view because `ProgressView("…")` otherwise falls back to system type.
+struct SheetLoadingState: View {
+    let label: String
+    var accent: Color = .tronEmerald
+
+    var body: some View {
+        HStack(spacing: 9) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(accent)
+                .accessibilityHidden(true)
+            Text(label)
+                .font(TronTypography.sans(
+                    size: TronTypography.sizeBodySM,
+                    weight: .medium
+                ))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+    }
+}

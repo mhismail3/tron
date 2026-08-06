@@ -77,7 +77,10 @@ open TronMobile.xcodeproj
 Every successful main-branch CI push is published to the private automatic
 internal TestFlight group for App ID `6761511764`. Release tags independently
 advance selected builds through the public TestFlight path; contributor PRs do
-not deploy and do not need App Store Connect access.
+not deploy and do not need App Store Connect access. Hosted stable Xcode 26 CI
+proves the iOS 26 floor; a dedicated release-only runner archives the same
+source with the exact Xcode 27 pin and publishes sanitized provenance. Runner
+bootstrap and beta rotation are documented in the iOS development guide.
 
 ### Mac wrapper
 
@@ -288,7 +291,7 @@ Three distribution lanes:
 Versioning sources:
 - **Source of truth** — root `VERSION.env`. `TRON_VERSION` is canonical
   SemVer, `TRON_APPLE_BUILD` is the checked-in local/Mac Apple build, and
-  `TRON_DISPLAY_VERSION` is the human-facing label. Hosted iOS TestFlight
+  `TRON_DISPLAY_VERSION` is the human-facing label. Automated iOS TestFlight
   delivery overrides `CFBundleVersion` with the existing workflow's monotonic
   `GITHUB_RUN_NUMBER`; internal, public, and rerun uploads share that owner.
 - **Generated mirrors** — `packages/agent/Cargo.toml`, `packages/agent/Cargo.lock`,

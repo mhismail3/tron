@@ -25,7 +25,7 @@ extension ChatViewModel: ConnectionContext {
     }
 
     var reconstructionEventLimit: Int {
-        guard hasInitiallyLoaded else {
+        guard hasAuthoritativeHistory else {
             return Self.initialReconstructionEventLimit
         }
 
@@ -166,10 +166,12 @@ extension ChatViewModel {
     /// the shared transport's interactive-session context. Audit sheets are a
     /// read-only projection and must not disrupt the user's active chat.
     func reconstructReadOnlyTranscript() async -> ConnectionReconstructionOutcome {
-        await connectionCoordinator.reconstructReadOnly(
+        let outcome = await connectionCoordinator.reconstructReadOnly(
             context: self,
             eventLimit: Self.workerAuditReconstructionEventLimit
         )
+        recordReconstructionOutcome(outcome)
+        return outcome
     }
 
     /// Connect, resume, and reconstruct the session.
@@ -177,6 +179,28 @@ extension ChatViewModel {
     /// Retryable and cancelled attempts retain the buffered live suffix; the
     /// mounted view's single connection-refresh task owns retry scheduling.
     func connectAndReconstruct() async -> ConnectionReconstructionOutcome {
-        await connectionCoordinator.connectAndReconstruct(context: self)
+        let outcome = await connectionCoordinator.connectAndReconstruct(context: self)
+        recordReconstructionOutcome(outcome)
+        return outcome
+    }
+
+    /// Preserve cached rows after a retryable failure while ending any stale
+    /// shell-owned loading label. A later successful reconstruction advances
+    /// the phase to `.authoritative` in `processReconstructionResult`.
+    func recordReconstructionOutcome(_ outcome: ConnectionReconstructionOutcome) {
+        guard !hasAuthoritativeHistory,
+              (outcome == .retryableFailure || outcome == .terminalFailure) else { return }
+        conversationHistoryPhase = .recoverableFailure(
+            hasCachedTranscript: conversationHistoryPhase.showsCachedTranscript
+        )
+    }
+
+    /// The shell loading budget is a presentation deadline, not permission to
+    /// treat cached or absent history as authoritative.
+    func markInitialReconstructionDelayed() {
+        guard !hasAuthoritativeHistory else { return }
+        conversationHistoryPhase = .recoverableFailure(
+            hasCachedTranscript: conversationHistoryPhase.showsCachedTranscript
+        )
     }
 }

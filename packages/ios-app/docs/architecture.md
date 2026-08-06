@@ -1,7 +1,7 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-27 for the state-owner feature layout, inspectable
-> provider context, and split-worker native notification delivery.
+> Last verified: 2026-08-06 for authoritative/cached chat loading, canonical
+> reconstruction ownership, cohesive sheets, and iOS 26/27 delivery.
 
 ## Overview
 
@@ -58,11 +58,18 @@ their DTOs contain no synthetic health state. Canonical worker summaries retain
 the operational health used by the dashboard and lifecycle controls.
 
 The local `EventDatabase` is a reconstructable projection under the app's
-Documents `.tron/database/prod.db` path. `EventStoreManager` serializes global
-stream replacement, reconstruction, and shutdown; server switching replaces
-the engine client and clears server-owned projections through their owning
-stores. `DependencyContainerStorage` and `DependencyContainerRuntimeIO` are the
-only production composition points for these local persistence dependencies.
+Documents `.tron/database/prod.db` path. `session::reconstruct` is the sole
+transcript-history and fork-ancestry contract; its committed event window warms
+the cache. The client has no incremental history RPC, ancestor RPC, or local
+sync-cursor repository; cache initialization removes that obsolete cursor table
+from older builds. Session-list refresh publishes metadata for deep links.
+New-session and fork rows publish synchronously after their database write
+commits, then the mounted chat reconstructs canonical history.
+`EventStoreManager` serializes global stream
+replacement and shutdown; server switching replaces the engine client and
+clears server-owned projections through their owning stores.
+`DependencyContainerStorage` and `DependencyContainerRuntimeIO` are the only
+production composition points for these local persistence dependencies.
 
 The Mac app is a packaging, launch-agent, and pairing shell. It is not a second
 operational `/engine` client, so iOS is the current client that owns the Engine
@@ -729,14 +736,23 @@ selected-server generation, so a deep link or server switch cannot reuse a
 view model backed by the previous server's repositories. Initial
 reconstruction first mounts any durable rows already held by the device event
 cache, then refreshes them from the server-authoritative snapshot. Successful
-snapshots update that cache, and leaving a connected interactive session starts
-one incremental cache refresh. This makes repeat opens local-first without
-allowing cached rows to release the live-event reconstruction gate or declare a
-session empty. A five-second presentation watchdog may reveal the shell, but a
-pending snapshot with no cached messages retains an explicit conversation
-loading state and a read-only composer instead of masquerading as an empty
-transcript. Transcript reveal is bounded to roughly 400 ms; any final bottom
-correction continues after content is visible.
+snapshots update that cache; closing the chat performs no redundant history
+RPC. One `ConversationHistoryPhase` drives transcript, overview, and composer:
+loading, cached-and-synchronizing, authoritative, or recoverable failure. Cached
+rows switch the prompt to `Type here` and permit a local draft, while send,
+speech, and attachment selection remain visible but disabled until the server
+snapshot commits. A five-second presentation watchdog ends stale loading copy
+without promoting cached or absent data to authority. An uncached failure shows
+recoverable status and continues bounded reconnect attempts.
+
+Cached and authoritative rows use the same bounded geometry settle and fade.
+After authoritative replacement changes lazy row heights, the shell performs
+one final bottom reconciliation only while the app still owns the initial
+viewport. This also covers an uncached reconstruction that finishes after the
+five-second recovery shell has appeared. A message deep link and any user
+scroll-away take precedence; Reduce Motion removes the fade without changing
+final placement. Transcript reveal is bounded to roughly 400 ms and short
+histories remain top-aligned.
 
 `SessionLoadDiagnostics` records local monotonic phase evidence for shell,
 cache, authoritative reconstruction, and first interactive state. OS signposts
@@ -976,6 +992,11 @@ surface, while light-mode medium sheets and iPad presentation retain their
 existing appearance. Explicit clear or unchanged presentation surfaces, such
 as immersive camera and onboarding flows, remain intentional opt-outs.
 
+Sheet-level asynchronous labels use `SheetLoadingState`, which separates the
+spinner from a Tron-typography text label. Raw labeled `ProgressView` remains
+reserved for numeric progress; compact unlabeled spinners may remain inside
+buttons and status controls.
+
 The model picker additionally resolves the OpenAI neutral accent to the
 standard high-contrast secondary-text token in dark mode. Model-entry chrome,
 the picker title and confirmation action, and the reasoning control share the
@@ -1096,10 +1117,12 @@ reminders; they are not a general device-control surface.
   The inbox and detail use the same Settings page container, cards,
   typography, toolbar hierarchy, and medium/large sheet detents as the other
   Settings sheets; artifact ownership does not introduce a visual subsystem.
-  Preview presents Quick Look inside a Tron-owned navigation sheet with the
-  standard title, explicit dismiss and share controls, safe-area content, a
-  compact verified-file caption, and the same medium/large detents. The native
-  renderer never extends underneath or replaces Tron sheet chrome.
+  Preview uses that same Settings page container rather than bespoke navigation
+  chrome. It opens at medium, expands to large, provides standard dismiss/share
+  controls, and keeps a compact glass verified-file caption inside the safe
+  area. Quick Look's UIKit-owned descendant scroll views receive the same soft
+  edge treatment as SwiftUI sheets and OAuth web content, without forcing an
+  opaque or permanently hidden navigation-bar background.
 - Attach to Draft is the only bridge from Artifact Inbox into chat. It converts
   already-verified bytes into the existing `Attachment` value and sends an
   explicit app-local intent carrying the target session ID. Only the matching
