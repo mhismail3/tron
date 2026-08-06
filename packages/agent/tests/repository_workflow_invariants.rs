@@ -599,10 +599,10 @@ fn local_and_github_ci_share_one_fail_fast_test_schedule() {
     assert_eq!(
         calls,
         vec![
-            "test --workspace --lib --bins -- --quiet --test-threads=1".to_owned(),
-            "test --test alpha -- --quiet".to_owned(),
-            "test --test zeta -- --quiet".to_owned(),
-            "test --test integration -- --test-threads=1 --quiet".to_owned(),
+            "test --locked --workspace --lib --bins -- --quiet --test-threads=1".to_owned(),
+            "test --locked --test alpha -- --quiet".to_owned(),
+            "test --locked --test zeta -- --quiet".to_owned(),
+            "test --locked --test integration -- --test-threads=1 --quiet".to_owned(),
         ]
     );
 
@@ -615,10 +615,23 @@ fn local_and_github_ci_share_one_fail_fast_test_schedule() {
     assert_eq!(
         calls,
         vec![
-            "test --workspace --lib --bins -- --quiet --test-threads=1".to_owned(),
-            "test --test alpha -- --quiet".to_owned(),
+            "test --locked --workspace --lib --bins -- --quiet --test-threads=1".to_owned(),
+            "test --locked --test alpha -- --quiet".to_owned(),
         ]
     );
+
+    let quality = read_repo_file("scripts/tron.d/quality.sh");
+    for required in [
+        "cargo check --locked --workspace --all-targets",
+        "cargo clippy --locked --workspace --all-targets",
+        "cargo test --locked --workspace --lib --bins",
+        "cargo doc --locked --workspace --no-deps",
+    ] {
+        assert!(
+            quality.contains(required),
+            "repository-owned CI must refuse dependency resolution drift: missing {required}"
+        );
+    }
 
     let (succeeded, calls, stderr) = probe_quality_run_tests(&["alpha"], None);
     assert!(!succeeded, "quality run_tests must require integration");
@@ -627,6 +640,306 @@ fn local_and_github_ci_share_one_fail_fast_test_schedule() {
         "missing integration must fail before Cargo"
     );
     assert!(stderr.contains("serial integration test target is missing"));
+}
+
+#[test]
+fn workflow_ordering_preserves_main_history_and_rejects_stale_ios_delivery() {
+    let ci = read_repo_file(".github/workflows/ci.yml");
+    for required in [
+        "format('ci-{0}-pr-{1}', github.workflow, github.event.pull_request.number)",
+        "format('ci-{0}-{1}-{2}-{3}', github.workflow, github.event_name, github.run_id, github.run_attempt)",
+        "cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+    ] {
+        assert!(
+            ci.contains(required),
+            "authoritative CI ordering contract is missing {required}"
+        );
+    }
+    assert!(
+        !ci.contains("group: ci-${{ github.workflow }}-${{ github.ref }}"),
+        "main and manual CI runs must not share a pending-replacement group"
+    );
+
+    let ios = read_repo_file(".github/workflows/release-ios.yml");
+    let eligibility_job = ios
+        .split_once("  eligibility:\n")
+        .expect("iOS delivery must define a hosted eligibility job")
+        .1
+        .split_once("\n  testflight:\n")
+        .expect("eligibility must run before the protected release job")
+        .0;
+    for required in [
+        "runs-on: ubuntu-latest",
+        "eligible: ${{ steps.resolve.outputs.eligible }}",
+        "source_sha: ${{ steps.resolve.outputs.source_sha }}",
+        "latest_main_sha: ${{ steps.resolve.outputs.latest_main_sha }}",
+        "evidence_sha256: ${{ steps.resolve.outputs.evidence_sha256 }}",
+        "delivery_required: ${{ steps.resolve.outputs.delivery_required }}",
+        "apple_build_owner_run_number: ${{ steps.resolve.outputs.apple_build_owner_run_number }}",
+        "expected_asc_build_id: ${{ steps.resolve.outputs.expected_asc_build_id }}",
+        "actions: read",
+        "if: github.event_name == 'workflow_run'",
+        "ref: main",
+    ] {
+        assert!(
+            eligibility_job.contains(required),
+            "iOS eligibility job is missing {required}"
+        );
+    }
+    assert!(
+        !eligibility_job.contains("environment:") && !eligibility_job.contains("${{ secrets."),
+        "source eligibility must stay outside the protected environment and release secrets"
+    );
+
+    let eligibility_script = workflow_step_script(&ios, "Resolve delivery eligibility");
+    for required in [
+        "source_sha=\"$UPSTREAM_SHA\"",
+        "eligible=false",
+        "\"$UPSTREAM_CONCLUSION\" == \"success\"",
+        "\"$UPSTREAM_EVENT\" == \"push\"",
+        "\"$UPSTREAM_BRANCH\" == \"main\"",
+        "refs/heads/main:refs/remotes/origin/main",
+        "current_main_sha=\"$(git rev-parse refs/remotes/origin/main)\"",
+        "\"$source_sha\" == \"$current_main_sha\"",
+        "scripts/ios-release-verify.py eligibility",
+        "--observed-main-sha \"$current_main_sha\"",
+        "--ci-workflow-run-id \"$UPSTREAM_RUN_ID\"",
+        "evidence_sha256=sha256:$evidence_sha256",
+        "scripts/ios-release-verify.py github-release-state",
+        "scripts/ios-release-verify.py intent",
+        "TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER=\"$owner_run_number\"",
+        "delivery_required=$delivery_required",
+        "intent_artifact=\"tron-ios-release-intent-",
+    ] {
+        assert!(
+            eligibility_script.contains(required),
+            "automatic iOS delivery eligibility is missing {required}"
+        );
+    }
+    let intent_evidence = ios
+        .split_once("      - name: Preserve automatic release intent\n")
+        .expect("automatic release must persist intent before side effects")
+        .1
+        .split_once("\n  testflight:\n")
+        .expect("release intent must be retained outside the protected job")
+        .0;
+    for required in [
+        "name: ${{ steps.resolve.outputs.intent_artifact }}",
+        "path: ${{ steps.resolve.outputs.intent_path }}",
+        "retention-days: 90",
+        "if-no-files-found: error",
+    ] {
+        assert!(
+            intent_evidence.contains(required),
+            "automatic release intent retention is missing {required}"
+        );
+    }
+    for required in [
+        "permissions:\n      contents: read\n      actions: read",
+        "scripts/ios-release-verify.py github-provenance",
+        "scripts/ios-release-verify.py reuse-provenance",
+        "scripts/ios-release-verify.py admission",
+        "scripts/ios-release-verify.py receipt",
+        "scripts/ios-release-verify.py direct-intent",
+        "scripts/ios-release-verify.py github-direct-release-state",
+        "scripts/ios-release-verify.py github-direct-provenance",
+        "scripts/ios-release-verify.py direct-reuse-provenance",
+        "scripts/ios-release-verify.py direct-source-check",
+        "scripts/ios-release-verify.py direct-admission",
+        "scripts/ios-release-verify.py direct-receipt",
+        "--platform IOS",
+        "asc builds wait --build-id \"$build_id\"",
+        "expected_build_id=\"$EXISTING_ASC_BUILD_ID\"",
+        "existing live build lacks a trusted admission receipt",
+        "fresh release allocation from current main",
+    ] {
+        assert!(
+            ios.contains(required),
+            "rerun-safe iOS release workflow is missing {required}"
+        );
+    }
+    for artifact_name in [
+        "ios-dsyms-${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        "ios-release-provenance-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        "ios-release-reuse-provenance-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        "ios-dry-run-ipa-${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        "ios-release-admission-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        "ios-asc-diagnostics-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        "tron-ios-release-receipt-${{ github.event.workflow_run.id }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        "tron-ios-direct-release-intent-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+        "ios-release-direct-source-check-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        "ios-release-direct-admission-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        "tron-ios-direct-release-receipt-${{ github.run_id }}-${{ github.run_attempt }}",
+    ] {
+        assert!(
+            ios.contains(artifact_name),
+            "attempt-produced artifact is not v4-safe: {artifact_name}"
+        );
+    }
+    let upload_head = ios
+        .find("      - name: Upload to App Store Connect\n")
+        .expect("ASC upload must exist");
+    let durable_head = ios
+        .find("      - name: Preserve automatic delivery head evidence\n")
+        .expect("head evidence upload must exist");
+    let durable_admission = ios
+        .find("      - name: Preserve automatic ASC admission receipt\n")
+        .expect("ASC admission evidence must exist");
+    let receipt_write = ios
+        .find("      - name: Write automatic TestFlight delivery receipt\n")
+        .expect("delivery receipt writer must exist");
+    let teardown = ios
+        .find("      - name: Tear down iOS release credentials\n")
+        .expect("credential teardown must exist");
+    let receipt_upload = ios
+        .find("      - name: Preserve automatic TestFlight delivery receipt\n")
+        .expect("delivery receipt upload must exist");
+    assert!(
+        upload_head < durable_head
+            && durable_head < durable_admission
+            && durable_admission < receipt_write
+            && receipt_write < teardown
+            && teardown < receipt_upload,
+        "iOS release evidence must preserve upload/head/admission/delivery/cleanup order"
+    );
+    let eligibility_evidence = ios
+        .split_once("      - name: Preserve automatic delivery eligibility\n")
+        .expect("automatic eligibility must be retained as structured evidence")
+        .1
+        .split_once("\n  testflight:\n")
+        .expect("eligibility evidence must remain outside the protected release job")
+        .0;
+    for required in [
+        "if: github.event_name == 'workflow_run'",
+        "tron-ios-release-eligibility-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        "path: ${{ steps.resolve.outputs.evidence_path }}",
+        "retention-days: 90",
+        "if-no-files-found: error",
+    ] {
+        assert!(
+            eligibility_evidence.contains(required),
+            "automatic eligibility evidence is missing {required}"
+        );
+    }
+
+    for required in [
+        "needs: eligibility",
+        "if: needs.eligibility.outputs.eligible == 'true'",
+        "ref: ${{ needs.eligibility.outputs.source_sha }}",
+        "EXPECTED_SOURCE_SHA: ${{ needs.eligibility.outputs.source_sha }}",
+    ] {
+        assert!(
+            ios.contains(required),
+            "protected iOS delivery is not bound to eligibility output {required}"
+        );
+    }
+    let checkout_script = workflow_step_script(&ios, "Verify trusted checkout");
+    for required in [
+        "current_main_sha=\"$(git rev-parse origin/main)\"",
+        "test \"$resolved_sha\" = \"$current_main_sha\"",
+        "\"$GITHUB_EVENT_NAME\" == \"workflow_dispatch\" && \"$REQUESTED_CHANNEL\" != \"dry-run\"",
+        "git merge-base --is-ancestor \"$resolved_sha\" \"$current_main_sha\"",
+    ] {
+        assert!(
+            checkout_script.contains(required),
+            "release-runner checkout guard is missing {required}"
+        );
+    }
+    let delivery_guard = workflow_step_script(&ios, "Reconfirm automatic delivery head");
+    for required in [
+        "refs/heads/main:refs/remotes/origin/main",
+        "test \"$EXPECTED_SOURCE_SHA\" = \"$current_main_sha\"",
+        "checked_at=\"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\"",
+        "scripts/ios-release-verify.py head-check",
+        "--ci-workflow-run-id \"$CI_WORKFLOW_RUN_ID\"",
+        "--release-workflow-run-id \"$GITHUB_RUN_ID\"",
+        "sha256=sha256:$head_check_sha256",
+        "IOS_RELEASE_HEAD_CHECK=$head_check_path",
+    ] {
+        assert!(
+            delivery_guard.contains(required),
+            "automatic iOS delivery lost its just-in-time main-head guard: {required}"
+        );
+    }
+    assert!(
+        ios.contains("EXPECTED_SOURCE_SHA: ${{ needs.eligibility.outputs.source_sha }}"),
+        "automatic delivery guard must bind eligibility's exact source"
+    );
+    assert!(
+        ios.contains("id: pre_upload_guard")
+            && ios.contains("CI_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}")
+            && ios.contains("CI_COMPLETED_AT: ${{ github.event.workflow_run.updated_at }}"),
+        "automatic delivery evidence must bind the authoritative and release runs"
+    );
+    let guard_offset = ios
+        .find("- name: Reconfirm automatic delivery head")
+        .expect("delivery head guard should exist");
+    let upload_offset = ios
+        .find("- name: Upload to App Store Connect")
+        .expect("App Store Connect upload should exist");
+    assert!(
+        guard_offset < upload_offset,
+        "automatic iOS source must be rechecked before its first App Store Connect delivery"
+    );
+    let evidence_offset = ios
+        .find("- name: Preserve automatic delivery head evidence")
+        .expect("automatic delivery should preserve its just-in-time head check");
+    assert!(
+        upload_offset < evidence_offset,
+        "head-check artifact upload must not widen the check-to-App-Store upload race"
+    );
+    let evidence_step = &ios[evidence_offset..];
+    for required in [
+        "if: always() && github.event_name == 'workflow_run'",
+        "steps.pre_upload_guard.outcome == 'success'",
+        "path: ${{ steps.pre_upload_guard.outputs.path }}",
+        "retention-days: 90",
+        "if-no-files-found: error",
+    ] {
+        assert!(
+            evidence_step.contains(required),
+            "automatic delivery evidence retention is missing {required}"
+        );
+    }
+
+    let direct_guard = workflow_step_script(&ios, "Reconfirm direct live release source");
+    for required in [
+        "test \"$EXPECTED_SOURCE_SHA\" = \"$current_main_sha\"",
+        "source_mode=\"current-main\"",
+        "git merge-base --is-ancestor \"$EXPECTED_SOURCE_SHA\" \"$current_main_sha\"",
+        "source_mode=\"main-ancestor\"",
+        "scripts/ios-release-verify.py direct-source-check",
+        "IOS_RELEASE_DIRECT_SOURCE_CHECK=$source_check_path",
+    ] {
+        assert!(
+            direct_guard.contains(required),
+            "direct live source guard is missing {required}"
+        );
+    }
+    let direct_guard_offset = ios
+        .find("- name: Reconfirm direct live release source")
+        .expect("direct live source guard must exist");
+    let direct_source_evidence = ios
+        .find("- name: Preserve direct live source evidence")
+        .expect("direct source evidence must exist");
+    let direct_admission = ios
+        .find("- name: Preserve direct ASC admission")
+        .expect("direct admission evidence must exist");
+    let direct_receipt_write = ios
+        .find("- name: Write direct TestFlight delivery receipt")
+        .expect("direct receipt writer must exist");
+    let direct_receipt_upload = ios
+        .find("- name: Preserve direct TestFlight delivery receipt")
+        .expect("direct receipt artifact must exist");
+    assert!(
+        direct_guard_offset < upload_offset
+            && upload_offset < direct_source_evidence
+            && direct_source_evidence < direct_admission
+            && direct_admission < direct_receipt_write
+            && direct_receipt_write < teardown
+            && teardown < direct_receipt_upload,
+        "direct intent/effect/admission/receipt custody is out of order"
+    );
 }
 
 #[test]
@@ -757,20 +1070,18 @@ fn release_workflows_fail_closed_before_live_builds() {
             "iOS delivery workflow missing {required}"
         );
     }
-    assert!(
-        !ios.contains("\nconcurrency:\n"),
-        "automatic iOS delivery must not collapse queued main commits"
-    );
     for required in [
-        "github.event.workflow_run.conclusion == 'success'",
-        "github.event.workflow_run.event == 'push'",
-        "github.event.workflow_run.head_branch == 'main'",
+        "group: ${{ github.event_name == 'workflow_run' && format('ios-release-intent-{0}-{1}', github.event.workflow_run.id, github.event.workflow_run.conclusion)",
+        "cancel-in-progress: false",
+        "TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER: ${{ needs.eligibility.outputs.apple_build_owner_run_number }}",
+        "if: needs.eligibility.outputs.eligible == 'true' && needs.eligibility.outputs.delivery_required == 'true'",
     ] {
         assert!(
             ios.contains(required),
-            "automatic iOS delivery gate missing {required}"
+            "automatic iOS delivery is missing rerun-safe ownership contract {required}"
         );
     }
+    assert!(ios.contains("if: needs.eligibility.outputs.eligible == 'true'"));
     let credential_environment = ios
         .split_once("      - name: Require live iOS credentials\n")
         .expect("iOS delivery must own a live credential gate")
@@ -860,6 +1171,8 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "ios-installed-profile-uuids",
         "cmp -s \"$profile_path\" \"$destination\"",
         "printf '%s\\n' \"$uuid\" >> \"$installed_profile_uuids\"",
+        "ios-release-credential-ledger.py begin",
+        "ios-release-credential-ledger.py plan-profile",
     ] {
         assert!(
             workflow.contains(required),
@@ -917,9 +1230,25 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
     let signing_probe = signing
         .find("--sign \"$identity_hash\"")
         .expect("manual signing must prove non-interactive key access");
+    let ledger_begin = signing
+        .find("ios-release-credential-ledger.py begin")
+        .expect("manual signing must persist cleanup ownership");
+    let keychain_create = signing
+        .find("security create-keychain")
+        .expect("manual signing must create a job-owned keychain");
+    let profile_plan = signing
+        .find("ios-release-credential-ledger.py plan-profile")
+        .expect("manual signing must persist profile ownership");
+    let profile_install = signing
+        .find("/bin/cp \"$profile_path\" \"$destination\"")
+        .expect("manual signing must install a planned profile");
     assert!(
         root_download < wwdr_download && wwdr_download < exact_chain && exact_chain < signing_probe,
         "the exact pinned chain must validate before non-interactive signing is tested"
+    );
+    assert!(
+        ledger_begin < keychain_create && profile_plan < profile_install,
+        "durable credential ownership must precede every persistent signing mutation"
     );
     assert!(
         !signing.contains("security import \"$apple_root_path\""),
@@ -954,6 +1283,9 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "tron-signing-probe.stderr",
         "tron-signing-probe-cert-0",
         "installed_profile_uuids",
+        "ios-release-credential-ledger.py complete",
+        "ios-release-credential-ledger.py audit",
+        "retaining the iOS release credential ledger for next-job recovery",
         "exit \"$cleanup_failed\"",
     ] {
         assert!(
@@ -1047,6 +1379,7 @@ fi
     let run_cleanup = |fail_restore: bool| {
         Command::new("/bin/bash")
             .args(["-c", &cleanup])
+            .current_dir(repo_root())
             .env_clear()
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
             .env("RUNNER_TEMP", &runner_temp)
@@ -1100,6 +1433,7 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     let doctor = read_repo_file("scripts/ios-release-runner-doctor.sh");
     let user_context = read_repo_file("scripts/ios-release-user-context");
     let release_verifier = read_repo_file("scripts/ios-release-verify.py");
+    let credential_ledger = read_repo_file("scripts/ios-release-credential-ledger.py");
     let bootstrap = read_repo_file("scripts/bootstrap-ios-release-runner.sh");
     let version = read_repo_file("scripts/tron-version");
     assert_ne!(
@@ -1115,12 +1449,36 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     let doctor_gate = workflow
         .find("      - name: Verify dedicated release runner\n")
         .expect("iOS release must verify its dedicated runner");
+    let recovery_gate = workflow
+        .find("      - name: Recover stale iOS release credentials\n")
+        .expect("iOS release must recover stale credentials");
     let credential_gate = workflow
         .find("      - name: Require live iOS credentials\n")
         .expect("iOS release must own a live credential gate");
     assert!(
-        doctor_gate < credential_gate,
-        "the isolated account and toolchain must be verified before a step receives release secrets"
+        doctor_gate < recovery_gate && recovery_gate < credential_gate,
+        "runner verification and stale-credential recovery must finish before a step receives release secrets"
+    );
+    let recovery_script = workflow_step_script(&workflow, "Recover stale iOS release credentials");
+    assert!(recovery_script.contains("ios-release-credential-ledger.py recover"));
+    assert!(recovery_script.contains("ios-release-credential-ledger.py prepare-profile-directory"));
+    assert!(recovery_script.contains("ios-release-credential-ledger.py audit"));
+    let recover = recovery_script.find(" recover").expect("recovery command");
+    let prepare = recovery_script
+        .find(" prepare-profile-directory")
+        .expect("profile directory preparation command");
+    let audit = recovery_script
+        .find(" audit")
+        .expect("credential audit command");
+    assert!(recover < prepare && prepare < audit);
+    assert!(
+        !workflow.contains("mkdir -p \"$profiles_dir\""),
+        "profile-directory creation must not bypass no-follow ledger validation"
+    );
+    let recovery_environment = &workflow[recovery_gate..credential_gate];
+    assert!(
+        !recovery_environment.contains("secrets."),
+        "stale-credential recovery must remain secretless"
     );
 
     for required in [
@@ -1141,6 +1499,10 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "TRON_RELEASE_APPLE_ROOT_SHA256",
         "TRON_RELEASE_APPLE_WWDR_G3_URL",
         "TRON_RELEASE_APPLE_WWDR_G3_SHA256",
+        "ios-release-credential-ledger.py\" self-test",
+        "--audit-credentials",
+        "baseline keychain must have mode 0600",
+        "baseline keychain must not have hard links",
     ] {
         assert!(
             doctor.contains(required),
@@ -1174,13 +1536,39 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
             "release security-session verifier is missing {required}"
         );
     }
+    for required in [
+        "tron.ios-release-credential-attempt.v1",
+        "def begin(",
+        "def plan_profile(",
+        "def _ensure_descendant_directory(",
+        "def prepare_profile_directory(",
+        "def recover(",
+        "def complete(",
+        "def audit(",
+        "baseline keychain preferences",
+        "stale release credential state must be recovered before begin",
+        "profile UUID must use canonical uppercase UUID syntax",
+        "profile directory preparation crossed a symlink",
+    ] {
+        assert!(
+            credential_ledger.contains(required),
+            "credential recovery ledger is missing {required}"
+        );
+    }
+    for forbidden in ["password", "certificate material", "API keys"] {
+        assert!(
+            credential_ledger.contains(forbidden),
+            "credential ledger must explicitly exclude {forbidden}"
+        );
+    }
     let user_shell = "shell: ./scripts/ios-release-user-context /bin/bash";
     assert_eq!(
         workflow.matches(user_shell).count(),
-        4,
-        "manual signing, archive, export, and credential teardown must share the user security context"
+        5,
+        "recovery, manual signing, archive, export, and credential teardown must share the user security context"
     );
     for step_name in [
+        "Recover stale iOS release credentials",
         "Prepare manual iOS signing assets",
         "xcodebuild archive",
         "Export App Store IPA",
@@ -1201,6 +1589,17 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
             "{step_name} must enter the user context before its run body"
         );
     }
+    let ledger_self_test = Command::new("python3")
+        .args(["scripts/ios-release-credential-ledger.py", "self-test"])
+        .current_dir(repo_root())
+        .output()
+        .expect("credential ledger self-test should start");
+    assert!(
+        ledger_self_test.status.success(),
+        "credential ledger self-test failed:\n{}{}",
+        String::from_utf8_lossy(&ledger_self_test.stdout),
+        String::from_utf8_lossy(&ledger_self_test.stderr)
+    );
     for required in [
         "TRON_RELEASE_RUNNER_SHA256",
         "shasum -a 256",
@@ -1411,6 +1810,396 @@ fn github_ci_stages_feedback_and_reuses_exact_evidence_fail_closed() {
 }
 
 #[test]
+fn provider_neutral_ci_shadow_is_pinned_advisory_and_release_free() {
+    let policy: serde_json::Value = serde_json::from_str(&read_repo_file("config/ci-policy.json"))
+        .expect("CI policy should be valid JSON");
+    assert_eq!(policy["schema"], "tron.ci-policy.v1");
+    assert_eq!(
+        policy["providers"]["github-actions"]["role"],
+        "authoritative"
+    );
+    assert_eq!(
+        policy["providers"]["github-actions"]["required_check_authority"],
+        true
+    );
+    assert_eq!(
+        policy["providers"]["github-actions"]["release_authority"],
+        true
+    );
+    assert_eq!(policy["providers"]["buildkite"]["role"], "shadow");
+    assert_eq!(policy["providers"]["buildkite"]["shadow"], true);
+    assert_eq!(
+        policy["providers"]["buildkite"]["required_check_authority"],
+        false
+    );
+    assert_eq!(policy["providers"]["buildkite"]["release_authority"], false);
+    assert_eq!(policy["release"]["provider"], "github-actions");
+    assert_eq!(policy["release"]["ios"]["identity"]["app_id"], "6761511764");
+    assert_eq!(
+        policy["release"]["ios"]["identity"]["bundle_ids"],
+        serde_json::json!(["com.tron.mobile", "com.tron.mobile.ShareExtension"])
+    );
+    assert_eq!(policy["release"]["ios"]["identity"]["scheme"], "Tron");
+    assert_eq!(
+        policy["release"]["ios"]["identity"]["configuration"],
+        "Prod"
+    );
+    assert_eq!(
+        policy["release"]["ios"]["channels"],
+        serde_json::json!({"internal": "internal", "external": "external"})
+    );
+    assert_eq!(
+        policy["release"]["ios"]["triggers"],
+        serde_json::json!({"internal": "latest-green-main", "external": "server-v*"})
+    );
+    assert_eq!(
+        policy["release"]["mac"],
+        serde_json::json!({
+            "configuration_path": ".github/workflows/release-mac.yml",
+            "channels": {"public": "public"},
+            "triggers": {"public": "server-v*"}
+        })
+    );
+    let workflow_inventory = policy["workflow_inventory"]
+        .as_object()
+        .expect("CI policy should inventory every authoritative workflow");
+    let expected_workflows: [(&str, &str, &str, &str, &[&str]); 6] = [
+        (
+            "merge-validation",
+            ".github/workflows/ci.yml",
+            "required-validation",
+            "secretless-shadow-observation",
+            &["pull_request:main", "push:main", "workflow_dispatch"],
+        ),
+        (
+            "fast-feedback",
+            ".github/workflows/fast-feedback.yml",
+            "advisory-validation",
+            "unimplemented",
+            &["pull_request:main"],
+        ),
+        (
+            "ios-performance",
+            ".github/workflows/ios-performance.yml",
+            "advisory-measurement",
+            "unimplemented",
+            &["schedule", "workflow_dispatch"],
+        ),
+        (
+            "server-performance",
+            ".github/workflows/performance.yml",
+            "advisory-measurement",
+            "unimplemented",
+            &["schedule", "workflow_dispatch"],
+        ),
+        (
+            "ios-release",
+            ".github/workflows/release-ios.yml",
+            "release",
+            "unimplemented",
+            &[
+                "workflow_run:CI:main:completed",
+                "push:server-v*",
+                "workflow_dispatch",
+            ],
+        ),
+        (
+            "mac-release",
+            ".github/workflows/release-mac.yml",
+            "release",
+            "unimplemented",
+            &["push:server-v*", "workflow_dispatch"],
+        ),
+    ];
+    assert_eq!(workflow_inventory.len(), expected_workflows.len());
+    for (id, path, role, coverage, triggers) in expected_workflows {
+        let workflow = workflow_inventory
+            .get(id)
+            .unwrap_or_else(|| panic!("CI policy is missing workflow {id}"));
+        assert_eq!(workflow["configuration_path"], path);
+        assert_eq!(workflow["provider"], "github-actions");
+        assert_eq!(workflow["role"], role);
+        assert_eq!(workflow["candidate_coverage"], coverage);
+        assert_eq!(workflow["triggers"], serde_json::json!(triggers));
+        assert!(
+            repo_root().join(path).is_file(),
+            "inventoried workflow is missing: {path}"
+        );
+    }
+    let inventoried_paths: std::collections::BTreeSet<&str> = workflow_inventory
+        .values()
+        .map(|workflow| {
+            workflow["configuration_path"]
+                .as_str()
+                .expect("workflow path should be a string")
+        })
+        .collect();
+    let checked_in_paths: std::collections::BTreeSet<String> =
+        std::fs::read_dir(repo_root().join(".github/workflows"))
+            .expect("workflow directory should exist")
+            .map(|entry| {
+                let name = entry
+                    .expect("workflow entry should be readable")
+                    .file_name()
+                    .into_string()
+                    .expect("workflow filename should be UTF-8");
+                format!(".github/workflows/{name}")
+            })
+            .collect();
+    assert_eq!(
+        inventoried_paths
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<std::collections::BTreeSet<_>>(),
+        checked_in_paths,
+        "replacement policy must inventory every checked-in GitHub workflow"
+    );
+    assert_eq!(
+        policy["replacement_gate"]["scope"],
+        "all-workflow-inventory-entries"
+    );
+    let required_blockers: Vec<&str> = policy["replacement_gate"]["required_blockers"]
+        .as_array()
+        .expect("replacement gate should have policy-owned blockers")
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .expect("replacement blocker should be a string")
+        })
+        .collect();
+    for blocker in [
+        "artifact-custody-verification",
+        "fork-pull-request-parity",
+        "skip-token-trigger-continuity",
+        "workflow-dispatch-parity",
+        "fast-feedback-parity",
+        "performance-workflow-parity",
+        "ios-performance-workflow-parity",
+        "candidate-main-release-handoff-parity",
+        "ios-testflight-release-parity",
+        "release-tag-parity",
+        "mac-release-parity",
+    ] {
+        assert!(
+            required_blockers.contains(&blocker),
+            "replacement policy lost blocker {blocker}"
+        );
+    }
+    assert_eq!(policy["cutover_gate"]["minimum_representative_runs"], 30);
+    assert_eq!(policy["cutover_gate"]["minimum_observation_days"], 30);
+    assert_eq!(
+        policy["cutover_gate"]["maximum_candidate_main_p95_seconds"],
+        480
+    );
+    assert_eq!(
+        policy["cutover_gate"]["maximum_candidate_provider_failure_rate"],
+        0.01
+    );
+    assert_eq!(
+        policy["cutover_gate"]["minimum_provider_failure_rate_improvement"],
+        0.02
+    );
+    assert_eq!(
+        policy["cutover_gate"]["maximum_paired_reliability_p_value"],
+        0.05
+    );
+    assert_eq!(
+        policy["cutover_gate"]["authority_change_policy"],
+        "prohibited-until-explicit-external-review"
+    );
+
+    let required_jobs: Vec<&str> = policy["required_jobs"]
+        .as_array()
+        .expect("CI policy should list required jobs")
+        .iter()
+        .map(|value| value.as_str().expect("required job should be a string"))
+        .collect();
+    assert_eq!(
+        required_jobs,
+        [
+            "personal-info-guard",
+            "version-drift",
+            "workflow-lint",
+            "rust",
+            "ios",
+            "mac",
+        ]
+    );
+
+    let bootstrap = read_repo_file(".buildkite/pipeline.yml");
+    let shadow = read_repo_file(".buildkite/shadow-steps.yml");
+    let adapter = read_repo_file("scripts/ci-shadow-run.sh");
+    let context = read_repo_file("scripts/ci-provider-context.py");
+    let evidence = read_repo_file("scripts/ci-validation-evidence.py");
+    let parity = read_repo_file("scripts/ci-parity-report.py");
+    let cutover = read_repo_file("scripts/ci-cutover-evaluation.py");
+    let ios_release_verifier = read_repo_file("scripts/ios-release-verify.py");
+    let ios_release_docs = read_repo_file("packages/ios-app/docs/development.md");
+    let definition_validator = read_repo_file("scripts/validate-ci-definitions.sh");
+    let rust_image = read_repo_file(".buildkite/rust-shadow.Dockerfile");
+
+    assert!(bootstrap.contains("key: \"source-context\""));
+    assert!(bootstrap.contains("scripts/ci-shadow-run.sh source-context"));
+    assert!(bootstrap.contains("build/ci-shadow/source-context/**/*"));
+    assert!(bootstrap.contains("retry:\n      manual:\n        allowed: false"));
+    assert!(adapter.contains("buildkite-agent pipeline upload"));
+    assert!(adapter.contains("--reject-parse-warnings"));
+    assert!(adapter.contains("--expected-context"));
+    assert!(adapter.contains("--bundle"));
+    assert!(adapter.contains("meta-data get buildkite:webhook"));
+    assert!(adapter.contains("--webhook-payload"));
+    assert!(context.contains("Buildkite webhook.pull_request.base.sha"));
+    assert!(context.contains("Buildkite webhook.before"));
+    assert!(context.contains("Buildkite webhook.pull_request.merge_commit_sha"));
+    assert!(!context.contains("BUILDKITE_PULL_REQUEST_BASE_SHA"));
+    for job in &required_jobs {
+        assert!(
+            shadow.contains(&format!("scripts/ci-shadow-run.sh {job}")),
+            "Buildkite shadow is missing required job {job}"
+        );
+    }
+    assert!(shadow.contains("key: \"shadow-evidence\""));
+    assert!(shadow.contains("key: \"operational-observation\""));
+    assert!(shadow.contains("allow_dependency_failure: true"));
+    assert!(shadow.contains("soft_fail: true"));
+    assert!(shadow.contains("depends_on:\n      - \"personal-info-guard\""));
+    assert!(
+        !shadow.contains("    cache:"),
+        "untrusted pull requests must not seed cross-build writable caches"
+    );
+    assert!(adapter.contains("ci-validation-evidence.py"));
+    assert!(context.contains("pinned context"));
+    assert!(evidence.contains("tron.validation.v2"));
+    assert!(evidence.contains("validate_archive_manifest"));
+    assert!(parity.contains("tron.ci-parity.v1"));
+    assert!(adapter.contains("tron.ci-shadow-bootstrap-execution.v1"));
+    assert!(adapter.contains("executed-bootstrap.yml"));
+    assert!(adapter.contains("tron.ci-shadow-operational-observation.v1"));
+    for schema in [
+        "tron.ci-cutover-observations.v2",
+        "tron.ci-cutover-evaluation.v2",
+        "tron.ci-testflight-export.v2",
+    ] {
+        assert!(
+            cutover.contains(schema),
+            "cutover evaluator is missing current schema {schema}"
+        );
+    }
+    for schema in [
+        "tron.ios-release-eligibility.v1",
+        "tron.ios-release-intent.v1",
+        "tron.ios-release-head-check.v1",
+        "tron.ios-release-provenance.v1",
+        "tron.ios-release-admission.v1",
+        "tron.ios-release-reuse-provenance.v1",
+        "tron.ios-release-receipt.v1",
+    ] {
+        assert!(
+            cutover.contains(schema) && ios_release_verifier.contains(schema),
+            "cutover and release validation must share evidence schema {schema}"
+        );
+    }
+    for schema in [
+        "tron.ios-release-direct-intent.v1",
+        "tron.ios-release-direct-source-check.v1",
+        "tron.ios-release-direct-admission.v1",
+        "tron.ios-release-direct-reuse-provenance.v1",
+        "tron.ios-release-direct-receipt.v1",
+    ] {
+        assert!(
+            ios_release_verifier.contains(schema) && ios_release_docs.contains(schema),
+            "direct live release custody is missing schema {schema}"
+        );
+    }
+    assert!(cutover.contains("tron.ci-trigger-export.v1"));
+    assert!(cutover.contains("one_sided_exact_mcnemar"));
+    assert!(cutover.contains("observation-thresholds-satisfied-provenance-unverified"));
+    assert!(cutover.contains("eligible_for_external_review\": False"));
+    assert!(cutover.contains("candidate-main-release-handoff-parity"));
+    assert!(cutover.contains("\"context\": \"CI summary\", \"integration_id\": 15368"));
+    assert!(cutover.contains("\"build_pull_request_merge_commits\": False"));
+    assert!(cutover.contains("candidate_attestation[\"build_pull_request_merge\"]"));
+    assert!(cutover.contains("\"trigger_mode\": \"code\""));
+    assert!(cutover.contains("candidate_attestation[\"code_trigger_mode\"]"));
+    assert!(parity.contains("--reference-artifacts"));
+    assert!(parity.contains("--candidate-artifacts"));
+    assert!(parity.contains("\"verified\": False"));
+    assert!(definition_validator.contains("--reject-secrets"));
+    assert!(definition_validator.contains("--reject-parse-warnings"));
+    assert!(definition_validator.contains(".buildkite/shadow-steps.yml"));
+    assert!(rust_image.contains("rustup component add --toolchain"));
+    assert!(rust_image.contains("rustfmt clippy"));
+
+    for forbidden in [
+        "tron-ios-release",
+        "ios-testflight",
+        "release-ios",
+        "release-mac",
+        "ASC_KEY",
+        "IOS_DISTRIBUTION",
+        "MACOS_CERT",
+        "notarytool",
+    ] {
+        assert!(
+            !bootstrap.contains(forbidden) && !shadow.contains(forbidden),
+            "Buildkite execution pipeline must not contain release surface {forbidden}"
+        );
+    }
+
+    let github_ci = read_repo_file(".github/workflows/ci.yml");
+    let ios_release = read_repo_file(".github/workflows/release-ios.yml");
+    let mac_release = read_repo_file(".github/workflows/release-mac.yml");
+    assert!(github_ci.contains("'CI summary'"));
+    assert!(ios_release.contains("workflows: [\"CI\"]"));
+    assert!(ios_release.contains("runs-on: [self-hosted, macOS, ARM64, tron-ios-release]"));
+    assert!(ios_release.contains("environment: ios-testflight"));
+    assert!(mac_release.contains("tags:\n      - \"server-v*\""));
+    assert!(github_ci.contains("ci-cutover-evaluation.py --self-test"));
+    assert!(github_ci.contains("scripts/validate-ci-definitions.sh"));
+    assert!(github_ci.contains("ready_for_review"));
+    assert!(github_ci.contains("converted_to_draft"));
+    assert!(github_ci.contains("retention-days: 90"));
+    assert!(adapter.contains("ci-cutover-evaluation.py\" --self-test"));
+
+    for (program, arguments) in [
+        (
+            "python3",
+            vec!["scripts/ci-provider-context.py", "--self-test"],
+        ),
+        (
+            "python3",
+            vec!["scripts/ci-validation-evidence.py", "--self-test"],
+        ),
+        (
+            "python3",
+            vec!["scripts/ci-parity-report.py", "--self-test"],
+        ),
+        (
+            "python3",
+            vec!["scripts/ci-cutover-evaluation.py", "--self-test"],
+        ),
+        ("bash", vec!["scripts/ci-shadow-run.sh", "--self-test"]),
+        (
+            "bash",
+            vec!["scripts/validate-ci-definitions.sh", "--self-test"],
+        ),
+    ] {
+        let output = Command::new(program)
+            .args(arguments)
+            .current_dir(repo_root())
+            .output()
+            .unwrap_or_else(|error| panic!("{program} CI self-test failed to start: {error}"));
+        assert!(
+            output.status.success(),
+            "{program} CI self-test failed:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn github_workflow_dependencies_are_immutable() {
     for path in [
         ".github/workflows/ci.yml",
@@ -1473,6 +2262,11 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
         "TRON_CI_XCODEGEN_VERSION=2.45.3",
         "TRON_CI_CREATE_DMG_VERSION=1.3.0",
         "TRON_CI_ASC_VERSION=3.5.0",
+        "TRON_CI_RUST_IMAGE='rust:1.94.1-bookworm@sha256:6ae102bdbf528294bc79ad6e1fae682f6f7c2a6e6621506ba959f9685b308a55'",
+        "TRON_CI_ACTIONLINT_IMAGE='rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667'",
+        "TRON_CI_BUILDKITE_AGENT_VERSION=3.136.2",
+        "TRON_CI_BUILDKITE_AGENT_LINUX_AMD64_SHA256=3a10ff051d7ea08dfcf16e29f7cbe96370e1929f26eec36621ca3802fecf94e9",
+        "TRON_CI_BUILDKITE_AGENT_DARWIN_ARM64_SHA256=5e0160bdf509c422bbe78e0f5836acc6e9404196c33bf42a9434470ad2fb935a",
         "TRON_RELEASE_RUNNER_VERSION=2.336.0",
         "TRON_RELEASE_RUNNER_URL=https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-osx-arm64-2.336.0.tar.gz",
         "TRON_RELEASE_RUNNER_SHA256=8e8839c49b7060b6b2154f4931f815df330c27f167d53ef2239ee3dfce28b079",
@@ -1486,17 +2280,58 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
             "toolchain manifest lost {required}"
         );
     }
-    assert_eq!(manifest.matches("_SHA256=").count(), 7);
+    assert_eq!(manifest.matches("_SHA256=").count(), 9);
 
     let installer = read_repo_file("scripts/install-ci-tools.sh");
     assert!(installer.contains("verify_sha256"));
     assert!(installer.contains("shasum -a 256"));
+    assert!(installer.contains("--retry-all-errors"));
+    assert!(installer.contains("--retry 5"));
+    assert!(installer.contains("${destination}.partial.XXXXXX"));
+    assert!(installer.contains("mv -f \"$partial\" \"$destination\""));
     assert!(installer.contains("share/xcodegen"));
+    assert!(installer.contains("install_buildkite_agent"));
+    for required in [
+        "tron.ci-tool-prefix.v1",
+        "write_prefix_manifest",
+        "verify_prefix_manifest",
+        "publish_staged_prefix",
+        "${prefix}.staging.XXXXXX",
+        "os.replace(temporary, manifest)",
+        "write_prefix_manifest \"$staging\" \"$tool\" \"$version\"",
+        "\"$validator\" \"$staging\"",
+        "publish_staged_prefix \"$staging\" \"$prefix\"",
+        "--self-test",
+        "incomplete tool prefix was accepted",
+        "corrupt tool prefix was accepted",
+        "share/create-dmg/support",
+    ] {
+        assert!(
+            installer.contains(required),
+            "atomic manifest-sealed CI tool installation is missing {required}"
+        );
+    }
 
     let verifier = read_repo_file("scripts/verify-ci-toolchain.sh");
     assert!(verifier.contains("SettingPresets"));
     assert!(verifier.contains("Platforms/iOS.yml"));
     assert!(verifier.contains("Platforms/macOS.yml"));
+    assert!(verifier.contains("verify_buildkite_agent"));
+    assert!(verifier.contains("verify_owned_prefix create-dmg \"$prefix\""));
+    assert!(verifier.contains("template.applescript eula-resources-template.xml"));
+    assert!(verifier.contains("share/create-dmg/support/$required"));
+
+    let installer_self_test = Command::new("bash")
+        .args(["scripts/install-ci-tools.sh", "--self-test"])
+        .current_dir(repo_root())
+        .output()
+        .expect("CI tool installer self-test should start");
+    assert!(
+        installer_self_test.status.success(),
+        "CI tool installer self-test failed:\n{}{}",
+        String::from_utf8_lossy(&installer_self_test.stdout),
+        String::from_utf8_lossy(&installer_self_test.stderr)
+    );
 
     for path in [
         ".github/workflows/ci.yml",

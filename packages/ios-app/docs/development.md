@@ -663,10 +663,13 @@ The isolated TestFlight runner separately pins Xcode 27.0 beta 3 build
 `27A5218g`, the iOS 27.0 SDK, and a 26.0 deployment floor. Apple's
 [App Store Connect release notes](https://developer.apple.com/help/app-store-connect/release-notes/)
 list that beta/SDK pair for internal and external TestFlight submission; recheck
-that source whenever rotating the beta. Both paths download exact
-XcodeGen, create-dmg, App Store Connect CLI, and GitHub runner releases whose
-SHA-256 values are checked before execution. Workflows must not select `latest`,
-install these tools through Homebrew, or maintain a second version list.
+that source whenever rotating the beta. Both paths download exact XcodeGen,
+create-dmg, App Store Connect CLI, GitHub runner, and CI-definition parser
+releases whose SHA-256 values are checked before execution. The manifest also
+owns the advisory shadow's digest-pinned Rust image and the digest-pinned
+actionlint image exercised by both providers.
+Workflows must not select `latest`, install these tools through Homebrew, or
+maintain a second version list.
 
 The installer writes only to an isolated runner directory and appends its bin
 directory to `GITHUB_PATH`:
@@ -674,6 +677,7 @@ directory to `GITHUB_PATH`:
 ```bash
 scripts/install-ci-tools.sh xcodegen
 scripts/verify-ci-toolchain.sh ios xcodegen
+scripts/validate-ci-definitions.sh
 ```
 
 The Mac lane adds `create-dmg`; the iOS release lane adds `asc` and runs
@@ -684,9 +688,35 @@ complete Rust, iOS, and Mac matrix. The iOS lane separates
 `build-for-testing` from `test-without-building`, uses explicit DerivedData,
 and uploads `tron.ios-ci-metrics.v1` timing/count/toolchain evidence on every
 run plus the full `.xcresult` only on failure. A successful ready-PR run also
-publishes `tron.validation.v1` evidence for its exact merge tree. Main reuses
-that work only after checking the associated PR, successful run, artifact
-SHA-256, schema, and tree; every verification failure runs the full matrix.
+publishes `tron.validation.v2` evidence for its exact merge tree, complete
+required-job set, CI policy, pipeline configuration, toolchain, sanitized iOS
+metrics, and artifact manifest. Historical v1 evidence remains readable. Main
+never reuses v1: current reuse and parity require v2. Main reuses v2 work only
+after checking the associated PR, successful run,
+artifact SHA-256, schema, policy/toolchain digest, and tree; every verification
+failure runs the full matrix.
+
+An opt-in Buildkite pipeline may run the same iOS lane on a hosted M4 queue
+pinned to the manifest's Xcode 26.3 and iOS 26.2 runtime. It is shadow evidence
+only: GitHub's `CI summary` remains authoritative, and Buildkite has no
+TestFlight environment, signing material, or access to the isolated release
+runner. Provider-side activation and queue confinement are documented in the
+[Buildkite shadow runbook](../../../.buildkite/README.md). One shadow
+source-context job pins GitHub's synthetic merge commit;
+every workload then verifies the distributed commit, tree, and parents. Use
+`scripts/ci-parity-report.py` to compare v2 evidence with the GitHub run; it
+requires the extracted artifact directory from each provider, stream-verifies
+every evidence-manifested file, and semantically binds both context and metrics
+payloads plus all six Buildkite job manifests and bootstrap records. Nested
+job-manifest command-log/DMG entries are structure-checked but not dereferenced
+because they are not copied into shadow evidence. SDK, toolchain, source, job,
+enumeration, worker-count, or test-result drift fails the comparison. This
+offline report does not authenticate provider artifact IDs, nested payloads,
+run conclusions, or custody; those remain provider-API evidence.
+The provider-neutral policy pins the live ASC app ID, production app and share
+extension bundle IDs, `Tron` scheme, and `Prod` configuration; a future
+provider's delivery measurements must match that exact product identity.
+
 The scheduled performance workflow is advisory and uploads raw benchmark
 evidence; cache or parallel-test changes remain advisory until repeated runs
 prove identical test sets, isolation, and a material p95 improvement.
@@ -719,11 +749,32 @@ TestFlight archives run on the repository-scoped labels
 `self-hosted`, `macOS`, `ARM64`, and `tron-ios-release`. This public repository
 must never route pull-request or fork-authored code to that runner. The release
 workflow accepts only an exact successful `main` CI SHA, a release tag reachable
-from `main`, or a manual `main` run. The protected `ios-testflight` environment
+from `main`, or a manual run whose live source is the exact current `main` head.
+Manual dry-runs retain the less restrictive `main`-reachability check. The
+protected `ios-testflight` environment
 and the one-job dedicated runner provide the remaining release boundary. The
-workflow deliberately has no GitHub concurrency group: the runner serializes
-archives itself while GitHub preserves every successful `main` SHA in its queue
-instead of replacing an older pending release.
+complete automatic intent/effect/receipt transaction is serialized, without
+cancellation, by authoritative upstream CI run ID. Reruns of one upstream run
+therefore cannot race each other, while different main commits retain distinct
+concurrency keys. A small hosted job with no signing or App Store secrets admits
+an automatic run only when its successful CI source is still the exact current
+`origin/main` head. The release checkout repeats that equality check after the
+dedicated runner queue and again immediately before the first App Store Connect
+delivery. Direct live runs repeat their own source check immediately before ASC:
+manual delivery requires equality with current `main`, while a release tag must
+remain an ancestor of current `main`. Each direct GitHub run ID is its immutable
+transaction key.
+
+For every automatic workflow-run attempt, including failed and stale upstream
+attempts, the hosted gate retains an attempt-unique 90-day
+`tron.ios-release-eligibility.v1` artifact containing the upstream CI identity,
+source/outcome, freshly observed main SHA, decision, downstream producer, and
+UTC observation time. An eligible attempt reconstructs the authenticated
+artifact history and emits `tron.ios-release-intent.v1` as `new`, `resume`, or
+`completed`. A completed intent does not reserve the protected runner. Tag and
+manual live attempts similarly reconstruct a run-ID-scoped
+`tron.ios-release-direct-intent.v1` history. Their separate direct schemas keep
+the existing automatic v1 contract unchanged.
 
 The runner lives on a separate hidden standard macOS account named `tron-ci`.
 Its home, keychain baseline, Actions checkout, DerivedData, and signing material
@@ -755,6 +806,16 @@ the checked-in `ios-release-user-context` boundary to enter `tron-ci`'s
 headless `Background` launchd domain and proves both that launchd's manager UID
 and the process audit UID equal the account's effective UID. Manual keychain
 preparation, archive, export, and teardown all run through that same boundary.
+The next secretless step replays `ios-release-credential-ledger.py recover` in
+that user context, creates or validates every component of the standard
+provisioning-profile directory with no-follow ownership checks, and audits an
+empty result before GitHub injects any release secret. This restores the
+baseline keychain preferences and removes only the strictly validated keychains
+and provisioning profiles durably claimed by an interrupted earlier attempt. A
+symlinked or wrong-owner ancestor fails before profile content or signing
+material is exposed. Operators can run the doctor's
+`--audit-credentials` mode to check the same persistent boundary without
+recovering it.
 
 The system-domain listener is deliberate: GitHub's generated Darwin `svc.sh`
 is created only after runner registration, installs a per-login LaunchAgent,
@@ -830,16 +891,27 @@ archive, a different Xcode 27 build, the wrong SDK, or a minimum OS above 26.0.
 
 `.github/workflows/release-ios.yml` owns two independent TestFlight lanes. A
 successful `CI` workflow for a push to `main` publishes that workflow's exact
-tested commit to the private internal group. A `server-v*` tag publishes to the
-external/public TestFlight path used by Mac onboarding. Pull requests, failed
-or cancelled CI runs, CI runs for other branches, and manual feature-branch
-dry-runs never trigger delivery. Every accepted SHA must be reachable from
-`main` before the self-hosted runner proceeds.
+tested commit to the private internal group only if it is still the current
+`main` head. The hosted eligibility job compares the upstream SHA with a freshly
+fetched `origin/main` without entering the protected environment; the release
+checkout repeats that exact comparison after acquiring the self-hosted runner
+and just before a live App Store Connect upload or existing-build distribution.
+A `server-v*` tag publishes to the external/public TestFlight path used by Mac
+onboarding. Pull requests, failed or cancelled CI runs, stale successful main
+runs, CI runs for other branches, and manual feature-branch dry-runs never
+trigger delivery. Live manual runs must still equal current `main` at checkout
+and at the final guard; tags must remain reachable from `main`. Manual dry-runs
+remain restricted to `main` but need only pass the reachability guard.
 The workflow always regenerates the Xcode project with XcodeGen, so
 `project.yml` and `VERSION.env` remain the marketing-version sources of truth.
-Automated iOS delivery overrides `CURRENT_PROJECT_VERSION` with this retained
-workflow's monotonic `GITHUB_RUN_NUMBER`; reruns reuse the same number and the
-checked-in `TRON_APPLE_BUILD` remains the local and Mac build-number source.
+Hosted delivery overrides `CURRENT_PROJECT_VERSION` from the Release workflow's
+single monotonic run-number counter. Owner run number `N` maps to
+`(1000 + floor(N / 100)).(N % 100).1` for automatic internal delivery and to the same
+prefix with lane `.2` for tag/manual delivery. The first automatic intent owns
+its allocation permanently; later upstream or downstream reruns authenticate
+and reuse that owner instead of allocating from their own counters. The `1000`
+epoch keeps hosted values above legacy bare-integer builds. Checked-in
+`TRON_APPLE_BUILD` remains the local and Mac build-number source.
 
 The upload lane uses the exact Xcode 27 release pin with the `Tron` scheme and
 `Prod` configuration. That is the App Store Connect bundle
@@ -853,11 +925,12 @@ same accepted `main` source with Xcode 27. This proves the SDK-linked product
 surface without weakening host isolation merely to create a GUI login session.
 All live lanes archive for `generic/platform=iOS`, export an App Store Connect
 IPA with Xcode's `app-store-connect` export method, validate the exported
-app/extension bundle IDs, entitlements, and export-compliance plist keys, upload with
-`asc builds upload`, waits for the build to become valid, resolves TestFlight
-export compliance, and updates the What to Test notes. Reruns use
-`asc builds list` to reuse an existing Apple build instead of uploading a
-duplicate binary.
+app/extension bundle IDs, entitlements, and export-compliance plist keys, upload
+with `asc builds upload`, wait for the build to become valid, resolve TestFlight
+export compliance, and update the What to Test notes. Every App Store Connect
+lookup is scoped to platform `IOS`; processing follows the exact ASC build ID,
+not a loose version match. A bounded preflight rejects an allocation that is not
+strictly newer than the visible hosted build namespace.
 
 Before export, `ios-release-verify.py` reads both archived Info plists and
 asserts the exact Xcode build, iPhoneOS 27 SDK, iOS 26.0 minimum, bundle IDs,
@@ -866,10 +939,45 @@ existing signing and entitlement checks. Each newly built dry or live archive
 also uploads `tron.ios-release-provenance.v1`: exact source SHA, GitHub run and
 attempt, Xcode version/build, SDK, deployment target, canonical/marketing/build
 versions, app/extension identifiers, and app/share-extension executable plus
-IPA SHA-256 values. It
-intentionally contains no runner name, user name, path, credential, or device
-identity. Existing App Store builds are reused from their original run rather
-than receiving fabricated provenance.
+IPA SHA-256 values. It intentionally contains no runner name, user name, path,
+credential, or device identity.
+
+Automatic delivery is an authenticated evidence state machine. Its immutable
+`tron.ios-release-intent.v1` owns source, product, and build allocation;
+`tron.ios-release-provenance.v1` binds the binary; and
+`tron.ios-release-head-check.v1` records the just-in-time current-main check.
+After a fresh upload becomes addressable, `tron.ios-release-admission.v1` binds
+the exact ASC build ID to the intent, provenance, and head-check digests. An
+existing build is accepted only when its exact ASC ID and original provenance
+are already bound by that authenticated admission chain. The retry then emits
+`tron.ios-release-reuse-provenance.v1` plus a new chained admission; it never
+relabels old provenance as if the retry produced it. Final internal group
+delivery emits `tron.ios-release-receipt.v1`. Every v4 artifact name includes
+the producing run ID and attempt, and the final receipt is published only after
+credential teardown succeeds.
+
+Tag and manual live delivery use a separate run-ID-scoped state machine so the
+automatic v1 contract remains unchanged. `tron.ios-release-direct-intent.v1`
+owns trigger, channel, source, product, and allocation;
+`tron.ios-release-direct-source-check.v1` records the final `current-main` or
+`main-ancestor` decision; and `tron.ios-release-direct-admission.v1` binds those
+records plus exact binary provenance to one ASC build ID. Reuse requires
+`tron.ios-release-direct-reuse-provenance.v1` and a new chained admission.
+Completed internal or external delivery emits
+`tron.ios-release-direct-receipt.v1` only after credential teardown. External
+review-pending attempts retain admission without a completion receipt so the
+same run can safely resume after Apple approval.
+
+The final head check is performed immediately before the first App Store
+Connect side effect. For a fresh build, its secret-free artifact is uploaded
+immediately after the ASC upload attempt so artifact I/O does not widen the
+check-to-upload race; admission follows only after ASC returns the exact build
+identity. This necessarily leaves a narrow cross-system dual-write window in
+every live lane: ASC can accept a binary before GitHub durably records
+admission. A retry polls for that delayed upload, but fails closed if it finds
+an unadmitted build. Leave the stranded build untouched and start a fresh manual
+live workflow from current `main`, which receives a new lane-2 allocation. The
+workflow never guesses ownership from a matching build number alone.
 
 The internal lane fails before archive unless the configured group exists, is
 internal, has automatic all-build access, and contains at least one tester. It
@@ -889,7 +997,10 @@ window. Once externally testable, CI prefers the configured public-link group
 used by Mac onboarding, but can auto-discover a single public-link group when
 the repository variable is stale. Missing, stale, or ambiguous public-group
 configuration is a warning after upload and processing; CI skips API group
-assignment rather than failing the external release checkpoint.
+assignment rather than failing the external release checkpoint. Group
+assignment itself is replay-safe: the workflow pages the group relationship,
+skips publication when the exact build is already present, and verifies that
+the relationship becomes observable after a new publication.
 
 The app and share extension Info.plists set
 `ITSAppUsesNonExemptEncryption=false`, which is the current release assertion
@@ -928,7 +1039,12 @@ either grant that access or use the local signing secrets.
 ASC authentication is environment-backed in CI; the workflow does not create
 a repo-local `.asc/config.json`. Before manual signing changes the user
 keychain search list or default, it enters the release account's validated
-Background bootstrap and records both exactly. The temporary search path
+Background bootstrap and records both exactly. Before creating the job
+keychain, it atomically writes a private mode-0600 attempt ledger under the
+isolated runner home; each new provisioning-profile UUID is added and fsynced
+immediately before that profile is installed. The ledger contains only
+recomputed run/attempt ownership and paths—never passwords, keys,
+certificates, profile contents, or other credentials. The temporary search path
 includes the job keychain plus macOS's system and system-root keychains; the
 system-owned Apple root retains its built-in trust. Archive and export remain
 in that same audit/bootstrap context. An always-run final step re-enters it,
@@ -938,9 +1054,14 @@ only provisioning profiles the job created. Identical pre-existing profiles
 are reused, while a UUID collision
 with different content fails instead of overwriting runner state. Cleanup
 continues after individual errors but fails the job if any restoration or
-removal is incomplete. A final always-run step removes release build products
-and runs `git clean -ffdx` only inside the isolated Actions checkout; this
-operation is forbidden in an interactive development workspace.
+removal is incomplete. Only a fully successful teardown may remove the attempt
+ledger and pass its final empty-state audit; otherwise the ledger remains for
+the next job's bounded pre-secret recovery. This covers host termination and
+process kills that bypass GitHub's `always()` step, while the TestFlight receipt
+still cannot publish until normal teardown succeeds. A final always-run step
+removes release build products and runs `git clean -ffdx` only inside the
+isolated Actions checkout; this operation is forbidden in an interactive
+development workspace.
 
 Required GitHub Actions secrets:
 

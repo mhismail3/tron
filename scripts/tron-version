@@ -151,7 +151,7 @@ write_github_ios_outputs() {
 
     local event_name="${GITHUB_EVENT_NAME:-}"
     local run_number="${GITHUB_RUN_NUMBER:-}"
-    local channel source_sha trigger_mode dry_run
+    local channel source_sha trigger_mode dry_run apple_build owner_run_number lane
 
     if [[ ! "$run_number" =~ ^[1-9][0-9]*$ ]]; then
         die "GITHUB_RUN_NUMBER must be a positive integer: ${run_number:-<missing>}"
@@ -170,8 +170,14 @@ write_github_ios_outputs() {
             channel="internal"
             source_sha="${TRON_UPSTREAM_SHA:-}"
             trigger_mode="main-ci"
+            owner_run_number="${TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER:-}"
+            [[ "$owner_run_number" =~ ^[1-9][0-9]*$ ]] \
+                || die "automatic iOS delivery requires a positive owner run number"
+            lane=1
             ;;
         push)
+            [ -z "${TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER:-}" ] \
+                || die "the automatic iOS build owner override is workflow_run-only"
             [ "${GITHUB_REF_TYPE:-}" = "tag" ] \
                 || die "iOS push delivery requires a release tag"
             [ "${GITHUB_REF_NAME:-}" = "$TRON_RELEASE_TAG" ] \
@@ -179,8 +185,12 @@ write_github_ios_outputs() {
             channel="external"
             source_sha="${GITHUB_SHA:-}"
             trigger_mode="tag"
+            owner_run_number="$run_number"
+            lane=2
             ;;
         workflow_dispatch)
+            [ -z "${TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER:-}" ] \
+                || die "the automatic iOS build owner override is workflow_run-only"
             channel="${TRON_IOS_CHANNEL_INPUT:-dry-run}"
             case "$channel" in
                 dry-run|internal|external)
@@ -191,6 +201,8 @@ write_github_ios_outputs() {
             esac
             source_sha="${GITHUB_SHA:-}"
             trigger_mode="manual"
+            owner_run_number="$run_number"
+            lane=2
             ;;
         *)
             die "unsupported iOS TestFlight event: ${event_name:-<missing>}"
@@ -205,14 +217,25 @@ write_github_ios_outputs() {
         dry_run="false"
     fi
 
+    # CFBundleVersion supports three bounded integer segments. Reserve the
+    # third segment as the delivery lane. Every fresh hosted build is allocated
+    # from the Release workflow's single monotonic run-number counter; an
+    # automatic retry passes the authenticated original owner run number here.
+    # The 1000 major-segment epoch also moves the hosted namespace above the
+    # legacy bare-integer build numbers used before this mapping shipped.
+    if (( owner_run_number > 899999 )); then
+        die "iOS hosted build owner run number exceeds the supported range: $owner_run_number"
+    fi
+    apple_build="$((1000 + owner_run_number / 100)).$((owner_run_number % 100)).$lane"
+
     printf '%s\n' \
         "version=$TRON_VERSION" "mode=$trigger_mode" "tag=$TRON_RELEASE_TAG" \
         "dmg_name=$TRON_DMG_NAME" "display_version=$TRON_DISPLAY_VERSION" \
-        "apple_build=$run_number" "marketing_version=$TRON_APPLE_MARKETING_VERSION" \
+        "apple_build=$apple_build" "marketing_version=$TRON_APPLE_MARKETING_VERSION" \
         "release_title=$TRON_RELEASE_TITLE" "is_prerelease=$TRON_IS_PRERELEASE" \
         "channel=$channel" "dry_run=$dry_run" "source_sha=$source_sha" \
         >> "$GITHUB_OUTPUT"
-    echo "Resolved iOS $channel delivery for ${source_sha:0:12} / Apple build $run_number from $trigger_mode"
+    echo "Resolved iOS $channel delivery for ${source_sha:0:12} / Apple build $apple_build from $trigger_mode"
 }
 
 replace_regex() {
@@ -431,19 +454,36 @@ self_test() {
     GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_run" GITHUB_RUN_NUMBER="27" \
         TRON_UPSTREAM_WORKFLOW="CI" TRON_UPSTREAM_EVENT="push" \
         TRON_UPSTREAM_CONCLUSION="success" TRON_UPSTREAM_BRANCH="main" \
-        TRON_UPSTREAM_SHA="$test_sha" \
+        TRON_UPSTREAM_SHA="$test_sha" TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER="37" \
         "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
     for expected in \
-        "mode=main-ci" "apple_build=27" "channel=internal" "dry_run=false" \
+        "mode=main-ci" "apple_build=1000.37.1" "channel=internal" "dry_run=false" \
         "source_sha=$test_sha"; do
         grep -Fqx "$expected" "$github_output" || die "github-ios-output omitted $expected"
+    done
+
+    local owner expected_build
+    for owner in 99 100 899999; do
+        case "$owner" in
+            99) expected_build="1000.99.1" ;;
+            100) expected_build="1001.0.1" ;;
+            899999) expected_build="9999.99.1" ;;
+        esac
+        : > "$github_output"
+        GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_run" GITHUB_RUN_NUMBER="27" \
+            TRON_UPSTREAM_WORKFLOW="CI" TRON_UPSTREAM_EVENT="push" \
+            TRON_UPSTREAM_CONCLUSION="success" TRON_UPSTREAM_BRANCH="main" \
+            TRON_UPSTREAM_SHA="$test_sha" TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER="$owner" \
+            "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
+        grep -Fqx "apple_build=$expected_build" "$github_output" \
+            || die "github-ios-output mapped owner $owner to the wrong hosted build"
     done
 
     : > "$github_output"
     GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="push" GITHUB_RUN_NUMBER="28" \
         GITHUB_REF_TYPE="tag" GITHUB_REF_NAME="$TRON_RELEASE_TAG" GITHUB_SHA="$test_sha" \
         "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
-    for expected in "mode=tag" "apple_build=28" "channel=external" "dry_run=false"; do
+    for expected in "mode=tag" "apple_build=1000.28.2" "channel=external" "dry_run=false"; do
         grep -Fqx "$expected" "$github_output" || die "github-ios-output omitted $expected"
     done
 
@@ -452,7 +492,7 @@ self_test() {
         GITHUB_REF_TYPE="branch" GITHUB_REF_NAME="main" GITHUB_SHA="$test_sha" \
         TRON_IOS_CHANNEL_INPUT="dry-run" \
         "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
-    for expected in "mode=manual" "channel=dry-run" "dry_run=true"; do
+    for expected in "mode=manual" "apple_build=1000.29.2" "channel=dry-run" "dry_run=true"; do
         grep -Fqx "$expected" "$github_output" || die "github-ios-output omitted $expected"
     done
 
@@ -483,6 +523,25 @@ self_test() {
         die "github-ios-output accepted manual dry-run outside main"
     fi
     [ ! -s "$github_output" ] || die "github-ios-output wrote fields for rejected dry-run"
+
+    : > "$github_output"
+    if GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="push" GITHUB_RUN_NUMBER="215" \
+        GITHUB_REF_TYPE="tag" GITHUB_REF_NAME="$TRON_RELEASE_TAG" GITHUB_SHA="$test_sha" \
+        TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER="215" \
+        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null 2>&1; then
+        die "github-ios-output accepted the automatic build owner override for a tag"
+    fi
+    [ ! -s "$github_output" ] || die "github-ios-output wrote fields for a rejected tag override"
+
+    : > "$github_output"
+    if GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_run" GITHUB_RUN_NUMBER="33" \
+        TRON_UPSTREAM_WORKFLOW="CI" TRON_UPSTREAM_EVENT="push" \
+        TRON_UPSTREAM_CONCLUSION="success" TRON_UPSTREAM_BRANCH="main" \
+        TRON_UPSTREAM_SHA="$test_sha" TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER="900000" \
+        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null 2>&1; then
+        die "github-ios-output accepted an overflowing automatic build owner"
+    fi
+    [ ! -s "$github_output" ] || die "github-ios-output wrote fields for an overflowing owner"
     rm -f "$github_output"
 
     local invalid
