@@ -2764,7 +2764,10 @@ triggers TestFlight delivery. The dedicated macOS release runner is a
 system-domain launchd job that drops privileges to its isolated service account;
 hosted macOS CI retains Simulator/XCTest ownership because those tools require a
 logged-in user session, while the release runner owns only Xcode 27 archive,
-export, verification, upload, and distribution.
+export, verification, upload, and distribution. Manual signing imports the
+checksum-pinned public Apple WWDR G3 intermediate into the job-owned ephemeral
+keychain, so certificate-chain validation never depends on an interactive
+user's login keychain.
 
 ## Validation
 

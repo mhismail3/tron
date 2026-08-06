@@ -978,11 +978,16 @@ The workflow decodes each profile before export and fails early if the
 profile is an Ad Hoc/development profile with devices, or if the app and share
 extension mix Xcode-managed and manually managed profile styles. It also fails
 an expired profile immediately and emits a GitHub warning during the final 30
-days. Provisioning profiles cannot outlive their selected distribution
-certificate, so rotate the Apple Distribution certificate, `.p12`, and both
-profile secrets together before the earliest expiration date. This is a
-credential rotation only; the TestFlight group and workflow configuration stay
-in place.
+days. Because the isolated service account has no interactive login keychain,
+manual signing also downloads Apple's public WWDR G3 intermediate from the
+canonical Apple PKI URL, verifies the repository-pinned SHA-256 digest, and
+imports it into the ephemeral signing keychain before validating the Apple
+Distribution identity. This prevents a build from silently depending on a
+developer's ambient keychain state. Provisioning profiles cannot outlive their
+selected distribution certificate, so rotate the Apple Distribution
+certificate, `.p12`, and both profile secrets together before the earliest
+expiration date. This is a credential rotation only; the TestFlight group and
+workflow configuration stay in place.
 
 Manual workflow runs expose a `channel` choice. `dry-run` builds and tests but
 skips App Store Connect; `internal` exercises private delivery from `main`; and

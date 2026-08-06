@@ -848,6 +848,9 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "security default-keychain -d user -s \"$baseline_keychain\"",
         "security list-keychains -d user -s \"$keychain_path\" \"${original_keychains[@]}\"",
         "security default-keychain -d user -s \"$keychain_path\"",
+        "wwdr_path=\"$RUNNER_TEMP/AppleWWDRCAG3.cer\"",
+        "-T /usr/bin/xcodebuild >/dev/null",
+        "\"$keychain_path\" >/dev/null",
         "ios-installed-profile-uuids",
         "cmp -s \"$profile_path\" \"$destination\"",
         "printf '%s\\n' \"$uuid\" >> \"$installed_profile_uuids\"",
@@ -867,6 +870,38 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         snapshot < mutation,
         "keychain snapshot must precede mutation"
     );
+    let signing = workflow_step_script(&workflow, "Prepare manual iOS signing assets");
+    for required in [
+        "TRON_RELEASE_APPLE_WWDR_G3_URL",
+        "TRON_RELEASE_APPLE_WWDR_G3_SHA256",
+        "security verify-cert -c \"$wwdr_path\"",
+        "security import \"$wwdr_path\" -k \"$keychain_path\" >/dev/null",
+        "grep -F \"$IOS_DISTRIBUTION_IDENTITY\" >/dev/null",
+    ] {
+        assert!(
+            signing.contains(required),
+            "manual signing must validate its isolated certificate chain through {required}"
+        );
+    }
+    let wwdr_checksum = signing
+        .find("actual_wwdr_sha=")
+        .expect("manual signing must checksum Apple's intermediate");
+    let wwdr_import = signing
+        .find("security import \"$wwdr_path\"")
+        .expect("manual signing must import Apple's intermediate");
+    let identity_validation = signing
+        .find("security find-identity")
+        .expect("manual signing must validate its imported identity");
+    assert!(
+        wwdr_checksum < wwdr_import && wwdr_import < identity_validation,
+        "the pinned intermediate must be verified and imported before identity validation"
+    );
+    assert!(
+        !signing.contains("grep -q \"$IOS_DISTRIBUTION_IDENTITY\"")
+            && signing.contains("-T /usr/bin/xcodebuild >/dev/null")
+            && signing.contains("\"$keychain_path\" >/dev/null"),
+        "manual signing must avoid pipefail false negatives and certificate-subject log leakage"
+    );
 
     let summary = workflow
         .rfind("      - name: Summary\n")
@@ -883,6 +918,7 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "security delete-keychain \"$keychain_path\"",
         "tron-asc-api-key.p8",
         "ios-distribution.p12",
+        "AppleWWDRCAG3.cer",
         "installed_profile_uuids",
         "exit \"$cleanup_failed\"",
     ] {
@@ -1039,6 +1075,8 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "GITHUB_WORKSPACE",
         "RUNNER_TEMP",
         "tron-runner-baseline.keychain-db",
+        "TRON_RELEASE_APPLE_WWDR_G3_URL",
+        "TRON_RELEASE_APPLE_WWDR_G3_SHA256",
     ] {
         assert!(
             doctor.contains(required),
@@ -1316,13 +1354,15 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
         "TRON_RELEASE_RUNNER_VERSION=2.336.0",
         "TRON_RELEASE_RUNNER_URL=https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-osx-arm64-2.336.0.tar.gz",
         "TRON_RELEASE_RUNNER_SHA256=8e8839c49b7060b6b2154f4931f815df330c27f167d53ef2239ee3dfce28b079",
+        "TRON_RELEASE_APPLE_WWDR_G3_URL=https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer",
+        "TRON_RELEASE_APPLE_WWDR_G3_SHA256=dcf21878c77f4198e4b4614f03d696d89c66c66008d4244e1b99161aac91601f",
     ] {
         assert!(
             manifest.contains(required),
             "toolchain manifest lost {required}"
         );
     }
-    assert_eq!(manifest.matches("_SHA256=").count(), 5);
+    assert_eq!(manifest.matches("_SHA256=").count(), 6);
 
     let installer = read_repo_file("scripts/install-ci-tools.sh");
     assert!(installer.contains("verify_sha256"));
