@@ -1,0 +1,43 @@
+# Lightweight feedback for every pull request, including drafts. This workflow
+# is advisory; only CI's full ready-PR validation can satisfy merge policy.
+
+name: Fast feedback
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: fast-feedback-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  feedback:
+    name: Fast feedback
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Repository guards and helper contracts
+        run: |
+          ./scripts/personal-info-guard.sh
+          ./scripts/tron version check
+          ./scripts/ci-change-flags.sh --self-test
+          python3 scripts/ci-validation-evidence.py --self-test
+          python3 scripts/ios-test-selection.py --self-test
+      - name: Classify changed paths
+        env:
+          TRON_DIFF_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRON_DIFF_HEAD_SHA: ${{ github.sha }}
+        run: scripts/ci-change-flags.sh
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          cache-workspaces: packages/agent
+          rustflags: ""
+      - name: Rust formatting
+        run: scripts/tron ci fmt

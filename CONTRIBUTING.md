@@ -12,10 +12,9 @@ scripts/install-hooks.sh                                           # one-time
 scripts/tron ci test                                               # Rust baseline
 ```
 
-Open a PR against `main`. CI always runs the personal-info/version guards and
-the Rust quality path, then runs the full iOS or Mac jobs when their source
-paths or labels apply. Fill out
-the PR template — the checklist exists because `README.md` and the in-tree
+Open a draft PR against `main` for lightweight feedback, then mark it ready to
+run the authoritative Rust, iOS, and Mac merge-validation matrix. Fill out the
+PR template — the checklist exists because `README.md` and the in-tree
 progressive-disclosure docs drift fast.
 
 ## Project layout
@@ -72,6 +71,7 @@ cd packages/ios-app
 xcodegen generate
 open TronMobile.xcodeproj
 # or: xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+# fast local loop: scripts/tron-ios-simulator iterate origin/main
 ```
 
 Every successful main-branch CI push is published to the private automatic
@@ -129,8 +129,10 @@ coverage gap exists.
 | Personal-info guard | `scripts/personal-info-guard.sh` |
 | Rust commit milestone | `scripts/tron ci fmt check clippy test` |
 
-CI runs `scripts/tron ci fmt`, `check`, `clippy`, and `test` as its one Rust
-quality path for every repository change. Cargo's default auto-discovery of
+Fast feedback runs repository guards plus Rust formatting on every pull
+request, including drafts. Marking a PR ready runs `scripts/tron ci fmt`,
+`check`, `clippy`, and `test` as its one Rust quality path and always validates
+both Apple clients. Cargo's default auto-discovery of
 top-level `packages/agent/tests/*.rs` files owns the integration-target fact
 set. The test command derives that set from the same source layout, runs each
 target once in deterministic order, and reserves `integration` for the final
@@ -139,15 +141,17 @@ serial invocation. The
 compares that schedule with Cargo and verifies GitHub delegates to this local
 owner. The same invariant owns generated-project hygiene by requiring iOS and
 Mac XcodeGen output to stay ignored and untracked; client workflows own project
-generation and the consuming builds, tests, and archives. On pull requests,
-iOS and Mac jobs run for their package paths, their release workflows, or
-relevant labels. Both run on `main` and manual dispatch. `CI summary` requires
-successful change detection and all unconditional jobs; it accepts a skipped
-client job only on a successfully path-filtered pull request.
+generation and the consuming builds, tests, and archives. `CI summary` is the
+single fail-closed merge gate. A successful ready-PR run publishes evidence for
+the exact synthetic merge tree. The `main` run verifies that evidence and its
+GitHub artifact digest before reusing it; missing, ambiguous, stale, malformed,
+or tree-mismatched evidence automatically runs the complete matrix again.
 
-The path classifier is repository-owned `scripts/ci-change-flags.sh`; its
-offline self-test prevents workflow behavior from depending on a mutable
-third-party filtering action. Apple/release versions live only in
+The path classifier is repository-owned `scripts/ci-change-flags.sh`; fast
+feedback reports its result without letting path filtering weaken the merge
+gate. `scripts/ios-test-selection.py` conservatively powers local
+`check-affected` and `iterate` loops: unmapped, test, project, or shared paths
+fall back to the full iOS suite. Apple/release versions live only in
 `config/ci-toolchain.env`. CI downloads exact XcodeGen, create-dmg, and ASC
 artifacts, verifies their SHA-256 values, and checks Xcode, the iOS runtime, and
 simulator identity before building. Update the manifest and its invariant tests
@@ -156,6 +160,17 @@ in the same PR when a toolchain moves.
 `performance.yml` runs a daily advisory 100-sample server benchmark and uploads
 raw samples plus git/Python/runner provenance. It does not block deployment
 until a stable runner and calibrated baseline are deliberately promoted. The
+weekly/manual `ios-performance.yml` compares serial and two-worker tests from
+cold hosted runners. Its enumeration hash, result counts, and timing evidence
+must remain identical across repeated pairs before parallelism is promoted;
+the experiment is not a required check. Promotion requires ten clean paired
+runs, no isolation/flake divergence, and a lower p95. A future DerivedData
+cache must key Xcode, SDK, generated-project, configuration, source, and test
+contracts; it stays off the required path until restore is under 60 seconds,
+the artifact is under 2 GB, and p50 improves by at least 20% without behavioral
+divergence. Target budgets are under two minutes for fast feedback, full merge
+validation below five-minute p50/eight-minute p95, and green-main-to-internal-
+TestFlight below seven-minute p50/ten-minute p95. The
 offline whole-agent acceptance catalog is checked with
 `python3 scripts/evaluation/whole-agent.py --self-test`; external runners may
 evaluate normalized evidence without adding evaluation behavior to the engine.

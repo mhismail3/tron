@@ -10,6 +10,7 @@ STATE_FILE="$STATE_DIR/ios-simulator-udid"
 SIMULATOR_ID="${TRON_IOS_SIMULATOR_ID:-}"
 SIMULATOR_NAME="${TRON_IOS_SIMULATOR_NAME:-iPhone 17 Pro}"
 DERIVED_DATA="${TRON_IOS_SIMULATOR_DERIVED_DATA:-/tmp/tron-ios-beta-derived}"
+TEST_DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-/tmp/tron-ios-beta-tests-derived}"
 BUNDLE_ID="com.tron.mobile.beta"
 
 usage() {
@@ -19,18 +20,23 @@ Usage:
   scripts/tron-ios-simulator install
   scripts/tron-ios-simulator status
   scripts/tron-ios-simulator remember [SIMULATOR_ID]
+  scripts/tron-ios-simulator check-affected [BASE_REF]
+  scripts/tron-ios-simulator iterate [BASE_REF]
 
 Commands:
   start      Boot the remembered simulator and launch its verified Tron Beta app.
   install    Build/install Tron Beta without erasing its paired app container.
   status     Show the remembered simulator and validate its installed Tron Beta app.
   remember   Save an explicit simulator ID, or the Simulator app's current device.
+  check-affected  Run the conservative test selection for changes since BASE_REF.
+  iterate    Run affected tests, then rebuild/install/launch Tron Beta.
 
 Environment overrides:
   TRON_IOS_SIMULATOR_ID            Simulator UUID to use and remember
   TRON_IOS_SIMULATOR_NAME          Default device name (iPhone 17 Pro)
   TRON_IOS_SIMULATOR_STATE_DIR     Local state directory
   TRON_IOS_SIMULATOR_DERIVED_DATA  Stable DerivedData path
+  TRON_IOS_TEST_DERIVED_DATA       Separate stable test DerivedData path
 
 This helper intentionally uses the beta bundle ID and never uninstalls or erases
 the app. Pairing is stored in that bundle's data container on the remembered
@@ -148,6 +154,38 @@ install_beta() {
     launch_beta "$simulator_id"
 }
 
+check_affected() {
+    local simulator_id="$1"
+    local base_ref="${2:-origin/main}"
+    local selection mode reason line
+    local test_args=()
+    selection="$(python3 "$ROOT_DIR/scripts/ios-test-selection.py" "$base_ref" --format lines)"
+    mode="$(printf '%s\n' "$selection" | sed -n '1p')"
+    reason="$(printf '%s\n' "$selection" | sed -n '2p')"
+    if [ "$mode" = "none" ]; then
+        echo "No iOS validation required: $reason"
+        return
+    fi
+    if [ "$mode" = "focused" ]; then
+        while IFS= read -r line; do
+            [ -n "$line" ] && test_args+=("-only-testing:$line")
+        done < <(printf '%s\n' "$selection" | tail -n +3)
+    fi
+    echo "iOS validation mode: $mode ($reason)"
+    boot_simulator "$simulator_id"
+    (
+        cd "$IOS_DIR"
+        xcodegen generate
+        xcodebuild test \
+            -project TronMobile.xcodeproj \
+            -scheme "Tron Beta" \
+            -configuration Beta \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -derivedDataPath "$TEST_DERIVED_DATA" \
+            "${test_args[@]}"
+    )
+}
+
 show_status() {
     local simulator_id="$1"
     local device_line
@@ -191,6 +229,15 @@ case "$command" in
         [ -n "$simulator_id" ] || die "pass a simulator ID or select one in Simulator first"
         remember_simulator_id "$simulator_id"
         show_status "$simulator_id"
+        ;;
+    check-affected)
+        simulator_id="$(resolve_simulator_id)"
+        check_affected "$simulator_id" "${2:-origin/main}"
+        ;;
+    iterate)
+        simulator_id="$(resolve_simulator_id)"
+        check_affected "$simulator_id" "${2:-origin/main}"
+        install_beta "$simulator_id"
         ;;
     -h|--help|help)
         usage

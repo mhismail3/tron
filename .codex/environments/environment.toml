@@ -24,6 +24,18 @@ command = "scripts/tron-ios-simulator install"
 platform = "darwin"
 
 [[actions]]
+name = "Test Affected + Rebuild iOS Beta Simulator"
+icon = "debug"
+command = "scripts/tron-ios-simulator iterate origin/main"
+platform = "darwin"
+
+[[actions]]
+name = "Test Affected iOS Changes"
+icon = "tool"
+command = "scripts/tron-ios-simulator check-affected origin/main"
+platform = "darwin"
+
+[[actions]]
 name = "Rebuild + Install + Launch iOS Prod Fast Debug on iPhone"
 icon = "debug"
 command = "env DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer TRON_IOS_REQUIRED_SDK_MAJOR=27 TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME='Tron Fast' TRON_IOS_CONFIGURATION=ProdDebug scripts/tron-ios-device install"
