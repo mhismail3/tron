@@ -1,37 +1,11 @@
-# Continuous Integration
+# Authoritative merge validation.
 #
-# Six validation workloads, plus change detection and one aggregate gate:
-#   - personal-info-guard: ubuntu, ~30s, runs every PR + push (always).
-#   - version-drift:       ubuntu, ~10s, validates VERSION.env mirrors.
-#   - workflow-lint:       ubuntu, validates every Actions workflow.
-#   - rust:                ubuntu (1x), runs the canonical `scripts/tron ci`
-#                          checks for every repository change.
-#   - ios:                 macos (10x), runs when packages/ios-app/** or its
-#                          release workflow changes, or for every non-PR full
-#                          validation.
-#   - mac:                 macos (10x), runs when packages/mac-app/** or
-#                          packages/agent/** changes (the Rust binary is
-#                          embedded in the Mac app bundle), or for every
-#                          non-PR full validation. Also exercises a
-#                          dry-run DMG assembly on PR to catch release-mac.yml
-#                          drift before tag push.
-#
-# Rust is intentionally unconditional because its invariant targets inspect
-# Rust, docs, scripts, workflows, and client source, including immutable
-# full-SHA/digest pins for every external workflow dependency. Only macOS
-# workloads are path-gated on PRs. Pushes to main and manual dispatch run the
-# full matrix.
-#
-# Concurrency: in-flight runs for the same PR are cancelled on new pushes
-# (cheap on push to main — only one run can be in flight there anyway).
-#
-# Adding a new ecosystem:
-#   1. Add a path rule in `scripts/ci-change-flags.sh`.
-#   2. Add a `<name>_required` output combining non-PR, filter, and label rules;
-#      gate the new job only on that output.
-#   3. List the job under `ci.needs` and expose both its result and required
-#      output to the aggregate script.
-#   4. Document in CONTRIBUTING.md.
+# Draft PRs use fast-feedback.yml. Ready PRs run the complete Rust/iOS/Mac
+# matrix and publish immutable evidence for the exact synthetic merge tree.
+# A main push reuses that evidence only when its tree and GitHub artifact digest
+# match exactly; every unavailable, stale, ambiguous, or malformed case falls
+# back to the complete matrix. Release workflows still wait for this workflow's
+# successful exact-main-SHA conclusion.
 
 name: CI
 
@@ -49,29 +23,49 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
+  actions: read
   contents: read
+  pull-requests: read
 
 jobs:
-  changes:
-    name: Detect changes
+  provenance:
+    name: Resolve validation provenance
     runs-on: ubuntu-latest
     outputs:
-      ios_required: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ios == 'true' || contains(github.event.pull_request.labels.*.name, 'ios') }}
-      mac_required: ${{ github.event_name != 'pull_request' || steps.filter.outputs.mac == 'true' || contains(github.event.pull_request.labels.*.name, 'mac') }}
+      full_required: ${{ steps.mode.outputs.full_required }}
+      mode: ${{ steps.mode.outputs.mode }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-      - name: Classify changed paths
-        id: filter
+      - name: Resolve validation mode
+        id: mode
         env:
-          TRON_DIFF_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
-          TRON_DIFF_HEAD_SHA: ${{ github.sha }}
-        run: scripts/ci-change-flags.sh
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_DRAFT: ${{ github.event.pull_request.draft || false }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$PR_DRAFT" == "true" ]]; then
+            echo "full_required=false" >> "$GITHUB_OUTPUT"
+            echo "mode=draft" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            if python3 scripts/ci-validation-evidence.py verify --output build/reused-validation-evidence.json; then
+              echo "full_required=false" >> "$GITHUB_OUTPUT"
+              echo "mode=reused" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::Exact PR evidence unavailable; running the complete validation matrix."
+              echo "full_required=true" >> "$GITHUB_OUTPUT"
+              echo "mode=fallback" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "full_required=true" >> "$GITHUB_OUTPUT"
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+          fi
 
   personal-info-guard:
     name: Personal-info guard
     runs-on: ubuntu-latest
+    needs: provenance
+    if: needs.provenance.outputs.full_required == 'true'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Run personal-info-guard
@@ -80,6 +74,8 @@ jobs:
   version-drift:
     name: Version drift
     runs-on: ubuntu-latest
+    needs: provenance
+    if: needs.provenance.outputs.full_required == 'true'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Check centralized version mirrors
@@ -91,12 +87,16 @@ jobs:
       - name: Run deterministic CI helper tests
         run: |
           ./scripts/ci-change-flags.sh --self-test
+          python3 scripts/ci-validation-evidence.py --self-test
+          python3 scripts/ios-test-selection.py --self-test
           python3 scripts/benchmarks/bench.py --self-test
           python3 scripts/evaluation/whole-agent.py --self-test
 
   workflow-lint:
     name: Workflow lint
     runs-on: ubuntu-latest
+    needs: provenance
+    if: needs.provenance.outputs.full_required == 'true'
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -106,6 +106,8 @@ jobs:
   rust:
     name: Rust quality
     runs-on: ubuntu-latest
+    needs: provenance
+    if: needs.provenance.outputs.full_required == 'true'
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -133,10 +135,12 @@ jobs:
         run: scripts/tron ci test
 
   ios:
-    name: iOS (xcodebuild test)
+    name: iOS (measured build + test)
     runs-on: macos-15
-    needs: changes
-    if: needs.changes.outputs.ios_required == 'true'
+    needs: provenance
+    if: needs.provenance.outputs.full_required == 'true'
+    outputs:
+      metrics: ${{ steps.metrics.outputs.metrics }}
     defaults:
       run:
         working-directory: packages/ios-app
@@ -159,29 +163,35 @@ jobs:
       - name: List available iOS simulators
         run: xcrun simctl list devices available | head -60
 
-      - name: xcodebuild test
-        run: |
-          set -o pipefail
-          xcodebuild test \
-            -project TronMobile.xcodeproj \
-            -scheme 'Tron Beta' \
-            -destination 'platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro' \
-            -resultBundlePath TestResults.xcresult \
-            -quiet
+      - name: Measured build and test
+        run: ../../scripts/ios-ci-test.sh
+
+      - name: Export sanitized metrics
+        id: metrics
+        run: echo "metrics=$(jq -c . build/ios-ci-metrics.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload sanitized iOS metrics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-ci-metrics
+          path: packages/ios-app/build/ios-ci-metrics.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload xcresult on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ios-test-results
-          path: packages/ios-app/TestResults.xcresult
+          path: packages/ios-app/build/TestResults.xcresult
           retention-days: 7
 
   mac:
     name: Mac wrapper (build + test, dry-run DMG)
     runs-on: macos-15
-    needs: changes
-    if: needs.changes.outputs.mac_required == 'true'
+    needs: provenance
+    if: needs.provenance.outputs.full_required == 'true'
     defaults:
       run:
         working-directory: packages/mac-app
@@ -294,43 +304,68 @@ jobs:
             --volume-name "Tron Dry-Run" \
             --layout structural
 
-  # Aggregate gate — the main ruleset points at this single check. Client jobs
-  # may be skipped only when a successful PR path filter proves they are
-  # untouched; pushes and manual runs require both client jobs to succeed.
+  # The ruleset points at this single fail-closed check. Its draft-only name is
+  # intentionally different, so draft feedback can never satisfy merge policy.
   ci:
-    name: CI summary
+    name: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && 'Draft validation' || 'CI summary' }}
     runs-on: ubuntu-latest
-    needs: [changes, personal-info-guard, version-drift, workflow-lint, rust, ios, mac]
+    needs: [provenance, personal-info-guard, version-drift, workflow-lint, rust, ios, mac]
     if: always()
     env:
-      RESULT_CHANGES: ${{ needs.changes.result }}
+      RESULT_PROVENANCE: ${{ needs.provenance.result }}
       RESULT_GUARD: ${{ needs.personal-info-guard.result }}
       RESULT_VERSION: ${{ needs.version-drift.result }}
       RESULT_WORKFLOW_LINT: ${{ needs.workflow-lint.result }}
       RESULT_RUST: ${{ needs.rust.result }}
       RESULT_IOS: ${{ needs.ios.result }}
       RESULT_MAC: ${{ needs.mac.result }}
-      REQUIRE_IOS: ${{ needs.changes.outputs.ios_required }}
-      REQUIRE_MAC: ${{ needs.changes.outputs.mac_required }}
+      FULL_REQUIRED: ${{ needs.provenance.outputs.full_required }}
+      VALIDATION_MODE: ${{ needs.provenance.outputs.mode }}
     steps:
       - name: Verify all required jobs passed
         run: |
           fail=0
-          for name in CHANGES GUARD VERSION WORKFLOW_LINT RUST; do
+          if [[ "$RESULT_PROVENANCE" != "success" ]]; then
+            echo "::error::PROVENANCE job: $RESULT_PROVENANCE"; exit 1
+          fi
+          if [[ "$FULL_REQUIRED" == "false" ]]; then
+            for name in GUARD VERSION WORKFLOW_LINT RUST IOS MAC; do
+              var="RESULT_$name"
+              result="${!var}"
+              if [[ "$result" != "skipped" ]]; then
+                echo "::error::$name must be skipped in $VALIDATION_MODE mode: $result"; fail=1
+              fi
+            done
+            if [[ $fail -ne 0 ]]; then exit 1; fi
+            echo "Validation mode: $VALIDATION_MODE"
+            exit 0
+          fi
+          for name in GUARD VERSION WORKFLOW_LINT RUST IOS MAC; do
             var="RESULT_$name"
             result="${!var}"
             if [[ "$result" != "success" ]]; then
               echo "::error::$name job: $result"; fail=1
             fi
           done
-          for name in IOS MAC; do
-            var="RESULT_$name"
-            result="${!var}"
-            required_var="REQUIRE_$name"
-            required="${!required_var}"
-            [[ "$result" == "success" ]] && continue
-            [[ "$required" == "false" && "$result" == "skipped" ]] && continue
-            echo "::error::$name job: $result"; fail=1
-          done
           if [[ $fail -ne 0 ]]; then exit 1; fi
           echo "All required jobs passed."
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+        with:
+          ref: ${{ github.sha }}
+      - name: Create merge validation evidence
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+        env:
+          TRON_PR_NUMBER: ${{ github.event.pull_request.number }}
+          TRON_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TRON_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRON_IOS_METRICS_JSON: ${{ needs.ios.outputs.metrics }}
+        run: python3 scripts/ci-validation-evidence.py create --output build/validation-evidence.json
+      - name: Upload merge validation evidence
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tron-merge-validation
+          path: build/validation-evidence.json
+          if-no-files-found: error
+          retention-days: 30

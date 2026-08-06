@@ -825,10 +825,11 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
     assert!(repo_path("packages/ios-app/project.yml").exists());
 
     let ci = read_repo_file(".github/workflows/ci.yml");
+    let fast_feedback = read_repo_file(".github/workflows/fast-feedback.yml");
+    let ios_ci = read_repo_file("scripts/ios-ci-test.sh");
     for required in [
         "working-directory: packages/ios-app",
         "run: xcodegen generate",
-        "-project TronMobile.xcodeproj",
         "working-directory: packages/mac-app",
         "-project TronMac.xcodeproj",
         "Dry-run DMG assembly",
@@ -836,11 +837,18 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
     ] {
         assert!(ci.contains(required), "CI missing {required}");
     }
+    for required in [
+        "build-for-testing",
+        "test-without-building",
+        "-project TronMobile.xcodeproj",
+    ] {
+        assert!(ios_ci.contains(required), "iOS CI owner missing {required}");
+    }
     let change_classifier = read_repo_file("scripts/ci-change-flags.sh");
     assert!(
-        ci.contains("run: scripts/ci-change-flags.sh")
+        fast_feedback.contains("run: scripts/ci-change-flags.sh")
             && change_classifier.contains(".github/workflows/release-mac.yml"),
-        "Mac release workflow changes must schedule Mac CI"
+        "Mac release workflow changes must be reported by fast feedback"
     );
 
     let release_mac = read_repo_file(".github/workflows/release-mac.yml");
@@ -927,7 +935,7 @@ fn mac_dmg_packaging_has_one_fail_closed_owner() {
     let ci = read_repo_file(".github/workflows/ci.yml");
     let ci_dmg = ci.split_once("- name: Dry-run DMG assembly").unwrap().1;
     assert_call(
-        ci_dmg.split_once("  # Aggregate gate").unwrap().0,
+        ci_dmg.split_once("  # The ruleset points").unwrap().0,
         "CI DMG call",
         &[
             "./scripts/package-dmg.sh",

@@ -260,6 +260,7 @@ fn ci_summary_script(workflow: &str) -> String {
         .expect("CI summary must own a result-check script");
     script
         .lines()
+        .take_while(|line| line.starts_with("          "))
         .map(|line| {
             line.strip_prefix("          ")
                 .unwrap_or_else(|| panic!("unexpected CI summary indentation: {line}"))
@@ -270,23 +271,34 @@ fn ci_summary_script(workflow: &str) -> String {
 
 fn probe_ci_summary(
     script: &str,
-    changes: &str,
+    provenance: &str,
     ios: &str,
     mac: &str,
-    require_ios: &str,
-    require_mac: &str,
+    full_required: &str,
 ) -> Output {
+    let common_result = if full_required == "true" {
+        "success"
+    } else {
+        "skipped"
+    };
     Command::new("bash")
         .args(["-c", script])
-        .env("RESULT_CHANGES", changes)
-        .env("RESULT_GUARD", "success")
-        .env("RESULT_VERSION", "success")
-        .env("RESULT_WORKFLOW_LINT", "success")
-        .env("RESULT_RUST", "success")
+        .env("RESULT_PROVENANCE", provenance)
+        .env("RESULT_GUARD", common_result)
+        .env("RESULT_VERSION", common_result)
+        .env("RESULT_WORKFLOW_LINT", common_result)
+        .env("RESULT_RUST", common_result)
         .env("RESULT_IOS", ios)
         .env("RESULT_MAC", mac)
-        .env("REQUIRE_IOS", require_ios)
-        .env("REQUIRE_MAC", require_mac)
+        .env("FULL_REQUIRED", full_required)
+        .env(
+            "VALIDATION_MODE",
+            if full_required == "true" {
+                "full"
+            } else {
+                "reused"
+            },
+        )
         .output()
         .expect("CI summary probe should start")
 }
@@ -985,8 +997,9 @@ fi
 }
 
 #[test]
-fn github_ci_schedules_clients_and_aggregates_fail_closed() {
+fn github_ci_stages_feedback_and_reuses_exact_evidence_fail_closed() {
     let workflow = read_repo_file(".github/workflows/ci.yml");
+    let feedback = read_repo_file(".github/workflows/fast-feedback.yml");
     let classifier = read_repo_file("scripts/ci-change-flags.sh");
     assert!(
         classifier.contains("packages/ios-app/*")
@@ -1005,9 +1018,9 @@ fn github_ci_schedules_clients_and_aggregates_fail_closed() {
         );
     }
     assert!(
-        workflow.contains("run: scripts/ci-change-flags.sh")
-            && !workflow.contains("dorny/paths-filter"),
-        "CI must use the repository-owned deterministic change classifier"
+        feedback.contains("run: scripts/ci-change-flags.sh")
+            && !feedback.contains("dorny/paths-filter"),
+        "fast feedback must use the repository-owned deterministic change classifier"
     );
     let classifier_test = Command::new("bash")
         .args(["scripts/ci-change-flags.sh", "--self-test"])
@@ -1021,10 +1034,12 @@ fn github_ci_schedules_clients_and_aggregates_fail_closed() {
         .map(|(_, summary)| summary)
         .expect("CI must define its aggregate summary job");
     for required in [
-        "needs: [changes, personal-info-guard, version-drift, workflow-lint, rust, ios, mac]",
-        "RESULT_CHANGES: ${{ needs.changes.result }}",
-        "REQUIRE_IOS: ${{ needs.changes.outputs.ios_required }}",
-        "REQUIRE_MAC: ${{ needs.changes.outputs.mac_required }}",
+        "needs: [provenance, personal-info-guard, version-drift, workflow-lint, rust, ios, mac]",
+        "RESULT_PROVENANCE: ${{ needs.provenance.result }}",
+        "FULL_REQUIRED: ${{ needs.provenance.outputs.full_required }}",
+        "VALIDATION_MODE: ${{ needs.provenance.outputs.mode }}",
+        "Create merge validation evidence",
+        "name: tron-merge-validation",
     ] {
         assert!(
             ci_summary.contains(required),
@@ -1032,10 +1047,11 @@ fn github_ci_schedules_clients_and_aggregates_fail_closed() {
         );
     }
     for required in [
-        "ios_required: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ios == 'true' || contains(github.event.pull_request.labels.*.name, 'ios') }}",
-        "mac_required: ${{ github.event_name != 'pull_request' || steps.filter.outputs.mac == 'true' || contains(github.event.pull_request.labels.*.name, 'mac') }}",
-        "if: needs.changes.outputs.ios_required == 'true'",
-        "if: needs.changes.outputs.mac_required == 'true'",
+        "python3 scripts/ci-validation-evidence.py verify",
+        "full_required=true",
+        "mode=fallback",
+        "if: needs.provenance.outputs.full_required == 'true'",
+        "Draft validation",
     ] {
         assert!(
             workflow.contains(required),
@@ -1045,31 +1061,31 @@ fn github_ci_schedules_clients_and_aggregates_fail_closed() {
 
     let script = ci_summary_script(ci_summary);
     assert!(
-        probe_ci_summary(&script, "success", "skipped", "skipped", "false", "false")
+        probe_ci_summary(&script, "success", "skipped", "skipped", "false")
             .status
             .success(),
-        "a successfully path-filtered PR may skip both clients"
+        "verified evidence may skip the complete matrix"
     );
     assert!(
-        probe_ci_summary(&script, "success", "success", "success", "true", "true")
+        probe_ci_summary(&script, "success", "success", "success", "true")
             .status
             .success(),
-        "a full push succeeds when both clients pass"
+        "full validation succeeds when every workload passes"
     );
     assert!(
-        !probe_ci_summary(&script, "failure", "skipped", "skipped", "false", "false")
+        !probe_ci_summary(&script, "failure", "skipped", "skipped", "false")
             .status
             .success(),
-        "change-detector failure must fail the aggregate"
+        "provenance failure must fail the aggregate"
     );
     assert!(
-        !probe_ci_summary(&script, "success", "skipped", "success", "true", "true")
+        !probe_ci_summary(&script, "success", "skipped", "success", "true")
             .status
             .success(),
         "a required client skip must fail the aggregate"
     );
     assert!(
-        !probe_ci_summary(&script, "success", "failure", "skipped", "true", "false")
+        !probe_ci_summary(&script, "success", "failure", "success", "true")
             .status
             .success(),
         "client failures must fail the aggregate"
@@ -1080,6 +1096,8 @@ fn github_ci_schedules_clients_and_aggregates_fail_closed() {
 fn github_workflow_dependencies_are_immutable() {
     for path in [
         ".github/workflows/ci.yml",
+        ".github/workflows/fast-feedback.yml",
+        ".github/workflows/ios-performance.yml",
         ".github/workflows/performance.yml",
         ".github/workflows/release-ios.yml",
         ".github/workflows/release-mac.yml",

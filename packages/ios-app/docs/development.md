@@ -107,6 +107,12 @@ root, and `Stop Dev Server` runs `scripts/tron dev --stop`.
 `Rebuild + Install + Launch iOS Beta Simulator` and `Just Launch Installed iOS
 Beta Simulator` use `scripts/tron-ios-simulator`; Codex-owned simulator
 app-path work therefore keeps the persistent Beta bundle and pairing container.
+`Test Affected iOS Changes` uses a separate stable test DerivedData directory
+and a source-controlled concern manifest. `Test Affected + Rebuild iOS Beta
+Simulator` runs that validation before installing and launching the persistent
+Beta app. Any unmapped iOS path, test change, project setting, or shared app
+foundation falls back to the full suite; selectors are an iteration aid, never
+the authoritative ready-PR merge boundary.
 Physical-device actions use `scripts/tron-ios-device`, which regenerates the
 Xcode project, preflights the active Xcode toolchain, and builds
 `TronMobile.xcodeproj` directly from authoritative `project.yml`; arbitrary
@@ -662,9 +668,17 @@ scripts/verify-ci-toolchain.sh ios xcodegen
 
 The Mac lane adds `create-dmg`; the iOS release lane adds `asc`. Pull-request
 path classification is owned by `scripts/ci-change-flags.sh`, including its
-offline self-test. The scheduled performance workflow is advisory and uploads
-raw 100-sample benchmark evidence; it is not a release gate until a stable
-baseline is calibrated.
+offline self-test. Draft PRs receive lightweight feedback; ready PRs run the
+complete Rust, iOS, and Mac matrix. The iOS lane separates
+`build-for-testing` from `test-without-building`, uses explicit DerivedData,
+and uploads `tron.ios-ci-metrics.v1` timing/count/toolchain evidence on every
+run plus the full `.xcresult` only on failure. A successful ready-PR run also
+publishes `tron.validation.v1` evidence for its exact merge tree. Main reuses
+that work only after checking the associated PR, successful run, artifact
+SHA-256, schema, and tree; every verification failure runs the full matrix.
+The scheduled performance workflow is advisory and uploads raw benchmark
+evidence; cache or parallel-test changes remain advisory until repeated runs
+prove identical test sets, isolation, and a material p95 improvement.
 
 XcodeGen requires both its executable and version-matched `SettingPresets`
 data. The checksum installer links both into its isolated tool root, and the
