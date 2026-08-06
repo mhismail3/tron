@@ -88,6 +88,19 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
     python3 "$project_dir/scripts/ios-release-verify.py" \
         security-session --require-non-root >/dev/null \
         || die "TestFlight archives require a non-root macOS security session"
+    user_context="$project_dir/scripts/ios-release-user-context"
+    [[ -x "$user_context" ]] \
+        || die "release user-context boundary is missing or non-executable"
+    runner_uid="$(id -u)"
+    [[ "$("$user_context" /bin/launchctl manageruid)" == "$runner_uid" ]] \
+        || die "release user-context boundary selected the wrong launchd account"
+    [[ "$("$user_context" /bin/launchctl managername)" == "Background" ]] \
+        || die "release user-context boundary requires the headless Background domain"
+    "$user_context" python3 "$project_dir/scripts/ios-release-verify.py" \
+        security-session \
+        --require-non-root \
+        --require-audit-uid "$runner_uid" >/dev/null \
+        || die "release user-context boundary has a mixed audit identity"
     [[ "$(/usr/bin/stat -f '%Su' "$HOME")" == "$runner_user" ]] \
         || die "release runner home has the wrong owner"
     [[ "$(/usr/bin/stat -f '%Lp' "$HOME")" == "700" ]] \
