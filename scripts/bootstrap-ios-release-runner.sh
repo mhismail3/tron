@@ -65,9 +65,9 @@ fi
 sudo install -d -m 700 -o "$runner_user" -g staff "$runner_home"
 [[ -d "$runner_home" && ! -L "$runner_home" ]] \
     || die "release runner home was not created safely"
-[[ "$(stat -f '%Su' "$runner_home")" == "$runner_user" ]] \
+[[ "$(/usr/bin/stat -f '%Su' "$runner_home")" == "$runner_user" ]] \
     || die "release runner home has the wrong owner"
-[[ "$(stat -f '%Lp' "$runner_home")" == "700" ]] \
+[[ "$(/usr/bin/stat -f '%Lp' "$runner_home")" == "700" ]] \
     || die "release runner home must have mode 0700"
 
 # The release workflow snapshots and restores a baseline keychain before using

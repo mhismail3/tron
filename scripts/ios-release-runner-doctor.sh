@@ -68,9 +68,9 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
         || die "TestFlight archives must run as the isolated tron-ci account"
     [[ "$HOME" == "/Users/tron-ci" ]] \
         || die "release runner HOME must be /Users/tron-ci"
-    [[ "$(stat -f '%Su' "$HOME")" == "$runner_user" ]] \
+    [[ "$(/usr/bin/stat -f '%Su' "$HOME")" == "$runner_user" ]] \
         || die "release runner home has the wrong owner"
-    [[ "$(stat -f '%Lp' "$HOME")" == "700" ]] \
+    [[ "$(/usr/bin/stat -f '%Lp' "$HOME")" == "700" ]] \
         || die "release runner home must have mode 0700"
     if id -Gn "$runner_user" | tr ' ' '\n' | grep -Fxq admin; then
         die "release runner account must not be an administrator"

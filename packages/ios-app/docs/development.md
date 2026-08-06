@@ -751,7 +751,9 @@ interactive `sudo` checkpoint. It fails rather than replacing an existing
 runner. `sysadminctl` may report that the hidden service account cannot unlock
 FileVault; that is expected. When macOS records the custom home without creating
 it, the bootstrap creates and validates the missing mode-0700 home and Keychains
-hierarchy. A retry resumes safely from that account-only state. Rotation is
+hierarchy with macOS system utilities, independent of any Homebrew coreutils in
+the invoking shell's `PATH`. A retry resumes safely from that account-only
+state. Rotation is
 explicit: remove the old runner/service through GitHub's
 runner removal command, update the exact version/URL/SHA in the manifest, rerun
 the bootstrap, and confirm `gh api repos/{owner}/{repo}/actions/runners` reports
