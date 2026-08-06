@@ -748,7 +748,11 @@ and temporary directory all inside the isolated Actions installation.
 
 The bootstrap requires an authenticated repository-admin `gh` session and an
 interactive `sudo` checkpoint. It fails rather than replacing an existing
-runner. Rotation is explicit: remove the old runner/service through GitHub's
+runner. `sysadminctl` may report that the hidden service account cannot unlock
+FileVault; that is expected. When macOS records the custom home without creating
+it, the bootstrap creates and validates the missing mode-0700 home and Keychains
+hierarchy. A retry resumes safely from that account-only state. Rotation is
+explicit: remove the old runner/service through GitHub's
 runner removal command, update the exact version/URL/SHA in the manifest, rerun
 the bootstrap, and confirm `gh api repos/{owner}/{repo}/actions/runners` reports
 the release label online. Never register this label on a general-purpose user

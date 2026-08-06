@@ -44,15 +44,44 @@ fi
 
 runner_uid="$(id -u "$runner_user")"
 (( runner_uid >= 500 )) || die "release runner account is not a standard macOS user"
+runner_primary_group="$(id -gn "$runner_user")"
+[[ "$runner_primary_group" == "staff" ]] \
+    || die "release runner account must use the staff primary group"
+recorded_runner_home="$(
+    dscl . -read "/Users/$runner_user" NFSHomeDirectory | awk '{print $2}'
+)"
+[[ "$recorded_runner_home" == "$runner_home" ]] \
+    || die "release runner account home is '$recorded_runner_home', expected '$runner_home'"
 if dseditgroup -o checkmember -m "$runner_user" admin | grep -q 'yes'; then
     sudo dseditgroup -o edit -d "$runner_user" -t user admin
 fi
-sudo chmod 700 "$runner_home"
+
+# `sysadminctl` records an explicitly assigned home but does not necessarily
+# create it. Repair that normal interrupted-bootstrap state without weakening
+# path ownership or following a pre-existing symlink.
+[[ ! -L "$runner_home" ]] || die "release runner home must not be a symlink"
+[[ ! -e "$runner_home" || -d "$runner_home" ]] \
+    || die "release runner home exists but is not a directory"
+sudo install -d -m 700 -o "$runner_user" -g staff "$runner_home"
+[[ -d "$runner_home" && ! -L "$runner_home" ]] \
+    || die "release runner home was not created safely"
+[[ "$(stat -f '%Su' "$runner_home")" == "$runner_user" ]] \
+    || die "release runner home has the wrong owner"
+[[ "$(stat -f '%Lp' "$runner_home")" == "700" ]] \
+    || die "release runner home must have mode 0700"
 
 # The release workflow snapshots and restores a baseline keychain before using
 # its ephemeral signing keychain. A service account has no login keychain until
 # one is created explicitly.
-baseline_keychain="$runner_home/Library/Keychains/tron-runner-baseline.keychain-db"
+runner_library="$runner_home/Library"
+runner_keychains="$runner_library/Keychains"
+[[ ! -L "$runner_library" && ! -L "$runner_keychains" ]] \
+    || die "release runner Library paths must not be symlinks"
+sudo install -d -m 700 -o "$runner_user" -g staff \
+    "$runner_library" "$runner_keychains"
+baseline_keychain="$runner_keychains/tron-runner-baseline.keychain-db"
+[[ ! -L "$baseline_keychain" ]] \
+    || die "release runner baseline keychain must not be a symlink"
 if [[ ! -e "$baseline_keychain" ]]; then
     baseline_password="$(openssl rand -hex 32)"
     sudo -H -u "$runner_user" security create-keychain \
