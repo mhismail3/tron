@@ -105,7 +105,7 @@ def verify_document(document: Any, *, repository: str, main_sha: str, main_tree:
     ios = document.get("ios")
     if not isinstance(ios, dict) or ios.get("schema") != "tron.ios-ci-metrics.v1":
         raise ValueError("evidence does not contain valid iOS metrics")
-    for field in ("build_seconds", "test_seconds", "test_exit_code", "test_enumeration_sha256"):
+    for field in ("build_seconds", "test_seconds", "test_exit_code", "xcresult_summary_sha256"):
         if field not in ios:
             raise ValueError(f"iOS metrics are missing {field}")
     if not artifact_digest.startswith("sha256:"):
@@ -184,7 +184,7 @@ def self_test() -> None:
             "build_seconds": 100,
             "test_seconds": 200,
             "test_exit_code": 0,
-            "test_enumeration_sha256": "1" * 64,
+            "xcresult_summary_sha256": "1" * 64,
         },
     }
     verify_document(valid, repository="example/tron", main_sha="f" * 40,

@@ -137,6 +137,7 @@ jobs:
   ios:
     name: iOS (measured build + test)
     runs-on: macos-15
+    timeout-minutes: 25
     needs: provenance
     if: needs.provenance.outputs.full_required == 'true'
     outputs:

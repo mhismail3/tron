@@ -679,6 +679,8 @@ SHA-256, schema, and tree; every verification failure runs the full matrix.
 The scheduled performance workflow is advisory and uploads raw benchmark
 evidence; cache or parallel-test changes remain advisory until repeated runs
 prove identical test sets, isolation, and a material p95 improvement.
+Test enumeration is intentionally confined to that experiment because a cold
+hosted enumeration can add minutes without increasing authoritative coverage.
 
 XcodeGen requires both its executable and version-matched `SettingPresets`
 data. The checksum installer links both into its isolated tool root, and the

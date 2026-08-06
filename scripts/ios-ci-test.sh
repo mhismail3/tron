@@ -11,6 +11,7 @@ metrics_path="${TRON_IOS_CI_METRICS:-$ios_dir/build/ios-ci-metrics.json}"
 enumeration_path="${TRON_IOS_CI_ENUMERATION:-$ios_dir/build/ios-test-enumeration.json}"
 destination="${TRON_IOS_CI_DESTINATION:-platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro}"
 parallel_workers="${TRON_IOS_CI_PARALLEL_WORKERS:-1}"
+enumerate_tests="${TRON_IOS_CI_ENUMERATE_TESTS:-false}"
 
 mkdir -p "$(dirname "$metrics_path")" "$(dirname "$result_bundle")"
 for generated_output in "$result_bundle" "$enumeration_path" "$metrics_path"; do
@@ -46,16 +47,18 @@ if [[ "$build_status" -eq 0 ]]; then
   else
     test_args+=( -parallel-testing-enabled NO )
   fi
-  xcodebuild test-without-building \
-    -project TronMobile.xcodeproj \
-    -scheme 'Tron Beta' \
-    -destination "$destination" \
-    -derivedDataPath "$derived_data" \
-    -enumerate-tests \
-    -test-enumeration-style flat \
-    -test-enumeration-format json \
-    -test-enumeration-output-path "$enumeration_path" \
-    -quiet
+  if [[ "$enumerate_tests" == "true" ]]; then
+    xcodebuild test-without-building \
+      -project TronMobile.xcodeproj \
+      -scheme 'Tron Beta' \
+      -destination "$destination" \
+      -derivedDataPath "$derived_data" \
+      -enumerate-tests \
+      -test-enumeration-style flat \
+      -test-enumeration-format json \
+      -test-enumeration-output-path "$enumeration_path" \
+      -quiet
+  fi
   start_test="$(date +%s)"
   set +e
   xcodebuild test-without-building \
@@ -107,6 +110,7 @@ document = {
     "test_seconds": int(os.environ["TRON_TEST_SECONDS"]),
     "test_exit_code": int(os.environ["TRON_TEST_STATUS"]),
     "parallel_workers": int(os.environ["TRON_PARALLEL_WORKERS"]),
+    "enumerated_tests": enumeration.exists(),
     "counts": counts,
     "runner_arch": platform.machine(),
     "runner_os": platform.platform(),

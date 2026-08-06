@@ -40,6 +40,7 @@ jobs:
         run: xcodegen generate
       - name: Run measured strategy
         env:
+          TRON_IOS_CI_ENUMERATE_TESTS: "true"
           TRON_IOS_CI_PARALLEL_WORKERS: ${{ matrix.workers }}
         run: ../../scripts/ios-ci-test.sh
       - name: Upload strategy evidence
