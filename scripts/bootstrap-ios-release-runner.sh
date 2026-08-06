@@ -10,6 +10,8 @@ runner_home="/Users/$runner_user"
 runner_dir="$runner_home/actions-runner"
 runner_label="tron-ios-release"
 runner_name="tron-ios-release"
+runner_service_label="com.tron.ios-release-runner"
+runner_service_plist="/Library/LaunchDaemons/$runner_service_label.plist"
 
 die() {
     echo "error: $*" >&2
@@ -82,8 +84,74 @@ repository="$("$gh_executable" repo view --json nameWithOwner --jq .nameWithOwne
 [[ -n "$repository" ]] || die "could not resolve the current GitHub repository"
 "$gh_executable" api "repos/$repository/environments/ios-testflight" >/dev/null \
     || die "create the ios-testflight GitHub environment before bootstrapping"
+runner_registration_started=false
+bootstrap_complete=false
+runner_plist_staging=""
 archive="$(mktemp -t tron-actions-runner.XXXXXX.tar.gz)"
-trap '/bin/rm -f "$archive"' EXIT
+
+cleanup_bootstrap() {
+    local exit_status=$?
+    local cleanup_incomplete=false
+    local removal_token="" remaining_runner_id="" runner_id=""
+    trap - EXIT
+    set +e
+    /bin/rm -f "$archive"
+    if [[ -n "$runner_plist_staging" ]]; then
+        /bin/rm -f "$runner_plist_staging"
+    fi
+    if (( exit_status != 0 )) \
+        && [[ "$bootstrap_complete" != "true" && "$runner_registration_started" == "true" ]]; then
+        # Registration and service installation form one transaction. Neither
+        # remote credentials nor a launchd job may survive a failed bootstrap.
+        sudo launchctl bootout "system/$runner_service_label" >/dev/null 2>&1
+        sudo /bin/rm -f "$runner_service_plist"
+        runner_id="$(
+            "$gh_executable" api "repos/$repository/actions/runners" \
+                --jq ".runners[] | select(.name == \"$runner_name\") | .id" 2>/dev/null
+        )"
+        if sudo /bin/test -f "$runner_dir/.runner"; then
+            removal_token="$(
+                "$gh_executable" api --method POST \
+                    "repos/$repository/actions/runners/remove-token" --jq .token 2>/dev/null
+            )"
+            if [[ -n "$removal_token" ]]; then
+                run_as_runner "$runner_dir/config.sh" remove \
+                    --token "$removal_token" >/dev/null 2>&1
+            fi
+        fi
+        if [[ -n "$runner_id" ]]; then
+            "$gh_executable" api --method DELETE \
+                "repos/$repository/actions/runners/$runner_id" >/dev/null 2>&1
+        fi
+        sudo /bin/rm -f \
+            "$runner_dir/.runner" \
+            "$runner_dir/.credentials" \
+            "$runner_dir/.credentials_rsaparams"
+
+        if sudo launchctl print "system/$runner_service_label" >/dev/null 2>&1 \
+            || sudo /bin/test -e "$runner_service_plist" \
+            || sudo /bin/test -e "$runner_dir/.runner" \
+            || sudo /bin/test -e "$runner_dir/.credentials"; then
+            cleanup_incomplete=true
+        fi
+        if ! remaining_runner_id="$(
+            "$gh_executable" api "repos/$repository/actions/runners" \
+                --jq ".runners[] | select(.name == \"$runner_name\") | .id" 2>/dev/null
+        )"; then
+            cleanup_incomplete=true
+        elif [[ -n "$remaining_runner_id" ]]; then
+            cleanup_incomplete=true
+        fi
+        if [[ "$cleanup_incomplete" == "true" ]]; then
+            echo "error: incomplete runner bootstrap rollback; follow the rotation runbook before retrying" >&2
+        else
+            echo "Rolled back the incomplete GitHub runner registration and launchd service." >&2
+        fi
+    fi
+    exit "$exit_status"
+}
+trap cleanup_bootstrap EXIT
+
 curl --fail --location --silent --show-error "$TRON_RELEASE_RUNNER_URL" --output "$archive"
 actual_sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
 [[ "$actual_sha" == "$TRON_RELEASE_RUNNER_SHA256" ]] \
@@ -184,8 +252,17 @@ sudo /bin/test -f "$baseline_keychain" \
     || die "release runner baseline keychain is not a regular file"
 sudo chown "$runner_user":staff "$baseline_keychain"
 sudo chmod 600 "$baseline_keychain"
-run_as_runner security list-keychains -d user -s "$baseline_keychain"
-run_as_runner security default-keychain -d user -s "$baseline_keychain"
+
+if sudo launchctl print "system/$runner_service_label" >/dev/null 2>&1 \
+    || sudo /bin/test -e "$runner_service_plist"; then
+    die "release runner launch daemon already exists; use the documented rotation flow"
+fi
+existing_runner_id="$(
+    "$gh_executable" api "repos/$repository/actions/runners" \
+        --jq ".runners[] | select(.name == \"$runner_name\") | .id"
+)"
+[[ -z "$existing_runner_id" ]] \
+    || die "GitHub already has a runner named $runner_name; use the documented rotation flow"
 
 if sudo /bin/test -L "$runner_dir"; then
     die "release runner installation must not be a symlink"
@@ -199,7 +276,7 @@ validate_private_runner_directory "$runner_dir"
 # as root, then hand the checksum-trusted files to the isolated service account.
 sudo tar -xzf "$archive" -C "$runner_dir"
 sudo chown -R "$runner_user":staff "$runner_dir"
-for runner_executable in "$runner_dir/config.sh" "$runner_dir/svc.sh"; do
+for runner_executable in "$runner_dir/config.sh" "$runner_dir/bin/runsvc.sh"; do
     sudo /bin/test -f "$runner_executable" \
         || die "verified runner archive is missing $(basename "$runner_executable")"
     sudo /bin/test -x "$runner_executable" \
@@ -208,11 +285,18 @@ for runner_executable in "$runner_dir/config.sh" "$runner_dir/svc.sh"; do
         die "verified runner executable must not be a symlink: $runner_executable"
     fi
 done
+runner_plist_template="$runner_dir/bin/actions.runner.plist.template"
+sudo /bin/test -f "$runner_plist_template" \
+    || die "verified runner archive is missing its Darwin launchd template"
+if sudo /bin/test -L "$runner_plist_template"; then
+    die "verified runner launchd template must not be a symlink"
+fi
 registration_token="$(
     "$gh_executable" api --method POST \
         "repos/$repository/actions/runners/registration-token" --jq .token
 )"
 [[ -n "$registration_token" ]] || die "could not obtain a repository runner token"
+runner_registration_started=true
 run_as_runner "$runner_dir/config.sh" \
     --url "https://github.com/$repository" \
     --token "$registration_token" \
@@ -223,8 +307,49 @@ run_as_runner "$runner_dir/config.sh" \
     --disableupdate
 unset registration_token
 
-sudo "$runner_dir/svc.sh" install "$runner_user"
-sudo "$runner_dir/svc.sh" start
+for generated_runner_file in \
+    "$runner_dir/.runner" \
+    "$runner_dir/.credentials"; do
+    sudo /bin/test -f "$generated_runner_file" \
+        || die "runner configuration did not generate $(basename "$generated_runner_file")"
+    if sudo /bin/test -L "$generated_runner_file"; then
+        die "runner configuration generated an unsafe symlink: $generated_runner_file"
+    fi
+done
+
+# GitHub's Darwin `svc.sh` installs a per-login LaunchAgent and explicitly
+# refuses root. This hidden account has no Aqua login session, so install the
+# pinned runner's documented `runsvc.sh` entry point as a system-domain daemon
+# that drops privileges to the isolated account.
+sudo install -m 755 -o "$runner_user" -g staff \
+    "$runner_dir/bin/runsvc.sh" "$runner_dir/runsvc.sh"
+runner_logs="$runner_home/Library/Logs/$runner_service_label"
+sudo install -d -m 700 -o "$runner_user" -g staff "$runner_logs"
+validate_private_runner_directory "$runner_logs"
+
+runner_plist_staging="$(mktemp -t tron-ios-release-runner.plist)"
+sudo cat "$runner_plist_template" \
+    | sed \
+        -e "s|{{SvcName}}|$runner_service_label|g" \
+        -e "s|{{User}}|$runner_user|g" \
+        -e "s|{{RunnerRoot}}|$runner_dir|g" \
+        -e "s|{{UserHome}}|$runner_home|g" \
+        > "$runner_plist_staging"
+/usr/libexec/PlistBuddy -c "Add :GroupName string staff" "$runner_plist_staging"
+/usr/libexec/PlistBuddy -c "Add :KeepAlive bool true" "$runner_plist_staging"
+/usr/libexec/PlistBuddy -c "Add :Umask integer 63" "$runner_plist_staging"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:HOME string $runner_home" \
+    "$runner_plist_staging"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:PATH string $PATH" \
+    "$runner_plist_staging"
+plutil -lint "$runner_plist_staging" >/dev/null
+! grep -Fq '{{' "$runner_plist_staging" \
+    || die "release runner launchd template contains unresolved tokens"
+sudo install -m 600 -o root -g wheel "$runner_plist_staging" "$runner_service_plist"
+sudo launchctl bootstrap system "$runner_service_plist"
+sudo launchctl kickstart -k "system/$runner_service_label"
+sudo launchctl print "system/$runner_service_label" >/dev/null \
+    || die "release runner launch daemon did not start"
 sudo pmset -c sleep 0
 sudo pmset -a tcpkeepalive 1
 
@@ -248,5 +373,6 @@ for ((runner_poll = 1; runner_poll <= 30; runner_poll++)); do
 done
 [[ -n "$runner_summary" ]] \
     || die "release runner did not become online with its dedicated label"
+bootstrap_complete=true
 echo "$runner_summary"
 echo "Release runner installed. Confirm ios-testflight environment secrets before enabling delivery."

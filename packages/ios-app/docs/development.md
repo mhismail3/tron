@@ -660,7 +660,7 @@ retrieved through Apple's Xcode Organizer diagnostics path.
 `config/ci-toolchain.env` is the repository-owned Apple/release tool manifest.
 Hosted compatibility CI selects stable Xcode 26.3, iOS 26.2, and iPhone 17 Pro.
 The isolated TestFlight runner separately pins Xcode 27.0 beta 3 build
-`27A5218g`, the iOS 27.0 SDK/runtime, and a 26.0 deployment floor. Apple's
+`27A5218g`, the iOS 27.0 SDK, and a 26.0 deployment floor. Apple's
 [App Store Connect release notes](https://developer.apple.com/help/app-store-connect/release-notes/)
 list that beta/SDK pair for internal and external TestFlight submission; recheck
 that source whenever rotating the beta. Both paths download exact
@@ -733,8 +733,9 @@ and `server-v*` tags admitted; the bootstrap verifies that the environment
 exists before it requests a short-lived runner registration token.
 The checked-in bootstrap downloads the checksum-pinned ARM64 Actions runner,
 removes any accidental admin membership, constrains the service home to mode
-0700, verifies it cannot read the invoking user's home, installs a launchd
-service with updates disabled, and disables AC sleep:
+0700, verifies it cannot read the invoking user's home, installs a root-owned
+system-domain launchd definition that executes as `tron-ci` with updates
+disabled, and disables AC sleep:
 
 ```bash
 scripts/bootstrap-ios-release-runner.sh
@@ -744,10 +745,16 @@ scripts/ios-release-runner-doctor.sh
 Every Actions job reruns the doctor before any step receives release secrets.
 It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
 account with its exact home, mode-0700 ownership, baseline keychain, checkout,
-and temporary directory all inside the isolated Actions installation. Hosted
-macOS CI also runs the bootstrap's non-privileged `--self-test`, which exercises
-the real BSD ownership query plus idempotent ACL denial semantics without
-creating an account or registering a runner.
+and temporary directory all inside the isolated Actions installation, and the
+process belongs to launchd's system domain. The system-domain service is
+deliberate: GitHub's generated Darwin `svc.sh` is created only after runner
+registration, installs a per-login LaunchAgent, and refuses root. The hidden
+service account has no Aqua login session, so the bootstrap instead uses the
+checksum-pinned package's documented `runsvc.sh` entry point from a root-owned
+LaunchDaemon that drops privileges to `tron-ci`. Hosted macOS CI also runs the
+bootstrap's non-privileged `--self-test`, which exercises the real BSD ownership
+query plus idempotent ACL denial semantics without creating an account or
+registering a runner.
 
 The bootstrap requires an authenticated repository-admin `gh` session and an
 interactive `sudo` checkpoint. It fails rather than replacing an existing
@@ -766,11 +773,29 @@ home's broader POSIX permissions. If permanently deleting the service account,
 remove that exact ACL with
 `/bin/chmod -a "user:tron-ci deny list,search" "$HOME"`.
 
-Rotation is explicit: remove the old runner/service through GitHub's
-runner removal command, update the exact version/URL/SHA in the manifest, rerun
-the bootstrap, and let its bounded final poll confirm that GitHub reports the
-release label online. Never register this label on a general-purpose user account
-or add it to another workflow.
+Rotation is explicit. Stop and remove the system-domain job, request a
+short-lived removal token, unregister as the service account, then move the old
+installation aside before rerunning the bootstrap:
+
+```bash
+sudo launchctl bootout system/com.tron.ios-release-runner
+sudo /bin/rm /Library/LaunchDaemons/com.tron.ios-release-runner.plist
+repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+removal_token="$(gh api --method POST \
+  "repos/$repository/actions/runners/remove-token" --jq .token)"
+(cd / && sudo -H -u tron-ci \
+  /Users/tron-ci/actions-runner/config.sh remove --token "$removal_token")
+unset removal_token
+sudo /bin/mv /Users/tron-ci/actions-runner \
+  "/Users/tron-ci/actions-runner.retired.$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+Update the exact version/URL/SHA in the manifest, rerun the bootstrap, and let
+its bounded final poll confirm that GitHub reports the release label online. An
+interrupted post-registration bootstrap removes the new remote registration,
+local credentials, and custom launchd definition before returning failure; it
+reports explicitly if that rollback cannot be verified. Never register this
+label on a general-purpose user account or add it to another workflow.
 
 Before changing the Xcode beta pin, install the candidate side-by-side, confirm
 Apple currently accepts that build for TestFlight, update version, build, SDK,
@@ -804,13 +829,14 @@ The upload lane uses the exact Xcode 27 release pin with the `Tron` scheme and
 `Prod` configuration. That is the App Store Connect bundle
 (`com.tron.mobile`, App ID `6761511764`); the
 `Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
-Tag and manual deliveries create or select the pinned iOS 27 iPhone simulator
-and run the simulator tests. Automatic internal delivery relies on the
-already-successful stable Xcode 26 upstream CI test run instead of repeating it.
-All live
-lanes archive for `generic/platform=iOS`, export an App Store Connect IPA with
-Xcode's `app-store-connect` export method, validate the exported app/extension
-bundle IDs, entitlements, and export-compliance plist keys, uploads with
+Simulator and XCTest execution stays on hosted Xcode 26 CI, where a logged-in
+Aqua session owns CoreSimulator and TestManager. The isolated system-domain
+release runner does not duplicate those tests: it compiles and archives the
+same accepted `main` source with Xcode 27, which proves the SDK-linked product
+surface without weakening host isolation merely to create a GUI login session.
+All live lanes archive for `generic/platform=iOS`, export an App Store Connect
+IPA with Xcode's `app-store-connect` export method, validate the exported
+app/extension bundle IDs, entitlements, and export-compliance plist keys, upload with
 `asc builds upload`, waits for the build to become valid, resolves TestFlight
 export compliance, and updates the What to Test notes. Reruns use
 `asc builds list` to reuse an existing Apple build instead of uploading a

@@ -843,6 +843,9 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "export ASC_PRIVATE_KEY_PATH=\"$key_path\"",
         "ASC_PRIVATE_KEY_PATH=$key_path",
         "ios-keychain-snapshot-ready",
+        "baseline_keychain=\"$HOME/Library/Keychains/tron-runner-baseline.keychain-db\"",
+        "security list-keychains -d user -s \"$baseline_keychain\"",
+        "security default-keychain -d user -s \"$baseline_keychain\"",
         "security list-keychains -d user -s \"$keychain_path\" \"${original_keychains[@]}\"",
         "security default-keychain -d user -s \"$keychain_path\"",
         "ios-installed-profile-uuids",
@@ -1013,6 +1016,7 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     let ci = read_repo_file(".github/workflows/ci.yml");
     let doctor = read_repo_file("scripts/ios-release-runner-doctor.sh");
     let bootstrap = read_repo_file("scripts/bootstrap-ios-release-runner.sh");
+    let version = read_repo_file("scripts/tron-version");
 
     let doctor_gate = workflow
         .find("      - name: Verify dedicated release runner\n")
@@ -1028,6 +1032,8 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     for required in [
         "runner_user=\"$(id -un)\"",
         "\"$runner_user\" == \"tron-ci\"",
+        "ACTIONS_RUNNER_SVC",
+        "launchctl manageruid",
         "/usr/bin/stat -f '%Lp' \"$HOME\"",
         "id -Gn \"$runner_user\"",
         "GITHUB_WORKSPACE",
@@ -1069,7 +1075,18 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "/bin/test -x \"$invoking_home\"",
         "sudo /bin/chmod +a \"$runner_home_acl\" \"$invoking_home\"",
         "sudo /bin/test -e \"$runner_dir/.runner\"",
+        "\"$runner_dir/bin/runsvc.sh\"",
+        "actions.runner.plist.template",
         "run_as_runner \"$runner_dir/config.sh\"",
+        "\"$runner_dir/.credentials\"",
+        "runner_service_label=\"com.tron.ios-release-runner\"",
+        "sudo launchctl bootstrap system \"$runner_service_plist\"",
+        "sudo launchctl kickstart -k \"system/$runner_service_label\"",
+        "runner_registration_started=true",
+        "actions/runners/remove-token",
+        "sudo launchctl bootout \"system/$runner_service_label\"",
+        "\"$runner_dir/.credentials_rsaparams\"",
+        "incomplete runner bootstrap rollback",
         "runner_poll <= 30",
         "release runner did not become online with its dedicated label",
         "-t user admin",
@@ -1090,6 +1107,10 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
             && !bootstrap.contains("[[ ! -e \"$runner_dir/.runner\" ]]"),
         "state below the mode-0700 runner home must be inspected with privilege"
     );
+    assert!(
+        !bootstrap.contains("$runner_dir/svc.sh"),
+        "the hidden runner must not install GitHub's per-login Darwin LaunchAgent"
+    );
     let personal_home_gate = bootstrap
         .find("if runner_can_access_invoking_home; then")
         .expect("bootstrap must enforce the invoking-home boundary");
@@ -1099,6 +1120,27 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     assert!(
         personal_home_gate < keychain_setup,
         "personal-home isolation must be established before runner state is created"
+    );
+    let runner_configuration = bootstrap
+        .find("run_as_runner \"$runner_dir/config.sh\"")
+        .expect("bootstrap must configure the runner");
+    let generated_credentials_check = bootstrap
+        .find("\"$runner_dir/.credentials\"; do")
+        .expect("bootstrap must verify config-generated credentials");
+    let system_service = bootstrap
+        .find("sudo launchctl bootstrap system \"$runner_service_plist\"")
+        .expect("bootstrap must install the system-domain runner service");
+    assert!(
+        runner_configuration < generated_credentials_check
+            && generated_credentials_check < system_service,
+        "runner configuration must finish before the custom system-domain service is installed"
+    );
+    assert!(
+        !workflow.contains("simctl")
+            && !workflow.contains("xcodebuild test")
+            && !workflow.contains("run_tests")
+            && !version.contains("run_tests"),
+        "the system-domain release runner must not own Aqua-session Simulator/XCTest work"
     );
     assert!(
         ci.contains("../../scripts/bootstrap-ios-release-runner.sh --self-test"),

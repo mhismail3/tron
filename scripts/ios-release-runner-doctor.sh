@@ -14,7 +14,6 @@ required_release_values=(
     TRON_RELEASE_IOS_XCODE_VERSION
     TRON_RELEASE_IOS_XCODE_BUILD
     TRON_RELEASE_IOS_SDK_VERSION
-    TRON_RELEASE_IOS_RUNTIME_VERSION
     TRON_RELEASE_IOS_DEVELOPER_DIR
     TRON_RELEASE_IOS_DEPLOYMENT_TARGET
     TRON_RELEASE_IOS_MIN_FREE_GB
@@ -68,6 +67,10 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
         || die "TestFlight archives must run as the isolated tron-ci account"
     [[ "$HOME" == "/Users/tron-ci" ]] \
         || die "release runner HOME must be /Users/tron-ci"
+    [[ "${ACTIONS_RUNNER_SVC:-}" == "1" ]] \
+        || die "TestFlight archives must run through the dedicated launchd service"
+    [[ "$(launchctl manageruid)" == "0" ]] \
+        || die "TestFlight archives must run in launchd's system domain"
     [[ "$(/usr/bin/stat -f '%Su' "$HOME")" == "$runner_user" ]] \
         || die "release runner home has the wrong owner"
     [[ "$(/usr/bin/stat -f '%Lp' "$HOME")" == "700" ]] \

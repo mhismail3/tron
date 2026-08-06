@@ -5,6 +5,9 @@
 # run only on the locked-down release runner with the exact Xcode 27 pin in
 # `config/ci-toolchain.env`; hosted Xcode 26 CI continues to prove the iOS 26 floor. Release
 # tags retain the external/public TestFlight path and Beta App Review handling.
+# Simulator/XCTest remains on hosted CI because the isolated release runner is
+# a system-domain service with no logged-in Aqua session; its Xcode 27 archive
+# is the SDK-linked compilation and distribution proof.
 # Both channels use this workflow's monotonic GITHUB_RUN_NUMBER as the hosted
 # iOS CFBundleVersion; reruns reuse their original number. VERSION.env remains
 # the product-version and local/Mac build source.
@@ -208,82 +211,6 @@ jobs:
           grep -q "CURRENT_PROJECT_VERSION = ${{ steps.ver.outputs.apple_build }}" "$settings"
           grep -q "TRON_CANONICAL_VERSION = ${{ steps.ver.outputs.version }}" "$settings"
 
-      - name: Prepare iOS simulator
-        if: steps.ver.outputs.run_tests == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          source config/ci-toolchain.env
-          runtimes_json="$RUNNER_TEMP/sim-runtimes.json"
-          devices_json="$RUNNER_TEMP/sim-devices.json"
-          xcrun simctl list runtimes available --json > "$runtimes_json"
-          runtime_id="$(
-            jq -r --arg version "$TRON_RELEASE_IOS_RUNTIME_VERSION" '
-              [.runtimes[]
-                | select(.platform == "iOS" and .version == $version and .isAvailable == true)
-                | select((.supportedDeviceTypes // []) | map(select(.productFamily == "iPhone")) | length > 0)]
-              | .[0].identifier // empty
-            ' "$runtimes_json"
-          )"
-          if [[ -z "$runtime_id" ]]; then
-            echo "::error::pinned iOS $TRON_RELEASE_IOS_RUNTIME_VERSION simulator runtime is unavailable"
-            exit 1
-          fi
-          device_type="$(
-            jq -r --arg runtime_id "$runtime_id" --arg device_name "$TRON_CI_IOS_SIMULATOR_NAME" '
-              [.runtimes[] | select(.identifier == $runtime_id)][0]
-              | (.supportedDeviceTypes // []) as $types
-              | ($types | map(select(.name == $device_name)))
-              | .[0].identifier // empty
-            ' "$runtimes_json"
-          )"
-          device_name="$TRON_CI_IOS_SIMULATOR_NAME"
-          if [[ -z "$device_type" ]]; then
-            echo "::error::pinned simulator $device_name is unavailable on $runtime_id"
-            exit 1
-          fi
-
-          xcrun simctl list devices available --json > "$devices_json"
-          udid="$(
-            jq -r --arg runtime_id "$runtime_id" --arg device_name "$device_name" '
-              (.devices[$runtime_id] // [])
-              | map(select(.isAvailable == true and .name == $device_name))
-              | .[0].udid // empty
-            ' "$devices_json"
-          )"
-          if [[ -z "$udid" ]]; then
-            udid="$(xcrun simctl create "Tron CI $device_name" "$device_type" "$runtime_id")"
-            echo "::notice::created $device_name simulator $udid on $runtime_id"
-          else
-            echo "::notice::using existing $device_name simulator $udid on $runtime_id"
-          fi
-          xcrun simctl boot "$udid" >/dev/null 2>&1 || true
-          xcrun simctl bootstatus "$udid" -b
-          echo "IOS_TEST_DESTINATION=platform=iOS Simulator,id=$udid" >> "$GITHUB_ENV"
-
-      - name: xcodebuild test
-        if: steps.ver.outputs.run_tests == 'true'
-        working-directory: ${{ env.IOS_APP_DIR }}
-        shell: bash
-        run: |
-          set -o pipefail
-          xcodebuild test \
-            -project TronMobile.xcodeproj \
-            -scheme "$IOS_SCHEME" \
-            -configuration Beta \
-            -destination "$IOS_TEST_DESTINATION" \
-            -derivedDataPath build/TestDerivedData \
-            -resultBundlePath TestResults.xcresult \
-            -quiet
-
-      - name: Upload xcresult on failure
-        if: failure() && steps.ver.outputs.run_tests == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ios-release-test-results
-          path: packages/ios-app/TestResults.xcresult
-          retention-days: 7
-
       - name: Prepare ASC API key
         if: steps.ver.outputs.dry_run != 'true'
         shell: bash
@@ -460,36 +387,21 @@ jobs:
           original_default_path="$RUNNER_TEMP/ios-original-default-keychain"
           snapshot_ready="$RUNNER_TEMP/ios-keychain-snapshot-ready"
           installed_profile_uuids="$RUNNER_TEMP/ios-installed-profile-uuids"
+          baseline_keychain="$HOME/Library/Keychains/tron-runner-baseline.keychain-db"
           profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
           mkdir -p "$profiles_dir"
           : > "$original_keychains_path"
           : > "$installed_profile_uuids"
 
-          original_keychains=()
-          keychain_list="$(security list-keychains -d user)"
-          while IFS= read -r existing_keychain; do
-            existing_keychain="${existing_keychain#"${existing_keychain%%[![:space:]]*}"}"
-            existing_keychain="${existing_keychain%"${existing_keychain##*[![:space:]]}"}"
-            existing_keychain="${existing_keychain#\"}"
-            existing_keychain="${existing_keychain%\"}"
-            if [[ -n "$existing_keychain" ]]; then
-              original_keychains+=("$existing_keychain")
-              printf '%s\n' "$existing_keychain" >> "$original_keychains_path"
-            fi
-          done <<< "$keychain_list"
-          if (( ${#original_keychains[@]} == 0 )); then
-            echo "::error::user keychain search list is empty"
+          test -f "$baseline_keychain" || {
+            echo "::error::dedicated release-runner baseline keychain is missing"
             exit 1
-          fi
-          original_default="$(security default-keychain -d user)"
-          original_default="${original_default#"${original_default%%[![:space:]]*}"}"
-          original_default="${original_default%"${original_default##*[![:space:]]}"}"
-          original_default="${original_default#\"}"
-          original_default="${original_default%\"}"
-          if [[ -z "$original_default" ]]; then
-            echo "::error::user default keychain is empty"
-            exit 1
-          fi
+          }
+          security list-keychains -d user -s "$baseline_keychain"
+          security default-keychain -d user -s "$baseline_keychain"
+          original_keychains=("$baseline_keychain")
+          original_default="$baseline_keychain"
+          printf '%s\n' "$baseline_keychain" > "$original_keychains_path"
           printf '%s\n' "$original_default" > "$original_default_path"
           : > "$snapshot_ready"
 
