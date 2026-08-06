@@ -76,9 +76,30 @@ class GitHub:
 
     def get(self, path: str, *, raw: bool = False) -> Any:
         request = urllib.request.Request(self.base + path, headers=self.headers)
+        if raw:
+            # Artifact downloads redirect from api.github.com to a short-lived
+            # signed blob URL. Never forward the GitHub bearer credential to
+            # that different origin: signed storage rejects it, and credential
+            # scoping must remain explicit even if a provider accepts it.
+            class NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+                    return None
+
+            try:
+                with urllib.request.build_opener(NoRedirect).open(request, timeout=30) as response:
+                    return response.read()
+            except urllib.error.HTTPError as error:
+                if error.code not in (301, 302, 303, 307, 308):
+                    raise
+                location = error.headers.get("Location")
+                if not location:
+                    raise ValueError("artifact redirect did not include a location") from error
+                error.close()
+                with urllib.request.urlopen(location, timeout=60) as response:
+                    return response.read()
         with urllib.request.urlopen(request, timeout=30) as response:
             body = response.read()
-        return body if raw else json.loads(body)
+        return json.loads(body)
 
 
 def verify_document(document: Any, *, repository: str, main_sha: str, main_tree: str,

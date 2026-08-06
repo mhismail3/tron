@@ -1001,6 +1001,12 @@ fn github_ci_stages_feedback_and_reuses_exact_evidence_fail_closed() {
     let workflow = read_repo_file(".github/workflows/ci.yml");
     let feedback = read_repo_file(".github/workflows/fast-feedback.yml");
     let classifier = read_repo_file("scripts/ci-change-flags.sh");
+    let evidence = read_repo_file("scripts/ci-validation-evidence.py");
+    assert!(
+        evidence.contains("class NoRedirect")
+            && evidence.contains("urllib.request.urlopen(location, timeout=60)"),
+        "artifact evidence must not forward GitHub authorization to signed blob storage"
+    );
     assert!(
         classifier.contains("packages/ios-app/*")
             && classifier.contains(".github/workflows/release-ios.yml"),
