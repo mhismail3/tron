@@ -744,7 +744,10 @@ scripts/ios-release-runner-doctor.sh
 Every Actions job reruns the doctor before any step receives release secrets.
 It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
 account with its exact home, mode-0700 ownership, baseline keychain, checkout,
-and temporary directory all inside the isolated Actions installation.
+and temporary directory all inside the isolated Actions installation. Hosted
+macOS CI also runs the bootstrap's non-privileged `--self-test`, which exercises
+the real BSD ownership query plus idempotent ACL denial semantics without
+creating an account or registering a runner.
 
 The bootstrap requires an authenticated repository-admin `gh` session and an
 interactive `sudo` checkpoint. It fails rather than replacing an existing
@@ -753,12 +756,21 @@ FileVault; that is expected. When macOS records the custom home without creating
 it, the bootstrap creates and validates the missing mode-0700 home and Keychains
 hierarchy with macOS system utilities, independent of any Homebrew coreutils in
 the invoking shell's `PATH`. A retry resumes safely from that account-only
-state. Rotation is
-explicit: remove the old runner/service through GitHub's
+state; checks beneath the private service home run with the service/root
+identity so an already-created baseline keychain is detected and reused rather
+than mistaken for a missing file. Because standard macOS accounts share the
+`staff` group, the bootstrap also probes both list and traversal access to the
+invoking user's home. When needed, it adds an idempotent
+`tron-ci deny list,search` ACL for only the runner instead of changing the
+home's broader POSIX permissions. If permanently deleting the service account,
+remove that exact ACL with
+`/bin/chmod -a "user:tron-ci deny list,search" "$HOME"`.
+
+Rotation is explicit: remove the old runner/service through GitHub's
 runner removal command, update the exact version/URL/SHA in the manifest, rerun
-the bootstrap, and confirm `gh api repos/{owner}/{repo}/actions/runners` reports
-the release label online. Never register this label on a general-purpose user
-account or add it to another workflow.
+the bootstrap, and let its bounded final poll confirm that GitHub reports the
+release label online. Never register this label on a general-purpose user account
+or add it to another workflow.
 
 Before changing the Xcode beta pin, install the candidate side-by-side, confirm
 Apple currently accepts that build for TestFlight, update version, build, SDK,

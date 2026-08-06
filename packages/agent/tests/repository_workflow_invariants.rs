@@ -1010,6 +1010,7 @@ fi
 #[test]
 fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     let workflow = read_repo_file(".github/workflows/release-ios.yml");
+    let ci = read_repo_file(".github/workflows/ci.yml");
     let doctor = read_repo_file("scripts/ios-release-runner-doctor.sh");
     let bootstrap = read_repo_file("scripts/bootstrap-ios-release-runner.sh");
 
@@ -1042,14 +1043,35 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "TRON_RELEASE_RUNNER_SHA256",
         "shasum -a 256",
         "runner_user=\"tron-ci\"",
+        "gh_executable=\"$(command -v gh || true)\"",
+        "export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin\"",
+        "bootstrap_self_test()",
+        "runner isolation ACL is not idempotent",
+        "runner isolation ACL does not deny list and search access",
+        "run_as_runner()",
+        "cd /",
+        "validate_private_runner_directory()",
         "recorded_runner_home",
         "NFSHomeDirectory",
         "[[ ! -L \"$runner_home\" ]]",
         "sudo install -d -m 700 -o \"$runner_user\" -g staff \"$runner_home\"",
-        "/usr/bin/stat -f '%Su' \"$runner_home\"",
-        "/usr/bin/stat -f '%Lp' \"$runner_home\"",
+        "/usr/bin/stat -f '%Su' \"$directory\"",
+        "/usr/bin/stat -f '%Lp' \"$directory\"",
         "\"$runner_library\" \"$runner_keychains\"",
-        "[[ ! -L \"$baseline_keychain\" ]]",
+        "sudo /bin/test -L \"$runner_path\"",
+        "sudo /bin/test -L \"$baseline_keychain\"",
+        "sudo /bin/test -e \"$baseline_keychain\"",
+        "run_as_runner security create-keychain",
+        "invoking_user=\"${SUDO_USER:-${USER:-}}\"",
+        "/usr/bin/stat -f '%Su' \"$invoking_home\"",
+        "runner_home_acl=\"user:$runner_user deny list,search\"",
+        "/bin/test -r \"$invoking_home\"",
+        "/bin/test -x \"$invoking_home\"",
+        "sudo /bin/chmod +a \"$runner_home_acl\" \"$invoking_home\"",
+        "sudo /bin/test -e \"$runner_dir/.runner\"",
+        "run_as_runner \"$runner_dir/config.sh\"",
+        "runner_poll <= 30",
+        "release runner did not become online with its dedicated label",
         "-t user admin",
         "--disableupdate",
     ] {
@@ -1058,6 +1080,30 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
             "release runner bootstrap is missing isolation behavior {required}"
         );
     }
+    assert!(
+        !bootstrap.contains("chmod 700 \"$invoking_home\"")
+            && !bootstrap.contains("chmod go-rwx \"$invoking_home\""),
+        "release runner isolation must not rewrite the invoking user's broad home permissions"
+    );
+    assert!(
+        !bootstrap.contains("[[ ! -e \"$baseline_keychain\" ]]")
+            && !bootstrap.contains("[[ ! -e \"$runner_dir/.runner\" ]]"),
+        "state below the mode-0700 runner home must be inspected with privilege"
+    );
+    let personal_home_gate = bootstrap
+        .find("if runner_can_access_invoking_home; then")
+        .expect("bootstrap must enforce the invoking-home boundary");
+    let keychain_setup = bootstrap
+        .find("runner_library=\"$runner_home/Library\"")
+        .expect("bootstrap must own the runner keychain hierarchy");
+    assert!(
+        personal_home_gate < keychain_setup,
+        "personal-home isolation must be established before runner state is created"
+    );
+    assert!(
+        ci.contains("../../scripts/bootstrap-ios-release-runner.sh --self-test"),
+        "hosted macOS CI must execute the release-runner ACL and BSD-utility self-test"
+    );
 }
 
 #[test]
