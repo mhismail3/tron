@@ -380,8 +380,10 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          source config/ci-toolchain.env
 
           cert_path="$RUNNER_TEMP/ios-distribution.p12"
+          wwdr_path="$RUNNER_TEMP/AppleWWDRCAG3.cer"
           keychain_path="$RUNNER_TEMP/ios-signing.keychain-db"
           keychain_password="$(uuidgen)"
           original_keychains_path="$RUNNER_TEMP/ios-original-keychains"
@@ -411,21 +413,38 @@ jobs:
           security create-keychain -p "$keychain_password" "$keychain_path"
           security set-keychain-settings -lut 21600 "$keychain_path"
           security unlock-keychain -p "$keychain_password" "$keychain_path"
+
+          # The isolated account intentionally has no interactive login
+          # keychain. Import Apple's public G3 intermediate into this job-owned
+          # keychain so identity validation cannot depend on ambient user state.
+          curl --fail --location --silent --show-error \
+            "$TRON_RELEASE_APPLE_WWDR_G3_URL" \
+            --output "$wwdr_path"
+          actual_wwdr_sha="$(shasum -a 256 "$wwdr_path" | awk '{print $1}')"
+          [[ "$actual_wwdr_sha" == "$TRON_RELEASE_APPLE_WWDR_G3_SHA256" ]] || {
+            echo "::error::Apple WWDR G3 certificate checksum mismatch"
+            exit 1
+          }
+          security verify-cert -c "$wwdr_path" >/dev/null
+          security import "$wwdr_path" -k "$keychain_path" >/dev/null
+          /bin/rm -f "$wwdr_path"
+
           security import "$cert_path" \
             -k "$keychain_path" \
             -P "$IOS_DISTRIBUTION_CERT_PASSWORD" \
             -T /usr/bin/codesign \
             -T /usr/bin/security \
-            -T /usr/bin/xcodebuild
-          rm -f "$cert_path"
+            -T /usr/bin/xcodebuild >/dev/null
+          /bin/rm -f "$cert_path"
           security list-keychains -d user -s "$keychain_path" "${original_keychains[@]}"
           security default-keychain -d user -s "$keychain_path"
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -s \
             -k "$keychain_password" \
-            "$keychain_path"
-          security find-identity -v -p codesigning "$keychain_path" | grep -q "$IOS_DISTRIBUTION_IDENTITY" || {
+            "$keychain_path" >/dev/null
+          security find-identity -v -p codesigning "$keychain_path" \
+            | grep -F "$IOS_DISTRIBUTION_IDENTITY" >/dev/null || {
             echo "::error::imported .p12 does not contain an $IOS_DISTRIBUTION_IDENTITY signing identity"
             exit 1
           }
@@ -1443,6 +1462,7 @@ jobs:
           temporary_credentials=(
             "$RUNNER_TEMP/tron-asc-api-key.p8"
             "$RUNNER_TEMP/ios-distribution.p12"
+            "$RUNNER_TEMP/AppleWWDRCAG3.cer"
             "$RUNNER_TEMP/app.mobileprovision"
             "$RUNNER_TEMP/share-extension.mobileprovision"
             "$RUNNER_TEMP/app-profile.plist"
