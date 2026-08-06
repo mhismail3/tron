@@ -20,6 +20,8 @@ required_release_values=(
     TRON_RELEASE_RUNNER_VERSION
     TRON_RELEASE_RUNNER_URL
     TRON_RELEASE_RUNNER_SHA256
+    TRON_RELEASE_APPLE_ROOT_URL
+    TRON_RELEASE_APPLE_ROOT_SHA256
     TRON_RELEASE_APPLE_WWDR_G3_URL
     TRON_RELEASE_APPLE_WWDR_G3_SHA256
 )
@@ -32,11 +34,16 @@ done
 [[ "$TRON_RELEASE_IOS_DEPLOYMENT_TARGET" =~ ^[0-9]+\.[0-9]+$ ]] || die "invalid deployment target"
 [[ "$TRON_RELEASE_RUNNER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid runner version"
 [[ "$TRON_RELEASE_RUNNER_SHA256" =~ ^[[:xdigit:]]{64}$ ]] || die "invalid runner checksum"
+[[ "$TRON_RELEASE_APPLE_ROOT_SHA256" =~ ^[[:xdigit:]]{64}$ ]] \
+    || die "invalid Apple Root CA checksum"
 [[ "$TRON_RELEASE_APPLE_WWDR_G3_SHA256" =~ ^[[:xdigit:]]{64}$ ]] \
     || die "invalid Apple WWDR G3 checksum"
 expected_runner_url="https://github.com/actions/runner/releases/download/v${TRON_RELEASE_RUNNER_VERSION}/actions-runner-osx-arm64-${TRON_RELEASE_RUNNER_VERSION}.tar.gz"
 [[ "$TRON_RELEASE_RUNNER_URL" == "$expected_runner_url" ]] \
     || die "runner URL does not match the pinned version and ARM64 platform"
+expected_apple_root_url="https://www.apple.com/appleca/AppleIncRootCertificate.cer"
+[[ "$TRON_RELEASE_APPLE_ROOT_URL" == "$expected_apple_root_url" ]] \
+    || die "Apple Root CA certificate must come from the canonical Apple PKI URL"
 expected_wwdr_g3_url="https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer"
 [[ "$TRON_RELEASE_APPLE_WWDR_G3_URL" == "$expected_wwdr_g3_url" ]] \
     || die "Apple WWDR G3 certificate must come from the canonical Apple PKI URL"
