@@ -129,7 +129,7 @@ coverage gap exists.
 | Personal-info guard | `scripts/personal-info-guard.sh` |
 | Rust commit milestone | `scripts/tron ci fmt check clippy test` |
 
-Fast feedback runs repository guards plus Rust format/check on every pull
+Fast feedback runs repository guards plus Rust formatting on every pull
 request, including drafts. Marking a PR ready runs `scripts/tron ci fmt`,
 `check`, `clippy`, and `test` as its one Rust quality path and always validates
 both Apple clients. Cargo's default auto-discovery of

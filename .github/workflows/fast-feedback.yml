@@ -39,7 +39,5 @@ jobs:
         with:
           cache-workspaces: packages/agent
           rustflags: ""
-      - name: Rust format and compile check
-        run: |
-          scripts/tron ci fmt
-          scripts/tron ci check
+      - name: Rust formatting
+        run: scripts/tron ci fmt
