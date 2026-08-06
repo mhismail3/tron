@@ -383,7 +383,9 @@ jobs:
           source config/ci-toolchain.env
 
           cert_path="$RUNNER_TEMP/ios-distribution.p12"
+          apple_root_path="$RUNNER_TEMP/AppleIncRootCertificate.cer"
           wwdr_path="$RUNNER_TEMP/AppleWWDRCAG3.cer"
+          signing_probe="$RUNNER_TEMP/tron-signing-probe"
           keychain_path="$RUNNER_TEMP/ios-signing.keychain-db"
           keychain_password="$(uuidgen)"
           original_keychains_path="$RUNNER_TEMP/ios-original-keychains"
@@ -415,19 +417,32 @@ jobs:
           security unlock-keychain -p "$keychain_password" "$keychain_path"
 
           # The isolated account intentionally has no interactive login
-          # keychain. Import Apple's public G3 intermediate into this job-owned
-          # keychain so identity validation cannot depend on ambient user state.
-          curl --fail --location --silent --show-error \
-            "$TRON_RELEASE_APPLE_WWDR_G3_URL" \
-            --output "$wwdr_path"
-          actual_wwdr_sha="$(shasum -a 256 "$wwdr_path" | awk '{print $1}')"
-          [[ "$actual_wwdr_sha" == "$TRON_RELEASE_APPLE_WWDR_G3_SHA256" ]] || {
-            echo "::error::Apple WWDR G3 certificate checksum mismatch"
-            exit 1
+          # keychain. Put the complete public trust chain in this job-owned
+          # keychain so CodeSign cannot depend on ambient user search state.
+          import_public_certificate() {
+            local label="$1" url="$2" expected_sha="$3" destination="$4" actual_sha
+            curl --fail --location --silent --show-error \
+              "$url" \
+              --output "$destination"
+            actual_sha="$(shasum -a 256 "$destination" | awk '{print $1}')"
+            [[ "$actual_sha" == "$expected_sha" ]] || {
+              echo "::error::$label certificate checksum mismatch"
+              return 1
+            }
+            security verify-cert -c "$destination" >/dev/null
+            security import "$destination" -k "$keychain_path" >/dev/null
+            /bin/rm -f "$destination"
           }
-          security verify-cert -c "$wwdr_path" >/dev/null
-          security import "$wwdr_path" -k "$keychain_path" >/dev/null
-          /bin/rm -f "$wwdr_path"
+          import_public_certificate \
+            "Apple Root CA" \
+            "$TRON_RELEASE_APPLE_ROOT_URL" \
+            "$TRON_RELEASE_APPLE_ROOT_SHA256" \
+            "$apple_root_path"
+          import_public_certificate \
+            "Apple WWDR G3" \
+            "$TRON_RELEASE_APPLE_WWDR_G3_URL" \
+            "$TRON_RELEASE_APPLE_WWDR_G3_SHA256" \
+            "$wwdr_path"
 
           security import "$cert_path" \
             -k "$keychain_path" \
@@ -443,11 +458,14 @@ jobs:
             -s \
             -k "$keychain_password" \
             "$keychain_path" >/dev/null
-          security find-identity -v -p codesigning "$keychain_path" \
-            | grep -F "$IOS_DISTRIBUTION_IDENTITY" >/dev/null || {
-            echo "::error::imported .p12 does not contain an $IOS_DISTRIBUTION_IDENTITY signing identity"
+          /bin/cp /usr/bin/true "$signing_probe"
+          if ! codesign --force --sign "$IOS_DISTRIBUTION_IDENTITY" \
+              "$signing_probe" >/dev/null 2>&1 \
+              || ! codesign --verify --strict "$signing_probe" >/dev/null 2>&1; then
+            echo "::error::ephemeral release keychain cannot perform non-interactive code signing"
             exit 1
-          }
+          fi
+          /bin/rm -f "$signing_probe"
 
           install_profile() {
             local label="$1" bundle_id="$2" base64_value="$3"
@@ -1462,7 +1480,9 @@ jobs:
           temporary_credentials=(
             "$RUNNER_TEMP/tron-asc-api-key.p8"
             "$RUNNER_TEMP/ios-distribution.p12"
+            "$RUNNER_TEMP/AppleIncRootCertificate.cer"
             "$RUNNER_TEMP/AppleWWDRCAG3.cer"
+            "$RUNNER_TEMP/tron-signing-probe"
             "$RUNNER_TEMP/app.mobileprovision"
             "$RUNNER_TEMP/share-extension.mobileprovision"
             "$RUNNER_TEMP/app-profile.plist"
