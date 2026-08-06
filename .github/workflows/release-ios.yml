@@ -42,9 +42,12 @@
 #
 # Credential lifecycle invariant: ASC uses the job's environment-backed key
 # directly. Manual signing snapshots the user keychain preferences before it
-# prepends and selects a job-owned keychain. One final `if: always()` step
-# restores those preferences and removes the private key, certificate, created
-# profiles, and keychain without deleting state that predated the job.
+# prepends and selects a unique job-owned file keychain while leaving Apple's
+# trusted root in the system-root store. A pre-archive Mach-O proves both private
+# key access and the exact embedded leaf/intermediate/root chain. One final
+# `if: always()` step restores those preferences and removes the private key,
+# certificate, diagnostics, created profiles, and keychain without deleting
+# state that predated the job.
 
 name: Release (iOS TestFlight)
 
@@ -91,7 +94,6 @@ jobs:
       IOS_BUNDLE_ID: com.tron.mobile
       IOS_SHARE_EXTENSION_BUNDLE_ID: com.tron.mobile.ShareExtension
       APPLE_TEAM_ID: MYGKXH6TY4
-      IOS_DISTRIBUTION_IDENTITY: Apple Distribution
 
     steps:
       - name: Checkout
@@ -383,23 +385,39 @@ jobs:
           source config/ci-toolchain.env
 
           cert_path="$RUNNER_TEMP/ios-distribution.p12"
+          leaf_path="$RUNNER_TEMP/ios-distribution-leaf.pem"
+          leaf_der_path="$RUNNER_TEMP/ios-distribution-leaf.cer"
           apple_root_path="$RUNNER_TEMP/AppleIncRootCertificate.cer"
           wwdr_path="$RUNNER_TEMP/AppleWWDRCAG3.cer"
           signing_probe="$RUNNER_TEMP/tron-signing-probe"
-          keychain_path="$RUNNER_TEMP/ios-signing.keychain-db"
+          signing_probe_error="$RUNNER_TEMP/tron-signing-probe.stderr"
+          signing_probe_cert_prefix="$RUNNER_TEMP/tron-signing-probe-cert-"
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || {
+            echo "::error::GitHub run identity is invalid"
+            exit 1
+          }
+          keychain_path="$HOME/Library/Keychains/tron-ios-signing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.keychain-db"
           keychain_password="$(uuidgen)"
           original_keychains_path="$RUNNER_TEMP/ios-original-keychains"
           original_default_path="$RUNNER_TEMP/ios-original-default-keychain"
           snapshot_ready="$RUNNER_TEMP/ios-keychain-snapshot-ready"
           installed_profile_uuids="$RUNNER_TEMP/ios-installed-profile-uuids"
           baseline_keychain="$HOME/Library/Keychains/tron-runner-baseline.keychain-db"
+          system_keychain="/Library/Keychains/System.keychain"
+          system_root_keychain="/System/Library/Keychains/SystemRootCertificates.keychain"
           profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
           mkdir -p "$profiles_dir"
           : > "$original_keychains_path"
           : > "$installed_profile_uuids"
 
-          test -f "$baseline_keychain" || {
-            echo "::error::dedicated release-runner baseline keychain is missing"
+          for required_keychain in "$baseline_keychain" "$system_keychain" "$system_root_keychain"; do
+            test -f "$required_keychain" && test ! -L "$required_keychain" || {
+              echo "::error::required release keychain is unavailable"
+              exit 1
+            }
+          done
+          test ! -e "$keychain_path" && test ! -L "$keychain_path" || {
+            echo "::error::job-owned signing keychain already exists"
             exit 1
           }
           security list-keychains -d user -s "$baseline_keychain"
@@ -412,14 +430,11 @@ jobs:
 
           printf '%s' "$IOS_DISTRIBUTION_CERT_P12_BASE64" | base64 -d > "$cert_path"
           test -s "$cert_path" || { echo "::error::decoded iOS distribution certificate is empty"; exit 1; }
-          security create-keychain -p "$keychain_password" "$keychain_path"
-          security set-keychain-settings -lut 21600 "$keychain_path"
-          security unlock-keychain -p "$keychain_password" "$keychain_path"
 
           # The isolated account intentionally has no interactive login
-          # keychain. Put the complete public trust chain in this job-owned
-          # keychain so CodeSign cannot depend on ambient user search state.
-          import_public_certificate() {
+          # keychain. Pin and validate the exact public chain independently of
+          # ambient keychains before admitting the private key.
+          download_public_certificate() {
             local label="$1" url="$2" expected_sha="$3" destination="$4" actual_sha
             curl --fail --location --silent --show-error \
               "$url" \
@@ -429,21 +444,52 @@ jobs:
               echo "::error::$label certificate checksum mismatch"
               return 1
             }
-            security verify-cert -c "$destination" >/dev/null
-            security import "$destination" -k "$keychain_path" >/dev/null
-            /bin/rm -f "$destination"
           }
-          import_public_certificate \
+          download_public_certificate \
             "Apple Root CA" \
             "$TRON_RELEASE_APPLE_ROOT_URL" \
             "$TRON_RELEASE_APPLE_ROOT_SHA256" \
             "$apple_root_path"
-          import_public_certificate \
+          download_public_certificate \
             "Apple WWDR G3" \
             "$TRON_RELEASE_APPLE_WWDR_G3_URL" \
             "$TRON_RELEASE_APPLE_WWDR_G3_SHA256" \
             "$wwdr_path"
 
+          if ! TRON_P12_PASSWORD="$IOS_DISTRIBUTION_CERT_PASSWORD" \
+            openssl pkcs12 \
+              -in "$cert_path" \
+              -clcerts \
+              -nokeys \
+              -passin env:TRON_P12_PASSWORD \
+              -out "$leaf_path" >/dev/null 2>&1; then
+            echo "::error::distribution .p12 could not be decoded with its configured password"
+            exit 1
+          fi
+          [[ "$(grep -c 'BEGIN CERTIFICATE' "$leaf_path")" == "1" ]] || {
+            echo "::error::distribution .p12 must contain exactly one leaf certificate"
+            exit 1
+          }
+          openssl x509 -in "$leaf_path" -outform DER -out "$leaf_der_path"
+          security verify-cert \
+            -N \
+            -L \
+            -p codeSign \
+            -c "$leaf_path" \
+            -c "$wwdr_path" \
+            -r "$apple_root_path" \
+            -q || {
+              echo "::error::distribution certificate does not validate through the pinned Apple WWDR G3 chain"
+              exit 1
+            }
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          # Only the intermediate belongs in the job keychain. The root must
+          # retain the system store's built-in trust rather than becoming an
+          # untrusted duplicate in a temporary user keychain.
+          security import "$wwdr_path" -k "$keychain_path" >/dev/null
           security import "$cert_path" \
             -k "$keychain_path" \
             -P "$IOS_DISTRIBUTION_CERT_PASSWORD" \
@@ -451,20 +497,94 @@ jobs:
             -T /usr/bin/security \
             -T /usr/bin/xcodebuild >/dev/null
           /bin/rm -f "$cert_path"
-          security list-keychains -d user -s "$keychain_path" "${original_keychains[@]}"
+          security list-keychains -d user -s \
+            "$keychain_path" \
+            "${original_keychains[@]}" \
+            "$system_keychain" \
+            "$system_root_keychain"
           security default-keychain -d user -s "$keychain_path"
           security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
+            -S apple-tool:,apple: \
             -s \
             -k "$keychain_password" \
             "$keychain_path" >/dev/null
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+
+          # Verify the same explicit search path CodeSign will use. This check
+          # both primes trustd and proves the intermediate can reach Apple's
+          # system-owned trust anchor without network issuer fetching.
+          security verify-cert \
+            -L \
+            -p codeSign \
+            -c "$leaf_path" \
+            -k "$keychain_path" \
+            -k "$system_keychain" \
+            -k "$system_root_keychain" \
+            -q || {
+              echo "::error::release keychain search path cannot validate the distribution certificate"
+              exit 1
+            }
+
+          identity_hashes=()
+          while IFS= read -r identity_hash; do
+            [[ -n "$identity_hash" ]] && identity_hashes+=("$identity_hash")
+          done < <(
+            security find-identity -v -p codesigning "$keychain_path" 2>/dev/null \
+              | awk 'length($2) == 40 && $2 ~ /^[[:xdigit:]]+$/ { print toupper($2) }'
+          )
+          [[ "${#identity_hashes[@]}" == "1" ]] || {
+            echo "::error::job-owned keychain must contain exactly one valid signing identity"
+            exit 1
+          }
+          identity_hash="${identity_hashes[0]}"
+          leaf_identity_hash="$(
+            openssl x509 -in "$leaf_path" -noout -fingerprint -sha1 \
+              | sed -E 's/^.*=//; s/://g' \
+              | tr '[:lower:]' '[:upper:]'
+          )"
+          [[ "$identity_hash" == "$leaf_identity_hash" ]] || {
+            echo "::error::imported signing identity does not match the validated distribution leaf"
+            exit 1
+          }
+
           /bin/cp /usr/bin/true "$signing_probe"
-          if ! codesign --force --sign "$IOS_DISTRIBUTION_IDENTITY" \
-              "$signing_probe" >/dev/null 2>&1 \
-              || ! codesign --verify --strict "$signing_probe" >/dev/null 2>&1; then
-            echo "::error::ephemeral release keychain cannot perform non-interactive code signing"
+          if ! /usr/bin/codesign \
+              --force \
+              --sign "$identity_hash" \
+              --keychain "$keychain_path" \
+              "$signing_probe" >/dev/null 2>"$signing_probe_error"; then
+            signing_diagnostic="$(
+              python3 scripts/ios-release-verify.py \
+                codesign-diagnostic --log "$signing_probe_error"
+            )"
+            echo "::error::non-interactive CodeSign preflight failed: $signing_diagnostic"
             exit 1
           fi
+          /usr/bin/codesign --verify --strict "$signing_probe" >/dev/null 2>&1 || {
+            echo "::error::CodeSign preflight produced an invalid signature"
+            exit 1
+          }
+
+          /usr/bin/codesign \
+            -d \
+            --extract-certificates="$signing_probe_cert_prefix" \
+            "$signing_probe" >/dev/null 2>&1
+          for certificate_index in 0 1 2; do
+            test -f "${signing_probe_cert_prefix}${certificate_index}" || {
+              echo "::error::CodeSign preflight did not embed a complete three-certificate chain"
+              exit 1
+            }
+          done
+          embedded_leaf_sha="$(shasum -a 256 "${signing_probe_cert_prefix}0" | awk '{print $1}')"
+          embedded_wwdr_sha="$(shasum -a 256 "${signing_probe_cert_prefix}1" | awk '{print $1}')"
+          embedded_root_sha="$(shasum -a 256 "${signing_probe_cert_prefix}2" | awk '{print $1}')"
+          validated_leaf_sha="$(shasum -a 256 "$leaf_der_path" | awk '{print $1}')"
+          [[ "$embedded_leaf_sha" == "$validated_leaf_sha" \
+              && "$embedded_wwdr_sha" == "$TRON_RELEASE_APPLE_WWDR_G3_SHA256" \
+              && "$embedded_root_sha" == "$TRON_RELEASE_APPLE_ROOT_SHA256" ]] || {
+            echo "::error::CodeSign preflight embedded an unexpected certificate chain"
+            exit 1
+          }
           /bin/rm -f "$signing_probe"
 
           install_profile() {
@@ -475,6 +595,12 @@ jobs:
             decoded_plist="$RUNNER_TEMP/$label-profile.plist"
             printf '%s' "$base64_value" | base64 -d > "$profile_path"
             security cms -D -i "$profile_path" -o "$decoded_plist"
+            python3 scripts/ios-release-verify.py profile-certificate \
+              --profile-plist "$decoded_plist" \
+              --leaf-certificate "$leaf_der_path" >/dev/null || {
+                echo "::error::$label provisioning profile does not include the validated distribution certificate" >&2
+                return 1
+              }
 
             uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$decoded_plist")"
             name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$decoded_plist")"
@@ -557,6 +683,8 @@ jobs:
             echo "IOS_APP_PROFILE_SPECIFIER=$app_profile_name"
             echo "IOS_SHARE_PROFILE_SPECIFIER=$share_profile_name"
             echo "IOS_EXPORT_SIGNING_STYLE=$export_signing_style"
+            echo "IOS_DISTRIBUTION_IDENTITY_HASH=$identity_hash"
+            echo "IOS_SIGNING_KEYCHAIN_PATH=$keychain_path"
           } >> "$GITHUB_ENV"
 
       - name: xcodebuild archive
@@ -591,7 +719,8 @@ jobs:
               -destination 'generic/platform=iOS' \
               DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
               CODE_SIGN_STYLE=Manual \
-              CODE_SIGN_IDENTITY="$IOS_DISTRIBUTION_IDENTITY" \
+              CODE_SIGN_IDENTITY="$IOS_DISTRIBUTION_IDENTITY_HASH" \
+              "OTHER_CODE_SIGN_FLAGS=--keychain $IOS_SIGNING_KEYCHAIN_PATH" \
               "PROVISIONING_PROFILE_SPECIFIER=\$(TRON_APPSTORE_PROFILE_SPECIFIER)" \
               IOS_APP_PROFILE_SPECIFIER="$IOS_APP_PROFILE_SPECIFIER" \
               IOS_SHARE_PROFILE_SPECIFIER="$IOS_SHARE_PROFILE_SPECIFIER" \
@@ -674,7 +803,7 @@ jobs:
               <string>$IOS_SHARE_PROFILE_UUID</string>
             </dict>
             <key>signingCertificate</key>
-            <string>$IOS_DISTRIBUTION_IDENTITY</string>
+            <string>$IOS_DISTRIBUTION_IDENTITY_HASH</string>
             <key>signingStyle</key>
             <string>manual</string>
             <key>stripSwiftSymbols</key>
@@ -1422,7 +1551,13 @@ jobs:
         run: |
           set +e
           cleanup_failed=0
-          keychain_path="$RUNNER_TEMP/ios-signing.keychain-db"
+          keychain_path=""
+          if [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]; then
+            keychain_path="$HOME/Library/Keychains/tron-ios-signing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.keychain-db"
+          else
+            echo "::error::refusing to resolve a signing keychain from an invalid GitHub run identity"
+            cleanup_failed=1
+          fi
           original_keychains_path="$RUNNER_TEMP/ios-original-keychains"
           original_default_path="$RUNNER_TEMP/ios-original-default-keychain"
           snapshot_ready="$RUNNER_TEMP/ios-keychain-snapshot-ready"
@@ -1447,14 +1582,14 @@ jobs:
             fi
           fi
 
-          if [[ -e "$keychain_path" ]]; then
+          if [[ -n "$keychain_path" && -e "$keychain_path" ]]; then
             if ! security delete-keychain "$keychain_path"; then
               echo "::error::failed to delete the iOS signing keychain"
               cleanup_failed=1
               /bin/rm -f "$keychain_path"
             fi
           fi
-          if [[ -e "$keychain_path" || -L "$keychain_path" ]]; then
+          if [[ -n "$keychain_path" && ( -e "$keychain_path" || -L "$keychain_path" ) ]]; then
             echo "::error::iOS signing keychain remains after cleanup"
             cleanup_failed=1
           fi
@@ -1480,9 +1615,15 @@ jobs:
           temporary_credentials=(
             "$RUNNER_TEMP/tron-asc-api-key.p8"
             "$RUNNER_TEMP/ios-distribution.p12"
+            "$RUNNER_TEMP/ios-distribution-leaf.pem"
+            "$RUNNER_TEMP/ios-distribution-leaf.cer"
             "$RUNNER_TEMP/AppleIncRootCertificate.cer"
             "$RUNNER_TEMP/AppleWWDRCAG3.cer"
             "$RUNNER_TEMP/tron-signing-probe"
+            "$RUNNER_TEMP/tron-signing-probe.stderr"
+            "$RUNNER_TEMP/tron-signing-probe-cert-0"
+            "$RUNNER_TEMP/tron-signing-probe-cert-1"
+            "$RUNNER_TEMP/tron-signing-probe-cert-2"
             "$RUNNER_TEMP/app.mobileprovision"
             "$RUNNER_TEMP/share-extension.mobileprovision"
             "$RUNNER_TEMP/app-profile.plist"

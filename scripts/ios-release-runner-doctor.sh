@@ -85,6 +85,9 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
         || die "TestFlight archives must run through the dedicated launchd service"
     [[ "$(launchctl manageruid)" == "0" ]] \
         || die "TestFlight archives must run in launchd's system domain"
+    python3 "$project_dir/scripts/ios-release-verify.py" \
+        security-session --require-non-root >/dev/null \
+        || die "TestFlight archives require a non-root macOS security session"
     [[ "$(/usr/bin/stat -f '%Su' "$HOME")" == "$runner_user" ]] \
         || die "release runner home has the wrong owner"
     [[ "$(/usr/bin/stat -f '%Lp' "$HOME")" == "700" ]] \

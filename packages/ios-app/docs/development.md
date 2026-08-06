@@ -746,7 +746,10 @@ Every Actions job reruns the doctor before any step receives release secrets.
 It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
 account with its exact home, mode-0700 ownership, baseline keychain, checkout,
 and temporary directory all inside the isolated Actions installation, and the
-process belongs to launchd's system domain. The system-domain service is
+process belongs to launchd's system domain while its Security framework audit
+session is non-root. That last check detects the mixed Unix/security context
+that macOS otherwise reports later as an opaque `errSecInternalComponent`.
+The system-domain service is
 deliberate: GitHub's generated Darwin `svc.sh` is created only after runner
 registration, installs a per-login LaunchAgent, and refuses root. The hidden
 service account has no Aqua login session, so the bootstrap instead uses the
@@ -888,14 +891,20 @@ local and CI `asc` installations can expose different TestFlight subcommand
 names.
 
 The export step supports two signing modes. If all local signing secrets are
-present, CI imports an Apple Distribution `.p12` into a temporary keychain,
+present, CI imports an Apple Distribution `.p12` into a uniquely named,
+job-owned file keychain under the isolated account's standard
+`~/Library/Keychains/` directory,
 installs App Store Connect provisioning profiles for the app and share
 extension, and uses those same assets for both archive and export. Manually
 managed and Xcode-managed profiles both resolve separate target-level profile
-specifiers for the app and share extension during archive. CI pins the
-installed Apple Distribution identity and uses manual archive signing without
-provisioning updates, so Xcode cannot fall back to development signing or
-create certificates and profiles in the Apple account. Export then uses
+specifiers for the app and share extension during archive. Each decoded profile
+must include the exact validated distribution leaf from the `.p12`; certificate
+rotation can therefore fail before installation rather than during archive. CI
+pins the installed Apple Distribution identity by certificate hash, directs archive
+CodeSign lookup to that exact keychain, and uses manual archive signing without
+provisioning updates. Xcode therefore cannot select a similarly named identity,
+fall back to development signing, or create certificates and profiles in the
+Apple account. Export then uses
 `signingStyle=manual` or `signingStyle=automatic` to match the installed profile
 kind. If the local signing secrets are absent, CI falls back to automatic Xcode
 cloud signing with the ASC API key. Cloud signing requires Apple to allow that
@@ -904,10 +913,13 @@ either grant that access or use the local signing secrets.
 
 ASC authentication is environment-backed in CI; the workflow does not create
 a repo-local `.asc/config.json`. Before manual signing changes the user
-keychain search list or default, it records both exactly. An always-run final
-step restores those preferences, deletes the temporary private key,
-certificate, and keychain, and removes only provisioning profiles the job
-created. Identical pre-existing profiles are reused, while a UUID collision
+keychain search list or default, it records both exactly. The temporary search
+path includes the job keychain plus macOS's system and system-root keychains;
+the system-owned Apple root retains its built-in trust. An always-run final
+step restores the original preferences, deletes the temporary private key,
+certificate, standard-directory keychain, and diagnostic files, and removes
+only provisioning profiles the job created. Identical pre-existing profiles
+are reused, while a UUID collision
 with different content fails instead of overwriting runner state. Cleanup
 continues after individual errors but fails the job if any restoration or
 removal is incomplete. A final always-run step removes release build products
@@ -980,12 +992,21 @@ extension mix Xcode-managed and manually managed profile styles. It also fails
 an expired profile immediately and emits a GitHub warning during the final 30
 days. Because the isolated service account has no interactive login keychain,
 manual signing also downloads Apple's public root and WWDR G3 intermediate from
-their canonical Apple PKI URLs, verifies both repository-pinned SHA-256 digests,
-and imports the complete chain into the ephemeral signing keychain. A throwaway
-Mach-O CodeSign probe must then succeed before Xcode starts. This prevents a
-build from silently depending on a developer's ambient keychain search list or
-failing only after an expensive archive begins. Provisioning profiles cannot
-outlive their selected distribution certificate, so rotate the Apple
+their canonical Apple PKI URLs and verifies both repository-pinned SHA-256
+digests. Before the private key is admitted, CI extracts the single public leaf
+from the `.p12` and validates the exact leaf -> WWDR G3 -> Apple Root chain with
+ambient keychain lookup and issuer fetching disabled. Only WWDR G3 is imported
+into the temporary user keychain; the explicit system-root keychain preserves
+macOS's built-in trust instead of treating a copied root certificate as trust
+configuration. A throwaway Mach-O is
+signed through the exact identity hash and keychain, verified, and its
+three embedded certificates are extracted and compared with the validated leaf
+and both repository pins. Any failure is reduced to a redacted category such as
+untrusted chain, forbidden keychain interaction, missing identity, or security
+context; certificate subjects and raw signing output never enter Actions logs.
+This prevents a build from silently depending on a developer's ambient login
+keychain or failing only after an expensive archive begins. Provisioning
+profiles cannot outlive their selected distribution certificate, so rotate the Apple
 Distribution certificate, `.p12`, and both profile secrets together before the
 earliest expiration date. This is a credential rotation only; the TestFlight
 group and workflow configuration stay in place.
