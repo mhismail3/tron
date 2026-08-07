@@ -1306,23 +1306,21 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
     std::fs::create_dir_all(&workspace).unwrap();
     let workspace_scripts = workspace.join("scripts");
     std::fs::create_dir_all(&workspace_scripts).unwrap();
-    for script in ["ios-release-user-context", "ios-release-verify.py"] {
-        std::fs::copy(
-            repo_path(&format!("scripts/{script}")),
-            workspace_scripts.join(script),
-        )
-        .unwrap_or_else(|error| panic!("copy cleanup boundary {script}: {error}"));
-    }
-    let mut boundary_permissions =
-        std::fs::metadata(workspace_scripts.join("ios-release-user-context"))
-            .unwrap()
-            .permissions();
-    boundary_permissions.set_mode(0o755);
-    std::fs::set_permissions(
-        workspace_scripts.join("ios-release-user-context"),
-        boundary_permissions,
+    // This probe owns platform-neutral teardown behavior. The production
+    // boundary intentionally rejects non-macOS hosts and has separate
+    // structural plus hosted-macOS coverage, so use a tracked forwarding
+    // boundary here to exercise the workflow's first-command guard on Linux as
+    // well as macOS. Tracking it also proves `git clean` cannot remove the
+    // boundary before the remainder of teardown completes.
+    let cleanup_boundary = workspace_scripts.join("ios-release-user-context");
+    std::fs::write(
+        &cleanup_boundary,
+        "#!/bin/bash\nset -euo pipefail\nexec \"$@\"\n",
     )
     .unwrap();
+    let mut boundary_permissions = std::fs::metadata(&cleanup_boundary).unwrap().permissions();
+    boundary_permissions.set_mode(0o755);
+    std::fs::set_permissions(&cleanup_boundary, boundary_permissions).unwrap();
     assert!(
         Command::new("git")
             .args(["init", "--quiet"])
