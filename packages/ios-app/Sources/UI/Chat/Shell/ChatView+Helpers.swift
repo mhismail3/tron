@@ -167,6 +167,9 @@ extension ChatView {
         }
         guard isCurrent(ticket), !Task.isCancelled else { return }
 
+        viewportMeasurements.beginTranscriptPositioning(messageCount: msgCount)
+        transcriptScrollPosition.scrollTo(edge: .bottom)
+
         // Deep link: skip animation, scroll to target
         if honorsDeepLink, let target = scrollTarget {
             logger.debug("[INIT] Deep link target, skipping cascade", category: .ui)
@@ -289,12 +292,20 @@ extension ChatView {
         guard scrollTarget == nil,
               !scrollCoordinator.userScrolledAway,
               await waitForInitialScrollProxy() else { return }
+        viewportMeasurements.beginTranscriptPositioning(
+            messageCount: viewModel.messages.count
+        )
+        transcriptScrollPosition.scrollTo(edge: .bottom)
+        guard await layoutDelay(milliseconds: 20) else { return }
+        guard isCurrent(ticket), !Task.isCancelled else { return }
         _ = await waitForInitialScrollGeometry()
         guard isCurrent(ticket), !Task.isCancelled else { return }
         guard ChatTranscriptRevealPolicy.shouldRequestBottomPosition(
             hasScrollGeometry: viewportMeasurements.hasScrollGeometry,
             hasScrollableOverflow: viewportMeasurements.hasScrollableOverflow
         ) else { return }
+
+        scrollToBottom()
 
         for _ in 0..<ChatTranscriptRevealPolicy.initialBottomSettleAttempts {
             guard !scrollCoordinator.userScrolledAway,
@@ -305,7 +316,7 @@ extension ChatView {
             ) else { return }
             guard isCurrent(ticket), !Task.isCancelled else { return }
             if ChatTranscriptRevealPolicy.isAtInitialBottom(
-                distanceFromBottom: viewportMeasurements.initialDistanceFromBottom
+                distanceFromBottom: viewportMeasurements.currentDistanceFromBottom
             ) {
                 break
             }

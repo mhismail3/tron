@@ -6,6 +6,9 @@ import Foundation
 @MainActor
 protocol AppConnectionRepository: AnyObject {
     var connectionState: ConnectionState { get }
+    /// Monotonic ready-socket epoch. This advances even when an intermediate
+    /// reconnect state is coalesced into connected-to-connected observation.
+    var continuityGeneration: UInt64 { get }
 
     func connect() async
 }

@@ -41,6 +41,10 @@ protocol ConnectionContext: ChatCoordinatorContext, LocalChatNotificationPresent
     /// Drain events that were buffered during a successfully committed reconstruction
     func drainEventBuffer()
 
+    /// Establish the connection-local live lane before taking the durable
+    /// snapshot, closing the snapshot-to-subscription race.
+    func ensureLiveEventSubscription() async throws
+
     func setSessionProcessing(_ isProcessing: Bool)
 }
 
@@ -112,14 +116,19 @@ final class ConnectionCoordinator {
 
             context.setSessionProcessing(result.isRunning)
             context.isReconstructing = false
+            context.removeLocalNotification(
+                dedupKey: "worker.session.reconstruct.failed"
+            )
             return .completed
         } catch {
             context.isReconstructing = false
-            context.appendLocalError(
+            presentFailureIfActionable(
+                error,
                 dedupKey: "worker.session.reconstruct.failed",
                 title: "Could not load worker session",
-                message: "Worker session history could not be loaded: \(error.localizedDescription)",
-                suggestion: "Check the connection, dismiss this sheet, and try again."
+                messagePrefix: "Worker session history could not be loaded",
+                suggestion: "Check the connection, dismiss this sheet, and try again.",
+                context: context
             )
             return .retryableFailure
         }
@@ -179,6 +188,33 @@ final class ConnectionCoordinator {
                 : .retryableFailure
         }
 
+        // Subscribe before fetching the authoritative snapshot. Events that
+        // arrive after subscription are buffered behind `isReconstructing`;
+        // the snapshot's sequence cut then deduplicates that live suffix.
+        // Reversing these operations creates an unobservable loss window.
+        do {
+            try await context.ensureLiveEventSubscription()
+            guard !Task.isCancelled else {
+                context.logInfo("[RECONSTRUCT] Cancelled during live-lane setup; retaining buffered events")
+                return .cancelled
+            }
+        } catch {
+            guard !Task.isCancelled else {
+                context.logInfo("[RECONSTRUCT] Live-lane setup cancelled; retaining buffered events")
+                return .cancelled
+            }
+            context.logWarning("[RECONSTRUCT] Live-lane setup failed: \(error.localizedDescription)")
+            presentFailureIfActionable(
+                error,
+                dedupKey: "session.reconstruct.failed",
+                title: "Could not synchronize chat",
+                messagePrefix: "Live session updates could not be synchronized",
+                suggestion: "Tron will retry when the engine is reachable.",
+                context: context
+            )
+            return .retryableFailure
+        }
+
         // Reconstruct session state from server (single engine invocation)
         do {
             let result = try await context.reconstructSession(
@@ -215,6 +251,7 @@ final class ConnectionCoordinator {
             context.isReconstructing = false
             context.logInfo("[RECONSTRUCT] Snapshot committed; draining buffered live suffix")
             context.drainEventBuffer()
+            context.removeLocalNotification(dedupKey: "session.reconstruct.failed")
             return .completed
         } catch {
             guard !Task.isCancelled else {
@@ -222,14 +259,42 @@ final class ConnectionCoordinator {
                 return .cancelled
             }
             context.logWarning("[RECONSTRUCT] Failed: \(error.localizedDescription)")
-            context.appendLocalError(
+            presentFailureIfActionable(
+                error,
                 dedupKey: "session.reconstruct.failed",
                 title: "Could not load chat",
-                message: "Session history could not be loaded: \(error.localizedDescription)",
-                suggestion: "Check the connection. Tron will retry while the server remains reachable."
+                messagePrefix: "Session history could not be loaded",
+                suggestion: "Check the connection. Tron will retry while the server remains reachable.",
+                context: context
             )
             return .retryableFailure
         }
+    }
+
+    /// Connection loss, timeout, cancellation, and foreground socket churn are
+    /// expected recoverable states. Keep any cached transcript visible and let
+    /// the connection/reconstruction owners retry without turning those states
+    /// into alarming timeline content. Protocol and data failures remain visible.
+    private func presentFailureIfActionable(
+        _ error: Error,
+        dedupKey: String,
+        title: String,
+        messagePrefix: String,
+        suggestion: String,
+        context: ConnectionContext
+    ) {
+        guard !ConnectionErrorClassifier.isTransientTransport(error) else {
+            context.logInfo(
+                "[RECONSTRUCT] Suppressing transient transport presentation: \(error.localizedDescription)"
+            )
+            return
+        }
+        context.appendLocalError(
+            dedupKey: dedupKey,
+            title: title,
+            message: "\(messagePrefix): \(error.localizedDescription)",
+            suggestion: suggestion
+        )
     }
 
     // MARK: - Session Resume Error Handling

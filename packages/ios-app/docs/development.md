@@ -89,14 +89,18 @@ protocol response handling.
 
 Transport lifecycle tests must cover replacement races, not only ordinary
 disconnects. A receive, heartbeat, send, completion, or verification callback
-from an old socket must be unable to retire the current generation; manual
-retry must install exactly one reconnect owner. Chat lifecycle tests likewise
-assert that leaving a mounted chat cancels presentation-owned work and releases
-its display link while preserving reconstructable stream state. Run these
-focused checks with the Beta simulator scheme:
+from an old socket must be unable to retire the current generation; real app
+backgrounding must discard that generation while retaining session subscription
+interests and requested worker monitoring; and foreground connection requests
+must share exactly one reconnect owner. Chat
+lifecycle tests likewise assert subscribe-before-snapshot ordering, transient
+transport-error suppression, bounded live-suffix recovery, initial bottom
+placement, and teardown of presentation-owned work while preserving
+reconstructable stream state. Run these focused checks with the Beta simulator
+scheme:
 
 ```bash
-xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EnginePendingRequestLifecycleTests -only-testing:TronMobileTests/WebSocketRequestTransportTests -only-testing:TronMobileTests/EngineConnectionReconnectTests -only-testing:TronMobileTests/TronLoggerSensitiveDataTests -only-testing:TronMobileTests/StreamingManagerTypewriterTests -only-testing:TronMobileTests/ChatViewModelLifecycleTests
+xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/AppSceneTransportPolicyTests -only-testing:TronMobileTests/EnginePendingRequestLifecycleTests -only-testing:TronMobileTests/WebSocketRequestTransportTests -only-testing:TronMobileTests/EngineConnectionReconnectTests -only-testing:TronMobileTests/EngineClientObservationTests -only-testing:TronMobileTests/ConnectionErrorClassifierTests -only-testing:TronMobileTests/ConnectionCoordinatorTests -only-testing:TronMobileTests/CatchUpEventBufferTests -only-testing:TronMobileTests/ChatConnectionContinuityTests -only-testing:TronMobileTests/ChatViewportMeasurementsTests -only-testing:TronMobileTests/ArtifactInboxViewModelTests -only-testing:TronMobileTests/ArtifactPreviewVisualRenderTests -only-testing:TronMobileTests/ChatViewModelLifecycleTests
 ```
 
 ### Codex App Local Actions

@@ -20,4 +20,7 @@ protocol LocalChatNotificationPresenting: AnyObject {
         message: String,
         suggestion: String?
     )
+
+    /// Remove one recovered condition without erasing unrelated local errors.
+    func removeLocalNotification(dedupKey: String)
 }

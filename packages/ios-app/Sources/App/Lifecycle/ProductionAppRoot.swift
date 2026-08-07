@@ -1,5 +1,30 @@
 import SwiftUI
 
+enum AppSceneTransportTransition: Equatable {
+    case none
+    case suspend
+    case resumeAndRecover
+}
+
+enum AppSceneTransportPolicy {
+    static func shouldStartSuspended(in phase: ScenePhase) -> Bool {
+        phase == .background
+    }
+
+    static func transition(
+        from oldPhase: ScenePhase,
+        to newPhase: ScenePhase
+    ) -> AppSceneTransportTransition {
+        if newPhase == .background, oldPhase != .background {
+            return .suspend
+        }
+        if newPhase == .active, oldPhase != .active {
+            return .resumeAndRecover
+        }
+        return .none
+    }
+}
+
 private enum ProductionAppStorageKeys {
     static let onboardingComplete = "onboardingComplete"
 }
@@ -59,6 +84,12 @@ struct ProductionAppRoot: View {
             .preferredColorScheme(appearanceSettings.mode.colorScheme)
             .scrollEdgeEffectStyle(.soft, for: .all)
             .task {
+                // A background launch has no preceding scene-phase change.
+                // Gate initialization before it can open a WebSocket; the
+                // ordinary active transition will release this suspension.
+                if AppSceneTransportPolicy.shouldStartSuspended(in: scenePhase) {
+                    container.setBackgroundState(true)
+                }
                 await initializeApp()
             }
             .onChange(of: container.engineClient.connectionState) { oldState, newState in
@@ -101,26 +132,43 @@ struct ProductionAppRoot: View {
                 openNotificationDetail(serverId: serverId, deliveryId: deliveryId)
             }
             .onChange(of: scenePhase) { oldPhase, newPhase in
-                let isBackground = newPhase != .active
-                container.setBackgroundState(isBackground)
+                let transportTransition = AppSceneTransportPolicy.transition(
+                    from: oldPhase,
+                    to: newPhase
+                )
+                // `.inactive` is a transient interruption (Control Center,
+                // permission UI, call overlay), not process suspension. Only a
+                // real `.background` transition retires the socket; `.active`
+                // releases that suspension before foreground recovery starts.
+                switch transportTransition {
+                case .suspend:
+                    container.setBackgroundState(true)
+                case .resumeAndRecover:
+                    container.setBackgroundState(false)
+                case .none:
+                    break
+                }
                 container.clientLogIngestionService.handleScenePhaseChange(isActive: newPhase == .active)
 
                 // Flush any pending debounced draft save before backgrounding
-                if isBackground {
+                if transportTransition == .suspend {
                     Task { await container.draftStore.flushPending() }
                 }
 
-                TronLogger.shared.info("Scene phase changed: \(oldPhase) -> \(newPhase), background=\(isBackground)", category: .session)
+                TronLogger.shared.info(
+                    "Scene phase changed: \(oldPhase) -> \(newPhase), transportSuspended=\(newPhase == .background)",
+                    category: .session
+                )
 
                 // When returning to foreground, check for pending share content
-                if newPhase == .active && oldPhase != .active {
+                if transportTransition == .resumeAndRecover {
                     if PendingShareService.load() != nil {
                         container.deepLinkRouter.pendingIntent = .share
                     }
                 }
 
                 // When returning to foreground, handle reconnection and refresh session list
-                if newPhase == .active && oldPhase != .active {
+                if transportTransition == .resumeAndRecover {
                     Task {
                         await recoverForegroundConnection()
                         // Notification registration/outbox/sync must not race a

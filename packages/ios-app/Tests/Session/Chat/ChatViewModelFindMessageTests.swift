@@ -453,6 +453,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
 @MainActor
 private final class DeepLinkTestConnectionRepository: AppConnectionRepository {
     var connectionState: ConnectionState = .connected
+    var continuityGeneration: UInt64 = 0
 
     func connect() async {}
 }

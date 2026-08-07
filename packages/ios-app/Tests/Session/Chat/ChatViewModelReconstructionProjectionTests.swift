@@ -439,6 +439,7 @@ extension ChatViewModelPaginationTests {
 @MainActor
 final class PaginationTestConnectionRepository: AppConnectionRepository {
     var connectionState: ConnectionState = .connected
+    var continuityGeneration: UInt64 = 0
 
     func connect() async {}
 }

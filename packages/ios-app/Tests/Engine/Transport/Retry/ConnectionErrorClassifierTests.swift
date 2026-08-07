@@ -54,6 +54,12 @@ struct ConnectionErrorClassifierTests {
         #expect(ConnectionErrorClassifier.requiresConnectionRecovery(EngineConnectionError.timeout) == false)
     }
 
+    @Test("task cancellation is transient presentation churn")
+    func cancellationIsTransientOnly() {
+        #expect(ConnectionErrorClassifier.isTransientTransport(CancellationError()))
+        #expect(ConnectionErrorClassifier.requiresConnectionRecovery(CancellationError()) == false)
+    }
+
     @Test("protocol and application errors are not transient transport errors")
     func nonTransportErrors() {
         let generic = NSError(domain: "test", code: 1, userInfo: nil)

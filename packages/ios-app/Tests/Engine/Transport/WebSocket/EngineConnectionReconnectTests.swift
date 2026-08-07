@@ -79,6 +79,40 @@ struct EngineConnectionReconnectTests {
         #expect(EngineConnection.connectionVerificationTimeout < 30.0)
     }
 
+    @Test("backgrounding retires the current WebSocket epoch")
+    func backgroundRetiresCurrentTransport() {
+        let connection = makeSUT()
+        let task = URLSession.shared.webSocketTask(
+            with: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        defer { task.cancel() }
+        _ = connection.installTransportOwnership(task)
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+        connection.pingTask = Task { try? await Task.sleep(for: .seconds(60)) }
+        connection.receiveTask = Task { try? await Task.sleep(for: .seconds(60)) }
+
+        connection.setBackgroundState(true)
+
+        #expect(connection.isInBackground)
+        #expect(connection.connectionState == .disconnected)
+        #expect(connection.engineConnectionTask == nil)
+        #expect(connection.pingTask == nil)
+        #expect(connection.receiveTask == nil)
+        #expect(!connection.isConnectedFlag)
+    }
+
+    @Test("backgrounding preserves parked authorization failure")
+    func backgroundPreservesUnauthorizedState() {
+        let connection = makeSUT()
+        connection.markUnauthorized(reason: "Re-pair required")
+
+        connection.setBackgroundState(true)
+
+        #expect(connection.isInBackground)
+        #expect(connection.connectionState == .unauthorized(reason: "Re-pair required"))
+    }
+
     @Test("heartbeat owns long-lived websocket liveness")
     func heartbeatOwnsLongLivedWebSocketLiveness() {
         let configuration = EngineConnection.makeSessionConfiguration()

@@ -125,4 +125,59 @@ struct ChatViewportMeasurementsTests {
         #expect(!measurements.hasScrollableOverflow)
         #expect(measurements.scrollContentHeight == 700)
     }
+
+    @Test("A new transcript positioning pass invalidates empty-shell geometry")
+    func transcriptPositioningInvalidatesStaleGeometry() {
+        let measurements = ChatViewportMeasurements()
+        measurements.recordInitialBottomAnchor(maxY: 800)
+        measurements.recordScrollGeometry(
+            contentHeight: 0,
+            viewportHeight: 800,
+            bottomInset: 80,
+            distanceFromBottom: 0,
+            messageCount: 0
+        )
+        #expect(measurements.hasScrollGeometry)
+        #expect(!measurements.hasScrollableOverflow)
+
+        measurements.beginTranscriptPositioning(messageCount: 12)
+
+        #expect(!measurements.hasScrollGeometry)
+        #expect(measurements.hasScrollableOverflow)
+        #expect(measurements.initialBottomAnchorMaxY == nil)
+        #expect(measurements.initialDistanceFromBottom == .infinity)
+        #expect(measurements.currentDistanceFromBottom == .infinity)
+    }
+
+    @Test("A geometry sample for the current transcript is not discarded")
+    func currentTranscriptGeometryIsPreserved() {
+        let measurements = ChatViewportMeasurements()
+        measurements.recordScrollGeometry(
+            contentHeight: 1_500,
+            viewportHeight: 800,
+            bottomInset: 80,
+            distanceFromBottom: 0,
+            messageCount: 12
+        )
+
+        measurements.beginTranscriptPositioning(messageCount: 12)
+
+        #expect(measurements.hasScrollGeometry)
+        #expect(measurements.hasScrollableOverflow)
+        #expect(measurements.currentDistanceFromBottom == 0)
+    }
+
+    @Test("Scroll geometry retains normalized current bottom distance")
+    func scrollGeometryRetainsCurrentBottomDistance() {
+        let measurements = ChatViewportMeasurements()
+
+        measurements.recordScrollGeometry(
+            contentHeight: 1_500,
+            viewportHeight: 800,
+            bottomInset: 80,
+            distanceFromBottom: 125
+        )
+
+        #expect(measurements.currentDistanceFromBottom == 125)
+    }
 }

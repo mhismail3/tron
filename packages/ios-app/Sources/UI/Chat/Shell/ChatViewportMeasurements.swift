@@ -14,11 +14,31 @@ final class ChatViewportMeasurements {
     private(set) var initialBottomAnchorMaxY: CGFloat?
     private(set) var scrollContentHeight: CGFloat = 0
     private(set) var scrollBottomInset: CGFloat = 0
+    private(set) var currentDistanceFromBottom: CGFloat = .infinity
     private(set) var hasScrollGeometry = false
     private(set) var hasScrollableOverflow = true
+    private(set) var scrollGeometryMessageCount: Int?
     var messageViewportFrames: [UUID: CGRect] = [:]
     var isNearTopHistoryDetent = false
     var hasConsumedTopHistoryDetent = false
+
+    /// Discard geometry measured for an empty/provisional projection before a
+    /// new transcript owns initial positioning. This prevents a late snapshot
+    /// from being classified using the shell's earlier empty content size.
+    func beginTranscriptPositioning(messageCount: Int) {
+        // A geometry callback can win the race and already describe this exact
+        // transcript. Preserve that fresh sample; only invalidate a sample
+        // produced for a different projection (most commonly the empty shell).
+        guard scrollGeometryMessageCount != messageCount else { return }
+        initialDistanceFromBottom = .infinity
+        initialBottomAnchorMaxY = nil
+        scrollContentHeight = 0
+        scrollBottomInset = 0
+        currentDistanceFromBottom = .infinity
+        hasScrollGeometry = false
+        hasScrollableOverflow = true
+        scrollGeometryMessageCount = nil
+    }
 
     func recordViewportHeight(_ viewportHeight: CGFloat) {
         guard viewportHeight.isFinite else { return }
@@ -49,7 +69,9 @@ final class ChatViewportMeasurements {
     func recordScrollGeometry(
         contentHeight: CGFloat,
         viewportHeight: CGFloat,
-        bottomInset: CGFloat
+        bottomInset: CGFloat,
+        distanceFromBottom: CGFloat = .infinity,
+        messageCount: Int? = nil
     ) {
         guard contentHeight.isFinite,
               viewportHeight.isFinite,
@@ -60,7 +82,11 @@ final class ChatViewportMeasurements {
         }
         scrollContentHeight = contentHeight
         scrollBottomInset = max(0, bottomInset)
+        currentDistanceFromBottom = distanceFromBottom.isFinite
+            ? max(0, distanceFromBottom)
+            : .infinity
         hasScrollGeometry = true
+        scrollGeometryMessageCount = messageCount
         hasScrollableOverflow = ChatTranscriptRevealPolicy.hasScrollableOverflow(
             contentHeight: contentHeight,
             viewportHeight: viewportHeight,

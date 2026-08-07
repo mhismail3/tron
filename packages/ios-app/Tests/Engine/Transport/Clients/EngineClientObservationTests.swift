@@ -79,6 +79,114 @@ struct EngineClientObservationTests {
         #expect(rpc.connectionState == .disconnected)
     }
 
+    @Test("background retirement discards the old client transport epoch")
+    func testBackgroundRetiresClientTransport() async throws {
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65530/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+        await rpc.connect()
+        let retired = try #require(rpc.engineConnection)
+
+        rpc.setBackgroundState(true)
+
+        #expect(rpc.connectionState == .disconnected)
+        #expect(rpc.engineConnection == nil)
+        #expect(retired.connectionState == .disconnected)
+
+        await rpc.manualRetry()
+        #expect(rpc.engineConnection == nil)
+
+        rpc.setBackgroundState(false)
+        await rpc.manualRetry()
+        let replacement = try #require(rpc.engineConnection)
+        #expect(replacement !== retired)
+        #expect(recorder.requests.count >= 2)
+        rpc.disconnect()
+    }
+
+    @Test("background retirement preserves the selected session subscription interest")
+    func testBackgroundPreservesSessionInterest() async {
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65530/engine")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+        rpc.setCurrentSessionId("session-a")
+        for _ in 0..<10 { await Task.yield() }
+        #expect(rpc.currentSessionId == "session-a")
+        #expect(!rpc.sessionSubscriptionInterests.isEmpty)
+
+        rpc.setBackgroundState(true)
+
+        #expect(rpc.currentSessionId == "session-a")
+        #expect(!rpc.sessionSubscriptionInterests.isEmpty)
+        #expect(rpc.connectionState == .disconnected)
+    }
+
+    @Test("background retirement preserves requested worker monitoring")
+    func testBackgroundPreservesWorkerMonitoringInterest() async {
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65530/engine")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+
+        do {
+            try await rpc.ensureWorkerEventSubscriptions()
+            Issue.record("expected offline worker subscription to fail")
+        } catch {
+            // The durable monitoring intent is accepted before transport work.
+        }
+        #expect(rpc.workerEventSubscriptionsRequested)
+
+        rpc.setBackgroundState(true)
+        #expect(rpc.workerEventSubscriptionsRequested)
+
+        rpc.disconnect()
+        #expect(!rpc.workerEventSubscriptionsRequested)
+    }
+
+    @Test("background state rejects late connection work until foreground")
+    func testBackgroundDefersLateConnectionWork() async {
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65530/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+
+        rpc.setBackgroundState(true)
+        await rpc.connect()
+        await rpc.manualRetry()
+
+        #expect(recorder.requests.isEmpty)
+        #expect(rpc.engineConnection == nil)
+        #expect(rpc.connectionState == .disconnected)
+
+        rpc.setBackgroundState(false)
+        await rpc.connect()
+        #expect(recorder.requests.count == 1)
+        rpc.disconnect()
+    }
+
+    @Test("background retirement keeps authorization parked")
+    func testBackgroundKeepsAuthorizationParked() async throws {
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65530/engine")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+        await rpc.connect()
+        let connection = try #require(rpc.engineConnection)
+        connection.markUnauthorized(reason: "Re-pair required")
+        for _ in 0..<10 where rpc.connectionState != connection.connectionState {
+            await Task.yield()
+        }
+
+        rpc.setBackgroundState(true)
+
+        #expect(rpc.engineConnection === connection)
+        #expect(rpc.connectionState == .unauthorized(reason: "Re-pair required"))
+    }
+
     @Test("Concurrent connect callers await one shared attempt")
     func testConcurrentConnectIsSingleFlight() async {
         let recorder = HostedEngineAttemptRecorder()
@@ -128,9 +236,16 @@ struct EngineClientObservationTests {
         #expect(EngineClientConnectionPolicy.shouldSkipConnect(state: .connecting))
         #expect(EngineClientConnectionPolicy.shouldSkipConnect(state: .reconnecting(attempt: 1, nextRetrySeconds: 2)))
         #expect(EngineClientConnectionPolicy.shouldSkipConnect(state: .deployRestarting(remainingSeconds: 3)))
+        #expect(EngineClientConnectionPolicy.shouldSkipConnect(
+            state: .unauthorized(reason: "Re-pair required")
+        ))
         #expect(EngineClientConnectionPolicy.shouldDiscardExistingTransport(
             hasTransport: true,
             state: .connected
+        ) == false)
+        #expect(EngineClientConnectionPolicy.shouldDiscardExistingTransport(
+            hasTransport: true,
+            state: .unauthorized(reason: "Re-pair required")
         ) == false)
     }
 
@@ -148,6 +263,70 @@ struct EngineClientObservationTests {
             previous: .disconnected,
             next: .connecting
         ))
+        #expect(EngineClientStreamSubscriptionPolicy.shouldClearSubscriptions(
+            previous: .connected,
+            next: .connected,
+            transportChanged: true
+        ))
+    }
+
+    @Test("rapid connected-to-connected generation replacement restores interests")
+    func testStreamSubscriptionPolicyHandlesCollapsedReconnectEdge() {
+        #expect(EngineClientStreamSubscriptionPolicy.shouldResubscribe(
+            previous: .connected,
+            next: .connected,
+            hasCurrentSession: true,
+            transportChanged: true
+        ))
+        #expect(!EngineClientStreamSubscriptionPolicy.shouldResubscribe(
+            previous: .connected,
+            next: .connected,
+            hasCurrentSession: true,
+            transportChanged: false
+        ))
+    }
+
+    @Test("collapsed reconnect advances the observable continuity generation")
+    func testCollapsedReconnectAdvancesContinuityGeneration() async throws {
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65530/engine")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+        await rpc.connect()
+        let connection = try #require(rpc.engineConnection)
+        let firstTask = URLSession.shared.webSocketTask(
+            with: URL(string: "ws://127.0.0.1:65530/engine")!
+        )
+        let secondTask = URLSession.shared.webSocketTask(
+            with: URL(string: "ws://127.0.0.1:65530/engine")!
+        )
+        defer {
+            firstTask.cancel()
+            secondTask.cancel()
+            rpc.disconnect()
+        }
+
+        _ = connection.installTransportOwnership(firstTask)
+        connection.markProtocolReady(maxMessageSize: 1_024)
+        for _ in 0..<100 where rpc.continuityGeneration < 1 {
+            await Task.yield()
+        }
+        #expect(rpc.continuityGeneration == 1)
+
+        // Mutate through reconnecting and back to connected without yielding,
+        // reproducing a UI observation that samples connected on both sides.
+        connection.connectionState = .reconnecting(
+            attempt: 1,
+            nextRetrySeconds: 0
+        )
+        _ = connection.installTransportOwnership(secondTask)
+        connection.markProtocolReady(maxMessageSize: 2_048)
+        for _ in 0..<100 where rpc.continuityGeneration < 2 {
+            await Task.yield()
+        }
+
+        #expect(rpc.connectionState == .connected)
+        #expect(rpc.continuityGeneration == 2)
     }
 
     @Test("Stream subscriptions resubscribe current session after reconnect")

@@ -49,4 +49,11 @@ extension ChatViewModel {
         removeFromMessages { ids.contains($0.id) }
         localNotificationIdsByDedupKey.removeAll()
     }
+
+    func removeLocalNotification(dedupKey: String) {
+        guard let id = localNotificationIdsByDedupKey.removeValue(
+            forKey: dedupKey
+        ) else { return }
+        removeFromMessages { $0.id == id }
+    }
 }
