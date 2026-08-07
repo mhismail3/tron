@@ -1,13 +1,13 @@
 import SwiftUI
 
 struct SessionContextSheet: View {
+    @Environment(\.dependencies) private var dependencies
     let sessionId: String
     let serverConnectionId: String
     let contextState: ContextTrackingState
     let currentModelId: String
     let currentModelInfo: ModelInfo?
     let reasoningLevel: String?
-    let isConnected: Bool
     let isAgentActive: Bool
     let isCompacting: Bool
     let isFork: Bool
@@ -22,6 +22,7 @@ struct SessionContextSheet: View {
     @Environment(\.scenePhase) var scenePhase
     @State var availableModels: [ModelInfo] = []
     @State var isLoadingModels = false
+    @State var modelLoadingGeneration: UInt64 = 0
     @State var isForking = false
     @State var showModelPicker = false
     @State var showForkConfirmation = false
@@ -52,6 +53,10 @@ struct SessionContextSheet: View {
     @State var showDeliveryHistorySheet = false
     @State var selectedContextDetail: SessionContextDetailSelection?
     @State var showContextHistory = false
+
+    var isConnected: Bool {
+        dependencies.connectionRepository.connectionState.isConnected
+    }
 
     var resolvedModelInfo: ModelInfo? {
         currentModelInfo ?? ModelInfo.matching(currentModelId, in: availableModels)
@@ -199,8 +204,14 @@ struct SessionContextSheet: View {
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
-        .task { await loadModels() }
-        .task(id: "\(serverConnectionId):\(sessionId):\(isConnected)") {
+        .task(id: dependencies.connectionRepository.continuity) {
+            await loadModels()
+        }
+        .task(id: SessionContextContinuityKey(
+            serverConnectionId: serverConnectionId,
+            sessionId: sessionId,
+            continuity: dependencies.connectionRepository.continuity
+        )) {
             await observeSessionContext()
         }
         .onReceive(NotificationCenter.default.publisher(for: .workerRunProjectionInvalidated)) {
@@ -270,4 +281,10 @@ struct SessionContextSheet: View {
         .tronErrorAlert(message: $errorMessage)
     }
 
+}
+
+private struct SessionContextContinuityKey: Equatable {
+    let serverConnectionId: String
+    let sessionId: String
+    let continuity: EngineConnectionContinuity
 }

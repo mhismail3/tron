@@ -215,6 +215,20 @@ final class DelegationViewModel {
             && !deliverableDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    func resetForServerChange() {
+        refreshGeneration &+= 1
+        worker = nil
+        inspection = nil
+        runs = []
+        attention = []
+        resultsByInvocation = [:]
+        isLoading = false
+        isMutating = false
+        hasLoaded = false
+        lastError = nil
+        lastSubmittedInvocationId = nil
+    }
+
     func refresh(
         availableWorkers: [WorkerSummaryDTO],
         repository: any WorkerKernelRepository,
@@ -224,13 +238,8 @@ final class DelegationViewModel {
         let generation = refreshGeneration
 
         guard connectionState.isConnected else {
-            worker = nil
-            inspection = nil
-            runs = []
-            attention = []
-            resultsByInvocation = [:]
-            hasLoaded = true
-            lastError = connectionState.displayText
+            // Preserve the last authoritative suite projection while the
+            // shared transport owns reconnection.
             return
         }
         guard let selected = DelegationContract.primaryWorker(from: availableWorkers) else {
@@ -269,6 +278,7 @@ final class DelegationViewModel {
             return
         } catch {
             guard generation == refreshGeneration else { return }
+            guard !ConnectionErrorClassifier.isTransientTransport(error) else { return }
             errors.append("Contract: \(error.localizedDescription)")
         }
 
@@ -280,6 +290,7 @@ final class DelegationViewModel {
             return
         } catch {
             guard generation == refreshGeneration else { return }
+            guard !ConnectionErrorClassifier.isTransientTransport(error) else { return }
             errors.append("Runs: \(error.localizedDescription)")
         }
 
@@ -294,6 +305,7 @@ final class DelegationViewModel {
             return
         } catch {
             guard generation == refreshGeneration else { return }
+            guard !ConnectionErrorClassifier.isTransientTransport(error) else { return }
             errors.append("Attention: \(error.localizedDescription)")
         }
 

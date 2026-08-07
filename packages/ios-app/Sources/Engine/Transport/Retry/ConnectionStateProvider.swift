@@ -6,7 +6,22 @@ import Foundation
 @MainActor
 protocol ConnectionStateProvider: AnyObject {
     var connectionState: ConnectionState { get }
+    var continuityGeneration: UInt64 { get }
+    var continuityOwnerId: UUID { get }
     func manualRetry() async
+}
+
+extension ConnectionStateProvider {
+    var continuityGeneration: UInt64 { 0 }
+    var continuityOwnerId: UUID { EngineConnectionContinuity.fallbackOwnerId }
+
+    var continuity: EngineConnectionContinuity {
+        EngineConnectionContinuity(
+            state: connectionState,
+            generation: continuityGeneration,
+            ownerId: continuityOwnerId
+        )
+    }
 }
 
 extension EngineClient: ConnectionStateProvider {}

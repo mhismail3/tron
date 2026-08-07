@@ -11,6 +11,7 @@ struct SessionSidebar: View {
     @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
     @State private var sessionExpansion = SessionListSessionExpansion()
     @State private var workerConsole = WorkerConsoleViewModel()
+    @State private var workerConsoleOwnerId: UUID?
     @State private var showWorkerConsole = false
 
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
@@ -28,7 +29,8 @@ struct SessionSidebar: View {
 
     private var workerConsoleRefreshKey: WorkerConsoleRefreshKey {
         WorkerConsoleRefreshKey(
-            isConnected: dependencies.connectionRepository.connectionState.isConnected,
+            serverSelectionVersion: dependencies.activeServerSelectionVersion,
+            continuity: dependencies.connectionRepository.continuity,
             dashboardPresented: showWorkerConsole
         )
     }
@@ -165,6 +167,11 @@ struct SessionSidebar: View {
             reconcileWorkspaceDisclosure(groupIds: Set(groupCounts.keys))
         }
         .task(id: workerConsoleRefreshKey) {
+            let ownerId = dependencies.connectionRepository.continuityOwnerId
+            if workerConsoleOwnerId != ownerId {
+                workerConsoleOwnerId = ownerId
+                workerConsole.resetForServerChange()
+            }
             guard !showWorkerConsole else { return }
             await refreshWorkerConsoleSummary()
             await workerConsole.monitorSummary(
@@ -176,8 +183,7 @@ struct SessionSidebar: View {
             WorkerConsoleSheet(
                 viewModel: workerConsole,
                 repository: dependencies.workerKernelRepository,
-                modelRepository: dependencies.modelRepository,
-                connectionState: dependencies.connectionRepository.connectionState
+                modelRepository: dependencies.modelRepository
             )
         }
     }
@@ -310,6 +316,7 @@ struct SessionSidebar: View {
 }
 
 private struct WorkerConsoleRefreshKey: Equatable {
-    let isConnected: Bool
+    let serverSelectionVersion: Int
+    let continuity: EngineConnectionContinuity
     let dashboardPresented: Bool
 }

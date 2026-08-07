@@ -13,7 +13,6 @@ enum ConnectionToastPolicy {
 
     /// Semantic banner identity. Reconnecting countdown ticks should not count as new banners.
     enum Kind: Equatable, Sendable {
-        case unavailable
         case reconnecting
         case failed
         case unauthorized
@@ -32,13 +31,10 @@ enum ConnectionToastPolicy {
 
         switch state {
         case .disconnected:
-            return Presentation(
-                kind: .unavailable,
-                message: ConnectionStatusCopy.activeServerNotConnectedBanner,
-                severity: .warning,
-                autoDismiss: retryableAutoDismiss,
-                includesRetry: true
-            )
+            // Foreground lifecycle and cold-launch failures now always own an
+            // automatic recovery attempt. Do not flash a failure banner during
+            // the brief handoff into connecting/reconnecting.
+            return nil
         case .failed:
             return Presentation(
                 kind: .failed,

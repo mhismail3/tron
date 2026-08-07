@@ -94,6 +94,29 @@ struct DelegationViewModelTests {
         #expect(viewModel.currentAttentionCount == 1)
     }
 
+    @Test("Offline refresh preserves the last authoritative Delegation projection")
+    func offlineRefreshPreservesProjection() async {
+        let repository = DelegationMockRepository()
+        let viewModel = DelegationViewModel()
+        let workers = [Self.worker()]
+
+        await viewModel.refresh(
+            availableWorkers: workers,
+            repository: repository,
+            connectionState: .connected
+        )
+        await viewModel.refresh(
+            availableWorkers: [],
+            repository: repository,
+            connectionState: .disconnected
+        )
+
+        #expect(viewModel.worker == workers[0])
+        #expect(viewModel.runs.count == 1)
+        #expect(viewModel.lastError == nil)
+        #expect(!viewModel.isLoading)
+    }
+
     @Test("Submission builds the public contract and uses durable enqueue")
     func submitUsesDurableEnqueue() async {
         let repository = DelegationMockRepository()

@@ -397,9 +397,8 @@ struct WorkerConsoleInteractionTests {
         #expect(mainSheet.contains(".containerRelativeFrame(.horizontal)"))
         #expect(mainSheet.contains(".scrollBounceBehavior(.basedOnSize, axes: .vertical)"))
         #expect(mainSheet.contains("SessionContextRefreshCoordinator()"))
-        #expect(mainSheet.contains(
-            #".task(id: "\(serverConnectionId):\(sessionId):\(isConnected)")"#
-        ))
+        #expect(mainSheet.contains("SessionContextContinuityKey("))
+        #expect(mainSheet.contains("continuity: dependencies.connectionRepository.continuity"))
         #expect(!mainSheet.contains("workerRefreshRevision"))
         #expect(!context.contains("guard !isLoadingWorkerRuns"))
         #expect(!context.contains("guard !isLoadingAgentUpdates"))
@@ -626,9 +625,13 @@ struct WorkerConsoleInteractionTests {
         #expect(delegation.contains("guard !isPresentingChildSheet else { return }"))
         #expect(research.contains(#"workerProjection: "covered""#))
         #expect(research.contains("guard !isPresentingChildSheet else { return }"))
-        #expect(runDetail.contains("refreshRevision):\\(isPresentingChildSheet)"))
+        #expect(runDetail.contains("WorkerRunDetailRefreshKey("))
+        #expect(runDetail.contains("isCovered: isPresentingChildSheet,"))
+        #expect(runDetail.contains("continuity: dependencies.connectionRepository.continuity"))
         #expect(runDetail.contains("if !isPresentingChildSheet,"))
-        #expect(toolRun.contains("refreshRevision):\\(isPresentingChildSheet)"))
+        #expect(toolRun.contains("WorkerToolRunGraphRefreshKey("))
+        #expect(toolRun.contains("isCovered: isPresentingChildSheet,"))
+        #expect(toolRun.contains("continuity: dependencies.connectionRepository.continuity"))
         #expect(toolRun.contains("if !isPresentingChildSheet,"))
     }
 

@@ -8,6 +8,7 @@ private struct WorkerPresentationArtifactSelection: Identifiable {
 private enum WorkerPresentationLoadResult: Sendable {
     case success(String, WorkerResultChunkDTO)
     case failure(String)
+    case deferred
 }
 
 /// Generic native renderer for a worker's immutable presentation descriptor.
@@ -19,12 +20,15 @@ struct WorkerRunDeclarativePresentationView: View {
     let graph: WorkerRunGraphDTO
     let repository: any WorkerKernelRepository
 
+    @Environment(\.dependencies) private var dependencies
+
     @State private var chunks: [String: WorkerResultChunkDTO] = [:]
     @State private var loadFailures: Set<String> = []
     @State private var actionMessages: [String: String] = [:]
     @State private var activeActionIds: Set<String> = []
     @State private var artifactSelection: WorkerPresentationArtifactSelection?
     @State private var pendingConfirmation: WorkerPresentationSectionDTO?
+    @State private var loadedInvocationId: String?
 
     private var descriptor: WorkerPresentationDTO? {
         WorkerDeclarativePresentation.descriptor(for: graph)
@@ -47,7 +51,10 @@ struct WorkerRunDeclarativePresentationView: View {
                 }
             }
             .accessibilityIdentifier("worker-declarative-presentation")
-            .task(id: graph.requestedInvocationId) {
+            .task(id: WorkerPresentationRefreshKey(
+                invocationId: graph.requestedInvocationId,
+                continuity: dependencies.connectionRepository.continuity
+            )) {
                 await loadResultBindings(descriptor)
             }
             .sheet(item: $artifactSelection) { selection in
@@ -321,7 +328,10 @@ struct WorkerRunDeclarativePresentationView: View {
     }
 
     private func loadResultBindings(_ presentation: WorkerPresentationDTO) async {
-        chunks = [:]
+        if loadedInvocationId != graph.requestedInvocationId {
+            chunks = [:]
+            loadedInvocationId = graph.requestedInvocationId
+        }
         loadFailures = []
         let pointers = WorkerDeclarativePresentation.resultPointers(in: presentation)
         let requests: [Task<WorkerPresentationLoadResult, Never>] = pointers.map { pointer in
@@ -336,6 +346,8 @@ struct WorkerRunDeclarativePresentationView: View {
                             limit: 20
                         )
                     )
+                } catch where ConnectionErrorClassifier.isTransientTransport(error) {
+                    return .deferred
                 } catch {
                     return WorkerPresentationLoadResult.failure(pointer)
                 }
@@ -349,6 +361,8 @@ struct WorkerRunDeclarativePresentationView: View {
                     chunks[pointer] = chunk
                 case .failure(let pointer):
                     loadFailures.insert(pointer)
+                case .deferred:
+                    break
                 }
             }
         } onCancel: {
@@ -417,4 +431,9 @@ struct WorkerRunDeclarativePresentationView: View {
             .tronInfo
         }
     }
+}
+
+private struct WorkerPresentationRefreshKey: Equatable {
+    let invocationId: String
+    let continuity: EngineConnectionContinuity
 }

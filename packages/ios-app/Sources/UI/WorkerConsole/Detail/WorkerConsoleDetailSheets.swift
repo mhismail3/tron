@@ -34,10 +34,14 @@ struct WorkerInboxAuditSheet: View {
     let workerNames: [String: String]
     let repository: any WorkerKernelRepository
 
+    @Environment(\.dependencies) private var dependencies
+
     @State private var items: [WorkerInboxItemDTO] = []
     @State private var nextOffset: UInt64?
     @State private var isLoading = false
     @State private var error: String?
+    @State private var loadGeneration = 0
+    @State private var projectionOwnerId: UUID?
 
     var body: some View {
         NavigationStack {
@@ -95,16 +99,34 @@ struct WorkerInboxAuditSheet: View {
                     SheetDismissButton(color: .tronInfo)
                 }
             }
-            .task { await load(reset: true) }
+            .task(id: dependencies.connectionRepository.continuity) {
+                let ownerId = dependencies.connectionRepository.continuityOwnerId
+                if projectionOwnerId != ownerId {
+                    projectionOwnerId = ownerId
+                    loadGeneration &+= 1
+                    items = []
+                    nextOffset = nil
+                    isLoading = false
+                    error = nil
+                }
+                guard dependencies.connectionRepository.connectionState.isConnected else { return }
+                await load(reset: true)
+            }
         }
         .workerConsoleSheetPresentation()
         .tint(.tronInfo)
     }
 
     private func load(reset: Bool) async {
-        guard !isLoading else { return }
+        guard reset || !isLoading else { return }
+        loadGeneration &+= 1
+        let generation = loadGeneration
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if generation == loadGeneration {
+                isLoading = false
+            }
+        }
         do {
             let page = try await repository.workerInbox(
                 workerId: workerId,
@@ -112,6 +134,8 @@ struct WorkerInboxAuditSheet: View {
                 offset: reset ? nil : nextOffset,
                 attentionOnly: false
             )
+            guard !Task.isCancelled,
+                  generation == loadGeneration else { return }
             if reset {
                 items = page.items
             } else {
@@ -123,7 +147,10 @@ struct WorkerInboxAuditSheet: View {
             nextOffset = page.nextOffset
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            guard generation == loadGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                self.error = error.localizedDescription
+            }
         }
     }
 }
@@ -135,6 +162,7 @@ struct WorkerRunDetailSheet: View {
     var onCancel: (() -> Void)?
 
     @Environment(\.dependencies) private var dependencies
+    @Environment(\.dismiss) private var dismiss
     @State private var currentRun: WorkerInvocationDTO
     @State private var graph: WorkerRunGraphDTO?
     @State private var selectedSession: WorkerRunSessionSelection?
@@ -149,6 +177,8 @@ struct WorkerRunDetailSheet: View {
     @State private var isMutating = false
     @State private var loadError: String?
     @State private var refreshRevision = 0
+    @State private var resultLoadGeneration = 0
+    @State private var projectionOwnerId: UUID?
 
     init(
         run: WorkerInvocationDTO,
@@ -193,7 +223,8 @@ struct WorkerRunDetailSheet: View {
                         )
                         WorkerRunActionBar(
                             graph: graph,
-                            isMutating: isMutating,
+                            isMutating: isMutating
+                                || !dependencies.connectionRepository.connectionState.isConnected,
                             detach: { mutate(.detach) },
                             awaitResult: { mutate(.awaitResult) },
                             cancel: { confirmCancel = true },
@@ -278,7 +309,18 @@ struct WorkerRunDetailSheet: View {
             } message: {
                 Text("Only this invocation will stop. Other work and the worker route remain active.")
             }
-            .task(id: "\(currentRun.invocationId):\(refreshRevision):\(isPresentingChildSheet)") {
+            .task(id: WorkerRunDetailRefreshKey(
+                invocationId: currentRun.invocationId,
+                refreshRevision: refreshRevision,
+                isCovered: isPresentingChildSheet,
+                continuity: dependencies.connectionRepository.continuity
+            )) {
+                let ownerId = dependencies.connectionRepository.continuityOwnerId
+                if let projectionOwnerId, projectionOwnerId != ownerId {
+                    dismiss()
+                    return
+                }
+                projectionOwnerId = ownerId
                 guard !isPresentingChildSheet else { return }
                 await observeRun()
             }
@@ -374,6 +416,7 @@ struct WorkerRunDetailSheet: View {
                 invocationId: currentRun.invocationId,
                 modelToolInvocationId: nil
             )
+            guard !Task.isCancelled else { return }
             if let refreshed = result.runs.first {
                 currentRun = refreshed
             }
@@ -386,7 +429,7 @@ struct WorkerRunDetailSheet: View {
                 await loadResultOverview(for: refreshedGraph)
             }
         } catch {
-            if error is CancellationError {
+            if ConnectionErrorClassifier.isTransientTransport(error) {
                 return
             }
             loadError = "Live worker state could not load: \(error.localizedDescription)"
@@ -402,8 +445,7 @@ struct WorkerRunDetailSheet: View {
             return
         }
         let invocationId = graph.requestedInvocationId
-        guard resultChunk?.reference.invocationId != invocationId,
-              resultLoadingInvocationId != invocationId else {
+        guard resultChunk?.reference.invocationId != invocationId else {
             return
         }
 
@@ -412,9 +454,12 @@ struct WorkerRunDetailSheet: View {
         }
         isLoadingResult = true
         resultLoadingInvocationId = invocationId
+        resultLoadGeneration &+= 1
+        let loadGeneration = resultLoadGeneration
         resultLoadError = nil
         defer {
-            if resultLoadingInvocationId == invocationId {
+            if resultLoadingInvocationId == invocationId,
+               loadGeneration == resultLoadGeneration {
                 isLoadingResult = false
                 resultLoadingInvocationId = nil
             }
@@ -426,11 +471,14 @@ struct WorkerRunDetailSheet: View {
                 offset: 0,
                 limit: 4
             )
-            guard resultLoadingInvocationId == invocationId else { return }
+            guard !Task.isCancelled,
+                  resultLoadingInvocationId == invocationId,
+                  loadGeneration == resultLoadGeneration else { return }
             resultChunk = loadedChunk
         } catch {
             guard resultLoadingInvocationId == invocationId,
-                  !(error is CancellationError) else {
+                  loadGeneration == resultLoadGeneration,
+                  !ConnectionErrorClassifier.isTransientTransport(error) else {
                 return
             }
             resultLoadError = error.localizedDescription
@@ -445,7 +493,8 @@ struct WorkerRunDetailSheet: View {
     }
 
     private func mutate(_ mutation: Mutation) {
-        guard !isMutating else { return }
+        guard dependencies.connectionRepository.connectionState.isConnected,
+              !isMutating else { return }
         isMutating = true
         Task {
             defer { isMutating = false }
@@ -480,6 +529,13 @@ struct WorkerRunDetailSheet: View {
             }
         }
     }
+}
+
+private struct WorkerRunDetailRefreshKey: Equatable {
+    let invocationId: String
+    let refreshRevision: Int
+    let isCovered: Bool
+    let continuity: EngineConnectionContinuity
 }
 
 private struct WorkerRunSessionSelection: Identifiable {

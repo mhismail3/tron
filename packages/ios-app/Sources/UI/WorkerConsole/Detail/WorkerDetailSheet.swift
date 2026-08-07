@@ -13,11 +13,15 @@ private enum WorkerDetailSection: Hashable {
 }
 
 struct WorkerDetailSheet: View {
+    @Environment(\.dependencies) private var dependencies
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
     let modelRepository: any ModelRepository
-    let connectionState: ConnectionState
     var mode: WorkerDetailMode = .operational
+
+    private var connectionState: ConnectionState {
+        dependencies.connectionRepository.connectionState
+    }
 
     @State private var confirmRetire = false
     @State private var confirmPurge = false
@@ -33,6 +37,10 @@ struct WorkerDetailSheet: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
+                    if !connectionState.isConnected,
+                       viewModel.inspection != nil {
+                        WorkerConsoleContinuityBanner()
+                    }
                     if viewModel.isLoadingSelection {
                         WorkerConsoleLoadingState(title: "Loading worker")
                     } else if let worker = viewModel.selectedWorker,
@@ -83,9 +91,16 @@ struct WorkerDetailSheet: View {
             } message: {
                 Text("The worker will stop receiving work but its versions and durable history will be retained.")
             }
-            .task {
-                availableModels = (try? await modelRepository.list(forceRefresh: false))
-                    ?? modelRepository.cachedModels
+            .task(id: dependencies.connectionRepository.continuity) {
+                guard dependencies.connectionRepository.connectionState.isConnected else { return }
+                do {
+                    availableModels = try await modelRepository.list(forceRefresh: true)
+                } catch where ConnectionErrorClassifier.isTransientTransport(error) {
+                    // Keep the last model projection until the next epoch.
+                } catch {
+                    availableModels = modelRepository.cachedModels
+                }
+                await viewModel.reconcileSelection(repository: repository)
             }
             .confirmationDialog(
                 "Archive and purge this worker?",
@@ -276,7 +291,7 @@ struct WorkerDetailSheet: View {
                     ForEach(inspection.triggers) { trigger in
                         WorkerTriggerCard(
                             trigger: trigger,
-                            isMutating: viewModel.isMutating,
+                            isMutating: viewModel.isMutating || !connectionState.isConnected,
                             rotate: trigger.kind == "webhook" ? {
                                 Task {
                                     await viewModel.rotateWebhook(
@@ -451,7 +466,8 @@ struct WorkerDetailSheet: View {
                     systemImage: "play.fill",
                     accent: .tronEmerald,
                     isBusy: viewModel.isMutating,
-                    isEnabled: viewModel.canInvokeSelectedWorker
+                    isEnabled: connectionState.isConnected
+                        && viewModel.canInvokeSelectedWorker
                 ) {
                     Task {
                         await viewModel.invoke(
@@ -515,7 +531,7 @@ struct WorkerDetailSheet: View {
                         WorkerVersionRow(
                             worker: worker,
                             version: version,
-                            isMutating: viewModel.isMutating
+                            isMutating: viewModel.isMutating || !connectionState.isConnected
                         ) {
                             Task {
                                 await viewModel.rollback(
@@ -640,7 +656,7 @@ struct WorkerDetailSheet: View {
                         title: "Purge permanently",
                         symbol: "trash",
                         color: .tronError,
-                        isEnabled: !viewModel.isMutating,
+                        isEnabled: connectionState.isConnected && !viewModel.isMutating,
                         action: { confirmPurge = true }
                     )
                 } else {
@@ -649,7 +665,7 @@ struct WorkerDetailSheet: View {
                             title: "Stop current work",
                             symbol: "stop.circle",
                             color: .tronWarning,
-                            isEnabled: !viewModel.isMutating
+                            isEnabled: connectionState.isConnected && !viewModel.isMutating
                         ) {
                             Task {
                                 await viewModel.stop(
@@ -664,7 +680,7 @@ struct WorkerDetailSheet: View {
                         title: worker.enabled ? "Disable new work" : "Enable worker",
                         symbol: worker.enabled ? "pause.circle" : "play.circle",
                         color: worker.enabled ? .tronWarning : .tronEmerald,
-                        isEnabled: !viewModel.isMutating
+                        isEnabled: connectionState.isConnected && !viewModel.isMutating
                     ) {
                         Task {
                             await viewModel.setEnabled(
@@ -684,7 +700,7 @@ struct WorkerDetailSheet: View {
                         title: "Retire worker",
                         symbol: "archivebox",
                         color: .tronError,
-                        isEnabled: !viewModel.isMutating,
+                        isEnabled: connectionState.isConnected && !viewModel.isMutating,
                         action: { confirmRetire = true }
                     )
                 }

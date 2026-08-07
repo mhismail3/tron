@@ -77,6 +77,10 @@ final class ArtifactPreviewVisualRenderTests: XCTestCase {
             repository: repository,
             viewModel: viewModel,
             draftSessionId: "current-session",
+            continuity: EngineConnectionContinuity(
+                state: .connected,
+                generation: 1
+            ),
             onDeleted: {}
         )
         let outputURL = try render(

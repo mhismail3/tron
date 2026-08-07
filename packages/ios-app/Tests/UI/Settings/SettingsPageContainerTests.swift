@@ -24,6 +24,16 @@ final class SettingsPageContainerTests: XCTestCase {
         )
     }
 
+    func testSettingsContainerPresentsLeadingActionsAsARealToolbarGroup() throws {
+        let content = try source(named: "SettingsPageContainer.swift")
+
+        XCTAssertTrue(content.contains("ToolbarItemGroup(placement: .topBarLeading)"))
+        XCTAssertFalse(
+            content.contains("ToolbarItem(placement: .topBarLeading) {\n                            leadingToolbar"),
+            "Multiple leading actions must not be compressed into one toolbar item"
+        )
+    }
+
     private func source(named fileName: String) throws -> String {
         var url = try iosAppRoot()
         url.appendPathComponent("Sources")

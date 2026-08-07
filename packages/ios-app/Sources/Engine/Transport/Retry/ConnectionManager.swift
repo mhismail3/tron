@@ -1,13 +1,19 @@
 import Foundation
 
+private struct ConnectionManagerObservation: Equatable {
+    let state: ConnectionState
+    let continuityGeneration: UInt64
+    let continuityOwnerId: UUID
+}
+
 /// Central policy layer over the raw connection transport.
 ///
 /// Responsibilities:
-/// - Mirrors `ConnectionStateProvider.connectionState` into an `@Observable` `state` property
-///   so all consumers have a single source of truth.
+/// - Mirrors connection state and the ready-socket generation so all consumers
+///   have one continuity source of truth.
 /// - Offers `runOnReconnect(label:_:)` — a dedup'd, single-shot hook that fires once on the
-///   next `.connected` transition (or immediately if already connected, unless the caller
-///   asks to wait for a future reconnect edge).
+///   next usable transport epoch (or immediately if already connected, unless the caller
+///   asks to wait for a future epoch).
 /// - Forwards `manualRetry()` to the underlying transport.
 ///
 /// Replaces the scattered ad-hoc `engineClient.connectionState` observers throughout the app.
@@ -18,6 +24,8 @@ final class ConnectionManager {
     // MARK: - Public state
 
     private(set) var state: ConnectionState
+    private(set) var continuityGeneration: UInt64
+    private(set) var continuityOwnerId: UUID
 
     // MARK: - Private
 
@@ -38,6 +46,8 @@ final class ConnectionManager {
     init(provider: any ConnectionStateProvider) {
         self.provider = provider
         self.state = provider.connectionState
+        self.continuityGeneration = provider.continuityGeneration
+        self.continuityOwnerId = provider.continuityOwnerId
         startObserving()
     }
 
@@ -51,8 +61,8 @@ final class ConnectionManager {
     ///
     /// - If `state.isConnected` is currently true and `fireIfAlreadyConnected` is true, the
     ///   block runs immediately (on a new Task).
-    /// - Otherwise, the block is stored and fires on the next non-connected → `.connected`
-    ///   transition.
+    /// - Otherwise, the block is stored and fires when a new usable transport
+    ///   epoch becomes observable.
     /// - Re-registering the same `label` replaces any pending block (coalesce).
     /// - Once fired, the registration is cleared — further reconnects do not re-invoke it.
     func runOnReconnect(
@@ -89,12 +99,22 @@ final class ConnectionManager {
 
                 // Always read current state at the top of the loop so we never miss a transition
                 // that happened between callbacks.
-                let currentState = provider.connectionState
+                let current = ConnectionManagerObservation(
+                    state: provider.connectionState,
+                    continuityGeneration: provider.continuityGeneration,
+                    continuityOwnerId: provider.continuityOwnerId
+                )
                 do {
                     guard let self else { return }
-                    if state != currentState {
-                        applyStateChange(currentState)
-                    } else if hasInstalledObservation && currentState.isConnected {
+                    if state != current.state
+                        || continuityGeneration != current.continuityGeneration
+                        || continuityOwnerId != current.continuityOwnerId {
+                        applyContinuityChange(
+                            state: current.state,
+                            generation: current.continuityGeneration,
+                            ownerId: current.continuityOwnerId
+                        )
+                    } else if hasInstalledObservation && current.state.isConnected {
                         // Observation can wake for a rapid connected -> reconnecting -> connected
                         // cycle after the provider has already returned to `.connected`. Hooks that
                         // explicitly asked for a future reconnect edge should still run.
@@ -104,16 +124,35 @@ final class ConnectionManager {
 
                 hasInstalledObservation = true
                 await waitForObservationChange {
-                    provider.connectionState
+                    ConnectionManagerObservation(
+                        state: provider.connectionState,
+                        continuityGeneration: provider.continuityGeneration,
+                        continuityOwnerId: provider.continuityOwnerId
+                    )
                 }
             }
         }
     }
 
-    private func applyStateChange(_ newState: ConnectionState) {
-        let wasConnected = state.isConnected
+    private func applyContinuityChange(
+        state newState: ConnectionState,
+        generation newGeneration: UInt64,
+        ownerId newOwnerId: UUID
+    ) {
+        let previous = EngineConnectionContinuity(
+            state: state,
+            generation: continuityGeneration,
+            ownerId: continuityOwnerId
+        )
         state = newState
-        if !wasConnected && newState.isConnected {
+        continuityGeneration = newGeneration
+        continuityOwnerId = newOwnerId
+        let current = EngineConnectionContinuity(
+            state: newState,
+            generation: newGeneration,
+            ownerId: newOwnerId
+        )
+        if current.requiresReconciliation(after: previous) {
             drainHooks()
         }
     }

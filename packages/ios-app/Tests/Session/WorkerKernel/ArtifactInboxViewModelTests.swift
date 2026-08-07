@@ -224,6 +224,75 @@ struct ArtifactInboxViewModelTests {
         #expect(model.nextOffset == nil)
     }
 
+    @Test("Transient refresh failure preserves the last artifact projection")
+    func transientRefreshFailurePreservesArtifacts() async {
+        let fixture = fixtureArtifact()
+        let repository = ArtifactRepositoryStub(
+            page: WorkerArtifactPageDTO(
+                artifacts: [fixture],
+                returned: 1,
+                total: 1,
+                nextOffset: nil,
+                storageAttention: normalAttention()
+            ),
+            content: WorkerArtifactContentDTO(
+                artifact: fixture,
+                data: "aGVsbG8="
+            )
+        )
+        let model = ArtifactInboxViewModel()
+        await model.refresh(repository: repository)
+
+        repository.artifactDeliveryError = EngineConnectionError.notConnected
+        await model.refresh(repository: repository)
+
+        #expect(model.artifacts == [fixture])
+        #expect(model.errorMessage == nil)
+        #expect(!model.isLoading)
+    }
+
+    @Test("Cancelled refresh always releases the loading state")
+    func cancelledRefreshReleasesLoadingState() async {
+        let fixture = fixtureArtifact()
+        let repository = ArtifactRepositoryStub(
+            page: emptyPage(),
+            content: WorkerArtifactContentDTO(
+                artifact: fixture,
+                data: "aGVsbG8="
+            ),
+            artifactDeliveryError: CancellationError()
+        )
+        let model = ArtifactInboxViewModel()
+
+        await model.refresh(repository: repository)
+
+        #expect(!model.isLoading)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test("Transient preview failure remains eligible for continuity retry")
+    func transientPreviewFailureCanRecover() async throws {
+        let fixture = fixtureArtifact()
+        let repository = ArtifactRepositoryStub(
+            page: emptyPage(),
+            content: WorkerArtifactContentDTO(
+                artifact: fixture,
+                data: "aGVsbG8="
+            ),
+            contentError: EngineConnectionError.notConnected
+        )
+        let model = ArtifactInboxViewModel()
+
+        await model.load(fixture, repository: repository)
+        #expect(model.materialized[fixture.id] == nil)
+        #expect(model.errorMessage == nil)
+
+        repository.contentError = nil
+        await model.load(fixture, repository: repository)
+
+        #expect(try #require(model.materialized[fixture.id]).data == Data("hello".utf8))
+    }
+
     @Test("Delete is explicit and removes only the selected artifact")
     func explicitDeleteReconcilesInbox() async throws {
         let fixture = fixtureArtifact()
@@ -376,19 +445,25 @@ final class ArtifactRepositoryStub: WorkerKernelRepository {
     let pages: [UInt64: WorkerArtifactPageDTO]
     let content: WorkerArtifactContentDTO
     let deleteError: Error?
+    var artifactDeliveryError: Error?
+    var contentError: Error?
     private(set) var deletedArtifactIds: [String] = []
 
     init(
         page: WorkerArtifactPageDTO,
         content: WorkerArtifactContentDTO,
         additionalPages: [UInt64: WorkerArtifactPageDTO] = [:],
-        deleteError: Error? = nil
+        deleteError: Error? = nil,
+        artifactDeliveryError: Error? = nil,
+        contentError: Error? = nil
     ) {
         var pages = additionalPages
         pages[0] = page
         self.pages = pages
         self.content = content
         self.deleteError = deleteError
+        self.artifactDeliveryError = artifactDeliveryError
+        self.contentError = contentError
     }
 
     func artifactDeliveries(
@@ -396,6 +471,7 @@ final class ArtifactRepositoryStub: WorkerKernelRepository {
         offset: UInt64
     ) async throws -> WorkerArtifactPageDTO {
         #expect(limit == 200)
+        if let artifactDeliveryError { throw artifactDeliveryError }
         guard let page = pages[offset] else {
             throw EngineConnectionError.invalidResponse
         }
@@ -406,6 +482,7 @@ final class ArtifactRepositoryStub: WorkerKernelRepository {
         workerId: String,
         artifactId: String
     ) async throws -> WorkerArtifactContentDTO {
+        if let contentError { throw contentError }
         #expect(workerId == content.artifact.workerId)
         #expect(artifactId == content.artifact.artifactId)
         return content

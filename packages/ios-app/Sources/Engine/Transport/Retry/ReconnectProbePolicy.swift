@@ -13,8 +13,8 @@ struct ReconnectProbePolicy: Sendable, Equatable {
 
     init(
         maxAutomaticAttempts: Int? = nil,
-        probeTimeout: TimeInterval = 2.0,
-        retryDelay: TimeInterval = 3.0
+        probeTimeout: TimeInterval = 10.0,
+        retryDelay: TimeInterval = 2.0
     ) {
         if let maxAutomaticAttempts {
             precondition(maxAutomaticAttempts > 0, "Reconnect attempts must be positive")

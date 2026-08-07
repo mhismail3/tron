@@ -7,7 +7,7 @@ private enum DelegationSection: String, CaseIterable {
 }
 
 private struct DelegationRefreshKey: Equatable {
-    let isConnected: Bool
+    let continuity: EngineConnectionContinuity
     let workerProjection: String
     let runProjection: String
     let isCovered: Bool
@@ -18,7 +18,6 @@ struct DelegationSheet: View {
 
     @Bindable var consoleViewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
-    let connectionState: ConnectionState
 
     @State private var viewModel = DelegationViewModel()
     @State private var selectedSection = DelegationSection.tasks
@@ -26,12 +25,17 @@ struct DelegationSheet: View {
     @State private var showTechnicalDetails = false
     @State private var showOptionalGuidance = false
     @State private var technicalViewModel = WorkerConsoleViewModel()
+    @State private var projectionOwnerId: UUID?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     summaryCard
+                    if !dependencies.connectionRepository.connectionState.isConnected,
+                       viewModel.hasLoaded {
+                        WorkerConsoleContinuityBanner()
+                    }
                     TronSegmentedControl(
                         options: DelegationSection.allCases.map { ($0.rawValue, $0) },
                         selection: $selectedSection,
@@ -76,7 +80,7 @@ struct DelegationSheet: View {
                             await viewModel.cancel(
                                 run,
                                 repository: repository,
-                                connectionState: connectionState,
+                                connectionState: dependencies.connectionRepository.connectionState,
                                 availableWorkers: consoleViewModel.workers
                             )
                             selectedRun = viewModel.runs.first { $0.invocationId == run.invocationId }
@@ -87,7 +91,7 @@ struct DelegationSheet: View {
                             await viewModel.retry(
                                 run,
                                 repository: repository,
-                                connectionState: connectionState,
+                                connectionState: dependencies.connectionRepository.connectionState,
                                 availableWorkers: consoleViewModel.workers
                             )
                             selectedRun = nil
@@ -100,7 +104,6 @@ struct DelegationSheet: View {
                     viewModel: technicalViewModel,
                     repository: repository,
                     modelRepository: dependencies.modelRepository,
-                    connectionState: connectionState,
                     mode: .technical
                 )
             }
@@ -108,6 +111,7 @@ struct DelegationSheet: View {
                 DelegationGuidanceSheet(viewModel: viewModel)
             }
             .task(id: refreshKey) {
+                prepareProjectionForCurrentOwner()
                 guard !isPresentingChildSheet else { return }
                 await refresh()
             }
@@ -153,7 +157,8 @@ struct DelegationSheet: View {
 
     @ViewBuilder
     private var content: some View {
-        if !connectionState.isConnected {
+        if !dependencies.connectionRepository.connectionState.isConnected,
+           !viewModel.hasLoaded {
             WorkerConsoleEmptyState(
                 symbol: "network.slash",
                 title: "Delegation is offline",
@@ -283,12 +288,13 @@ struct DelegationSheet: View {
                 systemImage: "paperplane.fill",
                 accent: .tronPurple,
                 isBusy: viewModel.isMutating,
-                isEnabled: viewModel.canSubmit
+                isEnabled: dependencies.connectionRepository.connectionState.isConnected
+                    && viewModel.canSubmit
             ) {
                 Task {
                     if await viewModel.submit(
                         repository: repository,
-                        connectionState: connectionState,
+                        connectionState: dependencies.connectionRepository.connectionState,
                         availableWorkers: consoleViewModel.workers
                     ) {
                         selectedSection = .tasks
@@ -356,7 +362,7 @@ struct DelegationSheet: View {
     private var refreshKey: DelegationRefreshKey {
         if isPresentingChildSheet {
             return DelegationRefreshKey(
-                isConnected: connectionState.isConnected,
+                continuity: dependencies.connectionRepository.continuity,
                 workerProjection: "covered",
                 runProjection: "covered",
                 isCovered: true
@@ -371,7 +377,7 @@ struct DelegationSheet: View {
             .map { "\($0.invocationId):\($0.status):\($0.completedAt ?? "")" }
             .joined(separator: "|")
         return DelegationRefreshKey(
-            isConnected: connectionState.isConnected,
+            continuity: dependencies.connectionRepository.continuity,
             workerProjection: workers,
             runProjection: runs,
             isCovered: false
@@ -383,8 +389,18 @@ struct DelegationSheet: View {
         await viewModel.refresh(
             availableWorkers: consoleViewModel.workers,
             repository: repository,
-            connectionState: connectionState
+            connectionState: dependencies.connectionRepository.connectionState
         )
+    }
+
+    private func prepareProjectionForCurrentOwner() {
+        let ownerId = dependencies.connectionRepository.continuityOwnerId
+        guard projectionOwnerId != ownerId else { return }
+        projectionOwnerId = ownerId
+        viewModel.resetForServerChange()
+        technicalViewModel.resetForServerChange()
+        selectedRun = nil
+        showTechnicalDetails = false
     }
 
     private func openTechnicalDetails() async {
@@ -399,7 +415,7 @@ struct DelegationSheet: View {
         showTechnicalDetails = true
         await technicalViewModel.refreshSummary(
             repository: repository,
-            connectionState: connectionState
+            connectionState: dependencies.connectionRepository.connectionState
         )
     }
 }

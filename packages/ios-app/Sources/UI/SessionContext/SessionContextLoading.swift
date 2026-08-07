@@ -88,6 +88,7 @@ extension SessionContextSheet {
             return
         } catch {
             guard refreshCoordinator.isCurrent(generation) else { return }
+            guard !ConnectionErrorClassifier.isTransientTransport(error) else { return }
             agentUpdatesLoadError = !hasLoadedAgentUpdatesSnapshot
                 ? "Delivery and wait status could not load: \(error.localizedDescription)"
                 : "Couldn’t refresh delivery and wait status; showing the last update."
@@ -127,6 +128,7 @@ extension SessionContextSheet {
             return
         } catch {
             guard refreshCoordinator.isCurrent(generation) else { return }
+            guard !ConnectionErrorClassifier.isTransientTransport(error) else { return }
             if contextRequests.isEmpty {
                 loadCachedInspectableContext()
             }
@@ -241,17 +243,31 @@ extension SessionContextSheet {
     }
 
     func loadModels() async {
-        availableModels = modelRepository.cachedModels
-        guard availableModels.isEmpty, isConnected else { return }
+        if availableModels.isEmpty {
+            availableModels = modelRepository.cachedModels
+        }
+        guard isConnected else { return }
 
+        modelLoadingGeneration &+= 1
+        let generation = modelLoadingGeneration
         isLoadingModels = true
-        defer { isLoadingModels = false }
+        defer {
+            if generation == modelLoadingGeneration {
+                isLoadingModels = false
+            }
+        }
         do {
-            availableModels = try await modelRepository.list(forceRefresh: false)
+            let models = try await modelRepository.list(forceRefresh: true)
+            guard !Task.isCancelled,
+                  generation == modelLoadingGeneration else { return }
+            availableModels = models
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = "Could not load models: \(error.localizedDescription)"
+            guard generation == modelLoadingGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                errorMessage = "Could not load models: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -296,6 +312,7 @@ extension SessionContextSheet {
             return
         } catch {
             guard refreshCoordinator.isCurrent(generation) else { return }
+            guard !ConnectionErrorClassifier.isTransientTransport(error) else { return }
             workerLoadError = sessionWorkerRuns.isEmpty
                 ? "Worker activity could not load: \(error.localizedDescription)"
                 : "Couldn’t refresh worker activity; showing the last update."

@@ -133,6 +133,11 @@ final class ArtifactInboxViewModel {
         let ticket = generation
         isLoading = true
         errorMessage = nil
+        defer {
+            if ticket == generation {
+                isLoading = false
+            }
+        }
         do {
             let page = try await repository.artifactDeliveries(limit: 200, offset: 0)
             guard !Task.isCancelled, ticket == generation else { return }
@@ -143,10 +148,9 @@ final class ArtifactInboxViewModel {
             return
         } catch {
             guard ticket == generation else { return }
-            errorMessage = error.localizedDescription
-        }
-        if ticket == generation {
-            isLoading = false
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -183,7 +187,9 @@ final class ArtifactInboxViewModel {
             return
         } catch {
             guard ticket == generation else { return }
-            errorMessage = error.localizedDescription
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -234,7 +240,9 @@ final class ArtifactInboxViewModel {
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -301,11 +309,14 @@ final class ArtifactInboxViewModel {
         generation &+= 1
         lifecycleGeneration &+= 1
         artifacts = []
+        storageAttention = nil
         materialized = [:]
         nextOffset = nil
+        isLoading = false
         isLoadingMore = false
         loadingArtifactId = nil
         deletingArtifactId = nil
+        errorMessage = nil
         Task { [files] in
             await files.removeAll()
         }

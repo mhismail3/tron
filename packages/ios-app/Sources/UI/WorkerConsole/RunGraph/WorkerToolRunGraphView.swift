@@ -81,6 +81,8 @@ struct WorkerToolRunGraphView: View {
     @State private var resultLoadingInvocationId: String?
     @State private var resultLoadError: String?
     @State private var showExecutionDetails = false
+    @State private var resultLoadGeneration = 0
+    @State private var projectionOwnerId: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -107,7 +109,8 @@ struct WorkerToolRunGraphView: View {
 
                 WorkerRunActionBar(
                     graph: graph,
-                    isMutating: isMutating,
+                    isMutating: isMutating
+                        || !dependencies.connectionRepository.connectionState.isConnected,
                     detach: { mutate(.detach) },
                     awaitResult: { mutate(.awaitResult) },
                     cancel: { confirmCancel = true },
@@ -127,9 +130,24 @@ struct WorkerToolRunGraphView: View {
                 .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
             }
         }
-        .task(
-            id: "\(invocationId ?? ""):\(modelToolInvocationId):\(refreshRevision):\(isPresentingChildSheet)"
-        ) {
+        .task(id: WorkerToolRunGraphRefreshKey(
+            invocationId: invocationId,
+            modelToolInvocationId: modelToolInvocationId,
+            refreshRevision: refreshRevision,
+            isCovered: isPresentingChildSheet,
+            continuity: dependencies.connectionRepository.continuity
+        )) {
+            let ownerId = dependencies.connectionRepository.continuityOwnerId
+            if projectionOwnerId != ownerId {
+                projectionOwnerId = ownerId
+                graph = nil
+                resultChunk = nil
+                resultLoadError = nil
+                error = nil
+                resultLoadGeneration &+= 1
+                resultLoadingInvocationId = nil
+                isLoadingResult = false
+            }
             guard !isPresentingChildSheet else { return }
             await observe()
         }
@@ -193,6 +211,7 @@ struct WorkerToolRunGraphView: View {
                 invocationId: invocationId,
                 modelToolInvocationId: invocationId == nil ? modelToolInvocationId : nil
             )
+            guard !Task.isCancelled else { return }
             let refreshedGraph = page.graphs?.first
             graph = refreshedGraph
             error = nil
@@ -200,7 +219,7 @@ struct WorkerToolRunGraphView: View {
                 await loadResultOverview(for: refreshedGraph)
             }
         } catch {
-            if error is CancellationError {
+            if ConnectionErrorClassifier.isTransientTransport(error) {
                 return
             }
             self.error = error.localizedDescription
@@ -216,8 +235,7 @@ struct WorkerToolRunGraphView: View {
             return
         }
         let targetInvocationId = graph.requestedInvocationId
-        guard resultChunk?.reference.invocationId != targetInvocationId,
-              resultLoadingInvocationId != targetInvocationId else {
+        guard resultChunk?.reference.invocationId != targetInvocationId else {
             return
         }
 
@@ -226,9 +244,12 @@ struct WorkerToolRunGraphView: View {
         }
         isLoadingResult = true
         resultLoadingInvocationId = targetInvocationId
+        resultLoadGeneration &+= 1
+        let loadGeneration = resultLoadGeneration
         resultLoadError = nil
         defer {
-            if resultLoadingInvocationId == targetInvocationId {
+            if resultLoadingInvocationId == targetInvocationId,
+               loadGeneration == resultLoadGeneration {
                 isLoadingResult = false
                 resultLoadingInvocationId = nil
             }
@@ -240,11 +261,14 @@ struct WorkerToolRunGraphView: View {
                 offset: 0,
                 limit: 4
             )
-            guard resultLoadingInvocationId == targetInvocationId else { return }
+            guard !Task.isCancelled,
+                  resultLoadingInvocationId == targetInvocationId,
+                  loadGeneration == resultLoadGeneration else { return }
             resultChunk = loadedChunk
         } catch {
             guard resultLoadingInvocationId == targetInvocationId,
-                  !(error is CancellationError) else {
+                  loadGeneration == resultLoadGeneration,
+                  !ConnectionErrorClassifier.isTransientTransport(error) else {
                 return
             }
             resultLoadError = error.localizedDescription
@@ -259,7 +283,9 @@ struct WorkerToolRunGraphView: View {
     }
 
     private func mutate(_ mutation: Mutation) {
-        guard !isMutating, let targetId = graph?.requestedInvocationId else { return }
+        guard dependencies.connectionRepository.connectionState.isConnected,
+              !isMutating,
+              let targetId = graph?.requestedInvocationId else { return }
         isMutating = true
         Task {
             defer { isMutating = false }
@@ -293,4 +319,12 @@ struct WorkerToolRunGraphView: View {
             }
         }
     }
+}
+
+private struct WorkerToolRunGraphRefreshKey: Equatable {
+    let invocationId: String?
+    let modelToolInvocationId: String
+    let refreshRevision: Int
+    let isCovered: Bool
+    let continuity: EngineConnectionContinuity
 }

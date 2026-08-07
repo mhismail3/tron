@@ -24,6 +24,8 @@ struct NewSessionFlow: View {
     @State private var availableModels: [ModelInfo] = []
     @State private var isLoadingModels = false
     @State private var showModelPicker = false
+    @State private var projectionOwnerId: UUID?
+    @State private var modelLoadGeneration = 0
 
     @State private var selectedReasoningLevel = "medium"
 
@@ -32,7 +34,10 @@ struct NewSessionFlow: View {
     }
 
     private var canCreateSession: Bool {
-        !isCreating && selectedModelIsCreatable && currentCreateIntent() != nil
+        connectionRepository.connectionState.isConnected
+            && !isCreating
+            && selectedModelIsCreatable
+            && currentCreateIntent() != nil
     }
 
     private var selectedModelInfo: ModelInfo? {
@@ -119,15 +124,16 @@ struct NewSessionFlow: View {
                 guard let level = notification.object as? String else { return }
                 selectedReasoningLevel = level
             }
-            .task {
-                await loadModels()
-            }
-            .onChange(of: connectionRepository.connectionState) { oldState, newState in
-                if newState.isConnected && !oldState.isConnected {
-                    _ = Task {
-                        await loadModels()
-                    }
+            .task(id: connectionRepository.continuity) {
+                let ownerId = connectionRepository.continuityOwnerId
+                if projectionOwnerId != ownerId {
+                    projectionOwnerId = ownerId
+                    availableModels = []
+                    selectedModel = ""
+                    isLoadingModels = false
+                    errorMessage = nil
                 }
+                await loadModels()
             }
         }
         .adaptivePresentationDetents(NewSessionFlowPresentation.detents, ipadSizing: .largeForm)
@@ -267,7 +273,16 @@ struct NewSessionFlow: View {
     }
 
     private func loadModels() async {
+        let ownerId = connectionRepository.continuityOwnerId
+        modelLoadGeneration &+= 1
+        let loadTicket = modelLoadGeneration
         isLoadingModels = true
+        defer {
+            if projectionOwnerId == ownerId,
+               loadTicket == modelLoadGeneration {
+                isLoadingModels = false
+            }
+        }
 
         // Ensure connection is established.
         await connectionRepository.connect()
@@ -276,21 +291,24 @@ struct NewSessionFlow: View {
         }
 
         do {
-            let models = try await modelRepository.list(forceRefresh: false)
-            await MainActor.run {
-                availableModels = models
-
-                selectedModel = NewSessionPreferredModel.resolve(
-                    defaultModel: defaultModel,
-                    availableModels: models
-                )
-
-                isLoadingModels = false
-            }
+            let models = try await modelRepository.list(forceRefresh: true)
+            guard !Task.isCancelled,
+                  projectionOwnerId == ownerId,
+                  loadTicket == modelLoadGeneration else { return }
+            availableModels = models
+            selectedModel = NewSessionPreferredModel.resolve(
+                defaultModel: defaultModel,
+                availableModels: models
+            )
+            errorMessage = nil
+        } catch is CancellationError {
+            return
         } catch {
-            await MainActor.run {
-                selectedModel = defaultModel.isEmpty ? (availableModels.first?.id ?? "") : defaultModel
-                isLoadingModels = false
+            guard projectionOwnerId == ownerId,
+                  loadTicket == modelLoadGeneration else { return }
+            selectedModel = defaultModel.isEmpty ? (availableModels.first?.id ?? "") : defaultModel
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                errorMessage = error.localizedDescription
             }
         }
     }
@@ -298,8 +316,14 @@ struct NewSessionFlow: View {
     private func createSession(_ intent: NewSessionCreateIntent) {
         isCreatingSession = true
         errorMessage = nil
+        let ownerId = connectionRepository.continuityOwnerId
 
         Task {
+            defer {
+                if projectionOwnerId == ownerId {
+                    isCreatingSession = false
+                }
+            }
             do {
                 let result = try await sessionRepository.create(
                     workingDirectory: intent.workingDirectory,
@@ -316,16 +340,18 @@ struct NewSessionFlow: View {
                     )
                 }
 
+                guard !Task.isCancelled, projectionOwnerId == ownerId else { return }
                 try await onSessionCreated(NewSessionCreated(
                     sessionId: result.sessionId,
                     workspaceId: intent.workingDirectory,
                     model: result.model,
                     workingDirectory: intent.workingDirectory
                 ))
-                isCreatingSession = false
+            } catch is CancellationError {
+                return
             } catch {
+                guard projectionOwnerId == ownerId else { return }
                 errorMessage = error.localizedDescription
-                isCreatingSession = false
             }
         }
     }

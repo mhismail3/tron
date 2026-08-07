@@ -38,7 +38,7 @@ struct SettingsPageContainer<Leading: View, Content: View>: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     if Leading.self != EmptyView.self {
-                        ToolbarItem(placement: .topBarLeading) {
+                        ToolbarItemGroup(placement: .topBarLeading) {
                             leadingToolbar
                         }
                     }

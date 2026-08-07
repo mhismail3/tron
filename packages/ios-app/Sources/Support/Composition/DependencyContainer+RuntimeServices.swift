@@ -36,6 +36,13 @@ extension DependencyContainer {
         engineClient.setBackgroundState(inBackground)
     }
 
+    /// Resume the one shared engine transport and let every projection observe
+    /// the resulting continuity generation.
+    func resumeConnectionFromBackground() async {
+        guard pairedServerStore.activeServer != nil else { return }
+        await engineClient.resumeFromBackground()
+    }
+
     /// Verify connection is alive
     func verifyConnection() async -> Bool {
         guard pairedServerStore.activeServer != nil else { return false }

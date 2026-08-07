@@ -29,6 +29,17 @@ enum EngineClientConnectionPolicy {
     static func shouldDiscardExistingTransport(hasTransport: Bool, state: ConnectionState) -> Bool {
         hasTransport && !shouldSkipConnect(state: state)
     }
+
+    static func shouldOwnAutomaticRecovery(
+        attemptedLiveSession: Bool,
+        isInBackground: Bool,
+        state: ConnectionState
+    ) -> Bool {
+        attemptedLiveSession
+            && !isInBackground
+            && !state.isConnected
+            && !state.requiresUserAction
+    }
 }
 
 enum EngineClientStreamSubscriptionPolicy {

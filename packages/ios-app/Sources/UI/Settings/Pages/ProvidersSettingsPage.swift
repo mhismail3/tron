@@ -1,5 +1,15 @@
 import SwiftUI
 
+private struct ProviderAuthRefreshKey: Equatable {
+    let authVersion: Int
+    let continuity: EngineConnectionContinuity
+}
+
+private struct ProviderModelRefreshKey: Equatable {
+    let ollamaBaseURL: String
+    let continuity: EngineConnectionContinuity
+}
+
 // ARCHITECTURE: Compact provider grids, auth state, engine invocations,
 // OAuth sheet, and error alert live here; per-provider UI lives under
 // ModelProviders/.
@@ -17,6 +27,9 @@ struct ProvidersSettingsPage: View {
     @State private var oauthProvider: OAuthProvider?
     @State private var ollamaModels: [ModelInfo] = []
     @State private var isRefreshingOllama = false
+    @State private var projectionOwnerId: UUID?
+    @State private var modelRefreshGeneration = 0
+    @State private var authRefreshGeneration = 0
 
     private var authRepository: any AuthRepository { dependencies.authRepository }
 
@@ -30,8 +43,22 @@ struct ProvidersSettingsPage: View {
                 authState = updatedAuthState
             }
         }
-        .task(id: dependencies.authVersion) { await loadAuthState() }
-        .task(id: settingsState.ollamaBaseUrl) { await refreshOllamaModels(force: false) }
+        .task(id: ProviderAuthRefreshKey(
+            authVersion: dependencies.authVersion,
+            continuity: dependencies.connectionRepository.continuity
+        )) {
+            prepareProjectionForCurrentOwner()
+            guard dependencies.connectionRepository.connectionState.isConnected else { return }
+            await loadAuthState()
+        }
+        .task(id: ProviderModelRefreshKey(
+            ollamaBaseURL: settingsState.ollamaBaseUrl,
+            continuity: dependencies.connectionRepository.continuity
+        )) {
+            prepareProjectionForCurrentOwner()
+            guard dependencies.connectionRepository.connectionState.isConnected else { return }
+            await refreshOllamaModels(force: true)
+        }
         .tronErrorAlert(message: $error)
     }
 
@@ -91,21 +118,49 @@ struct ProvidersSettingsPage: View {
     // MARK: - Actions
 
     private func loadAuthState() async {
+        let ownerId = dependencies.connectionRepository.continuityOwnerId
+        authRefreshGeneration &+= 1
+        let refreshTicket = authRefreshGeneration
         do {
-            authState = try await authRepository.get()
+            let loaded = try await authRepository.get()
+            guard !Task.isCancelled,
+                  dependencies.connectionRepository.continuityOwnerId == ownerId,
+                  refreshTicket == authRefreshGeneration else { return }
+            authState = loaded
+            error = nil
         } catch {
-            self.error = error.localizedDescription
+            guard dependencies.connectionRepository.continuityOwnerId == ownerId,
+                  refreshTicket == authRefreshGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                self.error = error.localizedDescription
+            }
         }
     }
 
     private func refreshOllamaModels(force: Bool) async {
+        let ownerId = dependencies.connectionRepository.continuityOwnerId
+        modelRefreshGeneration &+= 1
+        let refreshTicket = modelRefreshGeneration
         isRefreshingOllama = true
-        defer { isRefreshingOllama = false }
+        defer {
+            if dependencies.connectionRepository.continuityOwnerId == ownerId,
+               refreshTicket == modelRefreshGeneration {
+                isRefreshingOllama = false
+            }
+        }
         do {
             let models = try await dependencies.modelRepository.list(forceRefresh: force)
+            guard !Task.isCancelled,
+                  dependencies.connectionRepository.continuityOwnerId == ownerId,
+                  refreshTicket == modelRefreshGeneration else { return }
             ollamaModels = models.filter { $0.provider == "ollama" }
+            error = nil
         } catch {
-            self.error = error.localizedDescription
+            guard dependencies.connectionRepository.continuityOwnerId == ownerId,
+                  refreshTicket == modelRefreshGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                self.error = error.localizedDescription
+            }
         }
     }
 
@@ -169,12 +224,36 @@ struct ProvidersSettingsPage: View {
     }
 
     private func performAuthAction(_ action: () async throws -> AuthSnapshot) async -> ProviderAuthActionResult {
+        let ownerId = dependencies.connectionRepository.continuityOwnerId
         do {
-            authState = try await action()
+            let loaded = try await action()
+            guard !Task.isCancelled,
+                  dependencies.connectionRepository.continuityOwnerId == ownerId else {
+                return .failed
+            }
+            authState = loaded
             return .succeeded
         } catch {
-            self.error = error.localizedDescription
+            guard dependencies.connectionRepository.continuityOwnerId == ownerId else {
+                return .failed
+            }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                self.error = error.localizedDescription
+            }
             return .failed
         }
+    }
+
+    private func prepareProjectionForCurrentOwner() {
+        let ownerId = dependencies.connectionRepository.continuityOwnerId
+        guard projectionOwnerId != ownerId else { return }
+        projectionOwnerId = ownerId
+        authState = nil
+        ollamaModels = []
+        isRefreshingOllama = false
+        modelRefreshGeneration &+= 1
+        authRefreshGeneration &+= 1
+        error = nil
+        oauthProvider = nil
     }
 }

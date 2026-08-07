@@ -31,6 +31,9 @@ final class WorkerConsoleViewModel {
     private(set) var activityAttentionNextOffset: UInt64?
     private var activeRefreshScope: WorkerConsoleRefreshScope?
     private var pendingFullRefresh = false
+    /// Retires reads from a replaced server even if task cancellation races a
+    /// response that was already being decoded.
+    private var projectionGeneration = 0
 
     var selectedWorker: WorkerSummaryDTO? {
         workers.first { $0.workerId == selectedWorkerId }
@@ -158,11 +161,14 @@ final class WorkerConsoleViewModel {
             return
         }
 
+        let projectionTicket = projectionGeneration
         isRefreshing = true
         defer {
-            activeRefreshScope = nil
-            isRefreshing = false
-            hasLoaded = true
+            if projectionTicket == projectionGeneration {
+                activeRefreshScope = nil
+                isRefreshing = false
+                hasLoaded = true
+            }
         }
 
         var nextScope = scope
@@ -172,9 +178,11 @@ final class WorkerConsoleViewModel {
             await performRefresh(
                 scope: nextScope,
                 repository: repository,
-                connectionState: connectionState
+                connectionState: connectionState,
+                projectionTicket: projectionTicket
             )
-            guard pendingFullRefresh else { return }
+            guard projectionTicket == projectionGeneration,
+                  pendingFullRefresh else { return }
             nextScope = .full
         } while true
     }
@@ -182,10 +190,13 @@ final class WorkerConsoleViewModel {
     private func performRefresh(
         scope: WorkerConsoleRefreshScope,
         repository: any WorkerKernelRepository,
-        connectionState: ConnectionState
+        connectionState: ConnectionState,
+        projectionTicket: Int
     ) async {
-        guard connectionState.isConnected else {
-            clearServerProjection()
+        guard projectionTicket == projectionGeneration,
+              connectionState.isConnected else {
+            // A transport epoch is temporary. Keep the last authoritative
+            // projection visible and read-only until continuity refreshes it.
             return
         }
 
@@ -196,6 +207,8 @@ final class WorkerConsoleViewModel {
                     sessionId: nil,
                     relevanceQuery: nil
                 )
+                guard !Task.isCancelled,
+                      projectionTicket == projectionGeneration else { return }
                 apply(snapshot)
             case .full:
                 let snapshotRequest = Task { @MainActor in
@@ -210,11 +223,31 @@ final class WorkerConsoleViewModel {
                 let attentionRequest = Task { @MainActor in
                     try await repository.workerAttention(workerId: nil, limit: 20)
                 }
-                let (snapshot, globalRuns, globalAttention) = try await (
-                    snapshotRequest.value,
-                    runsRequest.value,
-                    attentionRequest.value
+                let (snapshot, globalRuns, globalAttention): (
+                    EngineIntrospectionSnapshotDTO,
+                    WorkerRunsResultDTO,
+                    WorkerInboxResultDTO
                 )
+                do {
+                    (snapshot, globalRuns, globalAttention) = try await withTaskCancellationHandler {
+                        try await (
+                            snapshotRequest.value,
+                            runsRequest.value,
+                            attentionRequest.value
+                        )
+                    } onCancel: {
+                        snapshotRequest.cancel()
+                        runsRequest.cancel()
+                        attentionRequest.cancel()
+                    }
+                } catch {
+                    snapshotRequest.cancel()
+                    runsRequest.cancel()
+                    attentionRequest.cancel()
+                    throw error
+                }
+                guard !Task.isCancelled,
+                      projectionTicket == projectionGeneration else { return }
                 apply(snapshot)
                 activityRuns = globalRuns.runs
                 activityAttention = globalAttention.items
@@ -225,7 +258,11 @@ final class WorkerConsoleViewModel {
             if let selectedWorkerId,
                workers.contains(where: { $0.workerId == selectedWorkerId }) {
                 if scope == .full {
-                    try await loadWorker(selectedWorkerId, repository: repository)
+                    try await loadWorker(
+                        selectedWorkerId,
+                        repository: repository,
+                        projectionTicket: projectionTicket
+                    )
                 }
             } else {
                 selectedWorkerId = nil
@@ -235,7 +272,10 @@ final class WorkerConsoleViewModel {
             }
             lastError = nil
         } catch {
-            lastError = error.localizedDescription
+            guard projectionTicket == projectionGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                lastError = error.localizedDescription
+            }
         }
     }
 
@@ -243,6 +283,20 @@ final class WorkerConsoleViewModel {
         engineSnapshot = snapshot
         workers = snapshot.workers
         stopAll = snapshot.dispatchStopped
+    }
+
+    func resetForServerChange() {
+        projectionGeneration &+= 1
+        clearServerProjection()
+        activeRefreshScope = nil
+        pendingFullRefresh = false
+        isRefreshing = false
+        isLoadingSelection = false
+        isLoadingMoreActivity = false
+        isMutating = false
+        hasLoaded = false
+        lastError = nil
+        monitoringError = nil
     }
 
     private func clearServerProjection() {
@@ -261,8 +315,13 @@ final class WorkerConsoleViewModel {
 
     func loadOlderActivityRuns(repository: any WorkerKernelRepository) async {
         guard let offset = activityRunsNextOffset, !isLoadingMoreActivity else { return }
+        let projectionTicket = projectionGeneration
         isLoadingMoreActivity = true
-        defer { isLoadingMoreActivity = false }
+        defer {
+            if projectionTicket == projectionGeneration {
+                isLoadingMoreActivity = false
+            }
+        }
         do {
             let page = try await repository.workerRuns(
                 workerId: nil,
@@ -270,33 +329,49 @@ final class WorkerConsoleViewModel {
                 limit: 20,
                 offset: offset
             )
+            guard !Task.isCancelled,
+                  projectionTicket == projectionGeneration else { return }
             Self.appendUnique(page.runs, to: &activityRuns, id: \.invocationId)
             activityRunsNextOffset = page.nextOffset
             lastError = nil
         } catch {
-            lastError = error.localizedDescription
+            guard projectionTicket == projectionGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                lastError = error.localizedDescription
+            }
         }
     }
 
     func loadOlderActivityAttention(repository: any WorkerKernelRepository) async {
         guard let offset = activityAttentionNextOffset, !isLoadingMoreActivity else { return }
+        let projectionTicket = projectionGeneration
         isLoadingMoreActivity = true
-        defer { isLoadingMoreActivity = false }
+        defer {
+            if projectionTicket == projectionGeneration {
+                isLoadingMoreActivity = false
+            }
+        }
         do {
             let page = try await repository.workerAttention(
                 workerId: nil,
                 limit: 20,
                 offset: offset
             )
+            guard !Task.isCancelled,
+                  projectionTicket == projectionGeneration else { return }
             Self.appendUnique(page.items, to: &activityAttention, id: \.inboxId)
             activityAttentionNextOffset = page.nextOffset
             lastError = nil
         } catch {
-            lastError = error.localizedDescription
+            guard projectionTicket == projectionGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                lastError = error.localizedDescription
+            }
         }
     }
 
     func select(_ workerId: String, repository: any WorkerKernelRepository) async {
+        let projectionTicket = projectionGeneration
         selectedWorkerId = workerId
         inspection = nil
         runs = []
@@ -304,15 +379,63 @@ final class WorkerConsoleViewModel {
         invocationResult = nil
         webhookCredential = nil
         isLoadingSelection = true
-        defer { isLoadingSelection = false }
+        defer {
+            if projectionTicket == projectionGeneration {
+                isLoadingSelection = false
+            }
+        }
         do {
-            try await loadWorker(workerId, repository: repository)
+            try await loadWorker(
+                workerId,
+                repository: repository,
+                projectionTicket: projectionTicket
+            )
+            guard projectionTicket == projectionGeneration,
+                  selectedWorkerId == workerId else { return }
             invocationInput = WorkerConsolePresentation.invocationTemplate(
                 from: inspection?.bundle["inputSchema"]
             )
             lastError = nil
         } catch {
-            lastError = error.localizedDescription
+            guard projectionTicket == projectionGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                lastError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Refresh the currently presented worker without discarding its last
+    /// authoritative projection during a temporary transport epoch.
+    func reconcileSelection(repository: any WorkerKernelRepository) async {
+        guard let selectedWorkerId else { return }
+        let projectionTicket = projectionGeneration
+        let showsLoadingState = inspection == nil
+        if showsLoadingState {
+            isLoadingSelection = true
+        }
+        defer {
+            if showsLoadingState,
+               projectionTicket == projectionGeneration {
+                isLoadingSelection = false
+            }
+        }
+        do {
+            try await loadWorker(
+                selectedWorkerId,
+                repository: repository,
+                projectionTicket: projectionTicket
+            )
+            guard projectionTicket == projectionGeneration,
+                  self.selectedWorkerId == selectedWorkerId else { return }
+            invocationInput = WorkerConsolePresentation.invocationTemplate(
+                from: inspection?.bundle["inputSchema"]
+            )
+            lastError = nil
+        } catch {
+            guard projectionTicket == projectionGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                lastError = error.localizedDescription
+            }
         }
     }
 
@@ -396,7 +519,9 @@ final class WorkerConsoleViewModel {
             try await repository.ensureWorkerEventSubscriptions()
             monitoringError = nil
         } catch {
-            monitoringError = error.localizedDescription
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                monitoringError = error.localizedDescription
+            }
             return
         }
 
@@ -556,7 +681,8 @@ final class WorkerConsoleViewModel {
 
     private func loadWorker(
         _ workerId: String,
-        repository: any WorkerKernelRepository
+        repository: any WorkerKernelRepository,
+        projectionTicket: Int? = nil
     ) async throws {
         let inspectionRequest = Task { @MainActor in
             try await repository.inspectWorker(workerId)
@@ -567,11 +693,34 @@ final class WorkerConsoleViewModel {
         let attentionRequest = Task { @MainActor in
             try await repository.workerAttention(workerId: workerId, limit: 20)
         }
-        let (loadedInspection, loadedRuns, loadedAttention) = try await (
-            inspectionRequest.value,
-            runsRequest.value,
-            attentionRequest.value
+        let (loadedInspection, loadedRuns, loadedAttention): (
+            WorkerInspectResultDTO,
+            WorkerRunsResultDTO,
+            WorkerInboxResultDTO
         )
+        do {
+            (loadedInspection, loadedRuns, loadedAttention) = try await withTaskCancellationHandler {
+                try await (
+                    inspectionRequest.value,
+                    runsRequest.value,
+                    attentionRequest.value
+                )
+            } onCancel: {
+                inspectionRequest.cancel()
+                runsRequest.cancel()
+                attentionRequest.cancel()
+            }
+        } catch {
+            inspectionRequest.cancel()
+            runsRequest.cancel()
+            attentionRequest.cancel()
+            throw error
+        }
+        try Task.checkCancellation()
+        if let projectionTicket,
+           projectionTicket != projectionGeneration {
+            throw CancellationError()
+        }
         inspection = loadedInspection
         runs = loadedRuns.runs
         attention = loadedAttention.items
@@ -582,6 +731,7 @@ final class WorkerConsoleViewModel {
         connectionState: ConnectionState,
         operation: () async throws -> Void
     ) async {
+        guard connectionState.isConnected else { return }
         isMutating = true
         defer { isMutating = false }
         do {

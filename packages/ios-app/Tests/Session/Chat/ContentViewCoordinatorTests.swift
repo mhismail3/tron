@@ -203,15 +203,46 @@ final class SettingsServerLoadKeyTests: XCTestCase {
     func testConnectionAndServerGenerationOwnOneSettingsLoadIdentity() {
         let initial = SettingsServerLoadKey(
             serverSelectionVersion: 1,
-            isConnected: false
+            continuity: EngineConnectionContinuity(
+                state: .disconnected,
+                generation: 0
+            )
         )
         XCTAssertNotEqual(
             initial,
-            SettingsServerLoadKey(serverSelectionVersion: 1, isConnected: true)
+            SettingsServerLoadKey(
+                serverSelectionVersion: 1,
+                continuity: EngineConnectionContinuity(
+                    state: .connected,
+                    generation: 1
+                )
+            )
         )
         XCTAssertNotEqual(
             initial,
-            SettingsServerLoadKey(serverSelectionVersion: 2, isConnected: false)
+            SettingsServerLoadKey(
+                serverSelectionVersion: 2,
+                continuity: EngineConnectionContinuity(
+                    state: .disconnected,
+                    generation: 0
+                )
+            )
+        )
+        XCTAssertNotEqual(
+            SettingsServerLoadKey(
+                serverSelectionVersion: 1,
+                continuity: EngineConnectionContinuity(
+                    state: .connected,
+                    generation: 1
+                )
+            ),
+            SettingsServerLoadKey(
+                serverSelectionVersion: 1,
+                continuity: EngineConnectionContinuity(
+                    state: .connected,
+                    generation: 2
+                )
+            )
         )
     }
 }

@@ -134,6 +134,29 @@ struct ResearchSuiteViewModelTests {
         #expect(viewModel.currentAttentionCount == 1)
     }
 
+    @Test("Offline refresh preserves the last authoritative Research projection")
+    func offlineRefreshPreservesProjection() async {
+        let repository = ResearchSuiteMockRepository(reportOutput: Self.reportOutput)
+        let viewModel = ResearchSuiteViewModel()
+        let workers = [Self.worker(role: "coordinator", primary: true)]
+
+        await viewModel.refresh(
+            availableWorkers: workers,
+            repository: repository,
+            connectionState: .connected
+        )
+        await viewModel.refresh(
+            availableWorkers: [],
+            repository: repository,
+            connectionState: .disconnected
+        )
+
+        #expect(viewModel.workers == workers)
+        #expect(viewModel.reports.count == 1)
+        #expect(viewModel.lastError == nil)
+        #expect(!viewModel.isLoading)
+    }
+
     private static func worker(
         role: String,
         primary: Bool,

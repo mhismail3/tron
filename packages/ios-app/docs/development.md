@@ -92,7 +92,12 @@ disconnects. A receive, heartbeat, send, completion, or verification callback
 from an old socket must be unable to retire the current generation; real app
 backgrounding must discard that generation while retaining session subscription
 interests and requested worker monitoring; and foreground connection requests
-must share exactly one reconnect owner. Chat
+must share exactly one reconnect owner. A cold active launch must start that
+canonical owner without requiring a chat, a failed initial live attempt must
+continue probing while foregrounded, and read-only calls must wait without a
+busy reconnect loop while explicit client retirement cancels them. Continuity
+tests must cover disconnected-to-connected, connected-to-connected socket
+replacement, and equal-generation client/server replacement. Chat
 lifecycle tests likewise assert subscribe-before-snapshot ordering, transient
 transport-error suppression, bounded live-suffix recovery, initial bottom
 placement, and teardown of presentation-owned work while preserving
@@ -100,8 +105,17 @@ reconstructable stream state. Run these focused checks with the Beta simulator
 scheme:
 
 ```bash
-xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/AppSceneTransportPolicyTests -only-testing:TronMobileTests/EnginePendingRequestLifecycleTests -only-testing:TronMobileTests/WebSocketRequestTransportTests -only-testing:TronMobileTests/EngineConnectionReconnectTests -only-testing:TronMobileTests/EngineClientObservationTests -only-testing:TronMobileTests/ConnectionErrorClassifierTests -only-testing:TronMobileTests/ConnectionCoordinatorTests -only-testing:TronMobileTests/CatchUpEventBufferTests -only-testing:TronMobileTests/ChatConnectionContinuityTests -only-testing:TronMobileTests/ChatViewportMeasurementsTests -only-testing:TronMobileTests/ArtifactInboxViewModelTests -only-testing:TronMobileTests/ArtifactPreviewVisualRenderTests -only-testing:TronMobileTests/ChatViewModelLifecycleTests
+xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/AppSceneTransportPolicyTests -only-testing:TronMobileTests/EnginePendingRequestLifecycleTests -only-testing:TronMobileTests/WebSocketRequestTransportTests -only-testing:TronMobileTests/EngineConnectionReconnectTests -only-testing:TronMobileTests/EngineClientObservationTests -only-testing:TronMobileTests/ConnectionManagerTests -only-testing:TronMobileTests/ConnectionErrorClassifierTests -only-testing:TronMobileTests/ConnectionCoordinatorTests -only-testing:TronMobileTests/CatchUpEventBufferTests -only-testing:TronMobileTests/ChatConnectionContinuityTests -only-testing:TronMobileTests/ChatViewportMeasurementsTests -only-testing:TronMobileTests/SettingsStateTests -only-testing:TronMobileTests/ArtifactInboxViewModelTests -only-testing:TronMobileTests/ArtifactPreviewVisualRenderTests -only-testing:TronMobileTests/WorkerConsoleViewModelTests -only-testing:TronMobileTests/ResearchSuiteViewModelTests -only-testing:TronMobileTests/DelegationViewModelTests -only-testing:TronMobileTests/ChatViewModelLifecycleTests
 ```
+
+Before shipping a lifecycle change, manually exercise one active chat and one
+mounted non-chat sheet (Artifacts or Engine) through background/foreground,
+airplane mode off/on, paired-Mac restart, and active-server replacement. The
+same-server cases must retain the last good content, become read-only, reconnect
+without tapping Retry, and reconcile once. Server replacement must clear the
+old projection before accepting any new result. Loading indicators must settle
+after cancellation, and no transient disconnect banner may survive a successful
+continuity pass.
 
 ### Codex App Local Actions
 

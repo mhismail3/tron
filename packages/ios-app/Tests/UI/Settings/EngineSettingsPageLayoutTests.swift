@@ -152,8 +152,16 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             "Search credentials should be visible alongside model providers"
         )
         XCTAssertTrue(
-            content.contains("refreshOllamaModels(force: false)"),
-            "Opening Providers should reuse the prefetched model catalog"
+            content.contains("ProviderModelRefreshKey("),
+            "Provider models should refresh from a continuity-aware task"
+        )
+        XCTAssertTrue(
+            content.contains("continuity: dependencies.connectionRepository.continuity"),
+            "Provider projections should reconcile after every usable transport epoch"
+        )
+        XCTAssertTrue(
+            content.contains("refreshOllamaModels(force: true)"),
+            "Provider reconciliation should verify the current server catalog"
         )
         XCTAssertTrue(
             content.contains("dependencies.modelRepository.invalidateCache()"),

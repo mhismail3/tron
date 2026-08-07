@@ -104,4 +104,67 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.loadError, "save failed")
         XCTAssertTrue(state.isLoaded)
     }
+
+    func testForcedReconciliationPreservesLastSnapshotAcrossTransientFailure() async {
+        let initial = ServerSettingsSnapshot(
+            defaultModel: "model-a",
+            defaultWorkspace: "/workspace-a",
+            tailscaleIp: "100.64.0.1",
+            ollamaBaseUrl: "http://first:11434",
+            compactionPreserveRecentCount: 5,
+            compactionTriggerTokenThreshold: 0.7
+        )
+        let refreshed = ServerSettingsSnapshot(
+            defaultModel: "model-b",
+            defaultWorkspace: "/workspace-b",
+            tailscaleIp: "100.64.0.2",
+            ollamaBaseUrl: "http://second:11434",
+            compactionPreserveRecentCount: 7,
+            compactionTriggerTokenThreshold: 0.8
+        )
+        let repository = ReconnectingSettingsRepository(result: .success(initial))
+        let state = SettingsState()
+
+        await state.load(using: repository)
+        repository.result = .failure(EngineConnectionError.notConnected)
+        await state.load(using: repository, forceRefresh: true)
+
+        XCTAssertTrue(state.isLoaded)
+        XCTAssertEqual(state.defaultModel, "model-a")
+        XCTAssertEqual(state.quickSessionWorkspace, "/workspace-a")
+        XCTAssertNil(state.loadError)
+
+        repository.result = .success(refreshed)
+        await state.load(using: repository, forceRefresh: true)
+
+        XCTAssertEqual(state.defaultModel, "model-b")
+        XCTAssertEqual(state.quickSessionWorkspace, "/workspace-b")
+        XCTAssertEqual(repository.getCount, 3)
+    }
+}
+
+@MainActor
+private final class ReconnectingSettingsRepository: SettingsRepository {
+    var result: Result<ServerSettingsSnapshot, Error>
+    private(set) var getCount = 0
+
+    init(result: Result<ServerSettingsSnapshot, Error>) {
+        self.result = result
+    }
+
+    func get() async throws -> ServerSettingsSnapshot {
+        getCount += 1
+        return try result.get()
+    }
+
+    func update(
+        _: SettingsMutation,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws {}
+
+    func resetToDefaults(
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> ServerSettingsSnapshot {
+        try result.get()
+    }
 }

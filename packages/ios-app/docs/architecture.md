@@ -163,6 +163,23 @@ or event delivery returns to UI ownership. Transport logging APIs accept route,
 direction, byte count, and bounded session prefixes only; raw payload previews
 cannot be passed to them.
 
+The canonical client connects on every cold active launch when a paired server
+exists; opening a chat is not a prerequisite for Settings, artifacts, worker
+state, notifications, or the session index to become live. A failed first live
+upgrade joins the same unbounded foreground reconnect owner used after an
+established socket loss. Each probe has a ten-second cold cellular/VPN route
+budget, URLSession waits for connectivity within that budget, and failed
+probes retry after two seconds. Backgrounding remains the hard stop for that
+loop.
+
+Read and write recovery are deliberately different. A side-effect-free engine
+read waits for a usable foreground transport and, if its socket epoch fails,
+replays only after a different ready epoch exists. A request-discovered broken
+socket also establishes the shared recovery owner before waiting. Explicit
+client retirement prevents a deferred read from resurrecting a replaced
+server. Mutations remain fail-fast and use their existing idempotency contracts;
+the transport never guesses that a write is safe to replay.
+
 Session live tails have explicit domain leases. The presented chat and the
 background processing projection retain independent interests in the same
 subscription. Switching chats or observing terminal processing releases its
@@ -184,7 +201,14 @@ authoritative continuity pass. This explicit foreground request is
 coalesced with the ordinary disconnected-to-connected observer, so SwiftUI
 state-update coalescing cannot skip catch-up. A separate monotonic ready-socket
 generation also forces that pass when a fast replacement is sampled as
-connected-to-connected. Unauthorized connections remain parked for re-pair
+connected-to-connected. Continuity also carries the stable identity of its
+server-bound client, because a replacement client can have the same numeric
+generation as its predecessor. Mounted server projections key their refreshes
+on this complete continuity token, retain the last same-server snapshot while
+offline, suppress transient transport errors, and clear only when the client/
+server owner is explicitly replaced. Late decoded results and cancelled loads
+are generation-fenced so they cannot repopulate a new server or strand a
+loading indicator. Unauthorized connections remain parked for re-pair
 rather than being retried by automatic session work. A process launched while
 already backgrounded installs the same suspension gate before app
 initialization, because no scene transition exists to do it later.
@@ -483,6 +507,9 @@ kinds leave the standard console intact.
 Loading, disconnected, empty, partial-error, and section-empty states all use
 the same compact semantic cards instead of raw list placeholders. An empty
 console explicitly directs the user to create workers conversationally. A
+temporarily disconnected console keeps its last authoritative inventory and
+detail projections visible but read-only under one automatic-recovery banner;
+reconnection replaces them from server truth. A
 retired worker appears only in the final dedicated Retired workers section,
 after the active persistent inventory, so historical state cannot compete with
 operational workers. It does not show the invalid ordinary Enable action; its
@@ -1175,7 +1202,9 @@ reminders; they are not a general device-control surface.
   efficient selectable text view that still displays every byte. Format-owned
   binary documents fall back to Quick Look, whose UIKit-owned descendant scroll
   views receive the same soft edge treatment as SwiftUI sheets and OAuth web
-  content. Share and confirmed Delete live in the standard leading toolbar;
+  content. Share and confirmed Delete live as independent controls in the
+  standard leading toolbar group, so neither is compressed into an ad hoc
+  stack;
   Share already exposes Save to Files, so there is no duplicate Export action.
 - Attach to Draft is the only bridge from Artifact Inbox into chat. It converts
   already-verified bytes into the existing `Attachment` value and sends an

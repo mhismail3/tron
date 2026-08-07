@@ -7,7 +7,7 @@ private enum ResearchSuiteSection: String, CaseIterable {
 }
 
 private struct ResearchSuiteRefreshKey: Equatable {
-    let isConnected: Bool
+    let continuity: EngineConnectionContinuity
     let workerProjection: String
     let runProjection: String
     let isCovered: Bool
@@ -17,7 +17,6 @@ struct ResearchSuiteSheet: View {
     @Environment(\.dependencies) private var dependencies
     @Bindable var consoleViewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
-    let connectionState: ConnectionState
 
     @State private var viewModel = ResearchSuiteViewModel()
     @State private var selectedSection = ResearchSuiteSection.overview
@@ -25,12 +24,17 @@ struct ResearchSuiteSheet: View {
     @State private var selectedTechnicalWorker: WorkerSummaryDTO?
     @State private var showReportHistoryWarnings = false
     @State private var technicalViewModel = WorkerConsoleViewModel()
+    @State private var projectionOwnerId: UUID?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     summaryCard
+                    if !dependencies.connectionRepository.connectionState.isConnected,
+                       viewModel.hasLoaded {
+                        WorkerConsoleContinuityBanner()
+                    }
                     TronSegmentedControl(
                         options: ResearchSuiteSection.allCases.map { ($0.rawValue, $0) },
                         selection: $selectedSection,
@@ -73,7 +77,6 @@ struct ResearchSuiteSheet: View {
                     viewModel: technicalViewModel,
                     repository: repository,
                     modelRepository: dependencies.modelRepository,
-                    connectionState: connectionState,
                     mode: .technical
                 )
             }
@@ -85,6 +88,7 @@ struct ResearchSuiteSheet: View {
                 )
             }
             .task(id: refreshKey) {
+                prepareProjectionForCurrentOwner()
                 guard !isPresentingChildSheet else { return }
                 await refresh()
             }
@@ -131,7 +135,8 @@ struct ResearchSuiteSheet: View {
 
     @ViewBuilder
     private var content: some View {
-        if !connectionState.isConnected {
+        if !dependencies.connectionRepository.connectionState.isConnected,
+           !viewModel.hasLoaded {
             WorkerConsoleEmptyState(
                 symbol: "network.slash",
                 title: "Research is offline",
@@ -302,8 +307,18 @@ struct ResearchSuiteSheet: View {
         await viewModel.refresh(
             availableWorkers: consoleViewModel.workers,
             repository: repository,
-            connectionState: connectionState
+            connectionState: dependencies.connectionRepository.connectionState
         )
+    }
+
+    private func prepareProjectionForCurrentOwner() {
+        let ownerId = dependencies.connectionRepository.continuityOwnerId
+        guard projectionOwnerId != ownerId else { return }
+        projectionOwnerId = ownerId
+        viewModel.resetForServerChange()
+        technicalViewModel.resetForServerChange()
+        selectedReport = nil
+        selectedTechnicalWorker = nil
     }
 
     private var isPresentingChildSheet: Bool {
@@ -313,7 +328,7 @@ struct ResearchSuiteSheet: View {
     private var refreshKey: ResearchSuiteRefreshKey {
         if isPresentingChildSheet {
             return ResearchSuiteRefreshKey(
-                isConnected: connectionState.isConnected,
+                continuity: dependencies.connectionRepository.continuity,
                 workerProjection: "covered",
                 runProjection: "covered",
                 isCovered: true
@@ -328,7 +343,7 @@ struct ResearchSuiteSheet: View {
             .map { "\($0.invocationId):\($0.status):\($0.completedAt ?? "")" }
             .joined(separator: "|")
         return ResearchSuiteRefreshKey(
-            isConnected: connectionState.isConnected,
+            continuity: dependencies.connectionRepository.continuity,
             workerProjection: workers,
             runProjection: runs,
             isCovered: false
