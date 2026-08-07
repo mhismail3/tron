@@ -10,6 +10,12 @@ die() {
     exit 1
 }
 
+doctor_mode="${1:-}"
+case "$doctor_mode" in
+    "" | --self-test | --audit-credentials) ;;
+    *) die "usage: scripts/ios-release-runner-doctor.sh [--self-test|--audit-credentials]" ;;
+esac
+
 required_release_values=(
     TRON_RELEASE_IOS_XCODE_VERSION
     TRON_RELEASE_IOS_XCODE_BUILD
@@ -48,8 +54,9 @@ expected_wwdr_g3_url="https://www.apple.com/certificateauthority/AppleWWDRCAG3.c
 [[ "$TRON_RELEASE_APPLE_WWDR_G3_URL" == "$expected_wwdr_g3_url" ]] \
     || die "Apple WWDR G3 certificate must come from the canonical Apple PKI URL"
 
-if [[ "${1:-}" == "--self-test" ]]; then
+if [[ "$doctor_mode" == "--self-test" ]]; then
     python3 "$project_dir/scripts/ios-release-verify.py" self-test
+    python3 "$project_dir/scripts/ios-release-credential-ledger.py" self-test
     echo "iOS release runner configuration self-test passed"
     exit 0
 fi
@@ -116,8 +123,15 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
         "$HOME/actions-runner/_work/"*) ;;
         *) die "runner temp is outside the isolated runner home" ;;
     esac
-    [[ -f "$HOME/Library/Keychains/tron-runner-baseline.keychain-db" ]] \
-        || die "release runner baseline keychain is missing"
+    baseline_keychain="$HOME/Library/Keychains/tron-runner-baseline.keychain-db"
+    [[ -f "$baseline_keychain" && ! -L "$baseline_keychain" ]] \
+        || die "release runner baseline keychain must be a regular file"
+    [[ "$(/usr/bin/stat -f '%Su' "$baseline_keychain")" == "$runner_user" ]] \
+        || die "release runner baseline keychain has the wrong owner"
+    [[ "$(/usr/bin/stat -f '%Lp' "$baseline_keychain")" == "600" ]] \
+        || die "release runner baseline keychain must have mode 0600"
+    [[ "$(/usr/bin/stat -f '%l' "$baseline_keychain")" == "1" ]] \
+        || die "release runner baseline keychain must not have hard links"
 fi
 
 free_kb="$(df -Pk "$project_dir" | awk 'NR == 2 { print $4 }')"
@@ -130,5 +144,16 @@ for executable in python3 security codesign xcodebuild xcrun; do
     command -v "$executable" >/dev/null || die "missing required executable: $executable"
 done
 [[ -x /usr/libexec/PlistBuddy ]] || die "missing PlistBuddy"
+
+if [[ "$doctor_mode" == "--audit-credentials" ]]; then
+    if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+        "$user_context" python3 \
+            "$project_dir/scripts/ios-release-credential-ledger.py" audit >/dev/null \
+            || die "stale iOS release credential state is present"
+    else
+        python3 "$project_dir/scripts/ios-release-credential-ledger.py" audit >/dev/null \
+            || die "stale iOS release credential state is present"
+    fi
+fi
 
 echo "Verified release toolchain: Xcode $actual_xcode_version ($actual_xcode_build), iPhoneOS SDK $actual_sdk"

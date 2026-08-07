@@ -15,11 +15,27 @@ require_contains() {
     fi
 }
 
+resolved_command_path() {
+    python3 - "$1" <<'PY'
+import os
+import sys
+
+print(os.path.realpath(sys.argv[1]))
+PY
+}
+
+verify_owned_prefix() {
+    local tool="$1" prefix="$2"
+    "$repo_root/scripts/install-ci-tools.sh" --verify-prefix "$tool" "$prefix"
+}
+
 verify_xcodegen() {
-    require_contains XcodeGen "$TRON_CI_XCODEGEN_VERSION" "$(xcodegen --version 2>&1)"
-    local executable_root presets
-    executable_root="$(cd "$(dirname "$(command -v xcodegen)")/.." && pwd)"
-    presets="$executable_root/share/xcodegen/SettingPresets"
+    local executable prefix presets
+    executable="$(resolved_command_path "$(command -v xcodegen)")"
+    prefix="$(cd "$(dirname "$executable")/.." && pwd -P)"
+    verify_owned_prefix xcodegen "$prefix"
+    require_contains XcodeGen "$TRON_CI_XCODEGEN_VERSION" "$("$executable" --version 2>&1)"
+    presets="$prefix/share/xcodegen/SettingPresets"
     for required in base.yml Configs/debug.yml Configs/release.yml Platforms/iOS.yml Platforms/macOS.yml; do
         if [[ ! -f "$presets/$required" ]]; then
             echo "error: XcodeGen setting preset is missing: $presets/$required" >&2
@@ -29,15 +45,39 @@ verify_xcodegen() {
 }
 
 verify_create_dmg() {
-    require_contains create-dmg "$TRON_CI_CREATE_DMG_VERSION" "$(create-dmg --version 2>&1)"
+    local executable prefix required
+    executable="$(resolved_command_path "$(command -v create-dmg)")"
+    prefix="$(cd "$(dirname "$executable")/.." && pwd -P)"
+    verify_owned_prefix create-dmg "$prefix"
+    require_contains create-dmg "$TRON_CI_CREATE_DMG_VERSION" "$("$executable" --version 2>&1)"
+    for required in template.applescript eula-resources-template.xml; do
+        if [[ ! -f "$prefix/share/create-dmg/support/$required" ]]; then
+            echo "error: create-dmg support asset is missing: $required" >&2
+            return 1
+        fi
+    done
 }
 
 verify_asc() {
-    require_contains ASC "$TRON_CI_ASC_VERSION" "$(asc version 2>&1)"
+    local executable prefix
+    executable="$(resolved_command_path "$(command -v asc)")"
+    prefix="$(cd "$(dirname "$executable")" && pwd -P)"
+    verify_owned_prefix asc "$prefix"
+    require_contains ASC "$TRON_CI_ASC_VERSION" "$("$executable" version 2>&1)"
 }
 
 verify_xcode() {
     require_contains Xcode "Xcode $TRON_CI_XCODE_VERSION" "$(xcodebuild -version)"
+}
+
+verify_buildkite_agent() {
+    local executable prefix
+    executable="$(resolved_command_path "$(command -v buildkite-agent)")"
+    prefix="$(cd "$(dirname "$executable")" && pwd -P)"
+    verify_owned_prefix buildkite-agent "$prefix"
+    require_contains Buildkite-agent \
+        "version $TRON_CI_BUILDKITE_AGENT_VERSION" \
+        "$("$executable" --version 2>&1)"
 }
 
 verify_ios() {
@@ -63,6 +103,7 @@ for target in "$@"; do
         xcodegen) verify_xcodegen ;;
         create-dmg) verify_create_dmg ;;
         asc) verify_asc ;;
+        buildkite-agent) verify_buildkite_agent ;;
         *) echo "error: unsupported verification target: $target" >&2; exit 2 ;;
     esac
 done

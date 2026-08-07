@@ -43,14 +43,14 @@ run_tests() {
 
     if (
         cd "$RUST_WORKSPACE" || exit 1
-        cargo test --workspace --lib --bins \
+        cargo test --locked --workspace --lib --bins \
             -- --quiet --test-threads=1 2>&1 || exit 1
         for target in "${test_targets[@]}"; do
             if [ "$target" = integration ]; then
-                cargo test --test integration \
+                cargo test --locked --test integration \
                     -- --test-threads=1 --quiet 2>&1 || exit 1
             else
-                cargo test --test "$target" -- --quiet 2>&1 || exit 1
+                cargo test --locked --test "$target" -- --quiet 2>&1 || exit 1
             fi
         done
     ); then
@@ -69,13 +69,13 @@ run_fmt_check() {
 
 run_clippy() {
     print_status "Running clippy with Cargo lint policy..."
-    (cd "$RUST_WORKSPACE" && cargo clippy --workspace --all-targets) || { print_error "Clippy failed"; return 1; }
+    (cd "$RUST_WORKSPACE" && cargo clippy --locked --workspace --all-targets) || { print_error "Clippy failed"; return 1; }
     print_success "Clippy passed"
 }
 
 run_doc_check() {
     print_status "Building docs..."
-    (cd "$RUST_WORKSPACE" && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps) || { print_error "Doc build failed"; return 1; }
+    (cd "$RUST_WORKSPACE" && RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps) || { print_error "Doc build failed"; return 1; }
     print_success "Docs OK"
 }
 
@@ -196,7 +196,15 @@ cmd_ci() {
     for step in "${steps[@]}"; do
         case "$step" in
             fmt)      run_fmt_check || failed=true ;;
-            check)    print_status "Compile checking..."; (cd "$RUST_WORKSPACE" && cargo check --workspace --all-targets) && print_success "Check passed" || { print_error "Check failed"; failed=true; } ;;
+            check)
+                print_status "Compile checking..."
+                if (cd "$RUST_WORKSPACE" && cargo check --locked --workspace --all-targets); then
+                    print_success "Check passed"
+                else
+                    print_error "Check failed"
+                    failed=true
+                fi
+                ;;
             clippy)   run_clippy || failed=true ;;
             test)     run_tests || failed=true ;;
             bench)    run_bench_gate || failed=true ;;

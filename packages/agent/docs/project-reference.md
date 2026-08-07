@@ -2655,6 +2655,165 @@ correlated to the exact provider call. The durable
 `tool.invocation.started`/`tool.invocation.completed` pair remains the
 reconstruction and terminal source of truth.
 
+## CI Authority and Portable Evidence
+
+GitHub Actions remains the authoritative merge and release control plane.
+Protected `main` requires its single fail-closed `CI summary`; successful
+exact-main validation remains the sole automatic trigger for internal
+TestFlight, and release tags remain the owners of public TestFlight and Mac
+publication. No shadow provider receives Apple credentials or release-runner
+access.
+
+The provider boundary is repository-owned rather than encoded only in workflow
+syntax. `config/ci-policy.json` declares authority, required workloads,
+toolchain/config inputs, release ownership, and the non-authoritative Buildkite
+shadow role. `scripts/ci-provider-context.py` normalizes GitHub and Buildkite
+metadata and verifies the actual checked-out source. One Buildkite source step
+pins GitHub's synthetic merge ref, proves the bootstrap bytes executed before
+checkout match the merge, and distributes a history-bounded,
+prerequisite-excluding thin bundle proportional to the merge delta. Every
+workload then verifies the commit, tree, parents, and executed-bootstrap record.
+GitHub's aggregate evidence job keeps its exact merge checkout at depth one and
+reads the tree plus ordered parents from the immutable raw commit headers; it
+does not mistake shallow revision-walk output for a parentless source or fetch
+unneeded history.
+The same-ref fetch uses a bounded propagation retry for an unavailable or
+still-old merge ref. It accepts and checks out only the fetched object whose
+ordered parents equal the provider-cached GitHub webhook's immutable base/head
+pair. The webhook's nullable `merge_commit_sha` can lag that regeneration and
+is observational rather than authoritative; Actions independently proves its
+exact merge-ref `GITHUB_SHA`, checkout, and ordered parents. Main
+uses that immutable payload's `before`/`after` rather than deriving a base from
+commit parents. The raw payload stays ephemeral and is never an artifact.
+Normalized context retains the exact provider trigger action. Missing,
+malformed, draft, tag, or
+unsupported provider context fails before validation.
+
+`tron.validation.v2` evidence records provider/run identity, exact PR
+base/head/merge commit and tree, policy and pipeline digests, the complete
+required-job set, deterministic toolchain digest, sanitized iOS metrics, and
+artifact SHA-256 metadata. The document carries a canonical self-digest so
+transport corruption is detectable; GitHub artifact digest verification remains
+the authority for main-reuse. Historical v1 evidence remains parseable for
+audits, but is ineligible for current main reuse and provider parity.
+Main selects the newest fully validated exact proof and retains its self-digested
+reuse receipt plus byte-exact downloaded validation-artifact ZIP for 90 days;
+otherwise it runs the full matrix. Provider-native caches and artifact metadata
+never count as provenance.
+
+`.buildkite/pipeline.yml` is an opt-in advisory experiment. The provider-side
+activation and confinement contract lives in the
+[Buildkite shadow runbook](../../../.buildkite/README.md). Its hosted Linux and
+pinned M4 macOS jobs call the same repository scripts as GitHub, emit shadow
+evidence, and cannot publish, notarize, sign, or use the isolated iOS release
+runner. Cross-build writable Cargo, target, and rustup caches are deliberately
+disabled so pull-request code cannot seed state later consumed by `main`.
+`scripts/validate-ci-definitions.sh` uses repository-owned actionlint and
+Buildkite-agent pins to validate GitHub workflows and dry-run both Buildkite
+graphs with secret and parse-warning rejection. The derived Rust image installs
+and executes the exact root toolchain's rustfmt/clippy components before the
+quality suite. Checksum-pinned tool downloads retry bounded transient failures
+and are atomically cached only after verification. `scripts/ci-parity-report.py` compares authoritative and candidate v2
+evidence fail-closed. It binds each provider to its current policy-owned
+configuration (without requiring those provider-specific digests to equal),
+requires the exact workload set plus context, iOS metrics, and six Buildkite
+job manifests, and ignores only expected host/timing differences. Comparison
+also requires both extracted artifact directories. Every evidence-manifested
+payload is safely resolved beneath its directory and stream-verified for exact
+size and SHA-256; ambiguous, traversing, symlinked, missing, or multiply-mapped
+files fail. The context and iOS payloads must equal their evidence, while
+Buildkite's job manifests and bootstrap execution record must bind the same
+build, pinned context, metrics, and current bootstrap. Every successful job
+manifest must structurally name its exact job-local command log and provider
+context; iOS must name its exact metrics path, and PR Mac must name
+`packages/mac-app/dist/Tron-dryrun.dmg`. Context and metrics are content-bound,
+but nested command-log and DMG payload custody remains external because those
+provider-held files are absent from shadow evidence. This is offline payload
+integrity and semantic parity only: it does not authenticate provider custody,
+artifact IDs, run conclusions, nested job payloads, or API metadata. Provider
+API exports own those observations.
+Buildkite cannot become a required check or release owner until a window of at
+least 30 days independently contains 30 representative ready-PR source cohorts,
+30 eligible `main` pushes, 30 authenticated eligible TestFlight deliveries, and
+30 successful cross-provider parity samples showing exact behavioral parity and
+materially better measured reliability, followed by separately authorized
+release-security proof and an atomic rollback design.
+
+The policy's workflow inventory makes replacement scope explicit: CI merge/main
+validation, PR fast feedback, server performance, iOS performance, iOS release,
+and Mac release. The checked-in Buildkite graph covers only the first as a
+secretless shadow. Policy-owned blockers keep the other workflows, fork and
+skip-token trigger continuity, manual dispatch, provider custody, release tags,
+TestFlight handoff/delivery, and Mac release from being mistaken for completed
+parity. The same contract fixes the public ASC app, app/share-extension bundle
+IDs, Xcode scheme, and release configuration that TestFlight evidence must
+match exactly. Delivery channel identity (`internal`, `external`, or `public`)
+is modeled separately from its latest-green-main or `server-v*` trigger.
+
+An always-run, soft-failing Buildkite observer records all six post-bootstrap
+step outcomes and identity-bound or missing manifests. Provider API exports
+remain canonical for missing triggers, source-bootstrap failures, canceled
+dependencies, outages, retries/rebuild ancestry, and superseded heads. Provider
+settings must disable statuses, forks, tags, the GitHub-specific
+`build_pull_request_merge_commits` provider-generated PR merge
+checkouts, and queue secrets, then enable skip plus cancel-intermediate behavior
+with `!main`, preserving complete `main`
+history while avoiding superseded Apple work. The independent trigger universe
+includes every non-draft PR-to-`main` `opened`, `synchronize`, `reopened`, and
+`ready_for_review` source event, including CI-skip titles; provider suppression
+is a candidate `missing`, not an allowed export filter.
+The strict token universe includes both providers' documented bracketed forms
+and both GitHub `skip-checks` trailer spellings. A commit-message ruleset cannot
+neutralize Buildkite's PR-title suppression, so independent trigger
+reconciliation and its policy blocker remain required.
+Since the initial bootstrap is PR-authored code with an agent session token,
+safe activation additionally requires a dedicated secretless hosted cluster
+whose only addressable queues are the documented Linux and Mac shadow queues.
+It must have no path to release/self-hosted agents; pipeline YAML checks cannot
+substitute for that provider-side confinement.
+The settings attestation additionally requires PR, ready-for-review, reopened,
+and `main` branch builds, keeps existing-commit PR suppression disabled, and
+records that GitHub `workflow_dispatch` currently has no Buildkite parity lane.
+Provider-backed fields use Buildkite's API names and values directly:
+`trigger_mode` must be `code`; status, PR, tag, merge-checkout, and trigger
+booleans retain their `publish_*` and `build_*` names; and the pipeline retains
+`branch_configuration`, `skip_queued_branch_builds`, and
+`cancel_running_branch_builds` with their exact filters. The evaluator rejects
+the GitLab-only `build_pull_request_merge` field and translated aliases such as
+`code_trigger_mode`.
+Shadow enablement also requires the GitHub ruleset to bind `CI summary` to the
+GitHub Actions app integration ID `15368`; a name-only required context is
+insufficient once another CI app is installed. The authority-ruleset export
+and Buildkite status-disabled attestation jointly preserve that boundary.
+
+`scripts/ci-cutover-evaluation.py` joins strict normalized exports for eligible
+events, both providers, independent product verdicts, TestFlight delivery, and
+candidate settings with separately supplied release-security and rollback
+proofs. It emits `tron.ci-cutover-evaluation.v2` from a
+`tron.ci-cutover-observations.v2` ledger and requires
+`tron.ci-testflight-export.v2`; v1 release observations lack the complete exact
+run-attempt eligibility and intent/head/provenance/admission/reuse/receipt
+history and are rejected rather than upgraded by inference. Every trigger
+delivery remains visible, while repeated actions for one PR+source form one
+cohort and superseded heads do not inflate the independent minimums of 30 PR
+cohorts, 30 eligible main pushes, 30 authenticated eligible TestFlight
+deliveries, 30 successful parity samples, and a 30-day window. Candidate
+reliability must be at most 1%,
+improve by at least two percentage points, and win the paired one-sided exact
+McNemar/binomial test at p <= 0.05, in addition to the latency and zero-error
+gates. Because an offline wrapper cannot authenticate its claimed live API
+response, threshold success remains
+`observation-thresholds-satisfied-provenance-unverified` with
+`eligible_for_external_review: false`; live API and controlled-proof
+re-verification remain blocking. No evaluator path mutates CI or release
+authority, and the report must reproduce the complete policy-owned blocker set
+rather than narrowing replacement to the measured merge lane.
+Each TestFlight observation joins authoritative and candidate main-run source,
+outcome, attempts, operational evidence, and end-to-end latency, then binds the
+delivery to the authoritative GitHub completion. Candidate main validation is
+therefore measured, but a candidate-main-to-GitHub-release handoff is not;
+`candidate-main-release-handoff-parity` remains independently blocking.
+
 ## iOS Client
 
 **Minimum iOS:** 26.0. The generated project and documented toolchain workflow
@@ -2753,13 +2912,52 @@ and Just Launch Installed variants, target a deduplicated production app, and
 the rebuild action installs the requested configuration's `iphoneos` artifact.
 
 Hosted iOS distribution uses one App-Store-eligible `Tron` / `Prod` archive
-path for two TestFlight channels. Every successful main-branch CI push uploads
-the exact tested commit to the configured automatic internal group; release
-tags independently advance their build through external Beta App Review and
-the public group. The persistent workflow's `GITHUB_RUN_NUMBER` owns hosted
-iOS `CFBundleVersion` monotonicity and remains stable on reruns, while
-`VERSION.env` continues to own canonical product versions and local/Mac Apple
-build mirrors. Pull-request CI never receives distribution credentials or
+path for two TestFlight channels. A successful main-branch CI push uploads its
+exact tested commit to the configured automatic internal group only while that
+commit remains the current main head. A secretless hosted gate checks before
+the release queue and retains every automatic attempt as
+`tron.ios-release-eligibility.v1` for 90 days. A workflow-level concurrency key
+serializes the entire intent/effect/receipt transaction for one authoritative
+upstream CI run without cancelling it; distinct CI run IDs remain independent.
+The isolated runner checks current main after its queue and again immediately
+before App Store Connect delivery.
+
+Automatic retries are resolved from canonical, attempt-unique GitHub artifacts.
+`tron.ios-release-intent.v1` forms a linear `new`/`resume`/`completed` history
+whose first entry permanently owns the build allocation. Binary provenance and
+the final main-head check feed `tron.ios-release-admission.v1`, which records the
+exact ASC build ID before distribution. Reusing an admitted build requires the
+original provenance and admission chain, emits
+`tron.ios-release-reuse-provenance.v1`, and produces a new chained admission;
+matching a version/build number alone is never authority. The final
+`tron.ios-release-receipt.v1` binds internal group delivery to the admission
+tail and is published only after credential teardown succeeds. If ASC accepts a
+fresh binary but GitHub cannot durably publish its admission, the unavoidable
+cross-system dual-write window is terminal for that allocation: a retry leaves
+the unadmitted build untouched and directs an operator to a fresh manual
+internal run from current main.
+
+Tag and manual live runs preserve the same custody without reinterpreting those
+automatic schemas. Their run-ID-scoped records are
+`tron.ios-release-direct-intent.v1`,
+`tron.ios-release-direct-source-check.v1`,
+`tron.ios-release-direct-admission.v1`,
+`tron.ios-release-direct-reuse-provenance.v1`, and
+`tron.ios-release-direct-receipt.v1`. Manual live source must equal current
+`main` at checkout and immediately before ASC; tag source must remain a
+`main` ancestor. Existing builds require an exact prior direct admission/ASC-ID
+join. External review-pending runs retain admission without a completion receipt
+and resume the same build after approval; completed evidence skips the runner.
+
+Hosted iOS `CFBundleVersion` values come from the Release workflow's one
+monotonic run-number counter. Owner run `N` maps to
+`(1000 + floor(N / 100)).(N % 100).1` for automatic delivery and lane `.2` for
+tag/manual delivery. Upstream and downstream reruns authenticate the first
+intent's owner, while `VERSION.env` continues to own canonical product versions
+and local/Mac Apple build mirrors. All ASC lookups specify platform `IOS`, and
+processing and replay-safe group assignment follow the exact ASC build ID.
+Release tags independently advance their build through external Beta App Review
+and the public group. Pull-request CI never receives distribution credentials or
 triggers TestFlight delivery. The dedicated macOS release runner is a
 system-domain launchd job that drops privileges to its isolated service account;
 hosted macOS CI retains Simulator/XCTest ownership because those tools require a
@@ -2769,7 +2967,11 @@ Unix account does not by itself establish the matching macOS Keychain context.
 Before secrets are exposed, the doctor therefore rejects a root Security
 framework session, enters the same account's headless Background launchd
 domain through `launchctl asuser`, and proves that both launchd's manager UID
-and the audit UID equal the effective UID. Manual keychain preparation, archive,
+and the audit UID equal the effective UID. A secretless recovery step then
+restores the baseline keychain preferences, removes only paths claimed by
+strict durable attempt ledgers, creates or validates the provisioning-profile
+directory component-by-component with no-follow ownership checks, and proves
+the persistent credential state is empty before GitHub injects secrets. Manual keychain preparation, archive,
 export, and teardown all use that boundary, so CodeSign reaches the isolated
 account's `secd` and `trustd` services without a GUI login or trust override.
 Manual signing validates its `.p12` leaf through the checksum-pinned WWDR G3
@@ -2782,7 +2984,12 @@ the workflow then verifies its embedded three-certificate chain against the
 validated leaf and repository pins. Redacted failure classification preserves
 the owning trust, interaction, identity, or security-context layer without
 logging certificate subjects. Certificate-chain validation never depends on an
-interactive user's login keychain.
+interactive user's login keychain. Before each persistent signing mutation, a
+mode-0600, fsynced ledger records only canonical run/attempt ownership and
+recomputed keychain/profile paths, never credential material. Successful
+teardown removes that ledger only after every target is absent; interruption or
+cleanup failure retains it for bounded next-job recovery, and the TestFlight
+receipt remains gated on successful teardown.
 
 ## Validation
 

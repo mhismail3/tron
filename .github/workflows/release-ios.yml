@@ -1,19 +1,26 @@
 # iOS TestFlight Delivery Pipeline
 #
-# Every successful main-branch CI push uploads the exact tested production iOS
-# bundle (`com.tron.mobile`) to the all-build internal TestFlight group. Archives
-# run only on the locked-down release runner with the exact Xcode 27 pin in
-# `config/ci-toolchain.env`; hosted Xcode 26 CI continues to prove the iOS 26
-# floor. Release tags retain the external/public TestFlight path and Beta App
-# Review handling.
+# A successful main-branch CI push uploads the exact tested production iOS
+# bundle (`com.tron.mobile`) to the all-build internal TestFlight group only
+# while that source is still the exact current `main` head. A secretless hosted
+# eligibility job rejects stale completions before they reserve the release
+# runner and retains every decision as structured 90-day evidence. The release
+# checkout repeats the exact-head check after its queue.
+# A final pre-ASC check is retained as structured, secret-free 90-day evidence.
+# Archives run only on the locked-down release runner with the exact Xcode 27
+# pin in `config/ci-toolchain.env`; hosted Xcode 26 CI continues to prove the
+# iOS 26 floor. Release tags retain the external/public TestFlight path and Beta
+# App Review handling.
 # Simulator/XCTest remains on hosted CI because the isolated release listener
 # is a system-domain service with no logged-in Aqua session. Signing-sensitive
 # commands cross into that same account's headless Background launchd domain,
 # where its Unix identity, audit identity, secd, and trustd namespace agree;
 # the Xcode 27 archive is the SDK-linked compilation and distribution proof.
-# Both channels use this workflow's monotonic GITHUB_RUN_NUMBER as the hosted
-# iOS CFBundleVersion; reruns reuse their original number. VERSION.env remains
-# the product-version and local/Mac build source.
+# Fresh builds use one monotonic Release-workflow allocation encoded as a valid
+# three-segment CFBundleVersion. Automatic upstream reruns authenticate and
+# reuse the first immutable intent's allocation; tag/manual runs use their own
+# Release run number. VERSION.env remains the product-version and local/Mac
+# build source.
 #
 # Required secrets:
 #   ASC_KEY_ID        App Store Connect API key id
@@ -79,17 +86,383 @@ on:
 permissions:
   contents: read
 
+# Serialize the complete intent/effect/receipt transaction for one upstream CI
+# run. Different main commits have different workflow_run IDs and never block
+# or replace one another. Failed CI attempts use a distinct conclusion key so
+# they cannot replace a pending successful delivery for the same run ID.
+concurrency:
+  group: ${{ github.event_name == 'workflow_run' && format('ios-release-intent-{0}-{1}', github.event.workflow_run.id, github.event.workflow_run.conclusion) || format('ios-release-run-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 jobs:
+  eligibility:
+    name: Resolve delivery eligibility
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      eligible: ${{ steps.resolve.outputs.eligible }}
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
+      latest_main_sha: ${{ steps.resolve.outputs.latest_main_sha }}
+      checked_at: ${{ steps.resolve.outputs.checked_at }}
+      evidence_sha256: ${{ steps.resolve.outputs.evidence_sha256 }}
+      delivery_required: ${{ steps.resolve.outputs.delivery_required }}
+      apple_build_owner_run_number: ${{ steps.resolve.outputs.apple_build_owner_run_number }}
+      intent_artifact: ${{ steps.resolve.outputs.intent_artifact }}
+      expected_asc_build_id: ${{ steps.resolve.outputs.expected_asc_build_id }}
+      intent_state: ${{ steps.resolve.outputs.intent_state }}
+    steps:
+      # Fetching only main keeps this gate small and outside the protected
+      # release environment. It never receives signing or App Store secrets.
+      - name: Checkout current main provenance
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          fetch-depth: 1
+      - name: Checkout direct release provenance
+        if: github.event_name != 'workflow_run'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Resolve delivery eligibility
+        id: resolve
+        shell: bash
+        env:
+          UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          UPSTREAM_EVENT: ${{ github.event.workflow_run.event }}
+          UPSTREAM_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
+          UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+          UPSTREAM_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          UPSTREAM_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          UPSTREAM_COMPLETED_AT: ${{ github.event.workflow_run.updated_at }}
+          GH_EVIDENCE_TOKEN: ${{ github.token }}
+          TRON_IOS_CHANNEL_INPUT: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          source_sha="$GITHUB_SHA"
+          eligible=true
+          delivery_required=true
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
+            source_sha="$UPSTREAM_SHA"
+            eligible=false
+            git fetch --force --no-tags origin \
+              refs/heads/main:refs/remotes/origin/main
+            current_main_sha="$(git rev-parse refs/remotes/origin/main)"
+            if [[ "$UPSTREAM_CONCLUSION" == "success" && \
+                  "$UPSTREAM_EVENT" == "push" && \
+                  "$UPSTREAM_BRANCH" == "main" ]]; then
+              if [[ "$source_sha" == "$current_main_sha" ]]; then
+                eligible=true
+              else
+                echo "::notice::Skipping stale CI source $source_sha; current main is $current_main_sha"
+              fi
+            fi
+
+            checked_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            evidence_path="$RUNNER_TEMP/ios-release-eligibility.json"
+            python3 scripts/ios-release-verify.py eligibility \
+              --repository "$GITHUB_REPOSITORY" \
+              --source-sha "$source_sha" \
+              --observed-main-sha "$current_main_sha" \
+              --checked-at "$checked_at" \
+              --eligible "$eligible" \
+              --ci-workflow-run-id "$UPSTREAM_RUN_ID" \
+              --ci-run-attempt "$UPSTREAM_RUN_ATTEMPT" \
+              --ci-completed-at "$UPSTREAM_COMPLETED_AT" \
+              --upstream-event "$UPSTREAM_EVENT" \
+              --upstream-branch "$UPSTREAM_BRANCH" \
+              --upstream-conclusion "$UPSTREAM_CONCLUSION" \
+              --release-workflow-run-id "$GITHUB_RUN_ID" \
+              --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+              --output "$evidence_path"
+            evidence_sha256="$(shasum -a 256 "$evidence_path" | awk '{print $1}')"
+            {
+              echo "latest_main_sha=$current_main_sha"
+              echo "checked_at=$checked_at"
+              echo "evidence_path=$evidence_path"
+              echo "evidence_sha256=sha256:$evidence_sha256"
+            } >> "$GITHUB_OUTPUT"
+
+            delivery_required=false
+            if [[ "$eligible" == true ]]; then
+              state_path="$RUNNER_TEMP/ios-release-state.json"
+              python3 scripts/ios-release-verify.py github-release-state \
+                --repository "$GITHUB_REPOSITORY" \
+                --source-sha "$source_sha" \
+                --ci-workflow-run-id "$UPSTREAM_RUN_ID" \
+                --ci-run-number "$UPSTREAM_RUN_NUMBER" \
+                --github-token "$GH_EVIDENCE_TOKEN" \
+                --output "$state_path"
+              state="$(jq -r '.state' "$state_path")"
+              case "$state" in
+                new)
+                  owner_run_id="$GITHUB_RUN_ID"
+                  owner_run_number="$GITHUB_RUN_NUMBER"
+                  owner_run_attempt="$GITHUB_RUN_ATTEMPT"
+                  ;;
+                resume|completed)
+                  owner_run_id="$(jq -r '.owner.workflow_run_id' "$state_path")"
+                  owner_run_number="$(jq -r '.owner.run_number' "$state_path")"
+                  owner_run_attempt="$(jq -r '.owner.run_attempt' "$state_path")"
+                  ;;
+                *) echo "::error::unsupported release intent state $state"; exit 1 ;;
+              esac
+
+              version_output="$RUNNER_TEMP/ios-intent-version-output"
+              : > "$version_output"
+              GITHUB_OUTPUT="$version_output" \
+                TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER="$owner_run_number" \
+                TRON_UPSTREAM_WORKFLOW="CI" \
+                TRON_UPSTREAM_EVENT="$UPSTREAM_EVENT" \
+                TRON_UPSTREAM_CONCLUSION="$UPSTREAM_CONCLUSION" \
+                TRON_UPSTREAM_BRANCH="$UPSTREAM_BRANCH" \
+                TRON_UPSTREAM_SHA="$source_sha" \
+                ./scripts/tron version github-ios-output >/dev/null
+              output_value() {
+                local key="$1" value
+                value="$(sed -n "s/^${key}=//p" "$version_output")"
+                [[ -n "$value" && "$(grep -c "^${key}=" "$version_output")" -eq 1 ]] || {
+                  echo "::error::version resolver did not emit exactly one $key"
+                  exit 1
+                }
+                printf '%s' "$value"
+              }
+              canonical_version="$(output_value version)"
+              marketing_version="$(output_value marketing_version)"
+              apple_build="$(output_value apple_build)"
+              if [[ "$state" != new ]]; then
+                jq -e \
+                  --arg canonical "$canonical_version" \
+                  --arg marketing "$marketing_version" \
+                  --arg build "$apple_build" \
+                  --arg app_id "6761511764" \
+                  --arg scheme "Tron" \
+                  --arg configuration "Prod" \
+                  --arg app_bundle "com.tron.mobile" \
+                  --arg extension_bundle "com.tron.mobile.ShareExtension" '
+                    .product.canonical_version == $canonical
+                    and .product.marketing_version == $marketing
+                    and .product.build_number == $build
+                    and .product.asc_app_id == $app_id
+                    and .product.scheme == $scheme
+                    and .product.configuration == $configuration
+                    and .product.app_bundle_id == $app_bundle
+                    and .product.extension_bundle_id == $extension_bundle
+                  ' "$state_path" >/dev/null || {
+                    echo "::error::authenticated release intent conflicts with the checked-out product"
+                    exit 1
+                  }
+              fi
+
+              previous_intent="$(jq -r '.previous_intent_sha256 // ""' "$state_path")"
+              completion_receipt="$(jq -r '.completion_receipt_sha256 // ""' "$state_path")"
+              intent_path="$RUNNER_TEMP/ios-release-intent.json"
+              intent_created_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+              python3 scripts/ios-release-verify.py intent \
+                --repository "$GITHUB_REPOSITORY" \
+                --source-sha "$source_sha" \
+                --created-at "$intent_created_at" \
+                --ci-workflow-run-id "$UPSTREAM_RUN_ID" \
+                --ci-run-number "$UPSTREAM_RUN_NUMBER" \
+                --ci-run-attempt "$UPSTREAM_RUN_ATTEMPT" \
+                --ci-completed-at "$UPSTREAM_COMPLETED_AT" \
+                --asc-app-id "6761511764" \
+                --scheme "Tron" \
+                --configuration "Prod" \
+                --canonical-version "$canonical_version" \
+                --marketing-version "$marketing_version" \
+                --build-number "$apple_build" \
+                --app-bundle-id "com.tron.mobile" \
+                --extension-bundle-id "com.tron.mobile.ShareExtension" \
+                --owner-release-workflow-run-id "$owner_run_id" \
+                --owner-release-run-number "$owner_run_number" \
+                --owner-release-run-attempt "$owner_run_attempt" \
+                --release-workflow-run-id "$GITHUB_RUN_ID" \
+                --release-run-number "$GITHUB_RUN_NUMBER" \
+                --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+                --resolution-state "$state" \
+                --previous-intent-sha256 "$previous_intent" \
+                --completion-receipt-sha256 "$completion_receipt" \
+                --output "$intent_path"
+              intent_artifact="tron-ios-release-intent-${UPSTREAM_RUN_ID}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+              expected_asc_build_id="$(jq -r '.admission.asc_build_id // ""' "$state_path")"
+              if [[ "$state" != completed ]]; then
+                delivery_required=true
+              else
+                echo "::notice::automatic delivery already completed for intent github-ci-run:$UPSTREAM_RUN_ID"
+              fi
+              {
+                echo "apple_build_owner_run_number=$owner_run_number"
+                echo "intent_artifact=$intent_artifact"
+                echo "intent_path=$intent_path"
+                echo "expected_asc_build_id=$expected_asc_build_id"
+                echo "intent_state=$state"
+              } >> "$GITHUB_OUTPUT"
+            fi
+          else
+            version_output="$RUNNER_TEMP/ios-direct-intent-version-output"
+            : > "$version_output"
+            GITHUB_OUTPUT="$version_output" ./scripts/tron version github-ios-output >/dev/null
+            output_value() {
+              local key="$1" value
+              value="$(sed -n "s/^${key}=//p" "$version_output")"
+              [[ -n "$value" && "$(grep -c "^${key}=" "$version_output")" -eq 1 ]] || {
+                echo "::error::version resolver did not emit exactly one $key"
+                exit 1
+              }
+              printf '%s' "$value"
+            }
+            direct_channel="$(output_value channel)"
+            if [[ "$direct_channel" != "dry-run" ]]; then
+              canonical_version="$(output_value version)"
+              marketing_version="$(output_value marketing_version)"
+              apple_build="$(output_value apple_build)"
+              state_path="$RUNNER_TEMP/ios-direct-release-state.json"
+              python3 scripts/ios-release-verify.py github-direct-release-state \
+                --repository "$GITHUB_REPOSITORY" \
+                --source-sha "$source_sha" \
+                --release-workflow-run-id "$GITHUB_RUN_ID" \
+                --release-run-number "$GITHUB_RUN_NUMBER" \
+                --github-token "$GH_EVIDENCE_TOKEN" \
+                --output "$state_path"
+              state="$(jq -r '.state' "$state_path")"
+              case "$state" in
+                new)
+                  owner_run_id="$GITHUB_RUN_ID"
+                  owner_run_number="$GITHUB_RUN_NUMBER"
+                  owner_run_attempt="$GITHUB_RUN_ATTEMPT"
+                  ;;
+                resume|completed)
+                  owner_run_id="$(jq -r '.owner.workflow_run_id' "$state_path")"
+                  owner_run_number="$(jq -r '.owner.run_number' "$state_path")"
+                  owner_run_attempt="$(jq -r '.owner.run_attempt' "$state_path")"
+                  jq -e \
+                    --arg canonical "$canonical_version" \
+                    --arg marketing "$marketing_version" \
+                    --arg build "$apple_build" \
+                    --arg channel "$direct_channel" \
+                    --arg event "$GITHUB_EVENT_NAME" \
+                    --arg ref_type "$GITHUB_REF_TYPE" \
+                    --arg ref_name "$GITHUB_REF_NAME" \
+                    --arg app_id "6761511764" \
+                    --arg scheme "Tron" \
+                    --arg configuration "Prod" \
+                    --arg app_bundle "com.tron.mobile" \
+                    --arg extension_bundle "com.tron.mobile.ShareExtension" '
+                      .product.canonical_version == $canonical
+                      and .product.marketing_version == $marketing
+                      and .product.build_number == $build
+                      and .product.asc_app_id == $app_id
+                      and .product.scheme == $scheme
+                      and .product.configuration == $configuration
+                      and .product.app_bundle_id == $app_bundle
+                      and .product.extension_bundle_id == $extension_bundle
+                      and .trigger == {
+                        event: $event,
+                        ref_type: $ref_type,
+                        ref_name: $ref_name,
+                        channel: $channel
+                      }
+                    ' "$state_path" >/dev/null || {
+                      echo "::error::authenticated direct release intent conflicts with the checked-out product"
+                      exit 1
+                    }
+                  ;;
+                *) echo "::error::unsupported direct release state $state"; exit 1 ;;
+              esac
+              previous_intent="$(jq -r '.previous_intent_sha256 // ""' "$state_path")"
+              completion_receipt="$(jq -r '.completion_receipt_sha256 // ""' "$state_path")"
+              intent_path="$RUNNER_TEMP/ios-release-direct-intent.json"
+              intent_created_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+              python3 scripts/ios-release-verify.py direct-intent \
+                --repository "$GITHUB_REPOSITORY" \
+                --source-sha "$source_sha" \
+                --created-at "$intent_created_at" \
+                --event "$GITHUB_EVENT_NAME" \
+                --ref-type "$GITHUB_REF_TYPE" \
+                --ref-name "$GITHUB_REF_NAME" \
+                --channel "$direct_channel" \
+                --asc-app-id "6761511764" \
+                --scheme "Tron" \
+                --configuration "Prod" \
+                --canonical-version "$canonical_version" \
+                --marketing-version "$marketing_version" \
+                --build-number "$apple_build" \
+                --app-bundle-id "com.tron.mobile" \
+                --extension-bundle-id "com.tron.mobile.ShareExtension" \
+                --owner-release-workflow-run-id "$owner_run_id" \
+                --owner-release-run-number "$owner_run_number" \
+                --owner-release-run-attempt "$owner_run_attempt" \
+                --release-workflow-run-id "$GITHUB_RUN_ID" \
+                --release-run-number "$GITHUB_RUN_NUMBER" \
+                --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+                --resolution-state "$state" \
+                --previous-intent-sha256 "$previous_intent" \
+                --completion-receipt-sha256 "$completion_receipt" \
+                --output "$intent_path"
+              intent_artifact="tron-ios-direct-release-intent-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+              expected_asc_build_id="$(jq -r '.admission.asc_build_id // ""' "$state_path")"
+              if [[ "$state" == "completed" ]]; then
+                delivery_required=false
+                echo "::notice::direct delivery already completed for github-release-run:$GITHUB_RUN_ID"
+              fi
+              {
+                echo "intent_artifact=$intent_artifact"
+                echo "intent_path=$intent_path"
+                echo "expected_asc_build_id=$expected_asc_build_id"
+                echo "intent_state=$state"
+              } >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+          {
+            echo "eligible=$eligible"
+            echo "delivery_required=$delivery_required"
+            echo "source_sha=$source_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Preserve automatic delivery eligibility
+        if: github.event_name == 'workflow_run'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tron-ios-release-eligibility-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.resolve.outputs.evidence_path }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Preserve automatic release intent
+        if: github.event_name == 'workflow_run' && steps.resolve.outputs.intent_path != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.resolve.outputs.intent_artifact }}
+          path: ${{ steps.resolve.outputs.intent_path }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Preserve direct live release intent
+        if: github.event_name != 'workflow_run' && steps.resolve.outputs.intent_path != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.resolve.outputs.intent_artifact }}
+          path: ${{ steps.resolve.outputs.intent_path }}
+          retention-days: 90
+          if-no-files-found: error
+
   testflight:
     name: Build + upload + distribute
-    if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'main')
+    needs: eligibility
+    if: needs.eligibility.outputs.eligible == 'true' && needs.eligibility.outputs.delivery_required == 'true'
     runs-on: [self-hosted, macOS, ARM64, tron-ios-release]
     environment: ios-testflight
     timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
 
     env:
       ASC_APP_ID: "6761511764"
@@ -104,14 +477,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ needs.eligibility.outputs.source_sha }}
           fetch-depth: 0
           clean: true
+
+      - name: Download live release intent
+        if: needs.eligibility.outputs.intent_artifact != ''
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
+        with:
+          name: ${{ needs.eligibility.outputs.intent_artifact }}
+          path: ${{ runner.temp }}/ios-release-intent
+
+      - name: Bind live release intent
+        if: needs.eligibility.outputs.intent_artifact != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
+            intent_path="$RUNNER_TEMP/ios-release-intent/ios-release-intent.json"
+          else
+            intent_path="$RUNNER_TEMP/ios-release-intent/ios-release-direct-intent.json"
+          fi
+          test -f "$intent_path" || { echo "::error::live release intent is missing"; exit 1; }
+          echo "IOS_RELEASE_INTENT=$intent_path" >> "$GITHUB_ENV"
 
       - name: Verify trusted checkout
         shell: bash
         env:
-          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          EXPECTED_SOURCE_SHA: ${{ needs.eligibility.outputs.source_sha }}
+          REQUESTED_CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
           resolved_sha="$(git rev-parse HEAD)"
@@ -126,10 +520,23 @@ jobs:
             }
           fi
           git fetch --no-tags origin main
-          git merge-base --is-ancestor "$resolved_sha" origin/main || {
-            echo "::error::TestFlight source must be reachable from main"
-            exit 1
-          }
+          current_main_sha="$(git rev-parse origin/main)"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
+            test "$resolved_sha" = "$current_main_sha" || {
+              echo "::error::automatic TestFlight source is no longer the current main head"
+              exit 1
+            }
+          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$REQUESTED_CHANNEL" != "dry-run" ]]; then
+            test "$resolved_sha" = "$current_main_sha" || {
+              echo "::error::manual live TestFlight source is no longer the current main head"
+              exit 1
+            }
+          else
+            git merge-base --is-ancestor "$resolved_sha" "$current_main_sha" || {
+              echo "::error::TestFlight source must be reachable from main"
+              exit 1
+            }
+          fi
 
       - name: Resolve iOS delivery
         id: ver
@@ -141,6 +548,7 @@ jobs:
           TRON_UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           TRON_UPSTREAM_BRANCH: ${{ github.event.workflow_run.head_branch }}
           TRON_UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
+          TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER: ${{ needs.eligibility.outputs.apple_build_owner_run_number }}
         run: |
           ./scripts/tron version github-ios-output
 
@@ -163,6 +571,14 @@ jobs:
 
       - name: Verify dedicated release runner
         run: scripts/ios-release-runner-doctor.sh
+
+      - name: Recover stale iOS release credentials
+        shell: ./scripts/ios-release-user-context /bin/bash --noprofile --norc -e -o pipefail {0}
+        run: |
+          set -euo pipefail
+          python3 scripts/ios-release-credential-ledger.py recover
+          python3 scripts/ios-release-credential-ledger.py prepare-profile-directory
+          python3 scripts/ios-release-credential-ledger.py audit
 
       - name: Initialize ASC diagnostics
         shell: bash
@@ -321,27 +737,213 @@ jobs:
         id: existing
         if: steps.ver.outputs.dry_run != 'true'
         shell: bash
+        env:
+          EXPECTED_ASC_BUILD_ID: ${{ needs.eligibility.outputs.expected_asc_build_id }}
+          INTENT_STATE: ${{ needs.eligibility.outputs.intent_state }}
         run: |
           set -euo pipefail
           build_json="$RUNNER_TEMP/existing-build.json"
-          if ! asc builds list \
+          lookup_attempts=1
+          if [[ "$INTENT_STATE" == "resume" && -z "$EXPECTED_ASC_BUILD_ID" ]]; then
+            lookup_attempts=60
+            echo "::notice::resumable intent has no admission; polling for a delayed prior upload before rebuilding"
+          fi
+          lookup_succeeded=false
+          for lookup_attempt in $(seq 1 "$lookup_attempts"); do
+            if asc builds list \
               --app "$ASC_APP_ID" \
               --version "${{ steps.ver.outputs.marketing_version }}" \
               --build-number "${{ steps.ver.outputs.apple_build }}" \
+              --platform IOS \
               --limit 10 \
               --output json > "$build_json"; then
+              lookup_succeeded=true
+              build_id="$(jq -r '(.data // []) | if type == "array" then .[0].id // empty else .id // empty end' "$build_json")"
+              [[ -z "$build_id" && "$lookup_attempt" -lt "$lookup_attempts" ]] || break
+            else
+              echo "::warning::ASC existing-build lookup failed (attempt $lookup_attempt/$lookup_attempts)"
+            fi
+            sleep 5
+          done
+          if [[ "$lookup_succeeded" != true ]]; then
             echo "::error::failed to query App Store Connect for existing build ${{ steps.ver.outputs.apple_build }}"
             exit 1
           fi
 
+          match_count="$(jq -r '(.data // []) | if type == "array" then length elif type == "object" then 1 else 0 end' "$build_json")"
+          [[ "$match_count" =~ ^[0-9]+$ ]] || { echo "::error::ASC build query returned malformed data"; exit 1; }
+          (( match_count <= 1 )) || { echo "::error::ASC build identity is ambiguous"; exit 1; }
           build_id="$(jq -r '(.data // []) | if type == "array" then .[0].id // empty else .id // empty end' "$build_json")"
           if [[ -n "$build_id" ]]; then
+            actual_build_number="$(jq -r '(.data // []) | if type == "array" then .[0].attributes.version // empty else .attributes.version // empty end' "$build_json")"
+            [[ "$actual_build_number" == "${{ steps.ver.outputs.apple_build }}" ]] || {
+              echo "::error::ASC returned build $actual_build_number for a different requested identity"
+              exit 1
+            }
+            if [[ -n "$EXPECTED_ASC_BUILD_ID" && "$build_id" != "$EXPECTED_ASC_BUILD_ID" ]]; then
+              echo "::error::ASC build id $build_id conflicts with authenticated admission $EXPECTED_ASC_BUILD_ID"
+              exit 1
+            fi
+            if [[ -n "${IOS_RELEASE_INTENT:-}" && -z "$EXPECTED_ASC_BUILD_ID" ]]; then
+              echo "::error::existing live build lacks a trusted admission receipt; leave it untouched and start a fresh release allocation from current main"
+              exit 1
+            fi
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
             echo "::notice::ASC build ${{ steps.ver.outputs.apple_build }} already exists ($build_id); upload will be skipped"
           else
+            if [[ -n "$EXPECTED_ASC_BUILD_ID" ]]; then
+              echo "::error::authenticated admitted build $EXPECTED_ASC_BUILD_ID is missing from ASC"
+              exit 1
+            fi
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Bind existing automatic build to authenticated provenance
+        if: github.event_name == 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists == 'true'
+        shell: bash
+        env:
+          GH_EVIDENCE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          provenance_path="$RUNNER_TEMP/ios-release-provenance.json"
+          provenance_metadata="$RUNNER_TEMP/ios-release-provenance-fetch.json"
+          admission_path="$RUNNER_TEMP/ios-release-admission.json"
+          intent_path="${IOS_RELEASE_INTENT:-}"
+          python3 scripts/ios-release-verify.py github-provenance \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ steps.ver.outputs.source_sha }}" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --canonical-version "${{ steps.ver.outputs.version }}" \
+            --marketing-version "${{ steps.ver.outputs.marketing_version }}" \
+            --app-bundle-id "$IOS_BUNDLE_ID" \
+            --extension-bundle-id "$IOS_SHARE_EXTENSION_BUNDLE_ID" \
+            --release-workflow-run-id "$GITHUB_RUN_ID" \
+            --github-token "$GH_EVIDENCE_TOKEN" \
+            --intent "$intent_path" \
+            --output "$provenance_path" \
+            --metadata-output "$provenance_metadata" \
+            --admission-output "$admission_path"
+          reuse_path="$RUNNER_TEMP/ios-release-reuse-provenance.json"
+          admission_for_reuse=""
+          [[ ! -f "$admission_path" ]] || admission_for_reuse="$admission_path"
+          python3 scripts/ios-release-verify.py reuse-provenance \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ steps.ver.outputs.source_sha }}" \
+            --canonical-version "${{ steps.ver.outputs.version }}" \
+            --marketing-version "${{ steps.ver.outputs.marketing_version }}" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --app-bundle-id "$IOS_BUNDLE_ID" \
+            --extension-bundle-id "$IOS_SHARE_EXTENSION_BUNDLE_ID" \
+            --asc-app-id "$ASC_APP_ID" \
+            --asc-build-id "${{ steps.existing.outputs.build_id }}" \
+            --release-workflow-run-id "$GITHUB_RUN_ID" \
+            --release-run-number "$GITHUB_RUN_NUMBER" \
+            --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --intent "$intent_path" \
+            --admission "$admission_for_reuse" \
+            --provenance "$provenance_path" \
+            --output "$reuse_path"
+          {
+            echo "IOS_RELEASE_PROVENANCE=$provenance_path"
+            echo "IOS_RELEASE_REUSE_PROVENANCE=$reuse_path"
+            if [[ -f "$admission_path" ]]; then
+              echo "IOS_RELEASE_PRIOR_ADMISSION=$admission_path"
+            fi
+          } >> "$GITHUB_ENV"
+
+      - name: Bind existing direct build to authenticated provenance
+        if: github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists == 'true'
+        shell: bash
+        env:
+          GH_EVIDENCE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          provenance_path="$RUNNER_TEMP/ios-release-provenance.json"
+          provenance_metadata="$RUNNER_TEMP/ios-release-direct-provenance-fetch.json"
+          admission_path="$RUNNER_TEMP/ios-release-prior-direct-admission.json"
+          python3 scripts/ios-release-verify.py github-direct-provenance \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ steps.ver.outputs.source_sha }}" \
+            --canonical-version "${{ steps.ver.outputs.version }}" \
+            --marketing-version "${{ steps.ver.outputs.marketing_version }}" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --app-bundle-id "$IOS_BUNDLE_ID" \
+            --extension-bundle-id "$IOS_SHARE_EXTENSION_BUNDLE_ID" \
+            --asc-build-id "${{ steps.existing.outputs.build_id }}" \
+            --release-workflow-run-id "$GITHUB_RUN_ID" \
+            --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --github-token "$GH_EVIDENCE_TOKEN" \
+            --intent "$IOS_RELEASE_INTENT" \
+            --output "$provenance_path" \
+            --metadata-output "$provenance_metadata" \
+            --admission-output "$admission_path"
+          reuse_path="$RUNNER_TEMP/ios-release-direct-reuse-provenance.json"
+          python3 scripts/ios-release-verify.py direct-reuse-provenance \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ steps.ver.outputs.source_sha }}" \
+            --canonical-version "${{ steps.ver.outputs.version }}" \
+            --marketing-version "${{ steps.ver.outputs.marketing_version }}" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --app-bundle-id "$IOS_BUNDLE_ID" \
+            --extension-bundle-id "$IOS_SHARE_EXTENSION_BUNDLE_ID" \
+            --asc-app-id "$ASC_APP_ID" \
+            --asc-build-id "${{ steps.existing.outputs.build_id }}" \
+            --release-workflow-run-id "$GITHUB_RUN_ID" \
+            --release-run-number "$GITHUB_RUN_NUMBER" \
+            --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --intent "$IOS_RELEASE_INTENT" \
+            --admission "$admission_path" \
+            --provenance "$provenance_path" \
+            --output "$reuse_path"
+          {
+            echo "IOS_RELEASE_PROVENANCE=$provenance_path"
+            echo "IOS_RELEASE_REUSE_PROVENANCE=$reuse_path"
+            echo "IOS_RELEASE_PRIOR_ADMISSION=$admission_path"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify new ASC build allocation order
+        if: steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          builds_json="$RUNNER_TEMP/asc-version-builds.json"
+          asc builds list \
+            --app "$ASC_APP_ID" \
+            --version "${{ steps.ver.outputs.marketing_version }}" \
+            --platform IOS \
+            --limit 200 \
+            --output json > "$builds_json"
+          python3 - "$builds_json" "${{ steps.ver.outputs.apple_build }}" <<'PY'
+          import json
+          import re
+          import sys
+
+          path, expected = sys.argv[1:]
+          with open(path, encoding="utf-8") as handle:
+              payload = json.load(handle)
+          builds = payload.get("data", [])
+          if isinstance(builds, dict):
+              builds = [builds]
+          if not isinstance(builds, list) or len(builds) >= 200:
+              raise SystemExit("::error::cannot prove ASC build ordering within the bounded version listing")
+
+          def version_tuple(value):
+              if not isinstance(value, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,2}", value):
+                  raise SystemExit(f"::error::ASC returned malformed build string {value!r}")
+              parts = [int(part) for part in value.split(".")]
+              return tuple((parts + [0, 0])[:3])
+
+          expected_tuple = version_tuple(expected)
+          versions = [entry.get("attributes", {}).get("version") for entry in builds]
+          higher = [value for value in versions if version_tuple(value) >= expected_tuple]
+          if higher:
+              highest = max(higher, key=version_tuple)
+              raise SystemExit(
+                  f"::error::new Apple build {expected} is not above existing {highest}; "
+                  "this release allocation ran out of order and must be replaced by a fresh Release workflow run"
+              )
+          PY
 
       - name: Resolve iOS signing mode
         id: signing
@@ -411,7 +1013,6 @@ jobs:
           system_keychain="/Library/Keychains/System.keychain"
           system_root_keychain="/System/Library/Keychains/SystemRootCertificates.keychain"
           profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
-          mkdir -p "$profiles_dir"
           : > "$original_keychains_path"
           : > "$installed_profile_uuids"
 
@@ -425,6 +1026,9 @@ jobs:
             echo "::error::job-owned signing keychain already exists"
             exit 1
           }
+          python3 scripts/ios-release-credential-ledger.py begin \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" >/dev/null
           security list-keychains -d user -s "$baseline_keychain"
           security default-keychain -d user -s "$baseline_keychain"
           original_keychains=("$baseline_keychain")
@@ -607,7 +1211,7 @@ jobs:
                 return 1
               }
 
-            uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$decoded_plist")"
+            uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$decoded_plist" | tr '[:lower:]' '[:upper:]')"
             name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$decoded_plist")"
             application_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$decoded_plist" 2>/dev/null || true)"
             provisions_all="$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$decoded_plist" 2>/dev/null || true)"
@@ -657,8 +1261,12 @@ jobs:
               fi
               echo "::notice::reusing existing App Store profile '$name' for $bundle_id" >&2
             else
-              printf '%s\n' "$uuid" >> "$installed_profile_uuids"
+              python3 scripts/ios-release-credential-ledger.py plan-profile \
+                --run-id "$GITHUB_RUN_ID" \
+                --run-attempt "$GITHUB_RUN_ATTEMPT" \
+                --profile-uuid "$uuid" >/dev/null
               /bin/cp "$profile_path" "$destination"
+              printf '%s\n' "$uuid" >> "$installed_profile_uuids"
               echo "::notice::installed temporary App Store profile '$name' for $bundle_id" >&2
             fi
             rm -f "$profile_path" "$decoded_plist"
@@ -769,7 +1377,7 @@ jobs:
         if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ios-dsyms-${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.apple_build }}
+          name: ios-dsyms-${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: packages/ios-app/build/TronMobile.xcarchive/dSYMs
           retention-days: 30
           if-no-files-found: warn
@@ -942,8 +1550,26 @@ jobs:
         if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ios-release-provenance-${{ steps.ver.outputs.apple_build }}
+          name: ios-release-provenance-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.IOS_RELEASE_PROVENANCE }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload automatic release reuse binding
+        if: github.event_name == 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-release-reuse-provenance-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.IOS_RELEASE_REUSE_PROVENANCE }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload direct release reuse binding
+        if: github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-release-direct-reuse-provenance-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.IOS_RELEASE_REUSE_PROVENANCE }}
           retention-days: 90
           if-no-files-found: error
 
@@ -951,10 +1577,102 @@ jobs:
         if: steps.ver.outputs.dry_run == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ios-dry-run-ipa-${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.apple_build }}
+          name: ios-dry-run-ipa-${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: packages/ios-app/build/TronMobile.ipa
           retention-days: 7
           if-no-files-found: error
+
+      - name: Reconfirm automatic delivery head
+        id: pre_upload_guard
+        if: github.event_name == 'workflow_run' && steps.ver.outputs.dry_run != 'true'
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ needs.eligibility.outputs.source_sha }}
+          CI_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          CI_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          CI_COMPLETED_AT: ${{ github.event.workflow_run.updated_at }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            refs/heads/main:refs/remotes/origin/main
+          current_main_sha="$(git rev-parse refs/remotes/origin/main)"
+          test "$EXPECTED_SOURCE_SHA" = "$current_main_sha" || {
+            echo "::error::automatic TestFlight source became stale before App Store Connect delivery"
+            exit 1
+          }
+          checked_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          head_check_path="$RUNNER_TEMP/ios-release-head-check.json"
+          python3 scripts/ios-release-verify.py head-check \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "$EXPECTED_SOURCE_SHA" \
+            --current-main-sha "$current_main_sha" \
+            --checked-at "$checked_at" \
+            --ci-workflow-run-id "$CI_WORKFLOW_RUN_ID" \
+            --ci-run-attempt "$CI_RUN_ATTEMPT" \
+            --ci-completed-at "$CI_COMPLETED_AT" \
+            --release-workflow-run-id "$GITHUB_RUN_ID" \
+            --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$head_check_path"
+          head_check_sha256="$(shasum -a 256 "$head_check_path" | awk '{print $1}')"
+          {
+            echo "path=$head_check_path"
+            echo "sha256=sha256:$head_check_sha256"
+            echo "checked_at=$checked_at"
+          } >> "$GITHUB_OUTPUT"
+          echo "IOS_RELEASE_HEAD_CHECK=$head_check_path" >> "$GITHUB_ENV"
+
+      - name: Reconfirm direct live release source
+        id: direct_source_guard
+        if: github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true'
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ needs.eligibility.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            refs/heads/main:refs/remotes/origin/main
+          current_main_sha="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            test "$EXPECTED_SOURCE_SHA" = "$current_main_sha" || {
+              echo "::error::manual live TestFlight source became stale before App Store Connect delivery"
+              exit 1
+            }
+            source_mode="current-main"
+          else
+            [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF_TYPE" == "tag" ]] || {
+              echo "::error::unsupported direct live release trigger"
+              exit 1
+            }
+            git merge-base --is-ancestor "$EXPECTED_SOURCE_SHA" "$current_main_sha" || {
+              echo "::error::tagged TestFlight source is no longer reachable from main"
+              exit 1
+            }
+            source_mode="main-ancestor"
+          fi
+          checked_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          source_check_path="$RUNNER_TEMP/ios-release-direct-source-check.json"
+          python3 scripts/ios-release-verify.py direct-source-check \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "$EXPECTED_SOURCE_SHA" \
+            --observed-main-sha "$current_main_sha" \
+            --mode "$source_mode" \
+            --source-admitted true \
+            --checked-at "$checked_at" \
+            --event "$GITHUB_EVENT_NAME" \
+            --ref-type "$GITHUB_REF_TYPE" \
+            --ref-name "$GITHUB_REF_NAME" \
+            --channel "${{ steps.ver.outputs.channel }}" \
+            --release-workflow-run-id "$GITHUB_RUN_ID" \
+            --release-run-number "$GITHUB_RUN_NUMBER" \
+            --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$source_check_path"
+          source_check_sha256="$(shasum -a 256 "$source_check_path" | awk '{print $1}')"
+          {
+            echo "path=$source_check_path"
+            echo "sha256=sha256:$source_check_sha256"
+            echo "checked_at=$checked_at"
+          } >> "$GITHUB_OUTPUT"
+          echo "IOS_RELEASE_DIRECT_SOURCE_CHECK=$source_check_path" >> "$GITHUB_ENV"
 
       - name: Upload to App Store Connect
         if: steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
@@ -971,25 +1689,209 @@ jobs:
             --output json \
             --pretty
 
-      - name: Wait for ASC processing
-        if: steps.ver.outputs.dry_run != 'true'
+      - name: Preserve automatic delivery head evidence
+        if: always() && github.event_name == 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.pre_upload_guard.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tron-ios-release-head-check-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.pre_upload_guard.outputs.path }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Preserve direct live source evidence
+        if: always() && github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.direct_source_guard.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-release-direct-source-check-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.direct_source_guard.outputs.path }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Write automatic ASC reuse admission
+        if: github.event_name == 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          asc builds wait \
-            --app "$ASC_APP_ID" \
+          admission_dir="$RUNNER_TEMP/ios-release-current-admission"
+          mkdir -p "$admission_dir"
+          admission_path="$admission_dir/ios-release-admission.json"
+          admitted_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          python3 scripts/ios-release-verify.py admission \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ steps.ver.outputs.source_sha }}" \
             --build-number "${{ steps.ver.outputs.apple_build }}" \
-            --platform IOS \
-            --timeout 45m \
-            --poll-interval 30s \
-            --fail-on-invalid \
-            --output json \
+            --asc-app-id "$ASC_APP_ID" \
+            --asc-build-id "${{ steps.existing.outputs.build_id }}" \
+            --admitted-at "$admitted_at" \
+            --release-workflow-run-id "$GITHUB_RUN_ID" \
+            --release-run-number "$GITHUB_RUN_NUMBER" \
+            --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --intent "$IOS_RELEASE_INTENT" \
+            --provenance "$IOS_RELEASE_PROVENANCE" \
+            --head-check "$IOS_RELEASE_HEAD_CHECK" \
+            --prior-admission "$IOS_RELEASE_PRIOR_ADMISSION" \
+            --reuse-provenance "$IOS_RELEASE_REUSE_PROVENANCE" \
+            --output "$admission_path"
+          echo "IOS_RELEASE_ADMISSION=$admission_path" >> "$GITHUB_ENV"
+
+      - name: Preserve automatic ASC reuse admission
+        if: github.event_name == 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-release-admission-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.IOS_RELEASE_ADMISSION }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Resolve uploaded ASC build
+        id: admitted_build
+        if: steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_json="$RUNNER_TEMP/admitted-build.json"
+          build_id=""
+          for attempt in $(seq 1 60); do
+            if ! asc builds list \
+              --app "$ASC_APP_ID" \
+              --version "${{ steps.ver.outputs.marketing_version }}" \
+              --build-number "${{ steps.ver.outputs.apple_build }}" \
+              --platform IOS \
+              --limit 10 \
+              --output json > "$build_json"; then
+              echo "::warning::ASC admitted-build lookup failed (attempt $attempt/60)"
+              sleep 5
+              continue
+            fi
+            match_count="$(jq -r '(.data // []) | if type == "array" then length elif type == "object" then 1 else 0 end' "$build_json")"
+            (( match_count <= 1 )) || { echo "::error::uploaded ASC build identity is ambiguous"; exit 1; }
+            build_id="$(jq -r '(.data // []) | if type == "array" then .[0].id // empty else .id // empty end' "$build_json")"
+            [[ -z "$build_id" ]] || break
+            sleep 5
+          done
+          [[ -n "$build_id" ]] || { echo "::error::uploaded build did not become addressable for admission"; exit 1; }
+          actual_build_number="$(jq -r '(.data // []) | if type == "array" then .[0].attributes.version // empty else .attributes.version // empty end' "$build_json")"
+          [[ "$actual_build_number" == "${{ steps.ver.outputs.apple_build }}" ]] || {
+            echo "::error::admitted ASC build number differs from the uploaded identity"
+            exit 1
+          }
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+
+      - name: Write automatic ASC admission receipt
+        if: github.event_name == 'workflow_run' && steps.admitted_build.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          admission_path="$RUNNER_TEMP/ios-release-admission.json"
+          admitted_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          python3 scripts/ios-release-verify.py admission \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ steps.ver.outputs.source_sha }}" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --asc-app-id "$ASC_APP_ID" \
+            --asc-build-id "${{ steps.admitted_build.outputs.build_id }}" \
+            --admitted-at "$admitted_at" \
+            --release-workflow-run-id "$GITHUB_RUN_ID" \
+            --release-run-number "$GITHUB_RUN_NUMBER" \
+            --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --intent "$IOS_RELEASE_INTENT" \
+            --provenance "$IOS_RELEASE_PROVENANCE" \
+            --head-check "$IOS_RELEASE_HEAD_CHECK" \
+            --output "$admission_path"
+          echo "IOS_RELEASE_ADMISSION=$admission_path" >> "$GITHUB_ENV"
+
+      - name: Preserve automatic ASC admission receipt
+        if: github.event_name == 'workflow_run' && steps.admitted_build.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-release-admission-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.IOS_RELEASE_ADMISSION }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Write direct ASC admission
+        if: github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true'
+        shell: bash
+        env:
+          EXISTING_ASC_BUILD_ID: ${{ steps.existing.outputs.build_id }}
+          UPLOADED_ASC_BUILD_ID: ${{ steps.admitted_build.outputs.build_id }}
+        run: |
+          set -euo pipefail
+          asc_build_id="$EXISTING_ASC_BUILD_ID"
+          [[ -n "$asc_build_id" ]] || asc_build_id="$UPLOADED_ASC_BUILD_ID"
+          [[ -n "$asc_build_id" ]] || { echo "::error::direct release lacks an admitted ASC build id"; exit 1; }
+          admission_dir="$RUNNER_TEMP/ios-release-current-direct-admission"
+          mkdir -p "$admission_dir"
+          admission_path="$admission_dir/ios-release-direct-admission.json"
+          admitted_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          reuse_args=()
+          if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
+            reuse_args=(
+              --prior-admission "$IOS_RELEASE_PRIOR_ADMISSION"
+              --reuse-provenance "$IOS_RELEASE_REUSE_PROVENANCE"
+            )
+          fi
+          python3 scripts/ios-release-verify.py direct-admission \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ steps.ver.outputs.source_sha }}" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --asc-app-id "$ASC_APP_ID" \
+            --asc-build-id "$asc_build_id" \
+            --admitted-at "$admitted_at" \
+            --release-workflow-run-id "$GITHUB_RUN_ID" \
+            --release-run-number "$GITHUB_RUN_NUMBER" \
+            --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --intent "$IOS_RELEASE_INTENT" \
+            --provenance "$IOS_RELEASE_PROVENANCE" \
+            --source-check "$IOS_RELEASE_DIRECT_SOURCE_CHECK" \
+            "${reuse_args[@]}" \
+            --output "$admission_path"
+          echo "IOS_RELEASE_ADMISSION=$admission_path" >> "$GITHUB_ENV"
+
+      - name: Preserve direct ASC admission
+        if: github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-release-direct-admission-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.IOS_RELEASE_ADMISSION }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Wait for ASC processing
+        if: steps.ver.outputs.dry_run != 'true'
+        shell: bash
+        env:
+          EXISTING_ASC_BUILD_ID: ${{ steps.existing.outputs.build_id }}
+          ADMITTED_ASC_BUILD_ID: ${{ steps.admitted_build.outputs.build_id }}
+        run: |
+          set -euo pipefail
+          build_id="$EXISTING_ASC_BUILD_ID"
+          [[ -n "$build_id" ]] || build_id="$ADMITTED_ASC_BUILD_ID"
+          wait_args=(
+            --timeout 45m
+            --poll-interval 30s
+            --fail-on-invalid
+            --output json
             --pretty
+          )
+          if [[ -n "$build_id" ]]; then
+            asc builds wait --build-id "$build_id" "${wait_args[@]}"
+          else
+            asc builds wait \
+              --app "$ASC_APP_ID" \
+              --version "${{ steps.ver.outputs.marketing_version }}" \
+              --build-number "${{ steps.ver.outputs.apple_build }}" \
+              --platform IOS \
+              "${wait_args[@]}"
+          fi
 
       - name: Resolve processed ASC build
         id: asc_build
         if: steps.ver.outputs.dry_run != 'true'
         shell: bash
+        env:
+          EXISTING_ASC_BUILD_ID: ${{ steps.existing.outputs.build_id }}
+          ADMITTED_ASC_BUILD_ID: ${{ steps.admitted_build.outputs.build_id }}
         run: |
           set -euo pipefail
           build_json="$RUNNER_TEMP/processed-build.json"
@@ -997,10 +1899,25 @@ jobs:
             --app "$ASC_APP_ID" \
             --version "${{ steps.ver.outputs.marketing_version }}" \
             --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --platform IOS \
             --limit 10 \
             --output json > "$build_json"
+          match_count="$(jq -r '(.data // []) | if type == "array" then length elif type == "object" then 1 else 0 end' "$build_json")"
+          [[ "$match_count" == "1" ]] || { echo "::error::processed ASC build identity is absent or ambiguous"; exit 1; }
           build_id="$(jq -r '(.data // []) | if type == "array" then .[0].id // empty else .id // empty end' "$build_json")"
           test -n "$build_id" || { echo "::error::could not resolve processed ASC build id"; exit 1; }
+          actual_build_number="$(jq -r '(.data // []) | if type == "array" then .[0].attributes.version // empty else .attributes.version // empty end' "$build_json")"
+          [[ "$actual_build_number" == "${{ steps.ver.outputs.apple_build }}" ]] || { echo "::error::processed ASC build number differs"; exit 1; }
+          expected_build_id="$EXISTING_ASC_BUILD_ID"
+          [[ -n "$expected_build_id" ]] || expected_build_id="$ADMITTED_ASC_BUILD_ID"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" && -z "$expected_build_id" ]]; then
+            echo "::error::automatic delivery reached processing without an admitted ASC build id"
+            exit 1
+          fi
+          if [[ -n "$expected_build_id" && "$build_id" != "$expected_build_id" ]]; then
+            echo "::error::processed ASC build id differs from the admitted identity"
+            exit 1
+          fi
           echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
           echo "::notice::resolved ASC build ${{ steps.ver.outputs.apple_build }} as $build_id"
 
@@ -1490,6 +2407,46 @@ jobs:
             echo "::notice::no external TestFlight groups resolved; treating uploaded/processed build as the release checkpoint"
             exit 0
           fi
+          [[ "$groups" =~ ^[A-Za-z0-9-]+$ ]] || { echo "::error::external TestFlight group id is malformed"; exit 1; }
+          asc_token() {
+            ./scripts/asc-jwt \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer-id "$APPLE_API_ISSUER_ID" \
+              --key-path "$APPLE_API_KEY_PATH"
+          }
+          group_has_build() {
+            local url response http_code next_url
+            response="$RUNNER_TEMP/external-group-builds.json"
+            url="https://api.appstoreconnect.apple.com/v1/betaGroups/$groups/relationships/builds?limit=200"
+            for _ in {1..50}; do
+              http_code="$(
+                curl -sS \
+                  -o "$response" \
+                  -w "%{http_code}" \
+                  -H "Authorization: Bearer $(asc_token)" \
+                  -H "Accept: application/json" \
+                  "$url"
+              )"
+              [[ "$http_code" == 2* ]] || { echo "::error::external group relationship lookup failed (HTTP $http_code)"; return 2; }
+              jq -e '(.data // null) | type == "array"' "$response" >/dev/null || { echo "::error::external group relationship response is malformed"; return 2; }
+              if jq -e --arg id "$BUILD_ID" 'any((.data // [])[]; .id == $id)' "$response" >/dev/null; then
+                return 0
+              fi
+              next_url="$(jq -r '.links.next // empty' "$response")"
+              [[ -n "$next_url" ]] || return 1
+              [[ "$next_url" == https://api.appstoreconnect.apple.com/* ]] || { echo "::error::unexpected external group pagination URL"; return 2; }
+              url="$next_url"
+            done
+            echo "::error::external group relationship exceeded 50 pages"
+            return 2
+          }
+          if group_has_build; then
+            echo "::notice::ASC build $BUILD_ID is already assigned to external group $groups"
+            exit 0
+          else
+            relationship_status=$?
+            (( relationship_status == 1 )) || exit "$relationship_status"
+          fi
           short_sha="${{ steps.ver.outputs.source_sha }}"
           short_sha="${short_sha:0:12}"
           notes="Tron ${{ steps.ver.outputs.display_version }} (${{ steps.ver.outputs.version }}), Apple build ${{ steps.ver.outputs.apple_build }}, commit $short_sha, GitHub run $GITHUB_RUN_NUMBER."
@@ -1504,12 +2461,92 @@ jobs:
             --poll-interval 30s \
             --output json \
             --pretty
+          for _ in {1..30}; do
+            if group_has_build; then
+              exit 0
+            else
+              relationship_status=$?
+              (( relationship_status == 1 )) || exit "$relationship_status"
+            fi
+            sleep 10
+          done
+          echo "::error::external TestFlight group assignment was not observable after publishing"
+          exit 1
+
+      - name: Write automatic TestFlight delivery receipt
+        if: success() && github.event_name == 'workflow_run' && steps.ver.outputs.channel == 'internal'
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt_path="$RUNNER_TEMP/ios-release-receipt.json"
+          completed_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          python3 scripts/ios-release-verify.py receipt \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ steps.ver.outputs.source_sha }}" \
+            --ci-workflow-run-id "${{ github.event.workflow_run.id }}" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --asc-build-id "${{ steps.asc_build.outputs.build_id }}" \
+            --testflight-group-id "${{ steps.internal_group.outputs.group_id }}" \
+            --completed-at "$completed_at" \
+            --release-workflow-run-id "$GITHUB_RUN_ID" \
+            --release-run-number "$GITHUB_RUN_NUMBER" \
+            --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --intent "$IOS_RELEASE_INTENT" \
+            --admission "$IOS_RELEASE_ADMISSION" \
+            --provenance "$IOS_RELEASE_PROVENANCE" \
+            --head-check "$IOS_RELEASE_HEAD_CHECK" \
+            --reuse-provenance "${IOS_RELEASE_REUSE_PROVENANCE:-}" \
+            --output "$receipt_path"
+          echo "IOS_RELEASE_RECEIPT=$receipt_path" >> "$GITHUB_ENV"
+
+      - name: Write direct TestFlight delivery receipt
+        if: success() && github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true' && (steps.ver.outputs.channel == 'internal' || (steps.ver.outputs.channel == 'external' && steps.beta_review.outputs.external_ready == 'true'))
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel="${{ steps.ver.outputs.channel }}"
+          if [[ "$channel" == "internal" ]]; then
+            group_id="${{ steps.internal_group.outputs.group_id }}"
+            disposition="available-internal-group"
+          else
+            group_id="${{ steps.testflight_groups.outputs.external_group_ids }}"
+            if [[ -n "$group_id" ]]; then
+              disposition="available-external-group"
+            else
+              disposition="external-ready-no-group"
+            fi
+          fi
+          receipt_path="$RUNNER_TEMP/ios-release-direct-receipt.json"
+          completed_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          reuse_args=()
+          if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
+            reuse_args=(--reuse-provenance "$IOS_RELEASE_REUSE_PROVENANCE")
+          fi
+          python3 scripts/ios-release-verify.py direct-receipt \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ steps.ver.outputs.source_sha }}" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --asc-build-id "${{ steps.asc_build.outputs.build_id }}" \
+            --channel "$channel" \
+            --disposition "$disposition" \
+            --completed-at "$completed_at" \
+            --release-workflow-run-id "$GITHUB_RUN_ID" \
+            --release-run-number "$GITHUB_RUN_NUMBER" \
+            --release-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --intent "$IOS_RELEASE_INTENT" \
+            --admission "$IOS_RELEASE_ADMISSION" \
+            --provenance "$IOS_RELEASE_PROVENANCE" \
+            --source-check "$IOS_RELEASE_DIRECT_SOURCE_CHECK" \
+            --testflight-group-id "$group_id" \
+            "${reuse_args[@]}" \
+            --output "$receipt_path"
+          echo "IOS_RELEASE_DIRECT_RECEIPT=$receipt_path" >> "$GITHUB_ENV"
 
       - name: Upload App Store Connect diagnostics on failure
         if: failure() && steps.ver.outputs.dry_run != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ios-asc-diagnostics-${{ steps.ver.outputs.apple_build }}
+          name: ios-asc-diagnostics-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.ASC_DIAGNOSTICS_DIR }}
           retention-days: 7
           if-no-files-found: warn
@@ -1557,8 +2594,10 @@ jobs:
           set +e
           cleanup_failed=0
           keychain_path=""
+          credential_ledger_path=""
           if [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]; then
             keychain_path="$HOME/Library/Keychains/tron-ios-signing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.keychain-db"
+            credential_ledger_path="$HOME/.tron-ios-release-state/attempt-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
           else
             echo "::error::refusing to resolve a signing keychain from an invalid GitHub run identity"
             cleanup_failed=1
@@ -1649,9 +2688,10 @@ jobs:
             fi
           done
 
-          # A single dedicated runner naturally serializes jobs without a
-          # GitHub concurrency group, so every successful main SHA remains in
-          # the queue. Clean its isolated checkout before the next queued job.
+          # Workflow-level, intent-keyed concurrency serializes every automatic
+          # intent/effect/receipt transaction; the dedicated runner provides a
+          # second physical serialization boundary. Clean this isolated checkout
+          # before the next admitted job.
           if [[ -z "${GITHUB_WORKSPACE:-}" || ! -d "$GITHUB_WORKSPACE/.git" ]]; then
             echo "::error::isolated iOS release checkout is unavailable for cleanup"
             cleanup_failed=1
@@ -1666,4 +2706,44 @@ jobs:
               cleanup_failed=1
             fi
           fi
+
+          # The durable ledger is cleared only after the existing teardown has
+          # restored keychain preferences and removed every target it recorded.
+          # If anything above failed, retain the ledger so the next admitted
+          # job can replay bounded recovery before credentials are exposed.
+          if [[ -n "$credential_ledger_path" && ( -e "$credential_ledger_path" || -L "$credential_ledger_path" ) ]]; then
+            if [[ "$cleanup_failed" -eq 0 ]]; then
+              if ! python3 scripts/ios-release-credential-ledger.py complete \
+                --run-id "$GITHUB_RUN_ID" \
+                --run-attempt "$GITHUB_RUN_ATTEMPT"; then
+                echo "::error::failed to complete the iOS release credential ledger"
+                cleanup_failed=1
+              fi
+            else
+              echo "::warning::retaining the iOS release credential ledger for next-job recovery"
+            fi
+          fi
+          if [[ "$cleanup_failed" -eq 0 ]] && \
+             ! python3 scripts/ios-release-credential-ledger.py audit; then
+            echo "::error::iOS release credential state is not clean after teardown"
+            cleanup_failed=1
+          fi
           exit "$cleanup_failed"
+
+      - name: Preserve automatic TestFlight delivery receipt
+        if: success() && github.event_name == 'workflow_run' && steps.ver.outputs.channel == 'internal'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tron-ios-release-receipt-${{ github.event.workflow_run.id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.IOS_RELEASE_RECEIPT }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Preserve direct TestFlight delivery receipt
+        if: success() && github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true' && (steps.ver.outputs.channel == 'internal' || (steps.ver.outputs.channel == 'external' && steps.beta_review.outputs.external_ready == 'true'))
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tron-ios-direct-release-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.IOS_RELEASE_DIRECT_RECEIPT }}
+          retention-days: 90
+          if-no-files-found: error

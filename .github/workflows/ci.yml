@@ -2,24 +2,28 @@
 #
 # Draft PRs use fast-feedback.yml. Ready PRs run the complete Rust/iOS/Mac
 # matrix and publish immutable evidence for the exact synthetic merge tree.
-# A main push reuses that evidence only when its tree and GitHub artifact digest
-# match exactly; every unavailable, stale, ambiguous, or malformed case falls
-# back to the complete matrix. Release workflows still wait for this workflow's
-# successful exact-main-SHA conclusion.
+# A main push selects the newest fully validated exact proof for the merged tree;
+# every unavailable, stale, or malformed candidate is rejected, and no valid
+# candidate falls back to the complete matrix. Reuse preserves a self-digested
+# receipt and the byte-exact downloaded validation-artifact ZIP for 90 days.
+# Release workflows still wait for this workflow's successful exact-main-SHA
+# conclusion.
 
 name: CI
 
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   push:
     branches: [main]
   workflow_dispatch:
 
-# Cancel previous in-flight runs for the same PR to avoid macOS minute waste.
-# Pushes to main never cancel — full-history validation is the goal there.
+# Coalesce only superseded heads of the same PR. GitHub concurrency retains at
+# most one pending run per group even when cancellation is disabled, so every
+# main push and manual run needs a run-unique group to preserve full history.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('ci-{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('ci-{0}-{1}-{2}-{3}', github.workflow, github.event_name, github.run_id, github.run_attempt) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -38,6 +42,8 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+      - name: Verify provider source context
+        run: python3 scripts/ci-provider-context.py resolve --output build/provider-context.json
       - name: Resolve validation mode
         id: mode
         env:
@@ -48,7 +54,10 @@ jobs:
             echo "full_required=false" >> "$GITHUB_OUTPUT"
             echo "mode=draft" >> "$GITHUB_OUTPUT"
           elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            if python3 scripts/ci-validation-evidence.py verify --output build/reused-validation-evidence.json; then
+            if python3 scripts/ci-validation-evidence.py verify \
+              --output build/reused-validation-evidence.json \
+              --receipt build/validation-reuse-receipt.json \
+              --artifact-archive build/reused-validation-artifact.zip; then
               echo "full_required=false" >> "$GITHUB_OUTPUT"
               echo "mode=reused" >> "$GITHUB_OUTPUT"
             else
@@ -60,6 +69,17 @@ jobs:
             echo "full_required=true" >> "$GITHUB_OUTPUT"
             echo "mode=full" >> "$GITHUB_OUTPUT"
           fi
+      - name: Preserve main validation reuse provenance
+        if: steps.mode.outputs.mode == 'reused'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tron-main-validation-reuse-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/validation-reuse-receipt.json
+            build/reused-validation-evidence.json
+            build/reused-validation-artifact.zip
+          if-no-files-found: error
+          retention-days: 90
 
   personal-info-guard:
     name: Personal-info guard
@@ -88,7 +108,12 @@ jobs:
         run: |
           ./scripts/ci-change-flags.sh --self-test
           ./scripts/ios-release-runner-doctor.sh --self-test
+          python3 scripts/ci-provider-context.py --self-test
           python3 scripts/ci-validation-evidence.py --self-test
+          python3 scripts/ci-parity-report.py --self-test
+          python3 scripts/ci-cutover-evaluation.py --self-test
+          ./scripts/ci-shadow-run.sh --self-test
+          ./scripts/validate-ci-definitions.sh --self-test
           python3 scripts/ios-test-selection.py --self-test
           python3 scripts/benchmarks/bench.py --self-test
           python3 scripts/evaluation/whole-agent.py --self-test
@@ -101,8 +126,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Validate GitHub Actions workflows
-        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
+      - name: Validate authoritative and shadow workflow definitions
+        run: scripts/validate-ci-definitions.sh
 
   rust:
     name: Rust quality
@@ -184,7 +209,7 @@ jobs:
           name: ios-ci-metrics
           path: packages/ios-app/build/ios-ci-metrics.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
       - name: Upload xcresult on failure
         if: failure()
@@ -216,11 +241,14 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
           cache-workspaces: packages/agent
-          rustflags: "-D warnings"
+          # The repository manifest owns warning parity with the shadow lane.
+          rustflags: ""
 
       - name: Build agent helper (debug, for embedding)
         working-directory: packages/agent
-        run: cargo build --bin tron --locked
+        run: |
+          source ../../config/ci-toolchain.env
+          RUSTFLAGS="$TRON_CI_MAC_RUSTFLAGS" cargo build --bin tron --locked
 
       - name: Install checksum-pinned tools
         run: ../../scripts/install-ci-tools.sh xcodegen create-dmg
@@ -360,6 +388,10 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
         with:
           ref: ${{ github.sha }}
+          # Evidence reads raw commit headers, so the aggregate needs the exact
+          # merge object but not its history. Keep this checkout intentionally
+          # shallow.
+          fetch-depth: 1
       - name: Create merge validation evidence
         if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
         env:
@@ -367,12 +399,29 @@ jobs:
           TRON_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TRON_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           TRON_IOS_METRICS_JSON: ${{ needs.ios.outputs.metrics }}
-        run: python3 scripts/ci-validation-evidence.py create --output build/validation-evidence.json
+          TRON_CI_REQUIRED_JOBS_JSON: '{"personal-info-guard":"${{ needs.personal-info-guard.result }}","version-drift":"${{ needs.version-drift.result }}","workflow-lint":"${{ needs.workflow-lint.result }}","rust":"${{ needs.rust.result }}","ios":"${{ needs.ios.result }}","mac":"${{ needs.mac.result }}"}'
+        run: |
+          mkdir -p build
+          python3 scripts/ci-provider-context.py resolve \
+            --output build/provider-context.json
+          python3 scripts/ci-provider-context.py export \
+            --context build/provider-context.json \
+            --format shell > build/provider-context.env
+          source build/provider-context.env
+          printf '%s\n' "$TRON_IOS_METRICS_JSON" > build/ios-ci-metrics.json
+          python3 scripts/ci-validation-evidence.py create \
+            --output build/validation-evidence.json \
+            --ios-metrics build/ios-ci-metrics.json \
+            --artifact build/provider-context.json \
+            --artifact build/ios-ci-metrics.json
       - name: Upload merge validation evidence
         if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: tron-merge-validation
-          path: build/validation-evidence.json
+          path: |
+            build/validation-evidence.json
+            build/provider-context.json
+            build/ios-ci-metrics.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90

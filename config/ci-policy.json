@@ -1,0 +1,178 @@
+{
+  "schema": "tron.ci-policy.v1",
+  "main_branch": "main",
+  "supported_events": [
+    "pull_request",
+    "push",
+    "workflow_dispatch"
+  ],
+  "pull_request_merge_ref": "refs/pull/{number}/merge",
+  "required_jobs": [
+    "personal-info-guard",
+    "version-drift",
+    "workflow-lint",
+    "rust",
+    "ios",
+    "mac"
+  ],
+  "orchestration_controls": [
+    "provider-context",
+    "validation-evidence",
+    "aggregate-gate"
+  ],
+  "providers": {
+    "github-actions": {
+      "role": "authoritative",
+      "shadow": false,
+      "required_check_authority": true,
+      "release_authority": true,
+      "configuration_path": ".github/workflows/ci.yml"
+    },
+    "buildkite": {
+      "role": "shadow",
+      "shadow": true,
+      "required_check_authority": false,
+      "release_authority": false,
+      "configuration_path": ".buildkite/shadow-steps.yml",
+      "bootstrap_configuration_path": ".buildkite/pipeline.yml"
+    }
+  },
+  "release": {
+    "provider": "github-actions",
+    "ios": {
+      "configuration_path": ".github/workflows/release-ios.yml",
+      "identity": {
+        "app_id": "6761511764",
+        "bundle_ids": [
+          "com.tron.mobile",
+          "com.tron.mobile.ShareExtension"
+        ],
+        "scheme": "Tron",
+        "configuration": "Prod"
+      },
+      "channels": {
+        "internal": "internal",
+        "external": "external"
+      },
+      "triggers": {
+        "internal": "latest-green-main",
+        "external": "server-v*"
+      },
+      "runner": {
+        "labels": [
+          "self-hosted",
+          "macOS",
+          "ARM64",
+          "tron-ios-release"
+        ],
+        "environment": "ios-testflight"
+      }
+    },
+    "mac": {
+      "configuration_path": ".github/workflows/release-mac.yml",
+      "channels": {
+        "public": "public"
+      },
+      "triggers": {
+        "public": "server-v*"
+      }
+    }
+  },
+  "workflow_inventory": {
+    "merge-validation": {
+      "configuration_path": ".github/workflows/ci.yml",
+      "provider": "github-actions",
+      "role": "required-validation",
+      "triggers": [
+        "pull_request:main",
+        "push:main",
+        "workflow_dispatch"
+      ],
+      "candidate_coverage": "secretless-shadow-observation"
+    },
+    "fast-feedback": {
+      "configuration_path": ".github/workflows/fast-feedback.yml",
+      "provider": "github-actions",
+      "role": "advisory-validation",
+      "triggers": [
+        "pull_request:main"
+      ],
+      "candidate_coverage": "unimplemented"
+    },
+    "ios-performance": {
+      "configuration_path": ".github/workflows/ios-performance.yml",
+      "provider": "github-actions",
+      "role": "advisory-measurement",
+      "triggers": [
+        "schedule",
+        "workflow_dispatch"
+      ],
+      "candidate_coverage": "unimplemented"
+    },
+    "server-performance": {
+      "configuration_path": ".github/workflows/performance.yml",
+      "provider": "github-actions",
+      "role": "advisory-measurement",
+      "triggers": [
+        "schedule",
+        "workflow_dispatch"
+      ],
+      "candidate_coverage": "unimplemented"
+    },
+    "ios-release": {
+      "configuration_path": ".github/workflows/release-ios.yml",
+      "provider": "github-actions",
+      "role": "release",
+      "triggers": [
+        "workflow_run:CI:main:completed",
+        "push:server-v*",
+        "workflow_dispatch"
+      ],
+      "candidate_coverage": "unimplemented"
+    },
+    "mac-release": {
+      "configuration_path": ".github/workflows/release-mac.yml",
+      "provider": "github-actions",
+      "role": "release",
+      "triggers": [
+        "push:server-v*",
+        "workflow_dispatch"
+      ],
+      "candidate_coverage": "unimplemented"
+    }
+  },
+  "replacement_gate": {
+    "scope": "all-workflow-inventory-entries",
+    "required_blockers": [
+      "live-provider-api-reverification",
+      "trusted-product-evidence-verification",
+      "controlled-proof-authenticity-verification",
+      "provider-settings-continuity-verification",
+      "authoritative-ruleset-binding-verification",
+      "artifact-custody-verification",
+      "fork-pull-request-parity",
+      "skip-token-trigger-continuity",
+      "workflow-dispatch-parity",
+      "fast-feedback-parity",
+      "performance-workflow-parity",
+      "ios-performance-workflow-parity",
+      "candidate-main-release-handoff-parity",
+      "ios-testflight-release-parity",
+      "release-tag-parity",
+      "mac-release-parity"
+    ]
+  },
+  "cutover_gate": {
+    "minimum_representative_runs": 30,
+    "minimum_observation_days": 30,
+    "maximum_full_pull_request_p95_seconds": 480,
+    "maximum_candidate_main_p95_seconds": 480,
+    "maximum_green_main_to_testflight_p95_seconds": 600,
+    "maximum_false_green_count": 0,
+    "maximum_source_mismatch_count": 0,
+    "maximum_candidate_provider_failure_rate": 0.01,
+    "minimum_provider_failure_rate_improvement": 0.02,
+    "maximum_paired_reliability_p_value": 0.05,
+    "authority_change_policy": "prohibited-until-explicit-external-review"
+  }
+}
