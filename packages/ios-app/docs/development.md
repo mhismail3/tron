@@ -1278,7 +1278,14 @@ The workflow decodes each profile before export and fails early if the
 profile is an Ad Hoc/development profile with devices, or if the app and share
 extension mix Xcode-managed and manually managed profile styles. It also fails
 an expired profile immediately and emits a GitHub warning during the final 30
-days. Because the isolated service account has no interactive login keychain,
+days. Temporary profiles are installed in Xcode's current build-time library at
+`~/Library/Developer/Xcode/UserData/Provisioning Profiles`; Xcode 16 moved this
+library from the former `~/Library/MobileDevice` location, which Xcode 27 no
+longer accepts for deterministic App Store export (see Apple's
+[Xcode 16 release notes](https://developer.apple.com/documentation/xcode-release-notes/xcode-16-release-notes)).
+The durable credential ledger owns the same current path, so interrupted-job
+recovery and teardown cannot drift from profile installation. Because the
+isolated service account has no interactive login keychain,
 manual signing also downloads Apple's public root and WWDR G3 intermediate from
 their canonical Apple PKI URLs and verifies both repository-pinned SHA-256
 digests. Before the private key is admitted, CI extracts the single public leaf
