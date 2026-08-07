@@ -990,25 +990,6 @@ written under the transaction trace. This same bounded wait protects the
 forward cutover and rollback, so a normal asynchronous removal cannot be
 misclassified as a failed stop or trigger a rollback into the same transition.
 
-Repair also recognizes the one previously shipped Background contract whose
-agent used `SessionCreate=true`. It validates the exact old agent and helper,
-copies the three root-owned files into a mode-0700
-`background-service-backup` rollback journal, fences the idle runner, and
-replaces them with the inheriting agent, updated boot helper, and immutable
-session entry point. The replacement must pass that entry point, create a
-different exact listener PID, and bring the same fenced GitHub runner ID online
-before the journal is committed and scheduling reopens. Because the validated
-agent can invoke only the root-owned fail-closed entry point, a listener cannot
-exist when its Unix, manager, Security-session, or audit identity is invalid.
-A failure restores the prior Background service, while a later repair resolves
-a durable interrupted journal by either validating and committing the
-corrected candidate or restoring the exact prior files before retrying the
-upgrade.
-The current LaunchDaemon adds root-owned stdout/stderr journals and a 0077
-creation umask. Repair generates the exact former no-log LaunchDaemon contract
-separately from the current plist, so adding observability cannot invalidate an
-already-persisted rollback journal or prevent recovery from the pre-log state.
-
 Rotation is explicit. Stop and remove the Background agent and its boot helper,
 request a short-lived removal token, unregister as the service account, then
 move the old installation aside before rerunning the bootstrap. Removing the
@@ -1026,11 +1007,7 @@ sudo /bin/rm -f \
   "/Library/Application Support/Tron/ReleaseRunner/com.tron.ios-release-runner.plist" \
   "/Library/Application Support/Tron/ReleaseRunner/legacy-system-service.plist" \
   "/Library/Application Support/Tron/ReleaseRunner/bootstrap-user-agent" \
-  "/Library/Application Support/Tron/ReleaseRunner/start-runner" \
-  "/Library/Application Support/Tron/ReleaseRunner/background-service-backup/com.tron.ios-release-runner.plist" \
-  "/Library/Application Support/Tron/ReleaseRunner/background-service-backup/com.tron.ios-release-runner-bootstrap.plist" \
-  "/Library/Application Support/Tron/ReleaseRunner/background-service-backup/bootstrap-user-agent"
-sudo /bin/rmdir "/Library/Application Support/Tron/ReleaseRunner/background-service-backup" 2>/dev/null || true
+  "/Library/Application Support/Tron/ReleaseRunner/start-runner"
 repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 removal_token="$(gh api --method POST \
   "repos/$repository/actions/runners/remove-token" --jq .token)"

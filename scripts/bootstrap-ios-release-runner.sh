@@ -23,15 +23,10 @@ runner_session_entrypoint="$runner_bootstrap_dir/start-runner"
 runner_session_entrypoint_source="$project_dir/scripts/ios-release-runner-session-entrypoint"
 runner_diagnostics_source="$project_dir/scripts/ios-release-runner-diagnostics.sh"
 runner_bootstrap_lock="/var/run/tron-ios-release-runner-bootstrap.lock"
-runner_background_backup_dir="$runner_bootstrap_dir/background-service-backup"
 runner_log_dir="/Library/Logs/Tron"
 runner_bootstrap_log="$runner_log_dir/ios-release-runner-bootstrap.log"
 runner_bootstrap_stdout_log="$runner_log_dir/ios-release-runner-launchd.log"
 runner_bootstrap_stderr_log="$runner_log_dir/ios-release-runner-launchd-error.log"
-# The only previously shipped Background helper required SessionCreate=true.
-# Repair recognizes that exact root-owned helper so it can upgrade the live
-# topology transactionally without accepting arbitrary privileged code.
-legacy_background_helper_sha256="7312787b9ddbb2f5064402b97d6df0c0358ce8987768ebe9161cffc574d13e1a"
 bootstrap_trace_id="$(/bin/date -u '+%Y%m%dT%H%M%SZ')-$$"
 durable_log_ready=false
 durable_log_warning_emitted=false
@@ -76,25 +71,18 @@ gh_executable="$(command -v gh || true)"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 
 configure_runner_service_plist() {
-    local plist="$1" create_session="${2:-false}"
+    local plist="$1"
     /bin/rm -f "$plist"
     /usr/bin/plutil -create xml1 "$plist"
     /usr/libexec/PlistBuddy -c "Add :Label string $runner_service_label" "$plist"
     /usr/libexec/PlistBuddy -c "Add :ProgramArguments array" "$plist"
-    if [[ "$create_session" == "true" ]]; then
-        /usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string $runner_dir/runsvc.sh" "$plist"
-    else
-        /usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string $runner_session_entrypoint" "$plist"
-        /usr/libexec/PlistBuddy -c "Add :ProgramArguments:1 string $runner_user" "$plist"
-        /usr/libexec/PlistBuddy -c "Add :ProgramArguments:2 string $runner_dir/runsvc.sh" "$plist"
-    fi
+    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string $runner_session_entrypoint" "$plist"
+    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:1 string $runner_user" "$plist"
+    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:2 string $runner_dir/runsvc.sh" "$plist"
     /usr/libexec/PlistBuddy -c "Add :WorkingDirectory string $runner_dir" "$plist"
     /usr/libexec/PlistBuddy -c "Add :StandardOutPath string $runner_home/Library/Logs/$runner_service_label/stdout.log" "$plist"
     /usr/libexec/PlistBuddy -c "Add :StandardErrorPath string $runner_home/Library/Logs/$runner_service_label/stderr.log" "$plist"
     /usr/libexec/PlistBuddy -c "Add :ProcessType string Interactive" "$plist"
-    if [[ "$create_session" == "true" ]]; then
-        /usr/libexec/PlistBuddy -c "Add :SessionCreate bool true" "$plist"
-    fi
     /usr/libexec/PlistBuddy -c "Add :LimitLoadToSessionType string Background" "$plist"
     /usr/libexec/PlistBuddy -c "Add :RunAtLoad bool true" "$plist"
     /usr/libexec/PlistBuddy -c "Add :KeepAlive bool true" "$plist"
@@ -129,24 +117,6 @@ configure_runner_bootstrap_plist() {
     /usr/libexec/PlistBuddy -c "Add :StandardErrorPath string $runner_bootstrap_stderr_log" "$plist"
 }
 
-configure_legacy_runner_bootstrap_plist() {
-    local plist="$1" runner_uid="$2"
-    /bin/rm -f "$plist"
-    /usr/bin/plutil -create xml1 "$plist"
-    /usr/libexec/PlistBuddy -c "Add :Label string $runner_bootstrap_label" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :ProgramArguments array" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string $runner_bootstrap_helper" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:1 string $runner_user" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:2 string $runner_uid" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:3 string $runner_service_plist" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:4 string $runner_service_label" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :RunAtLoad bool true" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :KeepAlive dict" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :KeepAlive:SuccessfulExit bool false" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :ThrottleInterval integer 30" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :ProcessType string Background" "$plist"
-}
-
 classify_runner_service_state() {
     local legacy_exists="$1" backup_exists="$2" candidate_count="$3"
     if [[ "$legacy_exists" == "true" && "$backup_exists" == "true" ]]; then
@@ -155,7 +125,7 @@ classify_runner_service_state() {
         echo legacy
     elif [[ "$backup_exists" == "true" ]]; then
         echo journaled
-    elif [[ "$candidate_count" == "3" || "$candidate_count" == "4" ]]; then
+    elif [[ "$candidate_count" == "4" ]]; then
         echo current
     else
         echo invalid
@@ -175,13 +145,11 @@ classify_existing_runner_directory_mode() {
 }
 
 bootstrap_self_test() {
-    local acl_entry acl_listing acl_probe acl_tail bootstrap_plist_probe legacy_bootstrap_plist_probe legacy_plist_probe plist_probe
+    local acl_entry acl_listing acl_probe acl_tail bootstrap_plist_probe plist_probe
     acl_probe="$(mktemp -d -t tron-runner-acl)"
     plist_probe="$(mktemp -t tron-runner-agent.plist)"
-    legacy_plist_probe="$(mktemp -t tron-runner-legacy-agent.plist)"
     bootstrap_plist_probe="$(mktemp -t tron-runner-bootstrap.plist)"
-    legacy_bootstrap_plist_probe="$(mktemp -t tron-runner-legacy-bootstrap.plist)"
-    trap '/bin/chmod -N "$acl_probe" >/dev/null 2>&1 || true; /bin/rmdir "$acl_probe" >/dev/null 2>&1 || true; /bin/rm -f "$plist_probe" "$legacy_plist_probe" "$bootstrap_plist_probe" "$legacy_bootstrap_plist_probe"' EXIT
+    trap '/bin/chmod -N "$acl_probe" >/dev/null 2>&1 || true; /bin/rmdir "$acl_probe" >/dev/null 2>&1 || true; /bin/rm -f "$plist_probe" "$bootstrap_plist_probe"' EXIT
     chmod 750 "$acl_probe"
     acl_entry="user:$(id -un) deny list,search"
     chmod +a "$acl_entry" "$acl_probe"
@@ -216,9 +184,6 @@ bootstrap_self_test() {
         || die "release runner agent must inherit its user-domain group"
     ! plutil -extract SessionCreate raw -o - "$plist_probe" >/dev/null 2>&1 \
         || die "release runner agent must inherit its Background audit session"
-    configure_runner_service_plist "$legacy_plist_probe" true
-    [[ "$(plutil -extract SessionCreate raw -o - "$legacy_plist_probe")" == "true" ]] \
-        || die "release runner repair cannot recognize the prior audit-session contract"
     configure_runner_bootstrap_plist "$bootstrap_plist_probe" 502
     plutil -lint "$bootstrap_plist_probe" >/dev/null
     [[ "$(plutil -extract ProgramArguments.1 raw -o - "$bootstrap_plist_probe")" == "$runner_user" ]] \
@@ -233,40 +198,15 @@ bootstrap_self_test() {
         || die "release runner bootstrap daemon has the wrong durable error log"
     [[ "$(plutil -extract Umask raw -o - "$bootstrap_plist_probe")" == "63" ]] \
         || die "release runner bootstrap daemon has the wrong log-creation umask"
-    configure_legacy_runner_bootstrap_plist "$legacy_bootstrap_plist_probe" 502
-    plutil -lint "$legacy_bootstrap_plist_probe" >/dev/null
-    ! plutil -extract StandardOutPath raw -o - "$legacy_bootstrap_plist_probe" >/dev/null 2>&1 \
-        || die "release runner repair lost the prior no-log bootstrap contract"
-    ! plutil -extract StandardErrorPath raw -o - "$legacy_bootstrap_plist_probe" >/dev/null 2>&1 \
-        || die "release runner repair lost the prior no-log bootstrap contract"
-    ! plutil -extract Umask raw -o - "$legacy_bootstrap_plist_probe" >/dev/null 2>&1 \
-        || die "release runner repair lost the prior no-log bootstrap contract"
-    /usr/bin/python3 - "$legacy_bootstrap_plist_probe" <<'PY'
-import plistlib
-import sys
-
-with open(sys.argv[1], "rb") as handle:
-    document = plistlib.load(handle)
-expected_keys = {
-    "KeepAlive",
-    "Label",
-    "ProcessType",
-    "ProgramArguments",
-    "RunAtLoad",
-    "ThrottleInterval",
-}
-if set(document) != expected_keys or set(document["KeepAlive"]) != {"SuccessfulExit"}:
-    raise SystemExit("error: prior no-log bootstrap contract gained or lost keys")
-PY
     [[ "$(classify_runner_service_state true false 0)" == "legacy" ]] \
         || die "release runner migration state machine rejected the legacy state"
     [[ "$(classify_runner_service_state false true 2)" == "journaled" ]] \
         || die "release runner migration state machine rejected an interrupted candidate"
-    [[ "$(classify_runner_service_state false false 3)" == "current" \
-        && "$(classify_runner_service_state false false 4)" == "current" ]] \
+    [[ "$(classify_runner_service_state false false 4)" == "current" ]] \
         || die "release runner migration state machine rejected the current topology"
     [[ "$(classify_runner_service_state true true 4)" == "invalid" \
         && "$(classify_runner_service_state false false 1)" == "invalid" \
+        && "$(classify_runner_service_state false false 3)" == "invalid" \
         && "$(classify_runner_service_state false false 5)" == "invalid" ]] \
         || die "release runner migration state machine accepted an ambiguous topology"
     [[ "$(classify_existing_runner_directory_mode 700)" == "private" \
@@ -282,9 +222,7 @@ PY
     "$runner_diagnostics_source" --self-test >/dev/null
     /bin/rm -f \
         "$plist_probe" \
-        "$legacy_plist_probe" \
-        "$bootstrap_plist_probe" \
-        "$legacy_bootstrap_plist_probe"
+        "$bootstrap_plist_probe"
     trap - EXIT
     echo "iOS release runner bootstrap self-test passed"
 }
@@ -527,18 +465,11 @@ normalize_existing_runner_directory_mode() {
 
 stage_runner_service_files() {
     runner_plist_staging="$(mktemp -t tron-ios-release-runner.plist)"
-    runner_legacy_plist_staging="$(mktemp -t tron-ios-release-runner-legacy.plist)"
     runner_bootstrap_plist_staging="$(mktemp -t tron-ios-release-bootstrap.plist)"
-    runner_legacy_bootstrap_plist_staging="$(mktemp -t tron-ios-release-legacy-bootstrap.plist)"
     configure_runner_service_plist "$runner_plist_staging"
-    configure_runner_service_plist "$runner_legacy_plist_staging" true
     configure_runner_bootstrap_plist "$runner_bootstrap_plist_staging" "$runner_uid"
-    configure_legacy_runner_bootstrap_plist \
-        "$runner_legacy_bootstrap_plist_staging" "$runner_uid"
     plutil -lint "$runner_plist_staging" >/dev/null
-    plutil -lint "$runner_legacy_plist_staging" >/dev/null
     plutil -lint "$runner_bootstrap_plist_staging" >/dev/null
-    plutil -lint "$runner_legacy_bootstrap_plist_staging" >/dev/null
 }
 
 install_runner_service_files() {
@@ -592,119 +523,6 @@ current_runner_service_files_match() {
         && sudo /usr/bin/cmp -s "$runner_bootstrap_plist_staging" "$runner_bootstrap_plist" \
         && sudo /usr/bin/cmp -s "$runner_bootstrap_helper_source" "$runner_bootstrap_helper" \
         && sudo /usr/bin/cmp -s "$runner_session_entrypoint_source" "$runner_session_entrypoint"
-}
-
-validate_legacy_background_runner_service_files() {
-    validate_privileged_install_roots
-    validate_privileged_file "$runner_service_plist" 644
-    validate_privileged_file "$runner_bootstrap_plist" 600
-    validate_privileged_file "$runner_bootstrap_helper" 755
-    legacy_background_runner_service_files_match \
-        || die "existing Background service is not the recognized prior contract"
-}
-
-legacy_background_runner_service_files_match() {
-    local helper_sha
-    if sudo /bin/test -e "$runner_session_entrypoint" \
-        || sudo /bin/test -L "$runner_session_entrypoint"; then
-        return 1
-    fi
-    sudo /usr/bin/cmp -s "$runner_legacy_plist_staging" "$runner_service_plist" \
-        || return 1
-    sudo /usr/bin/cmp -s "$runner_legacy_bootstrap_plist_staging" "$runner_bootstrap_plist" \
-        || return 1
-    helper_sha="$(sudo /usr/bin/shasum -a 256 "$runner_bootstrap_helper" | /usr/bin/awk '{print $1}')"
-    [[ "$helper_sha" == "$legacy_background_helper_sha256" ]] \
-        || return 1
-}
-
-validate_background_service_backup() {
-    local agent_backup bootstrap_backup helper_backup helper_sha
-    validate_privileged_directory "$runner_background_backup_dir" 700
-    agent_backup="$runner_background_backup_dir/$(/usr/bin/basename "$runner_service_plist")"
-    bootstrap_backup="$runner_background_backup_dir/$(/usr/bin/basename "$runner_bootstrap_plist")"
-    helper_backup="$runner_background_backup_dir/$(/usr/bin/basename "$runner_bootstrap_helper")"
-    validate_privileged_file "$agent_backup" 644
-    validate_privileged_file "$bootstrap_backup" 600
-    validate_privileged_file "$helper_backup" 755
-    sudo /usr/bin/cmp -s "$runner_legacy_plist_staging" "$agent_backup" \
-        || die "Background rollback journal has an unrecognized agent contract"
-    sudo /usr/bin/cmp -s "$runner_legacy_bootstrap_plist_staging" "$bootstrap_backup" \
-        || die "Background rollback journal has an inconsistent bootstrap daemon"
-    helper_sha="$(sudo /usr/bin/shasum -a 256 "$helper_backup" | /usr/bin/awk '{print $1}')"
-    [[ "$helper_sha" == "$legacy_background_helper_sha256" ]] \
-        || die "Background rollback journal has an unrecognized bootstrap helper"
-}
-
-create_background_service_backup() {
-    local path backup_path
-    log_event info background_journal_create_started "file_count=3"
-    if sudo /bin/test -e "$runner_background_backup_dir" \
-        || sudo /bin/test -L "$runner_background_backup_dir"; then
-        return 1
-    fi
-    sudo /usr/bin/install -d -m 700 -o root -g wheel "$runner_background_backup_dir" \
-        || return 1
-    validate_privileged_directory "$runner_background_backup_dir" 700
-    for path in \
-        "$runner_service_plist" \
-        "$runner_bootstrap_plist" \
-        "$runner_bootstrap_helper"; do
-        backup_path="$runner_background_backup_dir/$(/usr/bin/basename "$path")"
-        sudo /bin/cp -p "$path" "$backup_path" || return 1
-        sudo /usr/bin/cmp -s "$path" "$backup_path" || return 1
-    done
-    validate_privileged_file "$runner_background_backup_dir/$(/usr/bin/basename "$runner_service_plist")" 644
-    validate_privileged_file "$runner_background_backup_dir/$(/usr/bin/basename "$runner_bootstrap_plist")" 600
-    validate_privileged_file "$runner_background_backup_dir/$(/usr/bin/basename "$runner_bootstrap_helper")" 755
-    log_event info background_journal_created "file_count=3 mode=700"
-}
-
-remove_background_service_backup() {
-    local path
-    for path in \
-        "$runner_service_plist" \
-        "$runner_bootstrap_plist" \
-        "$runner_bootstrap_helper"; do
-        sudo /bin/rm -f "$runner_background_backup_dir/$(/usr/bin/basename "$path")" \
-            || return 1
-    done
-    sudo /bin/rmdir "$runner_background_backup_dir" || return 1
-    log_event info background_journal_removed "file_count=3"
-}
-
-rollback_background_service_upgrade() {
-    local path backup_path expected_mode
-    log_event warning background_rollback_started "runner_id=${repair_runner_id:-unavailable}"
-    stop_runner_candidate_services || return 1
-    wait_for_all_runner_listeners_exit || return 1
-    wait_for_remote_runner_status offline || return 1
-    sudo /bin/rm -f "$runner_session_entrypoint" || return 1
-    for path in \
-        "$runner_service_plist" \
-        "$runner_bootstrap_plist" \
-        "$runner_bootstrap_helper"; do
-        sudo /bin/rm -f "$path" || return 1
-        backup_path="$runner_background_backup_dir/$(/usr/bin/basename "$path")"
-        sudo /bin/test -f "$backup_path" || return 1
-        case "$path" in
-            "$runner_service_plist") expected_mode=644 ;;
-            "$runner_bootstrap_plist") expected_mode=600 ;;
-            "$runner_bootstrap_helper") expected_mode=755 ;;
-            *) return 1 ;;
-        esac
-        sudo /usr/bin/install -m "$expected_mode" -o root -g wheel "$backup_path" "$path" \
-            || return 1
-    done
-    validate_legacy_background_runner_service_files
-    remove_background_service_backup || return 1
-    start_installed_runner_service_files || return 1
-    wait_for_new_runner_listener "" || return 1
-    wait_for_remote_runner_status online || return 1
-    restore_remote_runner_label || return 1
-    background_service_upgrade_active=false
-    log_event warning background_rollback_completed \
-        "runner_id=${repair_runner_id:-unavailable} status=$remote_runner_status labeled=$remote_runner_release_labeled"
 }
 
 legacy_runner_service_is_valid() {
@@ -1094,13 +912,10 @@ validate_existing_background_service() {
 runner_registration_started=false
 bootstrap_complete=false
 runner_plist_staging=""
-runner_legacy_plist_staging=""
 runner_bootstrap_plist_staging=""
-runner_legacy_bootstrap_plist_staging=""
 archive=""
 bootstrap_lock_held=false
 repair_migration_active=false
-background_service_upgrade_active=false
 repair_runner_id=""
 repair_previous_listener_pid=""
 remote_runner_busy=""
@@ -1118,7 +933,7 @@ cleanup_bootstrap() {
     trap - ERR
     set +e
     log_event info cleanup_started \
-        "exit_status=$exit_status migration_active=$repair_migration_active background_upgrade_active=$background_service_upgrade_active registration_started=$runner_registration_started bootstrap_complete=$bootstrap_complete"
+        "exit_status=$exit_status migration_active=$repair_migration_active registration_started=$runner_registration_started bootstrap_complete=$bootstrap_complete"
     if [[ -n "$archive" ]]; then
         /bin/rm -f "$archive"
     fi
@@ -1129,16 +944,6 @@ cleanup_bootstrap() {
         else
             cleanup_incomplete=true
             log_event error legacy_rollback_failed \
-                "runner_id=${repair_runner_id:-unavailable} scheduling=fenced"
-        fi
-    fi
-    if (( exit_status != 0 )) && [[ "$background_service_upgrade_active" == "true" ]]; then
-        if rollback_background_service_upgrade; then
-            log_event warning background_upgrade_recovered \
-                "runner_id=${repair_runner_id:-unavailable}"
-        else
-            cleanup_incomplete=true
-            log_event error background_upgrade_rollback_failed \
                 "runner_id=${repair_runner_id:-unavailable} scheduling=fenced"
         fi
     fi
@@ -1201,14 +1006,8 @@ cleanup_bootstrap() {
     if [[ -n "$runner_plist_staging" ]]; then
         /bin/rm -f "$runner_plist_staging"
     fi
-    if [[ -n "$runner_legacy_plist_staging" ]]; then
-        /bin/rm -f "$runner_legacy_plist_staging"
-    fi
     if [[ -n "$runner_bootstrap_plist_staging" ]]; then
         /bin/rm -f "$runner_bootstrap_plist_staging"
-    fi
-    if [[ -n "$runner_legacy_bootstrap_plist_staging" ]]; then
-        /bin/rm -f "$runner_legacy_bootstrap_plist_staging"
     fi
     if [[ "$cleanup_incomplete" == "true" ]]; then
         log_event error bootstrap_finished \
@@ -1375,31 +1174,6 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
             candidate_path_count=$((candidate_path_count + 1))
         fi
     done
-    background_backup_exists=false
-    if sudo /bin/test -e "$runner_background_backup_dir" \
-        || sudo /bin/test -L "$runner_background_backup_dir"; then
-        background_backup_exists=true
-        validate_background_service_backup
-        if (( candidate_path_count == 4 )) && current_runner_service_files_match; then
-            # A prior process installed and started the corrected candidate but
-            # exited before committing its journal. Health verification below
-            # decides whether the journal can be removed.
-            :
-        elif (( candidate_path_count == 3 )) \
-            && legacy_background_runner_service_files_match; then
-            remove_background_service_backup \
-                || die "could not clear a redundant Background rollback journal"
-            background_backup_exists=false
-        else
-            fence_remote_runner \
-                || die "could not fence an interrupted Background service upgrade"
-            background_service_upgrade_active=true
-            rollback_background_service_upgrade \
-                || die "could not recover the interrupted Background service upgrade"
-            background_backup_exists=false
-            candidate_path_count=3
-        fi
-    fi
     legacy_path_exists=false
     if sudo /bin/test -e "$legacy_runner_service_plist" \
         || sudo /bin/test -L "$legacy_runner_service_plist"; then
@@ -1415,78 +1189,30 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
             "$legacy_path_exists" "$legacy_backup_exists" "$candidate_path_count"
     )"
     log_event info service_topology_classified \
-        "state=$runner_service_state candidate_files=$candidate_path_count legacy_path=$legacy_path_exists legacy_journal=$legacy_backup_exists background_journal=$background_backup_exists"
+        "state=$runner_service_state candidate_files=$candidate_path_count legacy_path=$legacy_path_exists legacy_journal=$legacy_backup_exists"
     [[ "$runner_service_state" != "invalid" ]] \
         || die "release runner repair found an ambiguous or incomplete service topology"
 
     if [[ "$runner_service_state" == "current" ]]; then
         sudo /bin/launchctl print "system/$runner_service_label" >/dev/null 2>&1 \
             && die "legacy release runner is loaded without its immutable plist"
-        [[ "$candidate_path_count" == "3" || "$candidate_path_count" == "4" ]] \
-            || die "release runner repair found neither a complete legacy nor Background service"
-        if current_runner_service_files_match; then
-            log_event info current_service_validation_started \
-                "candidate_files=$candidate_path_count background_journal=$background_backup_exists"
-            validate_installed_runner_service_files
-            prepare_runner_security_context
-            validate_existing_background_service \
-                || die "existing Background release runner service is not healthy"
-            if [[ "$background_backup_exists" == "true" ]]; then
-                remove_background_service_backup \
-                    || die "verified Background runner still has an uncommitted rollback journal"
-                background_backup_exists=false
-            fi
-            restore_remote_runner_label \
-                || die "Background release runner is healthy but its scheduling label could not be restored"
-            bootstrap_complete=true
-            log_event info current_service_validated \
-                "runner_id=$repair_runner_id status=$remote_runner_status labeled=$remote_runner_release_labeled"
-            echo "$runner_summary"
-            echo "Release runner already uses the verified Background service topology."
-            exit 0
-        fi
-
-        validate_legacy_background_runner_service_files
-        bootstrap_phase=background_service_upgrade
-        log_event info background_upgrade_started \
-            "runner_id=$repair_runner_id prior_contract=session-create"
+        (( candidate_path_count == 4 )) \
+            || die "release runner repair found an incomplete Background service"
+        current_runner_service_files_match \
+            || die "existing Background service differs from the repository contract"
+        log_event info current_service_validation_started \
+            "candidate_files=$candidate_path_count"
+        validate_installed_runner_service_files
         prepare_runner_security_context
-        if ! create_background_service_backup; then
-            remove_background_service_backup >/dev/null 2>&1 || true
-            die "could not journal the prior Background runner service"
-        fi
-        if ! fence_remote_runner; then
-            remove_background_service_backup >/dev/null 2>&1 || true
-            die "release runner could not be fenced idle for audit-session repair"
-        fi
-        background_service_upgrade_active=true
-        repair_previous_listener_pid="$(runner_listener_pid || true)"
-        remove_runner_service_files \
-            || die "could not stop the prior Background runner service"
-        wait_for_listener_exit "$repair_previous_listener_pid" \
-            || die "prior Background runner listener did not stop"
-        wait_for_all_runner_listeners_exit \
-            || die "a Background runner listener remained during audit-session repair"
-        wait_for_remote_runner_status offline \
-            || die "GitHub did not observe the prior Background runner transition offline"
-        install_runner_service_files \
-            || die "could not install the corrected Background runner service"
-        start_runner_service_files \
-            || die "could not start the corrected Background runner service"
-        wait_for_new_runner_listener "$repair_previous_listener_pid" \
-            || die "corrected Background runner did not pass its fail-closed session entry point"
-        wait_for_remote_runner_status online \
-            || die "GitHub did not observe the corrected Background runner transition online"
-        remove_background_service_backup \
-            || die "corrected Background runner is healthy but its rollback journal remains"
-        background_service_upgrade_active=false
+        validate_existing_background_service \
+            || die "existing Background release runner service is not healthy"
         restore_remote_runner_label \
-            || die "corrected Background runner is healthy but its scheduling label remains fenced"
+            || die "Background release runner is healthy but its scheduling label could not be restored"
         bootstrap_complete=true
-        log_event info background_upgrade_committed \
+        log_event info current_service_validated \
             "runner_id=$repair_runner_id status=$remote_runner_status labeled=$remote_runner_release_labeled"
         echo "$runner_summary"
-        echo "Release runner upgraded transactionally to inherit its Background audit session."
+        echo "Release runner already uses the verified Background service topology."
         exit 0
     fi
 
@@ -1575,8 +1301,7 @@ for service_path in \
     "$runner_service_plist" \
     "$runner_bootstrap_plist" \
     "$runner_bootstrap_helper" \
-    "$runner_session_entrypoint" \
-    "$runner_background_backup_dir"; do
+    "$runner_session_entrypoint"; do
     if sudo /bin/test -e "$service_path" || sudo /bin/test -L "$service_path"; then
         die "release runner service path already exists: $service_path"
     fi

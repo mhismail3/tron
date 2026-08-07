@@ -1726,7 +1726,6 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "runner_session_entrypoint_source=\"$project_dir/scripts/ios-release-runner-session-entrypoint\"",
         "runner_diagnostics_source=\"$project_dir/scripts/ios-release-runner-diagnostics.sh\"",
         "runner_bootstrap_lock=\"/var/run/tron-ios-release-runner-bootstrap.lock\"",
-        "runner_background_backup_dir=\"$runner_bootstrap_dir/background-service-backup\"",
         "runner_log_dir=\"/Library/Logs/Tron\"",
         "runner_bootstrap_log=\"$runner_log_dir/ios-release-runner-bootstrap.log\"",
         "component=ios-release-runner-bootstrap",
@@ -1737,11 +1736,6 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "bootstrap_source_sha256=",
         "toolchain_source_sha256=",
         "release_workflow_sha256=",
-        "runner_legacy_bootstrap_plist_staging",
-        "configure_legacy_runner_bootstrap_plist()",
-        "\"$runner_legacy_bootstrap_plist_staging\" \"$runner_uid\"",
-        "prior no-log bootstrap contract gained or lost keys",
-        "legacy_background_helper_sha256=",
         "Add :ProgramArguments:0 string $runner_bootstrap_helper",
         "Add :ProgramArguments:0 string $runner_session_entrypoint",
         "! plutil -extract SessionCreate",
@@ -1772,9 +1766,6 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "fence_remote_runner()",
         "restore_remote_runner_label()",
         "rollback_to_legacy_service()",
-        "rollback_background_service_upgrade()",
-        "create_background_service_backup()",
-        "validate_background_service_backup()",
         "actions/runners/$repair_runner_id/labels/$runner_label",
         "wait_for_remote_runner_status offline",
         "wait_for_remote_runner_status online",
@@ -1849,21 +1840,6 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     assert!(
         !bootstrap.contains("BASH_COMMAND") && !bootstrap.contains("set -x"),
         "bootstrap failure logging must never record command text or enable credential-bearing shell traces"
-    );
-    let legacy_background_match_start = bootstrap
-        .find("legacy_background_runner_service_files_match()")
-        .expect("repair must own an exact prior Background contract matcher");
-    let legacy_background_match_end = bootstrap[legacy_background_match_start..]
-        .find("\n}\n\nvalidate_background_service_backup()")
-        .map(|offset| legacy_background_match_start + offset)
-        .expect("prior Background contract matcher must have a bounded body");
-    let legacy_background_match =
-        &bootstrap[legacy_background_match_start..legacy_background_match_end];
-    assert!(
-        legacy_background_match.contains(
-            "cmp -s \"$runner_legacy_bootstrap_plist_staging\" \"$runner_bootstrap_plist\"",
-        ),
-        "adding observability to the current LaunchDaemon must preserve the exact prior no-log plist for interrupted-journal recovery"
     );
     assert!(
         !bootstrap.contains("remote_runner_has_release_label"),
@@ -2114,57 +2090,6 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     assert!(
         legacy_remove < label_restore,
         "service repair must not readmit jobs until the candidate is committed"
-    );
-    let background_upgrade_start = repair
-        .find("log_event info background_upgrade_started")
-        .expect("repair must recognize the previously shipped Background contract");
-    let background_upgrade = &repair[background_upgrade_start..migration_start];
-    let background_journal = background_upgrade
-        .find("create_background_service_backup")
-        .expect("Background upgrade must journal the prior service files");
-    let background_fence = background_upgrade
-        .find("fence_remote_runner")
-        .expect("Background upgrade must fence scheduling before cutover");
-    let background_active = background_upgrade
-        .find("background_service_upgrade_active=true")
-        .expect("Background upgrade must arm transactional rollback");
-    let background_stop = background_upgrade
-        .find("remove_runner_service_files")
-        .expect("Background upgrade must stop and remove the prior service");
-    let background_install = background_upgrade
-        .find("install_runner_service_files")
-        .expect("Background upgrade must install the corrected service");
-    let background_start = background_upgrade
-        .find("start_runner_service_files")
-        .expect("Background upgrade must start the corrected service");
-    let background_listener = background_upgrade
-        .find("wait_for_new_runner_listener")
-        .expect("Background upgrade must prove the listener PID changed");
-    let background_online = background_upgrade
-        .find("wait_for_remote_runner_status online")
-        .expect("Background upgrade must bind the replacement online transition");
-    let background_journal_remove = background_online
-        + background_upgrade[background_online..]
-            .find("remove_background_service_backup")
-            .expect("Background upgrade must remove its journal after verification");
-    let background_commit = background_upgrade
-        .find("background_service_upgrade_active=false")
-        .expect("Background upgrade must commit after journal cleanup");
-    let background_label_restore = background_upgrade
-        .find("restore_remote_runner_label")
-        .expect("Background upgrade must reopen scheduling after commit");
-    assert!(
-        background_journal < background_fence
-            && background_fence < background_active
-            && background_active < background_stop
-            && background_stop < background_install
-            && background_install < background_start
-            && background_start < background_listener
-            && background_listener < background_online
-            && background_online < background_journal_remove
-            && background_journal_remove < background_commit
-            && background_commit < background_label_restore,
-        "Background service repair must journal, fence, replace through the fail-closed entry point, commit, and only then readmit jobs"
     );
     let fence_start = bootstrap
         .find("fence_remote_runner()")

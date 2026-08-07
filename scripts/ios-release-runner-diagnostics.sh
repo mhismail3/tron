@@ -135,7 +135,6 @@ for file_contract in \
 done
 
 for journal_path in \
-    "$runner_bootstrap_dir/background-service-backup" \
     "$runner_bootstrap_dir/legacy-system-service.plist"; do
     if /usr/bin/sudo /bin/test -e "$journal_path" || /usr/bin/sudo /bin/test -L "$journal_path"; then
         emit error rollback_journal_present "path=$journal_path steady_state=false"

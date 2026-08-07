@@ -3000,13 +3000,8 @@ commit; journal cleanup then precedes restoring the label. A cleanup failure
 keeps the verified candidate running and scheduling fenced. Failed pre-commit
 cutovers stop the helper before the agent, prove the exact runner offline,
 restore and verify the legacy listener, and then reopen scheduling. The durable
-journal makes process interruption and reboot resumable. Repair also recognizes
-the exact previously shipped Background agent that requested a second audit
-session. It journals those root-owned service files, installs the inheriting
-agent and immutable listener guard, and uses privileged `launchctl bsexec` to
-verify the actual replacement PID before reopening scheduling. An interrupted
-upgrade either commits a verified replacement or restores the exact journaled
-contract. A launchd `bootout` acknowledgement is not removal proof: every
+journal makes process interruption and reboot resumable. A launchd `bootout`
+acknowledgement is not removal proof: every
 forward and rollback stop waits up to 30 seconds for the exact target to become
 absent before touching its files or starting the other topology.
 
@@ -3019,14 +3014,13 @@ logs retain the doctor's exact sanitized effective/audit UID, manager type,
 Security-session attributes, filesystem boundary, toolchain, capacity, and
 source SHA. `scripts/ios-release-runner-diagnostics.sh` performs a read-only
 join of those records with installed-file hashes, rollback-journal presence,
-filtered launchd state, the actual listener's `bsexec` identity, remote runner
-state, and recent CI/TestFlight run metadata. It deliberately excludes process
+filtered launchd state, the exact listener process and Unix UID, the listener
+guard's own identity record, remote runner state, and recent CI/TestFlight run
+metadata. It deliberately excludes process
 environments, runner credentials, keychains, profiles, signing identities, raw
 job output, and Actions `_diag` files, and returns nonzero only after completing
-the snapshot when any required health check is bad. The current logged
-LaunchDaemon and exact former no-log definition are staged separately, so the
-observability upgrade can still authenticate and restore a journal written by
-the prior contract. Root never mutates runner-owned home descendants. The iOS
+the snapshot when any required health check is bad. Root never mutates
+runner-owned home descendants. The iOS
 development runbook owns the current agent, entry point, boot-helper,
 legacy cleanup, and full rotation paths. A secretless recovery step then
 restores the baseline keychain preferences, removes only paths claimed by
