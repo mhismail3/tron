@@ -747,12 +747,12 @@ read-only worker audits, which have no composer, use the standard sheet loading
 state. Hidden interactive rows reject gestures and accessibility focus until
 their initial viewport is settled. Composer actions use the session transport's
 current connection state instead of a second debounced readiness owner.
-Reconstruction completes cache and database reads before one non-suspending
-MainActor commit publishes transcript rows, context state, agent state, and the
-authoritative composer phase together. A five-second presentation watchdog ends
-stale loading copy without promoting cached or absent data to authority. An
-uncached failure shows recoverable status and continues bounded reconnect
-attempts.
+Reconstruction prepares its projection before one non-suspending MainActor
+commit publishes transcript rows, context state, agent state, and the
+authoritative composer phase together. Device-cache persistence then runs off
+the presentation critical path. A five-second presentation watchdog ends stale
+loading copy without promoting cached or absent data to authority. An uncached
+failure shows recoverable status and continues bounded reconnect attempts.
 
 Cached and authoritative rows use the same bounded geometry settle and fade.
 After authoritative replacement changes lazy row heights, the shell performs

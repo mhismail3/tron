@@ -35,7 +35,10 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
         XCTAssertEqual(writer.conversationHistoryPhase, .authoritative)
         XCTAssertNotNil(writer.sessionLoadDiagnostics.snapshot.interactiveMs)
 
-        let cachedEvents = try await database.events.getBySession("cached-session")
+        let cachedEvents = try await waitForCachedEvents(
+            in: database,
+            sessionId: "cached-session"
+        )
         XCTAssertEqual(cachedEvents.map(\.id), ["cached-user-message"])
 
         let reader = ChatViewModel(
@@ -106,6 +109,7 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
             eventStoreManager: manager
         )
         await writer.processReconstructionResult(reconstructionResult(content: "cached hello"))
+        _ = try await waitForCachedEvents(in: database, sessionId: "cached-session")
         let reader = ChatViewModel(
             engineClient: engineClient,
             sessionId: "cached-session",
@@ -168,5 +172,21 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
                 totalCost: nil
             )
         )
+    }
+
+    /// Reconstruction deliberately schedules disposable cache persistence
+    /// outside the presentation-critical path. Tests observe that async
+    /// contract through the repository instead of assuming task scheduling
+    /// order on the MainActor.
+    private func waitForCachedEvents(
+        in database: EventDatabase,
+        sessionId: String
+    ) async throws -> [SessionEvent] {
+        for _ in 0..<20 {
+            let events = try await database.events.getBySession(sessionId)
+            if !events.isEmpty { return events }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        return try await database.events.getBySession(sessionId)
     }
 }

@@ -123,9 +123,11 @@ extension ChatViewModel {
         // observable part of the authoritative projection. Otherwise SwiftUI
         // can render new rows while the composer still says it is loading.
         let state = UnifiedEventTransformer.reconstructSessionState(from: mergedEvents, presorted: true)
-        await cacheReconstructionEvents(mergedEvents)
-        let cachedSessionCost = await loadCachedSessionCost()
         guard !Task.isCancelled else { return }
+        let cachedSessionCost = eventStoreManager?.sessions
+            .first(where: { $0.id == sessionId })?
+            .cost
+        scheduleReconstructionEventCache(mergedEvents)
 
         // INVARIANT: Do not suspend between this marker and
         // `conversationHistoryPhase = .authoritative`. Messages, controls,
@@ -244,25 +246,11 @@ extension ChatViewModel {
         logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), loadedEvents=\(loadedReconstructionEvents.count), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil)", category: .session)
     }
 
-    /// Read the last device-cached cost before the observable reconstruction
-    /// commit. Server metadata overrides it below when present.
-    private func loadCachedSessionCost() async -> Double? {
-        guard let manager = eventStoreManager else { return nil }
-        do {
-            return try await manager.eventDB.sessions.get(sessionId)?.cost
-        } catch {
-            logger.warning(
-                "Failed to read session cost: \(error.localizedDescription)",
-                category: .session
-            )
-            return nil
-        }
-    }
-
     /// Keep the disposable device cache warm for the next presentation. The
     /// server remains authoritative; rows are immutable event identities and
-    /// duplicate inserts are ignored.
-    private func cacheReconstructionEvents(_ events: [RawEvent]) async {
+    /// duplicate inserts are ignored. Persistence is deliberately outside the
+    /// current presentation's critical path.
+    private func scheduleReconstructionEventCache(_ events: [RawEvent]) {
         guard !events.isEmpty, let manager = eventStoreManager else { return }
         let cachedEvents = events.map { event in
             SessionEvent(
@@ -276,13 +264,16 @@ extension ChatViewModel {
                 payload: event.payload
             )
         }
-        do {
-            _ = try await manager.eventDB.events.insertIgnoringDuplicates(cachedEvents)
-        } catch {
-            logger.warning(
-                "[CACHE] Could not persist reconstructed session history: \(error.localizedDescription)",
-                category: .database
-            )
+        let eventsRepository = manager.eventDB.events
+        Task {
+            do {
+                _ = try await eventsRepository.insertIgnoringDuplicates(cachedEvents)
+            } catch {
+                logger.warning(
+                    "[CACHE] Could not persist reconstructed session history: \(error.localizedDescription)",
+                    category: .database
+                )
+            }
         }
     }
 
