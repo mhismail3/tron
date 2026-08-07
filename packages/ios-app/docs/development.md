@@ -787,6 +787,8 @@ machine-specific queue.
 App Store Connect authentication remains environment-backed. When manual
 signing secrets are configured, the job validates the supplied distribution
 certificate against checksum-pinned Apple Root and WWDR G3 certificates,
+decodes Keychain-exported bundles with OpenSSL 3's explicit legacy PKCS#12
+provider for Apple-compatible legacy encryption,
 captures the hosted user's existing keychain search/default state, creates one
 run-attempt-named keychain, and installs only the two validated provisioning
 profiles. CodeSign must sign a probe and embed the exact validated chain before
