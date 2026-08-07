@@ -32,9 +32,6 @@ struct ChatView: View {
     // See: https://www.hackingwithswift.com/quick-start/swiftui/how-to-present-multiple-sheets
     @State var sheetCoordinator = SheetCoordinator()
 
-    // MARK: - Interaction policy (read-only gate for input bar, shared app-wide debounce)
-    @Environment(\.interactionPolicy) var interactionPolicy
-
     // MARK: - Navigation Lifecycle (SDF crash guard)
     // Disables .textSelection(.enabled) before navigation pop animation starts,
     // preventing EXC_BREAKPOINT in SwiftUI.SDFStyle.distanceRange.getter
@@ -332,8 +329,8 @@ struct ChatView: View {
             if initialLoadComplete, newState.isConnected && !oldState.isConnected {
                 scheduleReconstructionRefresh()
             }
-            // Input-bar read-only mode is derived from `interactionPolicy` (500ms
-            // reconnect debounce) — no per-view debounce state needed.
+            // Composer actions read this same session transport state directly;
+            // successful reconstruction must not wait on a second readiness owner.
         }
         .onChange(of: viewModel.streamRecoveryRequestGeneration) { _, _ in
             guard presentationMode == .interactiveSession else { return }

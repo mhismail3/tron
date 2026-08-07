@@ -23,12 +23,28 @@ enum ConversationHistoryPhase: Equatable, Sendable {
         }
     }
 
-    var allowsDraftEditing: Bool {
+    /// Local draft actions are safe as soon as a usable transcript is visible.
+    /// They do not mutate the server session and therefore do not wait for the
+    /// authoritative reconstruction cut.
+    var allowsLocalDraftActions: Bool {
         switch self {
         case .cachedSynchronizing, .authoritative, .recoverableFailure(hasCachedTranscript: true):
             true
         case .loading, .recoverableFailure(hasCachedTranscript: false):
             false
+        }
+    }
+
+    /// Server submission remains gated until reconstruction commits. Keep the
+    /// reason phase-owned so every composer actuator explains the same state.
+    var submissionBlockReason: SendBlockReason? {
+        switch self {
+        case .loading, .cachedSynchronizing:
+            .historySynchronizing
+        case .authoritative:
+            nil
+        case .recoverableFailure:
+            .historyUnavailable
         }
     }
 

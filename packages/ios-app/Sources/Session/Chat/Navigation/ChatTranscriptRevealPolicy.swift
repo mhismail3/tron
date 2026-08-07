@@ -26,14 +26,15 @@ enum ChatTranscriptRevealPolicy {
         initialLoadComplete ? 1 : 0
     }
 
-    /// A delayed authoritative snapshot must never look like an empty chat.
-    /// Cached messages are useful immediately while the server refreshes them;
-    /// a genuinely empty session is known only after reconstruction commits.
-    static func showsHistoryLoadingState(
+    /// Interactive chats already expose progress in their composer. A
+    /// read-only transcript without a composer needs one standalone status so
+    /// its sheet does not look broken while reconstruction is pending.
+    static func showsStandaloneLoadingState(
         phase: ConversationHistoryPhase,
-        hasMessages: Bool
+        hasMessages: Bool,
+        hasComposer: Bool
     ) -> Bool {
-        phase == .loading && !hasMessages
+        !hasComposer && phase == .loading && !hasMessages
     }
 
     static func showsHistoryRecoveryState(

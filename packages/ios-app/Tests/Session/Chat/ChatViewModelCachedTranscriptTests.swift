@@ -120,7 +120,7 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
             reader.conversationHistoryPhase,
             .recoverableFailure(hasCachedTranscript: true)
         )
-        XCTAssertTrue(reader.conversationHistoryPhase.allowsDraftEditing)
+        XCTAssertTrue(reader.conversationHistoryPhase.allowsLocalDraftActions)
         XCTAssertFalse(reader.hasAuthoritativeHistory)
     }
 
@@ -135,7 +135,7 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
         viewModel.recordReconstructionOutcome(.retryableFailure)
 
         XCTAssertEqual(viewModel.conversationHistoryPhase, .authoritative)
-        XCTAssertTrue(viewModel.conversationHistoryPhase.allowsDraftEditing)
+        XCTAssertTrue(viewModel.conversationHistoryPhase.allowsLocalDraftActions)
     }
 
     private func reconstructionResult(content: String) -> SessionReconstructResult {

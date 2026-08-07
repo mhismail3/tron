@@ -24,8 +24,9 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             ("chat-thinking-neural-spark.png", AnyView(Self.thinkingView), CGSize(width: 430, height: 180)),
             ("chat-tool-chip.png", AnyView(Self.toolChipView), CGSize(width: 430, height: 180)),
             ("chat-connection-toast.png", AnyView(Self.connectionToastView), CGSize(width: 430, height: 180)),
-            ("chat-composer-idle.png", AnyView(ComposerFixture()), CGSize(width: 430, height: 180)),
-            ("chat-composer-cached-syncing.png", AnyView(ComposerFixture(isSynchronizing: true)), CGSize(width: 430, height: 180)),
+            ("chat-composer-idle.png", AnyView(ComposerFixture(phase: .authoritative)), CGSize(width: 430, height: 180)),
+            ("chat-composer-loading.png", AnyView(ComposerFixture(phase: .loading)), CGSize(width: 430, height: 180)),
+            ("chat-composer-cached-syncing.png", AnyView(ComposerFixture(phase: .cachedSynchronizing)), CGSize(width: 430, height: 180)),
             ("sheet-loading-typography.png", AnyView(Self.sheetLoadingView), CGSize(width: 430, height: 180)),
         ]
 
@@ -140,7 +141,7 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
     }
 
     private struct ComposerFixture: View {
-        var isSynchronizing = false
+        let phase: ConversationHistoryPhase
         @State private var state = InputBarState()
 
         var body: some View {
@@ -149,13 +150,17 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
                 InputBar(
                     state: state,
                     config: InputBarConfig(
+                        speechTranscriptionAvailable: true,
+                        placeholderText: phase.placeholderText,
+                        placeholderShowsProgress: phase.placeholderShowsProgress,
                         contextPercentage: 68,
                         currentModelInfo: nil,
                         readOnly: false,
-                        allowsTextEntry: true,
-                        allowsAttachments: !isSynchronizing,
-                        allowsSubmission: !isSynchronizing,
-                        availabilityBlockReason: isSynchronizing ? .historySynchronizing : nil
+                        allowsTextEntry: phase.allowsLocalDraftActions,
+                        allowsAttachments: phase.allowsLocalDraftActions,
+                        allowsSpeechCapture: phase.allowsLocalDraftActions,
+                        allowsSubmission: phase.hasAuthoritativeSnapshot,
+                        availabilityBlockReason: phase.submissionBlockReason
                     ),
                     actions: InputBarActions(onContextTap: {})
                 )

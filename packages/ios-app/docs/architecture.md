@@ -737,13 +737,19 @@ view model backed by the previous server's repositories. Initial
 reconstruction first mounts any durable rows already held by the device event
 cache, then refreshes them from the server-authoritative snapshot. Successful
 snapshots update that cache; closing the chat performs no redundant history
-RPC. One `ConversationHistoryPhase` drives transcript, overview, and composer:
+RPC. One `ConversationHistoryPhase` drives transcript reveal and the composer:
 loading, cached-and-synchronizing, authoritative, or recoverable failure. Cached
-rows switch the prompt to `Type here` and permit a local draft, while send,
-speech, and attachment selection remain visible but disabled until the server
-snapshot commits. A five-second presentation watchdog ends stale loading copy
-without promoting cached or absent data to authority. An uncached failure shows
-recoverable status and continues bounded reconnect attempts.
+rows switch the prompt to `Type here` and permit draft text, attachment
+selection, and speech capture; only send waits for the server snapshot to
+commit. An uncached initial load shows progress only in the composer rather
+than covering the interactive transcript with a second loading presentation;
+read-only worker audits, which have no composer, use the standard sheet loading
+state. Hidden interactive rows reject gestures and accessibility focus until
+their initial viewport is settled. Composer actions use the session transport's
+current connection state instead of a second debounced readiness owner. A
+five-second presentation watchdog ends stale loading copy without promoting
+cached or absent data to authority. An uncached failure shows recoverable status
+and continues bounded reconnect attempts.
 
 Cached and authoritative rows use the same bounded geometry settle and fade.
 After authoritative replacement changes lazy row heights, the shell performs

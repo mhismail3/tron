@@ -69,10 +69,6 @@ enum MessageContent: Equatable {
     static func messageDeleted(targetType: String) -> MessageContent {
         .systemEvent(.messageDeleted(targetType: targetType))
     }
-    /// In-chat notification for catching up to in-progress session
-    static var catchingUp: MessageContent {
-        .systemEvent(.catchingUp)
-    }
     /// In-chat notification for turn failure
     static func turnFailed(
         error: String,
