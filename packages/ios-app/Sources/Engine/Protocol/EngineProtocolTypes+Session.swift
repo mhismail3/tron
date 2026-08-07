@@ -204,6 +204,13 @@ struct SessionContextRequestSummaryDTO: Decodable, Equatable, Identifiable, Send
     let messageCount: UInt64
     let toolCount: UInt64
     let automaticContextCount: UInt64
+    /// Lightweight inventory fields added after the original request-history
+    /// projection. They remain optional so a newer app can still inspect an
+    /// older paired server without failing the complete response decode.
+    let instructionCount: UInt64?
+    let attachmentMessageCount: UInt64?
+    let agentDeliveryCount: UInt64?
+    let environmentAvailable: Bool?
     let manifestAvailable: Bool
     let provenanceAvailability: String
 

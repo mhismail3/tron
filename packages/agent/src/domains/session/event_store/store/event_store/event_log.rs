@@ -391,31 +391,41 @@ impl EventStore {
 
     /// Resolve one bounded reverse-chronological page of provider-request
     /// audit events, including blob-backed payloads.
+    ///
+    /// The look-ahead row is used only to establish `has_more`. Its potentially
+    /// large payload is deliberately not resolved; callers asking for one
+    /// summary must never deserialize two complete provider contexts.
     pub(crate) fn get_provider_request_audits(
         &self,
         session_id: &str,
         before_sequence: Option<i64>,
-        limit: i64,
-    ) -> Result<Vec<(EventRow, serde_json::Value)>> {
+        page_size: usize,
+    ) -> Result<(Vec<(EventRow, serde_json::Value)>, bool)> {
         let conn = self.conn()?;
-        EventRepo::get_by_type_before_sequence(
+        let fetch_limit = i64::try_from(page_size.saturating_add(1)).unwrap_or(i64::MAX);
+        let mut rows = EventRepo::get_by_type_before_sequence(
             &conn,
             session_id,
             EventType::ModelProviderRequest.as_str(),
             before_sequence,
-            limit,
-        )?
-        .into_iter()
-        .map(|row| {
-            let payload = crate::shared::storage::resolve_stored_json_value(&conn, &row.payload)
-                .map_err(|error| {
-                    crate::domains::session::event_store::errors::EventStoreError::Internal(
-                        format!("resolve provider request audit {}: {error:#}", row.id),
-                    )
-                })?;
-            Ok((row, payload))
-        })
-        .collect()
+            fetch_limit,
+        )?;
+        let has_more = rows.len() > page_size;
+        rows.truncate(page_size);
+        let resolved = rows
+            .into_iter()
+            .map(|row| {
+                let payload =
+                    crate::shared::storage::resolve_stored_json_value(&conn, &row.payload)
+                        .map_err(|error| {
+                            crate::domains::session::event_store::errors::EventStoreError::Internal(
+                                format!("resolve provider request audit {}: {error:#}", row.id),
+                            )
+                        })?;
+                Ok((row, payload))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok((resolved, has_more))
     }
 
     /// Resolve one exact provider-request audit owned by a session.

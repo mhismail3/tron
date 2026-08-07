@@ -1,5 +1,16 @@
 import SwiftUI
 
+enum SessionContextDetailDestination: Equatable {
+    case instructions
+    case messages
+    case deliveries
+    case attachments
+    case environment
+    case tools
+    case automaticContext
+    case providerAudit
+}
+
 struct SessionContextSheet: View {
     @Environment(\.dependencies) private var dependencies
     let sessionId: String
@@ -38,12 +49,13 @@ struct SessionContextSheet: View {
     @State var workerCatalogRevision: UInt64 = 0
     @State var loadedWorkerCatalogRevision: UInt64?
     @State var loadOlderWorkerRunsPending = false
-    @State var contextRequests: [SessionContextRequestSummaryDTO] = []
-    @State var contextRequestsNextSequence: Int64?
+    @State var latestContextSummary: SessionContextRequestSummaryDTO?
     @State var latestContextDetail: SessionContextRequestDetailDTO?
     @State var isLoadingInspectableContext = false
     @State var contextLoadingGeneration: UInt64?
     @State var contextLoadError: String?
+    @State var contextDetailLoadingDestination: SessionContextDetailDestination?
+    @State var contextDetailLoadingGeneration: UInt64 = 0
     @State var agentUpdates: [SessionAgentUpdateDTO] = []
     @State var agentWaits: [SessionAgentWaitDTO] = []
     @State var agentUpdatesLoadError: String?
@@ -52,7 +64,6 @@ struct SessionContextSheet: View {
     @State var agentUpdatesLoadingGeneration: UInt64?
     @State var showDeliveryHistorySheet = false
     @State var selectedContextDetail: SessionContextDetailSelection?
-    @State var showContextHistory = false
 
     var isConnected: Bool {
         dependencies.connectionRepository.connectionState.isConnected
@@ -94,21 +105,11 @@ struct SessionContextSheet: View {
     var workerRunGroups: [SessionWorkerRunGroup] {
         SessionContextPresentation.causalGroups(sessionWorkerRuns)
     }
-    var latestContextSummary: SessionContextRequestSummaryDTO? {
-        contextRequests.first
-    }
     var manifest: SessionContextManifestDTO? {
         latestContextDetail?.contextManifest
     }
     var allSystemContributions: [ContextSystemContributionDTO] {
         (manifest?.systemContributions ?? []) + (latestContextDetail?.providerAdditions ?? [])
-    }
-    var requestWorkerSelections: [SessionContextWorkerSelection] {
-        SessionContextPresentation.workerSelections(from: manifest?.toolSurface)
-    }
-
-    var requestFixedToolSelections: [SessionContextFixedToolSelection] {
-        SessionContextPresentation.fixedToolSelections(from: manifest?.toolSurface)
     }
     var activeAgentUpdates: [SessionAgentUpdateDTO] {
         agentUpdates.filter {
@@ -152,10 +153,9 @@ struct SessionContextSheet: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: SessionContextPresentation.sectionSpacing) {
                     sessionSummary
-                    requestSummarySection
                     receivedContextSection
                     agentUpdatesSection
-                    if manifest?.automaticContext.isEmpty == false {
+                    if automaticContextCount > 0 {
                         automaticContextSection
                     }
                     workerActivitySection
@@ -266,17 +266,6 @@ struct SessionContextSheet: View {
                     agentUpdateCard(update)
                 }
             }
-        }
-        .sheet(isPresented: $showContextHistory) {
-            SessionContextHistorySheet(
-                requests: contextRequests,
-                models: availableModels,
-                hasMore: contextRequestsNextSequence != nil,
-                loadMore: { await loadOlderContextRequests() },
-                select: { request in
-                    await selectContextRequest(request)
-                }
-            )
         }
         .tronErrorAlert(message: $errorMessage)
     }

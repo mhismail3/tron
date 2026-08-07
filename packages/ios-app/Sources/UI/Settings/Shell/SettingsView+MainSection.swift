@@ -228,12 +228,8 @@ extension SettingsView {
     }
 
     var footerView: some View {
-        HStack(alignment: .center, spacing: 12) {
-            footerText
-            Spacer(minLength: 12)
-            feedbackFooterButton
-        }
-        .frame(maxWidth: .infinity)
+        footerText
+            .frame(maxWidth: .infinity)
     }
 
     var footerText: some View {
@@ -245,29 +241,5 @@ extension SettingsView {
             .lineLimit(1)
             .minimumScaleFactor(0.92)
     }
-
-    var feedbackFooterButton: some View {
-        let shape = RoundedRectangle(
-            cornerRadius: MainSettingsFooterLayout.feedbackButtonCornerRadius,
-            style: .continuous
-        )
-        return Button {
-            prepareAndPresentFeedback()
-        } label: {
-            Text("Send Feedback")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .contentShape(shape)
-        }
-        .buttonStyle(.plain)
-        .footerFeedbackButtonChrome()
-        .disabled(isPreparingFeedback)
-        .opacity(isPreparingFeedback ? 0.55 : 1)
-    }
-
 
 }

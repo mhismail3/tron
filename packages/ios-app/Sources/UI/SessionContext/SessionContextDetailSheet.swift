@@ -12,7 +12,7 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
         workers: [SessionContextWorkerSelection],
         raw: AnyCodable?
     )
-    case automatic(ContextAutomaticEvaluationDTO)
+    case automatic([ContextAutomaticEvaluationDTO])
     case providerAudit(
         SessionContextRequestDetailDTO,
         cacheReadTokens: Int,
@@ -27,7 +27,7 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
         case .environment: "environment"
         case .deliveries: "deliveries"
         case .tools: "tools"
-        case .automatic(let evaluation): "automatic:\(evaluation.id)"
+        case .automatic: "automatic"
         case .providerAudit(let detail, _, _): "provider:\(detail.eventId)"
         }
     }
@@ -40,8 +40,7 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
         case .environment: "Environment"
         case .deliveries: "Updates Included"
         case .tools: "Tool Surface"
-        case .automatic(let evaluation):
-            evaluation.kind == "continuity" ? "Continuity" : "Worker Results"
+        case .automatic: "Legacy Automatic Context"
         case .providerAudit: "Provider Request"
         }
     }
@@ -284,60 +283,13 @@ struct SessionContextDetailSheet: View {
                 }
             }
 
-        case .automatic(let evaluation):
-            SettingsSectionHeader(title: "Evaluation", bottomPadding: 4)
-            VStack(spacing: 0) {
-                metadataRow(
-                    "Outcome",
-                    WorkerConsolePresentation.displayLabel(evaluation.outcome)
-                )
-                Divider().opacity(0.35)
-                metadataRow(
-                    "Selection",
-                    WorkerConsolePresentation.displayLabel(evaluation.mechanism)
-                )
-                Divider().opacity(0.35)
-                metadataRow(
-                    "Delivered as",
-                    SessionContextPresentation.automaticContextChannel(evaluation)
-                )
-                Divider().opacity(0.35)
-                metadataRow("Policy worker", evaluation.workerId ?? "No worker ran")
-                Divider().opacity(0.35)
-                metadataRow("Version", evaluation.workerVersion ?? "Unavailable", code: true)
-                Divider().opacity(0.35)
-                metadataRow("Invocation", evaluation.invocationId ?? "Unavailable", code: true)
-            }
-            .padding(.horizontal, 13)
-            .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
-
-            SettingsSectionHeader(
-                title: evaluation.deliveryChannel == "reference"
-                    ? "Reference context"
-                    : "Injected narrative",
-                bottomPadding: 4
-            )
-            auditText(
-                evaluation.narrative
-                    ?? evaluation.detail
-                    ?? "No narrative was injected for this request."
-            )
-
-            SettingsSectionHeader(
-                title: "Sources (\(evaluation.sources.count))",
-                bottomPadding: 4
-            )
-            if evaluation.sources.isEmpty {
-                emptyState(
-                    evaluation.detail
-                        ?? "This evaluation recorded no source-level provenance."
-                )
+        case .automatic(let evaluations):
+            if evaluations.isEmpty {
+                emptyState("No automatic context evaluations were recorded.")
             } else {
-                auditText(
-                    SessionContextAuditFormatter.projectedJSONString(
-                        AnyCodable(evaluation.sources.map(\.value))
-                    )
-                )
+                ForEach(evaluations) { evaluation in
+                    automaticEvaluationDetail(evaluation)
+                }
             }
 
         case .providerAudit(let detail, let cacheReadTokens, let cacheWriteTokens):
@@ -436,6 +388,63 @@ struct SessionContextDetailSheet: View {
                 title: "View redacted JSON",
                 subtitle: "Formatted only when opened",
                 destination: .providerAudit(detail.providerAudit)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func automaticEvaluationDetail(
+        _ evaluation: ContextAutomaticEvaluationDTO
+    ) -> some View {
+        SettingsSectionHeader(
+            title: evaluation.kind == "continuity" ? "Continuity" : "Worker Results",
+            bottomPadding: 4
+        )
+        VStack(spacing: 0) {
+            metadataRow("Outcome", WorkerConsolePresentation.displayLabel(evaluation.outcome))
+            Divider().opacity(0.35)
+            metadataRow("Selection", WorkerConsolePresentation.displayLabel(evaluation.mechanism))
+            Divider().opacity(0.35)
+            metadataRow(
+                "Delivered as",
+                SessionContextPresentation.automaticContextChannel(evaluation)
+            )
+            Divider().opacity(0.35)
+            metadataRow("Policy worker", evaluation.workerId ?? "No worker ran")
+            Divider().opacity(0.35)
+            metadataRow("Version", evaluation.workerVersion ?? "Unavailable", code: true)
+            Divider().opacity(0.35)
+            metadataRow("Invocation", evaluation.invocationId ?? "Unavailable", code: true)
+        }
+        .padding(.horizontal, 13)
+        .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
+
+        SettingsSectionHeader(
+            title: evaluation.deliveryChannel == "reference"
+                ? "Reference context"
+                : "Injected narrative",
+            bottomPadding: 4
+        )
+        auditText(
+            evaluation.narrative
+                ?? evaluation.detail
+                ?? "No narrative was injected for this request."
+        )
+
+        SettingsSectionHeader(
+            title: "Sources (\(evaluation.sources.count))",
+            bottomPadding: 4
+        )
+        if evaluation.sources.isEmpty {
+            emptyState(
+                evaluation.detail
+                    ?? "This evaluation recorded no source-level provenance."
+            )
+        } else {
+            auditText(
+                SessionContextAuditFormatter.projectedJSONString(
+                    AnyCodable(evaluation.sources.map(\.value))
+                )
             )
         }
     }

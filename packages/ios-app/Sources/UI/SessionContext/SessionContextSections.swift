@@ -81,83 +81,71 @@ extension SessionContextSheet {
         return "\(TokenFormatter.format(effectiveContextWindow, style: .withSuffix)) window"
     }
 
-    var requestSummarySection: some View {
+    var receivedContextSection: some View {
         VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
             SettingsSectionHeader(
-                title: "Latest model request",
+                title: "What the agent received",
                 bottomPadding: SessionContextPresentation.headerToContentSpacing
             )
 
-            if let summary = latestContextSummary {
-                Button {
-                    showContextHistory = true
-                } label: {
-                    VStack(spacing: 9) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(SessionContextPresentation.modelDisplayName(
-                                summary.model,
-                                models: availableModels,
-                                fallback: currentModelDisplayName
-                            ))
-                                .font(TronTypography.sans(
-                                    size: TronTypography.sizeBody,
-                                    weight: .semibold
-                                ))
-                                .foregroundStyle(.tronTextPrimary)
-                            Spacer()
-                            Text(summary.turn.map { "Turn \($0)" } ?? "Legacy")
-                                .font(TronTypography.pillValue)
-                                .foregroundStyle(.tronEmerald)
-                        }
-
-                        HStack(spacing: 8) {
-                            Label(
-                                summary.providerName ?? summary.providerType ?? "Provider",
-                                systemImage: "network"
-                            )
-                            Spacer()
-                            Text(
-                                WorkerConsolePresentation.timestamp(summary.timestamp)
-                                    ?? summary.timestamp
-                            )
-                        }
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-
-                        if summary.provenanceAvailability != "complete" {
-                            Label(
-                                "Legacy audit: exact request remains available, but source provenance was not recorded.",
-                                systemImage: "clock.badge.exclamationmark"
-                            )
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronAmber)
-                            .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(14)
-                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if latestContextSummary != nil {
+                VStack(spacing: 0) {
+                    contextDisclosureRow(
+                        title: "Instructions",
+                        detail: "\(instructionContributionCount) ordered contributions",
+                        symbol: "text.alignleft",
+                        accent: .tronPurple,
+                        destination: .instructions
+                    )
+                    Divider().opacity(0.35)
+                    contextDisclosureRow(
+                        title: "Conversation & compaction",
+                        detail: "\(providerMessageCount) provider-visible messages",
+                        symbol: "bubble.left.and.bubble.right",
+                        accent: .tronCyan,
+                        destination: .messages
+                    )
+                    Divider().opacity(0.35)
+                    contextDisclosureRow(
+                        title: "Updates included",
+                        detail: "\(includedDeliveryCount) included in this model request",
+                        symbol: "bell.and.waves.left.and.right",
+                        accent: .tronEmerald,
+                        destination: .deliveries
+                    )
+                    Divider().opacity(0.35)
+                    contextDisclosureRow(
+                        title: "Attachments & documents",
+                        detail: "\(attachmentMessageCount) projected media messages",
+                        symbol: "paperclip",
+                        accent: .tronBlue,
+                        destination: .attachments
+                    )
+                    Divider().opacity(0.35)
+                    contextDisclosureRow(
+                        title: "Environment",
+                        detail: environmentContextDescription,
+                        symbol: "folder",
+                        accent: .tronAmber,
+                        destination: .environment
+                    )
+                    Divider().opacity(0.35)
+                    contextDisclosureRow(
+                        title: "Tool surface",
+                        detail: "\(latestContextSummary?.toolCount ?? 0) exact tools",
+                        symbol: "wrench.and.screwdriver",
+                        accent: .tronEmerald,
+                        destination: .tools
+                    )
                 }
-                .buttonStyle(.plain)
-                .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: true)
-                .accessibilityHint("Shows model request history")
+                .sectionFill(.tronPurple, cornerRadius: 12, subtle: true, interactive: false)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
                 if let contextLoadError {
                     Label(contextLoadError, systemImage: "exclamationmark.triangle")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronAmber)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .sectionFill(
-                            .tronAmber,
-                            cornerRadius: 10,
-                            subtle: true,
-                            interactive: false
-                        )
                 }
-            } else if isLoadingInspectableContext {
-                SheetLoadingState(label: "Loading model context…")
-                    .frame(maxWidth: .infinity)
-                    .padding(14)
-                    .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
             } else {
                 Button {
                     if contextLoadError != nil {
@@ -165,16 +153,22 @@ extension SessionContextSheet {
                     }
                 } label: {
                     HStack(spacing: 8) {
-                        Label(
-                            contextLoadError ?? "No provider request has been recorded yet.",
-                            systemImage: contextLoadError == nil
+                        if isLoadingInspectableContext {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: contextLoadError == nil
                                 ? "text.page.badge.magnifyingglass"
-                                : "exclamationmark.triangle"
+                                : "exclamationmark.triangle")
+                        }
+                        Text(
+                            contextLoadError
+                                ?? (isLoadingInspectableContext
+                                    ? "Loading request context…"
+                                    : "No provider request has been recorded yet.")
                         )
                         Spacer(minLength: 0)
                         if contextLoadError != nil {
-                            Text("Retry")
-                                .font(TronTypography.pillValue)
+                            Text("Retry").font(TronTypography.pillValue)
                         }
                     }
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -191,83 +185,6 @@ extension SessionContextSheet {
                     interactive: contextLoadError != nil
                 )
             }
-        }
-    }
-
-    var receivedContextSection: some View {
-        VStack(alignment: .leading, spacing: SessionContextPresentation.headerToContentSpacing) {
-            SettingsSectionHeader(
-                title: "What the agent received",
-                bottomPadding: SessionContextPresentation.headerToContentSpacing
-            )
-
-            VStack(spacing: 0) {
-                contextDisclosureRow(
-                    title: "Instructions",
-                    detail: "\(allSystemContributions.count) ordered contributions",
-                    symbol: "text.alignleft",
-                    accent: .tronPurple
-                ) {
-                    selectedContextDetail = .instructions(allSystemContributions)
-                }
-                Divider().opacity(0.35)
-                contextDisclosureRow(
-                    title: "Conversation & compaction",
-                    detail: "\(providerMessageCount) provider-visible messages",
-                    symbol: "bubble.left.and.bubble.right",
-                    accent: .tronCyan
-                ) {
-                    selectedContextDetail = .messages(manifest?.messages ?? [])
-                }
-                Divider().opacity(0.35)
-                contextDisclosureRow(
-                    title: "Updates included",
-                    detail: "\(manifest?.agentDeliveries.count ?? 0) included in this model request.",
-                    symbol: "bell.and.waves.left.and.right",
-                    accent: .tronEmerald
-                ) {
-                    selectedContextDetail = .deliveries(manifest?.agentDeliveries ?? [])
-                }
-                Divider().opacity(0.35)
-                contextDisclosureRow(
-                    title: "Attachments & documents",
-                    detail: "\(attachmentMessageCount) projected media messages",
-                    symbol: "paperclip",
-                    accent: .tronBlue
-                ) {
-                    selectedContextDetail = .attachments(
-                        manifest?.messages.filter {
-                            !$0.contentKinds.filter { $0 == "image" || $0 == "document" }.isEmpty
-                        } ?? []
-                    )
-                }
-                Divider().opacity(0.35)
-                contextDisclosureRow(
-                    title: "Environment",
-                    detail: manifest?.environment.workingDirectory == nil
-                        ? "No environment projection"
-                        : "Working directory and server route",
-                    symbol: "folder",
-                    accent: .tronAmber
-                ) {
-                    selectedContextDetail = .environment(manifest?.environment)
-                }
-                Divider().opacity(0.35)
-                contextDisclosureRow(
-                    title: "Tool surface",
-                    detail: "\(latestContextSummary?.toolCount ?? 0) exact tools",
-                    symbol: "wrench.and.screwdriver",
-                    accent: .tronEmerald
-                ) {
-                    selectedContextDetail = .tools(
-                        fixed: requestFixedToolSelections,
-                        workers: requestWorkerSelections,
-                        raw: manifest?.toolSurface
-                    )
-                }
-            }
-            .sectionFill(.tronPurple, cornerRadius: 12, subtle: true, interactive: false)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
@@ -505,86 +422,54 @@ extension SessionContextSheet {
                 bottomPadding: SessionContextPresentation.headerToContentSpacing
             )
 
-            if let evaluations = manifest?.automaticContext, !evaluations.isEmpty {
-                VStack(spacing: 8) {
-                    ForEach(evaluations) { evaluation in
-                        Button {
-                            selectedContextDetail = .automatic(evaluation)
-                        } label: {
-                            HStack(alignment: .top, spacing: 11) {
-                                Image(systemName: evaluation.kind == "continuity"
-                                    ? "brain.head.profile"
-                                    : "tray.full")
-                                    .foregroundStyle(evaluation.kind == "continuity"
-                                        ? .tronPurple
-                                        : .tronCyan)
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(evaluation.kind == "continuity"
-                                        ? "Continuity"
-                                        : "Worker Results")
-                                        .font(TronTypography.sans(
-                                            size: TronTypography.sizeBody,
-                                            weight: .semibold
-                                        ))
-                                        .foregroundStyle(.tronTextPrimary)
-                                    Text(automaticContextSummary(evaluation))
-                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                        .foregroundStyle(.tronTextSecondary)
-                                        .lineLimit(2)
-                                }
-                                Spacer()
-                                Text(WorkerConsolePresentation.displayLabel(evaluation.outcome))
-                                    .font(TronTypography.pillValue)
-                                    .foregroundStyle(evaluation.outcome == "failed"
-                                        ? .tronError
-                                        : .tronEmerald)
-                            }
-                            .padding(12)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .sectionFill(
-                            evaluation.kind == "continuity" ? .tronPurple : .tronCyan,
-                            cornerRadius: 12,
-                            subtle: true,
-                            interactive: true
-                        )
-                    }
-                }
-            } else {
-                Label(
-                    latestContextSummary?.manifestAvailable == false
-                        ? "Automatic contribution provenance is unavailable for this legacy request."
-                        : "No automatic context evaluations were recorded.",
-                    systemImage: "minus.circle"
-                )
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
-            }
+            contextDisclosureRow(
+                title: "Historical contributions",
+                detail: "\(automaticContextCount) recorded evaluations",
+                symbol: "clock.arrow.circlepath",
+                accent: .tronCyan,
+                destination: .automaticContext
+            )
+            .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
+    var instructionContributionCount: Int {
+        if latestContextDetail != nil {
+            return allSystemContributions.count
+        }
+        return Int(latestContextSummary?.instructionCount ?? 0)
+    }
+
     var attachmentMessageCount: Int {
-        manifest?.messages.filter {
-            $0.contentKinds.contains("image") || $0.contentKinds.contains("document")
-        }.count ?? 0
+        if let messages = manifest?.messages {
+            return messages.filter {
+                $0.contentKinds.contains("image") || $0.contentKinds.contains("document")
+            }.count
+        }
+        return Int(latestContextSummary?.attachmentMessageCount ?? 0)
     }
 
     var providerMessageCount: Int {
         manifest?.messages.count ?? Int(latestContextSummary?.messageCount ?? 0)
     }
 
-    func automaticContextSummary(_ evaluation: ContextAutomaticEvaluationDTO) -> String {
-        if let narrative = evaluation.narrative, !narrative.isEmpty {
-            return "\(SessionContextPresentation.automaticContextChannel(evaluation)) · \(narrative)"
+    var includedDeliveryCount: Int {
+        if let deliveries = manifest?.agentDeliveries {
+            return deliveries.count
         }
-        return evaluation.detail.map {
-            "\(SessionContextPresentation.automaticContextChannel(evaluation)) · \($0)"
-        } ?? "\(SessionContextPresentation.automaticContextChannel(evaluation)) · \(WorkerConsolePresentation.displayLabel(evaluation.mechanism)) · \(evaluation.sources.count) sources"
+        return Int(latestContextSummary?.agentDeliveryCount ?? 0)
+    }
+
+    var automaticContextCount: Int {
+        manifest?.automaticContext.count
+            ?? Int(latestContextSummary?.automaticContextCount ?? 0)
+    }
+
+    var environmentContextDescription: String {
+        let isAvailable = manifest?.environment.workingDirectory != nil
+            || latestContextSummary?.environmentAvailable == true
+        return isAvailable ? "Working directory and server route" : "No environment projection"
     }
 
     func contextDisclosureRow(
@@ -592,9 +477,11 @@ extension SessionContextSheet {
         detail: String,
         symbol: String,
         accent: Color,
-        action: @escaping () -> Void
+        destination: SessionContextDetailDestination
     ) -> some View {
-        Button(action: action) {
+        Button {
+            openContextDetail(destination)
+        } label: {
             HStack(spacing: 12) {
                 Image(systemName: symbol)
                     .foregroundStyle(accent)
@@ -611,12 +498,22 @@ extension SessionContextSheet {
                         .foregroundStyle(.tronTextMuted)
                 }
                 Spacer()
+                if contextDetailLoadingDestination == destination {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(accent)
+                }
             }
             .padding(.horizontal, 13)
             .padding(.vertical, 11)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(
+            latestContextSummary == nil
+                || (contextDetailLoadingDestination != nil
+                    && contextDetailLoadingDestination != destination)
+        )
     }
 
     var usageMetrics: some View {
@@ -804,13 +701,7 @@ extension SessionContextSheet {
             )
 
             Button {
-                if let latestContextDetail {
-                    selectedContextDetail = .providerAudit(
-                        latestContextDetail,
-                        cacheReadTokens: contextState.accumulatedCacheReadTokens,
-                        cacheWriteTokens: contextState.accumulatedCacheCreationTokens
-                    )
-                }
+                openContextDetail(.providerAudit)
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "doc.text.magnifyingglass")
@@ -828,17 +719,22 @@ extension SessionContextSheet {
                             .foregroundStyle(.tronTextMuted)
                     }
                     Spacer()
+                    if contextDetailLoadingDestination == .providerAudit {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.tronTextMuted)
+                    }
                 }
                 .padding(14)
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(latestContextDetail == nil)
+            .disabled(latestContextSummary == nil)
             .sectionFill(
                 .tronTextMuted,
                 cornerRadius: 12,
                 subtle: true,
-                interactive: latestContextDetail != nil
+                interactive: latestContextSummary != nil
             )
         }
     }

@@ -902,15 +902,17 @@ The composer context ring and Session Context sheet consume only existing
 session truth. Token usage, model-window pressure, compaction, model switching,
 and `session::fork` retain their existing owners. The latest
 `model.provider_request` event is the sole durable explanation of what a model
-received. While connected the sheet lists bounded summaries through
-`session::context_requests` and loads one exact manifest/audit through
-`session::context_request_detail`; while offline it decodes provider-request
-events already held by EventDatabase. There is no context-specific database,
+received. The sheet uses that one latest event rather than presenting a
+non-actionable request-history card. While connected it reads one lightweight
+summary through `session::context_requests(limit: 1)` and loads exact
+manifest/audit evidence through `session::context_request_detail` only when a
+detail row is opened. While offline it projects the latest provider-request
+event already held by EventDatabase. There is no context-specific database,
 cache, subscription, or polling service.
 
 `UI/SessionContext/` keeps that ownership visible in source: the main sheet owns
 only presentation state and navigation; sections render the manifest; loading
-owns the sheet-scoped cancellable tasks; detail/history sheets load bounded
+owns the sheet-scoped cancellable tasks; detail sheets load bounded
 evidence lazily; and the audit formatter projects redacted payloads. Cross-file
 extensions share the one sheet state rather than manufacturing feature view
 models or copies of provider-request data. Model metadata resolution accepts
@@ -920,12 +922,10 @@ of presenting a transient loading state. The main sheet constrains its content
 to the presentation width and owns only a vertical scroll axis; long live-state
 labels wrap within their cards rather than widening the scroll content. Global
 worker architecture remains in the Engine dashboard rather than being loaded
-again by Session Context. The
-toolbar shows the current short model name and opens the model picker; the
-latest-request card is the request-history entry point, so model switching does
-not consume a long body section. Request summaries and history resolve each
-audit's stored model identifier through the loaded catalog so they show the
-friendly model name while retaining the exact identifier in durable evidence.
+again by Session Context. The toolbar shows the current short model name and
+opens the model picker; the main body begins directly with actionable context
+inventory, so model switching does not consume a long body section. The latest
+audit retains its exact model identifier in durable evidence.
 The main context inventory has one Tool Surface disclosure row. Its
 available/omitted counts, relevance scores, and exact selected/omitted lists
 live together in the Tool Surface detail rather than being duplicated in
@@ -939,24 +939,26 @@ Navigation rows across the Session Context surface remain fully tappable
 without trailing chevrons; their leading icon, title, supporting text, and
 interactive glass treatment carry the affordance.
 
-The sheet initially loads only the latest request. Earlier requests page on
-demand. Provider Request and Tool Surface show bounded structured evidence
-first. Their exact JSON formats off the main actor only after the user opens a
-subordinate sheet, then stays inside one internally scrolling selectable text
-view rather than expanding the parent scroll by hundreds of kilobytes. While
-visible, a view-scoped coordinator owns independent worker, delivery/wait, and
-provider-audit lanes. Each lane allows one read in flight and retains a dirty
-bit so an invalidation during that read guarantees a follow-up without
-cancelling authoritative work. A session/server generation prevents stale
-responses from applying after switches or disconnects. The sheet reads all
-lanes on open, reconnect, and foreground resume, polls once per second only
-while agent/worker/wait/wake activity is known, and performs one final settled
-read. It retains prior snapshots during refresh; cancellation is silent control
-flow, while a genuine refresh failure either offers retry for an empty lane or
-labels the retained snapshot as the last successful update. View teardown owns
-and cancels the coordinator. Manifest provenance arrays omitted by the server
-when empty decode as empty collections, preserving the rest of the audit
-instead of collapsing the visible sections to summary-only counts.
+The sheet seeds its inventory synchronously from the already-reconstructed
+latest audit, then decodes that cached manifest off the main actor to prewarm
+detail navigation. Provider Request and Tool Surface show bounded structured
+evidence first. Their exact JSON stays inside one internally scrolling
+selectable text view rather than expanding the parent scroll by hundreds of
+kilobytes. While visible, a view-scoped coordinator owns independent worker,
+delivery/wait, and provider-audit lanes. Each lane allows one read in flight and
+retains a dirty bit so an invalidation during that read guarantees a follow-up
+without cancelling authoritative work. A session/server generation prevents
+stale responses from applying after switches or disconnects. The sheet reads
+all lanes on open, reconnect, and foreground resume. Only worker and
+delivery/wait state poll once per second while known activity remains; the
+immutable provider audit receives one final refresh when activity settles.
+Worker graphs publish before the optional friendly-name catalog lookup. Prior
+snapshots remain visible during refresh; cancellation is silent control flow,
+while a genuine refresh failure either offers retry for an empty lane or labels
+the retained snapshot as the last successful update. View teardown owns and
+cancels the coordinator. Manifest provenance arrays omitted by the server when
+empty decode as empty collections, preserving the rest of the audit instead of
+collapsing the visible sections to summary-only counts.
 
 The v4 manifest drives standardized sections for ordered instructions,
 conversation/compaction, attachments and documents, environment, exact
@@ -1065,6 +1067,12 @@ cannot wash out its foreground. The large detent remains the canonical opaque
 surface, while light-mode medium sheets and iPad presentation retain their
 existing appearance. Explicit clear or unchanged presentation surfaces, such
 as immersive camera and onboarding flows, remain intentional opt-outs.
+
+The main Settings sheet binds its phone detent selection. Its version tagline
+is absent at the medium detent and mounts as a bottom-pinned sibling of the
+scrolling content only at the large detent, without an independent solid
+backdrop. The sheet has no mail-composer or diagnostics-bundle feedback path;
+Logs remains the explicit local diagnostics surface.
 
 Sheet-level asynchronous labels use `SheetLoadingState`, which separates the
 spinner from a Tron-typography text label. Raw labeled `ProgressView` remains
@@ -1260,8 +1268,7 @@ Local storage is bounded and concern-owned:
   persisted by Tron;
 - event cache for session reconstruction;
 - successful prompt history for Recent Inputs;
-- local logs, feedback bundles, MetricKit payloads, and hashed server-log
-  correlation ids.
+- local logs, MetricKit payloads, and hashed server-log correlation ids.
 
 Secrets, worker webhook tokens, provider credentials, notification content,
 raw protocol frames, and server runtime metadata must never enter local

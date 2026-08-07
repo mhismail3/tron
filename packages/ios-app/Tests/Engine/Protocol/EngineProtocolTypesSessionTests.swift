@@ -465,6 +465,44 @@ struct SessionContextAuditDecodingTests {
 
         #expect(page.requests.first?.manifestAvailable == false)
         #expect(page.requests.first?.provenanceAvailability == "legacy_unavailable")
+        #expect(page.requests.first?.instructionCount == nil)
+        #expect(page.requests.first?.attachmentMessageCount == nil)
+        #expect(page.requests.first?.agentDeliveryCount == nil)
+        #expect(page.requests.first?.environmentAvailable == nil)
+    }
+
+    @Test("Current summaries decode the lightweight context inventory")
+    func currentSummaryInventoryDecodes() throws {
+        let data = Data("""
+        {
+          "requests":[{
+            "eventId":"current-event",
+            "sequence":8,
+            "timestamp":"2026-08-07T12:00:00Z",
+            "format":"tron.model_provider_request.v4",
+            "requestClassification":"interactive",
+            "messageCount":6,
+            "toolCount":23,
+            "automaticContextCount":1,
+            "instructionCount":3,
+            "attachmentMessageCount":2,
+            "agentDeliveryCount":1,
+            "environmentAvailable":true,
+            "manifestAvailable":true,
+            "provenanceAvailability":"complete"
+          }],
+          "hasMore":false,
+          "nextBeforeSequence":null
+        }
+        """.utf8)
+
+        let page = try JSONDecoder().decode(SessionContextRequestsResultDTO.self, from: data)
+        let summary = try #require(page.requests.first)
+
+        #expect(summary.instructionCount == 3)
+        #expect(summary.attachmentMessageCount == 2)
+        #expect(summary.agentDeliveryCount == 1)
+        #expect(summary.environmentAvailable == true)
     }
 
     @Test("Worker architecture remains a dynamic 26-node profile projection")

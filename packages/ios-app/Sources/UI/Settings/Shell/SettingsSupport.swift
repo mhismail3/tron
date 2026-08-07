@@ -151,8 +151,6 @@ enum MainSettingsFooterLayout {
     static let horizontalPadding: CGFloat = 20
     static let taglineLeadingPadding: CGFloat = 8
     static let verticalPadding: CGFloat = 10
-    static let feedbackButtonCornerRadius: CGFloat = 13
-    static let feedbackButtonGlassTintOpacity = 0.14
 }
 
 enum EngineSettingsSection: String, CaseIterable, Sendable {

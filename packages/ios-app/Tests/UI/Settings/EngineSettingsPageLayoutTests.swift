@@ -384,18 +384,18 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertFalse(engine.contains("Stop all workers"))
     }
 
-    func testSettingsFooterIsPinnedWithoutAFullWidthBackdrop() throws {
+    func testSettingsFooterIsPinnedOnlyAtTheLargeDetent() throws {
         let settingsView = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView.swift"])
         let pageContainer = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsPageContainer.swift"])
         let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
-        let footerSupport = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+FooterSupport.swift"])
         let support = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsSupport.swift"])
 
         XCTAssertTrue(
-            settingsView.contains("VStack(spacing: 0)")
-                && settingsView.contains("SettingsPageContainer(")
+            settingsView.contains("@State private var selectedDetent: PresentationDetent = .medium")
+                && settingsView.contains("selection: $selectedDetent")
+                && settingsView.contains("if selectedDetent == .large")
                 && settingsView.contains("settingsFooterDockView"),
-            "The Settings footer should stay anchored to the sheet bottom at every detent"
+            "The Settings footer should mount only when the phone sheet reaches its large detent"
         )
         XCTAssertFalse(
             settingsView.contains(".safeAreaInset(edge: .bottom"),
@@ -412,14 +412,20 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             "The pinned footer should align its content with the Settings rows"
         )
         XCTAssertFalse(
-            settingsMain.contains("SettingsFooterBackdrop()")
-                || footerSupport.contains("struct SettingsFooterBackdrop"),
+            settingsMain.contains("SettingsFooterBackdrop()"),
             "The footer should sit directly on the sheet instead of painting a rectangular material layer"
+        )
+        XCTAssertFalse(
+            settingsView.contains("feedbackMailDraft")
+                || settingsMain.contains("Send Feedback")
+                || settingsMain.contains("feedbackFooterButton"),
+            "Settings should not retain the removed feedback-mail action"
         )
         XCTAssertTrue(
             support.contains("static let horizontalPadding")
                 && support.contains("static let taglineLeadingPadding")
                 && support.contains("static let verticalPadding")
+                && !support.contains("feedbackButton")
                 && !support.contains("textLeadingPadding")
                 && !support.contains("dockHeight"),
             "Footer spacing constants should be centralized with the other Settings layout values"

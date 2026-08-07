@@ -195,6 +195,8 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_sequence_unique
   ON events(session_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events(session_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_events_session_type_sequence
+  ON events(session_id, type, sequence DESC);
 
 CREATE TABLE IF NOT EXISTS blobs (
   id              TEXT    PRIMARY KEY,

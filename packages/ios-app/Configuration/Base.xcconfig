@@ -1,9 +1,8 @@
 // Base.xcconfig - Shared settings for all configurations
 
-TRON_FEEDBACK_EMAIL =
 TRON_MAC_DOWNLOAD_URL = https:/$()/github.com/tron-owner/tron/releases
 
 // App info lives in project.yml and is generated from VERSION.env.
-// Local.xcconfig may override feedback and release URLs without committing
-// maintainer-specific identities.
+// Local.xcconfig may override release URLs without committing
+// maintainer-specific values.
 #include? "Local.xcconfig"
