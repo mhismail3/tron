@@ -1,0 +1,111 @@
+#!/bin/bash
+set -euo pipefail
+
+# Root-owned boot helper for the dedicated iOS release runner. The runner is a
+# Background LaunchAgent so its Unix, launchd, and audit identities agree, but
+# the hidden account never logs in to create that user domain. This one-shot
+# LaunchDaemon creates the domain after boot and loads the immutable agent.
+# launchd retries the helper only after failure; once the service exists this
+# process exits successfully and remains dormant until the next boot.
+
+die() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+(( EUID == 0 )) || die "release runner launchd bootstrap requires root"
+(( $# == 4 )) \
+    || die "usage: ios-release-runner-launchd-bootstrap user uid agent-plist service-label"
+
+runner_user="$1"
+runner_uid="$2"
+agent_plist="$3"
+service_label="$4"
+helper_path="/Library/Application Support/Tron/ReleaseRunner/bootstrap-user-agent"
+
+validate_root_directory() {
+    local directory="$1" exact_mode="${2:-}" mode
+    [[ -d "$directory" && ! -L "$directory" ]] \
+        || die "privileged bootstrap directory is not physical: $directory"
+    [[ "$(/usr/bin/stat -f '%Su' "$directory")" == "root" ]] \
+        || die "privileged bootstrap directory is not root-owned: $directory"
+    mode="$(/usr/bin/stat -f '%Lp' "$directory")"
+    if [[ -n "$exact_mode" ]]; then
+        [[ "$mode" == "$exact_mode" ]] \
+            || die "privileged bootstrap directory has the wrong mode: $directory"
+    elif (( (8#$mode & 8#022) != 0 )); then
+        die "privileged bootstrap directory is writable by an unprivileged account: $directory"
+    fi
+}
+
+validate_root_file() {
+    local file="$1" expected_mode="$2"
+    [[ -f "$file" && ! -L "$file" ]] \
+        || die "privileged bootstrap file is not physical: $file"
+    [[ "$(/usr/bin/stat -f '%Su:%Sg:%Lp' "$file")" == "root:wheel:$expected_mode" ]] \
+        || die "privileged bootstrap file has the wrong owner or mode: $file"
+    [[ "$(/usr/bin/stat -f '%l' "$file")" == "1" ]] \
+        || die "privileged bootstrap file must not have hard links: $file"
+}
+
+[[ "$runner_user" =~ ^[a-z_][a-z0-9_-]*$ ]] \
+    || die "invalid release runner account"
+[[ "$runner_uid" =~ ^[0-9]+$ && "$runner_uid" -ge 500 ]] \
+    || die "invalid release runner UID"
+[[ "$service_label" =~ ^[A-Za-z0-9.-]+$ ]] \
+    || die "invalid release runner service label"
+[[ "$0" == "$helper_path" ]] \
+    || die "release runner launchd bootstrap must run from its immutable installed path"
+validate_root_directory /Library
+validate_root_directory "/Library/Application Support"
+validate_root_directory "/Library/Application Support/Tron" 755
+validate_root_directory "/Library/Application Support/Tron/ReleaseRunner" 755
+validate_root_file "$helper_path" 755
+[[ "$agent_plist" == "/Library/Application Support/Tron/ReleaseRunner/$service_label.plist" ]] \
+    || die "release runner agent path does not match its label"
+# The explicitly targeted user domain can read this root:wheel:644 contract;
+# keeping it outside /Library/LaunchAgents prevents global per-user discovery.
+validate_root_file "$agent_plist" 644
+[[ "$(/usr/bin/id -u "$runner_user")" == "$runner_uid" ]] \
+    || die "release runner account no longer owns the configured UID"
+if /usr/bin/id -Gn "$runner_user" | /usr/bin/tr ' ' '\n' | /usr/bin/grep -Fxq admin; then
+    die "release runner account must not be an administrator"
+fi
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :Label' "$agent_plist")" == "$service_label" ]] \
+    || die "release runner agent label is inconsistent"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :LimitLoadToSessionType' "$agent_plist")" == "Background" ]] \
+    || die "release runner agent is not restricted to the Background domain"
+if /usr/libexec/PlistBuddy -c 'Print :UserName' "$agent_plist" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c 'Print :GroupName' "$agent_plist" >/dev/null 2>&1; then
+    die "release runner agent must inherit the user domain identity"
+fi
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :SessionCreate' "$agent_plist")" == "true" ]] \
+    || die "release runner agent must create its non-root security audit session"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$agent_plist")" == "/Users/$runner_user/actions-runner/runsvc.sh" ]] \
+    || die "release runner agent entry point is inconsistent"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :WorkingDirectory' "$agent_plist")" == "/Users/$runner_user/actions-runner" ]] \
+    || die "release runner agent working directory is inconsistent"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:HOME' "$agent_plist")" == "/Users/$runner_user" ]] \
+    || die "release runner agent HOME is inconsistent"
+
+runner_domain="user/$runner_uid"
+runner_service="$runner_domain/$service_label"
+if ! /bin/launchctl print "$runner_domain" >/dev/null 2>&1; then
+    /bin/launchctl bootstrap "$runner_domain" \
+        || /bin/launchctl print "$runner_domain" >/dev/null 2>&1 \
+        || die "could not bootstrap the release account's user domain"
+fi
+[[ "$(/bin/launchctl asuser "$runner_uid" /bin/launchctl manageruid)" == "$runner_uid" ]] \
+    || die "release account launchd manager UID is inconsistent"
+[[ "$(/bin/launchctl asuser "$runner_uid" /bin/launchctl managername)" == "Background" ]] \
+    || die "release account launchd manager is not the Background domain"
+
+if ! /bin/launchctl print "$runner_service" >/dev/null 2>&1; then
+    /bin/launchctl bootstrap "$runner_domain" "$agent_plist" \
+        || /bin/launchctl print "$runner_service" >/dev/null 2>&1 \
+        || die "could not bootstrap the release runner Background agent"
+fi
+/bin/launchctl kickstart "$runner_service" \
+    || die "could not start the release runner Background agent"
+/bin/launchctl print "$runner_service" >/dev/null \
+    || die "release runner Background agent is unavailable"

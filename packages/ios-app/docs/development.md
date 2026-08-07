@@ -785,8 +785,19 @@ exists before it requests a short-lived runner registration token.
 The checked-in bootstrap downloads the checksum-pinned ARM64 Actions runner,
 removes any accidental admin membership, constrains the service home to mode
 0700, verifies it cannot read the invoking user's home, installs a root-owned
-system-domain launchd definition that executes as `tron-ci` with updates
-disabled, and disables AC sleep:
+Background agent definition at
+`/Library/Application Support/Tron/ReleaseRunner/com.tron.ios-release-runner.plist`
+with updates disabled, and disables AC sleep. Keeping the definition outside
+`/Library/LaunchAgents` prevents launchd from discovering it for other users;
+the boot helper explicitly loads it only into `tron-ci`'s `user/<uid>` domain.
+The agent has no `UserName` or `GroupName` and inherits that domain's identity.
+A separate root-owned, one-shot
+LaunchDaemon at
+`/Library/LaunchDaemons/com.tron.ios-release-runner-bootstrap.plist` creates
+that user domain at boot and loads the agent through
+`/Library/Application Support/Tron/ReleaseRunner/bootstrap-user-agent`. The
+helper retries after failure, but the long-lived runner itself never enters the
+system domain:
 
 ```bash
 scripts/bootstrap-ios-release-runner.sh
@@ -796,16 +807,20 @@ scripts/ios-release-runner-doctor.sh
 Every Actions job reruns the doctor before any step receives release secrets.
 It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
 account with its exact home, mode-0700 ownership, baseline keychain, checkout,
-and temporary directory all inside the isolated Actions installation, and the
-listener belongs to launchd's system domain while its Security framework
-session is non-root. Unix identity is not sufficient for CodeSign: a
-system-domain child can still retain the wrong Mach bootstrap and audit user,
-which prevents CodeSign from resolving the isolated account's `secd` and
-`trustd` services. Before credentials are exposed, the doctor therefore uses
-the checked-in `ios-release-user-context` boundary to enter `tron-ci`'s
-headless `Background` launchd domain and proves both that launchd's manager UID
-and the process audit UID equal the account's effective UID. Manual keychain
-preparation, archive, export, and teardown all run through that same boundary.
+and temporary directory all inside the isolated Actions installation. It also
+requires launchd's manager UID and the Security framework audit UID to equal
+the account's effective UID, requires the manager session type to be
+`Background`, and rejects a root security session. Unix identity alone is not
+sufficient for CodeSign: a process in another bootstrap or audit domain cannot
+reliably resolve the isolated account's `secd` and `trustd` services. The
+checked-in `ios-release-user-context` boundary therefore validates the current
+context and executes directly; it deliberately refuses to use
+`launchctl asuser` to repair a listener that started in the wrong domain.
+Manual keychain preparation, archive, export, and teardown all stay inside that
+validated boundary. Each sensitive step uses absolute `/bin/bash` and invokes
+the boundary as its first command through `$GITHUB_WORKSPACE`; the boundary is
+not a GitHub custom-shell executable, whose path is resolved before the step
+script and cannot use workflow context expressions.
 The next secretless step replays `ios-release-credential-ledger.py recover` in
 that user context, creates or validates every component of the standard
 provisioning-profile directory with no-follow ownership checks, and audits an
@@ -817,46 +832,87 @@ material is exposed. Operators can run the doctor's
 `--audit-credentials` mode to check the same persistent boundary without
 recovering it.
 
-The system-domain listener is deliberate: GitHub's generated Darwin `svc.sh`
-is created only after runner registration, installs a per-login LaunchAgent,
-and refuses root. The hidden service account has no Aqua login session, so the
-bootstrap instead uses the checksum-pinned package's documented `runsvc.sh`
-entry point from a root-owned LaunchDaemon that drops privileges to `tron-ci`.
-The documented `launchctl asuser` transition changes only the bootstrap and
-audit context; because the runner keeps its existing standard-account UID, it
-does not create the mixed Unix/security identity Apple warns against. Hosted
-macOS CI also runs the
-bootstrap's non-privileged `--self-test` and executes the user-context wrapper
-inside its Aqua account. Those checks exercise the real BSD ownership query,
-idempotent ACL denial semantics, launchd manager identity, and audit identity
-without creating an account or registering a runner. The real release doctor's
-Background-domain requirement covers the system-to-user transition that a
-hosted Aqua job cannot reproduce.
+GitHub's generated Darwin `svc.sh` is created only after runner registration,
+installs a per-login LaunchAgent, and refuses root. The hidden service account
+has no Aqua login session, so Tron owns the launchd definitions and uses the
+checksum-pinned package's documented `runsvc.sh` entry point. The root helper
+uses launchd's supported independent `user/<uid>` domain and
+`LimitLoadToSessionType=Background`; `SessionCreate=true` gives the listener a
+non-root security audit session without requiring a GUI login. Hosted macOS CI
+also runs the bootstrap's non-privileged `--self-test` and executes the
+user-context wrapper inside its Aqua account. Those checks exercise the real
+BSD ownership query, idempotent ACL denial semantics, generated agent/helper
+contracts, launchd manager identity, and audit identity without creating an
+account or registering a runner. The real release doctor adds the
+Background-session requirement that a hosted Aqua job cannot reproduce.
 
 The bootstrap requires an authenticated repository-admin `gh` session and an
-interactive `sudo` checkpoint. It fails rather than replacing an existing
-runner. `sysadminctl` may report that the hidden service account cannot unlock
-FileVault; that is expected. When macOS records the custom home without creating
-it, the bootstrap creates and validates the missing mode-0700 home and Keychains
-hierarchy with macOS system utilities, independent of any Homebrew coreutils in
-the invoking shell's `PATH`. A retry resumes safely from that account-only
-state; checks beneath the private service home run with the service/root
-identity so an already-created baseline keychain is detected and reused rather
-than mistaken for a missing file. Because standard macOS accounts share the
-`staff` group, the bootstrap also probes both list and traversal access to the
-invoking user's home. When needed, it adds an idempotent
+interactive `sudo` checkpoint. Fresh installation and service repair share a
+root-owned process lock, so concurrent privileged invocations fail before
+mutating the host. Fresh installation fails rather than replacing an existing
+runner. `sysadminctl` may report that the hidden service account
+cannot unlock FileVault; that is expected. When macOS records the custom home
+without creating it, the bootstrap creates and validates the missing mode-0700
+home and Keychains hierarchy with macOS system utilities, independent of any
+Homebrew coreutils in the invoking shell's `PATH`. A retry resumes safely from
+that account-only state; checks beneath the private service home run with the
+service/root identity so an already-created baseline keychain is detected and
+reused rather than mistaken for a missing file. Because standard macOS accounts
+share the `staff` group, the bootstrap also probes both list and traversal
+access to the invoking user's home. When needed, it adds an idempotent
 `tron-ci deny list,search` ACL for only the runner instead of changing the
 home's broader POSIX permissions. If permanently deleting the service account,
 remove that exact ACL with
 `/bin/chmod -a "user:tron-ci deny list,search" "$HOME"`.
 
-Rotation is explicit. Stop and remove the system-domain job, request a
-short-lived removal token, unregister as the service account, then move the old
-installation aside before rerunning the bootstrap:
+Hosts installed with the former system-domain listener require one privileged
+migration after updating the checkout:
 
 ```bash
-sudo launchctl bootout system/com.tron.ios-release-runner
-sudo /bin/rm /Library/LaunchDaemons/com.tron.ios-release-runner.plist
+scripts/bootstrap-ios-release-runner.sh --repair-service
+```
+
+Repair validates the existing account, pinned runner version, exact GitHub
+runner ID, registration, files, and remote
+idle state before changing launchd. It temporarily removes only the dedicated
+`tron-ios-release` scheduling label and observes the runner idle twice, so a
+queued release cannot race the cutover. Each observation validates busy state
+and label presence from one successful GitHub API snapshot; malformed or failed
+reads reset the idle proof and fail closed. It then stages the complete agent/helper
+set and atomically moves the legacy plist to the root-owned, non-autoloading
+`legacy-system-service.plist` rollback journal before stopping the daemon. The
+old listener must disappear locally and the same GitHub runner ID must become
+offline before the candidate starts; the candidate must produce a different
+local PID and take that exact ID online. That proof is the logical commit;
+journal cleanup and scheduling-label restoration follow it. A failure after
+commit keeps the verified candidate running and scheduling fenced. If
+verification fails before commit, repair stops the boot helper first, removes
+the candidate, proves the exact runner offline, restores the journaled legacy
+daemon, proves it online, and only then restores scheduling. The journal also
+makes an interrupted process or reboot resumable. A completed repair is
+idempotent; inconsistent mixed topologies and a busy runner fail closed. Repair
+reuses the existing registration and credential files—it does not unregister
+or rotate the runner. Root mutates only root-owned service paths; all paths
+beneath the runner home are created and changed as `tron-ci` to prevent
+privileged symlink-follow races.
+
+Rotation is explicit. Stop and remove the Background agent and its boot helper,
+request a short-lived removal token, unregister as the service account, then
+move the old installation aside before rerunning the bootstrap. Removing the
+legacy path as well makes the procedure safe for a host whose migration did not
+complete:
+
+```bash
+runner_uid="$(id -u tron-ci)"
+sudo launchctl bootout system/com.tron.ios-release-runner-bootstrap || true
+sudo launchctl bootout "user/$runner_uid/com.tron.ios-release-runner" || true
+sudo launchctl bootout system/com.tron.ios-release-runner || true
+sudo /bin/rm -f \
+  /Library/LaunchDaemons/com.tron.ios-release-runner-bootstrap.plist \
+  /Library/LaunchDaemons/com.tron.ios-release-runner.plist \
+  "/Library/Application Support/Tron/ReleaseRunner/com.tron.ios-release-runner.plist" \
+  "/Library/Application Support/Tron/ReleaseRunner/legacy-system-service.plist" \
+  "/Library/Application Support/Tron/ReleaseRunner/bootstrap-user-agent"
 repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 removal_token="$(gh api --method POST \
   "repos/$repository/actions/runners/remove-token" --jq .token)"
@@ -918,10 +974,10 @@ The upload lane uses the exact Xcode 27 release pin with the `Tron` scheme and
 (`com.tron.mobile`, App ID `6761511764`); the
 `Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
 Simulator and XCTest execution stays on hosted Xcode 26 CI, where a logged-in
-Aqua session owns CoreSimulator and TestManager. The isolated system-domain
+Aqua session owns CoreSimulator and TestManager. The isolated Background
 release listener does not duplicate those tests: signing-sensitive commands
-enter its account's headless Background domain, then compile and archive the
-same accepted `main` source with Xcode 27. This proves the SDK-linked product
+remain in its account's headless user domain, then compile and archive the same
+accepted `main` source with Xcode 27. This proves the SDK-linked product
 surface without weakening host isolation merely to create a GUI login session.
 All live lanes archive for `generic/platform=iOS`, export an App Store Connect
 IPA with Xcode's `app-store-connect` export method, validate the exported
@@ -1038,8 +1094,8 @@ either grant that access or use the local signing secrets.
 
 ASC authentication is environment-backed in CI; the workflow does not create
 a repo-local `.asc/config.json`. Before manual signing changes the user
-keychain search list or default, it enters the release account's validated
-Background bootstrap and records both exactly. Before creating the job
+keychain search list or default, it validates the release account's current
+Background context and records both exactly. Before creating the job
 keychain, it atomically writes a private mode-0600 attempt ledger under the
 isolated runner home; each new provisioning-profile UUID is added and fsynced
 immediately before that profile is installed. The ledger contains only

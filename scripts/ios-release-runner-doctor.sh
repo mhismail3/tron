@@ -90,22 +90,24 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
         || die "release runner HOME must be /Users/tron-ci"
     [[ "${ACTIONS_RUNNER_SVC:-}" == "1" ]] \
         || die "TestFlight archives must run through the dedicated launchd service"
-    [[ "$(launchctl manageruid)" == "0" ]] \
-        || die "TestFlight archives must run in launchd's system domain"
+    runner_uid="$(id -u)"
+    [[ "$(launchctl manageruid)" == "$runner_uid" ]] \
+        || die "TestFlight archives must run in the release account's launchd domain"
+    [[ "$(launchctl managername)" == "Background" ]] \
+        || die "TestFlight archives require the headless Background domain"
     python3 "$project_dir/scripts/ios-release-verify.py" \
-        security-session --require-non-root >/dev/null \
-        || die "TestFlight archives require a non-root macOS security session"
+        security-session --require-non-root \
+        --require-audit-uid "$runner_uid" >/dev/null \
+        || die "TestFlight archives require the release account's security session"
     user_context="$project_dir/scripts/ios-release-user-context"
     [[ -x "$user_context" ]] \
         || die "release user-context boundary is missing or non-executable"
-    runner_uid="$(id -u)"
     [[ "$("$user_context" /bin/launchctl manageruid)" == "$runner_uid" ]] \
         || die "release user-context boundary selected the wrong launchd account"
     [[ "$("$user_context" /bin/launchctl managername)" == "Background" ]] \
         || die "release user-context boundary requires the headless Background domain"
     "$user_context" python3 "$project_dir/scripts/ios-release-verify.py" \
-        security-session \
-        --require-non-root \
+        security-session --require-non-root \
         --require-audit-uid "$runner_uid" >/dev/null \
         || die "release user-context boundary has a mixed audit identity"
     [[ "$(/usr/bin/stat -f '%Su' "$HOME")" == "$runner_user" ]] \
