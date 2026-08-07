@@ -3029,10 +3029,10 @@ directory component-by-component with no-follow ownership checks, and proves
 the persistent credential state is empty before GitHub injects secrets. The
 workflow and ledger share Xcode's current
 `~/Library/Developer/Xcode/UserData/Provisioning Profiles` library; the retired
-`~/Library/MobileDevice` cache is not part of the Xcode 27 signing contract.
+`~/Library/MobileDevice` cache is not part of the current signing contract.
 Profile UUIDs remain canonical lowercase from decoded profile through cache
-filename, export options, and durable cleanup ownership because Xcode 27's
-manual export lookup is case-sensitive. Manual keychain preparation, archive,
+filename, export options, and durable cleanup ownership because manual export
+lookup preserves that exact identity. Manual keychain preparation, archive,
 export, and teardown all use that boundary, so CodeSign reaches the isolated
 account's `secd` and `trustd` services without a GUI login or trust override.
 Manual signing validates its `.p12` leaf through the checksum-pinned WWDR G3
