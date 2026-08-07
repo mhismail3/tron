@@ -7,15 +7,17 @@
 # runner and retains every decision as structured 90-day evidence. The release
 # checkout repeats the exact-head check after its queue.
 # A final pre-ASC check is retained as structured, secret-free 90-day evidence.
-# Archives run only on the locked-down release runner with the exact Xcode 27
-# pin in `config/ci-toolchain.env`; hosted Xcode 26 CI continues to prove the
-# iOS 26 floor. Release tags retain the external/public TestFlight path and Beta
-# App Review handling.
+# Archives run only on the locked-down release runner with the exact
+# App-Store-supported stable/RC Xcode pin in `config/ci-toolchain.env`. Beta SDK
+# validation and direct device installation are separate from TestFlight.
+# Release tags retain the external/public TestFlight path and Beta App Review
+# handling.
 # Simulator/XCTest remains on hosted CI because the isolated release listener
 # runs in its hidden account's headless Background launchd domain, not a logged-
 # in Aqua session. Signing-sensitive commands stay inside that domain, where
 # the Unix identity, audit identity, secd, and trustd namespace agree;
-# the Xcode 27 archive is the SDK-linked compilation and distribution proof.
+# the stable archive is the App Store Connect compilation and distribution
+# proof.
 # Fresh builds use one monotonic Release-workflow allocation encoded as a valid
 # three-segment CFBundleVersion. Automatic upstream reruns authenticate and
 # reuse the first immutable intent's allocation; tag/manual runs use their own

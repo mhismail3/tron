@@ -2770,6 +2770,11 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
         "TRON_CI_BUILDKITE_AGENT_VERSION=3.136.2",
         "TRON_CI_BUILDKITE_AGENT_LINUX_AMD64_SHA256=3a10ff051d7ea08dfcf16e29f7cbe96370e1929f26eec36621ca3802fecf94e9",
         "TRON_CI_BUILDKITE_AGENT_DARWIN_ARM64_SHA256=5e0160bdf509c422bbe78e0f5836acc6e9404196c33bf42a9434470ad2fb935a",
+        "TRON_RELEASE_IOS_XCODE_VERSION=26.6",
+        "TRON_RELEASE_IOS_XCODE_BUILD=17F113",
+        "TRON_RELEASE_IOS_SDK_VERSION=26.5",
+        "TRON_RELEASE_IOS_DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer",
+        "TRON_RELEASE_IOS_DEPLOYMENT_TARGET=26.0",
         "TRON_RELEASE_RUNNER_VERSION=2.336.0",
         "TRON_RELEASE_RUNNER_URL=https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-osx-arm64-2.336.0.tar.gz",
         "TRON_RELEASE_RUNNER_SHA256=8e8839c49b7060b6b2154f4931f815df330c27f167d53ef2239ee3dfce28b079",
@@ -2783,6 +2788,16 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
             "toolchain manifest lost {required}"
         );
     }
+    assert!(
+        !manifest.contains("TRON_RELEASE_IOS_DEVELOPER_DIR=/Applications/Xcode-beta"),
+        "TestFlight delivery must not select a beta Xcode bundle"
+    );
+    let doctor = read_repo_file("scripts/ios-release-runner-doctor.sh");
+    assert!(
+        doctor.contains("TRON_RELEASE_IOS_DEVELOPER_DIR\" != *[Bb]eta*")
+            && doctor.contains("TestFlight delivery must not use a beta Xcode bundle"),
+        "the release doctor must reject a beta Xcode path before archive work"
+    );
     assert_eq!(manifest.matches("_SHA256=").count(), 9);
 
     let installer = read_repo_file("scripts/install-ci-tools.sh");

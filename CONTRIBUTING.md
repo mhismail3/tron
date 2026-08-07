@@ -79,9 +79,11 @@ TestFlight group for App ID `6761511764` only while it remains the current main
 head. Release tags independently advance selected builds through the public
 TestFlight path; contributor PRs do not deploy and do not need App Store Connect
 access. Hosted stable Xcode 26 CI proves the iOS 26 floor; a dedicated
-release-only runner archives the same source with the exact Xcode 27 pin and
-publishes sanitized provenance. Runner bootstrap and beta rotation are
-documented in the iOS development guide.
+release-only runner archives the same source with the exact
+App-Store-supported stable/RC Xcode pin and publishes sanitized provenance.
+Beta Xcode builds are limited to direct physical-device development until Apple
+accepts that toolchain for App Store Connect. Runner bootstrap and toolchain
+rotation are documented in the iOS development guide.
 
 ### Mac wrapper
 

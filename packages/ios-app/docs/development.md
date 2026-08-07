@@ -659,15 +659,17 @@ retrieved through Apple's Xcode Organizer diagnostics path.
 
 `config/ci-toolchain.env` is the repository-owned Apple/release tool manifest.
 Hosted compatibility CI selects stable Xcode 26.3, iOS 26.2, and iPhone 17 Pro.
-The isolated TestFlight runner separately pins Xcode 27.0 beta 3 build
-`27A5218g`, the iOS 27.0 SDK, and a 26.0 deployment floor. Apple's
-[App Store Connect release notes](https://developer.apple.com/help/app-store-connect/release-notes/)
-list that beta/SDK pair for internal and external TestFlight submission; recheck
-that source whenever rotating the beta. Both paths download exact XcodeGen,
-create-dmg, App Store Connect CLI, GitHub runner, and CI-definition parser
-releases whose SHA-256 values are checked before execution. The manifest also
-owns the advisory shadow's digest-pinned Rust image and the digest-pinned
-actionlint image exercised by both providers.
+The isolated TestFlight runner pins App-Store-supported Xcode 26.6 build
+`17F113`, the iOS 26.5 SDK, and a 26.0 deployment floor. Xcode 27 beta remains
+available for direct physical-device development, but App Store Connect rejects
+beta SDK uploads with `ITMS-90534`; it cannot supply TestFlight builds until
+Apple publishes and accepts an RC or release. Confirm the candidate on Apple's
+[release page](https://developer.apple.com/news/releases/) whenever rotating
+the distribution pin. Both CI paths download exact XcodeGen, create-dmg, App
+Store Connect CLI, GitHub runner, and CI-definition parser releases whose
+SHA-256 values are checked before execution. The manifest also owns the advisory
+shadow's digest-pinned Rust image and the digest-pinned actionlint image
+exercised by both providers.
 Workflows must not select `latest`, install these tools through Homebrew, or
 maintain a second version list.
 
@@ -1025,9 +1027,10 @@ local credentials, and custom launchd definition before returning failure; it
 reports explicitly if that rollback cannot be verified. Never register this
 label on a general-purpose user account or add it to another workflow.
 
-Before changing the Xcode beta pin, install the candidate side-by-side, confirm
-Apple currently accepts that build for TestFlight, and update the version,
-build, SDK, and developer-directory fields together, then run:
+Before changing the TestFlight Xcode pin, confirm Apple currently accepts that
+stable or RC build, install it on the runner, and update the version, build,
+SDK, and developer-directory fields together. Never select a beta bundle for a
+live TestFlight lane. Then run:
 
 ```bash
 scripts/ios-release-runner-doctor.sh
@@ -1035,8 +1038,8 @@ python3 scripts/ios-release-verify.py self-test
 ```
 
 Trigger a manual `dry-run` from `main` and inspect its provenance artifact
-before permitting a live upload. The archive verifier rejects an Xcode 26
-archive, a different Xcode 27 build, the wrong SDK, or a minimum OS above 26.0.
+before permitting a live upload. The archive verifier rejects any Xcode build
+or SDK that differs from the distribution manifest, or a minimum OS above 26.0.
 
 ## TestFlight Delivery CI
 
@@ -1064,16 +1067,18 @@ and reuse that owner instead of allocating from their own counters. The `1000`
 epoch keeps hosted values above legacy bare-integer builds. Checked-in
 `TRON_APPLE_BUILD` remains the local and Mac build-number source.
 
-The upload lane uses the exact Xcode 27 release pin with the `Tron` scheme and
-`Prod` configuration. That is the App Store Connect bundle
+The upload lane uses the exact App-Store-supported Xcode pin with the `Tron`
+scheme and `Prod` configuration. That is the App Store Connect bundle
 (`com.tron.mobile`, App ID `6761511764`); the
 `Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
 Simulator and XCTest execution stays on hosted Xcode 26 CI, where a logged-in
 Aqua session owns CoreSimulator and TestManager. The isolated Background
 release listener does not duplicate those tests: signing-sensitive commands
 remain in its account's headless user domain, then compile and archive the same
-accepted `main` source with Xcode 27. This proves the SDK-linked product
-surface without weakening host isolation merely to create a GUI login session.
+accepted `main` source with the pinned stable/RC distribution SDK. Xcode 27
+SDK-only UI remains available through the documented direct-device loop until
+Apple accepts that SDK for TestFlight; the release workflow must not attempt to
+bypass that platform policy.
 All live lanes archive for `generic/platform=iOS`, export an App Store Connect
 IPA with Xcode's `app-store-connect` export method, validate the exported
 app/extension bundle IDs, entitlements, and export-compliance plist keys, upload
@@ -1283,8 +1288,8 @@ days. Temporary profiles are installed in Xcode's current build-time library at
 library from the former `~/Library/MobileDevice` location (see Apple's
 [Xcode 16 release notes](https://developer.apple.com/documentation/xcode-release-notes/xcode-16-release-notes)).
 The workflow preserves Xcode's canonical lowercase profile UUID in the cache
-filename, export options, and durable credential ledger; Xcode 27's manual
-export lookup does not resolve the same UUID after case conversion. Recovery
+filename, export options, and durable credential ledger; manual export lookup
+does not resolve the same UUID after case conversion. Recovery
 and teardown therefore cannot drift from either profile installation path or
 identity. Because the isolated service account has no interactive login keychain,
 manual signing also downloads Apple's public root and WWDR G3 intermediate from
