@@ -791,6 +791,11 @@ with updates disabled, and disables AC sleep. Keeping the definition outside
 `/Library/LaunchAgents` prevents launchd from discovering it for other users;
 the boot helper explicitly loads it only into `tron-ci`'s `user/<uid>` domain.
 The agent has no `UserName` or `GroupName` and inherits that domain's identity.
+A root-owned
+`/Library/Application Support/Tron/ReleaseRunner/start-runner` entry point
+checks the listener's effective UID, Background manager, Security session, and
+audit UID before it executes the runner-owned `runsvc.sh`; an invalid listener
+therefore remains offline and cannot receive a GitHub job.
 A separate root-owned, one-shot
 LaunchDaemon at
 `/Library/LaunchDaemons/com.tron.ios-release-runner-bootstrap.plist` creates
@@ -812,6 +817,13 @@ executing the requested command. Dropping privileges before `asuser` is invalid:
 the non-root process cannot adopt the separate Background audit session and
 macOS rejects it with `EPERM`. Every call verifies the resulting manager UID,
 manager type, effective UID, and audit UID before keychain state is prepared.
+The agent deliberately omits `SessionCreate`: the independent `user/<uid>`
+Background domain already owns the correct non-root audit session, while asking
+launchd to create another session gives the listener a different audit login
+identity. Repair also uses privileged `launchctl bsexec` against the actual new
+listener PID, drops back to `tron-ci`, and repeats those checks before restoring
+its GitHub scheduling label. A domain probe alone is not accepted as evidence
+for the process GitHub will use.
 
 Every Actions job reruns the doctor before any step receives release secrets.
 It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
@@ -846,8 +858,10 @@ installs a per-login LaunchAgent, and refuses root. The hidden service account
 has no Aqua login session, so Tron owns the launchd definitions and uses the
 checksum-pinned package's documented `runsvc.sh` entry point. The root helper
 uses launchd's supported independent `user/<uid>` domain and
-`LimitLoadToSessionType=Background`; `SessionCreate=true` gives the listener a
-non-root security audit session without requiring a GUI login. Hosted macOS CI
+`LimitLoadToSessionType=Background`; the listener inherits that domain's
+non-root security audit session without requiring a GUI login. The immutable
+session entry point enforces the same identity contract on every restart before
+the listener can connect to GitHub. Hosted macOS CI
 also runs the bootstrap's non-privileged `--self-test` and executes the
 user-context wrapper inside its Aqua account. Those checks exercise the real
 BSD ownership query, idempotent ACL denial semantics, generated agent/helper
@@ -912,6 +926,18 @@ or rotate the runner. Root mutates only root-owned service paths; all paths
 beneath the runner home, including legacy permission normalization, are created
 and changed as `tron-ci` to prevent privileged symlink-follow races.
 
+Repair also recognizes the one previously shipped Background contract whose
+agent used `SessionCreate=true`. It validates the exact old agent and helper,
+copies the three root-owned files into a mode-0700
+`background-service-backup` rollback journal, fences the idle runner, and
+replaces them with the inheriting agent, updated boot helper, and immutable
+session entry point. The replacement must create a different listener PID;
+`bsexec` must prove that PID's manager, effective UID, audit UID, and non-root
+Security session before the journal is committed and scheduling reopens. A
+failure restores the prior Background service, while a later repair resolves a
+durable interrupted journal by either validating and committing the corrected
+candidate or restoring the exact prior files before retrying the upgrade.
+
 Rotation is explicit. Stop and remove the Background agent and its boot helper,
 request a short-lived removal token, unregister as the service account, then
 move the old installation aside before rerunning the bootstrap. Removing the
@@ -928,7 +954,12 @@ sudo /bin/rm -f \
   /Library/LaunchDaemons/com.tron.ios-release-runner.plist \
   "/Library/Application Support/Tron/ReleaseRunner/com.tron.ios-release-runner.plist" \
   "/Library/Application Support/Tron/ReleaseRunner/legacy-system-service.plist" \
-  "/Library/Application Support/Tron/ReleaseRunner/bootstrap-user-agent"
+  "/Library/Application Support/Tron/ReleaseRunner/bootstrap-user-agent" \
+  "/Library/Application Support/Tron/ReleaseRunner/start-runner" \
+  "/Library/Application Support/Tron/ReleaseRunner/background-service-backup/com.tron.ios-release-runner.plist" \
+  "/Library/Application Support/Tron/ReleaseRunner/background-service-backup/com.tron.ios-release-runner-bootstrap.plist" \
+  "/Library/Application Support/Tron/ReleaseRunner/background-service-backup/bootstrap-user-agent"
+sudo /bin/rmdir "/Library/Application Support/Tron/ReleaseRunner/background-service-backup" 2>/dev/null || true
 repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 removal_token="$(gh api --method POST \
   "repos/$repository/actions/runners/remove-token" --jq .token)"

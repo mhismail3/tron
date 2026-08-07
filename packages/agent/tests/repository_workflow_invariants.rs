@@ -1461,6 +1461,7 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     let credential_ledger = read_repo_file("scripts/ios-release-credential-ledger.py");
     let bootstrap = read_repo_file("scripts/bootstrap-ios-release-runner.sh");
     let launchd_bootstrap = read_repo_file("scripts/ios-release-runner-launchd-bootstrap");
+    let session_entrypoint = read_repo_file("scripts/ios-release-runner-session-entrypoint");
     let version = read_repo_file("scripts/tron-version");
     for (path, description) in [
         (
@@ -1470,6 +1471,10 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         (
             "scripts/ios-release-runner-launchd-bootstrap",
             "release launchd bootstrap helper",
+        ),
+        (
+            "scripts/ios-release-runner-session-entrypoint",
+            "release listener session entry point",
         ),
     ] {
         assert_ne!(
@@ -1706,9 +1711,14 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "runner_bootstrap_dir=\"/Library/Application Support/Tron/ReleaseRunner\"",
         "runner_bootstrap_helper=\"$runner_bootstrap_dir/bootstrap-user-agent\"",
         "runner_bootstrap_helper_source=\"$project_dir/scripts/ios-release-runner-launchd-bootstrap\"",
+        "runner_session_entrypoint=\"$runner_bootstrap_dir/start-runner\"",
+        "runner_session_entrypoint_source=\"$project_dir/scripts/ios-release-runner-session-entrypoint\"",
         "runner_bootstrap_lock=\"/var/run/tron-ios-release-runner-bootstrap.lock\"",
+        "runner_background_backup_dir=\"$runner_bootstrap_dir/background-service-backup\"",
+        "legacy_background_helper_sha256=",
         "Add :ProgramArguments:0 string $runner_bootstrap_helper",
-        "Add :SessionCreate bool true",
+        "Add :ProgramArguments:0 string $runner_session_entrypoint",
+        "! plutil -extract SessionCreate",
         "Add :LimitLoadToSessionType string Background",
         "! plutil -extract UserName",
         "! plutil -extract GroupName",
@@ -1733,6 +1743,12 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "fence_remote_runner()",
         "restore_remote_runner_label()",
         "rollback_to_legacy_service()",
+        "rollback_background_service_upgrade()",
+        "create_background_service_backup()",
+        "validate_background_service_backup()",
+        "verify_runner_listener_security_session()",
+        "run_in_runner_listener_session()",
+        "/bin/launchctl bsexec \"$listener_pid\"",
         "actions/runners/$repair_runner_id/labels/$runner_label",
         "wait_for_remote_runner_status offline",
         "wait_for_remote_runner_status online",
@@ -1832,11 +1848,32 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         );
     }
     for required in [
+        "entrypoint_path=\"/Library/Application Support/Tron/ReleaseRunner/start-runner\"",
+        "root:wheel:755:1",
+        "launchctl manageruid",
+        "launchctl managername",
+        "security.SessionGetInfo",
+        "process.getauid",
+        "security_identity_is_valid \"$security_identity\" \"$runner_uid\"",
+        "exec \"$runner_program\"",
+    ] {
+        assert!(
+            session_entrypoint.contains(required),
+            "release listener session entry point is missing {required}"
+        );
+    }
+    assert!(
+        !session_entrypoint.contains("launchctl asuser") && !session_entrypoint.contains("sudo"),
+        "the listener entry point must validate its inherited session rather than attempting to replace it"
+    );
+    for required in [
         "(( EUID == 0 ))",
         "[[ \"$agent_plist\" == \"/Library/Application Support/Tron/ReleaseRunner/$service_label.plist\" ]]",
         "root:wheel:644",
         "Print :LimitLoadToSessionType",
         "Print :SessionCreate",
+        "must inherit the Background domain's audit session",
+        "start-runner",
         "Print :UserName",
         "Print :GroupName",
         "runner_domain=\"user/$runner_uid\"",
@@ -1894,7 +1931,9 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         .find("stage_runner_service_files")
         .expect("service repair must stage and validate its candidate files");
     let migration_start = repair
-        .find("fence_remote_runner")
+        .find(
+            "fence_remote_runner \\\n        || die \"release runner could not be fenced idle for service repair\"",
+        )
         .expect("service repair must fence scheduling before cutover");
     let migration = &repair[migration_start..];
     let scheduling_fence = migration
@@ -1921,6 +1960,9 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     let listener_check = migration
         .find("wait_for_new_runner_listener")
         .expect("service repair must prove that the listener process changed");
+    let listener_session_check = migration
+        .find("verify_runner_listener_security_session")
+        .expect("service repair must verify the actual replacement listener session");
     let online_check = migration
         .find("wait_for_remote_runner_status online")
         .expect("service repair must bind the candidate's online transition");
@@ -1945,7 +1987,8 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
             && legacy_stop < candidate_install
             && candidate_install < candidate_start
             && candidate_start < listener_check
-            && listener_check < online_check
+            && listener_check < listener_session_check
+            && listener_session_check < online_check
             && online_check < migration_commit
             && migration_commit < legacy_remove,
         "service repair must fence scheduling, journal the legacy service, prove offline-to-online transition, and commit the Background listener before deleting its rollback journal"
@@ -1953,6 +1996,63 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     assert!(
         legacy_remove < label_restore,
         "service repair must not readmit jobs until the candidate is committed"
+    );
+    let background_upgrade_start = repair
+        .find(
+            "validate_legacy_background_runner_service_files\n        prepare_runner_security_context",
+        )
+        .expect("repair must recognize the previously shipped Background contract");
+    let background_upgrade = &repair[background_upgrade_start..migration_start];
+    let background_journal = background_upgrade
+        .find("create_background_service_backup")
+        .expect("Background upgrade must journal the prior service files");
+    let background_fence = background_upgrade
+        .find("fence_remote_runner")
+        .expect("Background upgrade must fence scheduling before cutover");
+    let background_active = background_upgrade
+        .find("background_service_upgrade_active=true")
+        .expect("Background upgrade must arm transactional rollback");
+    let background_stop = background_upgrade
+        .find("remove_runner_service_files")
+        .expect("Background upgrade must stop and remove the prior service");
+    let background_install = background_upgrade
+        .find("install_runner_service_files")
+        .expect("Background upgrade must install the corrected service");
+    let background_start = background_upgrade
+        .find("start_runner_service_files")
+        .expect("Background upgrade must start the corrected service");
+    let background_listener = background_upgrade
+        .find("wait_for_new_runner_listener")
+        .expect("Background upgrade must prove the listener PID changed");
+    let background_session = background_upgrade
+        .find("verify_runner_listener_security_session")
+        .expect("Background upgrade must verify the replacement listener session");
+    let background_online = background_upgrade
+        .find("wait_for_remote_runner_status online")
+        .expect("Background upgrade must bind the replacement online transition");
+    let background_journal_remove = background_online
+        + background_upgrade[background_online..]
+            .find("remove_background_service_backup")
+            .expect("Background upgrade must remove its journal after verification");
+    let background_commit = background_upgrade
+        .find("background_service_upgrade_active=false")
+        .expect("Background upgrade must commit after journal cleanup");
+    let background_label_restore = background_upgrade
+        .find("restore_remote_runner_label")
+        .expect("Background upgrade must reopen scheduling after commit");
+    assert!(
+        background_journal < background_fence
+            && background_fence < background_active
+            && background_active < background_stop
+            && background_stop < background_install
+            && background_install < background_start
+            && background_start < background_listener
+            && background_listener < background_session
+            && background_session < background_online
+            && background_online < background_journal_remove
+            && background_journal_remove < background_commit
+            && background_commit < background_label_restore,
+        "Background service repair must journal, fence, replace, verify the actual listener, commit, and only then readmit jobs"
     );
     let fence_start = bootstrap
         .find("fence_remote_runner()")

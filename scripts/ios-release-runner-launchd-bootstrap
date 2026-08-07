@@ -22,6 +22,7 @@ runner_uid="$2"
 agent_plist="$3"
 service_label="$4"
 helper_path="/Library/Application Support/Tron/ReleaseRunner/bootstrap-user-agent"
+entrypoint_path="/Library/Application Support/Tron/ReleaseRunner/start-runner"
 
 validate_root_directory() {
     local directory="$1" exact_mode="${2:-}" mode
@@ -61,6 +62,7 @@ validate_root_directory "/Library/Application Support"
 validate_root_directory "/Library/Application Support/Tron" 755
 validate_root_directory "/Library/Application Support/Tron/ReleaseRunner" 755
 validate_root_file "$helper_path" 755
+validate_root_file "$entrypoint_path" 755
 [[ "$agent_plist" == "/Library/Application Support/Tron/ReleaseRunner/$service_label.plist" ]] \
     || die "release runner agent path does not match its label"
 # The explicitly targeted user domain can read this root:wheel:644 contract;
@@ -79,10 +81,15 @@ if /usr/libexec/PlistBuddy -c 'Print :UserName' "$agent_plist" >/dev/null 2>&1 \
     || /usr/libexec/PlistBuddy -c 'Print :GroupName' "$agent_plist" >/dev/null 2>&1; then
     die "release runner agent must inherit the user domain identity"
 fi
-[[ "$(/usr/libexec/PlistBuddy -c 'Print :SessionCreate' "$agent_plist")" == "true" ]] \
-    || die "release runner agent must create its non-root security audit session"
-[[ "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$agent_plist")" == "/Users/$runner_user/actions-runner/runsvc.sh" ]] \
-    || die "release runner agent entry point is inconsistent"
+if /usr/libexec/PlistBuddy -c 'Print :SessionCreate' "$agent_plist" >/dev/null 2>&1; then
+    die "release runner agent must inherit the Background domain's audit session"
+fi
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$agent_plist")" == "$entrypoint_path" ]] \
+    || die "release runner agent does not use the immutable session entry point"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:1' "$agent_plist")" == "$runner_user" ]] \
+    || die "release runner agent entry point has the wrong account"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:2' "$agent_plist")" == "/Users/$runner_user/actions-runner/runsvc.sh" ]] \
+    || die "release runner listener program is inconsistent"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :WorkingDirectory' "$agent_plist")" == "/Users/$runner_user/actions-runner" ]] \
     || die "release runner agent working directory is inconsistent"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:HOME' "$agent_plist")" == "/Users/$runner_user" ]] \

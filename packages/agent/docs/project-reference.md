@@ -2964,8 +2964,12 @@ discovery directory and loaded explicitly into its isolated service account's
 headless `user/<uid>` Background domain. A one-shot root LaunchDaemon creates
 that independent domain at boot and loads the agent; the long-lived listener is
 never a system-domain process. `LimitLoadToSessionType=Background` and
-`SessionCreate=true` provide the matching bootstrap and non-root audit context
-without a GUI login. Bootstrap preparation adopts that launchd bootstrap and
+inheritance from the independent `user/<uid>` domain provide the matching
+bootstrap and non-root audit context without a GUI login. The agent deliberately
+omits `SessionCreate`, which would replace the correct Background audit login
+identity with a new mismatched session. A root-owned entry point verifies the
+effective UID, manager, Security session, and audit UID before the listener can
+connect to GitHub. Bootstrap preparation adopts that launchd bootstrap and
 security audit session with privileged `launchctl asuser` first, then
 immediately drops UID/GID to the isolated account because `asuser` deliberately
 does not alter Unix credentials. Reversing those operations is rejected by
@@ -2996,8 +3000,14 @@ commit; journal cleanup then precedes restoring the label. A cleanup failure
 keeps the verified candidate running and scheduling fenced. Failed pre-commit
 cutovers stop the helper before the agent, prove the exact runner offline,
 restore and verify the legacy listener, and then reopen scheduling. The durable
-journal makes process interruption and reboot resumable. Root never mutates runner-owned home
-descendants. The iOS development runbook owns the current agent, boot-helper,
+journal makes process interruption and reboot resumable. Repair also recognizes
+the exact previously shipped Background agent that requested a second audit
+session. It journals those root-owned service files, installs the inheriting
+agent and immutable listener guard, and uses privileged `launchctl bsexec` to
+verify the actual replacement PID before reopening scheduling. An interrupted
+upgrade either commits a verified replacement or restores the exact journaled
+contract. Root never mutates runner-owned home descendants. The iOS development
+runbook owns the current agent, entry point, boot-helper,
 legacy cleanup, and full rotation paths. A secretless recovery step then
 restores the baseline keychain preferences, removes only paths claimed by
 strict durable attempt ledgers, creates or validates the provisioning-profile
