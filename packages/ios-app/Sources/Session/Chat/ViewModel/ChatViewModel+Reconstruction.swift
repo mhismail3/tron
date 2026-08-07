@@ -30,9 +30,9 @@ extension ChatViewModel {
                 return false
             }
 
+            let cachedSession = try await manager.eventDB.sessions.get(sessionId)
             let cachedEvents: [SessionEvent]
-            if let cachedSession = try await manager.eventDB.sessions.get(sessionId),
-               cachedSession.isFork == true,
+            if cachedSession?.isFork == true,
                let latestCachedEventId = sessionEvents.last?.id {
                 cachedEvents = try await manager.eventDB.events.getAncestors(latestCachedEventId)
             } else {
@@ -51,7 +51,10 @@ extension ChatViewModel {
                 )
                 return false
             }
+            guard !Task.isCancelled else { return false }
 
+            // INVARIANT: Cached rows and their draft-ready phase publish in
+            // one MainActor turn. Do not suspend before `.cachedSynchronizing`.
             allReconstructedMessages = state.messages
             let batchSize = min(Self.initialMessageBatchSize, state.messages.count)
             displayedMessageCount = batchSize
@@ -68,7 +71,7 @@ extension ChatViewModel {
                 contextWindowSize: state.lastTurnInputTokens,
                 from: usage
             )
-            if let cachedSession = try await manager.eventDB.sessions.get(sessionId) {
+            if let cachedSession {
                 contextState.accumulatedCost = cachedSession.cost
             }
 
@@ -84,6 +87,8 @@ extension ChatViewModel {
                 messageCount: state.messages.count
             )
             return true
+        } catch is CancellationError {
+            return false
         } catch {
             logger.warning(
                 "[CACHE] Could not restore cached session history: \(error.localizedDescription)",
@@ -114,15 +119,23 @@ extension ChatViewModel {
             ? mergeReconstructionEvents(previousEvents, eventWindow.events)
             : eventWindow.events
 
-        // 1. Reconstruct the transient chat projection (messages + config + tokens)
-        //    Uses reconstructSessionState() as single source of truth.
+        // Prepare every dependency that can suspend before publishing any
+        // observable part of the authoritative projection. Otherwise SwiftUI
+        // can render new rows while the composer still says it is loading.
         let state = UnifiedEventTransformer.reconstructSessionState(from: mergedEvents, presorted: true)
+        await cacheReconstructionEvents(mergedEvents)
+        let cachedSessionCost = await loadCachedSessionCost()
+        guard !Task.isCancelled else { return }
+
+        // INVARIANT: Do not suspend between this marker and
+        // `conversationHistoryPhase = .authoritative`. Messages, controls,
+        // agent state, and context are one user-visible snapshot commit.
         turnLifecycleCoordinator.restoreDeliveryPresentationState(
             from: state.messages,
             runIsActive: result.isRunning
         )
 
-        // 2. Rebuild the full timeline before selecting the visible slice.
+        // Rebuild the full timeline before selecting the visible slice.
         allReconstructedMessages = state.messages
         let batchSize = visibleMessageCountAfterReconstruction(
             totalMessages: allReconstructedMessages.count,
@@ -138,21 +151,19 @@ extension ChatViewModel {
             clearAllMessages()
         }
 
-        // 3. Track oldest sequence for load-more pagination
+        // Track the oldest sequence for load-more pagination.
         reconstructionOldestEventId = eventWindow.oldestEventId ?? mergedEvents.first?.id
         hasOlderServerReconstructionPages = eventWindow.hasMoreEvents
         recomputeHasMoreMessages()
         loadedReconstructionEvents = mergedEvents
         prunedLiveMessages.removeAll()
 
-        await cacheReconstructionEvents(mergedEvents)
-
-        // 4. Update session metadata from reconstruction
+        // Update session metadata from reconstruction.
         if let turnCount = result.metadata.turnCount {
             currentTurn = turnCount
         }
 
-        // 4a. Set agent phase from server-authoritative value. A local Stop
+        // Set agent phase from the server-authoritative value. A local Stop
         // request is a stricter active substate and remains until the server's
         // terminal lifecycle arrives.
         switch result.agentPhase {
@@ -161,12 +172,12 @@ extension ChatViewModel {
         default: agentPhase = .idle
         }
 
-        // 4b. Process in-flight state (if agent is running)
+        // Process in-flight state if the agent is running.
         if let inFlight = result.inFlight {
-            await processInFlightState(inFlight)
+            processInFlightState(inFlight)
         }
 
-        // 4c. Rebuild reconnect-significant compaction UI from the same server
+        // Rebuild reconnect-significant compaction UI from the same server
         // cut as the event watermark. The live start frame is filtered at or
         // below that cut, so the snapshot owns the spinner and send gate.
         isCompacting = result.isCompacting ?? false
@@ -177,16 +188,9 @@ extension ChatViewModel {
             compactionInProgressMessageId = message.id
         }
 
-        // 5. Restore token state for context progress pill
-        //    Without this, contextWindowTokens stays 0 and the pill shows empty.
-        if let manager = eventStoreManager {
-            await updateTokenState(from: state, using: manager)
-        } else {
-            let usage = state.totalTokenUsage
-            contextState.setAccumulatedTokens(from: usage)
-            contextState.lastTurnInputTokens = state.lastTurnInputTokens
-            contextState.setTotalTokenUsage(contextWindowSize: state.lastTurnInputTokens, from: usage)
-        }
+        // Restore token state for the context progress pill.
+        // Without this, contextWindowTokens stays 0 and the pill shows empty.
+        updateTokenState(from: state, cachedSessionCost: cachedSessionCost)
         // Use server-authoritative cost when available (avoids DB race on resume)
         if let cost = result.metadata.totalCost {
             contextState.accumulatedCost = cost
@@ -196,7 +200,6 @@ extension ChatViewModel {
             reconcileCompletedReconstructionState()
         }
 
-        conversationHistoryPhase = .authoritative
         messageIndex.rebuild(from: messages)
         sessionLoadDiagnostics.recordAuthoritative(
             eventCount: result.events.count,
@@ -237,7 +240,23 @@ extension ChatViewModel {
             streamingRecoverySnapshot = nil
         }
 
+        conversationHistoryPhase = .authoritative
         logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), loadedEvents=\(loadedReconstructionEvents.count), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil)", category: .session)
+    }
+
+    /// Read the last device-cached cost before the observable reconstruction
+    /// commit. Server metadata overrides it below when present.
+    private func loadCachedSessionCost() async -> Double? {
+        guard let manager = eventStoreManager else { return nil }
+        do {
+            return try await manager.eventDB.sessions.get(sessionId)?.cost
+        } catch {
+            logger.warning(
+                "Failed to read session cost: \(error.localizedDescription)",
+                category: .session
+            )
+            return nil
+        }
     }
 
     /// Keep the disposable device cache warm for the next presentation. The
@@ -453,7 +472,7 @@ extension ChatViewModel {
     ///
     /// Builds streaming messages, tool chips, and thinking blocks from the
     /// server's content sequence and tool invocation state.
-    private func processInFlightState(_ inFlight: InFlightState) async {
+    private func processInFlightState(_ inFlight: InFlightState) {
         logger.info("[RECONSTRUCT] Processing in-flight: \(inFlight.contentSequence.count) sequence items, \(inFlight.toolInvocations.count) tools, streaming=\(inFlight.streaming?.type ?? "none")", category: .session)
 
         // Initialize turn tracking for in-flight content
@@ -565,7 +584,7 @@ extension ChatViewModel {
 
             case .toolRef(let invocationId):
                 if let toolInvocation = toolInvocationMap[invocationId] {
-                    await processInFlightToolInvocation(toolInvocation)
+                    processInFlightToolInvocation(toolInvocation)
                 }
             }
         }
@@ -577,7 +596,7 @@ extension ChatViewModel {
     }
 
     /// Process a single in-flight tool invocation into a UI message.
-    private func processInFlightToolInvocation(_ toolInvocation: CurrentTurnToolInvocation) async {
+    private func processInFlightToolInvocation(_ toolInvocation: CurrentTurnToolInvocation) {
         guard let toolName = toolInvocation.toolName else {
             logger.warning("[RECONSTRUCT] Dropping in-flight tool invocation \(toolInvocation.invocationId) without toolName", category: .session)
             return

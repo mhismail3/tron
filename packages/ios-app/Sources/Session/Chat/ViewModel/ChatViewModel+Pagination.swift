@@ -20,20 +20,20 @@ extension ChatViewModel {
         self.workspaceId = workspaceId
     }
 
-    /// Set token and cost state from reconstructed server events.
-    /// Server events are the single source of truth for token values.
-    func updateTokenState(from state: ReconstructedState, using manager: EventStoreManager) async {
+    /// Set token and cost state from one prepared reconstruction projection.
+    /// This is deliberately synchronous so the transcript, context pill, and
+    /// authoritative history phase publish in one MainActor turn.
+    func updateTokenState(
+        from state: ReconstructedState,
+        cachedSessionCost: Double?
+    ) {
         let usage = state.totalTokenUsage
         contextState.setAccumulatedTokens(from: usage)
         contextState.lastTurnInputTokens = state.lastTurnInputTokens
         contextState.setTotalTokenUsage(contextWindowSize: state.lastTurnInputTokens, from: usage)
 
-        do {
-            if let session = try await manager.eventDB.sessions.get(sessionId) {
-                contextState.accumulatedCost = session.cost
-            }
-        } catch {
-            logger.warning("Failed to read session cost: \(error.localizedDescription)", category: .session)
+        if let cachedSessionCost {
+            contextState.accumulatedCost = cachedSessionCost
         }
     }
 

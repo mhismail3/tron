@@ -29,6 +29,12 @@ extension SourceGuardTests {
             ),
             encoding: .utf8
         )
+        let reconstruction = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/Session/Chat/ViewModel/ChatViewModel+Reconstruction.swift"
+            ),
+            encoding: .utf8
+        )
 
         #expect(messageList.contains("placeholderText: historyPhase.placeholderText"))
         #expect(messageList.contains("allowsTextEntry: historyPhase.allowsLocalDraftActions"))
@@ -44,6 +50,33 @@ extension SourceGuardTests {
         #expect(!chatView.contains("@Environment(\\.interactionPolicy)"))
         #expect(!timelineNotifications.contains("CatchingUpNotificationView"))
         #expect(!systemEvents.contains("case catchingUp"))
+
+        let commitStart = try #require(reconstruction.range(
+            of: "// INVARIANT: Do not suspend between this marker"
+        ))
+        let commitEnd = try #require(reconstruction.range(
+            of: "\n        conversationHistoryPhase = .authoritative",
+            range: commitStart.upperBound..<reconstruction.endIndex
+        ))
+        let snapshotCommit = reconstruction[
+            commitStart.lowerBound..<commitEnd.upperBound
+        ]
+        #expect(snapshotCommit.contains("replaceAllMessages"))
+        #expect(snapshotCommit.contains("updateTokenState"))
+        #expect(!snapshotCommit.contains("await "))
+
+        let cachedCommitStart = try #require(reconstruction.range(
+            of: "// INVARIANT: Cached rows and their draft-ready phase publish"
+        ))
+        let cachedCommitEnd = try #require(reconstruction.range(
+            of: "\n            conversationHistoryPhase = .cachedSynchronizing",
+            range: cachedCommitStart.upperBound..<reconstruction.endIndex
+        ))
+        let cachedCommit = reconstruction[
+            cachedCommitStart.lowerBound..<cachedCommitEnd.upperBound
+        ]
+        #expect(cachedCommit.contains("replaceAllMessages"))
+        #expect(!cachedCommit.contains("await "))
     }
 
     @Test("Chat composer reads canonical connection repository without a view-model mirror")
