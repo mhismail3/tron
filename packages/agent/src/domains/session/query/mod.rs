@@ -7,7 +7,9 @@
 //! database read. Ordinary listings exclude worker-owned child sessions, while
 //! exact-ID audit reads and resume remain available. Row lookups and bounded
 //! listing read `EventStore` directly; within this query path, `SessionManager`
-//! remains only for resume/cache data.
+//! remains only for resume/cache data. Provider-context pagination resolves
+//! only rows returned to the caller; its look-ahead row is metadata-only so a
+//! one-item mobile overview never reads a second large context manifest.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -275,14 +277,11 @@ impl SessionQueryService {
                     message: format!("Session '{session_id}' not found"),
                 })?;
             let limit = limit.unwrap_or(10).clamp(1, 20);
-            let fetch_limit = i64::try_from(limit.saturating_add(1)).unwrap_or(21);
-            let mut rows = event_store
-                .get_provider_request_audits(&session_id, before_sequence, fetch_limit)
+            let (rows, has_more) = event_store
+                .get_provider_request_audits(&session_id, before_sequence, limit)
                 .map_err(|error| ToolError::Internal {
                     message: error.to_string(),
                 })?;
-            let has_more = rows.len() > limit;
-            rows.truncate(limit);
             let next_before_sequence = has_more
                 .then(|| rows.last().map(|(row, _)| row.sequence))
                 .flatten();
@@ -294,6 +293,32 @@ impl SessionQueryService {
                         .and_then(Value::as_str)
                         .unwrap_or("unknown");
                     let manifest = payload.get("contextManifest");
+                    let messages = manifest
+                        .and_then(|manifest| manifest.get("messages"))
+                        .and_then(Value::as_array);
+                    let instruction_count = manifest
+                        .and_then(|manifest| manifest.get("systemContributions"))
+                        .and_then(Value::as_array)
+                        .map_or(0, Vec::len)
+                        + payload
+                            .get("providerAdditions")
+                            .and_then(Value::as_array)
+                            .map_or(0, Vec::len);
+                    let attachment_message_count = messages.map_or(0, |messages| {
+                        messages
+                            .iter()
+                            .filter(|message| {
+                                message
+                                    .get("contentKinds")
+                                    .and_then(Value::as_array)
+                                    .is_some_and(|kinds| {
+                                        kinds.iter().any(|kind| {
+                                            matches!(kind.as_str(), Some("image" | "document"))
+                                        })
+                                    })
+                            })
+                            .count()
+                    });
                     json!({
                         "eventId":row.id,
                         "sequence":row.sequence,
@@ -310,6 +335,16 @@ impl SessionQueryService {
                             .and_then(|manifest| manifest.get("automaticContext"))
                             .and_then(Value::as_array)
                             .map_or(0, Vec::len),
+                        "instructionCount":instruction_count,
+                        "attachmentMessageCount":attachment_message_count,
+                        "agentDeliveryCount":manifest
+                            .and_then(|manifest| manifest.get("agentDeliveries"))
+                            .and_then(Value::as_array)
+                            .map_or(0, Vec::len),
+                        "environmentAvailable":manifest
+                            .and_then(|manifest| manifest.get("environment"))
+                            .and_then(|environment| environment.get("workingDirectory"))
+                            .is_some_and(|value| !value.is_null()),
                         "manifestAvailable":manifest.is_some(),
                         "provenanceAvailability":if crate::shared::protocol::model_audit::provider_audit_has_complete_provenance(format) {
                             "complete"
@@ -1107,7 +1142,16 @@ mod tests {
                     "model":"test",
                     "messageCount":2,
                     "toolCount":3,
-                    "contextManifest":{"automaticContext":[]},
+                    "contextManifest":{
+                        "systemContributions":[{"kind":"base"}],
+                        "messages":[
+                            {"contentKinds":["text"]},
+                            {"contentKinds":["image","text"]}
+                        ],
+                        "automaticContext":[],
+                        "agentDeliveries":[{"deliveryId":"delivery-1"}],
+                        "environment":{"workingDirectory":"/tmp"}
+                    },
                     "providerAdditions":[{
                         "kind":"provider_system_prefix",
                         "label":"Provider instructions",
@@ -1141,6 +1185,10 @@ mod tests {
         assert_eq!(first["requests"].as_array().unwrap().len(), 1);
         assert_eq!(first["requests"][0]["eventId"], current.id);
         assert_eq!(first["requests"][0]["provenanceAvailability"], "complete");
+        assert_eq!(first["requests"][0]["instructionCount"], 2);
+        assert_eq!(first["requests"][0]["attachmentMessageCount"], 1);
+        assert_eq!(first["requests"][0]["agentDeliveryCount"], 1);
+        assert_eq!(first["requests"][0]["environmentAvailable"], true);
         assert_eq!(first["hasMore"], true);
 
         let second = SessionQueryService::context_requests(

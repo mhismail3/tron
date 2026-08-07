@@ -241,11 +241,14 @@ Mac.
 The Engine sheet starts directly with its Servers section, where paired-server
 rows support local switching, retry, setup, and removal alongside `Connect to a
 new server`. No summary hero or separate Diagnostics block precedes those real
-controls; feedback remains the persistent Settings footer action. Product
-update checks are not part of the primitive iOS shell. When the active paired
-server is unreachable, Engine remains available so those local server actions
-still work, while Providers stays disabled until the Mac reconnects and
-`settings.get` succeeds.
+controls. The compact medium Settings detent contains no footer. At the large
+phone detent, the version tagline appears once beneath the independently
+scrolling settings content and remains pinned to the sheet bottom without a
+separate solid backdrop. Settings has no feedback-mail action; local diagnostics
+remain available through Logs. Product update checks are not part of the
+primitive iOS shell. When the active paired server is unreachable, Engine
+remains available so those local server actions still work, while Providers
+stays disabled until the Mac reconnects and `settings.get` succeeds.
 The selected unreachable row overrides stale
 `Connected` metadata with `Unavailable`; its ellipsis menu is reduced to Retry
 and Forget. The main Settings sheet also disables destructive server-coupled

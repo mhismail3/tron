@@ -69,6 +69,68 @@ fn get_events_by_type_basic() {
 }
 
 #[test]
+fn provider_audit_lookahead_does_not_resolve_its_payload() {
+    let store = setup();
+    let session = store
+        .create_session("model", "/tmp/provider-audit", None, None)
+        .unwrap();
+    let older = store
+        .append(&AppendOptions {
+            session_id: &session.session.id,
+            event_type: EventType::ModelProviderRequest,
+            payload: serde_json::json!({
+                "format": "tron.model_provider_request.v4",
+                "padding": "x".repeat(9_000),
+            }),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+    let latest = store
+        .append(&AppendOptions {
+            session_id: &session.session.id,
+            event_type: EventType::ModelProviderRequest,
+            payload: serde_json::json!({
+                "format": "tron.model_provider_request.v4",
+                "messageCount": 1,
+            }),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+
+    // Corrupt only the older blob. A one-row page still needs that row's
+    // metadata to compute `has_more`, but must not touch its payload bytes.
+    let conn = store.conn().unwrap();
+    let older_blob_id: String = conn
+        .query_row(
+            "SELECT payload_blob_id FROM storage_payload_refs
+             WHERE owner_kind='session_event' AND owner_id=?1 AND field_name='payload'",
+            [&older.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    conn.execute(
+        "UPDATE blobs SET content=?1 WHERE id=?2",
+        rusqlite::params![b"corrupt".as_slice(), older_blob_id],
+    )
+    .unwrap();
+    drop(conn);
+
+    let (page, has_more) = store
+        .get_provider_request_audits(&session.session.id, None, 1)
+        .unwrap();
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].0.id, latest.id);
+    assert!(has_more);
+
+    let error = store
+        .get_provider_request_audits(&session.session.id, Some(latest.sequence), 1)
+        .unwrap_err();
+    assert!(error.to_string().contains("resolve provider request audit"));
+}
+
+#[test]
 fn turn_queries_use_denormalized_session_ordinals() {
     let store = setup();
     let cr = store

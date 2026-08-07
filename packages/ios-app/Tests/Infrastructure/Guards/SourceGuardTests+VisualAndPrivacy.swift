@@ -39,7 +39,6 @@ extension SourceGuardTests {
     func testNoPersonalInfoLiterals() throws {
         let needles: [String] = [
             "/Users/",
-            "TRON_FEEDBACK_EMAIL = tron@",
             "githubRepoOwner",
         ]
 
@@ -81,7 +80,6 @@ extension SourceGuardTests {
         return path.hasSuffix("Sources/Support/Diagnostics/DiagnosticsRedactor.swift")
             || path.hasSuffix("Sources/Support/Foundation/Formatting/String+Extensions.swift")
             || path.hasSuffix("Tests/Support/Diagnostics/DiagnosticsRedactorTests.swift")
-            || path.hasSuffix("Tests/Support/Diagnostics/DiagnosticsBundleBuilderTests.swift")
     }
 
 }

@@ -200,30 +200,6 @@ extension SourceGuardTests {
         #expect(components.contains("TronTypography.sizeBodySM"))
     }
 
-    @Test("feedback recipient has no tracked personal default")
-    func testFeedbackRecipientConfigDefault() throws {
-        let iosRoot = iosAppRoot()
-        let baseConfig = try String(
-            contentsOf: iosRoot.appendingPathComponent("Configuration/Base.xcconfig"),
-            encoding: .utf8
-        )
-        let line = try #require(
-            baseConfig
-                .split(separator: "\n")
-                .first { $0.trimmingCharacters(in: .whitespaces).hasPrefix("TRON_FEEDBACK_EMAIL =") }
-        )
-        let value = line
-            .split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-            .last?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        #expect(value == "")
-        #expect(value?.contains("$(") == false)
-        #expect(baseConfig.contains("#include? \"Local.xcconfig\""))
-        #expect(baseConfig.contains("TRON_MAC_DOWNLOAD_URL = https:/$()/github.com/tron-owner/tron/releases"))
-    }
-
-
     @Test("settings log viewer remains available in production builds")
     func testSettingsLogViewerAvailableInProductionBuilds() throws {
         let iosRoot = iosAppRoot()

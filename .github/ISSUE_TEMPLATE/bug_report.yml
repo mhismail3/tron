@@ -10,17 +10,15 @@ body:
         faster this gets fixed.
 
         Before filing: please run `tron logs --tail 50` (Mac). For iOS bugs,
-        Settings → Send Feedback prepares a redacted diagnostics JSON
-        attachment when Mail is configured.
+        copy the relevant redacted entries from Settings → Logs.
 
   - type: input
     id: tron-version
     attributes:
       label: Tron version
       description: |
-        Server version: run `tron --version` on Mac. For an iOS bug,
-        Send Feedback includes the app version and build in its Mail draft;
-        TestFlight also shows the installed build.
+        Server version: run `tron --version` on Mac. For an iOS bug, TestFlight
+        shows the installed app version and build.
       placeholder: "e.g. 0.1.0 (build 1)"
     validations:
       required: true
@@ -89,7 +87,7 @@ body:
       description: |
         Server logs (last ~50 lines around the failure) help a lot.
         Get them via `tron logs --tail 50` on Mac.
-        For iOS bugs, Settings → Send Feedback includes the redacted diagnostics JSON in its Mail draft.
+        For iOS bugs, copy the relevant redacted entries from Settings → Logs.
       render: shell
     validations:
       required: false

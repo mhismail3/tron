@@ -639,15 +639,14 @@ eventPublisherV2.sink { event in
 
 Tron does not send usage analytics. `MetricKitDiagnosticsStore` subscribes to
 Apple MetricKit in `AppDelegate` and stores payload JSON under Application
-Support with 30-day / 50-file / 10 MB retention. Settings -> Send Feedback
-builds a redacted `tron-diagnostics-<timestamp>.json` attachment that includes
-bounded iOS logs, `logs::recent(limit: 1000)` when connected, local session and
-event summaries, and MetricKit payloads.
+Support with 30-day / 50-file / 10 MB retention. App Store and TestFlight crash
+and hang diagnostics remain available through Xcode Organizer. The app does not
+assemble or mail a second diagnostics bundle.
 
 When the app is connected to a paired server,
 `ClientLogIngestionService` automatically mirrors the bounded, redacted
 `TronLogger` buffer into the server `logs` table through `logs::ingest`.
-The upload redacts messages again at the send boundary; the server then applies
+The upload redacts messages at the send boundary; the server then applies
 its bearer/API/OAuth redactor before durable `logs` storage. Uploads track entry
 fingerprints for the active server endpoint, attach the active session id to
 each batch, use deterministic session-scoped batch idempotency, and still rely
@@ -656,22 +655,11 @@ session changes cancel stale duplicate suppression, and repeated
 reconnects or foreground transitions do not resend unchanged local buffers or
 create duplicate DB rows. Successful `logs::ingest` transport/debug plumbing is
 filtered before upload so automatic syncing cannot create a self-feeding log
-loop; failed ingestion and reconnect warnings are retained. The Logs sheet
-remains production-available for local inspection and copying; it is not the
-source of durable log truth.
-
-Mail delivery uses the `TRON_FEEDBACK_EMAIL` build setting and opens the native
-Mail composer with the support recipient, subject, body, and JSON attachment
-filled in. The tracked default in `Configuration/Base.xcconfig` is blank;
-maintainer or release builds can supply it through `Configuration/Local.xcconfig`,
-CI secrets, or other runtime build settings without changing source control. The
-body names the attachment and describes the actual included log time range when
-parseable timestamps are available. If Mail is not configured, or the recipient
-config is missing, Settings shows an alert instead of a share sheet because iOS
-public APIs do not reliably attach files through a default-mail-app handoff.
-Release builds must keep
-`DEBUG_INFORMATION_FORMAT = dwarf-with-dsym`; App Store/TestFlight crashes are
-retrieved through Apple's Xcode Organizer diagnostics path.
+loop; failed ingestion and reconnect warnings are retained. The production Logs
+sheet is the user-facing inspection and copy surface; server ingestion is the
+durable diagnostic authority. Release builds must keep
+`DEBUG_INFORMATION_FORMAT = dwarf-with-dsym` so App Store/TestFlight diagnostics
+remain symbolicated in Xcode Organizer.
 
 ## Deterministic CI toolchain
 

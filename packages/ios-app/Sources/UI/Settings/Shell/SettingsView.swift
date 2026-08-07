@@ -25,9 +25,7 @@ struct SettingsView: View {
     @State var workerDispatchError: String?
     @State var activePage: SettingsPage?
     @State var cardsVisible = false
-    @State private var feedbackMailDraft: FeedbackMailDraft?
-    @State private var feedbackResultMessage: String?
-    @State var isPreparingFeedback = false
+    @State private var selectedDetent: PresentationDetent = .medium
 
     enum SettingsPage: String, Identifiable {
         case engine, providers, notifications, artifacts, app
@@ -123,7 +121,11 @@ struct SettingsView: View {
 
     private var settingsView: some View {
         settingsWithAlerts
-            .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+            .adaptivePresentationDetents(
+                [.medium, .large],
+                selection: $selectedDetent,
+                ipadSizing: .largeForm
+            )
             .tint(.tronEmerald)
     }
 
@@ -144,7 +146,10 @@ struct SettingsView: View {
                     .cardEntrance(visible: cardsVisible, index: 0)
             }
 
-            settingsFooterDockView
+            if selectedDetent == .large {
+                settingsFooterDockView
+                    .transition(.opacity)
+            }
         }
     }
 
@@ -168,16 +173,6 @@ struct SettingsView: View {
             .sheet(item: $activePage) { page in
                 settingsPageSheet(for: page)
                     .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-            }
-            .sheet(item: $feedbackMailDraft) { draft in
-                FeedbackMailView(
-                    subject: draft.subject,
-                    body: draft.body,
-                    recipient: draft.recipient,
-                    attachments: draft.attachments
-                ) {
-                    feedbackMailDraft = nil
-                }
             }
     }
 
@@ -222,15 +217,6 @@ struct SettingsView: View {
                 }
             } message: {
                 Text(workerDispatchConfirmationMessage)
-            }
-            .alert(
-                feedbackResultMessage ?? "",
-                isPresented: Binding(
-                    get: { feedbackResultMessage != nil },
-                    set: { if !$0 { feedbackResultMessage = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) { feedbackResultMessage = nil }
             }
     }
 
@@ -419,49 +405,6 @@ struct SettingsView: View {
         Task {
             await eventStoreManager.archiveAllSessions()
             isArchivingAll = false
-        }
-    }
-
-    func prepareAndPresentFeedback() {
-        guard !isPreparingFeedback else { return }
-        isPreparingFeedback = true
-
-        Task { @MainActor in
-            defer { isPreparingFeedback = false }
-            do {
-                let attachment = try await DiagnosticsBundleBuilder(dependencies: dependencies).build()
-                let mailAttachment = FeedbackMailAttachment(
-                    data: attachment.data,
-                    mimeType: attachment.mimeType,
-                    fileName: attachment.fileName
-                )
-                let composer = FeedbackComposer(
-                    appVersion: AppConstants.canonicalVersion,
-                    buildNumber: AppConstants.buildNumber
-                )
-                let body = composer.assembleBody(
-                    userNotes: "",
-                    attachmentFileName: attachment.fileName,
-                    logSummary: attachment.logSummary
-                )
-
-                switch FeedbackDeliveryPlanner.route(
-                    configuredRecipient: FeedbackComposer.configuredRecipient(),
-                    canSendMail: FeedbackMailAvailability.canSendMail()
-                ) {
-                case .mail(let recipient):
-                    feedbackMailDraft = FeedbackMailDraft(
-                        subject: composer.subject(),
-                        body: body,
-                        recipient: recipient,
-                        attachments: [mailAttachment]
-                    )
-                case .mailUnavailable(let message):
-                    feedbackResultMessage = message
-                }
-            } catch {
-                feedbackResultMessage = "Could not prepare diagnostics: \(error.localizedDescription)"
-            }
         }
     }
 

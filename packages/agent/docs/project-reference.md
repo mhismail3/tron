@@ -1449,6 +1449,12 @@ worker, or relevance calculation. Agent-worker session IDs use the same reads.
 Legacy v2 rows retain their redacted provider audit and counts while
 request-specific provenance is explicitly labeled unavailable.
 
+The context-request query uses `(session_id, type, sequence)` ordering and one
+metadata-only look-ahead row. It resolves blob-backed payloads only for the
+requested page, so `limit: 1` never inflates into two full context reads. Current
+summaries include instruction, attachment-message, Agent Delivery, and
+environment-presence counts; older clients and legacy audit rows remain valid.
+
 At each provider request boundary, the worker-kernel-owned resolver captures the
 catalog revision and ranks dynamic workers by explicit session promotion,
 deterministic relevance score, recent successes, recency, and identity.
@@ -2869,11 +2875,12 @@ Compaction is a direct durable session boundary. Context clearing is a live
 transport event; the resulting context size is reflected by later session/token
 truth rather than an unwritten `context.cleared` storage row. The iOS composer
 projects that same token truth as a context ring. Session Context uses the
-provider-request event as its sole request-context authority. It initially
-loads the latest summary, pages earlier requests on demand, and lazily loads
-exact detail. While connected it uses `session::context_requests` and
-`session::context_request_detail`; offline it decodes v3 rows already present
-in the existing EventDatabase rather than maintaining another cache.
+provider-request event as its sole request-context authority. It shows no
+request-history card: the already-reconstructed latest event supplies an
+immediate lightweight inventory, `session::context_requests(limit: 1)`
+reconciles that overview, and `session::context_request_detail` loads exact
+detail only for an opened row. Offline it decodes v3/v4 rows already present in
+the existing EventDatabase rather than maintaining another cache.
 
 The sheet presents instructions, conversation/compaction, attachments,
 environment, request-specific Agent Delivery contributions, exact selected and
@@ -2892,9 +2899,11 @@ another activity store. Worker progress/output strings are not accumulated
 into client state or concatenated into a guessed stage; only non-worker tools
 retain the generic free-text lifecycle presentation. Lifecycle invalidation
 and reconnect re-fetch the graph, with one-second polling used only while a
-visible run remains active. Context-summary refresh likewise runs only while
-the sheet is open and the agent is active, followed by one terminal
-reconciliation. An agent-runner row can open the same Session Context
+visible run remains active. Delivery/wait state shares that bounded live
+cadence. Provider-context audits are immutable once written, so the sheet reads
+that lane on open, reconnect, and foreground, then once when activity settles
+rather than transferring a large manifest every second. An agent-runner row can
+open the same Session Context
 inspection for its child `agentSessionId`; command workers truthfully report
 that no nested model context exists.
 It has no parallel context-control resource client, resource/action audit,

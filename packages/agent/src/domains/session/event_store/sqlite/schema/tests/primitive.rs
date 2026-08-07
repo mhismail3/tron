@@ -43,6 +43,22 @@ fn schema_installation_is_idempotent() {
 }
 
 #[test]
+fn events_have_a_session_type_sequence_index() {
+    let conn = open_memory();
+    ensure_schema(&conn).unwrap();
+
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE type='index' AND name=?1",
+            ["idx_events_session_type_sequence"],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    assert!(sql.contains("events(session_id, type, sequence DESC)"));
+}
+
+#[test]
 fn sessions_table_has_no_product_metadata_columns() {
     let conn = open_memory();
     ensure_schema(&conn).unwrap();
