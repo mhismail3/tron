@@ -1210,6 +1210,7 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "embedded_wwdr_sha",
         "embedded_root_sha",
         "IOS_DISTRIBUTION_IDENTITY_HASH=$identity_hash",
+        "uuid=\"$(/usr/libexec/PlistBuddy -c 'Print :UUID' \"$decoded_plist\" | tr '[:upper:]' '[:lower:]')\"",
         "profile-certificate \\",
         "--leaf-certificate \"$leaf_der_path\"",
     ] {
@@ -1356,7 +1357,7 @@ fi
     permissions.set_mode(0o755);
     std::fs::set_permissions(&security, permissions).unwrap();
 
-    let uuid = "12345678-1234-1234-1234-123456789ABC";
+    let uuid = "12345678-1234-1234-1234-123456789abc";
     let keychains = home.join("Library/Keychains");
     std::fs::create_dir_all(&keychains).unwrap();
     let keychain = keychains.join("tron-ios-signing-12345-1.keychain-db");
@@ -1624,7 +1625,7 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "def audit(",
         "baseline keychain preferences",
         "stale release credential state must be recovered before begin",
-        "profile UUID must use canonical uppercase UUID syntax",
+        "profile UUID must use canonical lowercase UUID syntax",
         "profile directory preparation crossed a symlink",
     ] {
         assert!(
