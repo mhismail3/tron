@@ -1462,6 +1462,7 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     let bootstrap = read_repo_file("scripts/bootstrap-ios-release-runner.sh");
     let launchd_bootstrap = read_repo_file("scripts/ios-release-runner-launchd-bootstrap");
     let session_entrypoint = read_repo_file("scripts/ios-release-runner-session-entrypoint");
+    let runner_diagnostics = read_repo_file("scripts/ios-release-runner-diagnostics.sh");
     let version = read_repo_file("scripts/tron-version");
     for (path, description) in [
         (
@@ -1475,6 +1476,10 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         (
             "scripts/ios-release-runner-session-entrypoint",
             "release listener session entry point",
+        ),
+        (
+            "scripts/ios-release-runner-diagnostics.sh",
+            "release runner diagnostics collector",
         ),
     ] {
         assert_ne!(
@@ -1545,6 +1550,9 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "--audit-credentials",
         "baseline keychain must have mode 0600",
         "baseline keychain must not have hard links",
+        "listener_identity_verified",
+        "command_boundary_verified",
+        "security_session=$security_session",
     ] {
         assert!(
             doctor.contains(required),
@@ -1558,6 +1566,9 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "[[ \"$manager_uid\" == \"$release_uid\" ]]",
         "session_verifier=\"$script_dir/ios-release-verify.py\"",
         "--require-audit-uid \"$release_uid\"",
+        "component=ios-release-user-context",
+        "expected_uid=$release_uid observed_uid=${manager_uid:-unavailable}",
+        "security_session=$security_session",
         "exec \"$@\"",
     ] {
         assert!(
@@ -1713,8 +1724,23 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "runner_bootstrap_helper_source=\"$project_dir/scripts/ios-release-runner-launchd-bootstrap\"",
         "runner_session_entrypoint=\"$runner_bootstrap_dir/start-runner\"",
         "runner_session_entrypoint_source=\"$project_dir/scripts/ios-release-runner-session-entrypoint\"",
+        "runner_diagnostics_source=\"$project_dir/scripts/ios-release-runner-diagnostics.sh\"",
         "runner_bootstrap_lock=\"/var/run/tron-ios-release-runner-bootstrap.lock\"",
         "runner_background_backup_dir=\"$runner_bootstrap_dir/background-service-backup\"",
+        "runner_log_dir=\"/Library/Logs/Tron\"",
+        "runner_bootstrap_log=\"$runner_log_dir/ios-release-runner-bootstrap.log\"",
+        "component=ios-release-runner-bootstrap",
+        "initialize_bootstrap_logging()",
+        "record_unhandled_error()",
+        "unhandled_command_failure",
+        "phase=$bootstrap_phase source_line=$source_line exit_status=$exit_status",
+        "bootstrap_source_sha256=",
+        "toolchain_source_sha256=",
+        "release_workflow_sha256=",
+        "runner_legacy_bootstrap_plist_staging",
+        "configure_legacy_runner_bootstrap_plist()",
+        "\"$runner_legacy_bootstrap_plist_staging\" \"$runner_uid\"",
+        "prior no-log bootstrap contract gained or lost keys",
         "legacy_background_helper_sha256=",
         "Add :ProgramArguments:0 string $runner_bootstrap_helper",
         "Add :ProgramArguments:0 string $runner_session_entrypoint",
@@ -1734,6 +1760,9 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "install_runner_service_files()",
         "remove_runner_service_files()",
         "stop_runner_candidate_services()",
+        "stop_launchd_target()",
+        "wait_for_launchd_target_exit()",
+        "launchd_target_stop_timeout",
         "start_runner_service_files()",
         "wait_for_new_runner_listener()",
         "wait_for_all_runner_listeners_exit()",
@@ -1821,6 +1850,25 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "the runner service must use Tron's audited Background-agent contract rather than GitHub's login-session template"
     );
     assert!(
+        !bootstrap.contains("BASH_COMMAND") && !bootstrap.contains("set -x"),
+        "bootstrap failure logging must never record command text or enable credential-bearing shell traces"
+    );
+    let legacy_background_match_start = bootstrap
+        .find("legacy_background_runner_service_files_match()")
+        .expect("repair must own an exact prior Background contract matcher");
+    let legacy_background_match_end = bootstrap[legacy_background_match_start..]
+        .find("\n}\n\nvalidate_background_service_backup()")
+        .map(|offset| legacy_background_match_start + offset)
+        .expect("prior Background contract matcher must have a bounded body");
+    let legacy_background_match =
+        &bootstrap[legacy_background_match_start..legacy_background_match_end];
+    assert!(
+        legacy_background_match.contains(
+            "cmp -s \"$runner_legacy_bootstrap_plist_staging\" \"$runner_bootstrap_plist\"",
+        ),
+        "adding observability to the current LaunchDaemon must preserve the exact prior no-log plist for interrupted-journal recovery"
+    );
+    assert!(
         !bootstrap.contains("remote_runner_has_release_label"),
         "runner fencing must not collapse a failed label lookup into label absence"
     );
@@ -1854,6 +1902,9 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "launchctl managername",
         "security.SessionGetInfo",
         "process.getauid",
+        "component=ios-release-runner-session",
+        "event=$event",
+        "identity_observed",
         "security_identity_is_valid \"$security_identity\" \"$runner_uid\"",
         "exec \"$runner_program\"",
     ] {
@@ -1883,6 +1934,9 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "/bin/launchctl manageruid",
         "/bin/launchctl managername",
         "Background",
+        "component=ios-release-runner-launchd",
+        "domain_observed",
+        "service_observed",
     ] {
         assert!(
             launchd_bootstrap.contains(required),
@@ -1893,6 +1947,42 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         !launchd_bootstrap.contains("kickstart -k \"$runner_service\""),
         "the boot helper must not kill an already-running release listener"
     );
+    for required in [
+        "runner_log_dir=\"/Library/Logs/Tron\"",
+        "component=ios-release-runner-diagnostics",
+        "installed_file_observed",
+        "launchd_target_observed",
+        "/bin/launchctl bsexec \"$listener_pid\"",
+        "security-session --require-non-root",
+        "remote_runner_observed",
+        "gh_executable\" run list --workflow",
+        "workflow_run_observed",
+        "component=ios-release-runner-session",
+        "collection_finished",
+        "--self-test",
+    ] {
+        assert!(
+            runner_diagnostics.contains(required),
+            "release runner diagnostics are missing {required}"
+        );
+    }
+    for forbidden in [
+        "set -x",
+        "printenv",
+        "security find-identity",
+        "auth.json",
+        "cat \"$runner_dir/.credentials\"",
+        "tail -n 200 \"$runner_dir/_diag",
+    ] {
+        assert!(
+            !runner_diagnostics.contains(forbidden),
+            "release runner diagnostics must not expose secret-bearing state: {forbidden}"
+        );
+    }
+    assert!(
+        runner_diagnostics.contains("| /usr/bin/grep 'component=ios-release-runner-session'"),
+        "runner-owned service logs must be reduced to the immutable session guard's structured records"
+    );
     for forbidden in ["GITHUB_WORKSPACE", "project_dir", "actions-runner/_work"] {
         assert!(
             !launchd_bootstrap.contains(forbidden),
@@ -1900,7 +1990,7 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         );
     }
     for required in [
-        "bootout \"system/$runner_service_label\"",
+        "stop_launchd_target \"system/$runner_service_label\"",
         "bootstrap system \"$legacy_runner_service_plist\"",
         "kickstart -k \"system/$runner_service_label\"",
         "stop_runner_candidate_services",
@@ -1914,10 +2004,46 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
             "release service repair must preserve transactional rollback behavior {required}"
         );
     }
+    let stop_target_start = bootstrap
+        .find("stop_launchd_target()")
+        .expect("bootstrap must own one launchd teardown boundary");
+    let stop_target_end = bootstrap[stop_target_start..]
+        .find("\n}\n\nstop_runner_candidate_services()")
+        .map(|offset| stop_target_start + offset)
+        .expect("launchd teardown boundary must have a bounded body");
+    let stop_target = &bootstrap[stop_target_start..stop_target_end];
+    let bootout_request = stop_target
+        .find("launchctl bootout \"$target\"")
+        .expect("launchd teardown must request bootout");
+    let observed_exit = stop_target
+        .find("wait_for_launchd_target_exit \"$target\"")
+        .expect("launchd teardown must await observed target absence");
+    assert!(
+        bootout_request < observed_exit,
+        "launchd teardown must treat bootout as a request and target absence as the postcondition"
+    );
+    let exit_wait_start = bootstrap
+        .find("wait_for_launchd_target_exit()")
+        .expect("bootstrap must own a bounded launchd-exit poll");
+    let exit_wait_end = bootstrap[exit_wait_start..]
+        .find("\n}\n\nstop_launchd_target()")
+        .map(|offset| exit_wait_start + offset)
+        .expect("launchd-exit poll must have a bounded body");
+    let exit_wait = &bootstrap[exit_wait_start..exit_wait_end];
+    assert!(
+        exit_wait.contains("launchd_poll <= 30")
+            && exit_wait.contains("/bin/sleep 1")
+            && exit_wait.contains("launchd_target_stop_timeout"),
+        "launchd target removal must converge through a bounded, observable wait"
+    );
     let repair_start = bootstrap
-        .find("if [[ \"$bootstrap_mode\" == \"--repair-service\" ]]; then\n    validate_existing_runner_install")
+        .find("if [[ \"$bootstrap_mode\" == \"--repair-service\" ]]; then")
         .expect("bootstrap must own an explicit release-service repair path");
     let repair = &bootstrap[repair_start..];
+    assert!(
+        repair.contains("bootstrap_phase=service_repair\n    validate_existing_runner_install"),
+        "release-service repair must validate the existing installation under an observable phase"
+    );
     let state_observation = repair
         .find("read_remote_runner_observation")
         .expect("service repair must obtain one validated remote runner observation");
@@ -1946,7 +2072,7 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         .find("/bin/mv \"$legacy_runner_service_plist\" \"$legacy_runner_service_backup\"")
         .expect("service repair must atomically journal the legacy service");
     let legacy_stop = migration
-        .find("bootout \"system/$runner_service_label\"")
+        .find("stop_launchd_target \"system/$runner_service_label\"")
         .expect("service repair must stop the legacy system listener");
     let offline_check = migration
         .find("wait_for_remote_runner_status offline")
@@ -1998,9 +2124,7 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "service repair must not readmit jobs until the candidate is committed"
     );
     let background_upgrade_start = repair
-        .find(
-            "validate_legacy_background_runner_service_files\n        prepare_runner_security_context",
-        )
+        .find("log_event info background_upgrade_started")
         .expect("repair must recognize the previously shipped Background contract");
     let background_upgrade = &repair[background_upgrade_start..migration_start];
     let background_journal = background_upgrade
@@ -2154,7 +2278,8 @@ fn github_ci_stages_feedback_and_reuses_exact_evidence_fail_closed() {
     );
     assert!(
         classifier.contains("packages/ios-app/*")
-            && classifier.contains(".github/workflows/release-ios.yml"),
+            && classifier.contains(".github/workflows/release-ios.yml")
+            && classifier.contains("scripts/bootstrap-ios-*"),
         "iOS source and release changes must schedule iOS validation"
     );
     for required in [
@@ -2568,6 +2693,9 @@ fn provider_neutral_ci_shadow_is_pinned_advisory_and_release_free() {
     assert!(definition_validator.contains("--reject-secrets"));
     assert!(definition_validator.contains("--reject-parse-warnings"));
     assert!(definition_validator.contains(".buildkite/shadow-steps.yml"));
+    assert!(definition_validator.contains("component=ci-definition-validator"));
+    assert!(definition_validator.contains("github_workflows_verified"));
+    assert!(definition_validator.contains("buildkite_definition_verified"));
     assert!(rust_image.contains("rustup component add --toolchain"));
     assert!(rust_image.contains("rustfmt clippy"));
 
@@ -2731,6 +2859,10 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
     assert!(installer.contains("mv -f \"$partial\" \"$destination\""));
     assert!(installer.contains("share/xcodegen"));
     assert!(installer.contains("install_buildkite_agent"));
+    assert!(installer.contains("component=ci-tool-installer"));
+    assert!(installer.contains("download_cache_hit"));
+    assert!(installer.contains("download_completed"));
+    assert!(installer.contains("tool_prefix_rebuild_completed"));
     for required in [
         "tron.ci-tool-prefix.v1",
         "write_prefix_manifest",
@@ -2760,6 +2892,25 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
     assert!(verifier.contains("verify_owned_prefix create-dmg \"$prefix\""));
     assert!(verifier.contains("template.applescript eula-resources-template.xml"));
     assert!(verifier.contains("share/create-dmg/support/$required"));
+    assert!(verifier.contains("component=ci-toolchain-verifier"));
+    assert!(verifier.contains("manifest_sha256="));
+    assert!(verifier.contains("target_verified"));
+
+    let ios_test = read_repo_file("scripts/ios-ci-test.sh");
+    for required in [
+        "component=ios-ci-test",
+        "build_started",
+        "build_completed",
+        "test_started",
+        "test_completed",
+        "metrics_written",
+        "ci_completed",
+    ] {
+        assert!(
+            ios_test.contains(required),
+            "measured iOS CI execution is missing structured event {required}"
+        );
+    }
 
     let installer_self_test = Command::new("bash")
         .args(["scripts/install-ci-tools.sh", "--self-test"])

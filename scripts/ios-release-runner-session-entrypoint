@@ -7,8 +7,22 @@ set -euo pipefail
 # agree. This makes the same boundary hold after repair and after every reboot,
 # before GitHub can assign a job to the machine.
 
+log_event() {
+    local level="$1" event="$2" details="${3:-}" line timestamp
+    timestamp="$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    details="${details//$'\r'/ }"
+    details="${details//$'\n'/ }"
+    line="timestamp=$timestamp level=$level component=ios-release-runner-session pid=$$ event=$event"
+    [[ -z "$details" ]] || line="$line $details"
+    if [[ "$level" == "error" ]]; then
+        printf '%s\n' "$line" >&2
+    else
+        printf '%s\n' "$line"
+    fi
+}
+
 die() {
-    echo "error: $*" >&2
+    log_event error fatal "message=$*"
     exit 1
 }
 
@@ -47,21 +61,17 @@ entrypoint_path="/Library/Application Support/Tron/ReleaseRunner/start-runner"
 runner_uid="$(/usr/bin/id -u "$runner_user")"
 [[ "$runner_uid" =~ ^[0-9]+$ && "$runner_uid" -ge 500 ]] \
     || die "release runner account is not a standard account"
-[[ "$(/usr/bin/id -u)" == "$runner_uid" && "$(/usr/bin/id -un)" == "$runner_user" ]] \
-    || die "release listener has the wrong Unix identity"
-[[ "${HOME:-}" == "/Users/$runner_user" ]] \
-    || die "release listener has the wrong home"
 [[ "$runner_program" == "/Users/$runner_user/actions-runner/runsvc.sh" ]] \
     || die "release listener program is outside the isolated installation"
 [[ -f "$runner_program" && ! -L "$runner_program" && -x "$runner_program" ]] \
     || die "release listener program is unavailable or unsafe"
 [[ "$(/usr/bin/stat -f '%Su' "$runner_program")" == "$runner_user" ]] \
     || die "release listener program has the wrong owner"
-[[ "$(/bin/launchctl manageruid)" == "$runner_uid" ]] \
-    || die "release listener is outside its user launchd domain"
-[[ "$(/bin/launchctl managername)" == "Background" ]] \
-    || die "release listener is outside the Background launchd domain"
 
+effective_uid="$(/usr/bin/id -u 2>/dev/null || true)"
+effective_user="$(/usr/bin/id -un 2>/dev/null || true)"
+manager_uid="$(/bin/launchctl manageruid 2>/dev/null || true)"
+manager_name="$(/bin/launchctl managername 2>/dev/null || true)"
 security_identity="$(/usr/bin/python3 - <<'PY'
 import ctypes
 import os
@@ -94,8 +104,23 @@ if security_status != 0 or audit_status != 0:
 else:
     print(f"{os.geteuid()}:{audit_uid.value}:{1 if attributes.value & 1 else 0}")
 PY
-)"
+)" || security_identity="unavailable"
+home_matches=false
+[[ "${HOME:-}" == "/Users/$runner_user" ]] && home_matches=true
+log_event info identity_observed \
+    "expected_uid=$runner_uid effective_uid=${effective_uid:-unavailable} effective_user=${effective_user:-unavailable} manager_uid=${manager_uid:-unavailable} manager_name=${manager_name:-unavailable} security_identity=${security_identity:-unavailable} home_matches=$home_matches"
+[[ "$effective_uid" == "$runner_uid" && "$effective_user" == "$runner_user" ]] \
+    || die "release listener has the wrong Unix identity: expected_uid=$runner_uid observed_uid=${effective_uid:-unavailable}"
+[[ "$home_matches" == "true" ]] \
+    || die "release listener has the wrong home"
+[[ "$manager_uid" == "$runner_uid" ]] \
+    || die "release listener is outside its user launchd domain: expected_uid=$runner_uid observed_uid=${manager_uid:-unavailable}"
+[[ "$manager_name" == "Background" ]] \
+    || die "release listener is outside the Background launchd domain: observed=${manager_name:-unavailable}"
 security_identity_is_valid "$security_identity" "$runner_uid" \
-    || die "release listener has a mixed security audit session"
+    || die "release listener has a mixed security audit session: expected=$runner_uid:$runner_uid:0 observed=${security_identity:-unavailable}"
 
-exec "$runner_program"
+log_event info listener_exec \
+    "effective_uid=$effective_uid audit_identity=$security_identity manager_name=$manager_name"
+exec "$runner_program" \
+    || die "release listener could not execute the isolated runner program"

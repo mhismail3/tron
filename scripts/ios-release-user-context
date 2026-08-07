@@ -14,6 +14,14 @@ die() {
     exit 1
 }
 
+notice() {
+    local details="$1" timestamp
+    timestamp="$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    details="${details//$'\r'/ }"
+    details="${details//$'\n'/ }"
+    echo "::notice::timestamp=$timestamp component=ios-release-user-context event=context_verified $details" >&2
+}
+
 [[ "$(/usr/bin/uname -s)" == "Darwin" ]] \
     || die "the iOS release user-context boundary requires macOS"
 (( $# > 0 )) || die "usage: scripts/ios-release-user-context command [args...]"
@@ -32,15 +40,20 @@ release_user="$(/usr/bin/id -un)"
 manager_uid="$(/bin/launchctl manageruid 2>/dev/null || true)"
 manager_name="$(/bin/launchctl managername 2>/dev/null || true)"
 [[ "$manager_uid" == "$release_uid" ]] \
-    || die "the current launchd domain does not match the release account"
+    || die "the current launchd domain does not match the release account: expected_uid=$release_uid observed_uid=${manager_uid:-unavailable}"
 case "$manager_name" in
     Aqua | Background) ;;
-    *) die "the current user launchd context has an unsupported session type" ;;
+    *) die "the current user launchd context has an unsupported session type: observed=${manager_name:-unavailable}" ;;
 esac
-/usr/bin/python3 "$session_verifier" \
-    security-session \
-    --require-non-root \
-    --require-audit-uid "$release_uid" >/dev/null \
-    || die "the current user launchd context has a mixed audit identity"
+if ! security_session="$(
+    /usr/bin/python3 "$session_verifier" \
+        security-session \
+        --require-non-root \
+        --require-audit-uid "$release_uid"
+)"; then
+    die "the current user launchd context has a mixed audit identity: ${security_session:-verifier unavailable}"
+fi
+notice \
+    "effective_uid=$release_uid manager_uid=$manager_uid manager_name=$manager_name security_session=$security_session"
 
 exec "$@"

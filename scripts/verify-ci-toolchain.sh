@@ -7,6 +7,15 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$repo_root/config/ci-toolchain.env"
 
+log_ci_event() {
+    local event="$1" details="${2:-}" timestamp
+    timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    details="${details//$'\r'/ }"
+    details="${details//$'\n'/ }"
+    printf 'timestamp=%s level=info component=ci-toolchain-verifier event=%s%s\n' \
+        "$timestamp" "$event" "$([[ -n "$details" ]] && printf ' %s' "$details")" >&2
+}
+
 require_contains() {
     local label="$1" expected="$2" actual="$3"
     if [[ "$actual" != *"$expected"* ]]; then
@@ -96,6 +105,9 @@ verify_ios() {
 if [[ $# -eq 0 ]]; then
     set -- ios xcodegen
 fi
+manifest_sha256="$(shasum -a 256 "$repo_root/config/ci-toolchain.env" | awk '{print $1}')"
+log_ci_event verification_started \
+    "target_count=$# manifest_sha256=$manifest_sha256"
 for target in "$@"; do
     case "$target" in
         xcode) verify_xcode ;;
@@ -106,4 +118,7 @@ for target in "$@"; do
         buildkite-agent) verify_buildkite_agent ;;
         *) echo "error: unsupported verification target: $target" >&2; exit 2 ;;
     esac
+    log_ci_event target_verified "target=$target"
 done
+log_ci_event verification_completed \
+    "target_count=$# manifest_sha256=$manifest_sha256"

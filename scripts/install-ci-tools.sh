@@ -7,6 +7,15 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$repo_root/config/ci-toolchain.env"
 
+log_ci_event() {
+    local event="$1" details="${2:-}" timestamp
+    timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    details="${details//$'\r'/ }"
+    details="${details//$'\n'/ }"
+    printf 'timestamp=%s level=info component=ci-tool-installer event=%s%s\n' \
+        "$timestamp" "$event" "$([[ -n "$details" ]] && printf ' %s' "$details")" >&2
+}
+
 tools_root="${TRON_CI_TOOLS_DIR:-${RUNNER_TEMP:-/tmp}/tron-ci-tools}"
 bin_dir="$tools_root/bin"
 downloads="$tools_root/downloads"
@@ -22,12 +31,17 @@ verify_sha256() {
 }
 
 download() {
-    local url="$1" destination="$2" checksum="$3" partial
+    local url="$1" destination="$2" checksum="$3" partial size
     if [[ -f "$destination" ]] \
         && verify_sha256 "$destination" "$checksum" >/dev/null 2>&1; then
+        size="$(/usr/bin/wc -c < "$destination" | /usr/bin/tr -d '[:space:]')"
+        log_ci_event download_cache_hit \
+            "artifact=$(basename "$destination") bytes=$size sha256=$checksum"
         return
     fi
 
+    log_ci_event download_started \
+        "artifact=$(basename "$destination") sha256=$checksum retries=5 timeout_seconds=600"
     partial="$(mktemp "${destination}.partial.XXXXXX")"
     if ! curl \
         --fail \
@@ -49,6 +63,9 @@ download() {
         return 1
     fi
     mv -f "$partial" "$destination"
+    size="$(/usr/bin/wc -c < "$destination" | /usr/bin/tr -d '[:space:]')"
+    log_ci_event download_completed \
+        "artifact=$(basename "$destination") bytes=$size sha256=$checksum"
 }
 
 write_prefix_manifest() {
@@ -298,14 +315,17 @@ ensure_version_prefix() {
     local lock staging status
     shift 5
     if "$validator" "$prefix" >/dev/null 2>&1; then
+        log_ci_event tool_prefix_cache_hit "tool=$tool version=$version"
         return 0
     fi
 
     lock="$(acquire_prefix_lock "$prefix")"
     if "$validator" "$prefix" >/dev/null 2>&1; then
         release_prefix_lock "$lock"
+        log_ci_event tool_prefix_cache_hit_after_lock "tool=$tool version=$version"
         return 0
     fi
+    log_ci_event tool_prefix_rebuild_started "tool=$tool version=$version"
     staging="$(mktemp -d "${prefix}.staging.XXXXXX")"
     set +e
     (
@@ -321,6 +341,12 @@ ensure_version_prefix() {
         rm -rf -- "$staging"
     fi
     release_prefix_lock "$lock"
+    if [[ "$status" -eq 0 ]]; then
+        log_ci_event tool_prefix_rebuild_completed "tool=$tool version=$version"
+    else
+        log_ci_event tool_prefix_rebuild_failed \
+            "tool=$tool version=$version exit_status=$status"
+    fi
     return "$status"
 }
 
@@ -512,6 +538,7 @@ if [[ $# -eq 0 ]]; then
     set -- xcodegen create-dmg asc
 fi
 for tool in "$@"; do
+    log_ci_event tool_install_started "tool=$tool"
     case "$tool" in
         xcodegen) install_xcodegen ;;
         create-dmg) install_create_dmg ;;
@@ -519,6 +546,7 @@ for tool in "$@"; do
         buildkite-agent) install_buildkite_agent ;;
         *) echo "error: unsupported CI tool: $tool" >&2; exit 2 ;;
     esac
+    log_ci_event tool_install_completed "tool=$tool"
 done
 
 if [[ -n "${GITHUB_PATH:-}" ]]; then
@@ -526,3 +554,4 @@ if [[ -n "${GITHUB_PATH:-}" ]]; then
 else
     echo "Add this directory to PATH: $bin_dir"
 fi
+log_ci_event installer_completed "tool_count=$#"

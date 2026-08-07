@@ -8,8 +8,22 @@ set -euo pipefail
 # launchd retries the helper only after failure; once the service exists this
 # process exits successfully and remains dormant until the next boot.
 
+log_event() {
+    local level="$1" event="$2" details="${3:-}" line timestamp
+    timestamp="$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    details="${details//$'\r'/ }"
+    details="${details//$'\n'/ }"
+    line="timestamp=$timestamp level=$level component=ios-release-runner-launchd pid=$$ event=$event"
+    [[ -z "$details" ]] || line="$line $details"
+    if [[ "$level" == "error" ]]; then
+        printf '%s\n' "$line" >&2
+    else
+        printf '%s\n' "$line"
+    fi
+}
+
 die() {
-    echo "error: $*" >&2
+    log_event error fatal "message=$*"
     exit 1
 }
 
@@ -55,6 +69,8 @@ validate_root_file() {
     || die "invalid release runner UID"
 [[ "$service_label" =~ ^[A-Za-z0-9.-]+$ ]] \
     || die "invalid release runner service label"
+log_event info helper_started \
+    "runner_user=$runner_user expected_uid=$runner_uid service_label=$service_label"
 [[ "$0" == "$helper_path" ]] \
     || die "release runner launchd bootstrap must run from its immutable installed path"
 validate_root_directory /Library
@@ -97,22 +113,34 @@ fi
 
 runner_domain="user/$runner_uid"
 runner_service="$runner_domain/$service_label"
+domain_created=false
 if ! /bin/launchctl print "$runner_domain" >/dev/null 2>&1; then
     /bin/launchctl bootstrap "$runner_domain" \
         || /bin/launchctl print "$runner_domain" >/dev/null 2>&1 \
         || die "could not bootstrap the release account's user domain"
+    domain_created=true
 fi
-[[ "$(/bin/launchctl asuser "$runner_uid" /bin/launchctl manageruid)" == "$runner_uid" ]] \
-    || die "release account launchd manager UID is inconsistent"
-[[ "$(/bin/launchctl asuser "$runner_uid" /bin/launchctl managername)" == "Background" ]] \
-    || die "release account launchd manager is not the Background domain"
+manager_uid="$(/bin/launchctl asuser "$runner_uid" /bin/launchctl manageruid 2>/dev/null || true)"
+manager_name="$(/bin/launchctl asuser "$runner_uid" /bin/launchctl managername 2>/dev/null || true)"
+log_event info domain_observed \
+    "created=$domain_created expected_uid=$runner_uid manager_uid=${manager_uid:-unavailable} manager_name=${manager_name:-unavailable}"
+[[ "$manager_uid" == "$runner_uid" ]] \
+    || die "release account launchd manager UID is inconsistent: expected=$runner_uid observed=${manager_uid:-unavailable}"
+[[ "$manager_name" == "Background" ]] \
+    || die "release account launchd manager is not the Background domain: observed=${manager_name:-unavailable}"
 
+service_created=false
 if ! /bin/launchctl print "$runner_service" >/dev/null 2>&1; then
     /bin/launchctl bootstrap "$runner_domain" "$agent_plist" \
         || /bin/launchctl print "$runner_service" >/dev/null 2>&1 \
         || die "could not bootstrap the release runner Background agent"
+    service_created=true
 fi
+log_event info service_observed \
+    "created=$service_created target=$runner_service"
 /bin/launchctl kickstart "$runner_service" \
     || die "could not start the release runner Background agent"
 /bin/launchctl print "$runner_service" >/dev/null \
     || die "release runner Background agent is unavailable"
+log_event info helper_completed \
+    "target=$runner_service manager_uid=$manager_uid manager_name=$manager_name"

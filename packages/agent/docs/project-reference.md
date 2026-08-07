@@ -3006,8 +3006,28 @@ session. It journals those root-owned service files, installs the inheriting
 agent and immutable listener guard, and uses privileged `launchctl bsexec` to
 verify the actual replacement PID before reopening scheduling. An interrupted
 upgrade either commits a verified replacement or restores the exact journaled
-contract. Root never mutates runner-owned home descendants. The iOS development
-runbook owns the current agent, entry point, boot-helper,
+contract. A launchd `bootout` acknowledgement is not removal proof: every
+forward and rollback stop waits up to 30 seconds for the exact target to become
+absent before touching its files or starting the other topology.
+
+The installer, root boot helper, listener guard, doctor, and sensitive-command
+boundary all emit timestamped structured operational evidence without shell
+tracing or secret-bearing values. Root-owned mode-0600 journals under
+`/Library/Logs/Tron/` retain installer provenance, transaction state, launchd
+requests/convergence, rollback decisions, and boot-helper outcomes. GitHub job
+logs retain the doctor's exact sanitized effective/audit UID, manager type,
+Security-session attributes, filesystem boundary, toolchain, capacity, and
+source SHA. `scripts/ios-release-runner-diagnostics.sh` performs a read-only
+join of those records with installed-file hashes, rollback-journal presence,
+filtered launchd state, the actual listener's `bsexec` identity, remote runner
+state, and recent CI/TestFlight run metadata. It deliberately excludes process
+environments, runner credentials, keychains, profiles, signing identities, raw
+job output, and Actions `_diag` files, and returns nonzero only after completing
+the snapshot when any required health check is bad. The current logged
+LaunchDaemon and exact former no-log definition are staged separately, so the
+observability upgrade can still authenticate and restore a journal written by
+the prior contract. Root never mutates runner-owned home descendants. The iOS
+development runbook owns the current agent, entry point, boot-helper,
 legacy cleanup, and full rotation paths. A secretless recovery step then
 restores the baseline keychain preferences, removes only paths claimed by
 strict durable attempt ledgers, creates or validates the provisioning-profile

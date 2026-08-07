@@ -3,6 +3,15 @@
 
 set -euo pipefail
 
+log_ci_event() {
+  local event="$1" details="${2:-}" timestamp
+  timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  details="${details//$'\r'/ }"
+  details="${details//$'\n'/ }"
+  printf 'timestamp=%s level=info component=ios-ci-test event=%s%s\n' \
+    "$timestamp" "$event" "$([[ -n "$details" ]] && printf ' %s' "$details")"
+}
+
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ios_dir="$root_dir/packages/ios-app"
 derived_data="${TRON_IOS_CI_DERIVED_DATA:-$ios_dir/build/ci-derived-data}"
@@ -24,7 +33,10 @@ for generated_output in "$result_bundle" "$enumeration_path" "$metrics_path"; do
 done
 cd "$ios_dir"
 
+log_ci_event ci_started \
+  "destination='$destination' parallel_workers=$parallel_workers enumerate_tests=$enumerate_tests"
 start_build="$(date +%s)"
+log_ci_event build_started "scheme=Tron_Beta action=build-for-testing"
 set +e
 xcodebuild build-for-testing \
   -project TronMobile.xcodeproj \
@@ -36,6 +48,8 @@ xcodebuild build-for-testing \
 build_status=$?
 set -e
 end_build="$(date +%s)"
+log_ci_event build_completed \
+  "exit_status=$build_status duration_seconds=$((end_build - start_build))"
 
 start_test="$end_build"
 end_test="$end_build"
@@ -48,6 +62,7 @@ if [[ "$build_status" -eq 0 ]]; then
     test_args+=( -parallel-testing-enabled NO )
   fi
   if [[ "$enumerate_tests" == "true" ]]; then
+    log_ci_event enumeration_started "format=json style=flat"
     xcodebuild test-without-building \
       -project TronMobile.xcodeproj \
       -scheme 'Tron Beta' \
@@ -58,8 +73,11 @@ if [[ "$build_status" -eq 0 ]]; then
       -test-enumeration-format json \
       -test-enumeration-output-path "$enumeration_path" \
       -quiet
+    log_ci_event enumeration_completed "format=json style=flat"
   fi
   start_test="$(date +%s)"
+  log_ci_event test_started \
+    "action=test-without-building parallel_workers=$parallel_workers"
   set +e
   xcodebuild test-without-building \
     -project TronMobile.xcodeproj \
@@ -73,6 +91,8 @@ if [[ "$build_status" -eq 0 ]]; then
   test_status=$?
   set -e
   end_test="$(date +%s)"
+  log_ci_event test_completed \
+    "exit_status=$test_status duration_seconds=$((end_test - start_test))"
 fi
 
 summary_path="$(mktemp)"
@@ -123,7 +143,13 @@ document = {
 Path(os.environ["TRON_METRICS_PATH"]).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
 PY
 
+metrics_sha256="$(shasum -a 256 "$metrics_path" | awk '{print $1}')"
+log_ci_event metrics_written \
+  "schema=tron.ios-ci-metrics.v1 sha256=$metrics_sha256"
+
 if [[ "$build_status" -ne 0 ]]; then
+  log_ci_event ci_completed "exit_status=$build_status phase=build"
   exit "$build_status"
 fi
+log_ci_event ci_completed "exit_status=$test_status phase=test"
 exit "$test_status"

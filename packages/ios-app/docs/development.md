@@ -680,6 +680,17 @@ scripts/verify-ci-toolchain.sh ios xcodegen
 scripts/validate-ci-definitions.sh
 ```
 
+The tool installer, manifest verifier, CI-definition validator, and measured
+iOS build/test driver emit UTC structured events into the provider-owned job
+log. They identify cache hits versus verified downloads, checksum and manifest
+provenance, prefix rebuilds, each validated definition/target, phase start/end,
+exit status, duration, and the final metrics SHA-256. URLs with credentials,
+environment dumps, and command tracing are excluded. GitHub retains those logs;
+the iOS lane additionally uploads the matching metrics JSON on every run and
+the `.xcresult` on failure. A change to either `scripts/ios-*` or
+`scripts/bootstrap-ios-*` is classified as iOS work so these contracts cannot
+skip their owning validation lane.
+
 The Mac lane adds `create-dmg`; the iOS release lane adds `asc` and runs
 `scripts/ios-release-runner-doctor.sh` before touching credentials. Pull-request
 path classification is owned by `scripts/ci-change-flags.sh`, including its
@@ -809,6 +820,46 @@ scripts/bootstrap-ios-release-runner.sh
 scripts/ios-release-runner-doctor.sh
 ```
 
+The bootstrap and both launchd boundaries emit timestamped, single-line,
+secret-safe operational records. The interactive transaction writes a unique
+`trace`, the exact checkout commit/dirty bit, and SHA-256 provenance for the
+bootstrap, toolchain manifest, and iOS release workflow to the root-only
+`/Library/Logs/Tron/ios-release-runner-bootstrap.log`. The boot helper's stdout
+and stderr are retained separately at
+`/Library/Logs/Tron/ios-release-runner-launchd.log` and
+`/Library/Logs/Tron/ios-release-runner-launchd-error.log`; the directory is
+root-owned mode 0755 and every file is root-owned mode 0600. The immutable
+listener guard records only its PID, effective/audit UIDs, launchd manager,
+Security-session root flag, and validation outcome in the existing private
+`/Users/tron-ci/Library/Logs/com.tron.ios-release-runner/` streams. It never
+logs a command line, process environment, GitHub token, keychain value,
+signing identity, profile contents, or runner credential file. Do not enable
+shell tracing on a release script.
+
+An otherwise-unhandled bootstrap command failure records its named phase,
+source line, and exit status before transactional cleanup. It deliberately does
+not record `BASH_COMMAND` or arguments because account passwords, runner tokens,
+and signing material can cross those command boundaries.
+
+Every doctor run adds the same sanitized identity document, exact Xcode/SDK,
+capacity, filesystem-boundary result, source SHA, and credential-audit mode to
+the durable GitHub Actions job log. To correlate host, GitHub, and recent
+workflow state after any failure, run the read-only collector:
+
+```bash
+scripts/ios-release-runner-diagnostics.sh
+```
+
+It continues collecting after an unhealthy check and exits nonzero at the end.
+The output contains fixed installed-file metadata and hashes, rollback-journal
+presence, filtered launchd state, the actual listener's `bsexec` security
+identity, exact remote runner state, and the three most recent main CI and iOS
+release run records. It tails only the root-owned Tron logs and
+`component=ios-release-runner-session` guard lines; raw Actions `_diag` logs,
+job output, credentials, keychains, environments, and signing state are
+deliberately excluded. This is the first evidence bundle to capture before
+manually changing launchd state.
+
 Bootstrap-only preparation commands enter the hidden account's launchd context
 in a strict order. Root first invokes `launchctl asuser`, which adopts the
 target bootstrap and security audit session but does not change Unix
@@ -926,6 +977,14 @@ or rotate the runner. Root mutates only root-owned service paths; all paths
 beneath the runner home, including legacy permission normalization, are created
 and changed as `tron-ci` to prevent privileged symlink-follow races.
 
+`launchctl bootout` is only a teardown request: launchd may keep the target
+observable briefly after returning. Repair and rollback therefore poll the
+exact system or user target for up to 30 seconds and treat observed absence as
+the postcondition. Each request status, poll count, convergence, and timeout is
+written under the transaction trace. This same bounded wait protects the
+forward cutover and rollback, so a normal asynchronous removal cannot be
+misclassified as a failed stop or trigger a rollback into the same transition.
+
 Repair also recognizes the one previously shipped Background contract whose
 agent used `SessionCreate=true`. It validates the exact old agent and helper,
 copies the three root-owned files into a mode-0700
@@ -937,6 +996,10 @@ Security session before the journal is committed and scheduling reopens. A
 failure restores the prior Background service, while a later repair resolves a
 durable interrupted journal by either validating and committing the corrected
 candidate or restoring the exact prior files before retrying the upgrade.
+The current LaunchDaemon adds root-owned stdout/stderr journals and a 0077
+creation umask. Repair generates the exact former no-log LaunchDaemon contract
+separately from the current plist, so adding observability cannot invalidate an
+already-persisted rollback journal or prevent recovery from the pre-log state.
 
 Rotation is explicit. Stop and remove the Background agent and its boot helper,
 request a short-lived removal token, unregister as the service account, then
