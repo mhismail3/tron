@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import ctypes
 import datetime as dt
 import hashlib
 import io
@@ -151,73 +150,6 @@ def classify_codesign_log(path: Path) -> dict:
             classification = candidate
             break
     return {"classification": classification}
-
-
-def inspect_security_session(
-    require_non_root: bool, require_audit_uid: Optional[int] = None
-) -> dict:
-    if sys.platform != "darwin":
-        raise VerificationError("security-session inspection requires macOS")
-    security = ctypes.CDLL(
-        "/System/Library/Frameworks/Security.framework/Security"
-    )
-    session_get_info = security.SessionGetInfo
-    session_get_info.argtypes = (
-        ctypes.c_uint32,
-        ctypes.POINTER(ctypes.c_uint32),
-        ctypes.POINTER(ctypes.c_uint32),
-    )
-    session_get_info.restype = ctypes.c_int32
-    session_id = ctypes.c_uint32()
-    attributes = ctypes.c_uint32()
-    status = session_get_info(
-        ctypes.c_uint32(0xFFFFFFFF),
-        ctypes.byref(session_id),
-        ctypes.byref(attributes),
-    )
-    if status != 0:
-        raise VerificationError(f"SessionGetInfo failed with status {status}")
-
-    process = ctypes.CDLL(None, use_errno=True)
-    get_audit_uid = process.getauid
-    get_audit_uid.argtypes = (ctypes.POINTER(ctypes.c_uint32),)
-    get_audit_uid.restype = ctypes.c_int
-    audit_uid = ctypes.c_uint32()
-    if get_audit_uid(ctypes.byref(audit_uid)) != 0:
-        raise VerificationError(
-            f"getauid failed with errno {ctypes.get_errno()}"
-        )
-
-    value = attributes.value
-    document = {
-        "audit_uid": audit_uid.value,
-        "effective_uid": os.geteuid(),
-        "session_id": session_id.value,
-        "is_root": bool(value & 0x0001),
-        "has_graphics": bool(value & 0x0010),
-        "has_tty": bool(value & 0x0020),
-        "is_remote": bool(value & 0x1000),
-    }
-    if require_non_root and document["is_root"]:
-        raise VerificationError(
-            "release runner inherited the root macOS security session "
-            f"(effective_uid={document['effective_uid']}, "
-            f"audit_uid={document['audit_uid']}, "
-            f"session_id={document['session_id']}, is_root=true)"
-        )
-    if (
-        require_audit_uid is not None
-        and document["audit_uid"] != require_audit_uid
-    ):
-        raise VerificationError(
-            "release runner audit user does not match its Unix account "
-            f"(expected_audit_uid={require_audit_uid}, "
-            f"observed_audit_uid={document['audit_uid']}, "
-            f"effective_uid={document['effective_uid']}, "
-            f"session_id={document['session_id']}, "
-            f"is_root={str(document['is_root']).lower()})"
-        )
-    return document
 
 
 def read_plist(path: Path) -> dict:
@@ -4387,22 +4319,6 @@ def self_test() -> None:
             if "Example" in json.dumps(result):
                 raise AssertionError("codesign diagnostics leaked certificate identity")
 
-        if sys.platform == "darwin":
-            session = inspect_security_session(
-                require_non_root=True, require_audit_uid=os.geteuid()
-            )
-            if session["audit_uid"] != session["effective_uid"]:
-                raise AssertionError("security-session omitted matching audit identity")
-            try:
-                inspect_security_session(
-                    require_non_root=True,
-                    require_audit_uid=os.geteuid() + 1,
-                )
-            except VerificationError:
-                pass
-            else:
-                raise AssertionError("security-session accepted the wrong audit user")
-
         leaf = root / "leaf.cer"
         leaf.write_bytes(b"validated leaf")
         profile = root / "profile.plist"
@@ -4709,9 +4625,6 @@ def parser() -> argparse.ArgumentParser:
     profile.add_argument("--leaf-certificate", required=True)
     diagnostic = commands.add_parser("codesign-diagnostic")
     diagnostic.add_argument("--log", required=True)
-    security_session = commands.add_parser("security-session")
-    security_session.add_argument("--require-non-root", action="store_true")
-    security_session.add_argument("--require-audit-uid", type=int)
     commands.add_parser("self-test")
     return root
 
@@ -4759,15 +4672,6 @@ def main() -> int:
             print(
                 json.dumps(
                     classify_codesign_log(Path(args.log).resolve()), sort_keys=True
-                )
-            )
-        elif args.command == "security-session":
-            print(
-                json.dumps(
-                    inspect_security_session(
-                        args.require_non_root, args.require_audit_uid
-                    ),
-                    sort_keys=True,
                 )
             )
         else:

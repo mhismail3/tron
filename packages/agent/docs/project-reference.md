@@ -2947,7 +2947,7 @@ automatic schemas. Their run-ID-scoped records are
 `main` at checkout and immediately before ASC; tag source must remain a
 `main` ancestor. Existing builds require an exact prior direct admission/ASC-ID
 join. External review-pending runs retain admission without a completion receipt
-and resume the same build after approval; completed evidence skips the runner.
+and resume the same build after approval; completed evidence skips the release job.
 
 Hosted iOS `CFBundleVersion` values come from the Release workflow's one
 monotonic run-number counter. Owner run `N` maps to
@@ -2958,99 +2958,43 @@ and local/Mac Apple build mirrors. All ASC lookups specify platform `IOS`, and
 processing and replay-safe group assignment follow the exact ASC build ID.
 Release tags independently advance their build through external Beta App Review
 and the public group. Pull-request CI never receives distribution credentials or
-triggers TestFlight delivery. The dedicated macOS release runner is a
-root-owned agent definition stored outside launchd's global LaunchAgents
-discovery directory and loaded explicitly into its isolated service account's
-headless `user/<uid>` Background domain. A one-shot root LaunchDaemon creates
-that independent domain at boot and loads the agent; the long-lived listener is
-never a system-domain process. `LimitLoadToSessionType=Background` and
-inheritance from the independent `user/<uid>` domain provide the matching
-bootstrap and non-root audit context without a GUI login. The agent deliberately
-omits `SessionCreate`, which would replace the correct Background audit login
-identity with a new mismatched session. A root-owned entry point verifies the
-effective UID, manager, Security session, and audit UID before the listener can
-connect to GitHub. Bootstrap preparation adopts that launchd bootstrap and
-security audit session with privileged `launchctl asuser` first, then
-immediately drops UID/GID to the isolated account because `asuser` deliberately
-does not alter Unix credentials. Reversing those operations is rejected by
-macOS with `EPERM`; the boundary verifies manager, effective, and audit
-identities after the drop. Hosted macOS CI retains Simulator/XCTest ownership
-because those tools require an Aqua session, while the release runner owns only Xcode
-27 archive, export, verification, upload, and distribution. Before secrets are
-exposed, the doctor proves that launchd's manager UID and the Security framework
-audit UID both equal the effective UID, requires the Background manager type,
-and rejects a root security session. The command boundary validates and executes
-in that current context; it never uses `launchctl asuser` to mask a listener
-installed in the wrong domain. Fresh installation and service repair share one
-root-owned host lock. Existing legacy system-domain installations move through
-the bootstrap's `--repair-service` transaction: it fences the exact idle runner
-by removing its dedicated scheduling label. Before the service cutover, repair
-also recognizes the single known legacy filesystem state created when
-the former root tar extraction preserved the pinned archive root's 0755 mode
-over the precreated mode-0700 `actions-runner` directory. Only after the exact
-runner is remotely idle does the isolated account tighten that directory and
-the bootstrap revalidate every required runner file; other modes fail closed,
-and fresh installs reassert 0700 immediately after extraction. Busy state and
-label presence come from one validated remote snapshot, so API failures cannot
-masquerade as label absence. Repair then
-atomically moves the legacy plist to a root-owned non-autoloading journal,
-proves that exact runner offline, and admits the replacement only after its new
-listener takes the same ID online. Proving that candidate online is the logical
-commit; journal cleanup then precedes restoring the label. A cleanup failure
-keeps the verified candidate running and scheduling fenced. Failed pre-commit
-cutovers stop the helper before the agent, prove the exact runner offline,
-restore and verify the legacy listener, and then reopen scheduling. The durable
-journal makes process interruption and reboot resumable. A launchd `bootout`
-acknowledgement is not removal proof: every
-forward and rollback stop waits up to 30 seconds for the exact target to become
-absent before touching its files or starting the other topology.
+triggers TestFlight delivery. The TestFlight job runs on GitHub's ephemeral
+ARM64 `macos-26` image behind the protected `ios-testflight` environment.
+The workflow selects Xcode 26.6 explicitly; the pre-secret toolchain doctor
+requires `RUNNER_ENVIRONMENT=github-hosted`, `ImageOS=macos26`, ARM64, Xcode
+build `17F113`, the iOS 26.5 SDK, completed first-launch state, and bounded
+free capacity. A beta Xcode path fails before any signing or App Store secret is
+admitted. The exact hosted image inventory and repository manifest are the two
+rotation inputs.
 
-The installer, root boot helper, listener guard, doctor, and sensitive-command
-boundary all emit timestamped structured operational evidence without shell
-tracing or secret-bearing values. Root-owned mode-0600 journals under
-`/Library/Logs/Tron/` retain installer provenance, transaction state, launchd
-requests/convergence, rollback decisions, and boot-helper outcomes. GitHub job
-logs retain the doctor's exact sanitized effective/audit UID, manager type,
-Security-session attributes, filesystem boundary, toolchain, capacity, and
-source SHA. `scripts/ios-release-runner-diagnostics.sh` performs a read-only
-join of those records with installed-file hashes, rollback-journal presence,
-filtered launchd state, the exact listener process and Unix UID, the listener
-guard's own identity record, remote runner state, and recent CI/TestFlight run
-metadata. It deliberately excludes process
-environments, runner credentials, keychains, profiles, signing identities, raw
-job output, and Actions `_diag` files, and returns nonzero only after completing
-the snapshot when any required health check is bad. Root never mutates
-runner-owned home descendants. The iOS
-development runbook owns the current agent, entry point, boot-helper,
-legacy cleanup, and full rotation paths. A secretless recovery step then
-restores the baseline keychain preferences, removes only paths claimed by
-strict durable attempt ledgers, creates or validates the provisioning-profile
-directory component-by-component with no-follow ownership checks, and proves
-the persistent credential state is empty before GitHub injects secrets. The
-workflow and ledger share Xcode's current
-`~/Library/Developer/Xcode/UserData/Provisioning Profiles` library; the retired
-`~/Library/MobileDevice` cache is not part of the current signing contract.
-Profile UUIDs remain canonical lowercase from decoded profile through cache
-filename, export options, and durable cleanup ownership because manual export
-lookup preserves that exact identity. Manual keychain preparation, archive,
-export, and teardown all use that boundary, so CodeSign reaches the isolated
-account's `secd` and `trustd` services without a GUI login or trust override.
-Manual signing validates its `.p12` leaf through the checksum-pinned WWDR G3
-and Apple Root certificates without ambient issuer discovery, imports the
-leaf/private key plus WWDR into a unique standard-directory keychain, and keeps
-the trusted root in macOS's system-root store. Both provisioning profiles must
-admit that exact leaf. A throwaway Mach-O must sign through the exact identity
-hash and keychain;
-the workflow then verifies its embedded three-certificate chain against the
-validated leaf and repository pins. Redacted failure classification preserves
-the owning trust, interaction, identity, or security-context layer without
-logging certificate subjects. Certificate-chain validation never depends on an
-interactive user's login keychain. Before each persistent signing mutation, a
-mode-0600, fsynced ledger records only canonical run/attempt ownership and
-recomputed keychain/profile paths, never credential material. Successful
-teardown removes that ledger only after every target is absent; interruption or
-cleanup failure retains it for bounded next-job recovery, and the TestFlight
-receipt remains gated on successful teardown.
+This replaces the former long-lived hidden-account runner. Xcode 26.6's asset
+compiler launches CoreSimulator helpers even for device archives, while that
+runner's intentionally headless Background domain denied the helper's device
+directory. The hosted image supplies the normal Aqua/CoreSimulator and keychain
+services; it also removes the custom launchd agent, service account, persistent
+checkout, baseline keychain, runner registration, and cross-job recovery ledger
+from the production surface. Pull-request CI still never receives distribution
+credentials or triggers TestFlight.
+
+ASC authentication is environment-backed. Manual signing captures the hosted
+user's existing keychain search/default state, validates its `.p12` leaf
+through checksum-pinned WWDR G3 and Apple Root certificates without ambient
+issuer discovery, and imports the leaf/private key plus WWDR into one
+run-attempt-named keychain. The trusted root stays in macOS's system-root store.
+Both provisioning profiles must admit that exact leaf and retain canonical
+lowercase UUID filenames. A throwaway Mach-O must sign through the exact
+identity hash and keychain, and its embedded three-certificate chain must match
+the validated leaf and repository pins before archive work begins. Redacted
+failure classification preserves the owning trust, interaction, identity, or
+toolchain layer without logging certificate subjects.
+
+The sole `if: always()` teardown restores the captured keychain preferences
+and removes the temporary private key, certificate, profiles, diagnostic files,
+and job keychain. The TestFlight receipt remains gated on successful teardown.
+If the process is killed before teardown, the ephemeral VM is still discarded,
+so no credential or filesystem state can reach a later job. The iOS development
+runbook owns the exact hosted-image/toolchain rotation and manual-signing
+contract.
 
 ## Validation
 

@@ -59,12 +59,7 @@
         "external": "server-v*"
       },
       "runner": {
-        "labels": [
-          "self-hosted",
-          "macOS",
-          "ARM64",
-          "tron-ios-release"
-        ],
+        "image": "macos-26",
         "environment": "ios-testflight"
       }
     },

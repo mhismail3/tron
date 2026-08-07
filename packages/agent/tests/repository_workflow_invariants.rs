@@ -842,7 +842,7 @@ fn workflow_ordering_preserves_main_history_and_rejects_stale_ios_delivery() {
     ] {
         assert!(
             checkout_script.contains(required),
-            "release-runner checkout guard is missing {required}"
+            "release-job checkout guard is missing {required}"
         );
     }
     let delivery_guard = workflow_step_script(&ios, "Reconfirm automatic delivery head");
@@ -1155,9 +1155,10 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "export ASC_PRIVATE_KEY_PATH=\"$key_path\"",
         "ASC_PRIVATE_KEY_PATH=$key_path",
         "ios-keychain-snapshot-ready",
-        "baseline_keychain=\"$HOME/Library/Keychains/tron-runner-baseline.keychain-db\"",
-        "security list-keychains -d user -s \"$baseline_keychain\"",
-        "security default-keychain -d user -s \"$baseline_keychain\"",
+        "original_keychains=()",
+        "security list-keychains -d user | sed",
+        "security default-keychain -d user | sed",
+        "hosted runner default keychain is unavailable",
         "keychain_path=\"$HOME/Library/Keychains/tron-ios-signing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.keychain-db\"",
         "system_keychain=\"/Library/Keychains/System.keychain\"",
         "system_root_keychain=\"/System/Library/Keychains/SystemRootCertificates.keychain\"",
@@ -1171,8 +1172,7 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "ios-installed-profile-uuids",
         "cmp -s \"$profile_path\" \"$destination\"",
         "printf '%s\\n' \"$uuid\" >> \"$installed_profile_uuids\"",
-        "ios-release-credential-ledger.py begin",
-        "ios-release-credential-ledger.py plan-profile",
+        "hosted provisioning-profile directory is unsafe",
     ] {
         assert!(
             workflow.contains(required),
@@ -1231,26 +1231,17 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
     let signing_probe = signing
         .find("--sign \"$identity_hash\"")
         .expect("manual signing must prove non-interactive key access");
-    let ledger_begin = signing
-        .find("ios-release-credential-ledger.py begin")
-        .expect("manual signing must persist cleanup ownership");
     let keychain_create = signing
         .find("security create-keychain")
         .expect("manual signing must create a job-owned keychain");
-    let profile_plan = signing
-        .find("ios-release-credential-ledger.py plan-profile")
-        .expect("manual signing must persist profile ownership");
     let profile_install = signing
         .find("/bin/cp \"$profile_path\" \"$destination\"")
-        .expect("manual signing must install a planned profile");
+        .expect("manual signing must install a validated profile");
     assert!(
         root_download < wwdr_download && wwdr_download < exact_chain && exact_chain < signing_probe,
         "the exact pinned chain must validate before non-interactive signing is tested"
     );
-    assert!(
-        ledger_begin < keychain_create && profile_plan < profile_install,
-        "durable credential ownership must precede every persistent signing mutation"
-    );
+    assert!(keychain_create < profile_install);
     assert!(
         !signing.contains("security import \"$apple_root_path\""),
         "the system-trusted Apple root must not be duplicated in a temporary user keychain"
@@ -1284,9 +1275,7 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "tron-signing-probe.stderr",
         "tron-signing-probe-cert-0",
         "installed_profile_uuids",
-        "ios-release-credential-ledger.py complete",
-        "ios-release-credential-ledger.py audit",
-        "retaining the iOS release credential ledger for next-job recovery",
+        "The hosted VM is discarded after this step",
         "exit \"$cleanup_failed\"",
     ] {
         assert!(
@@ -1299,45 +1288,10 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
     let runner_temp = state.path().join("runner temp");
     let home = state.path().join("home");
     let bin = state.path().join("bin");
-    let workspace = state.path().join("checkout");
     let profiles = home.join("Library/Developer/Xcode/UserData/Provisioning Profiles");
     std::fs::create_dir_all(&runner_temp).unwrap();
     std::fs::create_dir_all(&profiles).unwrap();
     std::fs::create_dir_all(&bin).unwrap();
-    std::fs::create_dir_all(&workspace).unwrap();
-    let workspace_scripts = workspace.join("scripts");
-    std::fs::create_dir_all(&workspace_scripts).unwrap();
-    // This probe owns platform-neutral teardown behavior. The production
-    // boundary intentionally rejects non-macOS hosts and has separate
-    // structural plus hosted-macOS coverage, so use a tracked forwarding
-    // boundary here to exercise the workflow's first-command guard on Linux as
-    // well as macOS. Tracking it also proves `git clean` cannot remove the
-    // boundary before the remainder of teardown completes.
-    let cleanup_boundary = workspace_scripts.join("ios-release-user-context");
-    std::fs::write(
-        &cleanup_boundary,
-        "#!/bin/bash\nset -euo pipefail\nexec \"$@\"\n",
-    )
-    .unwrap();
-    let mut boundary_permissions = std::fs::metadata(&cleanup_boundary).unwrap().permissions();
-    boundary_permissions.set_mode(0o755);
-    std::fs::set_permissions(&cleanup_boundary, boundary_permissions).unwrap();
-    assert!(
-        Command::new("git")
-            .args(["init", "--quiet"])
-            .current_dir(&workspace)
-            .status()
-            .unwrap()
-            .success()
-    );
-    assert!(
-        Command::new("git")
-            .args(["add", "scripts"])
-            .current_dir(&workspace)
-            .status()
-            .unwrap()
-            .success()
-    );
     let security_log = state.path().join("security.log");
     let security = bin.join("security");
     std::fs::write(
@@ -1412,7 +1366,6 @@ fi
             .env("HOME", &home)
             .env("GITHUB_RUN_ID", "12345")
             .env("GITHUB_RUN_ATTEMPT", "1")
-            .env("GITHUB_WORKSPACE", &workspace)
             .env("SECURITY_LOG", &security_log)
             .env(
                 "FAIL_SECURITY_RESTORE",
@@ -1453,751 +1406,83 @@ fi
 }
 
 #[test]
-fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
+fn ios_release_uses_an_exact_ephemeral_host_before_credentials_are_admitted() {
     let workflow = read_repo_file(".github/workflows/release-ios.yml");
     let ci = read_repo_file(".github/workflows/ci.yml");
-    let doctor = read_repo_file("scripts/ios-release-runner-doctor.sh");
-    let user_context = read_repo_file("scripts/ios-release-user-context");
-    let release_verifier = read_repo_file("scripts/ios-release-verify.py");
-    let credential_ledger = read_repo_file("scripts/ios-release-credential-ledger.py");
-    let bootstrap = read_repo_file("scripts/bootstrap-ios-release-runner.sh");
-    let launchd_bootstrap = read_repo_file("scripts/ios-release-runner-launchd-bootstrap");
-    let session_entrypoint = read_repo_file("scripts/ios-release-runner-session-entrypoint");
-    let runner_diagnostics = read_repo_file("scripts/ios-release-runner-diagnostics.sh");
-    let version = read_repo_file("scripts/tron-version");
-    for (path, description) in [
-        (
-            "scripts/ios-release-user-context",
-            "release user-context boundary",
-        ),
-        (
-            "scripts/ios-release-runner-launchd-bootstrap",
-            "release launchd bootstrap helper",
-        ),
-        (
-            "scripts/ios-release-runner-session-entrypoint",
-            "release listener session entry point",
-        ),
-        (
-            "scripts/ios-release-runner-diagnostics.sh",
-            "release runner diagnostics collector",
-        ),
-    ] {
-        assert_ne!(
-            std::fs::metadata(repo_path(path))
-                .unwrap_or_else(|error| panic!("{description} must exist: {error}"))
-                .permissions()
-                .mode()
-                & 0o111,
-            0,
-            "{description} must be executable"
-        );
-    }
+    let shadow = read_repo_file("scripts/ci-shadow-run.sh");
+    let doctor = read_repo_file("scripts/ios-release-toolchain-doctor.sh");
 
-    let doctor_gate = workflow
-        .find("      - name: Verify dedicated release runner\n")
-        .expect("iOS release must verify its dedicated runner");
-    let recovery_gate = workflow
-        .find("      - name: Recover stale iOS release credentials\n")
-        .expect("iOS release must recover stale credentials");
+    let checkout = workflow
+        .find("      - name: Checkout\n")
+        .expect("iOS release must check out its admitted source");
+    let xcode = workflow
+        .find("      - name: Select exact release Xcode\n")
+        .expect("iOS release must select its exact Xcode");
+    let toolchain = workflow
+        .find("      - name: Verify hosted release toolchain\n")
+        .expect("iOS release must verify its hosted toolchain");
     let credential_gate = workflow
         .find("      - name: Require live iOS credentials\n")
         .expect("iOS release must own a live credential gate");
     assert!(
-        doctor_gate < recovery_gate && recovery_gate < credential_gate,
-        "runner verification and stale-credential recovery must finish before a step receives release secrets"
-    );
-    let recovery_script = workflow_step_script(&workflow, "Recover stale iOS release credentials");
-    assert!(recovery_script.contains("ios-release-credential-ledger.py recover"));
-    assert!(recovery_script.contains("ios-release-credential-ledger.py prepare-profile-directory"));
-    assert!(recovery_script.contains("ios-release-credential-ledger.py audit"));
-    let recover = recovery_script.find(" recover").expect("recovery command");
-    let prepare = recovery_script
-        .find(" prepare-profile-directory")
-        .expect("profile directory preparation command");
-    let audit = recovery_script
-        .find(" audit")
-        .expect("credential audit command");
-    assert!(recover < prepare && prepare < audit);
-    assert!(
-        !workflow.contains("mkdir -p \"$profiles_dir\""),
-        "profile-directory creation must not bypass no-follow ledger validation"
-    );
-    let current_profile_library = "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles";
-    assert_eq!(
-        workflow.matches(current_profile_library).count(),
-        2,
-        "manual signing and teardown must share Xcode's current provisioning-profile library"
+        checkout < xcode && xcode < toolchain && toolchain < credential_gate,
+        "trusted checkout and hosted toolchain verification must precede release secrets"
     );
     assert!(
-        !workflow.contains("Library/MobileDevice") && !credential_ledger.contains("MobileDevice"),
-        "Xcode 16 and later must not receive profiles through the retired MobileDevice cache"
+        workflow.contains("runs-on: macos-26")
+            && workflow.contains("xcode-version: \"26.6\"")
+            && workflow.contains("environment: ios-testflight"),
+        "TestFlight must use the exact protected GitHub-hosted macOS image"
     );
-    for component in [
-        "/ \"Developer\"",
-        "/ \"Xcode\"",
-        "/ \"UserData\"",
-        "/ \"Provisioning Profiles\"",
-    ] {
-        assert!(
-            credential_ledger.contains(component),
-            "credential cleanup must bind Xcode's current profile library component {component}"
-        );
-    }
-    let recovery_environment = &workflow[recovery_gate..credential_gate];
-    assert!(
-        !recovery_environment.contains("secrets."),
-        "stale-credential recovery must remain secretless"
-    );
-
     for required in [
-        "runner_user=\"$(id -un)\"",
-        "\"$runner_user\" == \"tron-ci\"",
-        "ACTIONS_RUNNER_SVC",
-        "launchctl manageruid",
-        "security-session --require-non-root",
-        "scripts/ios-release-user-context",
-        "/bin/launchctl managername",
-        "--require-audit-uid \"$runner_uid\"",
-        "/usr/bin/stat -f '%Lp' \"$HOME\"",
-        "id -Gn \"$runner_user\"",
-        "GITHUB_WORKSPACE",
-        "RUNNER_TEMP",
-        "tron-runner-baseline.keychain-db",
-        "TRON_RELEASE_APPLE_ROOT_URL",
-        "TRON_RELEASE_APPLE_ROOT_SHA256",
-        "TRON_RELEASE_APPLE_WWDR_G3_URL",
-        "TRON_RELEASE_APPLE_WWDR_G3_SHA256",
-        "ios-release-credential-ledger.py\" self-test",
-        "--audit-credentials",
-        "baseline keychain must have mode 0600",
-        "baseline keychain must not have hard links",
-        "listener_identity_verified",
-        "command_boundary_verified",
-        "security_session=$security_session",
+        "RUNNER_ENVIRONMENT",
+        "github-hosted",
+        "ImageOS",
+        "macos26",
+        "uname -m",
+        "arm64",
+        "TRON_RELEASE_IOS_XCODE_VERSION",
+        "TRON_RELEASE_IOS_XCODE_BUILD",
+        "TRON_RELEASE_IOS_SDK_VERSION",
+        "TestFlight delivery must not use a beta Xcode bundle",
+        "xcodebuild -checkFirstLaunchStatus",
+        "component=ios-release-toolchain-doctor",
     ] {
         assert!(
             doctor.contains(required),
-            "release runner doctor is missing boundary check {required}"
+            "hosted release toolchain doctor is missing {required}"
         );
     }
-    for required in [
-        "/bin/launchctl manageruid",
-        "/bin/launchctl managername",
-        "Aqua | Background",
-        "[[ \"$manager_uid\" == \"$release_uid\" ]]",
-        "session_verifier=\"$script_dir/ios-release-verify.py\"",
-        "--require-audit-uid \"$release_uid\"",
-        "component=ios-release-user-context",
-        "expected_uid=$release_uid observed_uid=${manager_uid:-unavailable}",
-        "security_session=$security_session",
-        "exec \"$@\"",
+    assert!(
+        workflow.contains("The hosted VM is discarded after this step")
+            && !workflow.contains("self-hosted")
+            && !workflow.contains("ios-release-user-context")
+            && !workflow.contains("credential-ledger")
+            && !workflow.contains("tron-runner-baseline")
+            && !workflow.contains("Recover stale iOS release credentials"),
+        "ephemeral TestFlight delivery must not retain persistent-runner recovery machinery"
+    );
+    for retired_path in [
+        "scripts/bootstrap-ios-release-runner.sh",
+        "scripts/ios-release-credential-ledger.py",
+        "scripts/ios-release-runner-diagnostics.sh",
+        "scripts/ios-release-runner-launchd-bootstrap",
+        "scripts/ios-release-runner-session-entrypoint",
+        "scripts/ios-release-user-context",
+        ".github/actionlint.yaml",
     ] {
         assert!(
-            user_context.contains(required),
-            "release user-context boundary is missing {required}"
+            !repo_path(retired_path).exists(),
+            "retired self-hosted release surface remains: {retired_path}"
         );
     }
-    assert!(
-        !user_context.contains("/bin/launchctl asuser"),
-        "the command boundary must reject a mismatched launchd domain instead of attempting a mixed-identity asuser transition"
-    );
-    for required in [
-        "process.getauid",
-        "\"audit_uid\": audit_uid.value",
-        "\"effective_uid\": os.geteuid()",
-        "release runner audit user does not match its Unix account",
-        "--require-audit-uid",
-    ] {
+    for owner in [ci.as_str(), shadow.as_str()] {
         assert!(
-            release_verifier.contains(required),
-            "release security-session verifier is missing {required}"
+            !owner.contains("bootstrap-ios-release-runner")
+                && !owner.contains("ios-release-user-context"),
+            "hosted validation retained a deleted runner primitive"
         );
     }
-    for required in [
-        "tron.ios-release-credential-attempt.v1",
-        "def begin(",
-        "def plan_profile(",
-        "def _ensure_descendant_directory(",
-        "def prepare_profile_directory(",
-        "def recover(",
-        "def complete(",
-        "def audit(",
-        "baseline keychain preferences",
-        "stale release credential state must be recovered before begin",
-        "profile UUID must use canonical lowercase UUID syntax",
-        "profile directory preparation crossed a symlink",
-    ] {
-        assert!(
-            credential_ledger.contains(required),
-            "credential recovery ledger is missing {required}"
-        );
-    }
-    for forbidden in ["password", "certificate material", "API keys"] {
-        assert!(
-            credential_ledger.contains(forbidden),
-            "credential ledger must explicitly exclude {forbidden}"
-        );
-    }
-    let user_context_guard = "\"$GITHUB_WORKSPACE/scripts/ios-release-user-context\" /usr/bin/true";
-    assert_eq!(
-        workflow.matches(user_context_guard).count(),
-        5,
-        "recovery, manual signing, archive, export, and credential teardown must validate the inherited user context"
-    );
-    assert!(
-        !workflow
-            .lines()
-            .any(|line| line.trim_start().starts_with("shell:")
-                && line.contains("ios-release-user-context")),
-        "GitHub custom-shell resolution must never own the user-context boundary"
-    );
-    for step_name in [
-        "Recover stale iOS release credentials",
-        "Prepare manual iOS signing assets",
-        "xcodebuild archive",
-        "Export App Store IPA",
-        "Tear down iOS release credentials",
-    ] {
-        let step = workflow
-            .find(&format!("      - name: {step_name}\n"))
-            .unwrap_or_else(|| panic!("release workflow is missing {step_name}"));
-        let following = &workflow[step..];
-        let shell = following
-            .find("        shell: /bin/bash")
-            .unwrap_or_else(|| panic!("{step_name} is missing its absolute bash shell"));
-        let run = following
-            .find("        run: |\n")
-            .unwrap_or_else(|| panic!("{step_name} is missing its run body"));
-        let guard = following
-            .find(user_context_guard)
-            .unwrap_or_else(|| panic!("{step_name} is missing its user-context guard"));
-        let next_step = following[1..]
-            .find("\n      - name: ")
-            .map(|offset| offset + 1)
-            .unwrap_or(following.len());
-        assert!(
-            shell < run && run < guard && guard < next_step,
-            "{step_name} must validate its inherited user context before sensitive commands"
-        );
-    }
-    assert!(
-        workflow.contains("path: ${{ runner.temp }}/ios-asc-diagnostics"),
-        "failure diagnostics must use an always-resolved runner.temp path even when setup fails before GITHUB_ENV is populated"
-    );
-    let ledger_self_test = Command::new("python3")
-        .args(["scripts/ios-release-credential-ledger.py", "self-test"])
-        .current_dir(repo_root())
-        .output()
-        .expect("credential ledger self-test should start");
-    assert!(
-        ledger_self_test.status.success(),
-        "credential ledger self-test failed:\n{}{}",
-        String::from_utf8_lossy(&ledger_self_test.stdout),
-        String::from_utf8_lossy(&ledger_self_test.stderr)
-    );
-    for required in [
-        "TRON_RELEASE_RUNNER_SHA256",
-        "shasum -a 256",
-        "runner_user=\"tron-ci\"",
-        "gh_executable=\"$(command -v gh || true)\"",
-        "export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin\"",
-        "bootstrap_self_test()",
-        "runner isolation ACL is not idempotent",
-        "runner isolation ACL does not deny list and search access",
-        "run_as_runner()",
-        "exec /usr/bin/sudo /bin/launchctl asuser \"$runner_uid\"",
-        "/usr/bin/sudo -n -H -u \"$runner_user\" \"$@\"",
-        "cd /",
-        "classify_existing_runner_directory_mode()",
-        "normalize_existing_runner_directory_mode()",
-        "validate_runner_directory_identity()",
-        "validate_private_runner_directory()",
-        "recorded_runner_home",
-        "NFSHomeDirectory",
-        "[[ ! -L \"$runner_home\" ]]",
-        "sudo /usr/bin/install -d -m 700 -o \"$runner_user\" -g staff \"$runner_home\"",
-        "/usr/bin/stat -f '%Su' \"$directory\"",
-        "/usr/bin/stat -f '%Lp' \"$directory\"",
-        "\"$runner_library\" \"$runner_keychains\"",
-        "sudo /bin/test -L \"$runner_path\"",
-        "sudo /bin/test -L \"$baseline_keychain\"",
-        "sudo /bin/test -e \"$baseline_keychain\"",
-        "run_in_runner_domain /usr/bin/security create-keychain",
-        "run_as_runner /usr/bin/install -d -m 700",
-        "run_as_runner /bin/chmod 600 \"$baseline_keychain\"",
-        "invoking_user=\"${SUDO_USER:-${USER:-}}\"",
-        "/usr/bin/stat -f '%Su' \"$invoking_home\"",
-        "runner_home_acl=\"user:$runner_user deny list,search\"",
-        "/bin/test -r \"$invoking_home\"",
-        "/bin/test -x \"$invoking_home\"",
-        "sudo /bin/chmod +a \"$runner_home_acl\" \"$invoking_home\"",
-        "sudo /bin/test -e \"$runner_dir/.runner\"",
-        "\"$runner_dir/bin/runsvc.sh\"",
-        "run_as_runner \"$runner_dir/config.sh\"",
-        "\"$runner_dir/.credentials\"",
-        "runner_service_label=\"com.tron.ios-release-runner\"",
-        "runner_service_plist=\"$runner_bootstrap_dir/$runner_service_label.plist\"",
-        "legacy_runner_service_plist=\"/Library/LaunchDaemons/$runner_service_label.plist\"",
-        "legacy_runner_service_backup=\"$runner_bootstrap_dir/legacy-system-service.plist\"",
-        "runner_bootstrap_label=\"com.tron.ios-release-runner-bootstrap\"",
-        "runner_bootstrap_dir=\"/Library/Application Support/Tron/ReleaseRunner\"",
-        "runner_bootstrap_helper=\"$runner_bootstrap_dir/bootstrap-user-agent\"",
-        "runner_bootstrap_helper_source=\"$project_dir/scripts/ios-release-runner-launchd-bootstrap\"",
-        "runner_session_entrypoint=\"$runner_bootstrap_dir/start-runner\"",
-        "runner_session_entrypoint_source=\"$project_dir/scripts/ios-release-runner-session-entrypoint\"",
-        "runner_diagnostics_source=\"$project_dir/scripts/ios-release-runner-diagnostics.sh\"",
-        "runner_bootstrap_lock=\"/var/run/tron-ios-release-runner-bootstrap.lock\"",
-        "runner_log_dir=\"/Library/Logs/Tron\"",
-        "runner_bootstrap_log=\"$runner_log_dir/ios-release-runner-bootstrap.log\"",
-        "component=ios-release-runner-bootstrap",
-        "initialize_bootstrap_logging()",
-        "record_unhandled_error()",
-        "unhandled_command_failure",
-        "phase=$bootstrap_phase source_line=$source_line exit_status=$exit_status",
-        "bootstrap_source_sha256=",
-        "toolchain_source_sha256=",
-        "release_workflow_sha256=",
-        "Add :ProgramArguments:0 string $runner_bootstrap_helper",
-        "Add :ProgramArguments:0 string $runner_session_entrypoint",
-        "! plutil -extract SessionCreate",
-        "Add :LimitLoadToSessionType string Background",
-        "! plutil -extract UserName",
-        "! plutil -extract GroupName",
-        "install -m 755 -o root -g wheel",
-        "install -m 644 -o root -g wheel",
-        "install -m 600 -o root -g wheel",
-        "bootstrap system \"$runner_bootstrap_plist\"",
-        "print \"user/$runner_uid/$runner_service_label\"",
-        "--repair-service",
-        "validate_existing_runner_install()",
-        "classify_runner_service_state()",
-        "stage_runner_service_files()",
-        "install_runner_service_files()",
-        "remove_runner_service_files()",
-        "stop_runner_candidate_services()",
-        "stop_launchd_target()",
-        "wait_for_launchd_target_exit()",
-        "launchd_target_stop_timeout",
-        "start_runner_service_files()",
-        "wait_for_new_runner_listener()",
-        "wait_for_all_runner_listeners_exit()",
-        "wait_for_runner_online()",
-        "read_remote_runner_observation()",
-        "[.busy, .status, ([.labels[].name] | index(\\\"$runner_label\\\") != null)] | @tsv",
-        "fence_remote_runner()",
-        "restore_remote_runner_label()",
-        "rollback_to_legacy_service()",
-        "actions/runners/$repair_runner_id/labels/$runner_label",
-        "wait_for_remote_runner_status offline",
-        "wait_for_remote_runner_status online",
-        "/usr/bin/stat -f '%d' \"$runner_bootstrap_dir\"",
-        "sudo /usr/bin/shlock -f \"$runner_bootstrap_lock\" -p \"$$\"",
-        "runner_registration_started=true",
-        "actions/runners/remove-token",
-        "\"$runner_dir/.credentials_rsaparams\"",
-        "incomplete runner bootstrap rollback",
-        "runner_poll <= 60",
-        "release runner did not become online with its dedicated label",
-        "-t user admin",
-        "--disableupdate",
-    ] {
-        assert!(
-            bootstrap.contains(required),
-            "release runner bootstrap is missing isolation behavior {required}"
-        );
-    }
-    assert_eq!(
-        bootstrap
-            .matches("run_as_runner /bin/chmod 700 \"$runner_dir\"")
-            .count(),
-        2,
-        "fresh installation and legacy repair must both establish the mode-0700 runner directory as its unprivileged owner"
-    );
-    let runner_domain_start = bootstrap
-        .find("run_in_runner_domain()")
-        .expect("bootstrap must own a runner-domain command boundary");
-    let runner_domain_end = bootstrap[runner_domain_start..]
-        .find("\n)\n\nvalidate_privileged_directory()")
-        .map(|offset| runner_domain_start + offset)
-        .expect("runner-domain command boundary must have a bounded body");
-    let runner_domain = &bootstrap[runner_domain_start..runner_domain_end];
-    let audit_adoption = runner_domain
-        .find("exec /usr/bin/sudo /bin/launchctl asuser \"$runner_uid\"")
-        .expect("runner-domain boundary must adopt the audit session while privileged");
-    let credential_drop = runner_domain
-        .find("/usr/bin/sudo -n -H -u \"$runner_user\" \"$@\"")
-        .expect("runner-domain boundary must drop Unix credentials before execution");
-    assert!(
-        audit_adoption < credential_drop,
-        "runner-domain boundary must adopt the launchd/audit session before dropping Unix credentials"
-    );
-    assert!(
-        !runner_domain.contains("exec sudo -H -u \"$runner_user\"")
-            && !runner_domain.contains("exec /usr/bin/sudo -H -u \"$runner_user\""),
-        "an unprivileged process cannot adopt the hidden account's audit session"
-    );
-    assert!(
-        !bootstrap.contains("chmod 700 \"$invoking_home\"")
-            && !bootstrap.contains("chmod go-rwx \"$invoking_home\""),
-        "release runner isolation must not rewrite the invoking user's broad home permissions"
-    );
-    assert!(
-        !bootstrap.contains("[[ ! -e \"$baseline_keychain\" ]]")
-            && !bootstrap.contains("[[ ! -e \"$runner_dir/.runner\" ]]"),
-        "state below the mode-0700 runner home must be inspected with privilege"
-    );
-    assert!(
-        !bootstrap.contains("$runner_dir/svc.sh"),
-        "the hidden runner must not install GitHub's per-login Darwin LaunchAgent"
-    );
-    assert!(
-        !bootstrap.contains("Add :UserName") && !bootstrap.contains("Add :GroupName"),
-        "the Background LaunchAgent must inherit the isolated user-domain identity"
-    );
-    assert!(
-        !bootstrap.contains("actions.runner.plist.template"),
-        "the runner service must use Tron's audited Background-agent contract rather than GitHub's login-session template"
-    );
-    assert!(
-        !bootstrap.contains("BASH_COMMAND") && !bootstrap.contains("set -x"),
-        "bootstrap failure logging must never record command text or enable credential-bearing shell traces"
-    );
-    assert!(
-        !bootstrap.contains("remote_runner_has_release_label"),
-        "runner fencing must not collapse a failed label lookup into label absence"
-    );
-    assert!(
-        !bootstrap.contains("runner_service_plist=\"/Library/LaunchAgents")
-            && !launchd_bootstrap.contains("[[ \"$agent_plist\" == \"/Library/LaunchAgents"),
-        "the explicitly bootstrapped runner agent must not enter launchd's global per-user discovery directory"
-    );
-    let security_context_start = bootstrap
-        .find("prepare_runner_security_context()")
-        .expect("bootstrap must own runner security-context preparation");
-    let security_context_end = bootstrap[security_context_start..]
-        .find("\n}\n\nvalidate_existing_background_service()")
-        .map(|offset| security_context_start + offset)
-        .expect("runner security-context preparation must have a bounded function body");
-    let security_context = &bootstrap[security_context_start..security_context_end];
-    for forbidden in [
-        "sudo /usr/bin/install",
-        "sudo /usr/sbin/chown",
-        "sudo /bin/chmod",
-    ] {
-        assert!(
-            !security_context.contains(forbidden),
-            "root must not mutate runner-owned home descendants: {forbidden}"
-        );
-    }
-    for required in [
-        "entrypoint_path=\"/Library/Application Support/Tron/ReleaseRunner/start-runner\"",
-        "root:wheel:755:1",
-        "launchctl manageruid",
-        "launchctl managername",
-        "security.SessionGetInfo",
-        "process.getauid",
-        "component=ios-release-runner-session",
-        "event=$event",
-        "identity_observed",
-        "security_identity_is_valid \"$security_identity\" \"$runner_uid\"",
-        "exec \"$runner_program\"",
-    ] {
-        assert!(
-            session_entrypoint.contains(required),
-            "release listener session entry point is missing {required}"
-        );
-    }
-    assert!(
-        !session_entrypoint.contains("launchctl asuser") && !session_entrypoint.contains("sudo"),
-        "the listener entry point must validate its inherited session rather than attempting to replace it"
-    );
-    for required in [
-        "(( EUID == 0 ))",
-        "[[ \"$agent_plist\" == \"/Library/Application Support/Tron/ReleaseRunner/$service_label.plist\" ]]",
-        "root:wheel:644",
-        "Print :LimitLoadToSessionType",
-        "Print :SessionCreate",
-        "must inherit the Background domain's audit session",
-        "start-runner",
-        "Print :UserName",
-        "Print :GroupName",
-        "runner_domain=\"user/$runner_uid\"",
-        "/bin/launchctl bootstrap \"$runner_domain\"",
-        "/bin/launchctl bootstrap \"$runner_domain\" \"$agent_plist\"",
-        "/bin/launchctl kickstart \"$runner_service\"",
-        "/bin/launchctl manageruid",
-        "/bin/launchctl managername",
-        "Background",
-        "component=ios-release-runner-launchd",
-        "domain_observed",
-        "service_observed",
-    ] {
-        assert!(
-            launchd_bootstrap.contains(required),
-            "release launchd bootstrap helper is missing {required}"
-        );
-    }
-    assert!(
-        !launchd_bootstrap.contains("kickstart -k \"$runner_service\""),
-        "the boot helper must not kill an already-running release listener"
-    );
-    for required in [
-        "runner_log_dir=\"/Library/Logs/Tron\"",
-        "component=ios-release-runner-diagnostics",
-        "installed_file_observed",
-        "launchd_target_observed",
-        "listener_process_observed",
-        "remote_runner_observed",
-        "gh_executable\" run list --workflow",
-        "workflow_run_observed",
-        "component=ios-release-runner-session",
-        "collection_finished",
-        "--self-test",
-    ] {
-        assert!(
-            runner_diagnostics.contains(required),
-            "release runner diagnostics are missing {required}"
-        );
-    }
-    for forbidden in [
-        "set -x",
-        "printenv",
-        "security find-identity",
-        "auth.json",
-        "cat \"$runner_dir/.credentials\"",
-        "tail -n 200 \"$runner_dir/_diag",
-    ] {
-        assert!(
-            !runner_diagnostics.contains(forbidden),
-            "release runner diagnostics must not expose secret-bearing state: {forbidden}"
-        );
-    }
-    assert!(
-        runner_diagnostics.contains("| /usr/bin/grep 'component=ios-release-runner-session'"),
-        "runner-owned service logs must be reduced to the immutable session guard's structured records"
-    );
-    for forbidden in ["GITHUB_WORKSPACE", "project_dir", "actions-runner/_work"] {
-        assert!(
-            !launchd_bootstrap.contains(forbidden),
-            "the privileged boot helper must not execute mutable checkout state: {forbidden}"
-        );
-    }
-    for required in [
-        "stop_launchd_target \"system/$runner_service_label\"",
-        "bootstrap system \"$legacy_runner_service_plist\"",
-        "kickstart -k \"system/$runner_service_label\"",
-        "stop_runner_candidate_services",
-        "remove_runner_service_files",
-        "wait_for_new_runner_listener",
-        "wait_for_remote_runner_status online",
-        "restore_remote_runner_label",
-    ] {
-        assert!(
-            bootstrap.contains(required),
-            "release service repair must preserve transactional rollback behavior {required}"
-        );
-    }
-    let stop_target_start = bootstrap
-        .find("stop_launchd_target()")
-        .expect("bootstrap must own one launchd teardown boundary");
-    let stop_target_end = bootstrap[stop_target_start..]
-        .find("\n}\n\nstop_runner_candidate_services()")
-        .map(|offset| stop_target_start + offset)
-        .expect("launchd teardown boundary must have a bounded body");
-    let stop_target = &bootstrap[stop_target_start..stop_target_end];
-    let bootout_request = stop_target
-        .find("launchctl bootout \"$target\"")
-        .expect("launchd teardown must request bootout");
-    let observed_exit = stop_target
-        .find("wait_for_launchd_target_exit \"$target\"")
-        .expect("launchd teardown must await observed target absence");
-    assert!(
-        bootout_request < observed_exit,
-        "launchd teardown must treat bootout as a request and target absence as the postcondition"
-    );
-    let exit_wait_start = bootstrap
-        .find("wait_for_launchd_target_exit()")
-        .expect("bootstrap must own a bounded launchd-exit poll");
-    let exit_wait_end = bootstrap[exit_wait_start..]
-        .find("\n}\n\nstop_launchd_target()")
-        .map(|offset| exit_wait_start + offset)
-        .expect("launchd-exit poll must have a bounded body");
-    let exit_wait = &bootstrap[exit_wait_start..exit_wait_end];
-    assert!(
-        exit_wait.contains("launchd_poll <= 30")
-            && exit_wait.contains("/bin/sleep 1")
-            && exit_wait.contains("launchd_target_stop_timeout"),
-        "launchd target removal must converge through a bounded, observable wait"
-    );
-    let repair_start = bootstrap
-        .find("if [[ \"$bootstrap_mode\" == \"--repair-service\" ]]; then")
-        .expect("bootstrap must own an explicit release-service repair path");
-    let repair = &bootstrap[repair_start..];
-    assert!(
-        repair.contains("bootstrap_phase=service_repair\n    validate_existing_runner_install"),
-        "release-service repair must validate the existing installation under an observable phase"
-    );
-    let state_observation = repair
-        .find("read_remote_runner_observation")
-        .expect("service repair must obtain one validated remote runner observation");
-    let busy_gate = repair
-        .find("[[ \"$remote_runner_busy\" == \"false\" ]]")
-        .expect("service repair must reject a remotely busy runner");
-    let mode_normalization = repair
-        .find("normalize_existing_runner_directory_mode")
-        .expect("service repair must normalize the known legacy archive mode");
-    let staged_service = repair
-        .find("stage_runner_service_files")
-        .expect("service repair must stage and validate its candidate files");
-    let migration_start = repair
-        .find(
-            "fence_remote_runner \\\n        || die \"release runner could not be fenced idle for service repair\"",
-        )
-        .expect("service repair must fence scheduling before cutover");
-    let migration = &repair[migration_start..];
-    let scheduling_fence = migration
-        .find("fence_remote_runner")
-        .expect("service repair must fence scheduling before cutover");
-    let migration_active = migration
-        .find("repair_migration_active=true")
-        .expect("service repair must persist state only after scheduling is fenced");
-    let legacy_journal = migration
-        .find("/bin/mv \"$legacy_runner_service_plist\" \"$legacy_runner_service_backup\"")
-        .expect("service repair must atomically journal the legacy service");
-    let legacy_stop = migration
-        .find("stop_launchd_target \"system/$runner_service_label\"")
-        .expect("service repair must stop the legacy system listener");
-    let offline_check = migration
-        .find("wait_for_remote_runner_status offline")
-        .expect("service repair must bind the old listener's offline transition");
-    let candidate_install = migration
-        .find("install_runner_service_files")
-        .expect("service repair must install its validated candidate files");
-    let candidate_start = migration
-        .find("start_runner_service_files")
-        .expect("service repair must start the Background candidate");
-    let listener_check = migration
-        .find("wait_for_new_runner_listener")
-        .expect("service repair must prove that the listener process changed");
-    let online_check = migration
-        .find("wait_for_remote_runner_status online")
-        .expect("service repair must bind the candidate's online transition");
-    let migration_commit = migration
-        .find("repair_migration_active=false")
-        .expect("service repair must commit the verified candidate before journal cleanup");
-    let legacy_remove = migration
-        .find("/bin/rm -f \"$legacy_runner_service_backup\"")
-        .expect("service repair must remove the rollback journal after cutover");
-    let label_restore = migration
-        .find("restore_remote_runner_label")
-        .expect("service repair must restore scheduling only after cutover");
-    assert!(
-        state_observation < busy_gate
-            && busy_gate < mode_normalization
-            && mode_normalization < staged_service
-            && scheduling_fence < migration_active
-            && migration_active < legacy_journal
-            && legacy_journal < legacy_stop
-            && legacy_stop < offline_check
-            && offline_check < candidate_install
-            && legacy_stop < candidate_install
-            && candidate_install < candidate_start
-            && candidate_start < listener_check
-            && listener_check < online_check
-            && online_check < migration_commit
-            && migration_commit < legacy_remove,
-        "service repair must fence scheduling, journal the legacy service, prove offline-to-online transition, and commit the Background listener before deleting its rollback journal"
-    );
-    assert!(
-        legacy_remove < label_restore,
-        "service repair must not readmit jobs until the candidate is committed"
-    );
-    let fence_start = bootstrap
-        .find("fence_remote_runner()")
-        .expect("bootstrap must own a bounded scheduling fence");
-    let fence_end = bootstrap[fence_start..]
-        .find("\n}\n\nrestore_remote_runner_label()")
-        .map(|offset| fence_start + offset)
-        .expect("scheduling fence must have a bounded function body");
-    let fence = &bootstrap[fence_start..fence_end];
-    assert!(
-        fence.contains("read_remote_runner_observation || return 1")
-            && fence.contains("if read_remote_runner_observation")
-            && fence.contains("$remote_runner_release_labeled\" == \"false")
-            && fence.contains("$remote_runner_busy\" == \"false"),
-        "scheduling fence must validate label and busy state together and fail closed on observation errors"
-    );
-    let rollback_start = bootstrap
-        .find("rollback_to_legacy_service()")
-        .expect("bootstrap must own a bounded legacy rollback transaction");
-    let rollback_end = bootstrap[rollback_start..]
-        .find("\n}\n\nprepare_runner_security_context()")
-        .map(|offset| rollback_start + offset)
-        .expect("legacy rollback must have a bounded function body");
-    let rollback = &bootstrap[rollback_start..rollback_end];
-    let rollback_listener_exit = rollback
-        .find("wait_for_all_runner_listeners_exit")
-        .expect("rollback must wait for every candidate listener to exit");
-    let rollback_offline = rollback
-        .find("wait_for_remote_runner_status offline")
-        .expect("rollback must prove the exact runner offline before restoring legacy");
-    let rollback_legacy_start = rollback
-        .find("bootstrap system \"$legacy_runner_service_plist\"")
-        .expect("rollback must restore the journaled legacy service");
-    let rollback_online = rollback
-        .find("wait_for_remote_runner_status online")
-        .expect("rollback must prove the exact legacy runner online");
-    let rollback_label_restore = rollback
-        .find("restore_remote_runner_label")
-        .expect("rollback must reopen scheduling only after legacy recovery");
-    assert!(
-        rollback_listener_exit < rollback_offline
-            && rollback_offline < rollback_legacy_start
-            && rollback_legacy_start < rollback_online
-            && rollback_online < rollback_label_restore,
-        "rollback must prove the exact runner offline before starting legacy and online before restoring scheduling"
-    );
-    let personal_home_gate = bootstrap
-        .find("if runner_can_access_invoking_home; then")
-        .expect("bootstrap must enforce the invoking-home boundary");
-    let keychain_setup = bootstrap[personal_home_gate..]
-        .find("prepare_runner_security_context")
-        .map(|offset| personal_home_gate + offset)
-        .expect("bootstrap must prepare the runner keychain hierarchy");
-    assert!(
-        personal_home_gate < keychain_setup,
-        "personal-home isolation must be established before runner state is created"
-    );
-    let runner_configuration = bootstrap
-        .rfind("run_as_runner \"$runner_dir/config.sh\"")
-        .expect("bootstrap must configure the runner");
-    let generated_credentials_check = bootstrap
-        .rfind("\"$runner_dir/.credentials\"; do")
-        .expect("bootstrap must verify config-generated credentials");
-    let configured_install = &bootstrap[generated_credentials_check..];
-    let background_service = configured_install
-        .find("install_runner_service_files")
-        .expect("bootstrap must install the Background user-domain runner service");
-    assert!(
-        runner_configuration < generated_credentials_check && background_service > 0,
-        "runner configuration and credential validation must finish before the Background user-domain service is installed"
-    );
-    assert!(
-        !workflow.contains("simctl")
-            && !workflow.contains("xcodebuild test")
-            && !workflow.contains("run_tests")
-            && !version.contains("run_tests"),
-        "the headless Background release runner must not own Aqua-session Simulator/XCTest work"
-    );
-    assert!(
-        ci.contains("../../scripts/bootstrap-ios-release-runner.sh --self-test"),
-        "hosted macOS CI must execute the release-runner ACL and BSD-utility self-test"
-    );
-    assert!(
-        ci.contains("../../scripts/ios-release-user-context /usr/bin/true"),
-        "hosted macOS CI must execute the release user-context boundary"
-    );
 }
 
 #[test]
@@ -2214,7 +1499,7 @@ fn github_ci_stages_feedback_and_reuses_exact_evidence_fail_closed() {
     assert!(
         classifier.contains("packages/ios-app/*")
             && classifier.contains(".github/workflows/release-ios.yml")
-            && classifier.contains("scripts/bootstrap-ios-*"),
+            && classifier.contains("scripts/ios-*"),
         "iOS source and release changes must schedule iOS validation"
     );
     for required in [
@@ -2655,7 +1940,7 @@ fn provider_neutral_ci_shadow_is_pinned_advisory_and_release_free() {
     let mac_release = read_repo_file(".github/workflows/release-mac.yml");
     assert!(github_ci.contains("'CI summary'"));
     assert!(ios_release.contains("workflows: [\"CI\"]"));
-    assert!(ios_release.contains("runs-on: [self-hosted, macOS, ARM64, tron-ios-release]"));
+    assert!(ios_release.contains("runs-on: macos-26"));
     assert!(ios_release.contains("environment: ios-testflight"));
     assert!(mac_release.contains("tags:\n      - \"server-v*\""));
     assert!(github_ci.contains("ci-cutover-evaluation.py --self-test"));
@@ -2773,11 +2058,8 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
         "TRON_RELEASE_IOS_XCODE_VERSION=26.6",
         "TRON_RELEASE_IOS_XCODE_BUILD=17F113",
         "TRON_RELEASE_IOS_SDK_VERSION=26.5",
-        "TRON_RELEASE_IOS_DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer",
+        "TRON_RELEASE_IOS_DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer",
         "TRON_RELEASE_IOS_DEPLOYMENT_TARGET=26.0",
-        "TRON_RELEASE_RUNNER_VERSION=2.336.0",
-        "TRON_RELEASE_RUNNER_URL=https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-osx-arm64-2.336.0.tar.gz",
-        "TRON_RELEASE_RUNNER_SHA256=8e8839c49b7060b6b2154f4931f815df330c27f167d53ef2239ee3dfce28b079",
         "TRON_RELEASE_APPLE_ROOT_URL=https://www.apple.com/appleca/AppleIncRootCertificate.cer",
         "TRON_RELEASE_APPLE_ROOT_SHA256=b0b1730ecbc7ff4505142c49f1295e6eda6bcaed7e2c68c5be91b5a11001f024",
         "TRON_RELEASE_APPLE_WWDR_G3_URL=https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer",
@@ -2792,13 +2074,13 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
         !manifest.contains("TRON_RELEASE_IOS_DEVELOPER_DIR=/Applications/Xcode-beta"),
         "TestFlight delivery must not select a beta Xcode bundle"
     );
-    let doctor = read_repo_file("scripts/ios-release-runner-doctor.sh");
+    let doctor = read_repo_file("scripts/ios-release-toolchain-doctor.sh");
     assert!(
         doctor.contains("TRON_RELEASE_IOS_DEVELOPER_DIR\" != *[Bb]eta*")
             && doctor.contains("TestFlight delivery must not use a beta Xcode bundle"),
         "the release doctor must reject a beta Xcode path before archive work"
     );
-    assert_eq!(manifest.matches("_SHA256=").count(), 9);
+    assert_eq!(manifest.matches("_SHA256=").count(), 8);
 
     let installer = read_repo_file("scripts/install-ci-tools.sh");
     assert!(installer.contains("verify_sha256"));

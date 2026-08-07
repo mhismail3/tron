@@ -659,14 +659,14 @@ retrieved through Apple's Xcode Organizer diagnostics path.
 
 `config/ci-toolchain.env` is the repository-owned Apple/release tool manifest.
 Hosted compatibility CI selects stable Xcode 26.3, iOS 26.2, and iPhone 17 Pro.
-The isolated TestFlight runner pins App-Store-supported Xcode 26.6 build
+The ephemeral GitHub-hosted TestFlight job pins App-Store-supported Xcode 26.6 build
 `17F113`, the iOS 26.5 SDK, and a 26.0 deployment floor. Xcode 27 beta remains
 available for direct physical-device development, but App Store Connect rejects
 beta SDK uploads with `ITMS-90534`; it cannot supply TestFlight builds until
 Apple publishes and accepts an RC or release. Confirm the candidate on Apple's
 [release page](https://developer.apple.com/news/releases/) whenever rotating
 the distribution pin. Both CI paths download exact XcodeGen, create-dmg, App
-Store Connect CLI, GitHub runner, and CI-definition parser releases whose
+Store Connect CLI and CI-definition parser releases whose
 SHA-256 values are checked before execution. The manifest also owns the advisory
 shadow's digest-pinned Rust image and the digest-pinned actionlint image
 exercised by both providers.
@@ -689,12 +689,11 @@ provenance, prefix rebuilds, each validated definition/target, phase start/end,
 exit status, duration, and the final metrics SHA-256. URLs with credentials,
 environment dumps, and command tracing are excluded. GitHub retains those logs;
 the iOS lane additionally uploads the matching metrics JSON on every run and
-the `.xcresult` on failure. A change to either `scripts/ios-*` or
-`scripts/bootstrap-ios-*` is classified as iOS work so these contracts cannot
-skip their owning validation lane.
+the `.xcresult` on failure. A change to `scripts/ios-*` is classified as iOS
+work so these contracts cannot skip their owning validation lane.
 
 The Mac lane adds `create-dmg`; the iOS release lane adds `asc` and runs
-`scripts/ios-release-runner-doctor.sh` before touching credentials. Pull-request
+`scripts/ios-release-toolchain-doctor.sh` before touching credentials. Pull-request
 path classification is owned by `scripts/ci-change-flags.sh`, including its
 offline self-test. Draft PRs receive lightweight feedback; ready PRs run the
 complete Rust, iOS, and Mac matrix. The iOS lane separates
@@ -756,290 +755,61 @@ xcodebuild test -scheme 'Tron Beta' \
   -only-testing:TronMobileTests/ChatTranscriptRevealPolicyTests
 ```
 
-### Dedicated iOS release runner
+### Hosted iOS release job
 
-TestFlight archives run on the repository-scoped labels
-`self-hosted`, `macOS`, `ARM64`, and `tron-ios-release`. This public repository
-must never route pull-request or fork-authored code to that runner. The release
-workflow accepts only an exact successful `main` CI SHA, a release tag reachable
-from `main`, or a manual run whose live source is the exact current `main` head.
-Manual dry-runs retain the less restrictive `main`-reachability check. The
-protected `ios-testflight` environment
-and the one-job dedicated runner provide the remaining release boundary. The
-complete automatic intent/effect/receipt transaction is serialized, without
-cancellation, by authoritative upstream CI run ID. Reruns of one upstream run
-therefore cannot race each other, while different main commits retain distinct
-concurrency keys. A small hosted job with no signing or App Store secrets admits
-an automatic run only when its successful CI source is still the exact current
-`origin/main` head. The release checkout repeats that equality check after the
-dedicated runner queue and again immediately before the first App Store Connect
-delivery. Direct live runs repeat their own source check immediately before ASC:
-manual delivery requires equality with current `main`, while a release tag must
-remain an ancestor of current `main`. Each direct GitHub run ID is its immutable
-transaction key.
+TestFlight archive, signing, upload, and distribution run on GitHub's ephemeral
+ARM64 `macos-26` image behind the protected `ios-testflight` environment.
+The image currently supplies Xcode 26.6 build `17F113` and the iOS 26.5 SDK;
+the workflow also selects Xcode 26.6 explicitly and
+`scripts/ios-release-toolchain-doctor.sh` verifies the image label,
+architecture, Xcode build, SDK, first-launch state, and capacity before any
+release secret is admitted. The exact source of the hosted image contract is
+GitHub's
+[macOS 26 ARM64 image inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md).
 
-For every automatic workflow-run attempt, including failed and stale upstream
-attempts, the hosted gate retains an attempt-unique 90-day
-`tron.ios-release-eligibility.v1` artifact containing the upstream CI identity,
-source/outcome, freshly observed main SHA, decision, downstream producer, and
-UTC observation time. An eligible attempt reconstructs the authenticated
-artifact history and emits `tron.ios-release-intent.v1` as `new`, `resume`, or
-`completed`. A completed intent does not reserve the protected runner. Tag and
-manual live attempts similarly reconstruct a run-ID-scoped
-`tron.ios-release-direct-intent.v1` history. Their separate direct schemas keep
-the existing automatic v1 contract unchanged.
+This hosted path replaces the former long-lived `tron-ci` self-hosted runner.
+Xcode 26.6's asset compiler launches CoreSimulator helpers during a device
+archive, which conflicts with that runner's intentionally headless Background
+launchd domain. The hosted image provides the normal Aqua/CoreSimulator
+services and an ephemeral home, so there is no launchd migration, hidden
+account, persistent checkout, baseline keychain, or cross-job recovery ledger
+to operate. No workflow retains the old self-hosted label.
 
-The runner lives on a separate hidden standard macOS account named `tron-ci`.
-Its home, keychain baseline, Actions checkout, DerivedData, and signing material
-are isolated from interactive development and from every normal Tron data home.
-Create the `ios-testflight` GitHub environment first with only the `main` branch
-and `server-v*` tags admitted; the bootstrap verifies that the environment
-exists before it requests a short-lived runner registration token.
-The checked-in bootstrap downloads the checksum-pinned ARM64 Actions runner,
-removes any accidental admin membership, constrains the service home to mode
-0700, verifies it cannot read the invoking user's home, installs a root-owned
-Background agent definition at
-`/Library/Application Support/Tron/ReleaseRunner/com.tron.ios-release-runner.plist`
-with updates disabled, and disables AC sleep. Keeping the definition outside
-`/Library/LaunchAgents` prevents launchd from discovering it for other users;
-the boot helper explicitly loads it only into `tron-ci`'s `user/<uid>` domain.
-The agent has no `UserName` or `GroupName` and inherits that domain's identity.
-A root-owned
-`/Library/Application Support/Tron/ReleaseRunner/start-runner` entry point
-checks the listener's effective UID, Background manager, Security session, and
-audit UID before it executes the runner-owned `runsvc.sh`; an invalid listener
-therefore remains offline and cannot receive a GitHub job.
-A separate root-owned, one-shot
-LaunchDaemon at
-`/Library/LaunchDaemons/com.tron.ios-release-runner-bootstrap.plist` creates
-that user domain at boot and loads the agent through
-`/Library/Application Support/Tron/ReleaseRunner/bootstrap-user-agent`. The
-helper retries after failure, but the long-lived runner itself never enters the
-system domain:
+The secretless eligibility job still admits an automatic run only when a
+successful `main` CI source is the exact current `origin/main` head. It
+retains its 90-day eligibility and intent evidence before the protected hosted
+job starts. The release checkout repeats the source comparison after scheduling
+and again immediately before App Store Connect. Direct live runs retain the
+same manual-main or reachable-tag checks. Intent-keyed concurrency serializes
+each complete intent/effect/receipt transaction without depending on a
+machine-specific queue.
+
+App Store Connect authentication remains environment-backed. When manual
+signing secrets are configured, the job validates the supplied distribution
+certificate against checksum-pinned Apple Root and WWDR G3 certificates,
+captures the hosted user's existing keychain search/default state, creates one
+run-attempt-named keychain, and installs only the two validated provisioning
+profiles. CodeSign must sign a probe and embed the exact validated chain before
+the archive begins. The sole `if: always()` teardown restores the original
+keychain state and removes every temporary key, certificate, profile, diagnostic,
+and keychain; GitHub then discards the VM. A killed job therefore cannot leave
+credentials or filesystem state for a later run.
+
+Before rotating the TestFlight toolchain, confirm that Apple accepts the
+candidate stable or RC build and that GitHub's GA `macos-26` image contains
+that exact Xcode build and SDK. Update the version, build, SDK, developer path,
+setup-Xcode input, documentation, and invariant test together. Never select a
+beta bundle for live TestFlight delivery. Run:
 
 ```bash
-scripts/bootstrap-ios-release-runner.sh
-scripts/ios-release-runner-doctor.sh
-```
-
-The bootstrap and both launchd boundaries emit timestamped, single-line,
-secret-safe operational records. The interactive transaction writes a unique
-`trace`, the exact checkout commit/dirty bit, and SHA-256 provenance for the
-bootstrap, toolchain manifest, and iOS release workflow to the root-only
-`/Library/Logs/Tron/ios-release-runner-bootstrap.log`. The boot helper's stdout
-and stderr are retained separately at
-`/Library/Logs/Tron/ios-release-runner-launchd.log` and
-`/Library/Logs/Tron/ios-release-runner-launchd-error.log`; the directory is
-root-owned mode 0755 and every file is root-owned mode 0600. The immutable
-listener guard records only its PID, effective/audit UIDs, launchd manager,
-Security-session root flag, and validation outcome in the existing private
-`/Users/tron-ci/Library/Logs/com.tron.ios-release-runner/` streams. It never
-logs a command line, process environment, GitHub token, keychain value,
-signing identity, profile contents, or runner credential file. Do not enable
-shell tracing on a release script.
-
-An otherwise-unhandled bootstrap command failure records its named phase,
-source line, and exit status before transactional cleanup. It deliberately does
-not record `BASH_COMMAND` or arguments because account passwords, runner tokens,
-and signing material can cross those command boundaries.
-
-Every doctor run adds the same sanitized identity document, exact Xcode/SDK,
-capacity, filesystem-boundary result, source SHA, and credential-audit mode to
-the durable GitHub Actions job log. To correlate host, GitHub, and recent
-workflow state after any failure, run the read-only collector:
-
-```bash
-scripts/ios-release-runner-diagnostics.sh
-```
-
-It continues collecting after an unhealthy check and exits nonzero at the end.
-The output contains fixed installed-file metadata and hashes, rollback-journal
-presence, filtered launchd state, the exact listener process and Unix UID,
-remote runner state, and the three most recent main CI and iOS release run
-records. It tails only the root-owned Tron logs and
-`component=ios-release-runner-session` guard lines; raw Actions `_diag` logs,
-job output, credentials, keychains, environments, and signing state are
-deliberately excluded. This is the first evidence bundle to capture before
-manually changing launchd state.
-
-Bootstrap-only preparation commands enter the hidden account's launchd context
-in a strict order. Root first invokes `launchctl asuser`, which adopts the
-target bootstrap and security audit session but does not change Unix
-credentials; the boundary then immediately drops UID/GID to `tron-ci` before
-executing the requested command. Dropping privileges before `asuser` is invalid:
-the non-root process cannot adopt the separate Background audit session and
-macOS rejects it with `EPERM`. Every call verifies the resulting manager UID,
-manager type, effective UID, and audit UID before keychain state is prepared.
-The agent deliberately omits `SessionCreate`: the independent `user/<uid>`
-Background domain already owns the correct non-root audit session, while asking
-launchd to create another session gives the listener a different audit login
-identity. The root-owned session entry point is the launchd program itself: it
-checks its own effective UID, manager UID/type, Security session, audit UID,
-home, and immutable file metadata before it can execute `runsvc.sh`. Repair
-therefore requires a different exact listener PID and the same GitHub runner
-ID to return online before restoring its scheduling label. It deliberately
-does not use `launchctl bsexec` as a second identity check; on current macOS,
-that command can preserve the verifier's audit identity instead of reporting
-the target process's identity. The pre-exec guard and job-time doctor inspect
-their own real contexts and remain the two fail-closed enforcement boundaries.
-
-Every Actions job reruns the doctor before any step receives release secrets.
-It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
-account with its exact home, mode-0700 ownership, baseline keychain, checkout,
-and temporary directory all inside the isolated Actions installation. It also
-requires launchd's manager UID and the Security framework audit UID to equal
-the account's effective UID, requires the manager session type to be
-`Background`, and rejects a root security session. Unix identity alone is not
-sufficient for CodeSign: a process in another bootstrap or audit domain cannot
-reliably resolve the isolated account's `secd` and `trustd` services. The
-checked-in `ios-release-user-context` boundary therefore validates the current
-context and executes directly; it deliberately refuses to use
-`launchctl asuser` to repair a listener that started in the wrong domain.
-Manual keychain preparation, archive, export, and teardown all stay inside that
-validated boundary. Each sensitive step uses absolute `/bin/bash` and invokes
-the boundary as its first command through `$GITHUB_WORKSPACE`; the boundary is
-not a GitHub custom-shell executable, whose path is resolved before the step
-script and cannot use workflow context expressions.
-The next secretless step replays `ios-release-credential-ledger.py recover` in
-that user context, creates or validates every component of the standard
-provisioning-profile directory with no-follow ownership checks, and audits an
-empty result before GitHub injects any release secret. This restores the
-baseline keychain preferences and removes only the strictly validated keychains
-and provisioning profiles durably claimed by an interrupted earlier attempt. A
-symlinked or wrong-owner ancestor fails before profile content or signing
-material is exposed. Operators can run the doctor's
-`--audit-credentials` mode to check the same persistent boundary without
-recovering it.
-
-GitHub's generated Darwin `svc.sh` is created only after runner registration,
-installs a per-login LaunchAgent, and refuses root. The hidden service account
-has no Aqua login session, so Tron owns the launchd definitions and uses the
-checksum-pinned package's documented `runsvc.sh` entry point. The root helper
-uses launchd's supported independent `user/<uid>` domain and
-`LimitLoadToSessionType=Background`; the listener inherits that domain's
-non-root security audit session without requiring a GUI login. The immutable
-session entry point enforces the same identity contract on every restart before
-the listener can connect to GitHub. Hosted macOS CI
-also runs the bootstrap's non-privileged `--self-test` and executes the
-user-context wrapper inside its Aqua account. Those checks exercise the real
-BSD ownership query, idempotent ACL denial semantics, generated agent/helper
-contracts, launchd manager identity, and audit identity without creating an
-account or registering a runner. The real release doctor adds the
-Background-session requirement that a hosted Aqua job cannot reproduce.
-
-The bootstrap requires an authenticated repository-admin `gh` session and an
-interactive `sudo` checkpoint. Fresh installation and service repair share a
-root-owned process lock, so concurrent privileged invocations fail before
-mutating the host. Fresh installation fails rather than replacing an existing
-runner. `sysadminctl` may report that the hidden service account
-cannot unlock FileVault; that is expected. When macOS records the custom home
-without creating it, the bootstrap creates and validates the missing mode-0700
-home and Keychains hierarchy with macOS system utilities, independent of any
-Homebrew coreutils in the invoking shell's `PATH`. A retry resumes safely from
-that account-only state; checks beneath the private service home run with the
-service/root identity so an already-created baseline keychain is detected and
-reused rather than mistaken for a missing file. Because standard macOS accounts
-share the `staff` group, the bootstrap also probes both list and traversal
-access to the invoking user's home. When needed, it adds an idempotent
-`tron-ci deny list,search` ACL for only the runner instead of changing the
-home's broader POSIX permissions. If permanently deleting the service account,
-remove that exact ACL with
-`/bin/chmod -a "user:tron-ci deny list,search" "$HOME"`.
-
-Hosts installed with the former system-domain listener require one privileged
-migration after updating the checkout:
-
-```bash
-scripts/bootstrap-ios-release-runner.sh --repair-service
-```
-
-Repair validates the existing account, pinned runner version, exact GitHub
-runner ID, registration, files, and remote
-idle state before changing launchd. Installations produced by the former
-privileged-tar bootstrap can have an `actions-runner` directory whose mode was
-broadened from 0700 to the pinned archive root's 0755 even though its enclosing
-home remained private. Repair recognizes only that exact legacy mode, waits for
-the exact remote runner to be idle, tightens it as `tron-ci`, and revalidates
-the complete installation before staging the cutover; every other unexpected
-mode fails closed. Fresh extraction also reasserts and verifies the directory's
-0700 boundary after tar completes. Repair temporarily removes only the dedicated
-`tron-ios-release` scheduling label and observes the runner idle twice, so a
-queued release cannot race the cutover. Each observation validates busy state
-and label presence from one successful GitHub API snapshot; malformed or failed
-reads reset the idle proof and fail closed. It then stages the complete agent/helper
-set and atomically moves the legacy plist to the root-owned, non-autoloading
-`legacy-system-service.plist` rollback journal before stopping the daemon. The
-old listener must disappear locally and the same GitHub runner ID must become
-offline before the candidate starts; the candidate must produce a different
-local PID and take that exact ID online. That proof is the logical commit;
-journal cleanup and scheduling-label restoration follow it. A failure after
-commit keeps the verified candidate running and scheduling fenced. If
-verification fails before commit, repair stops the boot helper first, removes
-the candidate, proves the exact runner offline, restores the journaled legacy
-daemon, proves it online, and only then restores scheduling. The journal also
-makes an interrupted process or reboot resumable. A completed repair is
-idempotent; inconsistent mixed topologies and a busy runner fail closed. Repair
-reuses the existing registration and credential files—it does not unregister
-or rotate the runner. Root mutates only root-owned service paths; all paths
-beneath the runner home, including legacy permission normalization, are created
-and changed as `tron-ci` to prevent privileged symlink-follow races.
-
-`launchctl bootout` is only a teardown request: launchd may keep the target
-observable briefly after returning. Repair and rollback therefore poll the
-exact system or user target for up to 30 seconds and treat observed absence as
-the postcondition. Each request status, poll count, convergence, and timeout is
-written under the transaction trace. This same bounded wait protects the
-forward cutover and rollback, so a normal asynchronous removal cannot be
-misclassified as a failed stop or trigger a rollback into the same transition.
-
-Rotation is explicit. Stop and remove the Background agent and its boot helper,
-request a short-lived removal token, unregister as the service account, then
-move the old installation aside before rerunning the bootstrap. Removing the
-legacy path as well makes the procedure safe for a host whose migration did not
-complete:
-
-```bash
-runner_uid="$(id -u tron-ci)"
-sudo launchctl bootout system/com.tron.ios-release-runner-bootstrap || true
-sudo launchctl bootout "user/$runner_uid/com.tron.ios-release-runner" || true
-sudo launchctl bootout system/com.tron.ios-release-runner || true
-sudo /bin/rm -f \
-  /Library/LaunchDaemons/com.tron.ios-release-runner-bootstrap.plist \
-  /Library/LaunchDaemons/com.tron.ios-release-runner.plist \
-  "/Library/Application Support/Tron/ReleaseRunner/com.tron.ios-release-runner.plist" \
-  "/Library/Application Support/Tron/ReleaseRunner/legacy-system-service.plist" \
-  "/Library/Application Support/Tron/ReleaseRunner/bootstrap-user-agent" \
-  "/Library/Application Support/Tron/ReleaseRunner/start-runner"
-repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
-removal_token="$(gh api --method POST \
-  "repos/$repository/actions/runners/remove-token" --jq .token)"
-(cd / && sudo -H -u tron-ci \
-  /Users/tron-ci/actions-runner/config.sh remove --token "$removal_token")
-unset removal_token
-sudo /bin/mv /Users/tron-ci/actions-runner \
-  "/Users/tron-ci/actions-runner.retired.$(date -u +%Y%m%dT%H%M%SZ)"
-```
-
-Update the exact version/URL/SHA in the manifest, rerun the bootstrap, and let
-its bounded final poll confirm that GitHub reports the release label online. An
-interrupted post-registration bootstrap removes the new remote registration,
-local credentials, and custom launchd definition before returning failure; it
-reports explicitly if that rollback cannot be verified. Never register this
-label on a general-purpose user account or add it to another workflow.
-
-Before changing the TestFlight Xcode pin, confirm Apple currently accepts that
-stable or RC build, install it on the runner, and update the version, build,
-SDK, and developer-directory fields together. Never select a beta bundle for a
-live TestFlight lane. Then run:
-
-```bash
-scripts/ios-release-runner-doctor.sh
+scripts/ios-release-toolchain-doctor.sh --self-test
 python3 scripts/ios-release-verify.py self-test
+scripts/validate-ci-definitions.sh
 ```
 
-Trigger a manual `dry-run` from `main` and inspect its provenance artifact
-before permitting a live upload. The archive verifier rejects any Xcode build
-or SDK that differs from the distribution manifest, or a minimum OS above 26.0.
+Then use a protected manual dry-run from `main` before live delivery. The
+archive verifier rejects a build whose Xcode, SDK, bundle identity, version, or
+minimum OS differs from the repository-owned manifest.
 
 ## TestFlight Delivery CI
 
@@ -1048,7 +818,7 @@ successful `CI` workflow for a push to `main` publishes that workflow's exact
 tested commit to the private internal group only if it is still the current
 `main` head. The hosted eligibility job compares the upstream SHA with a freshly
 fetched `origin/main` without entering the protected environment; the release
-checkout repeats that exact comparison after acquiring the self-hosted runner
+checkout repeats that exact comparison after acquiring the hosted release job
 and just before a live App Store Connect upload or existing-build distribution.
 A `server-v*` tag publishes to the external/public TestFlight path used by Mac
 onboarding. Pull requests, failed or cancelled CI runs, stale successful main
@@ -1071,11 +841,10 @@ The upload lane uses the exact App-Store-supported Xcode pin with the `Tron`
 scheme and `Prod` configuration. That is the App Store Connect bundle
 (`com.tron.mobile`, App ID `6761511764`); the
 `Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
-Simulator and XCTest execution stays on hosted Xcode 26 CI, where a logged-in
-Aqua session owns CoreSimulator and TestManager. The isolated Background
-release listener does not duplicate those tests: signing-sensitive commands
-remain in its account's headless user domain, then compile and archive the same
-accepted `main` source with the pinned stable/RC distribution SDK. Xcode 27
+Simulator and XCTest execution stays in the measured hosted CI lane. The
+separate ephemeral release job compiles and archives the same accepted `main`
+source with the pinned stable/RC distribution SDK and the hosted image's normal
+CoreSimulator and keychain services. Xcode 27
 SDK-only UI remains available through the documented direct-device loop until
 Apple accepts that SDK for TestFlight; the release workflow must not attempt to
 bypass that platform policy.
@@ -1089,7 +858,7 @@ not a loose version match. A bounded preflight rejects an allocation that is not
 strictly newer than the visible hosted build namespace.
 
 Before export, `ios-release-verify.py` reads both archived Info plists and
-asserts the exact Xcode build, iPhoneOS 27 SDK, iOS 26.0 minimum, bundle IDs,
+asserts the exact Xcode build, iPhoneOS 26.5 SDK, iOS 26.0 minimum, bundle IDs,
 versions, and export-compliance declarations. The exported IPA retains the
 existing signing and entitlement checks. Each newly built dry or live archive
 also uploads `tron.ios-release-provenance.v1`: exact source SHA, GitHub run and
@@ -1173,7 +942,7 @@ names.
 
 The export step supports two signing modes. If all local signing secrets are
 present, CI imports an Apple Distribution `.p12` into a uniquely named,
-job-owned file keychain under the isolated account's standard
+job-owned file keychain under the hosted account's standard
 `~/Library/Keychains/` directory,
 installs App Store Connect provisioning profiles for the app and share
 extension, and uses those same assets for both archive and export. Manually
@@ -1193,31 +962,18 @@ key/account to manage App Store signing; a cloud signing permission error means
 either grant that access or use the local signing secrets.
 
 ASC authentication is environment-backed in CI; the workflow does not create
-a repo-local `.asc/config.json`. Before manual signing changes the user
-keychain search list or default, it validates the release account's current
-Background context and records both exactly. Before creating the job
-keychain, it atomically writes a private mode-0600 attempt ledger under the
-isolated runner home; each new provisioning-profile UUID is added and fsynced
-immediately before that profile is installed. The ledger contains only
-recomputed run/attempt ownership and paths—never passwords, keys,
-certificates, profile contents, or other credentials. The temporary search path
-includes the job keychain plus macOS's system and system-root keychains; the
-system-owned Apple root retains its built-in trust. Archive and export remain
-in that same audit/bootstrap context. An always-run final step re-enters it,
-restores the original preferences, deletes the temporary private key,
-certificate, standard-directory keychain, and diagnostic files, and removes
-only provisioning profiles the job created. Identical pre-existing profiles
-are reused, while a UUID collision
-with different content fails instead of overwriting runner state. Cleanup
-continues after individual errors but fails the job if any restoration or
-removal is incomplete. Only a fully successful teardown may remove the attempt
-ledger and pass its final empty-state audit; otherwise the ledger remains for
-the next job's bounded pre-secret recovery. This covers host termination and
-process kills that bypass GitHub's `always()` step, while the TestFlight receipt
-still cannot publish until normal teardown succeeds. A final always-run step
-removes release build products and runs `git clean -ffdx` only inside the
-isolated Actions checkout; this operation is forbidden in an interactive
-development workspace.
+a repo-local `.asc/config.json`. Before manual signing changes the hosted
+user's keychain search list or default, it records both exactly. The temporary
+search path includes the job keychain plus macOS's system and system-root
+keychains; the system-owned Apple root retains its built-in trust. An always-run
+final step restores the original preferences, deletes the temporary private
+key, certificate, standard-directory keychain, and diagnostic files, and
+removes only provisioning profiles the job created. Identical pre-existing
+profiles are reused, while a UUID collision with different content fails
+instead of overwriting state. Cleanup continues after individual errors but
+fails the job if any restoration or removal is incomplete. The TestFlight
+receipt cannot publish until teardown succeeds, and the hosted VM is discarded
+even if a process kill prevents the `always()` step from completing.
 
 Required GitHub Actions secrets:
 
@@ -1288,27 +1044,23 @@ days. Temporary profiles are installed in Xcode's current build-time library at
 library from the former `~/Library/MobileDevice` location (see Apple's
 [Xcode 16 release notes](https://developer.apple.com/documentation/xcode-release-notes/xcode-16-release-notes)).
 The workflow preserves Xcode's canonical lowercase profile UUID in the cache
-filename, export options, and durable credential ledger; manual export lookup
-does not resolve the same UUID after case conversion. Recovery
-and teardown therefore cannot drift from either profile installation path or
-identity. Because the isolated service account has no interactive login keychain,
-manual signing also downloads Apple's public root and WWDR G3 intermediate from
+filename, export options, and teardown list; manual export lookup does not
+resolve the same UUID after case conversion. Manual signing also downloads
+Apple's public root and WWDR G3 intermediate from
 their canonical Apple PKI URLs and verifies both repository-pinned SHA-256
 digests. Before the private key is admitted, CI extracts the single public leaf
 from the `.p12` and validates the exact leaf -> WWDR G3 -> Apple Root chain with
 ambient keychain lookup and issuer fetching disabled. Only WWDR G3 is imported
 into the temporary user keychain; the explicit system-root keychain preserves
 macOS's built-in trust instead of treating a copied root certificate as trust
-configuration. These checks do not substitute for the execution-context gate:
-`security verify-cert` can validate explicit files from the system bootstrap
-even when CodeSign cannot reach the account's user-domain trust service. The
-doctor therefore proves the matching Background manager UID and audit UID
-first. A throwaway Mach-O is then signed in that context through the exact
-identity hash and keychain, verified, and its
+configuration. The hosted toolchain doctor proves the exact GA image, ARM64
+architecture, Xcode build, and SDK before secrets are admitted. A throwaway
+Mach-O is then signed through the exact identity hash and keychain, verified,
+and its
 three embedded certificates are extracted and compared with the validated leaf
 and both repository pins. Any failure is reduced to a redacted category such as
 untrusted chain, forbidden keychain interaction, missing identity, or security
-context; certificate subjects and raw signing output never enter Actions logs.
+toolchain; certificate subjects and raw signing output never enter Actions logs.
 This prevents a build from silently depending on a developer's ambient login
 keychain or failing only after an expensive archive begins. Provisioning
 profiles cannot outlive their selected distribution certificate, so rotate the Apple
@@ -1319,7 +1071,7 @@ group and workflow configuration stay in place.
 Manual workflow runs expose a `channel` choice. `dry-run` builds and tests but
 skips App Store Connect; `internal` exercises private delivery from `main`; and
 `external` exercises the public path from `main` without creating a tag. Live
-and dry-run manual channels are all restricted to `main`, so the release runner
+and dry-run manual channels are all restricted to `main`, so the release job
 never compiles an arbitrary branch. Live manual runs require the ASC secrets
 and consume the workflow run's Apple build
 number. For the first external build of a new marketing version, the expected

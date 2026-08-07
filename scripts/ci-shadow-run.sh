@@ -426,7 +426,7 @@ workload_version_drift() {
     "$repo_root/scripts/tron" version test
     "$repo_root/scripts/tron-release-notes" --test
     "$repo_root/scripts/ci-change-flags.sh" --self-test
-    "$repo_root/scripts/ios-release-runner-doctor.sh" --self-test
+    "$repo_root/scripts/ios-release-toolchain-doctor.sh" --self-test
     python3 "$repo_root/scripts/ci-provider-context.py" --self-test
     python3 "$repo_root/scripts/ci-validation-evidence.py" --self-test
     python3 "$repo_root/scripts/ci-parity-report.py" --self-test
@@ -486,8 +486,6 @@ workload_rust() {
 workload_ios() {
     configure_apple_tools
     cd "$repo_root/packages/ios-app"
-    ../../scripts/bootstrap-ios-release-runner.sh --self-test
-    ../../scripts/ios-release-user-context /usr/bin/true
     ../../scripts/install-ci-tools.sh xcodegen
     ../../scripts/verify-ci-toolchain.sh ios xcodegen
     xcodegen generate

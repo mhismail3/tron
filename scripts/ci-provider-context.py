@@ -380,10 +380,10 @@ def load_policy(path: Path = POLICY_PATH) -> dict[str, Any]:
     }:
         raise ContextError("iOS release triggers are invalid")
     if ios_release.get("runner") != {
-        "labels": ["self-hosted", "macOS", "ARM64", "tron-ios-release"],
+        "image": "macos-26",
         "environment": "ios-testflight",
     }:
-        raise ContextError("iOS release runner isolation is invalid")
+        raise ContextError("iOS release hosted image is invalid")
     if mac_release != {
         "configuration_path": ".github/workflows/release-mac.yml",
         "channels": {"public": "public"},

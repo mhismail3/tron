@@ -107,7 +107,7 @@ jobs:
       - name: Run deterministic CI helper tests
         run: |
           ./scripts/ci-change-flags.sh --self-test
-          ./scripts/ios-release-runner-doctor.sh --self-test
+          ./scripts/ios-release-toolchain-doctor.sh --self-test
           python3 scripts/ci-provider-context.py --self-test
           python3 scripts/ci-validation-evidence.py --self-test
           python3 scripts/ci-parity-report.py --self-test
@@ -173,11 +173,6 @@ jobs:
         working-directory: packages/ios-app
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - name: Verify iOS release runner bootstrap and user-context primitives
-        run: |
-          ../../scripts/bootstrap-ios-release-runner.sh --self-test
-          ../../scripts/ios-release-user-context /usr/bin/true
 
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:

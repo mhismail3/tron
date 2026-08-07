@@ -2,22 +2,21 @@
 #
 # A successful main-branch CI push uploads the exact tested production iOS
 # bundle (`com.tron.mobile`) to the all-build internal TestFlight group only
-# while that source is still the exact current `main` head. A secretless hosted
-# eligibility job rejects stale completions before they reserve the release
-# runner and retains every decision as structured 90-day evidence. The release
-# checkout repeats the exact-head check after its queue.
+# while that source is still the exact current `main` head. A secretless
+# eligibility job rejects stale completions before they reserve the hosted
+# release job and retains every decision as structured 90-day evidence. The
+# release checkout repeats the exact-head check after its queue.
 # A final pre-ASC check is retained as structured, secret-free 90-day evidence.
-# Archives run only on the locked-down release runner with the exact
+# Archives run on GitHub's ephemeral `macos-26` ARM64 image with the exact
 # App-Store-supported stable/RC Xcode pin in `config/ci-toolchain.env`. Beta SDK
-# validation and direct device installation are separate from TestFlight.
+# validation and direct device installation remain separate from TestFlight.
 # Release tags retain the external/public TestFlight path and Beta App Review
 # handling.
-# Simulator/XCTest remains on hosted CI because the isolated release listener
-# runs in its hidden account's headless Background launchd domain, not a logged-
-# in Aqua session. Signing-sensitive commands stay inside that domain, where
-# the Unix identity, audit identity, secd, and trustd namespace agree;
-# the stable archive is the App Store Connect compilation and distribution
-# proof.
+# The hosted image provides the normal CoreSimulator and keychain services that
+# Xcode's asset compiler needs. The job imports signing material into one
+# attempt-owned keychain, removes it in its sole `always()` teardown, and then
+# the ephemeral VM is discarded. The stable archive is the App Store Connect
+# compilation and distribution proof.
 # Fresh builds use one monotonic Release-workflow allocation encoded as a valid
 # three-segment CFBundleVersion. Automatic upstream reruns authenticate and
 # reuse the first immutable intent's allocation; tag/manual runs use their own
@@ -51,17 +50,14 @@
 # dry-run may omit the ASC credentials; live internal/external deliveries fail
 # before the build when any required credential is missing.
 #
-# Credential lifecycle invariant: the pre-secret doctor first proves the
-# release account's Background bootstrap and matching audit UID. ASC uses the
-# job's environment-backed key directly. Manual signing, Xcode archive/export,
-# and credential teardown then execute through that user context. Signing
-# snapshots the user keychain preferences before it prepends and selects a
-# unique job-owned file keychain while leaving Apple's trusted root in the
-# system-root store. A pre-archive Mach-O proves both private key access and the
-# exact embedded leaf/intermediate/root chain. One final `if: always()` step in
-# the same context restores those preferences and removes the private key,
-# certificate, diagnostics, created profiles, and keychain without deleting
-# state that predated the job.
+# Credential lifecycle invariant: the pre-secret doctor proves the exact hosted
+# image, Xcode, and SDK. ASC uses the job's environment-backed key directly.
+# Manual signing snapshots the hosted user's keychain preferences before it
+# prepends and selects a unique attempt-owned file keychain while leaving
+# Apple's trusted root in the system-root store. A pre-archive Mach-O proves
+# both private key access and the exact embedded leaf/intermediate/root chain.
+# One final `if: always()` step restores those preferences and removes the
+# private key, certificate, diagnostics, created profiles, and keychain.
 
 name: Release (iOS TestFlight)
 
@@ -459,7 +455,7 @@ jobs:
     name: Build + upload + distribute
     needs: eligibility
     if: needs.eligibility.outputs.eligible == 'true' && needs.eligibility.outputs.delivery_required == 'true'
-    runs-on: [self-hosted, macOS, ARM64, tron-ios-release]
+    runs-on: macos-26
     environment: ios-testflight
     timeout-minutes: 90
     permissions:
@@ -565,23 +561,19 @@ jobs:
           }
 
       - name: Select exact release Xcode
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: "26.6"
+
+      - name: Bind exact release Xcode
         shell: bash
         run: |
           set -euo pipefail
           source config/ci-toolchain.env
           echo "DEVELOPER_DIR=$TRON_RELEASE_IOS_DEVELOPER_DIR" >> "$GITHUB_ENV"
 
-      - name: Verify dedicated release runner
-        run: scripts/ios-release-runner-doctor.sh
-
-      - name: Recover stale iOS release credentials
-        shell: /bin/bash --noprofile --norc -e -o pipefail {0}
-        run: |
-          set -euo pipefail
-          "$GITHUB_WORKSPACE/scripts/ios-release-user-context" /usr/bin/true
-          python3 scripts/ios-release-credential-ledger.py recover
-          python3 scripts/ios-release-credential-ledger.py prepare-profile-directory
-          python3 scripts/ios-release-credential-ledger.py audit
+      - name: Verify hosted release toolchain
+        run: scripts/ios-release-toolchain-doctor.sh
 
       - name: Initialize ASC diagnostics
         shell: bash
@@ -991,7 +983,6 @@ jobs:
           IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64: ${{ secrets.IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64 }}
         run: |
           set -euo pipefail
-          "$GITHUB_WORKSPACE/scripts/ios-release-user-context" /usr/bin/true
           umask 077
           source config/ci-toolchain.env
 
@@ -1013,14 +1004,13 @@ jobs:
           original_default_path="$RUNNER_TEMP/ios-original-default-keychain"
           snapshot_ready="$RUNNER_TEMP/ios-keychain-snapshot-ready"
           installed_profile_uuids="$RUNNER_TEMP/ios-installed-profile-uuids"
-          baseline_keychain="$HOME/Library/Keychains/tron-runner-baseline.keychain-db"
           system_keychain="/Library/Keychains/System.keychain"
           system_root_keychain="/System/Library/Keychains/SystemRootCertificates.keychain"
           profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
           : > "$original_keychains_path"
           : > "$installed_profile_uuids"
 
-          for required_keychain in "$baseline_keychain" "$system_keychain" "$system_root_keychain"; do
+          for required_keychain in "$system_keychain" "$system_root_keychain"; do
             test -f "$required_keychain" && test ! -L "$required_keychain" || {
               echo "::error::required release keychain is unavailable"
               exit 1
@@ -1030,16 +1020,29 @@ jobs:
             echo "::error::job-owned signing keychain already exists"
             exit 1
           }
-          python3 scripts/ios-release-credential-ledger.py begin \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" >/dev/null
-          security list-keychains -d user -s "$baseline_keychain"
-          security default-keychain -d user -s "$baseline_keychain"
-          original_keychains=("$baseline_keychain")
-          original_default="$baseline_keychain"
-          printf '%s\n' "$baseline_keychain" > "$original_keychains_path"
+          original_keychains=()
+          while IFS= read -r original_keychain; do
+            original_keychain="${original_keychain#\"}"
+            original_keychain="${original_keychain%\"}"
+            [[ -n "$original_keychain" ]] && original_keychains+=("$original_keychain")
+          done < <(security list-keychains -d user | sed -E 's/^[[:space:]]+//')
+          (( ${#original_keychains[@]} > 0 )) || {
+            echo "::error::hosted runner has no user keychain search list"
+            exit 1
+          }
+          original_default="$(security default-keychain -d user | sed -E 's/^[[:space:]]+//; s/^\"//; s/\"$//')"
+          test -f "$original_default" && test ! -L "$original_default" || {
+            echo "::error::hosted runner default keychain is unavailable"
+            exit 1
+          }
+          printf '%s\n' "${original_keychains[@]}" > "$original_keychains_path"
           printf '%s\n' "$original_default" > "$original_default_path"
           : > "$snapshot_ready"
+          mkdir -p "$profiles_dir"
+          test -d "$profiles_dir" && test ! -L "$profiles_dir" || {
+            echo "::error::hosted provisioning-profile directory is unsafe"
+            exit 1
+          }
 
           printf '%s' "$IOS_DISTRIBUTION_CERT_P12_BASE64" | base64 -d > "$cert_path"
           test -s "$cert_path" || { echo "::error::decoded iOS distribution certificate is empty"; exit 1; }
@@ -1265,10 +1268,6 @@ jobs:
               fi
               echo "::notice::reusing existing App Store profile '$name' for $bundle_id" >&2
             else
-              python3 scripts/ios-release-credential-ledger.py plan-profile \
-                --run-id "$GITHUB_RUN_ID" \
-                --run-attempt "$GITHUB_RUN_ATTEMPT" \
-                --profile-uuid "$uuid" >/dev/null
               /bin/cp "$profile_path" "$destination"
               printf '%s\n' "$uuid" >> "$installed_profile_uuids"
               echo "::notice::installed temporary App Store profile '$name' for $bundle_id" >&2
@@ -1309,7 +1308,6 @@ jobs:
         shell: /bin/bash --noprofile --norc -e -o pipefail {0}
         run: |
           set -euo pipefail
-          "$GITHUB_WORKSPACE/scripts/ios-release-user-context" /usr/bin/true
           cd "$IOS_APP_DIR"
           archive_path="$(pwd)/build/TronMobile.xcarchive"
           rm -rf "$archive_path"
@@ -1392,7 +1390,6 @@ jobs:
         shell: /bin/bash --noprofile --norc -e -o pipefail {0}
         run: |
           set -euo pipefail
-          "$GITHUB_WORKSPACE/scripts/ios-release-user-context" /usr/bin/true
           cd "$IOS_APP_DIR"
           export_dir="$(pwd)/build/export"
           ipa_path="$(pwd)/build/TronMobile.ipa"
@@ -2598,13 +2595,10 @@ jobs:
         shell: /bin/bash --noprofile --norc {0}
         run: |
           set +e
-          "$GITHUB_WORKSPACE/scripts/ios-release-user-context" /usr/bin/true || exit 1
           cleanup_failed=0
           keychain_path=""
-          credential_ledger_path=""
           if [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]; then
             keychain_path="$HOME/Library/Keychains/tron-ios-signing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.keychain-db"
-            credential_ledger_path="$HOME/.tron-ios-release-state/attempt-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
           else
             echo "::error::refusing to resolve a signing keychain from an invalid GitHub run identity"
             cleanup_failed=1
@@ -2695,46 +2689,8 @@ jobs:
             fi
           done
 
-          # Workflow-level, intent-keyed concurrency serializes every automatic
-          # intent/effect/receipt transaction; the dedicated runner provides a
-          # second physical serialization boundary. Clean this isolated checkout
-          # before the next admitted job.
-          if [[ -z "${GITHUB_WORKSPACE:-}" || ! -d "$GITHUB_WORKSPACE/.git" ]]; then
-            echo "::error::isolated iOS release checkout is unavailable for cleanup"
-            cleanup_failed=1
-          else
-            if [[ -d "$GITHUB_WORKSPACE/packages/ios-app/build" ]] && \
-               ! /bin/rm -rf "$GITHUB_WORKSPACE/packages/ios-app/build"; then
-              echo "::error::failed to remove iOS release build products"
-              cleanup_failed=1
-            fi
-            if ! git -C "$GITHUB_WORKSPACE" clean -ffdx; then
-              echo "::error::failed to clean the isolated release checkout"
-              cleanup_failed=1
-            fi
-          fi
-
-          # The durable ledger is cleared only after the existing teardown has
-          # restored keychain preferences and removed every target it recorded.
-          # If anything above failed, retain the ledger so the next admitted
-          # job can replay bounded recovery before credentials are exposed.
-          if [[ -n "$credential_ledger_path" && ( -e "$credential_ledger_path" || -L "$credential_ledger_path" ) ]]; then
-            if [[ "$cleanup_failed" -eq 0 ]]; then
-              if ! python3 scripts/ios-release-credential-ledger.py complete \
-                --run-id "$GITHUB_RUN_ID" \
-                --run-attempt "$GITHUB_RUN_ATTEMPT"; then
-                echo "::error::failed to complete the iOS release credential ledger"
-                cleanup_failed=1
-              fi
-            else
-              echo "::warning::retaining the iOS release credential ledger for next-job recovery"
-            fi
-          fi
-          if [[ "$cleanup_failed" -eq 0 ]] && \
-             ! python3 scripts/ios-release-credential-ledger.py audit; then
-            echo "::error::iOS release credential state is not clean after teardown"
-            cleanup_failed=1
-          fi
+          # The hosted VM is discarded after this step; there is no persistent
+          # runner home, checkout, or credential state to recover in a later job.
           exit "$cleanup_failed"
 
       - name: Preserve automatic TestFlight delivery receipt
