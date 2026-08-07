@@ -25,7 +25,6 @@ struct SessionContextSheet: View {
     let modelRepository: any ModelRepository
     let sessionRepository: any NetworkSessionRepository
     let workerRepository: any WorkerKernelRepository
-    let cachedProviderRequestEvents: [RawEvent]
     let onSelectModel: (ModelInfo) -> Void
     let onFork: () async throws -> String
 
@@ -62,11 +61,16 @@ struct SessionContextSheet: View {
     @State var isLoadingAgentUpdates = false
     @State var hasLoadedAgentUpdatesSnapshot = false
     @State var agentUpdatesLoadingGeneration: UInt64?
+    @State var agentUpdatesLaneActivated = false
+    @State var workerLaneActivated = false
     @State var showDeliveryHistorySheet = false
     @State var selectedContextDetail: SessionContextDetailSelection?
 
     var isConnected: Bool {
         dependencies.connectionRepository.connectionState.isConnected
+    }
+    var cachedSessionRepository: SessionRepository {
+        dependencies.eventStoreManager.eventDB.sessions
     }
 
     var resolvedModelInfo: ModelInfo? {
@@ -151,14 +155,16 @@ struct SessionContextSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: SessionContextPresentation.sectionSpacing) {
+                LazyVStack(spacing: SessionContextPresentation.sectionSpacing) {
                     sessionSummary
                     receivedContextSection
                     agentUpdatesSection
+                        .onAppear { activateAgentUpdatesLane() }
                     if automaticContextCount > 0 {
                         automaticContextSection
                     }
                     workerActivitySection
+                        .onAppear { activateWorkerLane() }
                     sessionActionsSection
                     providerAuditSection
 
@@ -219,19 +225,23 @@ struct SessionContextSheet: View {
             if WorkerProjectionInvalidation.affectsSession(
                 notificationObject: notification.object,
                 sessionId: sessionId
-            ) {
+            ), workerLaneActivated {
                 requestWorkerRefresh()
-                requestAgentUpdatesRefresh()
+                if agentUpdatesLaneActivated {
+                    requestAgentUpdatesRefresh()
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .workerLifecycleProjectionInvalidated)) {
             _ in
             workerCatalogRevision &+= 1
-            requestWorkerRefresh()
+            if workerLaneActivated {
+                requestWorkerRefresh()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                requestAllSessionContextRefreshes()
+                requestActivatedSessionContextRefreshes()
             }
         }
         .sheet(isPresented: $showModelPicker) {

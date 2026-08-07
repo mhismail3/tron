@@ -191,7 +191,7 @@ struct SessionContextRequestDetailParams: Encodable, Equatable {
     let eventId: String
 }
 
-struct SessionContextRequestSummaryDTO: Decodable, Equatable, Identifiable, Sendable {
+struct SessionContextRequestSummaryDTO: Codable, Equatable, Identifiable, Sendable {
     let eventId: String
     let sequence: Int64
     let timestamp: String

@@ -294,6 +294,70 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(messages.count, 2) // user + assistant from parent
     }
 
+    func testRecentSessionWindowIsBoundedAndReturnedOldestFirst() async throws {
+        let events = (1...8).map { sequence in
+            SessionEvent(
+                id: "window-\(sequence)",
+                parentId: sequence == 1 ? nil : "window-\(sequence - 1)",
+                sessionId: "window-session",
+                workspaceId: "/test",
+                type: "message.user",
+                timestamp: "2026-08-07T12:00:\(String(format: "%02d", sequence))Z",
+                sequence: sequence,
+                payload: ["content": AnyCodable("message \(sequence)")]
+            )
+        }
+        _ = try await database.events.insertIgnoringDuplicates(events)
+
+        let recent = try await database.events.getRecentBySession("window-session", limit: 3)
+
+        XCTAssertEqual(recent.map(\.id), ["window-6", "window-7", "window-8"])
+    }
+
+    func testRecentAncestorWindowIsBoundedAcrossSessions() async throws {
+        let events = (1...8).map { sequence in
+            SessionEvent(
+                id: "ancestor-\(sequence)",
+                parentId: sequence == 1 ? nil : "ancestor-\(sequence - 1)",
+                sessionId: sequence < 7 ? "parent-session" : "fork-session",
+                workspaceId: "/test",
+                type: sequence == 7 ? "session.fork" : "message.user",
+                timestamp: "2026-08-07T12:00:\(String(format: "%02d", sequence))Z",
+                sequence: sequence < 7 ? sequence : sequence - 6,
+                payload: [:]
+            )
+        }
+        _ = try await database.events.insertIgnoringDuplicates(events)
+
+        let recent = try await database.events.getRecentAncestors("ancestor-8", limit: 3)
+
+        XCTAssertEqual(recent.map(\.id), ["ancestor-6", "ancestor-7", "ancestor-8"])
+    }
+
+    func testProviderRequestCacheWriteAlwaysDefersAuditBody() async throws {
+        let event = SessionEvent(
+            id: "provider-audit",
+            parentId: nil,
+            sessionId: "audit-session",
+            workspaceId: "/test",
+            type: SessionEventType.modelProviderRequest.rawValue,
+            timestamp: "2026-08-07T12:00:00Z",
+            sequence: 1,
+            payload: [
+                "contextManifest": AnyCodable(["messages": [["content": "large body"]]]),
+                "padding": AnyCodable(String(repeating: "x", count: 20_000)),
+            ]
+        )
+
+        try await database.events.insert(event)
+        let storedEvent = try await database.events.get(event.id)
+        let cached = try XCTUnwrap(storedEvent)
+
+        XCTAssertEqual(cached.payload["projection"]?.stringValue, "deferred")
+        XCTAssertNil(cached.payload["contextManifest"])
+        XCTAssertNil(cached.payload["padding"])
+    }
+
     func testDeleteEventsBySession() async throws {
         _ = try await database.events.insertIgnoringDuplicates([
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01", sequence: 1, payload: [:]),

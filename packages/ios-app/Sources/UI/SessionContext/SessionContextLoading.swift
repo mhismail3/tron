@@ -1,132 +1,16 @@
 import Foundation
 
-/// One already-reconstructed provider audit, reduced to a cheap overview for
-/// immediate sheet presentation. The full manifest is decoded off MainActor
-/// only to warm detail navigation; no second device cache is created.
-struct CachedSessionContextEvent: Sendable {
-    let eventId: String
-    let sequence: Int64
-    let timestamp: String
-    let payload: AnyCodable
-
-    init(_ event: RawEvent) {
-        eventId = event.id
-        sequence = Int64(event.sequence)
-        timestamp = event.timestamp
-        payload = AnyCodable(event.payload.mapValues(\.value))
-    }
-
-    var summary: SessionContextRequestSummaryDTO {
-        let root = payload.dictionaryValue ?? [:]
-        let manifestValue = root["contextManifest"].map(AnyCodable.init)
-        let manifest = manifestValue?.dictionaryValue
-        let messages = manifest?["messages"].map(AnyCodable.init)?.arrayValue ?? []
-        let systemContributions = manifest?["systemContributions"]
-            .map(AnyCodable.init)?.arrayValue ?? []
-        let providerAdditions = root["providerAdditions"]
-            .map(AnyCodable.init)?.arrayValue ?? []
-        let automaticContext = manifest?["automaticContext"]
-            .map(AnyCodable.init)?.arrayValue ?? []
-        let agentDeliveries = manifest?["agentDeliveries"]
-            .map(AnyCodable.init)?.arrayValue ?? []
-        let attachmentCount = messages.filter { message in
-            let kinds = AnyCodable(message).dictionaryValue?["contentKinds"]
-                .map(AnyCodable.init)?.arrayValue?.compactMap { $0 as? String } ?? []
-            return kinds.contains("image") || kinds.contains("document")
-        }.count
-        let format = root["format"] as? String ?? "unknown"
-        let completeFormats = [
-            "tron.model_provider_request.v3",
-            "tron.model_provider_request.v4",
-        ]
-
-        return SessionContextRequestSummaryDTO(
-            eventId: eventId,
-            sequence: sequence,
-            timestamp: timestamp,
-            format: format,
-            turn: nonnegativeUInt64(root["turn"]),
-            providerType: root["providerType"] as? String,
-            providerName: root["providerName"] as? String,
-            model: root["model"] as? String,
-            requestClassification: root["requestClassification"] as? String ?? "legacy",
-            messageCount: nonnegativeUInt64(root["messageCount"])
-                ?? UInt64(messages.count),
-            toolCount: nonnegativeUInt64(root["toolCount"]) ?? 0,
-            automaticContextCount: UInt64(automaticContext.count),
-            instructionCount: UInt64(systemContributions.count + providerAdditions.count),
-            attachmentMessageCount: UInt64(attachmentCount),
-            agentDeliveryCount: UInt64(agentDeliveries.count),
-            environmentAvailable: manifest?["environment"]
-                .map(AnyCodable.init)?.dictionaryValue?["workingDirectory"]
-                .map { !AnyCodable($0).isNull } ?? false,
-            manifestAvailable: manifestValue?.isNull == false,
-            provenanceAvailability: completeFormats.contains(format)
-                ? "complete"
-                : "legacy_unavailable"
-        )
-    }
-
-    func decodeDetail() async -> SessionContextRequestDetailDTO {
-        await Task.detached(priority: .userInitiated) {
-            let root = payload.dictionaryValue ?? [:]
-            let manifest = root["contextManifest"].flatMap { value in
-                try? JSONDecoder().decode(
-                    SessionContextManifestDTO.self,
-                    from: JSONEncoder().encode(AnyCodable(value))
-                )
-            }
-            let providerAdditions = root["providerAdditions"].flatMap { value in
-                try? JSONDecoder().decode(
-                    [ContextSystemContributionDTO].self,
-                    from: JSONEncoder().encode(AnyCodable(value))
-                )
-            }
-            let format = root["format"] as? String ?? "unknown"
-            return SessionContextRequestDetailDTO(
-                eventId: eventId,
-                sequence: sequence,
-                timestamp: timestamp,
-                format: format,
-                contextManifest: manifest,
-                providerAdditions: providerAdditions,
-                providerAudit: payload,
-                provenanceAvailability: [
-                    "tron.model_provider_request.v3",
-                    "tron.model_provider_request.v4",
-                ].contains(format)
-                    ? "complete"
-                    : "legacy_unavailable"
-            )
-        }.value
-    }
-
-    private func nonnegativeUInt64(_ value: Any?) -> UInt64? {
-        switch value {
-        case let value as UInt64:
-            value
-        case let value as Int where value >= 0:
-            UInt64(value)
-        case let value as Double where value >= 0:
-            UInt64(exactly: value.rounded(.towardZero))
-        default:
-            nil
-        }
-    }
-}
-
 extension SessionContextSheet {
     func observeSessionContext() async {
         refreshCoordinator.reset()
         defer { refreshCoordinator.reset() }
-        let cachedEvent = loadCachedContextOverview()
-        guard isConnected else {
-            await loadCachedContextDetail(from: cachedEvent)
-            return
-        }
+        await loadCachedContextOverview()
+        guard isConnected else { return }
 
-        requestAllSessionContextRefreshes()
-        await loadCachedContextDetail(from: cachedEvent)
+        // The compact provider inventory is the only eager network projection.
+        // Delivery and worker sections activate when their LazyVStack rows
+        // actually become visible.
+        requestProviderContextRefresh()
 
         // Worker and delivery state can change throughout an active run. The
         // provider-context audit is immutable once written, so reread it only
@@ -141,26 +25,41 @@ extension SessionContextSheet {
             }
             let isActive = shouldContinueObservingDeliveryState
             if isActive {
-                requestLiveSessionStateRefreshes()
+                requestActivatedLiveSessionStateRefreshes()
             } else if wasActive {
-                requestLiveSessionStateRefreshes()
+                requestActivatedLiveSessionStateRefreshes()
                 requestProviderContextRefresh()
             }
             wasActive = isActive
         }
     }
 
-    func requestAllSessionContextRefreshes() {
+    func requestActivatedSessionContextRefreshes() {
         guard isConnected else { return }
-        requestWorkerRefresh()
-        requestAgentUpdatesRefresh()
         requestProviderContextRefresh()
+        requestActivatedLiveSessionStateRefreshes()
     }
 
-    func requestLiveSessionStateRefreshes() {
+    func requestActivatedLiveSessionStateRefreshes() {
         guard isConnected else { return }
-        requestWorkerRefresh()
+        if workerLaneActivated {
+            requestWorkerRefresh()
+        }
+        if agentUpdatesLaneActivated {
+            requestAgentUpdatesRefresh()
+        }
+    }
+
+    func activateAgentUpdatesLane() {
+        guard !agentUpdatesLaneActivated else { return }
+        agentUpdatesLaneActivated = true
         requestAgentUpdatesRefresh()
+    }
+
+    func activateWorkerLane() {
+        guard !workerLaneActivated else { return }
+        workerLaneActivated = true
+        requestWorkerRefresh()
     }
 
     func requestAgentUpdatesRefresh() {
@@ -247,6 +146,7 @@ extension SessionContextSheet {
                 latestContextDetail = nil
             }
             latestContextSummary = refreshedSummary
+            storeCachedContextOverview(refreshedSummary)
             contextLoadError = nil
         } catch is CancellationError {
             return
@@ -261,23 +161,36 @@ extension SessionContextSheet {
         }
     }
 
-    @discardableResult
-    func loadCachedContextOverview() -> CachedSessionContextEvent? {
-        guard let event = cachedProviderRequestEvents.max(by: { $0.sequence < $1.sequence }) else {
-            return nil
+    func loadCachedContextOverview() async {
+        do {
+            guard let summary = try await cachedSessionRepository
+                .getContextSummary(sessionId) else { return }
+            guard !Task.isCancelled else { return }
+            latestContextSummary = summary
+            contextLoadError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            logger.warning(
+                "Could not restore cached Session Context summary: \(error.localizedDescription)",
+                category: .database
+            )
         }
-        let cachedEvent = CachedSessionContextEvent(event)
-        latestContextSummary = cachedEvent.summary
-        contextLoadError = nil
-        return cachedEvent
     }
 
-    func loadCachedContextDetail(from event: CachedSessionContextEvent?) async {
-        guard let event else { return }
-        let detail = await event.decodeDetail()
-        guard !Task.isCancelled,
-              latestContextSummary?.eventId == detail.eventId else { return }
-        latestContextDetail = detail
+    func storeCachedContextOverview(_ summary: SessionContextRequestSummaryDTO?) {
+        let repository = cachedSessionRepository
+        let sessionId = sessionId
+        Task {
+            do {
+                try await repository.storeContextSummary(summary, sessionId: sessionId)
+            } catch {
+                logger.warning(
+                    "Could not cache Session Context summary: \(error.localizedDescription)",
+                    category: .database
+                )
+            }
+        }
     }
 
     func openContextDetail(_ destination: SessionContextDetailDestination) {

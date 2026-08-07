@@ -91,6 +91,50 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
         XCTAssertEqual(viewModel.conversationHistoryPhase, .loading)
     }
 
+    func testCachedTranscriptRestoreReadsOnlyTheNewestBoundedWindow() async throws {
+        let testState = IsolatedTestState(label: "bounded-cached-transcript")
+        testState.registerTeardown(with: self)
+        let database = testState.makeDatabase()
+        try await database.initialize()
+        let eventCount = ChatViewModel.initialReconstructionEventLimit + 5
+        let cachedEvents = (1...eventCount).map { sequence in
+            SessionEvent(
+                id: "cached-message-\(sequence)",
+                parentId: sequence == 1 ? nil : "cached-message-\(sequence - 1)",
+                sessionId: "bounded-session",
+                workspaceId: "/test/workspace",
+                type: SessionEventType.messageUser.rawValue,
+                timestamp: "2026-08-07T12:\(String(format: "%02d", sequence / 60)):\(String(format: "%02d", sequence % 60))Z",
+                sequence: sequence,
+                payload: ["content": AnyCodable("message \(sequence)")]
+            )
+        }
+        _ = try await database.events.insertIgnoringDuplicates(cachedEvents)
+
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: engineClient,
+            defaults: testState.defaults
+        )
+        addTeardownBlock { await manager.shutdown() }
+        let viewModel = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "bounded-session",
+            eventStoreManager: manager
+        )
+
+        let restored = await viewModel.restoreCachedTranscript()
+
+        XCTAssertTrue(restored)
+        XCTAssertEqual(
+            viewModel.sessionLoadDiagnostics.snapshot.cachedEventCount,
+            ChatViewModel.initialReconstructionEventLimit
+        )
+        XCTAssertEqual(viewModel.allReconstructedMessages.first?.eventId, "cached-message-6")
+        XCTAssertEqual(viewModel.allReconstructedMessages.last?.eventId, "cached-message-\(eventCount)")
+    }
+
     func testDelayedCachedReconstructionRetainsDraftPresentationWithoutBecomingAuthoritative() async throws {
         let testState = IsolatedTestState(label: "delayed-cached-transcript")
         testState.registerTeardown(with: self)

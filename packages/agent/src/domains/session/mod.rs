@@ -32,6 +32,10 @@
 //!   `model.provider_request` events. They do not invoke a model, hook, worker,
 //!   or routing calculation and create no second context store or retention
 //!   policy. V2 rows remain readable with provenance labeled unavailable.
+//! - `session::reconstruct` preserves provider-request event identities and
+//!   pagination cursors but defers their potentially large audit bodies. Its
+//!   top-level metadata carries one bounded latest-request inventory; exact
+//!   manifests remain available through the explicit detail/export owners.
 //! - `session::agent_updates` is a bounded read projection over durable
 //!   deliveries and waits. It does not claim mailboxes, run policy workers, or
 //!   alter wake state.

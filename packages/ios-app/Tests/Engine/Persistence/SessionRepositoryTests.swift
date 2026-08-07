@@ -102,6 +102,32 @@ final class SessionRepositoryTests: XCTestCase {
         )
     }
 
+    private func makeContextSummary(
+        eventId: String = "provider-request-42",
+        sequence: Int64 = 42
+    ) -> SessionContextRequestSummaryDTO {
+        SessionContextRequestSummaryDTO(
+            eventId: eventId,
+            sequence: sequence,
+            timestamp: "2026-08-07T12:00:00Z",
+            format: "tron.model_provider_request.v4",
+            turn: 9,
+            providerType: "openai",
+            providerName: "OpenAI",
+            model: "gpt-5.6-sol",
+            requestClassification: "interactive",
+            messageCount: 62,
+            toolCount: 23,
+            automaticContextCount: 0,
+            instructionCount: 2,
+            attachmentMessageCount: 1,
+            agentDeliveryCount: 0,
+            environmentAvailable: true,
+            manifestAvailable: true,
+            provenanceAvailability: "complete"
+        )
+    }
+
     // MARK: - Insert + Get Round Trip
 
     func testInsertAndGetRoundTrip() async throws {
@@ -197,6 +223,69 @@ final class SessionRepositoryTests: XCTestCase {
         // Should still be only 1 session
         let all = try await database.sessions.getAll()
         XCTAssertEqual(all.count, 1)
+    }
+
+    func testContextSummaryRoundTripSurvivesSessionListUpsert() async throws {
+        let summary = makeContextSummary()
+        try await database.sessions.insert(makeSession())
+        try await database.sessions.storeContextSummary(summary, sessionId: "sess-1")
+
+        let storedSummary = try await database.sessions.getContextSummary("sess-1")
+        XCTAssertEqual(storedSummary, summary)
+
+        try await database.sessions.insert(makeSession(title: "Refreshed title"))
+        let summaryAfterUpsert = try await database.sessions.getContextSummary("sess-1")
+        XCTAssertEqual(summaryAfterUpsert, summary)
+
+        try await database.sessions.storeContextSummary(
+            makeContextSummary(eventId: "provider-request-41", sequence: 41),
+            sessionId: "sess-1"
+        )
+        let summaryAfterStaleWrite = try await database.sessions.getContextSummary("sess-1")
+        XCTAssertEqual(summaryAfterStaleWrite, summary)
+
+        try await database.sessions.storeContextSummary(nil, sessionId: "sess-1")
+        let clearedSummary = try await database.sessions.getContextSummary("sess-1")
+        XCTAssertNil(clearedSummary)
+    }
+
+    func testDatabaseInitializationCompactsCachedProviderAuditBody() async throws {
+        let legacyPayloadData = try JSONSerialization.data(withJSONObject: [
+            "contextManifest": ["messages": [["content": "large body"]]],
+            "padding": String(repeating: "x", count: 20_000),
+        ])
+        let legacyPayload = try XCTUnwrap(String(data: legacyPayloadData, encoding: .utf8))
+        try await database.withDB { db in
+            let sql = """
+                INSERT INTO events
+                (id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload)
+                VALUES (?, NULL, ?, ?, ?, ?, ?, ?)
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
+            }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, "provider-audit", -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            sqlite3_bind_text(statement, 2, "sess-1", -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            sqlite3_bind_text(statement, 3, "ws-1", -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            sqlite3_bind_text(statement, 4, "model.provider_request", -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            sqlite3_bind_text(statement, 5, "2026-08-07T12:00:00Z", -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            sqlite3_bind_int64(statement, 6, 1)
+            sqlite3_bind_text(statement, 7, legacyPayload, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw EventDatabaseError.insertFailed(sqliteErrorMessage(db))
+            }
+        }
+        await database.close()
+        database = testState.makeDatabase()
+        try await database.initialize()
+
+        let cachedEvent = try await database.events.get("provider-audit")
+        let event = try XCTUnwrap(cachedEvent)
+        XCTAssertEqual(event.payload["projection"]?.stringValue, "deferred")
+        XCTAssertNil(event.payload["contextManifest"])
+        XCTAssertNil(event.payload["padding"])
     }
 
     // MARK: - GetAll Ordering

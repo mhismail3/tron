@@ -16,6 +16,7 @@ enum DatabaseSchema {
         try createEventsTable(db: db)
         try createSessionsTable(db: db)
         try createDraftsTable(db: db)
+        try compactDeferredProviderAudits(db: db)
     }
 
     private static func createEventsTable(db: OpaquePointer?) throws {
@@ -64,7 +65,8 @@ enum DatabaseSchema {
                 server_origin TEXT,
                 activity_lines_json TEXT,
                 labels_json TEXT NOT NULL DEFAULT '[]',
-                organization_group TEXT
+                organization_group TEXT,
+                context_summary_json TEXT
             )
         """)
         try ensureColumn(
@@ -77,6 +79,12 @@ enum DatabaseSchema {
             db: db,
             table: "sessions",
             column: "organization_group",
+            definition: "TEXT"
+        )
+        try ensureColumn(
+            db: db,
+            table: "sessions",
+            column: "context_summary_json",
             definition: "TEXT"
         )
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)")
@@ -93,6 +101,20 @@ enum DatabaseSchema {
                 attachment_metadata_json TEXT NOT NULL DEFAULT '[]',
                 updated_at TEXT NOT NULL
             )
+        """)
+    }
+
+    /// Provider request manifests are server-owned audit bodies, not
+    /// transcript cache data. Older app versions cached those bodies verbatim,
+    /// which made one ordinary transcript restore decode many megabytes of JSON.
+    /// Preserve event identity and parent links while reducing the disposable
+    /// local row to the same marker returned by current reconstruction.
+    private static func compactDeferredProviderAudits(db: OpaquePointer?) throws {
+        try execute(db: db, """
+            UPDATE events
+            SET payload = '{"projection":"deferred"}'
+            WHERE type = 'model.provider_request'
+              AND payload != '{"projection":"deferred"}'
         """)
     }
 

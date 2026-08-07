@@ -286,6 +286,87 @@ fn run_or_turn_transition_invalidates_reconstruction_generation() {
 }
 
 #[tokio::test]
+async fn reconstruction_defers_provider_audits_and_embeds_latest_inventory() {
+    let ctx = make_test_context();
+    let session_id = ctx
+        .session_manager
+        .create_session("model", "/tmp", Some("bounded-audits"))
+        .unwrap();
+
+    for turn in 1..=12 {
+        ctx.event_store
+            .append(&AppendOptions {
+                session_id: &session_id,
+                event_type: EventType::ModelProviderRequest,
+                payload: json!({
+                    "format": "tron.model_provider_request.v4",
+                    "turn": turn,
+                    "providerType": "openai",
+                    "providerName": "OpenAI",
+                    "model": "model",
+                    "requestClassification": "interactive",
+                    "messageCount": turn,
+                    "toolCount": 23,
+                    "contextManifest": {
+                        "systemContributions": [{"kind": "base"}],
+                        "messages": [{"contentKinds": ["text"]}],
+                        "automaticContext": [],
+                        "agentDeliveries": [],
+                        "environment": {"workingDirectory": "/tmp"},
+                    },
+                    "providerAdditions": [],
+                    "padding": "x".repeat(20_000),
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+    }
+    ctx.event_store
+        .append(&AppendOptions {
+            session_id: &session_id,
+            event_type: EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "done"}],
+                "turn": 12,
+                "model": "model",
+                "stopReason": "end_turn",
+            }),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+
+    let result = SessionReconstructionService::reconstruct(
+        &Deps::from_test_context(&ctx),
+        session_id,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let audits = result["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["type"] == EventType::ModelProviderRequest.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(audits.len(), 12);
+    assert!(audits.iter().all(|event| {
+        event["payload"]["projection"] == "deferred"
+            && event["payload"].get("padding").is_none()
+            && event["payload"].get("contextManifest").is_none()
+    }));
+    assert_eq!(
+        result["metadata"]["latestContextRequest"]["messageCount"],
+        12
+    );
+    assert_eq!(result["metadata"]["latestContextRequest"]["toolCount"], 23);
+    assert!(result.to_string().len() < 30_000);
+}
+
+#[tokio::test]
 async fn raw_allocator_cannot_advance_reconstruction_watermark() {
     let ctx = make_test_context();
     let session_id = ctx

@@ -42,9 +42,6 @@ struct ChatSheetContent: View {
                 modelRepository: dependencies.modelRepository,
                 sessionRepository: dependencies.sessionRepository,
                 workerRepository: dependencies.workerKernelRepository,
-                cachedProviderRequestEvents: viewModel.loadedReconstructionEvents.filter {
-                    $0.type == SessionEventType.modelProviderRequest.rawValue
-                },
                 onSelectModel: { model in
                     NotificationCenter.default.post(name: .modelPickerAction, object: model)
                 },

@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 
 use crate::domains::session::Deps;
 use crate::domains::session::event_store::{
-    AgentDeliverySourceKind, ListSessionsOptions, session_organization_from_tags,
+    AgentDeliverySourceKind, EventRow, ListSessionsOptions, session_organization_from_tags,
 };
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, ToolError};
@@ -26,6 +26,77 @@ pub(crate) struct SessionQueryService;
 const SESSION_LIST_DEFAULT_LIMIT: usize = 50;
 const SESSION_LIST_MAX_LIMIT: usize = 200;
 const AGENT_UPDATE_PREVIEW_MAX_CHARS: usize = 1_024;
+
+/// Project one provider-request audit into the bounded inventory used by
+/// Session Context. Full manifests remain owned by
+/// `session::context_request_detail`; transcript reconstruction and overview
+/// reads must never put those potentially multi-megabyte bodies on the wire.
+fn context_request_summary(row: &EventRow, payload: &Value) -> Value {
+    let format = payload
+        .get("format")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let manifest = payload.get("contextManifest");
+    let messages = manifest
+        .and_then(|manifest| manifest.get("messages"))
+        .and_then(Value::as_array);
+    let instruction_count = manifest
+        .and_then(|manifest| manifest.get("systemContributions"))
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len)
+        + payload
+            .get("providerAdditions")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+    let attachment_message_count = messages.map_or(0, |messages| {
+        messages
+            .iter()
+            .filter(|message| {
+                message
+                    .get("contentKinds")
+                    .and_then(Value::as_array)
+                    .is_some_and(|kinds| {
+                        kinds
+                            .iter()
+                            .any(|kind| matches!(kind.as_str(), Some("image" | "document")))
+                    })
+            })
+            .count()
+    });
+    json!({
+        "eventId":row.id,
+        "sequence":row.sequence,
+        "timestamp":row.timestamp,
+        "format":format,
+        "turn":payload.get("turn").cloned().unwrap_or(Value::Null),
+        "providerType":payload.get("providerType").cloned().unwrap_or(Value::Null),
+        "providerName":payload.get("providerName").cloned().unwrap_or(Value::Null),
+        "model":payload.get("model").cloned().unwrap_or(Value::Null),
+        "requestClassification":payload.get("requestClassification").cloned().unwrap_or_else(|| json!("legacy")),
+        "messageCount":payload.get("messageCount").cloned().unwrap_or_else(|| json!(0)),
+        "toolCount":payload.get("toolCount").cloned().unwrap_or_else(|| json!(0)),
+        "automaticContextCount":manifest
+            .and_then(|manifest| manifest.get("automaticContext"))
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len),
+        "instructionCount":instruction_count,
+        "attachmentMessageCount":attachment_message_count,
+        "agentDeliveryCount":manifest
+            .and_then(|manifest| manifest.get("agentDeliveries"))
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len),
+        "environmentAvailable":manifest
+            .and_then(|manifest| manifest.get("environment"))
+            .and_then(|environment| environment.get("workingDirectory"))
+            .is_some_and(|value| !value.is_null()),
+        "manifestAvailable":manifest.is_some(),
+        "provenanceAvailability":if crate::shared::protocol::model_audit::provider_audit_has_complete_provenance(format) {
+            "complete"
+        } else {
+            "legacy_unavailable"
+        },
+    })
+}
 
 fn worker_evidence_text(value: &Value) -> Option<&str> {
     ["preview", "summary", "message"]
@@ -287,78 +358,38 @@ impl SessionQueryService {
                 .flatten();
             let requests = rows
                 .into_iter()
-                .map(|(row, payload)| {
-                    let format = payload
-                        .get("format")
-                        .and_then(Value::as_str)
-                        .unwrap_or("unknown");
-                    let manifest = payload.get("contextManifest");
-                    let messages = manifest
-                        .and_then(|manifest| manifest.get("messages"))
-                        .and_then(Value::as_array);
-                    let instruction_count = manifest
-                        .and_then(|manifest| manifest.get("systemContributions"))
-                        .and_then(Value::as_array)
-                        .map_or(0, Vec::len)
-                        + payload
-                            .get("providerAdditions")
-                            .and_then(Value::as_array)
-                            .map_or(0, Vec::len);
-                    let attachment_message_count = messages.map_or(0, |messages| {
-                        messages
-                            .iter()
-                            .filter(|message| {
-                                message
-                                    .get("contentKinds")
-                                    .and_then(Value::as_array)
-                                    .is_some_and(|kinds| {
-                                        kinds.iter().any(|kind| {
-                                            matches!(kind.as_str(), Some("image" | "document"))
-                                        })
-                                    })
-                            })
-                            .count()
-                    });
-                    json!({
-                        "eventId":row.id,
-                        "sequence":row.sequence,
-                        "timestamp":row.timestamp,
-                        "format":format,
-                        "turn":payload.get("turn").cloned().unwrap_or(Value::Null),
-                        "providerType":payload.get("providerType").cloned().unwrap_or(Value::Null),
-                        "providerName":payload.get("providerName").cloned().unwrap_or(Value::Null),
-                        "model":payload.get("model").cloned().unwrap_or(Value::Null),
-                        "requestClassification":payload.get("requestClassification").cloned().unwrap_or_else(|| json!("legacy")),
-                        "messageCount":payload.get("messageCount").cloned().unwrap_or_else(|| json!(0)),
-                        "toolCount":payload.get("toolCount").cloned().unwrap_or_else(|| json!(0)),
-                        "automaticContextCount":manifest
-                            .and_then(|manifest| manifest.get("automaticContext"))
-                            .and_then(Value::as_array)
-                            .map_or(0, Vec::len),
-                        "instructionCount":instruction_count,
-                        "attachmentMessageCount":attachment_message_count,
-                        "agentDeliveryCount":manifest
-                            .and_then(|manifest| manifest.get("agentDeliveries"))
-                            .and_then(Value::as_array)
-                            .map_or(0, Vec::len),
-                        "environmentAvailable":manifest
-                            .and_then(|manifest| manifest.get("environment"))
-                            .and_then(|environment| environment.get("workingDirectory"))
-                            .is_some_and(|value| !value.is_null()),
-                        "manifestAvailable":manifest.is_some(),
-                        "provenanceAvailability":if crate::shared::protocol::model_audit::provider_audit_has_complete_provenance(format) {
-                            "complete"
-                        } else {
-                            "legacy_unavailable"
-                        },
-                    })
-                })
+                .map(|(row, payload)| context_request_summary(&row, &payload))
                 .collect::<Vec<_>>();
             Ok(json!({
                 "requests":requests,
                 "hasMore":has_more,
                 "nextBeforeSequence":next_before_sequence,
             }))
+        })
+        .await
+    }
+
+    /// Return the latest context inventory at or below one reconstruction
+    /// watermark. This is embedded in the ordinary session snapshot so a
+    /// client can render Session Context from its local cache without issuing
+    /// three eager reads when a sheet opens.
+    pub(crate) async fn latest_context_request_summary(
+        deps: &Deps,
+        session_id: String,
+        through_sequence: i64,
+    ) -> Result<Option<Value>, ToolError> {
+        let event_store = deps.event_store.clone();
+        run_blocking_task("session.latest_context_request_summary", move || {
+            let before_sequence = through_sequence.checked_add(1);
+            let (rows, _) = event_store
+                .get_provider_request_audits(&session_id, before_sequence, 1)
+                .map_err(|error| ToolError::Internal {
+                    message: error.to_string(),
+                })?;
+            Ok(rows
+                .into_iter()
+                .next()
+                .map(|(row, payload)| context_request_summary(&row, &payload)))
         })
         .await
     }

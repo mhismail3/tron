@@ -5,12 +5,35 @@ import SwiftUI
 // ARCHITECTURE: Shared settings copy and sheet-launch contracts live here so
 // page views stay focused on layout and state binding.
 
+enum SettingsServerStatusPolicy {
+    static func isRecoveryInProgress(
+        activeServerExists: Bool,
+        connectionState: ConnectionState
+    ) -> Bool {
+        guard activeServerExists else { return false }
+        switch connectionState {
+        case .connecting, .reconnecting, .deployRestarting:
+            return true
+        case .disconnected, .connected, .failed, .unauthorized:
+            return false
+        }
+    }
+
+    static func showsUnavailableState(
+        activeServerExists: Bool,
+        connectionState: ConnectionState,
+        loadError: String?
+    ) -> Bool {
+        guard activeServerExists else { return false }
+        return !connectionState.isConnected || loadError != nil
+    }
+}
+
 enum SettingsLabels {
     static let providers = "Providers"
     static let connectToNewServer = "Connect to a new server"
     static let repairActiveServerPairing = "Re-pair this server"
     static let connectedServerUnavailableDescription = ConnectionStatusCopy.connectedServerUnavailableDescription
-    static let loadingServerSettingsDescription = "Loading server settings from the active server."
 }
 
 enum SettingsAdaptiveLayout {
@@ -149,7 +172,6 @@ enum MainSettingsGridDestination: Hashable, Sendable {
 
 enum MainSettingsFooterLayout {
     static let horizontalPadding: CGFloat = 20
-    static let taglineLeadingPadding: CGFloat = 8
     static let verticalPadding: CGFloat = 10
 }
 

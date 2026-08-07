@@ -110,7 +110,17 @@ final class EventRepository: @unchecked Sendable {
         sqlite3_bind_text(stmt, 6, event.timestamp, -1, SQLITE_TRANSIENT_DESTRUCTOR)
         sqlite3_bind_int(stmt, 7, Int32(event.sequence))
 
-        let payloadData = try JSONEncoder().encode(event.payload)
+        // INVARIANT: Provider request manifests are exact, server-owned audit
+        // data. They can be fetched on demand and must never enter the
+        // disposable transcript cache, including when paired to an older
+        // server that still returns them in reconstruction.
+        let cachedPayload: [String: AnyCodable]
+        if event.type == SessionEventType.modelProviderRequest.rawValue {
+            cachedPayload = ["projection": AnyCodable("deferred")]
+        } else {
+            cachedPayload = event.payload
+        }
+        let payloadData = try JSONEncoder().encode(cachedPayload)
         let payloadString = String(data: payloadData, encoding: .utf8) ?? "{}"
         sqlite3_bind_text(stmt, 8, payloadString, -1, SQLITE_TRANSIENT_DESTRUCTOR)
     }
@@ -181,6 +191,44 @@ final class EventRepository: @unchecked Sendable {
         }
     }
 
+    /// Read only the newest bounded session window, returned in presentation
+    /// order. Cold transcript presentation must scale with the requested
+    /// window, not with the lifetime size of the session cache.
+    func getRecentBySession(_ sessionId: String, limit: Int) async throws -> [SessionEvent] {
+        guard limit > 0 else { return [] }
+        guard let transport else {
+            throw EventDatabaseError.executeFailed("Database transport not available")
+        }
+
+        return try await transport.withDB { db in
+            let sql = """
+                SELECT id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload
+                FROM (
+                    SELECT id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload
+                    FROM events
+                    WHERE session_id = ?
+                    ORDER BY sequence DESC, timestamp DESC, id DESC
+                    LIMIT ?
+                )
+                ORDER BY sequence ASC, timestamp ASC, id ASC
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
+            }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, sessionId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            sqlite3_bind_int64(statement, 2, Int64(limit))
+
+            var events: [SessionEvent] = []
+            events.reserveCapacity(limit)
+            while sqlite3_step(statement) == SQLITE_ROW {
+                events.append(try Self.parseEventRow(statement))
+            }
+            return events
+        }
+    }
+
     /// Get ancestor chain for an event (follows parent_id links)
     func getAncestors(_ eventId: String) async throws -> [SessionEvent] {
         var ancestors: [SessionEvent] = []
@@ -196,6 +244,55 @@ final class EventRepository: @unchecked Sendable {
         }
 
         return ancestors
+    }
+
+    /// Read a bounded root-to-head suffix across fork session boundaries in a
+    /// single indexed recursive query. This is the fork-aware equivalent of
+    /// `getRecentBySession`; exact older history remains server-paginated.
+    func getRecentAncestors(_ eventId: String, limit: Int) async throws -> [SessionEvent] {
+        guard limit > 0 else { return [] }
+        guard let transport else {
+            throw EventDatabaseError.executeFailed("Database transport not available")
+        }
+
+        return try await transport.withDB { db in
+            let sql = """
+                WITH RECURSIVE ancestor_window(
+                    id, parent_id, session_id, workspace_id, type,
+                    timestamp, sequence, payload, depth
+                ) AS (
+                    SELECT id, parent_id, session_id, workspace_id, type,
+                           timestamp, sequence, payload, 0
+                    FROM events
+                    WHERE id = ?
+                    UNION ALL
+                    SELECT event.id, event.parent_id, event.session_id,
+                           event.workspace_id, event.type, event.timestamp,
+                           event.sequence, event.payload, ancestor.depth + 1
+                    FROM events AS event
+                    JOIN ancestor_window AS ancestor ON event.id = ancestor.parent_id
+                    WHERE ancestor.depth + 1 < ?
+                )
+                SELECT id, parent_id, session_id, workspace_id, type,
+                       timestamp, sequence, payload
+                FROM ancestor_window
+                ORDER BY depth DESC
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
+            }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, eventId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            sqlite3_bind_int64(statement, 2, Int64(limit))
+
+            var events: [SessionEvent] = []
+            events.reserveCapacity(limit)
+            while sqlite3_step(statement) == SQLITE_ROW {
+                events.append(try Self.parseEventRow(statement))
+            }
+            return events
+        }
     }
 
     // MARK: - Delete Operations
