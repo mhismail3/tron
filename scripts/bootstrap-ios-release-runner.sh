@@ -108,9 +108,12 @@ configure_runner_service_plist() {
         "$plist"
 }
 
-listener_security_identity_is_valid() {
+listener_security_probe_identity_is_valid() {
     local identity="$1" expected_uid="$2"
-    [[ "$identity" == "$expected_uid:$expected_uid:0" ]]
+    # `launchctl bsexec` preserves the privileged verifier's Unix credentials
+    # while adopting the target process's bootstrap and audit session. Verify
+    # that explicit shape and correlate the listener's own UID separately.
+    [[ "$identity" == "0:$expected_uid:0" ]]
 }
 
 configure_runner_bootstrap_plist() {
@@ -224,11 +227,11 @@ bootstrap_self_test() {
     configure_runner_service_plist "$legacy_plist_probe" true
     [[ "$(plutil -extract SessionCreate raw -o - "$legacy_plist_probe")" == "true" ]] \
         || die "release runner repair cannot recognize the prior audit-session contract"
-    listener_security_identity_is_valid "502:502:0" 502 \
-        || die "release runner listener identity classifier rejected a valid session"
-    if listener_security_identity_is_valid "502:0:1" 502 \
-        || listener_security_identity_is_valid "0:502:0" 502; then
-        die "release runner listener identity classifier accepted a mixed session"
+    listener_security_probe_identity_is_valid "0:502:0" 502 \
+        || die "release runner listener probe classifier rejected a valid session"
+    if listener_security_probe_identity_is_valid "502:502:0" 502 \
+        || listener_security_probe_identity_is_valid "0:0:1" 502; then
+        die "release runner listener probe classifier accepted an invalid session"
     fi
 
     configure_runner_bootstrap_plist "$bootstrap_plist_probe" 502
@@ -843,18 +846,23 @@ run_in_runner_listener_session() (
     local listener_pid="$1"
     shift
     [[ "$listener_pid" =~ ^[0-9]+$ ]] || return 1
-    # bsexec adopts the listener's exact bootstrap and security audit session.
-    # Enter it while privileged, then immediately restore the runner's Unix
-    # credentials so the probe observes the same three identities as a job.
+    # bsexec adopts the listener's exact bootstrap and security audit session
+    # while preserving this verifier's root Unix credentials. Do not invoke a
+    # second `sudo` inside that adopted session: macOS sudo's account/audit
+    # plugins are not guaranteed to resolve a hidden headless account there.
+    # The caller correlates this audit proof with the listener PID's direct UID.
     cd /
-    exec /usr/bin/sudo /bin/launchctl bsexec "$listener_pid" \
-        /usr/bin/sudo -n -H -u "$runner_user" "$@"
+    exec /usr/bin/sudo /bin/launchctl bsexec "$listener_pid" "$@"
 )
 
 verify_runner_listener_security_session() {
-    local listener_pid="${1:-}" identity manager_name manager_uid
+    local listener_pid="${1:-}" identity listener_uid manager_name manager_uid
     [[ -n "$listener_pid" ]] || listener_pid="$(runner_listener_pid || true)"
     [[ "$listener_pid" =~ ^[0-9]+$ ]] || return 1
+    listener_uid="$(
+        sudo /bin/ps -o uid= -p "$listener_pid" 2>/dev/null \
+            | /usr/bin/xargs
+    )"
     manager_uid="$(run_in_runner_listener_session "$listener_pid" /bin/launchctl manageruid 2>/dev/null || true)"
     manager_name="$(run_in_runner_listener_session "$listener_pid" /bin/launchctl managername 2>/dev/null || true)"
     identity="$(
@@ -862,10 +870,11 @@ verify_runner_listener_security_session() {
             'import ctypes, os; security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security"); session_id = ctypes.c_uint32(); attributes = ctypes.c_uint32(); status = security.SessionGetInfo(ctypes.c_uint32(0xFFFFFFFF), ctypes.byref(session_id), ctypes.byref(attributes)); uid = ctypes.c_uint32(); process = ctypes.CDLL(None, use_errno=True); audit_status = process.getauid(ctypes.byref(uid)); print(f"{os.geteuid()}:{uid.value}:{1 if attributes.value & 1 else 0}" if status == 0 and audit_status == 0 else "error")'
     )" || identity="unavailable"
     log_event info listener_security_observed \
-        "pid=$listener_pid expected_uid=$runner_uid manager_uid=${manager_uid:-unavailable} manager_name=${manager_name:-unavailable} security_identity=${identity:-unavailable}"
-    [[ "$manager_uid" == "$runner_uid" \
+        "pid=$listener_pid expected_uid=$runner_uid listener_uid=${listener_uid:-unavailable} manager_uid=${manager_uid:-unavailable} manager_name=${manager_name:-unavailable} probe_identity=${identity:-unavailable}"
+    [[ "$listener_uid" == "$runner_uid" \
+        && "$manager_uid" == "$runner_uid" \
         && "$manager_name" == "Background" ]] \
-        && listener_security_identity_is_valid "$identity" "$runner_uid"
+        && listener_security_probe_identity_is_valid "$identity" "$runner_uid"
 }
 
 wait_for_all_runner_listeners_exit() {

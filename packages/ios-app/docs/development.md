@@ -852,9 +852,10 @@ scripts/ios-release-runner-diagnostics.sh
 
 It continues collecting after an unhealthy check and exits nonzero at the end.
 The output contains fixed installed-file metadata and hashes, rollback-journal
-presence, filtered launchd state, the actual listener's `bsexec` security
-identity, exact remote runner state, and the three most recent main CI and iOS
-release run records. It tails only the root-owned Tron logs and
+presence, filtered launchd state, the actual listener's `bsexec` audit-session
+identity correlated with its direct process UID, exact remote runner state,
+and the three most recent main CI and iOS release run records. It tails only
+the root-owned Tron logs and
 `component=ios-release-runner-session` guard lines; raw Actions `_diag` logs,
 job output, credentials, keychains, environments, and signing state are
 deliberately excluded. This is the first evidence bundle to capture before
@@ -872,9 +873,13 @@ The agent deliberately omits `SessionCreate`: the independent `user/<uid>`
 Background domain already owns the correct non-root audit session, while asking
 launchd to create another session gives the listener a different audit login
 identity. Repair also uses privileged `launchctl bsexec` against the actual new
-listener PID, drops back to `tron-ci`, and repeats those checks before restoring
-its GitHub scheduling label. A domain probe alone is not accepted as evidence
-for the process GitHub will use.
+listener PID and correlates the adopted bootstrap/audit identity with that
+PID's direct Unix UID before restoring its GitHub scheduling label. The probe
+intentionally remains root: nesting `sudo -u tron-ci` inside an adopted
+Background audit session makes verification depend on `sudo` resolving a
+hidden headless account in that context, even though launchd has already
+started the valid service-account process. A domain probe alone is not
+accepted as evidence for the process GitHub will use.
 
 Every Actions job reruns the doctor before any step receives release secrets.
 It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
