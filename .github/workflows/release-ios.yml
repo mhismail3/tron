@@ -426,7 +426,7 @@ jobs:
 
       - name: Preserve automatic delivery eligibility
         if: github.event_name == 'workflow_run'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tron-ios-release-eligibility-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.resolve.outputs.evidence_path }}
@@ -435,7 +435,7 @@ jobs:
 
       - name: Preserve automatic release intent
         if: github.event_name == 'workflow_run' && steps.resolve.outputs.intent_path != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.resolve.outputs.intent_artifact }}
           path: ${{ steps.resolve.outputs.intent_path }}
@@ -444,7 +444,7 @@ jobs:
 
       - name: Preserve direct live release intent
         if: github.event_name != 'workflow_run' && steps.resolve.outputs.intent_path != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.resolve.outputs.intent_artifact }}
           path: ${{ steps.resolve.outputs.intent_path }}
@@ -1378,7 +1378,7 @@ jobs:
 
       - name: Upload archive dSYMs
         if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-dsyms-${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: packages/ios-app/build/TronMobile.xcarchive/dSYMs
@@ -1551,7 +1551,7 @@ jobs:
 
       - name: Upload release provenance
         if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-release-provenance-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.IOS_RELEASE_PROVENANCE }}
@@ -1560,7 +1560,7 @@ jobs:
 
       - name: Upload automatic release reuse binding
         if: github.event_name == 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-release-reuse-provenance-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.IOS_RELEASE_REUSE_PROVENANCE }}
@@ -1569,7 +1569,7 @@ jobs:
 
       - name: Upload direct release reuse binding
         if: github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-release-direct-reuse-provenance-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.IOS_RELEASE_REUSE_PROVENANCE }}
@@ -1578,7 +1578,7 @@ jobs:
 
       - name: Upload dry-run IPA artifact
         if: steps.ver.outputs.dry_run == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-dry-run-ipa-${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: packages/ios-app/build/TronMobile.ipa
@@ -1694,7 +1694,7 @@ jobs:
 
       - name: Preserve automatic delivery head evidence
         if: always() && github.event_name == 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.pre_upload_guard.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tron-ios-release-head-check-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.pre_upload_guard.outputs.path }}
@@ -1703,7 +1703,7 @@ jobs:
 
       - name: Preserve direct live source evidence
         if: always() && github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.direct_source_guard.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-release-direct-source-check-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.direct_source_guard.outputs.path }}
@@ -1739,7 +1739,7 @@ jobs:
 
       - name: Preserve automatic ASC reuse admission
         if: github.event_name == 'workflow_run' && steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-release-admission-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.IOS_RELEASE_ADMISSION }}
@@ -1805,7 +1805,7 @@ jobs:
 
       - name: Preserve automatic ASC admission receipt
         if: github.event_name == 'workflow_run' && steps.admitted_build.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-release-admission-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.IOS_RELEASE_ADMISSION }}
@@ -1853,7 +1853,7 @@ jobs:
 
       - name: Preserve direct ASC admission
         if: github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-release-direct-admission-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.IOS_RELEASE_ADMISSION }}
@@ -2547,7 +2547,7 @@ jobs:
 
       - name: Upload App Store Connect diagnostics on failure
         if: failure() && steps.ver.outputs.dry_run != 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-asc-diagnostics-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios-asc-diagnostics
@@ -2695,7 +2695,7 @@ jobs:
 
       - name: Preserve automatic TestFlight delivery receipt
         if: success() && github.event_name == 'workflow_run' && steps.ver.outputs.channel == 'internal'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tron-ios-release-receipt-${{ github.event.workflow_run.id }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.IOS_RELEASE_RECEIPT }}
@@ -2704,7 +2704,7 @@ jobs:
 
       - name: Preserve direct TestFlight delivery receipt
         if: success() && github.event_name != 'workflow_run' && steps.ver.outputs.dry_run != 'true' && (steps.ver.outputs.channel == 'internal' || (steps.ver.outputs.channel == 'external' && steps.beta_review.outputs.external_ready == 'true'))
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tron-ios-direct-release-receipt-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.IOS_RELEASE_DIRECT_RECEIPT }}

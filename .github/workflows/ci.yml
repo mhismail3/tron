@@ -71,7 +71,7 @@ jobs:
           fi
       - name: Preserve main validation reuse provenance
         if: steps.mode.outputs.mode == 'reused'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tron-main-validation-reuse-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -199,7 +199,7 @@ jobs:
 
       - name: Upload sanitized iOS metrics
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-ci-metrics
           path: packages/ios-app/build/ios-ci-metrics.json
@@ -208,7 +208,7 @@ jobs:
 
       - name: Upload xcresult on failure
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-test-results
           path: packages/ios-app/build/TestResults.xcresult
@@ -411,7 +411,7 @@ jobs:
             --artifact build/ios-ci-metrics.json
       - name: Upload merge validation evidence
         if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tron-merge-validation
           path: |
