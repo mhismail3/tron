@@ -200,14 +200,22 @@ def inspect_security_session(
     }
     if require_non_root and document["is_root"]:
         raise VerificationError(
-            "release runner inherited the root macOS security session"
+            "release runner inherited the root macOS security session "
+            f"(effective_uid={document['effective_uid']}, "
+            f"audit_uid={document['audit_uid']}, "
+            f"session_id={document['session_id']}, is_root=true)"
         )
     if (
         require_audit_uid is not None
         and document["audit_uid"] != require_audit_uid
     ):
         raise VerificationError(
-            "release runner audit user does not match its Unix account"
+            "release runner audit user does not match its Unix account "
+            f"(expected_audit_uid={require_audit_uid}, "
+            f"observed_audit_uid={document['audit_uid']}, "
+            f"effective_uid={document['effective_uid']}, "
+            f"session_id={document['session_id']}, "
+            f"is_root={str(document['is_root']).lower()})"
         )
     return document
 

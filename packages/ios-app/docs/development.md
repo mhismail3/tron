@@ -680,6 +680,17 @@ scripts/verify-ci-toolchain.sh ios xcodegen
 scripts/validate-ci-definitions.sh
 ```
 
+The tool installer, manifest verifier, CI-definition validator, and measured
+iOS build/test driver emit UTC structured events into the provider-owned job
+log. They identify cache hits versus verified downloads, checksum and manifest
+provenance, prefix rebuilds, each validated definition/target, phase start/end,
+exit status, duration, and the final metrics SHA-256. URLs with credentials,
+environment dumps, and command tracing are excluded. GitHub retains those logs;
+the iOS lane additionally uploads the matching metrics JSON on every run and
+the `.xcresult` on failure. A change to either `scripts/ios-*` or
+`scripts/bootstrap-ios-*` is classified as iOS work so these contracts cannot
+skip their owning validation lane.
+
 The Mac lane adds `create-dmg`; the iOS release lane adds `asc` and runs
 `scripts/ios-release-runner-doctor.sh` before touching credentials. Pull-request
 path classification is owned by `scripts/ci-change-flags.sh`, including its
@@ -791,6 +802,11 @@ with updates disabled, and disables AC sleep. Keeping the definition outside
 `/Library/LaunchAgents` prevents launchd from discovering it for other users;
 the boot helper explicitly loads it only into `tron-ci`'s `user/<uid>` domain.
 The agent has no `UserName` or `GroupName` and inherits that domain's identity.
+A root-owned
+`/Library/Application Support/Tron/ReleaseRunner/start-runner` entry point
+checks the listener's effective UID, Background manager, Security session, and
+audit UID before it executes the runner-owned `runsvc.sh`; an invalid listener
+therefore remains offline and cannot receive a GitHub job.
 A separate root-owned, one-shot
 LaunchDaemon at
 `/Library/LaunchDaemons/com.tron.ios-release-runner-bootstrap.plist` creates
@@ -804,6 +820,46 @@ scripts/bootstrap-ios-release-runner.sh
 scripts/ios-release-runner-doctor.sh
 ```
 
+The bootstrap and both launchd boundaries emit timestamped, single-line,
+secret-safe operational records. The interactive transaction writes a unique
+`trace`, the exact checkout commit/dirty bit, and SHA-256 provenance for the
+bootstrap, toolchain manifest, and iOS release workflow to the root-only
+`/Library/Logs/Tron/ios-release-runner-bootstrap.log`. The boot helper's stdout
+and stderr are retained separately at
+`/Library/Logs/Tron/ios-release-runner-launchd.log` and
+`/Library/Logs/Tron/ios-release-runner-launchd-error.log`; the directory is
+root-owned mode 0755 and every file is root-owned mode 0600. The immutable
+listener guard records only its PID, effective/audit UIDs, launchd manager,
+Security-session root flag, and validation outcome in the existing private
+`/Users/tron-ci/Library/Logs/com.tron.ios-release-runner/` streams. It never
+logs a command line, process environment, GitHub token, keychain value,
+signing identity, profile contents, or runner credential file. Do not enable
+shell tracing on a release script.
+
+An otherwise-unhandled bootstrap command failure records its named phase,
+source line, and exit status before transactional cleanup. It deliberately does
+not record `BASH_COMMAND` or arguments because account passwords, runner tokens,
+and signing material can cross those command boundaries.
+
+Every doctor run adds the same sanitized identity document, exact Xcode/SDK,
+capacity, filesystem-boundary result, source SHA, and credential-audit mode to
+the durable GitHub Actions job log. To correlate host, GitHub, and recent
+workflow state after any failure, run the read-only collector:
+
+```bash
+scripts/ios-release-runner-diagnostics.sh
+```
+
+It continues collecting after an unhealthy check and exits nonzero at the end.
+The output contains fixed installed-file metadata and hashes, rollback-journal
+presence, filtered launchd state, the exact listener process and Unix UID,
+remote runner state, and the three most recent main CI and iOS release run
+records. It tails only the root-owned Tron logs and
+`component=ios-release-runner-session` guard lines; raw Actions `_diag` logs,
+job output, credentials, keychains, environments, and signing state are
+deliberately excluded. This is the first evidence bundle to capture before
+manually changing launchd state.
+
 Bootstrap-only preparation commands enter the hidden account's launchd context
 in a strict order. Root first invokes `launchctl asuser`, which adopts the
 target bootstrap and security audit session but does not change Unix
@@ -812,6 +868,18 @@ executing the requested command. Dropping privileges before `asuser` is invalid:
 the non-root process cannot adopt the separate Background audit session and
 macOS rejects it with `EPERM`. Every call verifies the resulting manager UID,
 manager type, effective UID, and audit UID before keychain state is prepared.
+The agent deliberately omits `SessionCreate`: the independent `user/<uid>`
+Background domain already owns the correct non-root audit session, while asking
+launchd to create another session gives the listener a different audit login
+identity. The root-owned session entry point is the launchd program itself: it
+checks its own effective UID, manager UID/type, Security session, audit UID,
+home, and immutable file metadata before it can execute `runsvc.sh`. Repair
+therefore requires a different exact listener PID and the same GitHub runner
+ID to return online before restoring its scheduling label. It deliberately
+does not use `launchctl bsexec` as a second identity check; on current macOS,
+that command can preserve the verifier's audit identity instead of reporting
+the target process's identity. The pre-exec guard and job-time doctor inspect
+their own real contexts and remain the two fail-closed enforcement boundaries.
 
 Every Actions job reruns the doctor before any step receives release secrets.
 It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
@@ -846,8 +914,10 @@ installs a per-login LaunchAgent, and refuses root. The hidden service account
 has no Aqua login session, so Tron owns the launchd definitions and uses the
 checksum-pinned package's documented `runsvc.sh` entry point. The root helper
 uses launchd's supported independent `user/<uid>` domain and
-`LimitLoadToSessionType=Background`; `SessionCreate=true` gives the listener a
-non-root security audit session without requiring a GUI login. Hosted macOS CI
+`LimitLoadToSessionType=Background`; the listener inherits that domain's
+non-root security audit session without requiring a GUI login. The immutable
+session entry point enforces the same identity contract on every restart before
+the listener can connect to GitHub. Hosted macOS CI
 also runs the bootstrap's non-privileged `--self-test` and executes the
 user-context wrapper inside its Aqua account. Those checks exercise the real
 BSD ownership query, idempotent ACL denial semantics, generated agent/helper
@@ -912,6 +982,14 @@ or rotate the runner. Root mutates only root-owned service paths; all paths
 beneath the runner home, including legacy permission normalization, are created
 and changed as `tron-ci` to prevent privileged symlink-follow races.
 
+`launchctl bootout` is only a teardown request: launchd may keep the target
+observable briefly after returning. Repair and rollback therefore poll the
+exact system or user target for up to 30 seconds and treat observed absence as
+the postcondition. Each request status, poll count, convergence, and timeout is
+written under the transaction trace. This same bounded wait protects the
+forward cutover and rollback, so a normal asynchronous removal cannot be
+misclassified as a failed stop or trigger a rollback into the same transition.
+
 Rotation is explicit. Stop and remove the Background agent and its boot helper,
 request a short-lived removal token, unregister as the service account, then
 move the old installation aside before rerunning the bootstrap. Removing the
@@ -928,7 +1006,8 @@ sudo /bin/rm -f \
   /Library/LaunchDaemons/com.tron.ios-release-runner.plist \
   "/Library/Application Support/Tron/ReleaseRunner/com.tron.ios-release-runner.plist" \
   "/Library/Application Support/Tron/ReleaseRunner/legacy-system-service.plist" \
-  "/Library/Application Support/Tron/ReleaseRunner/bootstrap-user-agent"
+  "/Library/Application Support/Tron/ReleaseRunner/bootstrap-user-agent" \
+  "/Library/Application Support/Tron/ReleaseRunner/start-runner"
 repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 removal_token="$(gh api --method POST \
   "repos/$repository/actions/runners/remove-token" --jq .token)"

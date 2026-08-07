@@ -348,6 +348,10 @@ checks Xcode, the iOS runtime, and simulator identity before building. Shared
 tool downloads use bounded transient retries and publish into the cache only
 after checksum verification, so a partial response cannot poison later runs. Update
 the manifest and its invariant tests in the same PR when a toolchain moves.
+These setup and verification scripts emit structured UTC records for downloads,
+cache/prefix decisions, manifest hashes, validated definitions, and iOS
+build/test phase timings. Keep those records secret-safe: never add `set -x`,
+environment dumps, credential-bearing URLs, or signing material to CI logs.
 
 `performance.yml` runs a daily advisory 100-sample server benchmark and uploads
 raw samples plus git/Python/runner provenance. It does not block deployment
@@ -474,6 +478,13 @@ Three distribution lanes:
 | iOS internal TestFlight | A successful `CI` workflow for a `main` push triggers `release-ios.yml` for the exact tested SHA only while it remains the current `main` head. Intent-keyed concurrency serializes reruns of that upstream CI run without collapsing distinct commits. Attempt-unique eligibility, intent, provenance, head-check, ASC-admission, reuse, and completion evidence make delivery replay-safe; a completed intent skips the release runner. | Latest green main head. |
 | iOS public TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. Run-ID-scoped direct intent, source-check, ASC-admission, reuse, and completion evidence make tag/manual retries replay-safe; the same workflow submits Beta App Review when required and assigns externally-ready builds to the public group. | Same tag as server release. |
 | Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds and notarizes the macOS DMG, creates a draft release when absent, or refreshes assets on an existing release without changing its publish state. | Same tag as iOS release. |
+
+The iOS development runbook owns release-runner installation and repair. After
+any host-side or TestFlight startup failure, run
+`scripts/ios-release-runner-diagnostics.sh` before changing launchd state. It
+correlates secret-safe host journals, the actual listener identity, GitHub
+runner state, and recent CI/TestFlight run metadata while excluding credentials,
+keychains, signing material, process environments, and raw job logs.
 
 Versioning sources:
 - **Source of truth** — root `VERSION.env`. `TRON_VERSION` is canonical

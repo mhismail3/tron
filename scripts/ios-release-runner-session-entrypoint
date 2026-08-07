@@ -1,0 +1,126 @@
+#!/bin/bash
+set -euo pipefail
+
+# Root-owned fail-closed entry point for the dedicated iOS release listener.
+# The GitHub process is never allowed to connect unless its Unix identity,
+# launchd Background bootstrap, Security session, and audit login identity all
+# agree. This makes the same boundary hold after repair and after every reboot,
+# before GitHub can assign a job to the machine.
+
+log_event() {
+    local level="$1" event="$2" details="${3:-}" line timestamp
+    timestamp="$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    details="${details//$'\r'/ }"
+    details="${details//$'\n'/ }"
+    line="timestamp=$timestamp level=$level component=ios-release-runner-session pid=$$ event=$event"
+    [[ -z "$details" ]] || line="$line $details"
+    if [[ "$level" == "error" ]]; then
+        printf '%s\n' "$line" >&2
+    else
+        printf '%s\n' "$line"
+    fi
+}
+
+die() {
+    log_event error fatal "message=$*"
+    exit 1
+}
+
+security_identity_is_valid() {
+    local identity="$1" expected_uid="$2"
+    [[ "$identity" == "$expected_uid:$expected_uid:0" ]]
+}
+
+if [[ "${1:-}" == "--self-test" ]]; then
+    security_identity_is_valid "502:502:0" 502 \
+        || die "release listener entry point rejected a valid identity"
+    if security_identity_is_valid "502:0:1" 502 \
+        || security_identity_is_valid "0:502:0" 502; then
+        die "release listener entry point accepted a mixed identity"
+    fi
+    echo "iOS release runner session entry point self-test passed"
+    exit 0
+fi
+
+(( $# == 2 )) \
+    || die "usage: ios-release-runner-session-entrypoint user runner-program"
+
+runner_user="$1"
+runner_program="$2"
+entrypoint_path="/Library/Application Support/Tron/ReleaseRunner/start-runner"
+
+[[ "$runner_user" =~ ^[a-z_][a-z0-9_-]*$ ]] \
+    || die "invalid release runner account"
+[[ "$0" == "$entrypoint_path" ]] \
+    || die "release listener entry point must run from its immutable installed path"
+[[ -f "$entrypoint_path" && ! -L "$entrypoint_path" ]] \
+    || die "release listener entry point is not a physical file"
+[[ "$(/usr/bin/stat -f '%Su:%Sg:%Lp:%l' "$entrypoint_path")" == "root:wheel:755:1" ]] \
+    || die "release listener entry point has unsafe metadata"
+
+runner_uid="$(/usr/bin/id -u "$runner_user")"
+[[ "$runner_uid" =~ ^[0-9]+$ && "$runner_uid" -ge 500 ]] \
+    || die "release runner account is not a standard account"
+[[ "$runner_program" == "/Users/$runner_user/actions-runner/runsvc.sh" ]] \
+    || die "release listener program is outside the isolated installation"
+[[ -f "$runner_program" && ! -L "$runner_program" && -x "$runner_program" ]] \
+    || die "release listener program is unavailable or unsafe"
+[[ "$(/usr/bin/stat -f '%Su' "$runner_program")" == "$runner_user" ]] \
+    || die "release listener program has the wrong owner"
+
+effective_uid="$(/usr/bin/id -u 2>/dev/null || true)"
+effective_user="$(/usr/bin/id -un 2>/dev/null || true)"
+manager_uid="$(/bin/launchctl manageruid 2>/dev/null || true)"
+manager_name="$(/bin/launchctl managername 2>/dev/null || true)"
+security_identity="$(/usr/bin/python3 - <<'PY'
+import ctypes
+import os
+
+security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security")
+session_get_info = security.SessionGetInfo
+session_get_info.argtypes = (
+    ctypes.c_uint32,
+    ctypes.POINTER(ctypes.c_uint32),
+    ctypes.POINTER(ctypes.c_uint32),
+)
+session_get_info.restype = ctypes.c_int32
+session_id = ctypes.c_uint32()
+attributes = ctypes.c_uint32()
+security_status = session_get_info(
+    ctypes.c_uint32(0xFFFFFFFF),
+    ctypes.byref(session_id),
+    ctypes.byref(attributes),
+)
+
+process = ctypes.CDLL(None, use_errno=True)
+get_audit_uid = process.getauid
+get_audit_uid.argtypes = (ctypes.POINTER(ctypes.c_uint32),)
+get_audit_uid.restype = ctypes.c_int
+audit_uid = ctypes.c_uint32()
+audit_status = get_audit_uid(ctypes.byref(audit_uid))
+
+if security_status != 0 or audit_status != 0:
+    print("error")
+else:
+    print(f"{os.geteuid()}:{audit_uid.value}:{1 if attributes.value & 1 else 0}")
+PY
+)" || security_identity="unavailable"
+home_matches=false
+[[ "${HOME:-}" == "/Users/$runner_user" ]] && home_matches=true
+log_event info identity_observed \
+    "expected_uid=$runner_uid effective_uid=${effective_uid:-unavailable} effective_user=${effective_user:-unavailable} manager_uid=${manager_uid:-unavailable} manager_name=${manager_name:-unavailable} security_identity=${security_identity:-unavailable} home_matches=$home_matches"
+[[ "$effective_uid" == "$runner_uid" && "$effective_user" == "$runner_user" ]] \
+    || die "release listener has the wrong Unix identity: expected_uid=$runner_uid observed_uid=${effective_uid:-unavailable}"
+[[ "$home_matches" == "true" ]] \
+    || die "release listener has the wrong home"
+[[ "$manager_uid" == "$runner_uid" ]] \
+    || die "release listener is outside its user launchd domain: expected_uid=$runner_uid observed_uid=${manager_uid:-unavailable}"
+[[ "$manager_name" == "Background" ]] \
+    || die "release listener is outside the Background launchd domain: observed=${manager_name:-unavailable}"
+security_identity_is_valid "$security_identity" "$runner_uid" \
+    || die "release listener has a mixed security audit session: expected=$runner_uid:$runner_uid:0 observed=${security_identity:-unavailable}"
+
+log_event info listener_exec \
+    "effective_uid=$effective_uid audit_identity=$security_identity manager_name=$manager_name"
+exec "$runner_program" \
+    || die "release listener could not execute the isolated runner program"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
@@ -19,10 +19,49 @@ legacy_runner_service_backup="$runner_bootstrap_dir/legacy-system-service.plist"
 runner_bootstrap_plist="/Library/LaunchDaemons/$runner_bootstrap_label.plist"
 runner_bootstrap_helper="$runner_bootstrap_dir/bootstrap-user-agent"
 runner_bootstrap_helper_source="$project_dir/scripts/ios-release-runner-launchd-bootstrap"
+runner_session_entrypoint="$runner_bootstrap_dir/start-runner"
+runner_session_entrypoint_source="$project_dir/scripts/ios-release-runner-session-entrypoint"
+runner_diagnostics_source="$project_dir/scripts/ios-release-runner-diagnostics.sh"
 runner_bootstrap_lock="/var/run/tron-ios-release-runner-bootstrap.lock"
+runner_log_dir="/Library/Logs/Tron"
+runner_bootstrap_log="$runner_log_dir/ios-release-runner-bootstrap.log"
+runner_bootstrap_stdout_log="$runner_log_dir/ios-release-runner-launchd.log"
+runner_bootstrap_stderr_log="$runner_log_dir/ios-release-runner-launchd-error.log"
+bootstrap_trace_id="$(/bin/date -u '+%Y%m%dT%H%M%SZ')-$$"
+durable_log_ready=false
+durable_log_warning_emitted=false
+bootstrap_phase=initialization
+
+log_event() {
+    local level="$1" event="$2" details="${3:-}" line timestamp
+    timestamp="$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    details="${details//$'\r'/ }"
+    details="${details//$'\n'/ }"
+    line="timestamp=$timestamp level=$level component=ios-release-runner-bootstrap trace=$bootstrap_trace_id event=$event"
+    [[ -z "$details" ]] || line="$line $details"
+    printf '%s\n' "$line" >&2
+    if [[ "$durable_log_ready" == "true" ]]; then
+        if ! printf '%s\n' "$line" \
+            | /usr/bin/sudo -n /usr/bin/tee -a "$runner_bootstrap_log" >/dev/null 2>&1; then
+            durable_log_ready=false
+            if [[ "$durable_log_warning_emitted" != "true" ]]; then
+                durable_log_warning_emitted=true
+                printf 'warning: durable iOS release runner logging became unavailable\n' >&2
+            fi
+        fi
+    fi
+    return 0
+}
+
+record_unhandled_error() {
+    local exit_status="$1" source_line="$2"
+    log_event error unhandled_command_failure \
+        "phase=$bootstrap_phase source_line=$source_line exit_status=$exit_status"
+    return 0
+}
 
 die() {
-    echo "error: $*" >&2
+    log_event error fatal "message=$*"
     exit 1
 }
 
@@ -37,12 +76,13 @@ configure_runner_service_plist() {
     /usr/bin/plutil -create xml1 "$plist"
     /usr/libexec/PlistBuddy -c "Add :Label string $runner_service_label" "$plist"
     /usr/libexec/PlistBuddy -c "Add :ProgramArguments array" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string $runner_dir/runsvc.sh" "$plist"
+    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string $runner_session_entrypoint" "$plist"
+    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:1 string $runner_user" "$plist"
+    /usr/libexec/PlistBuddy -c "Add :ProgramArguments:2 string $runner_dir/runsvc.sh" "$plist"
     /usr/libexec/PlistBuddy -c "Add :WorkingDirectory string $runner_dir" "$plist"
     /usr/libexec/PlistBuddy -c "Add :StandardOutPath string $runner_home/Library/Logs/$runner_service_label/stdout.log" "$plist"
     /usr/libexec/PlistBuddy -c "Add :StandardErrorPath string $runner_home/Library/Logs/$runner_service_label/stderr.log" "$plist"
     /usr/libexec/PlistBuddy -c "Add :ProcessType string Interactive" "$plist"
-    /usr/libexec/PlistBuddy -c "Add :SessionCreate bool true" "$plist"
     /usr/libexec/PlistBuddy -c "Add :LimitLoadToSessionType string Background" "$plist"
     /usr/libexec/PlistBuddy -c "Add :RunAtLoad bool true" "$plist"
     /usr/libexec/PlistBuddy -c "Add :KeepAlive bool true" "$plist"
@@ -72,6 +112,9 @@ configure_runner_bootstrap_plist() {
     /usr/libexec/PlistBuddy -c "Add :KeepAlive:SuccessfulExit bool false" "$plist"
     /usr/libexec/PlistBuddy -c "Add :ThrottleInterval integer 30" "$plist"
     /usr/libexec/PlistBuddy -c "Add :ProcessType string Background" "$plist"
+    /usr/libexec/PlistBuddy -c "Add :Umask integer 63" "$plist"
+    /usr/libexec/PlistBuddy -c "Add :StandardOutPath string $runner_bootstrap_stdout_log" "$plist"
+    /usr/libexec/PlistBuddy -c "Add :StandardErrorPath string $runner_bootstrap_stderr_log" "$plist"
 }
 
 classify_runner_service_state() {
@@ -82,7 +125,7 @@ classify_runner_service_state() {
         echo legacy
     elif [[ "$backup_exists" == "true" ]]; then
         echo journaled
-    elif [[ "$candidate_count" == "3" ]]; then
+    elif [[ "$candidate_count" == "4" ]]; then
         echo current
     else
         echo invalid
@@ -131,13 +174,16 @@ bootstrap_self_test() {
         || die "release runner agent is not restricted to the Background domain"
     [[ "$(plutil -extract EnvironmentVariables.HOME raw -o - "$plist_probe")" == "$runner_home" ]] \
         || die "release runner agent has the wrong HOME"
+    [[ "$(plutil -extract ProgramArguments.0 raw -o - "$plist_probe")" == "$runner_session_entrypoint" ]] \
+        || die "release runner agent does not use the fail-closed session entry point"
+    [[ "$(plutil -extract ProgramArguments.2 raw -o - "$plist_probe")" == "$runner_dir/runsvc.sh" ]] \
+        || die "release runner agent has the wrong listener program"
     ! plutil -extract UserName raw -o - "$plist_probe" >/dev/null 2>&1 \
         || die "release runner agent must inherit its user-domain identity"
     ! plutil -extract GroupName raw -o - "$plist_probe" >/dev/null 2>&1 \
         || die "release runner agent must inherit its user-domain group"
-    [[ "$(plutil -extract SessionCreate raw -o - "$plist_probe")" == "true" ]] \
-        || die "release runner agent must create a non-root security audit session"
-
+    ! plutil -extract SessionCreate raw -o - "$plist_probe" >/dev/null 2>&1 \
+        || die "release runner agent must inherit its Background audit session"
     configure_runner_bootstrap_plist "$bootstrap_plist_probe" 502
     plutil -lint "$bootstrap_plist_probe" >/dev/null
     [[ "$(plutil -extract ProgramArguments.1 raw -o - "$bootstrap_plist_probe")" == "$runner_user" ]] \
@@ -146,14 +192,22 @@ bootstrap_self_test() {
         || die "release runner bootstrap daemon has the wrong UID"
     [[ "$(plutil -extract KeepAlive.SuccessfulExit raw -o - "$bootstrap_plist_probe")" == "false" ]] \
         || die "release runner bootstrap daemon must retry only after failure"
+    [[ "$(plutil -extract StandardOutPath raw -o - "$bootstrap_plist_probe")" == "$runner_bootstrap_stdout_log" ]] \
+        || die "release runner bootstrap daemon has the wrong durable output log"
+    [[ "$(plutil -extract StandardErrorPath raw -o - "$bootstrap_plist_probe")" == "$runner_bootstrap_stderr_log" ]] \
+        || die "release runner bootstrap daemon has the wrong durable error log"
+    [[ "$(plutil -extract Umask raw -o - "$bootstrap_plist_probe")" == "63" ]] \
+        || die "release runner bootstrap daemon has the wrong log-creation umask"
     [[ "$(classify_runner_service_state true false 0)" == "legacy" ]] \
         || die "release runner migration state machine rejected the legacy state"
     [[ "$(classify_runner_service_state false true 2)" == "journaled" ]] \
         || die "release runner migration state machine rejected an interrupted candidate"
-    [[ "$(classify_runner_service_state false false 3)" == "current" ]] \
+    [[ "$(classify_runner_service_state false false 4)" == "current" ]] \
         || die "release runner migration state machine rejected the current topology"
-    [[ "$(classify_runner_service_state true true 3)" == "invalid" \
-        && "$(classify_runner_service_state false false 1)" == "invalid" ]] \
+    [[ "$(classify_runner_service_state true true 4)" == "invalid" \
+        && "$(classify_runner_service_state false false 1)" == "invalid" \
+        && "$(classify_runner_service_state false false 3)" == "invalid" \
+        && "$(classify_runner_service_state false false 5)" == "invalid" ]] \
         || die "release runner migration state machine accepted an ambiguous topology"
     [[ "$(classify_existing_runner_directory_mode 700)" == "private" \
         && "$(classify_existing_runner_directory_mode 755)" == "legacy-archive" ]] \
@@ -162,7 +216,13 @@ bootstrap_self_test() {
         && "$(classify_existing_runner_directory_mode 777)" == "invalid" ]] \
         || die "release runner mode classifier accepted an unsupported state"
     /bin/bash -n "$runner_bootstrap_helper_source"
-    /bin/rm -f "$plist_probe" "$bootstrap_plist_probe"
+    /bin/bash -n "$runner_session_entrypoint_source"
+    /bin/bash -n "$runner_diagnostics_source"
+    "$runner_session_entrypoint_source" --self-test >/dev/null
+    "$runner_diagnostics_source" --self-test >/dev/null
+    /bin/rm -f \
+        "$plist_probe" \
+        "$bootstrap_plist_probe"
     trap - EXIT
     echo "iOS release runner bootstrap self-test passed"
 }
@@ -233,6 +293,36 @@ validate_privileged_file() {
         || die "privileged release file must not have hard links: $file"
 }
 
+initialize_bootstrap_logging() {
+    local log_file
+    validate_privileged_directory /Library
+    validate_privileged_directory /Library/Logs
+    if sudo /bin/test -e "$runner_log_dir" || sudo /bin/test -L "$runner_log_dir"; then
+        validate_privileged_directory "$runner_log_dir" 755
+        [[ "$(sudo /usr/bin/stat -f '%Sg' "$runner_log_dir")" == "wheel" ]] \
+            || die "release runner log directory has the wrong group"
+    else
+        sudo /usr/bin/install -d -m 755 -o root -g wheel "$runner_log_dir" \
+            || die "could not create the release runner log directory"
+    fi
+    for log_file in \
+        "$runner_bootstrap_log" \
+        "$runner_bootstrap_stdout_log" \
+        "$runner_bootstrap_stderr_log"; do
+        if sudo /bin/test -e "$log_file" || sudo /bin/test -L "$log_file"; then
+            validate_privileged_file "$log_file" 600
+        else
+            sudo /usr/bin/install -m 600 -o root -g wheel /dev/null "$log_file" \
+                || die "could not create a release runner log file"
+        fi
+    done
+    durable_log_ready=true
+    log_event info logging_ready \
+        "directory_mode=755 file_mode=600 storage=root-owned"
+    [[ "$durable_log_ready" == "true" ]] \
+        || die "could not append to the durable release runner bootstrap log"
+}
+
 validate_privileged_install_roots() {
     validate_privileged_directory /Library
     validate_privileged_directory /Library/LaunchDaemons
@@ -274,15 +364,18 @@ ensure_privileged_support_directory() {
 }
 
 ensure_runner_user_domain() {
+    local domain_created=false manager_name manager_uid
     if ! sudo /bin/launchctl print "user/$runner_uid" >/dev/null 2>&1; then
         sudo /bin/launchctl bootstrap "user/$runner_uid" \
             || sudo /bin/launchctl print "user/$runner_uid" >/dev/null 2>&1 \
             || return 1
+        domain_created=true
     fi
-    [[ "$(run_in_runner_domain /bin/launchctl manageruid)" == "$runner_uid" ]] \
-        || return 1
-    [[ "$(run_in_runner_domain /bin/launchctl managername)" == "Background" ]] \
-        || return 1
+    manager_uid="$(run_in_runner_domain /bin/launchctl manageruid 2>/dev/null || true)"
+    manager_name="$(run_in_runner_domain /bin/launchctl managername 2>/dev/null || true)"
+    log_event info runner_domain_observed \
+        "created=$domain_created expected_uid=$runner_uid manager_uid=${manager_uid:-unavailable} manager_name=${manager_name:-unavailable}"
+    [[ "$manager_uid" == "$runner_uid" && "$manager_name" == "Background" ]]
 }
 
 verify_runner_domain_security_session() {
@@ -290,7 +383,9 @@ verify_runner_domain_security_session() {
     identity="$(
         run_in_runner_domain /usr/bin/python3 -c \
             'import ctypes, os; uid = ctypes.c_uint32(); process = ctypes.CDLL(None, use_errno=True); result = process.getauid(ctypes.byref(uid)); print(f"{os.geteuid()}:{uid.value}" if result == 0 else "error")'
-    )"
+    )" || identity="unavailable"
+    log_event info runner_domain_security_observed \
+        "expected_identity=$runner_uid:$runner_uid observed_identity=${identity:-unavailable}"
     [[ "$identity" == "$runner_uid:$runner_uid" ]]
 }
 
@@ -379,11 +474,13 @@ stage_runner_service_files() {
 
 install_runner_service_files() {
     local path
+    log_event info service_files_install_started "candidate_file_count=4"
     ensure_privileged_support_directory || return 1
     for path in \
         "$runner_service_plist" \
         "$runner_bootstrap_plist" \
-        "$runner_bootstrap_helper"; do
+        "$runner_bootstrap_helper" \
+        "$runner_session_entrypoint"; do
         if sudo /bin/test -e "$path" || sudo /bin/test -L "$path"; then
             echo "error: refusing to replace existing release service path: $path" >&2
             return 1
@@ -392,6 +489,9 @@ install_runner_service_files() {
     sudo /usr/bin/install -m 755 -o root -g wheel \
         "$runner_bootstrap_helper_source" "$runner_bootstrap_helper" \
         || return 1
+    sudo /usr/bin/install -m 755 -o root -g wheel \
+        "$runner_session_entrypoint_source" "$runner_session_entrypoint" \
+        || return 1
     sudo /usr/bin/install -m 644 -o root -g wheel \
         "$runner_plist_staging" "$runner_service_plist" \
         || return 1
@@ -399,6 +499,7 @@ install_runner_service_files() {
         "$runner_bootstrap_plist_staging" "$runner_bootstrap_plist" \
         || return 1
     validate_installed_runner_service_files
+    log_event info service_files_installed "candidate_file_count=4"
 }
 
 validate_installed_runner_service_files() {
@@ -406,12 +507,22 @@ validate_installed_runner_service_files() {
     validate_privileged_file "$runner_service_plist" 644
     validate_privileged_file "$runner_bootstrap_plist" 600
     validate_privileged_file "$runner_bootstrap_helper" 755
+    validate_privileged_file "$runner_session_entrypoint" 755
     sudo /usr/bin/cmp -s "$runner_plist_staging" "$runner_service_plist" \
         || die "installed release runner agent differs from the staged contract"
     sudo /usr/bin/cmp -s "$runner_bootstrap_plist_staging" "$runner_bootstrap_plist" \
         || die "installed release runner bootstrap daemon differs from the staged contract"
     sudo /usr/bin/cmp -s "$runner_bootstrap_helper_source" "$runner_bootstrap_helper" \
         || die "installed release runner bootstrap helper differs from repository source"
+    sudo /usr/bin/cmp -s "$runner_session_entrypoint_source" "$runner_session_entrypoint" \
+        || die "installed release runner session entry point differs from repository source"
+}
+
+current_runner_service_files_match() {
+    sudo /usr/bin/cmp -s "$runner_plist_staging" "$runner_service_plist" \
+        && sudo /usr/bin/cmp -s "$runner_bootstrap_plist_staging" "$runner_bootstrap_plist" \
+        && sudo /usr/bin/cmp -s "$runner_bootstrap_helper_source" "$runner_bootstrap_helper" \
+        && sudo /usr/bin/cmp -s "$runner_session_entrypoint_source" "$runner_session_entrypoint"
 }
 
 legacy_runner_service_is_valid() {
@@ -432,56 +543,100 @@ validate_legacy_runner_service() {
         || die "legacy release runner service contract is inconsistent"
 }
 
+wait_for_launchd_target_exit() {
+    local target="$1"
+    for ((launchd_poll = 1; launchd_poll <= 30; launchd_poll++)); do
+        if ! sudo /bin/launchctl print "$target" >/dev/null 2>&1; then
+            log_event info launchd_target_absent \
+                "target=$target polls=$launchd_poll timeout_seconds=30"
+            return 0
+        fi
+        /bin/sleep 1
+    done
+    log_event error launchd_target_stop_timeout \
+        "target=$target polls=30 timeout_seconds=30"
+    return 1
+}
+
+stop_launchd_target() {
+    local bootout_status target="$1"
+    if ! sudo /bin/launchctl print "$target" >/dev/null 2>&1; then
+        log_event info launchd_target_already_absent "target=$target"
+        return 0
+    fi
+    if sudo /bin/launchctl bootout "$target"; then
+        bootout_status=0
+    else
+        bootout_status=$?
+    fi
+    log_event info launchd_bootout_requested \
+        "target=$target command_status=$bootout_status"
+    # `launchctl bootout` acknowledges a teardown request before launchd has
+    # necessarily removed the job. The observed absence is the postcondition;
+    # the immediate command status alone is neither success nor failure proof.
+    wait_for_launchd_target_exit "$target"
+}
+
 stop_runner_candidate_services() {
-    local helper_target="system/$runner_bootstrap_label"
-    local runner_target="user/$runner_uid/$runner_service_label"
     # Stop the root helper first so it cannot recreate the user agent while the
     # candidate is being removed or a legacy listener is being restored.
-    if sudo /bin/launchctl print "$helper_target" >/dev/null 2>&1; then
-        sudo /bin/launchctl bootout "$helper_target" || return 1
-    fi
-    sudo /bin/launchctl print "$helper_target" >/dev/null 2>&1 && return 1
-    if sudo /bin/launchctl print "$runner_target" >/dev/null 2>&1; then
-        sudo /bin/launchctl bootout "$runner_target" || return 1
-    fi
-    sudo /bin/launchctl print "$runner_target" >/dev/null 2>&1 && return 1
-    return 0
+    stop_launchd_target "system/$runner_bootstrap_label" || return 1
+    stop_launchd_target "user/$runner_uid/$runner_service_label"
 }
 
 remove_runner_service_files() {
+    log_event info service_files_remove_started "candidate_file_count=4"
     stop_runner_candidate_services || return 1
     sudo /bin/rm -f \
         "$runner_service_plist" \
         "$runner_bootstrap_plist" \
         "$runner_bootstrap_helper" \
+        "$runner_session_entrypoint" \
         || return 1
     for removed_path in \
         "$runner_service_plist" \
         "$runner_bootstrap_plist" \
-        "$runner_bootstrap_helper"; do
+        "$runner_bootstrap_helper" \
+        "$runner_session_entrypoint"; do
         if sudo /bin/test -e "$removed_path" || sudo /bin/test -L "$removed_path"; then
             return 1
         fi
     done
+    log_event info service_files_removed "candidate_file_count=4"
 }
 
-start_runner_service_files() {
-    validate_installed_runner_service_files
+start_installed_runner_service_files() {
+    local helper_target="system/$runner_bootstrap_label"
+    local runner_target="user/$runner_uid/$runner_service_label"
+    log_event info launchd_service_start_started \
+        "helper_target=$helper_target runner_target=$runner_target"
     sudo /bin/launchctl bootstrap system "$runner_bootstrap_plist" \
-        || sudo /bin/launchctl print "system/$runner_bootstrap_label" >/dev/null 2>&1 \
+        || sudo /bin/launchctl print "$helper_target" >/dev/null 2>&1 \
         || return 1
-    sudo /bin/launchctl kickstart -k "system/$runner_bootstrap_label" \
+    sudo /bin/launchctl kickstart -k "$helper_target" \
         || return 1
     for ((service_poll = 1; service_poll <= 30; service_poll++)); do
-        if sudo /bin/launchctl print "user/$runner_uid/$runner_service_label" >/dev/null 2>&1; then
+        if sudo /bin/launchctl print "$runner_target" >/dev/null 2>&1; then
             break
         fi
         sleep 1
     done
-    sudo /bin/launchctl print "user/$runner_uid/$runner_service_label" >/dev/null 2>&1 \
-        || return 1
+    if ! sudo /bin/launchctl print "$runner_target" >/dev/null 2>&1; then
+        log_event error launchd_service_start_timeout \
+            "runner_target=$runner_target polls=30 timeout_seconds=30"
+        return 1
+    fi
+    log_event info launchd_service_visible \
+        "runner_target=$runner_target polls=$service_poll timeout_seconds=30"
     ensure_runner_user_domain || return 1
     verify_runner_domain_security_session || return 1
+    log_event info launchd_service_start_completed \
+        "helper_target=$helper_target runner_target=$runner_target"
+}
+
+start_runner_service_files() {
+    validate_installed_runner_service_files
+    start_installed_runner_service_files
 }
 
 runner_listener_pid() {
@@ -493,10 +648,13 @@ runner_listener_pid() {
 wait_for_all_runner_listeners_exit() {
     for ((listener_poll = 1; listener_poll <= 30; listener_poll++)); do
         if [[ -z "$(runner_listener_pid || true)" ]]; then
+            log_event info listener_set_empty \
+                "polls=$listener_poll timeout_seconds=30"
             return 0
         fi
         sleep 1
     done
+    log_event error listener_set_exit_timeout "polls=30 timeout_seconds=30"
     return 1
 }
 
@@ -505,10 +663,14 @@ wait_for_listener_exit() {
     [[ -n "$previous_pid" ]] || return 0
     for ((listener_poll = 1; listener_poll <= 30; listener_poll++)); do
         if ! sudo /bin/kill -0 "$previous_pid" >/dev/null 2>&1; then
+            log_event info prior_listener_exited \
+                "pid=$previous_pid polls=$listener_poll timeout_seconds=30"
             return 0
         fi
         sleep 1
     done
+    log_event error prior_listener_exit_timeout \
+        "pid=$previous_pid polls=30 timeout_seconds=30"
     return 1
 }
 
@@ -517,10 +679,14 @@ wait_for_new_runner_listener() {
     for ((listener_poll = 1; listener_poll <= 30; listener_poll++)); do
         listener_pid="$(runner_listener_pid || true)"
         if [[ -n "$listener_pid" && "$listener_pid" != "$previous_pid" ]]; then
+            log_event info new_listener_observed \
+                "pid=$listener_pid previous_pid=${previous_pid:-none} polls=$listener_poll timeout_seconds=30"
             return 0
         fi
         sleep 1
     done
+    log_event error new_listener_timeout \
+        "previous_pid=${previous_pid:-none} polls=30 timeout_seconds=30"
     return 1
 }
 
@@ -535,9 +701,15 @@ wait_for_runner_online() {
                     | select([.labels[].name] | index(\"$runner_label\"))
                     | {status, busy, labels: [.labels[].name]}"
         )"
-        [[ -z "$runner_summary" ]] || return 0
+        if [[ -n "$runner_summary" ]]; then
+            log_event info remote_runner_online \
+                "runner_name=$runner_name polls=$runner_poll timeout_seconds=60"
+            return 0
+        fi
         sleep 1
     done
+    log_event error remote_runner_online_timeout \
+        "runner_name=$runner_name polls=60 timeout_seconds=60"
     return 1
 }
 
@@ -562,15 +734,21 @@ wait_for_remote_runner_status() {
     for ((runner_poll = 1; runner_poll <= 60; runner_poll++)); do
         if read_remote_runner_observation 2>/dev/null \
             && [[ "$remote_runner_status" == "$expected_status" ]]; then
+            log_event info remote_runner_status_converged \
+                "runner_id=$repair_runner_id expected_status=$expected_status observed_status=$remote_runner_status busy=$remote_runner_busy labeled=$remote_runner_release_labeled polls=$runner_poll timeout_seconds=60"
             return 0
         fi
         sleep 1
     done
+    log_event error remote_runner_status_timeout \
+        "runner_id=$repair_runner_id expected_status=$expected_status observed_status=${remote_runner_status:-unavailable} busy=${remote_runner_busy:-unavailable} labeled=${remote_runner_release_labeled:-unavailable} polls=60 timeout_seconds=60"
     return 1
 }
 
 fence_remote_runner() {
     read_remote_runner_observation || return 1
+    log_event info remote_runner_fence_started \
+        "runner_id=$repair_runner_id status=$remote_runner_status busy=$remote_runner_busy labeled=$remote_runner_release_labeled"
     [[ "$remote_runner_busy" == "false" ]] \
         || return 1
     if [[ "$remote_runner_release_labeled" == "true" ]]; then
@@ -585,7 +763,11 @@ fence_remote_runner() {
             && [[ "$remote_runner_release_labeled" == "false" \
                 && "$remote_runner_busy" == "false" ]]; then
             idle_observations=$((idle_observations + 1))
-            (( idle_observations >= 2 )) && return 0
+            if (( idle_observations >= 2 )); then
+                log_event info remote_runner_fenced \
+                    "runner_id=$repair_runner_id status=$remote_runner_status busy=$remote_runner_busy labeled=$remote_runner_release_labeled polls=$runner_poll idle_observations=$idle_observations"
+                return 0
+            fi
         else
             idle_observations=0
         fi
@@ -594,11 +776,15 @@ fence_remote_runner() {
     # No launchd state has changed yet. Best-effort reopening is safe even if a
     # job won the narrow pre-fence race; failure leaves scheduling closed.
     restore_remote_runner_label >/dev/null 2>&1 || true
+    log_event error remote_runner_fence_timeout \
+        "runner_id=$repair_runner_id observed_status=${remote_runner_status:-unavailable} busy=${remote_runner_busy:-unavailable} labeled=${remote_runner_release_labeled:-unavailable} polls=15"
     return 1
 }
 
 restore_remote_runner_label() {
     read_remote_runner_observation || return 1
+    log_event info remote_runner_unfence_started \
+        "runner_id=$repair_runner_id status=$remote_runner_status busy=$remote_runner_busy labeled=$remote_runner_release_labeled"
     if [[ "$remote_runner_release_labeled" == "false" ]]; then
         "$gh_executable" api --method POST \
             "repos/$repository/actions/runners/$repair_runner_id/labels" \
@@ -612,6 +798,8 @@ restore_remote_runner_label() {
             "repos/$repository/actions/runners/$repair_runner_id" \
             --jq '{status, busy, labels: [.labels[].name]}'
     )"
+    log_event info remote_runner_unfenced \
+        "runner_id=$repair_runner_id status=$remote_runner_status busy=$remote_runner_busy labeled=$remote_runner_release_labeled"
 }
 
 acquire_bootstrap_lock() {
@@ -621,10 +809,10 @@ acquire_bootstrap_lock() {
 }
 
 rollback_to_legacy_service() {
+    log_event warning legacy_rollback_started \
+        "runner_id=${repair_runner_id:-unavailable}"
     stop_runner_candidate_services || return 1
-    if sudo /bin/launchctl print "system/$runner_service_label" >/dev/null 2>&1; then
-        sudo /bin/launchctl bootout "system/$runner_service_label" || return 1
-    fi
+    stop_launchd_target "system/$runner_service_label" || return 1
     wait_for_all_runner_listeners_exit || return 1
     wait_for_remote_runner_status offline || return 1
     remove_runner_service_files || return 1
@@ -648,6 +836,8 @@ rollback_to_legacy_service() {
     wait_for_remote_runner_status online || return 1
     restore_remote_runner_label || return 1
     repair_migration_active=false
+    log_event warning legacy_rollback_service_restored \
+        "runner_id=${repair_runner_id:-unavailable}"
 }
 
 prepare_runner_security_context() {
@@ -704,8 +894,12 @@ prepare_runner_security_context() {
 }
 
 validate_existing_background_service() {
+    local listener_pid
     start_runner_service_files || return 1
-    [[ -n "$(runner_listener_pid || true)" ]] || return 1
+    listener_pid="$(runner_listener_pid || true)"
+    [[ -n "$listener_pid" ]] || return 1
+    log_event info guarded_listener_observed \
+        "pid=$listener_pid entrypoint=$runner_session_entrypoint"
     if [[ -n "$repair_runner_id" ]]; then
         wait_for_remote_runner_status online
     else
@@ -715,12 +909,6 @@ validate_existing_background_service() {
 
 [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]] \
     || die "the iOS release runner requires an Apple-silicon Mac"
-"$gh_executable" auth status >/dev/null \
-    || die "authenticate GitHub CLI before bootstrapping"
-repository="$("$gh_executable" repo view --json nameWithOwner --jq .nameWithOwner)"
-[[ -n "$repository" ]] || die "could not resolve the current GitHub repository"
-"$gh_executable" api "repos/$repository/environments/ios-testflight" >/dev/null \
-    || die "create the ios-testflight GitHub environment before bootstrapping"
 runner_registration_started=false
 bootstrap_complete=false
 runner_plist_staging=""
@@ -735,28 +923,28 @@ remote_runner_release_labeled=""
 remote_runner_status=""
 existing_runner_directory_mode=""
 existing_runner_directory_state=""
+repository=""
 
 cleanup_bootstrap() {
     local exit_status=$?
     local cleanup_incomplete=false
     local removal_token="" remaining_runner_id="" runner_id=""
     trap - EXIT
+    trap - ERR
     set +e
+    log_event info cleanup_started \
+        "exit_status=$exit_status migration_active=$repair_migration_active registration_started=$runner_registration_started bootstrap_complete=$bootstrap_complete"
     if [[ -n "$archive" ]]; then
         /bin/rm -f "$archive"
     fi
-    if [[ -n "$runner_plist_staging" ]]; then
-        /bin/rm -f "$runner_plist_staging"
-    fi
-    if [[ -n "$runner_bootstrap_plist_staging" ]]; then
-        /bin/rm -f "$runner_bootstrap_plist_staging"
-    fi
     if (( exit_status != 0 )) && [[ "$repair_migration_active" == "true" ]]; then
         if rollback_to_legacy_service; then
-            echo "Restored the legacy release runner after the failed service migration." >&2
+            log_event warning legacy_rollback_completed \
+                "runner_id=${repair_runner_id:-unavailable}"
         else
             cleanup_incomplete=true
-            echo "error: release runner migration and rollback both failed; its scheduling label remains fenced" >&2
+            log_event error legacy_rollback_failed \
+                "runner_id=${repair_runner_id:-unavailable} scheduling=fenced"
         fi
     fi
     if (( exit_status != 0 )) \
@@ -794,6 +982,7 @@ cleanup_bootstrap() {
             || sudo /bin/test -e "$runner_service_plist" \
             || sudo /bin/test -e "$runner_bootstrap_plist" \
             || sudo /bin/test -e "$runner_bootstrap_helper" \
+            || sudo /bin/test -e "$runner_session_entrypoint" \
             || sudo /bin/test -e "$runner_dir/.runner" \
             || sudo /bin/test -e "$runner_dir/.credentials"; then
             cleanup_incomplete=true
@@ -807,17 +996,29 @@ cleanup_bootstrap() {
             cleanup_incomplete=true
         fi
         if [[ "$cleanup_incomplete" == "true" ]]; then
-            echo "error: incomplete runner bootstrap rollback; follow the rotation runbook before retrying" >&2
+            log_event error registration_rollback_incomplete \
+                "message=incomplete runner bootstrap rollback; follow the rotation runbook before retrying remote_registration_remaining=unknown"
         else
-            echo "Rolled back the incomplete GitHub runner registration and launchd service." >&2
+            log_event warning registration_rollback_completed \
+                "remote_registration_remaining=false"
         fi
     fi
+    if [[ -n "$runner_plist_staging" ]]; then
+        /bin/rm -f "$runner_plist_staging"
+    fi
+    if [[ -n "$runner_bootstrap_plist_staging" ]]; then
+        /bin/rm -f "$runner_bootstrap_plist_staging"
+    fi
     if [[ "$cleanup_incomplete" == "true" ]]; then
+        log_event error bootstrap_finished \
+            "exit_status=1 cleanup_incomplete=true scheduling=fenced"
         if [[ "$bootstrap_lock_held" == "true" ]]; then
             sudo /bin/rm -f "$runner_bootstrap_lock"
         fi
         exit 1
     fi
+    log_event info bootstrap_finished \
+        "exit_status=$exit_status cleanup_incomplete=false bootstrap_complete=$bootstrap_complete"
     if [[ "$bootstrap_lock_held" == "true" ]]; then
         sudo /bin/rm -f "$runner_bootstrap_lock"
     fi
@@ -825,10 +1026,35 @@ cleanup_bootstrap() {
 }
 trap cleanup_bootstrap EXIT
 
+initialize_bootstrap_logging
+trap 'record_unhandled_error "$?" "$LINENO"' ERR
+bootstrap_phase=provenance
+bootstrap_source_sha256="$(/usr/bin/shasum -a 256 "$project_dir/scripts/bootstrap-ios-release-runner.sh" | /usr/bin/awk '{print $1}')"
+toolchain_source_sha256="$(/usr/bin/shasum -a 256 "$project_dir/config/ci-toolchain.env" | /usr/bin/awk '{print $1}')"
+release_workflow_sha256="$(/usr/bin/shasum -a 256 "$project_dir/.github/workflows/release-ios.yml" | /usr/bin/awk '{print $1}')"
+git_head="$(/usr/bin/git -C "$project_dir" rev-parse HEAD 2>/dev/null || true)"
+git_dirty=false
+if [[ -n "$(/usr/bin/git -C "$project_dir" status --porcelain --untracked-files=no 2>/dev/null || true)" ]]; then
+    git_dirty=true
+fi
+log_event info bootstrap_started \
+    "mode=$bootstrap_mode pid=$$ git_head=${git_head:-unavailable} git_dirty=$git_dirty bootstrap_sha256=$bootstrap_source_sha256 toolchain_sha256=$toolchain_source_sha256 release_workflow_sha256=$release_workflow_sha256 runner_version=$TRON_RELEASE_RUNNER_VERSION xcode_build=$TRON_RELEASE_IOS_XCODE_BUILD ios_sdk=$TRON_RELEASE_IOS_SDK_VERSION"
+bootstrap_phase=lock
 acquire_bootstrap_lock \
     || die "another release runner bootstrap or service repair is already active"
+log_event info bootstrap_lock_acquired "lock=$runner_bootstrap_lock"
+
+bootstrap_phase=github_preflight
+"$gh_executable" auth status >/dev/null \
+    || die "authenticate GitHub CLI before bootstrapping"
+repository="$("$gh_executable" repo view --json nameWithOwner --jq .nameWithOwner)"
+[[ -n "$repository" ]] || die "could not resolve the current GitHub repository"
+"$gh_executable" api "repos/$repository/environments/ios-testflight" >/dev/null \
+    || die "create the ios-testflight GitHub environment before bootstrapping"
+log_event info github_control_plane_ready "environment=ios-testflight"
 
 if [[ "$bootstrap_mode" == "install" ]]; then
+    bootstrap_phase=runner_archive_download
     archive="$(mktemp -t tron-actions-runner.XXXXXX.tar.gz)"
     curl --fail --location --silent --show-error "$TRON_RELEASE_RUNNER_URL" --output "$archive"
     actual_sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
@@ -836,6 +1062,7 @@ if [[ "$bootstrap_mode" == "install" ]]; then
         || die "GitHub runner archive checksum mismatch"
 fi
 
+bootstrap_phase=runner_account_preparation
 if ! dscl . -read "/Users/$runner_user" >/dev/null 2>&1; then
     [[ "$bootstrap_mode" == "install" ]] \
         || die "the release runner account is missing; repair cannot recreate it"
@@ -879,6 +1106,8 @@ if [[ ! -e "$runner_home" ]]; then
     sudo /usr/bin/install -d -m 700 -o "$runner_user" -g staff "$runner_home"
 fi
 validate_private_runner_directory "$runner_home"
+log_event info runner_account_validated \
+    "uid=$runner_uid primary_group=$runner_primary_group home_mode=700 admin=false"
 
 invoking_user="${SUDO_USER:-${USER:-}}"
 [[ -n "$invoking_user" && "$invoking_user" != "root" && "$invoking_user" != "$runner_user" ]] \
@@ -901,14 +1130,18 @@ runner_can_access_invoking_home() {
 # runner list/search access instead of changing the invoking user's broader
 # group permissions.
 runner_home_acl="user:$runner_user deny list,search"
+bootstrap_phase=invoking_home_isolation
 if runner_can_access_invoking_home; then
     sudo /bin/chmod +a "$runner_home_acl" "$invoking_home"
 fi
 if runner_can_access_invoking_home; then
     die "release runner account can still access the invoking user's home"
 fi
+log_event info invoking_home_isolation_validated \
+    "runner_uid=$runner_uid read_access=false search_access=false"
 
 if [[ "$bootstrap_mode" == "--repair-service" ]]; then
+    bootstrap_phase=service_repair
     validate_existing_runner_install
     remote_runner_count="$(
         "$gh_executable" api "repos/$repository/actions/runners?per_page=100" \
@@ -924,6 +1157,8 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
         || die "repair could not resolve the exact registered runner ID"
     read_remote_runner_observation \
         || die "repair could not read the exact registered runner state"
+    log_event info remote_runner_observed \
+        "runner_id=$repair_runner_id status=$remote_runner_status busy=$remote_runner_busy labeled=$remote_runner_release_labeled"
     [[ "$remote_runner_busy" == "false" ]] \
         || die "release runner is busy; wait for the active job before repairing its service"
     normalize_existing_runner_directory_mode
@@ -933,7 +1168,8 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
     for candidate_path in \
         "$runner_service_plist" \
         "$runner_bootstrap_plist" \
-        "$runner_bootstrap_helper"; do
+        "$runner_bootstrap_helper" \
+        "$runner_session_entrypoint"; do
         if sudo /bin/test -e "$candidate_path" || sudo /bin/test -L "$candidate_path"; then
             candidate_path_count=$((candidate_path_count + 1))
         fi
@@ -952,14 +1188,20 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
         classify_runner_service_state \
             "$legacy_path_exists" "$legacy_backup_exists" "$candidate_path_count"
     )"
+    log_event info service_topology_classified \
+        "state=$runner_service_state candidate_files=$candidate_path_count legacy_path=$legacy_path_exists legacy_journal=$legacy_backup_exists"
     [[ "$runner_service_state" != "invalid" ]] \
         || die "release runner repair found an ambiguous or incomplete service topology"
 
     if [[ "$runner_service_state" == "current" ]]; then
         sudo /bin/launchctl print "system/$runner_service_label" >/dev/null 2>&1 \
             && die "legacy release runner is loaded without its immutable plist"
-        [[ "$candidate_path_count" == "3" ]] \
-            || die "release runner repair found neither a complete legacy nor Background service"
+        (( candidate_path_count == 4 )) \
+            || die "release runner repair found an incomplete Background service"
+        current_runner_service_files_match \
+            || die "existing Background service differs from the repository contract"
+        log_event info current_service_validation_started \
+            "candidate_files=$candidate_path_count"
         validate_installed_runner_service_files
         prepare_runner_security_context
         validate_existing_background_service \
@@ -967,6 +1209,8 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
         restore_remote_runner_label \
             || die "Background release runner is healthy but its scheduling label could not be restored"
         bootstrap_complete=true
+        log_event info current_service_validated \
+            "runner_id=$repair_runner_id status=$remote_runner_status labeled=$remote_runner_release_labeled"
         echo "$runner_summary"
         echo "Release runner already uses the verified Background service topology."
         exit 0
@@ -975,6 +1219,9 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
     fence_remote_runner \
         || die "release runner could not be fenced idle for service repair"
     repair_migration_active=true
+    bootstrap_phase=legacy_service_migration
+    log_event info legacy_migration_started \
+        "runner_id=$repair_runner_id service_state=$runner_service_state"
     ensure_privileged_support_directory \
         || die "could not establish the root-owned release runner support directory"
 
@@ -1000,10 +1247,8 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
     fi
 
     repair_previous_listener_pid="$(runner_listener_pid || true)"
-    if sudo /bin/launchctl print "system/$runner_service_label" >/dev/null 2>&1; then
-        sudo /bin/launchctl bootout "system/$runner_service_label" \
-            || die "could not stop the legacy release runner listener"
-    fi
+    stop_launchd_target "system/$runner_service_label" \
+        || die "could not stop the legacy release runner listener"
     wait_for_all_runner_listeners_exit \
         || die "legacy release runner listener did not stop"
     wait_for_remote_runner_status offline \
@@ -1015,7 +1260,7 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
     start_runner_service_files \
         || die "could not start the Background release runner service"
     wait_for_new_runner_listener "$repair_previous_listener_pid" \
-        || die "Background release runner did not create a new listener"
+        || die "Background release runner did not pass its fail-closed session entry point"
     wait_for_remote_runner_status online \
         || die "GitHub did not observe the exact Background runner transition online"
     validate_legacy_runner_service "$legacy_runner_service_backup"
@@ -1032,12 +1277,16 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
     restore_remote_runner_label \
         || die "Background release runner is online but its scheduling label remains fenced"
     bootstrap_complete=true
+    log_event info legacy_migration_committed \
+        "runner_id=$repair_runner_id status=$remote_runner_status labeled=$remote_runner_release_labeled"
     echo "$runner_summary"
     echo "Release runner migrated transactionally to its Background user domain."
     exit 0
 fi
 
+bootstrap_phase=fresh_install
 prepare_runner_security_context
+log_event info fresh_install_started "runner_version=$TRON_RELEASE_RUNNER_VERSION"
 validate_privileged_install_roots
 for service_target in \
     "system/$runner_service_label" \
@@ -1051,7 +1300,8 @@ for service_path in \
     "$legacy_runner_service_backup" \
     "$runner_service_plist" \
     "$runner_bootstrap_plist" \
-    "$runner_bootstrap_helper"; do
+    "$runner_bootstrap_helper" \
+    "$runner_session_entrypoint"; do
     if sudo /bin/test -e "$service_path" || sudo /bin/test -L "$service_path"; then
         die "release runner service path already exists: $service_path"
     fi
@@ -1127,11 +1377,13 @@ install_runner_service_files \
 start_runner_service_files \
     || die "could not start the Background release runner service"
 wait_for_new_runner_listener "" \
-    || die "Background release runner did not create its listener"
+    || die "Background release runner did not pass its fail-closed session entry point"
 wait_for_runner_online \
     || die "release runner did not become online with its dedicated label"
 sudo /usr/bin/pmset -c sleep 0
 sudo /usr/bin/pmset -a tcpkeepalive 1
 bootstrap_complete=true
+log_event info fresh_install_committed \
+    "runner_name=$runner_name remote_status=online labeled=true"
 echo "$runner_summary"
 echo "Release runner installed. Confirm ios-testflight environment secrets before enabling delivery."

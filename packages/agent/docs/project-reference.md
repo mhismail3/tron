@@ -2964,8 +2964,12 @@ discovery directory and loaded explicitly into its isolated service account's
 headless `user/<uid>` Background domain. A one-shot root LaunchDaemon creates
 that independent domain at boot and loads the agent; the long-lived listener is
 never a system-domain process. `LimitLoadToSessionType=Background` and
-`SessionCreate=true` provide the matching bootstrap and non-root audit context
-without a GUI login. Bootstrap preparation adopts that launchd bootstrap and
+inheritance from the independent `user/<uid>` domain provide the matching
+bootstrap and non-root audit context without a GUI login. The agent deliberately
+omits `SessionCreate`, which would replace the correct Background audit login
+identity with a new mismatched session. A root-owned entry point verifies the
+effective UID, manager, Security session, and audit UID before the listener can
+connect to GitHub. Bootstrap preparation adopts that launchd bootstrap and
 security audit session with privileged `launchctl asuser` first, then
 immediately drops UID/GID to the isolated account because `asuser` deliberately
 does not alter Unix credentials. Reversing those operations is rejected by
@@ -2996,8 +3000,28 @@ commit; journal cleanup then precedes restoring the label. A cleanup failure
 keeps the verified candidate running and scheduling fenced. Failed pre-commit
 cutovers stop the helper before the agent, prove the exact runner offline,
 restore and verify the legacy listener, and then reopen scheduling. The durable
-journal makes process interruption and reboot resumable. Root never mutates runner-owned home
-descendants. The iOS development runbook owns the current agent, boot-helper,
+journal makes process interruption and reboot resumable. A launchd `bootout`
+acknowledgement is not removal proof: every
+forward and rollback stop waits up to 30 seconds for the exact target to become
+absent before touching its files or starting the other topology.
+
+The installer, root boot helper, listener guard, doctor, and sensitive-command
+boundary all emit timestamped structured operational evidence without shell
+tracing or secret-bearing values. Root-owned mode-0600 journals under
+`/Library/Logs/Tron/` retain installer provenance, transaction state, launchd
+requests/convergence, rollback decisions, and boot-helper outcomes. GitHub job
+logs retain the doctor's exact sanitized effective/audit UID, manager type,
+Security-session attributes, filesystem boundary, toolchain, capacity, and
+source SHA. `scripts/ios-release-runner-diagnostics.sh` performs a read-only
+join of those records with installed-file hashes, rollback-journal presence,
+filtered launchd state, the exact listener process and Unix UID, the listener
+guard's own identity record, remote runner state, and recent CI/TestFlight run
+metadata. It deliberately excludes process
+environments, runner credentials, keychains, profiles, signing identities, raw
+job output, and Actions `_diag` files, and returns nonzero only after completing
+the snapshot when any required health check is bad. Root never mutates
+runner-owned home descendants. The iOS
+development runbook owns the current agent, entry point, boot-helper,
 legacy cleanup, and full rotation paths. A secretless recovery step then
 restores the baseline keychain preferences, removes only paths claimed by
 strict durable attempt ledgers, creates or validates the provisioning-profile

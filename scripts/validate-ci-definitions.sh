@@ -7,6 +7,15 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$repo_root/config/ci-toolchain.env"
 
+log_ci_event() {
+    local event="$1" details="${2:-}" timestamp
+    timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    details="${details//$'\r'/ }"
+    details="${details//$'\n'/ }"
+    printf 'timestamp=%s level=info component=ci-definition-validator event=%s%s\n' \
+        "$timestamp" "$event" "$([[ -n "$details" ]] && printf ' %s' "$details")" >&2
+}
+
 validate_manifest_contract() {
     local rust_version rust_digest actionlint_digest checksum
     local rust_image="${1:-$TRON_CI_RUST_IMAGE}"
@@ -68,6 +77,7 @@ validate_buildkite_pipeline() {
             --reject-secrets \
             --reject-parse-warnings \
             < "$path" >/dev/null
+    log_ci_event buildkite_definition_verified "definition=$(basename "$path")"
 }
 
 self_test() {
@@ -99,7 +109,10 @@ if [[ "${1:-}" == "--self-test" ]]; then
 fi
 [[ $# -eq 0 ]] || { echo "usage: scripts/validate-ci-definitions.sh [--self-test]" >&2; exit 2; }
 
+manifest_sha256="$(shasum -a 256 "$repo_root/config/ci-toolchain.env" | awk '{print $1}')"
+log_ci_event validation_started "manifest_sha256=$manifest_sha256"
 validate_manifest_contract
+log_ci_event manifest_contract_verified "manifest_sha256=$manifest_sha256"
 export TRON_CI_TOOLS_DIR="${TRON_CI_TOOLS_DIR:-${RUNNER_TEMP:-/tmp}/tron-ci-tools}"
 export PATH="$TRON_CI_TOOLS_DIR/bin:$PATH"
 "$repo_root/scripts/install-ci-tools.sh" buildkite-agent
@@ -114,12 +127,15 @@ actionlint_version="$(docker run --rm "$TRON_CI_ACTIONLINT_IMAGE" -version)"
     echo "error: pinned actionlint image reported an unexpected version" >&2
     exit 1
 }
+log_ci_event actionlint_runtime_verified "version=1.7.12"
 docker run --rm \
     --volume "$repo_root:/work:ro" \
     --workdir /work \
     "$TRON_CI_ACTIONLINT_IMAGE" \
     -color=false
+log_ci_event github_workflows_verified "validator=actionlint version=1.7.12"
 
 validate_buildkite_pipeline "$repo_root/.buildkite/pipeline.yml"
 validate_buildkite_pipeline "$repo_root/.buildkite/shadow-steps.yml"
+log_ci_event validation_completed "manifest_sha256=$manifest_sha256"
 echo "CI definitions validated"
