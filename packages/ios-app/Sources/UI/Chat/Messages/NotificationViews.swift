@@ -205,24 +205,6 @@ struct InterruptedNotificationView: View {
     }
 }
 
-// MARK: - Catching Up Notification View
-
-struct CatchingUpNotificationView: View {
-    var body: some View {
-        NotificationPill(tint: .tronSlate) {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .scaleEffect(0.7)
-                    .tint(.tronSlate)
-
-                Text("Loading latest messages...")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.tronSlate)
-            }
-        }
-    }
-}
-
 // MARK: - Compaction Notification View (unified in-progress + completed)
 
 struct CompactionNotificationView: View {

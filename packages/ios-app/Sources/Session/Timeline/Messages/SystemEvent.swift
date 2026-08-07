@@ -20,13 +20,12 @@ enum SystemEvent: Equatable, Hashable {
     case contextCleared(tokensBefore: Int, tokensAfter: Int)
     /// A message was deleted from context
     case messageDeleted(targetType: String)
-    /// Catching up to in-progress session
-    case catchingUp
     /// Turn failed with error
     case turnFailed(error: String, code: String?, recoverable: Bool, failure: CanonicalFailurePayload?)
     /// Provider API error (auth, rate limit, network, etc.)
     case providerError(ProviderErrorDetailData)
-/// Tint color for the notification pill — single source of truth.
+
+    /// Tint color for the notification pill — single source of truth.
     var tintColor: Color {
         switch self {
         case .modelChange:                return .tronEmerald
@@ -36,7 +35,6 @@ enum SystemEvent: Equatable, Hashable {
         case .compaction:                 return .tronSky
         case .contextCleared:             return .tronSky
         case .messageDeleted:             return .tronSky
-        case .catchingUp:                 return .tronSlate
         case .turnFailed:                 return .tronError
         case .providerError:              return .tronError
         }
@@ -64,8 +62,6 @@ enum SystemEvent: Equatable, Hashable {
                            targetType == "message.assistant" ? "assistant message" :
                            targetType == "tool.invocation.completed" ? "tool result" : "message"
             return "Deleted \(typeLabel) from context"
-        case .catchingUp:
-            return "Loading latest messages..."
         case .turnFailed(let error, _, _, _):
             return "Request failed: \(error)"
         case .providerError(let data):

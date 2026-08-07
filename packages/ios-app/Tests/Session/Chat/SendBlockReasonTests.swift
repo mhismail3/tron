@@ -57,17 +57,50 @@ final class SendBlockReasonTests: XCTestCase {
         XCTAssertEqual(config(readOnly: true).sendBlockReason, .readOnly)
     }
 
-    func testHistorySynchronizationBlocksSubmissionButNotDraftEditing() {
+    func testHistorySynchronizationBlocksSubmissionButAllowsLocalDraftActions() {
         let c = InputBarConfig(
             allowsTextEntry: true,
-            allowsAttachments: false,
+            allowsAttachments: true,
+            allowsSpeechCapture: true,
             allowsSubmission: false,
             availabilityBlockReason: .historySynchronizing
         )
         XCTAssertTrue(c.allowsTextEntry)
-        XCTAssertFalse(c.allowsAttachments)
+        XCTAssertTrue(c.allowsAttachments)
+        XCTAssertTrue(c.allowsSpeechCapture)
+        XCTAssertFalse(c.attachmentSelectionDisabled)
+        XCTAssertNil(c.attachmentBlockReason)
+        XCTAssertFalse(c.speechCaptureDisabled)
+        XCTAssertNil(c.speechCaptureBlockReason)
         XCTAssertFalse(c.canSend(hasContent: true))
         XCTAssertEqual(c.sendBlockReason, .historySynchronizing)
+    }
+
+    func testInitialHistoryLoadingDisablesEveryDraftActuatorWithOneReason() {
+        let c = InputBarConfig(
+            allowsTextEntry: false,
+            allowsAttachments: false,
+            allowsSpeechCapture: false,
+            allowsSubmission: false,
+            availabilityBlockReason: .historySynchronizing
+        )
+
+        XCTAssertFalse(c.allowsTextEntry)
+        XCTAssertTrue(c.attachmentSelectionDisabled)
+        XCTAssertEqual(c.attachmentBlockReason, .historySynchronizing)
+        XCTAssertTrue(c.speechCaptureDisabled)
+        XCTAssertEqual(c.speechCaptureBlockReason, .historySynchronizing)
+        XCTAssertEqual(c.sendBlockReason, .historySynchronizing)
+    }
+
+    func testDisconnectedAuthoritativeChatKeepsLocalAttachmentsButBlocksNetworkActions() {
+        let c = InputBarConfig(isConnected: false)
+
+        XCTAssertFalse(c.attachmentSelectionDisabled)
+        XCTAssertNil(c.attachmentBlockReason)
+        XCTAssertTrue(c.speechCaptureDisabled)
+        XCTAssertEqual(c.speechCaptureBlockReason, .disconnected)
+        XCTAssertEqual(c.sendBlockReason, .disconnected)
     }
 
     // MARK: - Priority order

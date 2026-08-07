@@ -54,9 +54,6 @@ struct SystemEventView: View {
         case .messageDeleted(let targetType):
             MessageDeletedNotificationView(targetType: targetType)
 
-        case .catchingUp:
-            CatchingUpNotificationView()
-
         case .turnFailed(let error, let code, let recoverable, _):
             // C7: when the server marked the failure recoverable, surface a
             // "Retry" button that re-issues the last user prompt. Handler

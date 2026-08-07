@@ -83,11 +83,6 @@ extension ChatMessage {
         ChatMessage(role: .system, content: .messageDeleted(targetType: targetType))
     }
 
-    /// In-chat notification for catching up to in-progress session
-    static func catchingUp() -> ChatMessage {
-        ChatMessage(role: .system, content: .catchingUp)
-    }
-
     /// Thinking block message (appears before the text response)
     static func thinking(
         _ text: String,

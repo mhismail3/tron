@@ -55,7 +55,7 @@ enum SendBlockReason: Equatable, Sendable {
     case disconnected
     /// Context compaction is in progress.
     case compacting
-    /// The shared interaction policy currently treats this chat view as read-only.
+    /// This presentation does not permit session mutation.
     case readOnly
     /// Cached content is visible, but the authoritative session cut is not ready.
     case historySynchronizing
@@ -107,16 +107,52 @@ struct InputBarConfig {
     /// Why the send button would be unavailable even with non-empty input.
     /// `nil` means no async blocker; input emptiness is the only remaining gate.
     ///
-    /// Evaluation order matters: show the FIRST reason that applies, so
-    /// the tooltip names the most specific cause. `readOnly` wins over
-    /// everything else (the session fundamentally can't accept input);
-    /// `disconnected` over async processing (reconnect would unblock it
-    /// regardless of what the server is doing).
+    /// Evaluation order matters: presentation and history authority win over
+    /// transport state because reconnecting alone cannot make either writable.
     var sendBlockReason: SendBlockReason? {
         if readOnly { return .readOnly }
+        if !allowsSubmission {
+            return availabilityBlockReason ?? .historyUnavailable
+        }
         if let availabilityBlockReason { return availabilityBlockReason }
         if !isConnected { return .disconnected }
         if isCompacting { return .compacting }
+        return nil
+    }
+
+    /// Attachment selection edits only the local draft. It remains available
+    /// while the transport reconnects or cached history is being verified.
+    var attachmentSelectionDisabled: Bool {
+        readOnly || agentPhase.isActive || !allowsAttachments
+    }
+
+    var attachmentBlockReason: SendBlockReason? {
+        guard attachmentSelectionDisabled else { return nil }
+        if readOnly { return .readOnly }
+        if !allowsAttachments {
+            return availabilityBlockReason ?? .historyUnavailable
+        }
+        return nil
+    }
+
+    /// Recording is a local draft actuator, but transcription requires the
+    /// live worker transport. An active recording must always remain stoppable.
+    var speechCaptureDisabled: Bool {
+        if isRecording { return false }
+        return readOnly
+            || !allowsSpeechCapture
+            || agentPhase.isActive
+            || isTranscribing
+            || !isConnected
+    }
+
+    var speechCaptureBlockReason: SendBlockReason? {
+        guard speechCaptureDisabled else { return nil }
+        if readOnly { return .readOnly }
+        if !allowsSpeechCapture {
+            return availabilityBlockReason ?? .historyUnavailable
+        }
+        if !isConnected { return .disconnected }
         return nil
     }
 
@@ -140,7 +176,9 @@ struct InputBarConfig {
     let allowsTextEntry: Bool
     /// Attachment selection is visible in interactive chats but independently gated.
     let allowsAttachments: Bool
-    /// Submission and speech capture require an authoritative history cut.
+    /// Speech capture is draft-local and does not require an authoritative history cut.
+    let allowsSpeechCapture: Bool
+    /// Only server submission requires an authoritative history cut.
     let allowsSubmission: Bool
     /// History-specific explanation for an unavailable interactive action.
     let availabilityBlockReason: SendBlockReason?
@@ -175,6 +213,7 @@ struct InputBarConfig {
         readOnly: Bool = false,
         allowsTextEntry: Bool = true,
         allowsAttachments: Bool = true,
+        allowsSpeechCapture: Bool = true,
         allowsSubmission: Bool = true,
         availabilityBlockReason: SendBlockReason? = nil,
         showDragHint: Bool = false
@@ -194,6 +233,7 @@ struct InputBarConfig {
         self.readOnly = readOnly
         self.allowsTextEntry = allowsTextEntry
         self.allowsAttachments = allowsAttachments
+        self.allowsSpeechCapture = allowsSpeechCapture
         self.allowsSubmission = allowsSubmission
         self.availabilityBlockReason = availabilityBlockReason
         self.showDragHint = showDragHint

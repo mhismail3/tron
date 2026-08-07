@@ -2,6 +2,83 @@ import Testing
 import Foundation
 
 extension SourceGuardTests {
+    @Test("Interactive chat loading has one visible owner and one action policy")
+    func testInteractiveChatLoadingPresentationRemainsCoherent() throws {
+        let iosRoot = iosAppRoot()
+        let messageList = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/UI/Chat/Shell/ChatView+MessageList.swift"
+            ),
+            encoding: .utf8
+        )
+        let chatView = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/UI/Chat/Shell/ChatView.swift"
+            ),
+            encoding: .utf8
+        )
+        let timelineNotifications = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/UI/Chat/Messages/NotificationViews.swift"
+            ),
+            encoding: .utf8
+        )
+        let systemEvents = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/Session/Timeline/Messages/SystemEvent.swift"
+            ),
+            encoding: .utf8
+        )
+        let reconstruction = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/Session/Chat/ViewModel/ChatViewModel+Reconstruction.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(messageList.contains("placeholderText: historyPhase.placeholderText"))
+        #expect(messageList.contains("allowsTextEntry: historyPhase.allowsLocalDraftActions"))
+        #expect(messageList.contains("allowsAttachments: historyPhase.allowsLocalDraftActions"))
+        #expect(messageList.contains("allowsSpeechCapture: historyPhase.allowsLocalDraftActions"))
+        #expect(messageList.contains("allowsSubmission: historyPhase.hasAuthoritativeSnapshot"))
+        #expect(messageList.contains("availabilityBlockReason: historyPhase.submissionBlockReason"))
+        #expect(messageList.contains(".allowsHitTesting(initialLoadComplete)"))
+        #expect(messageList.contains(".accessibilityHidden(!initialLoadComplete)"))
+        #expect(!messageList.contains("Loading conversation"))
+        #expect(!messageList.contains("chat-history-loading-state"))
+        #expect(!messageList.contains("interactionPolicy"))
+        #expect(!chatView.contains("@Environment(\\.interactionPolicy)"))
+        #expect(!timelineNotifications.contains("CatchingUpNotificationView"))
+        #expect(!systemEvents.contains("case catchingUp"))
+
+        let commitStart = try #require(reconstruction.range(
+            of: "// INVARIANT: Do not suspend between this marker"
+        ))
+        let commitEnd = try #require(reconstruction.range(
+            of: "\n        conversationHistoryPhase = .authoritative",
+            range: commitStart.upperBound..<reconstruction.endIndex
+        ))
+        let snapshotCommit = reconstruction[
+            commitStart.lowerBound..<commitEnd.upperBound
+        ]
+        #expect(snapshotCommit.contains("replaceAllMessages"))
+        #expect(snapshotCommit.contains("updateTokenState"))
+        #expect(!snapshotCommit.contains("await "))
+
+        let cachedCommitStart = try #require(reconstruction.range(
+            of: "// INVARIANT: Cached rows and their draft-ready phase publish"
+        ))
+        let cachedCommitEnd = try #require(reconstruction.range(
+            of: "\n            conversationHistoryPhase = .cachedSynchronizing",
+            range: cachedCommitStart.upperBound..<reconstruction.endIndex
+        ))
+        let cachedCommit = reconstruction[
+            cachedCommitStart.lowerBound..<cachedCommitEnd.upperBound
+        ]
+        #expect(cachedCommit.contains("replaceAllMessages"))
+        #expect(!cachedCommit.contains("await "))
+    }
+
     @Test("Chat composer reads canonical connection repository without a view-model mirror")
     func testChatComposerReadsCanonicalConnectionRepository() throws {
         let iosRoot = iosAppRoot()

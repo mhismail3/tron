@@ -89,7 +89,7 @@ final class RetryTurnTests: XCTestCase {
         // than silently grabbing an assistant message.
         viewModel.messages = [
             ChatMessage(role: .assistant, content: .text("hello")),
-            ChatMessage(role: .system, content: .systemEvent(.catchingUp)),
+            ChatMessage(role: .system, content: .systemEvent(.interrupted)),
         ]
 
         XCTAssertNil(viewModel.findLastUserTextMessage())

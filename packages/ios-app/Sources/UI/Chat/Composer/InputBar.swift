@@ -48,12 +48,28 @@ struct InputBar: View {
     }
 
     private var micDisabled: Bool {
-        if config.isRecording { return false }
-        return config.readOnly
-            || !config.allowsSubmission
-            || config.agentPhase.isActive
-            || config.isTranscribing
-            || !config.isConnected
+        config.speechCaptureDisabled
+    }
+
+    private var trailingMode: ComposerTrailingMode {
+        ComposerTrailingMode(
+            showStop: showStop,
+            hasContent: state.hasContent,
+            canRecord: config.speechTranscriptionAvailable,
+            isRecording: config.isRecording,
+            isTranscribing: config.isTranscribing
+        )
+    }
+
+    private var trailingBlockedReason: String? {
+        switch trailingMode {
+        case .send:
+            config.sendBlockReason?.description
+        case .record:
+            config.speechCaptureBlockReason?.description
+        case .stopAgent, .stopRecording, .transcribing:
+            nil
+        }
     }
 
     // MARK: - Body
@@ -93,13 +109,10 @@ struct InputBar: View {
 
                 if !config.readOnly {
                     ComposerTrailingButton(
-                        showStop: showStop,
+                        mode: trailingMode,
                         canSend: canSend,
-                        canRecord: config.speechTranscriptionAvailable,
-                        isRecording: config.isRecording,
-                        isTranscribing: config.isTranscribing,
                         micDisabled: micDisabled,
-                        blockedReason: config.sendBlockReason?.description,
+                        blockedReason: trailingBlockedReason,
                         onSend: actions.onSend,
                         onAbort: actions.onAbort,
                         onMicTap: {
@@ -108,7 +121,7 @@ struct InputBar: View {
                         },
                         buttonSize: actionButtonSize
                     )
-                    .help(config.sendBlockReason?.description ?? "")
+                    .help(trailingBlockedReason ?? "")
                 }
             }
             .frame(minHeight: actionButtonSize)
@@ -122,15 +135,15 @@ struct InputBar: View {
             .overlay(alignment: .bottomLeading) {
                 if !config.readOnly {
                     ComposerAttachmentButton(
-                        isDisabled: config.agentPhase.isActive || !config.allowsAttachments,
-                        disabledReason: config.sendBlockReason?.description,
+                        isDisabled: config.attachmentSelectionDisabled,
+                        disabledReason: config.attachmentBlockReason?.description,
                         attachmentSupport: config.attachmentSupport,
                         includeRecentInputs: shouldShowRecentInputsMenuAction,
                         onSelect: presentAttachmentAction,
                         buttonSize: actionButtonSize
                     )
                     .padding(.leading, 4)
-                    .help(config.sendBlockReason?.description ?? "")
+                    .help(config.attachmentBlockReason?.description ?? "")
                 }
             }
             .overlay(alignment: .top) {

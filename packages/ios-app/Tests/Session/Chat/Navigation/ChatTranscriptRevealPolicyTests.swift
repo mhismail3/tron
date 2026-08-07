@@ -14,19 +14,32 @@ struct ChatTranscriptRevealPolicyTests {
         #expect(ChatTranscriptRevealPolicy.contentOpacity(initialLoadComplete: true) == 1)
     }
 
-    @Test("Pending history shows loading instead of an empty transcript")
-    func pendingHistoryShowsLoadingState() {
-        #expect(ChatTranscriptRevealPolicy.showsHistoryLoadingState(
-            phase: .loading,
+    @Test("Pending history has one composer-owned loading presentation")
+    func pendingHistoryPresentationState() {
+        let phase = ConversationHistoryPhase.loading
+        #expect(!phase.hasAuthoritativeSnapshot)
+        #expect(!phase.allowsLocalDraftActions)
+        #expect(phase.submissionBlockReason == .historySynchronizing)
+        #expect(phase.placeholderText == "Loading latest messages")
+        #expect(phase.placeholderShowsProgress)
+        #expect(!ChatTranscriptRevealPolicy.showsHistoryRecoveryState(
+            phase: phase,
             hasMessages: false
         ))
-        #expect(!ChatTranscriptRevealPolicy.showsHistoryLoadingState(
-            phase: .cachedSynchronizing,
-            hasMessages: true
+        #expect(!ChatTranscriptRevealPolicy.showsStandaloneLoadingState(
+            phase: phase,
+            hasMessages: false,
+            hasComposer: true
         ))
-        #expect(!ChatTranscriptRevealPolicy.showsHistoryLoadingState(
-            phase: .authoritative,
-            hasMessages: false
+        #expect(ChatTranscriptRevealPolicy.showsStandaloneLoadingState(
+            phase: phase,
+            hasMessages: false,
+            hasComposer: false
+        ))
+        #expect(!ChatTranscriptRevealPolicy.showsStandaloneLoadingState(
+            phase: phase,
+            hasMessages: true,
+            hasComposer: false
         ))
     }
 
@@ -35,7 +48,8 @@ struct ChatTranscriptRevealPolicyTests {
         let phase = ConversationHistoryPhase.cachedSynchronizing
         #expect(!phase.hasAuthoritativeSnapshot)
         #expect(phase.showsCachedTranscript)
-        #expect(phase.allowsDraftEditing)
+        #expect(phase.allowsLocalDraftActions)
+        #expect(phase.submissionBlockReason == .historySynchronizing)
         #expect(phase.placeholderText == "Type here")
         #expect(!phase.placeholderShowsProgress)
         #expect(!ChatTranscriptRevealPolicy.showsHistoryRecoveryState(
@@ -51,12 +65,29 @@ struct ChatTranscriptRevealPolicyTests {
         )
         #expect(!phase.hasAuthoritativeSnapshot)
         #expect(!phase.showsCachedTranscript)
-        #expect(!phase.allowsDraftEditing)
+        #expect(!phase.allowsLocalDraftActions)
+        #expect(phase.submissionBlockReason == .historyUnavailable)
         #expect(phase.placeholderText == "Conversation unavailable")
         #expect(!phase.placeholderShowsProgress)
         #expect(ChatTranscriptRevealPolicy.showsHistoryRecoveryState(
             phase: phase,
             hasMessages: false
+        ))
+    }
+
+    @Test("Cached failure preserves local drafts but reports unavailable submission")
+    func failedCachedHistoryPresentationState() {
+        let phase = ConversationHistoryPhase.recoverableFailure(
+            hasCachedTranscript: true
+        )
+        #expect(phase.showsCachedTranscript)
+        #expect(phase.allowsLocalDraftActions)
+        #expect(phase.submissionBlockReason == .historyUnavailable)
+        #expect(phase.placeholderText == "Type here")
+        #expect(!phase.placeholderShowsProgress)
+        #expect(!ChatTranscriptRevealPolicy.showsHistoryRecoveryState(
+            phase: phase,
+            hasMessages: true
         ))
     }
 

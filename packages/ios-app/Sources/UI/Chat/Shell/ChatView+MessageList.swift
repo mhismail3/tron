@@ -6,17 +6,6 @@ extension ChatView {
 
     var inputAreaContent: some View {
         let historyPhase = viewModel.conversationHistoryPhase
-        let hasAuthoritativeHistory = historyPhase.hasAuthoritativeSnapshot
-        let interactionIsConnected = interactionPolicy?.isConnected ?? false
-        let historyBlockReason: SendBlockReason? = if hasAuthoritativeHistory {
-            nil
-        } else if historyPhase.showsCachedTranscript || historyPhase == .loading {
-            .historySynchronizing
-        } else {
-            .historyUnavailable
-        }
-        let composerBlockReason = historyBlockReason
-            ?? (interactionIsConnected ? nil : .disconnected)
         return VStack(spacing: 0) {
             VStack(spacing: 8) {
                 InputBar(
@@ -35,10 +24,11 @@ extension ChatView {
                         currentModelInfo: currentModelInfo,
                         inputHistory: inputHistory,
                         readOnly: presentationMode != .interactiveSession,
-                        allowsTextEntry: historyPhase.allowsDraftEditing,
-                        allowsAttachments: hasAuthoritativeHistory && interactionIsConnected,
-                        allowsSubmission: hasAuthoritativeHistory && interactionIsConnected,
-                        availabilityBlockReason: composerBlockReason,
+                        allowsTextEntry: historyPhase.allowsLocalDraftActions,
+                        allowsAttachments: historyPhase.allowsLocalDraftActions,
+                        allowsSpeechCapture: historyPhase.allowsLocalDraftActions,
+                        allowsSubmission: historyPhase.hasAuthoritativeSnapshot,
+                        availabilityBlockReason: historyPhase.submissionBlockReason,
                         showDragHint: false
                     ),
                     actions: InputBarActions(
@@ -117,11 +107,13 @@ extension ChatView {
                 messagesScrollView
             }
 
-            if ChatTranscriptRevealPolicy.showsHistoryLoadingState(
+            if ChatTranscriptRevealPolicy.showsStandaloneLoadingState(
                 phase: viewModel.conversationHistoryPhase,
-                hasMessages: !viewModel.messages.isEmpty
+                hasMessages: !viewModel.messages.isEmpty,
+                hasComposer: presentationMode == .interactiveSession
             ) {
-                historyLoadingState
+                SheetLoadingState(label: "Loading worker activity…")
+                    .accessibilityIdentifier("worker-audit-history-loading-state")
             } else if ChatTranscriptRevealPolicy.showsHistoryRecoveryState(
                 phase: viewModel.conversationHistoryPhase,
                 hasMessages: !viewModel.messages.isEmpty
@@ -129,21 +121,6 @@ extension ChatView {
                 historyRecoveryState
             }
         }
-    }
-
-    private var historyLoadingState: some View {
-        VStack(spacing: 10) {
-            ProgressView()
-                .controlSize(.regular)
-            Text("Loading conversation…")
-                .font(TronTypography.sans(
-                    size: TronTypography.sizeBodySM,
-                    weight: .medium
-                ))
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("chat-history-loading-state")
     }
 
     private var historyRecoveryState: some View {
@@ -491,6 +468,8 @@ extension ChatView {
                 }
             }
             .opacity(ChatTranscriptRevealPolicy.contentOpacity(initialLoadComplete: initialLoadComplete))
+            .allowsHitTesting(initialLoadComplete)
+            .accessibilityHidden(!initialLoadComplete)
             .animation(.easeOut(duration: 0.28), value: initialLoadComplete)
 
             // Floating "New Content" pill — shows when user scrolled away and new content arrived

@@ -109,7 +109,7 @@ final class ChatSpeechTranscriptionCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             ComposerTrailingMode(
                 showStop: false,
-                canSend: false,
+                hasContent: false,
                 canRecord: true,
                 isRecording: false,
                 isTranscribing: false
@@ -119,12 +119,23 @@ final class ChatSpeechTranscriptionCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             ComposerTrailingMode(
                 showStop: false,
-                canSend: false,
+                hasContent: false,
                 canRecord: false,
                 isRecording: false,
                 isTranscribing: false
             ),
             .send
+        )
+        XCTAssertEqual(
+            ComposerTrailingMode(
+                showStop: false,
+                hasContent: true,
+                canRecord: true,
+                isRecording: false,
+                isTranscribing: false
+            ),
+            .send,
+            "A blocked non-empty draft must show Send rather than an unrelated microphone"
         )
     }
 
@@ -132,7 +143,7 @@ final class ChatSpeechTranscriptionCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             ComposerTrailingMode(
                 showStop: true,
-                canSend: true,
+                hasContent: true,
                 canRecord: true,
                 isRecording: true,
                 isTranscribing: true
@@ -142,7 +153,7 @@ final class ChatSpeechTranscriptionCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             ComposerTrailingMode(
                 showStop: false,
-                canSend: true,
+                hasContent: true,
                 canRecord: true,
                 isRecording: true,
                 isTranscribing: false
@@ -152,7 +163,7 @@ final class ChatSpeechTranscriptionCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             ComposerTrailingMode(
                 showStop: false,
-                canSend: true,
+                hasContent: true,
                 canRecord: true,
                 isRecording: false,
                 isTranscribing: true

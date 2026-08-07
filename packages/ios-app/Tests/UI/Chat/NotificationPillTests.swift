@@ -46,11 +46,6 @@ final class NotificationPillTests: XCTestCase {
         XCTAssertNotNil(view)
     }
 
-    func testCatchingUpNotificationCreation() {
-        let view = CatchingUpNotificationView()
-        XCTAssertNotNil(view)
-    }
-
     func testContextClearedNotificationCreation() {
         let view = ContextClearedNotificationView(tokensBefore: 80000, tokensAfter: 20000)
         XCTAssertNotNil(view)

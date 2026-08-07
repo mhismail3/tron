@@ -116,7 +116,7 @@ enum ComposerTrailingMode: Equatable {
 
     init(
         showStop: Bool,
-        canSend: Bool,
+        hasContent: Bool,
         canRecord: Bool,
         isRecording: Bool,
         isTranscribing: Bool
@@ -127,7 +127,7 @@ enum ComposerTrailingMode: Equatable {
             self = .stopRecording
         } else if isTranscribing {
             self = .transcribing
-        } else if canSend || !canRecord {
+        } else if hasContent || !canRecord {
             self = .send
         } else {
             self = .record
@@ -160,27 +160,14 @@ enum ComposerTrailingMode: Equatable {
 }
 
 struct ComposerTrailingButton: View {
-    let showStop: Bool
+    let mode: ComposerTrailingMode
     let canSend: Bool
-    let canRecord: Bool
-    let isRecording: Bool
-    let isTranscribing: Bool
     let micDisabled: Bool
     var blockedReason: String? = nil
     let onSend: () -> Void
     let onAbort: () -> Void
     let onMicTap: () -> Void
     let buttonSize: CGFloat
-
-    private var mode: ComposerTrailingMode {
-        ComposerTrailingMode(
-            showStop: showStop,
-            canSend: canSend,
-            canRecord: canRecord,
-            isRecording: isRecording,
-            isTranscribing: isTranscribing
-        )
-    }
 
     private var isDisabled: Bool {
         switch mode {
@@ -227,11 +214,8 @@ struct ComposerTrailingButton: View {
         .buttonStyle(.plain)
         .disabled(isDisabled)
         .contentTransition(.symbolEffect(.replace))
-        .animation(.easeInOut(duration: 0.2), value: showStop)
+        .animation(.easeInOut(duration: 0.2), value: mode)
         .animation(.easeInOut(duration: 0.2), value: canSend)
-        .animation(.easeInOut(duration: 0.2), value: canRecord)
-        .animation(.easeInOut(duration: 0.2), value: isRecording)
-        .animation(.easeInOut(duration: 0.2), value: isTranscribing)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(
             mode.accessibilityHint(
