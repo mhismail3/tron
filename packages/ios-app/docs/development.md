@@ -874,7 +874,14 @@ scripts/bootstrap-ios-release-runner.sh --repair-service
 
 Repair validates the existing account, pinned runner version, exact GitHub
 runner ID, registration, files, and remote
-idle state before changing launchd. It temporarily removes only the dedicated
+idle state before changing launchd. Installations produced by the former
+privileged-tar bootstrap can have an `actions-runner` directory whose mode was
+broadened from 0700 to the pinned archive root's 0755 even though its enclosing
+home remained private. Repair recognizes only that exact legacy mode, waits for
+the exact remote runner to be idle, tightens it as `tron-ci`, and revalidates
+the complete installation before staging the cutover; every other unexpected
+mode fails closed. Fresh extraction also reasserts and verifies the directory's
+0700 boundary after tar completes. Repair temporarily removes only the dedicated
 `tron-ios-release` scheduling label and observes the runner idle twice, so a
 queued release cannot race the cutover. Each observation validates busy state
 and label presence from one successful GitHub API snapshot; malformed or failed
@@ -893,8 +900,8 @@ makes an interrupted process or reboot resumable. A completed repair is
 idempotent; inconsistent mixed topologies and a busy runner fail closed. Repair
 reuses the existing registration and credential files—it does not unregister
 or rotate the runner. Root mutates only root-owned service paths; all paths
-beneath the runner home are created and changed as `tron-ci` to prevent
-privileged symlink-follow races.
+beneath the runner home, including legacy permission normalization, are created
+and changed as `tron-ci` to prevent privileged symlink-follow races.
 
 Rotation is explicit. Stop and remove the Background agent and its boot helper,
 request a short-lived removal token, unregister as the service account, then

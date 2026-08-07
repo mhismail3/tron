@@ -1669,6 +1669,9 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "runner isolation ACL does not deny list and search access",
         "run_as_runner()",
         "cd /",
+        "classify_existing_runner_directory_mode()",
+        "normalize_existing_runner_directory_mode()",
+        "validate_runner_directory_identity()",
         "validate_private_runner_directory()",
         "recorded_runner_home",
         "NFSHomeDirectory",
@@ -1747,6 +1750,13 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
             "release runner bootstrap is missing isolation behavior {required}"
         );
     }
+    assert_eq!(
+        bootstrap
+            .matches("run_as_runner /bin/chmod 700 \"$runner_dir\"")
+            .count(),
+        2,
+        "fresh installation and legacy repair must both establish the mode-0700 runner directory as its unprivileged owner"
+    );
     assert!(
         !bootstrap.contains("chmod 700 \"$invoking_home\"")
             && !bootstrap.contains("chmod go-rwx \"$invoking_home\""),
@@ -1852,6 +1862,9 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     let busy_gate = repair
         .find("[[ \"$remote_runner_busy\" == \"false\" ]]")
         .expect("service repair must reject a remotely busy runner");
+    let mode_normalization = repair
+        .find("normalize_existing_runner_directory_mode")
+        .expect("service repair must normalize the known legacy archive mode");
     let staged_service = repair
         .find("stage_runner_service_files")
         .expect("service repair must stage and validate its candidate files");
@@ -1897,7 +1910,8 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         .expect("service repair must restore scheduling only after cutover");
     assert!(
         state_observation < busy_gate
-            && busy_gate < staged_service
+            && busy_gate < mode_normalization
+            && mode_normalization < staged_service
             && scheduling_fence < migration_active
             && migration_active < legacy_journal
             && legacy_journal < legacy_stop
