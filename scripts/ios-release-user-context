@@ -1,12 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-# Run a release command in the isolated account's own launchd bootstrap and
-# audit session. The GitHub listener is intentionally a system-domain daemon
-# that drops its Unix credentials to tron-ci; Unix credentials alone do not
-# move its descendants out of the privileged system bootstrap. Keychain and
-# CodeSign need the matching per-user bootstrap so they can reach that user's
-# secd and trustd services.
+# Run a release command only when the listener already belongs to the isolated
+# account's own launchd bootstrap and audit session. Keychain and CodeSign need
+# that per-user context so they can reach the account's secd and trustd
+# services. This boundary deliberately refuses to cross from another launchd
+# domain: `launchctl asuser` cannot repair a listener that was installed in the
+# privileged system domain, and attempting that transition can retain a mixed
+# Unix/audit identity.
 
 die() {
     echo "::error::$*" >&2
@@ -30,39 +31,16 @@ release_user="$(/usr/bin/id -un)"
 
 manager_uid="$(/bin/launchctl manageruid 2>/dev/null || true)"
 manager_name="$(/bin/launchctl managername 2>/dev/null || true)"
-if [[ "$manager_uid" == "$release_uid" ]]; then
-    case "$manager_name" in
-        Aqua | Background) ;;
-        *) die "the current user launchd context has an unsupported session type" ;;
-    esac
-    /usr/bin/python3 "$session_verifier" \
-        security-session \
-        --require-non-root \
-        --require-audit-uid "$release_uid" >/dev/null \
-        || die "the current user launchd context has a mixed audit identity"
-    exec "$@"
-fi
-
-# `asuser` changes the Mach bootstrap namespace and security audit session but
-# deliberately does not change Unix credentials. That is exactly the required
-# transition here because launchd already spawned the runner as release_uid.
-target_manager_uid="$(
-    /bin/launchctl asuser "$release_uid" /bin/launchctl manageruid 2>/dev/null
-)" || die "the isolated release account has no usable launchd user domain"
-target_manager_name="$(
-    /bin/launchctl asuser "$release_uid" /bin/launchctl managername 2>/dev/null
-)" || die "the isolated release account launchd session type is unavailable"
-[[ "$target_manager_uid" == "$release_uid" ]] \
-    || die "the release user-domain bootstrap does not match the Unix account"
-case "$target_manager_name" in
+[[ "$manager_uid" == "$release_uid" ]] \
+    || die "the current launchd domain does not match the release account"
+case "$manager_name" in
     Aqua | Background) ;;
-    *) die "the release user-domain bootstrap has an unsupported session type" ;;
+    *) die "the current user launchd context has an unsupported session type" ;;
 esac
-/bin/launchctl asuser "$release_uid" \
-    /usr/bin/python3 "$session_verifier" \
+/usr/bin/python3 "$session_verifier" \
     security-session \
     --require-non-root \
     --require-audit-uid "$release_uid" >/dev/null \
-    || die "the release user-domain bootstrap has a mixed audit identity"
+    || die "the current user launchd context has a mixed audit identity"
 
-exec /bin/launchctl asuser "$release_uid" "$@"
+exec "$@"

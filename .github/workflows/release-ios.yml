@@ -12,9 +12,9 @@
 # iOS 26 floor. Release tags retain the external/public TestFlight path and Beta
 # App Review handling.
 # Simulator/XCTest remains on hosted CI because the isolated release listener
-# is a system-domain service with no logged-in Aqua session. Signing-sensitive
-# commands cross into that same account's headless Background launchd domain,
-# where its Unix identity, audit identity, secd, and trustd namespace agree;
+# runs in its hidden account's headless Background launchd domain, not a logged-
+# in Aqua session. Signing-sensitive commands stay inside that domain, where
+# the Unix identity, audit identity, secd, and trustd namespace agree;
 # the Xcode 27 archive is the SDK-linked compilation and distribution proof.
 # Fresh builds use one monotonic Release-workflow allocation encoded as a valid
 # three-segment CFBundleVersion. Automatic upstream reruns authenticate and
@@ -573,9 +573,10 @@ jobs:
         run: scripts/ios-release-runner-doctor.sh
 
       - name: Recover stale iOS release credentials
-        shell: ./scripts/ios-release-user-context /bin/bash --noprofile --norc -e -o pipefail {0}
+        shell: /bin/bash --noprofile --norc -e -o pipefail {0}
         run: |
           set -euo pipefail
+          "$GITHUB_WORKSPACE/scripts/ios-release-user-context" /usr/bin/true
           python3 scripts/ios-release-credential-ledger.py recover
           python3 scripts/ios-release-credential-ledger.py prepare-profile-directory
           python3 scripts/ios-release-credential-ledger.py audit
@@ -980,7 +981,7 @@ jobs:
 
       - name: Prepare manual iOS signing assets
         if: steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true' && steps.signing.outputs.mode == 'manual'
-        shell: ./scripts/ios-release-user-context /bin/bash --noprofile --norc -e -o pipefail {0}
+        shell: /bin/bash --noprofile --norc -e -o pipefail {0}
         env:
           IOS_DISTRIBUTION_CERT_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERT_P12_BASE64 }}
           IOS_DISTRIBUTION_CERT_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERT_PASSWORD }}
@@ -988,6 +989,7 @@ jobs:
           IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64: ${{ secrets.IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64 }}
         run: |
           set -euo pipefail
+          "$GITHUB_WORKSPACE/scripts/ios-release-user-context" /usr/bin/true
           umask 077
           source config/ci-toolchain.env
 
@@ -1302,9 +1304,10 @@ jobs:
 
       - name: xcodebuild archive
         if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
-        shell: ./scripts/ios-release-user-context /bin/bash --noprofile --norc -e -o pipefail {0}
+        shell: /bin/bash --noprofile --norc -e -o pipefail {0}
         run: |
           set -euo pipefail
+          "$GITHUB_WORKSPACE/scripts/ios-release-user-context" /usr/bin/true
           cd "$IOS_APP_DIR"
           archive_path="$(pwd)/build/TronMobile.xcarchive"
           rm -rf "$archive_path"
@@ -1384,9 +1387,10 @@ jobs:
 
       - name: Export App Store IPA
         if: steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
-        shell: ./scripts/ios-release-user-context /bin/bash --noprofile --norc -e -o pipefail {0}
+        shell: /bin/bash --noprofile --norc -e -o pipefail {0}
         run: |
           set -euo pipefail
+          "$GITHUB_WORKSPACE/scripts/ios-release-user-context" /usr/bin/true
           cd "$IOS_APP_DIR"
           export_dir="$(pwd)/build/export"
           ipa_path="$(pwd)/build/TronMobile.ipa"
@@ -2547,7 +2551,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ios-asc-diagnostics-${{ steps.ver.outputs.apple_build }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.ASC_DIAGNOSTICS_DIR }}
+          path: ${{ runner.temp }}/ios-asc-diagnostics
           retention-days: 7
           if-no-files-found: warn
 
@@ -2589,9 +2593,10 @@ jobs:
 
       - name: Tear down iOS release credentials
         if: always()
-        shell: ./scripts/ios-release-user-context /bin/bash --noprofile --norc {0}
+        shell: /bin/bash --noprofile --norc {0}
         run: |
           set +e
+          "$GITHUB_WORKSPACE/scripts/ios-release-user-context" /usr/bin/true || exit 1
           cleanup_failed=0
           keychain_path=""
           credential_ledger_path=""

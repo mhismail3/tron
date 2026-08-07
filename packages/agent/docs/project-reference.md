@@ -2959,15 +2959,35 @@ processing and replay-safe group assignment follow the exact ASC build ID.
 Release tags independently advance their build through external Beta App Review
 and the public group. Pull-request CI never receives distribution credentials or
 triggers TestFlight delivery. The dedicated macOS release runner is a
-system-domain launchd job that drops privileges to its isolated service account;
-hosted macOS CI retains Simulator/XCTest ownership because those tools require a
-logged-in user session, while the release runner owns only Xcode 27 archive,
-export, verification, upload, and distribution. The system-domain listener's
-Unix account does not by itself establish the matching macOS Keychain context.
-Before secrets are exposed, the doctor therefore rejects a root Security
-framework session, enters the same account's headless Background launchd
-domain through `launchctl asuser`, and proves that both launchd's manager UID
-and the audit UID equal the effective UID. A secretless recovery step then
+root-owned agent definition stored outside launchd's global LaunchAgents
+discovery directory and loaded explicitly into its isolated service account's
+headless `user/<uid>` Background domain. A one-shot root LaunchDaemon creates
+that independent domain at boot and loads the agent; the long-lived listener is
+never a system-domain process. `LimitLoadToSessionType=Background` and
+`SessionCreate=true` provide the matching bootstrap and non-root audit context
+without a GUI login. Hosted macOS CI retains Simulator/XCTest ownership because
+those tools require an Aqua session, while the release runner owns only Xcode
+27 archive, export, verification, upload, and distribution. Before secrets are
+exposed, the doctor proves that launchd's manager UID and the Security framework
+audit UID both equal the effective UID, requires the Background manager type,
+and rejects a root security session. The command boundary validates and executes
+in that current context; it never uses `launchctl asuser` to mask a listener
+installed in the wrong domain. Fresh installation and service repair share one
+root-owned host lock. Existing legacy system-domain installations move through
+the bootstrap's `--repair-service` transaction: it fences the exact idle runner
+by removing its dedicated scheduling label. Busy state and label presence come
+from one validated remote snapshot, so API failures cannot masquerade as label
+absence. Repair then
+atomically moves the legacy plist to a root-owned non-autoloading journal,
+proves that exact runner offline, and admits the replacement only after its new
+listener takes the same ID online. Proving that candidate online is the logical
+commit; journal cleanup then precedes restoring the label. A cleanup failure
+keeps the verified candidate running and scheduling fenced. Failed pre-commit
+cutovers stop the helper before the agent, prove the exact runner offline,
+restore and verify the legacy listener, and then reopen scheduling. The durable
+journal makes process interruption and reboot resumable. Root never mutates runner-owned home
+descendants. The iOS development runbook owns the current agent, boot-helper,
+legacy cleanup, and full rotation paths. A secretless recovery step then
 restores the baseline keychain preferences, removes only paths claimed by
 strict durable attempt ledgers, creates or validates the provisioning-profile
 directory component-by-component with no-follow ownership checks, and proves
