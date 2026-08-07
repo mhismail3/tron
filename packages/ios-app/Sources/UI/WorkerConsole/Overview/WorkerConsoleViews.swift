@@ -25,7 +25,7 @@ private enum EngineDashboardSection: String, CaseIterable {
 }
 
 private struct EngineDashboardRefreshKey: Equatable {
-    let isConnected: Bool
+    let continuity: EngineConnectionContinuity
     let section: EngineDashboardSection
     let isCovered: Bool
 }
@@ -110,20 +110,27 @@ struct WorkerConsoleDashboardBand: View {
 }
 
 struct WorkerConsoleSheet: View {
+    @Environment(\.dependencies) private var dependencies
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
     let modelRepository: any ModelRepository
-    let connectionState: ConnectionState
 
     @State private var selectedSection: EngineDashboardSection = .workers
     @State private var selectedCoreTool: EngineSurfaceToolDTO?
     @State private var showInboxAudit = false
+
+    private var connectionState: ConnectionState {
+        dependencies.connectionRepository.connectionState
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     summaryCard
+                    if !connectionState.isConnected, viewModel.hasLoaded {
+                        WorkerConsoleContinuityBanner()
+                    }
                     TronSegmentedControl(
                         options: EngineDashboardSection.allCases.map { ($0.rawValue, $0) },
                         selection: $selectedSection,
@@ -162,29 +169,25 @@ struct WorkerConsoleSheet: View {
                     case .researchSuite:
                         ResearchSuiteSheet(
                             consoleViewModel: viewModel,
-                            repository: repository,
-                            connectionState: connectionState
+                            repository: repository
                         )
                     case .delegation:
                         DelegationSheet(
                             consoleViewModel: viewModel,
-                            repository: repository,
-                            connectionState: connectionState
+                            repository: repository
                         )
                     case .genericConsole:
                         WorkerDetailSheet(
                             viewModel: viewModel,
                             repository: repository,
-                            modelRepository: modelRepository,
-                            connectionState: connectionState
+                            modelRepository: modelRepository
                         )
                     }
                 } else {
                     WorkerDetailSheet(
                         viewModel: viewModel,
                         repository: repository,
-                        modelRepository: modelRepository,
-                        connectionState: connectionState
+                        modelRepository: modelRepository
                     )
                 }
             }
@@ -201,7 +204,7 @@ struct WorkerConsoleSheet: View {
                 )
             }
             .task(id: EngineDashboardRefreshKey(
-                isConnected: connectionState.isConnected,
+                continuity: dependencies.connectionRepository.continuity,
                 section: selectedSection,
                 isCovered: isPresentingChildSheet
             )) {
@@ -210,12 +213,12 @@ struct WorkerConsoleSheet: View {
                 if selectedSection == .activity {
                     await viewModel.monitor(
                         repository: repository,
-                        connectionState: connectionState
+                        connectionState: dependencies.connectionRepository.connectionState
                     )
                 } else {
                     await viewModel.monitorSummary(
                         repository: repository,
-                        connectionState: connectionState
+                        connectionState: dependencies.connectionRepository.connectionState
                     )
                 }
             }
@@ -400,7 +403,7 @@ struct WorkerConsoleSheet: View {
                 title: "Active workers",
                 detail: "Direct chat tools and internal policy specialists share one durable runtime."
             ) {
-                if !connectionState.isConnected {
+                if !connectionState.isConnected, viewModel.workers.isEmpty {
                     WorkerConsoleEmptyState(
                         symbol: "network.slash",
                         title: "Worker state is offline",
@@ -424,7 +427,7 @@ struct WorkerConsoleSheet: View {
                 }
             }
 
-            if connectionState.isConnected, !viewModel.retiredWorkers.isEmpty {
+            if !viewModel.retiredWorkers.isEmpty {
                 WorkerConsoleGroup(
                     title: "Retired workers",
                     detail: "Inactive workers retained for audit, version history, and restoration."
@@ -512,12 +515,12 @@ struct WorkerConsoleSheet: View {
         if selectedSection == .activity {
             await viewModel.refresh(
                 repository: repository,
-                connectionState: connectionState
+                connectionState: dependencies.connectionRepository.connectionState
             )
         } else {
             await viewModel.refreshSummary(
                 repository: repository,
-                connectionState: connectionState
+                connectionState: dependencies.connectionRepository.connectionState
             )
         }
     }

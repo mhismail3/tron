@@ -94,24 +94,22 @@ struct NotificationDetailView: View {
     @ViewBuilder
     private var responseToolbar: some View {
         if let item, item.delivery.terminalResponse == nil {
-            HStack(spacing: 12) {
-                if item.delivery.actions.contains("snooze") {
-                    SheetPrimaryActionButton(
-                        icon: "clock.arrow.circlepath",
-                        accent: .tronEmerald,
-                        accessibilityLabel: "Snooze notification"
-                    ) {
-                        respond(.snooze, to: item)
-                    }
+            if item.delivery.actions.contains("snooze") {
+                SheetPrimaryActionButton(
+                    icon: "clock.arrow.circlepath",
+                    accent: .tronEmerald,
+                    accessibilityLabel: "Snooze notification"
+                ) {
+                    respond(.snooze, to: item)
                 }
-                if item.delivery.actions.contains("complete") {
-                    SheetPrimaryActionButton(
-                        icon: "checkmark.circle.fill",
-                        accent: .tronEmerald,
-                        accessibilityLabel: "Complete notification"
-                    ) {
-                        respond(.complete, to: item)
-                    }
+            }
+            if item.delivery.actions.contains("complete") {
+                SheetPrimaryActionButton(
+                    icon: "checkmark.circle.fill",
+                    accent: .tronEmerald,
+                    accessibilityLabel: "Complete notification"
+                ) {
+                    respond(.complete, to: item)
                 }
             }
         }

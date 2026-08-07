@@ -333,6 +333,9 @@ struct PairingStep: View {
 
         do {
             await connection.connect()
+            guard connection.connectionState.isConnected else {
+                throw EngineClientError.connectionNotEstablished
+            }
             let settings = try await settingsRepository.get()
             guard dependencies.pairedServerStore.activeServer?.id == plan.activeServer.id,
                   dependencies.activeServerSelectionVersion == selectionVersion

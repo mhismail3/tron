@@ -6,6 +6,7 @@ struct WorkerRunTechnicalDetailsSheet: View {
     let graph: WorkerRunGraphDTO?
 
     @Environment(\.dependencies) private var dependencies
+    @Environment(\.dismiss) private var dismiss
     @State private var showInput = false
     @State private var showLegacyOutput = false
     @State private var showRawResult = false
@@ -13,6 +14,8 @@ struct WorkerRunTechnicalDetailsSheet: View {
     @State private var resultChunk: WorkerResultChunkDTO?
     @State private var isLoadingResult = false
     @State private var resultLoadError: String?
+    @State private var resultLoadGeneration = 0
+    @State private var projectionOwnerId: UUID?
 
     init(
         run: WorkerInvocationDTO,
@@ -197,7 +200,16 @@ struct WorkerRunTechnicalDetailsSheet: View {
                     accent: .tronSlate
                 )
             }
-            .task(id: run.output?.reference?.invocationId) {
+            .task(id: WorkerRunTechnicalResultRefreshKey(
+                invocationId: run.output?.reference?.invocationId,
+                continuity: dependencies.connectionRepository.continuity
+            )) {
+                let ownerId = dependencies.connectionRepository.continuityOwnerId
+                if let projectionOwnerId, projectionOwnerId != ownerId {
+                    dismiss()
+                    return
+                }
+                projectionOwnerId = ownerId
                 await loadResultIfNeeded()
             }
         }
@@ -230,25 +242,39 @@ struct WorkerRunTechnicalDetailsSheet: View {
 
     private func loadResultIfNeeded() async {
         guard let reference = run.output?.reference,
-              resultChunk?.reference.invocationId != reference.invocationId,
-              !isLoadingResult else {
+              resultChunk?.reference.invocationId != reference.invocationId else {
             return
         }
+        resultLoadGeneration &+= 1
+        let generation = resultLoadGeneration
         isLoadingResult = true
         resultLoadError = nil
-        defer { isLoadingResult = false }
+        defer {
+            if generation == resultLoadGeneration {
+                isLoadingResult = false
+            }
+        }
         do {
-            resultChunk = try await dependencies.workerKernelRepository.workerResult(
+            let loaded = try await dependencies.workerKernelRepository.workerResult(
                 invocationId: reference.invocationId,
                 pointer: "",
                 offset: 0,
                 limit: 20
             )
+            guard !Task.isCancelled,
+                  generation == resultLoadGeneration else { return }
+            resultChunk = loaded
         } catch {
-            if error is CancellationError {
+            guard generation == resultLoadGeneration else { return }
+            if ConnectionErrorClassifier.isTransientTransport(error) {
                 return
             }
             resultLoadError = error.localizedDescription
         }
     }
+}
+
+private struct WorkerRunTechnicalResultRefreshKey: Equatable {
+    let invocationId: String?
+    let continuity: EngineConnectionContinuity
 }

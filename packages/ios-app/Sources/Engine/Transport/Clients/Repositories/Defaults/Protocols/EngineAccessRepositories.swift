@@ -9,8 +9,23 @@ protocol AppConnectionRepository: AnyObject {
     /// Monotonic ready-socket epoch. This advances even when an intermediate
     /// reconnect state is coalesced into connected-to-connected observation.
     var continuityGeneration: UInt64 { get }
+    /// Stable identity for the installed server-bound connection owner.
+    var continuityOwnerId: UUID { get }
 
     func connect() async
+}
+
+extension AppConnectionRepository {
+    var continuityGeneration: UInt64 { 0 }
+    var continuityOwnerId: UUID { EngineConnectionContinuity.fallbackOwnerId }
+
+    var continuity: EngineConnectionContinuity {
+        EngineConnectionContinuity(
+            state: connectionState,
+            generation: continuityGeneration,
+            ownerId: continuityOwnerId
+        )
+    }
 }
 
 // MARK: - Session Event Repository

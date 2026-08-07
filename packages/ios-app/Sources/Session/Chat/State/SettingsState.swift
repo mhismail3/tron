@@ -40,17 +40,21 @@ final class SettingsState {
 
     func load(
         using settingsRepository: any SettingsRepository,
+        forceRefresh: Bool = false,
         acceptResult: @escaping @MainActor () -> Bool = { true }
     ) async {
-        guard !isLoaded else { return }
+        guard forceRefresh || !isLoaded else { return }
         do {
             let settings = try await settingsRepository.get()
             guard acceptResult() else { return }
             applyServerSettings(settings)
             isLoaded = true
+            loadError = nil
         } catch {
             guard acceptResult() else { return }
-            loadError = error.localizedDescription
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                loadError = error.localizedDescription
+            }
         }
     }
 

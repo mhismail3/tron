@@ -45,6 +45,19 @@ struct ConnectionManagerTests {
         #expect(manager.state == .connected)
     }
 
+    @Test("state keeps tracking reconnect cadence without a continuity edge")
+    func stateTracksReconnectCadence() async {
+        let (manager, provider) = makeSUT(initialState: .connected)
+
+        provider.connectionState = .reconnecting(attempt: 1, nextRetrySeconds: 2)
+        await waitForStateSync()
+        #expect(manager.state == .reconnecting(attempt: 1, nextRetrySeconds: 2))
+
+        provider.connectionState = .reconnecting(attempt: 1, nextRetrySeconds: 1)
+        await waitForStateSync()
+        #expect(manager.state == .reconnecting(attempt: 1, nextRetrySeconds: 1))
+    }
+
     @Test("Idle state observation releases its connection manager")
     func idleObservationReleasesManager() async {
         let provider = MockConnectionStateProvider()
@@ -109,6 +122,39 @@ struct ConnectionManagerTests {
 
         await fired.waitForFulfillment(timeout: .seconds(1))
         #expect(await fired.wasFulfilled)
+    }
+
+    @Test("future reconnect hook fires for connected socket generation replacement")
+    func hookFiresForConnectedGenerationReplacement() async {
+        let (manager, provider) = makeSUT(initialState: .connected)
+        let fired = ManualExpectation()
+
+        manager.runOnReconnect(label: "x", fireIfAlreadyConnected: false) {
+            await fired.fulfill()
+        }
+
+        provider.continuityGeneration = 1
+        await fired.waitForFulfillment(timeout: .seconds(1))
+
+        #expect(await fired.wasFulfilled)
+        #expect(manager.continuityGeneration == 1)
+        #expect(manager.state == .connected)
+    }
+
+    @Test("future reconnect hook fires for a connected owner replacement")
+    func hookFiresForConnectedOwnerReplacement() async {
+        let (manager, provider) = makeSUT(initialState: .connected)
+        let fired = ManualExpectation()
+
+        manager.runOnReconnect(label: "x", fireIfAlreadyConnected: false) {
+            await fired.fulfill()
+        }
+
+        provider.continuityOwnerId = UUID()
+        await fired.waitForFulfillment(timeout: .seconds(1))
+
+        #expect(await fired.wasFulfilled)
+        #expect(manager.continuityOwnerId == provider.continuityOwnerId)
     }
 
     @Test("runOnReconnect holds hook while disconnected, fires on .connected")
@@ -286,6 +332,8 @@ struct ConnectionManagerTests {
 @MainActor
 final class MockConnectionStateProvider: ConnectionStateProvider {
     var connectionState: ConnectionState = .disconnected
+    var continuityGeneration: UInt64 = 0
+    var continuityOwnerId = EngineConnectionContinuity.fallbackOwnerId
     var manualRetryCallCount = 0
 
     func manualRetry() async {

@@ -565,6 +565,35 @@ struct WorkerConsoleErrorBanner: View {
     }
 }
 
+/// Non-destructive continuity status shown above a retained server snapshot.
+/// The shared transport owns recovery; sheets remain useful and read-only
+/// instead of replacing known-good content with an error screen.
+struct WorkerConsoleContinuityBanner: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(.tronWarning)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Reconnecting to engine")
+                    .font(TronTypography.sans(
+                        size: TronTypography.sizeBodySM,
+                        weight: .semibold
+                    ))
+                    .foregroundStyle(.tronTextPrimary)
+                Text("Showing the last server update. This sheet will catch up automatically.")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .sectionFill(.tronWarning, cornerRadius: 10, subtle: true, interactive: false)
+    }
+}
+
 struct WorkerConsoleLoadingState: View {
     let title: String
 

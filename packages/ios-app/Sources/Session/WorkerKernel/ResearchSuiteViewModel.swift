@@ -306,6 +306,7 @@ final class ResearchSuiteViewModel {
     var isLoading = false
     var hasLoaded = false
     var lastError: String?
+    private var refreshGeneration = 0
 
     var healthyComponentCount: Int {
         workers.count { $0.enabled && !$0.retired && $0.health == "healthy" }
@@ -326,35 +327,39 @@ final class ResearchSuiteViewModel {
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState
     ) async {
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
         guard connectionState.isConnected else {
-            workers = []
-            runs = []
-            attention = []
-            reports = []
-            reportHistoryWarnings = []
-            hasLoaded = true
-            lastError = connectionState.displayText
+            // Preserve the last authoritative suite projection while the
+            // shared transport owns reconnection.
             return
         }
 
         isLoading = true
         defer {
-            isLoading = false
-            hasLoaded = true
+            if generation == refreshGeneration {
+                isLoading = false
+                hasLoaded = true
+            }
         }
 
-        workers = ResearchSuiteContract.suiteWorkers(from: availableWorkers)
+        let selectedWorkers = ResearchSuiteContract.suiteWorkers(from: availableWorkers)
         var loadedRuns: [WorkerInvocationDTO] = []
         var loadedAttention: [WorkerInboxItemDTO] = []
         var errors: [String] = []
 
-        for worker in workers {
+        for worker in selectedWorkers {
             do {
                 loadedRuns += try await repository.workerRuns(
                     workerId: worker.workerId,
                     limit: 20
                 ).runs
+                guard !Task.isCancelled, generation == refreshGeneration else { return }
+            } catch is CancellationError {
+                return
             } catch {
+                guard generation == refreshGeneration else { return }
+                guard !ConnectionErrorClassifier.isTransientTransport(error) else { return }
                 errors.append("\(worker.name) runs: \(error.localizedDescription)")
             }
             do {
@@ -362,17 +367,36 @@ final class ResearchSuiteViewModel {
                     workerId: worker.workerId,
                     limit: 20
                 ).items
+                guard !Task.isCancelled, generation == refreshGeneration else { return }
+            } catch is CancellationError {
+                return
             } catch {
+                guard generation == refreshGeneration else { return }
+                guard !ConnectionErrorClassifier.isTransientTransport(error) else { return }
                 errors.append("\(worker.name) attention: \(error.localizedDescription)")
             }
         }
 
+        guard !Task.isCancelled, generation == refreshGeneration else { return }
+        workers = selectedWorkers
         runs = loadedRuns.sorted { $0.createdAt > $1.createdAt }
         attention = loadedAttention.sorted { $0.createdAt > $1.createdAt }
         let decoded = Self.decodeReports(from: runs)
         reports = decoded.reports
         reportHistoryWarnings = decoded.errors
         lastError = errors.isEmpty ? nil : errors.joined(separator: "\n")
+    }
+
+    func resetForServerChange() {
+        refreshGeneration &+= 1
+        workers = []
+        runs = []
+        attention = []
+        reports = []
+        reportHistoryWarnings = []
+        isLoading = false
+        hasLoaded = false
+        lastError = nil
     }
 
     func workerName(for workerId: String) -> String {

@@ -57,6 +57,45 @@ enum ConnectionState: Equatable, Sendable {
     }
 }
 
+/// Stable identity for one usable engine transport epoch.
+///
+/// UI refresh work deliberately keys off `isConnected` rather than the full
+/// reconnect countdown so a one-second retry tick cannot cancel useful work.
+/// `generation` still changes for a rapid connected-to-connected socket
+/// replacement, which makes every mounted server projection reconcile even
+/// when Swift Observation coalesces the intermediate state.
+struct EngineConnectionContinuity: Equatable, Sendable {
+    /// Compatibility identity for lightweight previews and test doubles that
+    /// do not own a replaceable production transport.
+    static let fallbackOwnerId = UUID(
+        uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    )
+
+    let isConnected: Bool
+    let generation: UInt64
+    /// Stable identity of the client that owns `generation`. A replacement
+    /// client may have the same state and numeric generation as its
+    /// predecessor; this field still forces mounted projections to reconcile.
+    let ownerId: UUID
+
+    init(
+        state: ConnectionState,
+        generation: UInt64,
+        ownerId: UUID = fallbackOwnerId
+    ) {
+        isConnected = state.isConnected
+        self.generation = generation
+        self.ownerId = ownerId
+    }
+
+    func requiresReconciliation(after previous: Self) -> Bool {
+        isConnected
+            && (!previous.isConnected
+                || generation != previous.generation
+                || ownerId != previous.ownerId)
+    }
+}
+
 // MARK: - WebSocket Errors
 
 enum EngineConnectionError: Error, LocalizedError, Sendable, Equatable {

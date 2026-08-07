@@ -98,8 +98,7 @@ struct EngineClientObservationTests {
         await rpc.manualRetry()
         #expect(rpc.engineConnection == nil)
 
-        rpc.setBackgroundState(false)
-        await rpc.manualRetry()
+        await rpc.resumeFromBackground()
         let replacement = try #require(rpc.engineConnection)
         #expect(replacement !== retired)
         #expect(recorder.requests.count >= 2)
@@ -221,6 +220,61 @@ struct EngineClientObservationTests {
         rpc.disconnect()
     }
 
+    @Test("explicit disconnect prevents deferred reads from resurrecting a retired client")
+    func explicitDisconnectIsTerminalForDeferredReads() async {
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65529/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+        await rpc.connect()
+        let attemptsBeforeRetirement = recorder.requests.count
+
+        rpc.disconnect()
+
+        do {
+            let _: EmptyParams = try await rpc.invokeRead(
+                functionId: "test::read",
+                payload: EmptyParams()
+            )
+            Issue.record("expected an explicitly retired client to reject reads")
+        } catch {
+            #expect(error as? EngineConnectionError == .notConnected)
+        }
+        #expect(recorder.requests.count == attemptsBeforeRetirement)
+    }
+
+    @Test("an offline read owns one connection request and cancels cleanly")
+    func offlineReadWaitsWithoutSpinning() async {
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65529/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+        let read = Task { @MainActor () -> Error? in
+            do {
+                let _: EmptyParams = try await rpc.invokeRead(
+                    functionId: "test::read",
+                    payload: EmptyParams()
+                )
+                return nil
+            } catch {
+                return error
+            }
+        }
+
+        for _ in 0..<100 where recorder.requests.isEmpty {
+            await Task.yield()
+        }
+        #expect(recorder.requests.count == 1)
+
+        read.cancel()
+        let error = await read.value
+        #expect(error is CancellationError)
+        #expect(recorder.requests.count == 1)
+        rpc.disconnect()
+    }
+
     @Test("Connect policy discards stale disconnected transports")
     func testConnectPolicyDiscardsStaleDisconnectedTransport() {
         #expect(EngineClientConnectionPolicy.shouldSkipConnect(state: .disconnected) == false)
@@ -247,6 +301,30 @@ struct EngineClientObservationTests {
             hasTransport: true,
             state: .unauthorized(reason: "Re-pair required")
         ) == false)
+    }
+
+    @Test("only a foreground live initial attempt enters automatic recovery")
+    func testInitialAutomaticRecoveryPolicy() {
+        #expect(EngineClientConnectionPolicy.shouldOwnAutomaticRecovery(
+            attemptedLiveSession: true,
+            isInBackground: false,
+            state: .disconnected
+        ))
+        #expect(!EngineClientConnectionPolicy.shouldOwnAutomaticRecovery(
+            attemptedLiveSession: false,
+            isInBackground: false,
+            state: .disconnected
+        ))
+        #expect(!EngineClientConnectionPolicy.shouldOwnAutomaticRecovery(
+            attemptedLiveSession: true,
+            isInBackground: true,
+            state: .disconnected
+        ))
+        #expect(!EngineClientConnectionPolicy.shouldOwnAutomaticRecovery(
+            attemptedLiveSession: true,
+            isInBackground: false,
+            state: .unauthorized(reason: "Re-pair required")
+        ))
     }
 
     @Test("Stream subscriptions are per socket and clear on disconnect")

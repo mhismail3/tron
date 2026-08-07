@@ -50,8 +50,15 @@ final class EngineConnection {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = .infinity
+        // Keep a cold cellular/VPN route eligible long enough for the system to
+        // restore connectivity. Our bounded open timeout still owns cadence.
+        configuration.waitsForConnectivity = true
         return configuration
     }
+
+    /// Advances only after production elects to create a real URLSession. The
+    /// deterministic handled-attempt seam used by hosted tests does not count.
+    private(set) var liveSessionAttemptGeneration: UInt64 = 0
 
     var reconnectTask: Task<Void, Never>?
     var reconnectTaskGeneration: UInt64 = 0
@@ -186,6 +193,7 @@ final class EngineConnection {
             connectionState = stateOnFailure
             return
         }
+        liveSessionAttemptGeneration &+= 1
 
         let configuration = Self.makeSessionConfiguration()
         logger.verbose("URLSession config: requestTimeout=30s, resourceTimeout=unbounded", category: .websocket)

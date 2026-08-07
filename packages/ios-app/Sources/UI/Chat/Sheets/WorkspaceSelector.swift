@@ -21,6 +21,9 @@ struct WorkspaceSelector: View {
     @State private var newFolderName = ""
     @State private var isSubmittingFolder = false
     @State private var folderCreationError: String?
+    @State private var projectionOwnerId: UUID?
+    @State private var homeLoadGeneration = 0
+    @State private var navigationGeneration = 0
     @FocusState private var folderNameFieldFocused: Bool
 
     init(
@@ -85,14 +88,30 @@ struct WorkspaceSelector: View {
                     .foregroundStyle(canSelectCurrentPath ? Color.tronEmerald : Color.tronOverlay(0.3))
                 }
             }
-            .task {
-                await loadHome()
+            .task(id: connectionRepository.continuity) {
+                prepareProjectionForCurrentOwner()
+                if currentPath.isEmpty {
+                    await loadHome()
+                } else if connectionRepository.connectionState.isConnected {
+                    do {
+                        try await loadDirectory(currentPath)
+                        errorMessage = nil
+                    } catch where ConnectionErrorClassifier.isTransientTransport(error) {
+                        errorMessage = nil
+                    } catch {
+                        errorMessage = workspaceBrowserErrorMessage(error)
+                    }
+                }
             }
             .onChange(of: showHidden) {
                 guard !currentPath.isEmpty else { return }
                 Task {
                     do {
                         try await loadDirectory(currentPath)
+                    } catch is CancellationError {
+                        return
+                    } catch where ConnectionErrorClassifier.isTransientTransport(error) {
+                        errorMessage = nil
                     } catch {
                         errorMessage = workspaceBrowserErrorMessage(error)
                     }
@@ -316,7 +335,8 @@ struct WorkspaceSelector: View {
     }
 
     private var canSubmitFolder: Bool {
-        !isSubmittingFolder
+        connectionRepository.connectionState.isConnected
+            && !isSubmittingFolder
             && FolderNameValidator.validationError(for: newFolderName) == nil
             && !currentPath.isEmpty
     }
@@ -370,35 +390,61 @@ struct WorkspaceSelector: View {
     }
 
     private func loadHome() async {
+        let ownerId = connectionRepository.continuityOwnerId
+        homeLoadGeneration &+= 1
+        let loadTicket = homeLoadGeneration
         isLoading = true
         errorMessage = nil
+        defer {
+            if projectionOwnerId == ownerId,
+               loadTicket == homeLoadGeneration {
+                isLoading = false
+            }
+        }
         do {
             await connectionRepository.connect()
             let home = try await workspaceBrowserRepository.getHome()
+            guard !Task.isCancelled,
+                  projectionOwnerId == ownerId,
+                  loadTicket == homeLoadGeneration else { return }
             serverSuggestedPaths = home.suggestedPaths
             let selected = selectedPath.trimmingCharacters(in: .whitespacesAndNewlines)
             let target = selected.isEmpty ? home.homePath : selected
             do {
                 try await loadDirectory(target, setNavigationState: false)
+            } catch is CancellationError {
+                return
             } catch {
+                guard projectionOwnerId == ownerId,
+                      loadTicket == homeLoadGeneration else { return }
                 try await loadDirectory(home.homePath, setNavigationState: false)
                 errorMessage = "Could not open \(target.abbreviatingHomeDirectory); showing Home."
             }
+        } catch is CancellationError {
+            return
         } catch {
-            errorMessage = workspaceBrowserErrorMessage(error)
+            guard projectionOwnerId == ownerId,
+                  loadTicket == homeLoadGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                errorMessage = workspaceBrowserErrorMessage(error)
+            }
         }
-        isLoading = false
     }
 
     private func loadDirectory(
         _ path: String,
         setNavigationState: Bool = true
     ) async throws {
+        let ownerId = connectionRepository.continuityOwnerId
+        navigationGeneration &+= 1
+        let navigationTicket = navigationGeneration
         if setNavigationState {
             isNavigating = true
         }
         defer {
-            if setNavigationState {
+            if setNavigationState,
+               projectionOwnerId == ownerId,
+               navigationTicket == navigationGeneration {
                 isNavigating = false
             }
         }
@@ -406,6 +452,11 @@ struct WorkspaceSelector: View {
             path: path,
             showHidden: showHidden
         )
+        guard !Task.isCancelled,
+              projectionOwnerId == ownerId,
+              navigationTicket == navigationGeneration else {
+            throw CancellationError()
+        }
         withAnimation(.easeInOut(duration: 0.16)) {
             entries = result.entries
             currentPath = result.path
@@ -419,6 +470,10 @@ struct WorkspaceSelector: View {
                 errorMessage = nil
                 try await loadDirectory(path)
                 cancelFolderCreation()
+            } catch is CancellationError {
+                return
+            } catch where ConnectionErrorClassifier.isTransientTransport(error) {
+                errorMessage = nil
             } catch {
                 errorMessage = workspaceBrowserErrorMessage(error)
             }
@@ -443,6 +498,24 @@ struct WorkspaceSelector: View {
         }
     }
 
+    private func prepareProjectionForCurrentOwner() {
+        let ownerId = connectionRepository.continuityOwnerId
+        guard projectionOwnerId != ownerId else { return }
+        projectionOwnerId = ownerId
+        currentPath = ""
+        parentPath = nil
+        entries = []
+        serverSuggestedPaths = []
+        isLoading = false
+        isNavigating = false
+        homeLoadGeneration &+= 1
+        navigationGeneration &+= 1
+        errorMessage = nil
+        isCreatingFolder = false
+        isSubmittingFolder = false
+        folderCreationError = nil
+    }
+
     private func cancelFolderCreation() {
         withAnimation(.easeInOut(duration: 0.16)) {
             isCreatingFolder = false
@@ -461,7 +534,13 @@ struct WorkspaceSelector: View {
 
         isSubmittingFolder = true
         folderCreationError = nil
+        let ownerId = connectionRepository.continuityOwnerId
         Task {
+            defer {
+                if projectionOwnerId == ownerId {
+                    isSubmittingFolder = false
+                }
+            }
             do {
                 let newPath = URL(fileURLWithPath: currentPath)
                     .appendingPathComponent(trimmedName)
@@ -471,14 +550,16 @@ struct WorkspaceSelector: View {
                     recursive: false,
                     idempotencyKey: .userAction("filesystem.createDir")
                 )
+                guard !Task.isCancelled, projectionOwnerId == ownerId else { return }
                 selectedPath = result.path
-                isSubmittingFolder = false
                 dismiss()
+            } catch is CancellationError {
+                return
             } catch let error as EngineProtocolError {
-                isSubmittingFolder = false
+                guard projectionOwnerId == ownerId else { return }
                 folderCreationError = workspaceBrowserErrorMessage(error)
             } catch {
-                isSubmittingFolder = false
+                guard projectionOwnerId == ownerId else { return }
                 folderCreationError = workspaceBrowserErrorMessage(error)
             }
         }

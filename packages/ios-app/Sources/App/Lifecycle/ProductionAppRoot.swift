@@ -42,6 +42,7 @@ struct ProductionAppRoot: View {
 
     @State private var initializer = AppInitializer()
     @State private var connectionBannerKind: ConnectionToastPolicy.Kind?
+    @State private var foregroundRecoveryTask: Task<Void, Never>?
 
     // Onboarding state — owned per-launch; survives across the sheet
     // because @State preserves its initial value for the lifetime of
@@ -142,10 +143,10 @@ struct ProductionAppRoot: View {
                 // releases that suspension before foreground recovery starts.
                 switch transportTransition {
                 case .suspend:
+                    foregroundRecoveryTask?.cancel()
+                    foregroundRecoveryTask = nil
                     container.setBackgroundState(true)
-                case .resumeAndRecover:
-                    container.setBackgroundState(false)
-                case .none:
+                case .resumeAndRecover, .none:
                     break
                 }
                 container.clientLogIngestionService.handleScenePhaseChange(isActive: newPhase == .active)
@@ -169,8 +170,10 @@ struct ProductionAppRoot: View {
 
                 // When returning to foreground, handle reconnection and refresh session list
                 if transportTransition == .resumeAndRecover {
-                    Task {
-                        await recoverForegroundConnection()
+                    foregroundRecoveryTask?.cancel()
+                    foregroundRecoveryTask = Task { @MainActor in
+                        await container.resumeConnectionFromBackground()
+                        guard !Task.isCancelled, scenePhase == .active else { return }
                         // Notification registration/outbox/sync must not race a
                         // stale half-open connection with foreground recovery.
                         container.notificationCoordinator.foregrounded()
@@ -316,6 +319,13 @@ struct ProductionAppRoot: View {
         await initializer.initialize {
             try await container.initialize()
         }
+        // A cold active launch has no scene-phase edge to trigger foreground
+        // recovery. Establish the canonical server connection here so the
+        // sidebar, Settings, artifacts, and notifications do not depend on a
+        // chat being opened first.
+        if scenePhase == .active {
+            await container.resumeConnectionFromBackground()
+        }
         if container.engineClient.connectionState.isConnected {
             container.notificationCoordinator.connectionDidAuthenticate()
         } else {
@@ -384,35 +394,4 @@ struct ProductionAppRoot: View {
         )
     }
 
-    private func recoverForegroundConnection() async {
-        switch container.engineClient.connectionState {
-        case .connected:
-            // Verify the connection before any foreground engine protocol refresh. A Mac
-            // sleep can leave URLSession's WebSocket half-open; without this,
-            // notification/session refreshes wait on stale server timeouts
-            // before the UI sees the disconnected state.
-            let isAlive = await container.verifyConnection()
-            if !isAlive {
-                TronLogger.shared.info("Connection dead on foreground return - retrying", category: .engine)
-                await container.manualRetry()
-            }
-        case .deployRestarting:
-            // Server restart flow owns its own reconnect budget — don't interfere.
-            TronLogger.shared.debug("Deploy-restart reconnect in progress on foreground return", category: .engine)
-        case .disconnected, .failed, .connecting, .reconnecting:
-            // Any non-connected/non-deploy state on foreground return is
-            // treated as "kick a fresh retry". This covers the case where
-            // the reconnect Task was paused during backgrounding and the
-            // state is stale; manualRetry() resets the attempt counter and
-            // cancels any lingering task before spawning a new one.
-            TronLogger.shared.info("Triggering manualRetry on foreground return (state: \(container.engineClient.connectionState))", category: .engine)
-            await container.manualRetry()
-        case .unauthorized:
-            // .unauthorized is a parked state — auto-retrying on foreground
-            // would just re-trigger 401. The user must tap the pill (or open
-            // the re-pair sheet) to provide a fresh token first; only then
-            // does manualRetry fire.
-            TronLogger.shared.info("Skipping foreground auto-retry while unauthorized — awaiting user re-pair", category: .engine)
-        }
-    }
 }

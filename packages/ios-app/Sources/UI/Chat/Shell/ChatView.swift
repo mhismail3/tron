@@ -13,16 +13,6 @@ enum ChatPresentationMode: Equatable {
     case workerAudit
 }
 
-struct ChatConnectionContinuity: Equatable {
-    let state: ConnectionState
-    let generation: UInt64
-
-    func requiresRecovery(after previous: Self) -> Bool {
-        state.isConnected
-            && (!previous.state.isConnected || generation != previous.generation)
-    }
-}
-
 struct ChatView: View {
     // MARK: - Environment & State (internal for extension access)
     @Environment(\.dismiss) var dismiss
@@ -320,19 +310,16 @@ struct ChatView: View {
 
     var body: some View {
         lifecycleContent
-        .onChange(of: ChatConnectionContinuity(
-            state: services.connection.connectionState,
-            generation: services.connection.continuityGeneration
-        )) { oldContinuity, newContinuity in
+        .onChange(of: services.connection.continuity) { oldContinuity, newContinuity in
             if presentationMode == .interactiveSession {
-                if newContinuity.state.isConnected {
+                if newContinuity.isConnected {
                     viewModel.startSpeechTranscriptionMonitoring()
                 } else {
                     viewModel.stopSpeechTranscriptionMonitoring()
                 }
             }
             if initialLoadComplete,
-               newContinuity.requiresRecovery(after: oldContinuity) {
+               newContinuity.requiresReconciliation(after: oldContinuity) {
                 scheduleReconstructionRefresh()
             }
             // Composer actions read this same session transport state directly;

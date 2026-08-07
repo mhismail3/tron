@@ -174,11 +174,16 @@ struct WorkerResultInspectorSheet: View {
     let repository: any WorkerKernelRepository
     let showsTechnicalDetails: Bool
 
+    @Environment(\.dependencies) private var dependencies
+    @Environment(\.dismiss) private var dismiss
+
     @State private var locations: [WorkerResultLocation]
     @State private var chunk: WorkerResultChunkDTO?
     @State private var isLoading = false
     @State private var error: String?
     @State private var showTechnicalDetails = false
+    @State private var loadGeneration = 0
+    @State private var projectionOwnerId: UUID?
 
     private var location: WorkerResultLocation {
         locations.last ?? WorkerResultLocation(pointer: "", offset: 0)
@@ -202,7 +207,7 @@ struct WorkerResultInspectorSheet: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    if isLoading {
+                    if isLoading, chunk == nil {
                         SheetLoadingState(label: "Loading durable result…")
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, 24)
@@ -248,7 +253,18 @@ struct WorkerResultInspectorSheet: View {
                     WorkerResultTechnicalSheet(chunk: chunk)
                 }
             }
-            .task(id: "\(invocationId)|\(location.pointer)|\(location.offset)") {
+            .task(id: WorkerResultInspectorRefreshKey(
+                invocationId: invocationId,
+                pointer: location.pointer,
+                offset: location.offset,
+                continuity: dependencies.connectionRepository.continuity
+            )) {
+                let ownerId = dependencies.connectionRepository.continuityOwnerId
+                if let projectionOwnerId, projectionOwnerId != ownerId {
+                    dismiss()
+                    return
+                }
+                projectionOwnerId = ownerId
                 await load()
             }
         }
@@ -394,19 +410,33 @@ struct WorkerResultInspectorSheet: View {
     }
 
     private func load() async {
-        chunk = nil
+        if chunk?.pointer != location.pointer || chunk?.offset != location.offset {
+            chunk = nil
+        }
+        loadGeneration &+= 1
+        let generation = loadGeneration
         isLoading = true
         error = nil
-        defer { isLoading = false }
+        defer {
+            if generation == loadGeneration {
+                isLoading = false
+            }
+        }
         do {
-            chunk = try await repository.workerResult(
+            let loaded = try await repository.workerResult(
                 invocationId: invocationId,
                 pointer: location.pointer,
                 offset: location.offset,
                 limit: 20
             )
+            guard !Task.isCancelled,
+                  generation == loadGeneration else { return }
+            chunk = loaded
         } catch {
-            self.error = "Exact worker result could not load: \(error.localizedDescription)"
+            guard generation == loadGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                self.error = "Exact worker result could not load: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -423,6 +453,13 @@ struct WorkerResultInspectorSheet: View {
             countStyle: .file
         )
     }
+}
+
+private struct WorkerResultInspectorRefreshKey: Equatable {
+    let invocationId: String
+    let pointer: String
+    let offset: UInt64
+    let continuity: EngineConnectionContinuity
 }
 
 private struct WorkerResultTechnicalSheet: View {

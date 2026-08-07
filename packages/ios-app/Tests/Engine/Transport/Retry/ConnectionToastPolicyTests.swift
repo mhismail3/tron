@@ -17,15 +17,11 @@ struct ConnectionToastPolicyTests {
         #expect(ConnectionToastPolicy.shouldDismiss(for: .connected, hasActiveServer: true))
     }
 
-    @Test("disconnected active server shows retryable unavailable toast")
-    func disconnectedShowsUnavailableToast() {
+    @Test("automatic disconnected handoff does not flash an unavailable toast")
+    func disconnectedSuppressesUnavailableToast() {
         let presentation = ConnectionToastPolicy.presentation(for: .disconnected, hasActiveServer: true)
 
-        #expect(presentation?.message == ConnectionStatusCopy.activeServerNotConnectedBanner)
-        #expect(presentation?.severity == .warning)
-        #expect(presentation?.autoDismiss == ConnectionToastPolicy.retryableAutoDismiss)
-        #expect(presentation?.includesRetry == true)
-        #expect(presentation?.kind == .unavailable)
+        #expect(presentation == nil)
     }
 
     @Test("retryable connection banners auto-dismiss after four seconds")

@@ -158,6 +158,36 @@ struct WorkerConsoleViewModelTests {
         #expect(viewModel.activityRunsNextOffset == nil)
         #expect(repository.runOffsets == [nil, 1])
     }
+
+    @Test("Temporary disconnect preserves dashboard state until continuity refresh")
+    func temporaryDisconnectPreservesDashboardProjection() async {
+        let repository = MockWorkerKernelRepository()
+        let viewModel = WorkerConsoleViewModel()
+        await viewModel.refresh(repository: repository, connectionState: .connected)
+
+        await viewModel.refresh(repository: repository, connectionState: .disconnected)
+
+        #expect(viewModel.workers.map(\.workerId) == ["research"])
+        #expect(viewModel.coreToolCount == 0)
+        #expect(viewModel.lastError == nil)
+
+        viewModel.resetForServerChange()
+        #expect(viewModel.workers.isEmpty)
+        #expect(viewModel.engineSnapshot == nil)
+    }
+
+    @Test("Transient transport error does not replace worker projection with an error")
+    func transientRefreshErrorPreservesDashboardProjection() async {
+        let repository = MockWorkerKernelRepository()
+        let viewModel = WorkerConsoleViewModel()
+        await viewModel.refresh(repository: repository, connectionState: .connected)
+
+        repository.snapshotError = EngineConnectionError.notConnected
+        await viewModel.refresh(repository: repository, connectionState: .connected)
+
+        #expect(viewModel.workers.map(\.workerId) == ["research"])
+        #expect(viewModel.lastError == nil)
+    }
 }
 
 @MainActor
@@ -179,6 +209,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var runOffsets: [UInt64?] = []
     var pagedActivity = false
     var includeRetiredFixture = false
+    var snapshotError: Error?
 
     private var worker: WorkerSummaryDTO {
         WorkerSummaryDTO(
@@ -218,6 +249,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
         sessionId: String?,
         relevanceQuery: String?
     ) async throws -> EngineIntrospectionSnapshotDTO {
+        if let snapshotError { throw snapshotError }
         snapshotSessionIds.append(sessionId)
         return EngineIntrospectionSnapshotDTO(
             dispatchStopped: false,

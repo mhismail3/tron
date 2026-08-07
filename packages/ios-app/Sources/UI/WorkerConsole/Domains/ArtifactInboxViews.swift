@@ -7,11 +7,24 @@ private enum ArtifactInboxLayout {
     static let rowSpacing: CGFloat = 5
 }
 
+private struct ArtifactInboxRefreshKey: Equatable {
+    let serverSelectionVersion: Int
+    let continuity: EngineConnectionContinuity
+}
+
+private struct ArtifactPreviewRefreshKey: Equatable {
+    let artifactId: String
+    let continuity: EngineConnectionContinuity
+}
+
 struct ArtifactInboxView: View {
     let repository: any WorkerKernelRepository
     let draftSessionId: String?
+    let continuity: EngineConnectionContinuity
+    let serverSelectionVersion: Int
     @State private var viewModel = ArtifactInboxViewModel()
     @State private var selectedArtifact: WorkerArtifactDTO?
+    @State private var projectionServerSelectionVersion: Int?
 
     var body: some View {
         SettingsPageContainer(title: "Artifacts", scrollsContent: false) {
@@ -24,7 +37,23 @@ struct ArtifactInboxView: View {
                         .listRowInsets(rowInsets)
                 }
 
-                if viewModel.artifacts.isEmpty, !viewModel.isLoading {
+                if viewModel.artifacts.isEmpty,
+                   !viewModel.isLoading,
+                   !continuity.isConnected {
+                    ContentUnavailableView {
+                        Label("Reconnecting to artifacts", systemImage: "arrow.triangle.2.circlepath")
+                            .font(TronTypography.sans(
+                                size: TronTypography.sizeBody,
+                                weight: .semibold
+                            ))
+                    } description: {
+                        Text("Your artifact inbox will refresh automatically when the paired server is available.")
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(rowInsets)
+                } else if viewModel.artifacts.isEmpty, !viewModel.isLoading {
                     ContentUnavailableView {
                         Label("No artifacts yet", systemImage: "tray.full")
                             .font(TronTypography.sans(
@@ -91,7 +120,16 @@ struct ArtifactInboxView: View {
         }
         .workerConsoleSheetPresentation()
         .tint(.tronEmerald)
-        .task {
+        .task(id: ArtifactInboxRefreshKey(
+            serverSelectionVersion: serverSelectionVersion,
+            continuity: continuity
+        )) {
+            if projectionServerSelectionVersion != serverSelectionVersion {
+                projectionServerSelectionVersion = serverSelectionVersion
+                selectedArtifact = nil
+                viewModel.deactivate()
+            }
+            guard continuity.isConnected else { return }
             await viewModel.refresh(repository: repository)
         }
         .onDisappear {
@@ -103,6 +141,7 @@ struct ArtifactInboxView: View {
                 repository: repository,
                 viewModel: viewModel,
                 draftSessionId: draftSessionId,
+                continuity: continuity,
                 onDeleted: {
                     selectedArtifact = nil
                 }
@@ -215,6 +254,7 @@ struct ArtifactPreviewSheet: View {
     let repository: any WorkerKernelRepository
     let viewModel: ArtifactInboxViewModel
     let draftSessionId: String?
+    let continuity: EngineConnectionContinuity
     let onDeleted: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -248,7 +288,11 @@ struct ArtifactPreviewSheet: View {
         }
         .workerConsoleSheetPresentation()
         .tint(.tronEmerald)
-        .task(id: artifact.id) {
+        .task(id: ArtifactPreviewRefreshKey(
+            artifactId: artifact.id,
+            continuity: continuity
+        )) {
+            guard continuity.isConnected else { return }
             await viewModel.load(artifact, repository: repository)
         }
         .onDisappear {
@@ -295,35 +339,29 @@ struct ArtifactPreviewSheet: View {
 
     @ViewBuilder
     private var toolbarActions: some View {
-        HStack(spacing: 14) {
-            if let url = content?.fileURL {
-                ShareLink(item: url) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(.tronEmerald)
-                }
-                .accessibilityLabel("Share artifact")
-            } else {
+        if let url = content?.fileURL {
+            ShareLink(item: url) {
                 Image(systemName: "square.and.arrow.up")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(.tronTextMuted.opacity(0.45))
-                    .accessibilityHidden(true)
+                    .foregroundStyle(.tronEmerald)
             }
-            Button {
-                showDeleteConfirmation = true
-            } label: {
-                if viewModel.deletingArtifactId == artifact.id {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(.tronError)
-                } else {
-                    Image(systemName: "trash")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(.tronError)
-                }
+            .accessibilityLabel("Share artifact")
+        } else {
+            Button {} label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(TronTypography.buttonSM)
             }
-            .disabled(viewModel.deletingArtifactId == artifact.id)
-            .accessibilityLabel("Delete artifact")
+            .disabled(true)
+            .accessibilityLabel("Share artifact unavailable")
+        }
+        SheetPrimaryActionButton(
+            icon: "trash",
+            accent: .tronError,
+            isBusy: viewModel.deletingArtifactId == artifact.id,
+            isEnabled: continuity.isConnected,
+            accessibilityLabel: "Delete artifact"
+        ) {
+            showDeleteConfirmation = true
         }
     }
 
@@ -362,6 +400,24 @@ struct ArtifactPreviewSheet: View {
         } else if viewModel.loadingArtifactId == artifact.id {
             SheetLoadingState(label: "Loading artifact")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if !continuity.isConnected {
+            VStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.regular)
+                    .tint(.tronEmerald)
+                Text("Reconnecting to artifact")
+                    .font(TronTypography.sans(
+                        size: TronTypography.sizeTitle,
+                        weight: .semibold
+                    ))
+                    .foregroundStyle(.tronTextPrimary)
+                Text("The preview will resume automatically when the paired server is available.")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronTextSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error = viewModel.errorMessage {
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle")

@@ -10,8 +10,8 @@ struct ReconnectProbePolicyTests {
     func defaultConstants() {
         let policy = ReconnectProbePolicy()
         #expect(policy.maxAutomaticAttempts == nil)
-        #expect(policy.probeTimeout == 2.0)
-        #expect(policy.retryDelay == 3.0)
+        #expect(policy.probeTimeout == 10.0)
+        #expect(policy.retryDelay == 2.0)
     }
 
     @Test("custom policy stores explicit values")

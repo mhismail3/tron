@@ -18,6 +18,10 @@ final class DefaultAppConnectionRepository: AppConnectionRepository {
         client.continuityGeneration
     }
 
+    var continuityOwnerId: UUID {
+        client.continuityOwnerId
+    }
+
     func connect() async {
         await client.connect()
     }

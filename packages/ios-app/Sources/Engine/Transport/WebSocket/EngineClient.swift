@@ -1,5 +1,14 @@
 import Foundation
 
+private struct EngineReadinessObservation: Equatable {
+    let state: ConnectionState
+    let continuityGeneration: UInt64
+    let isInBackground: Bool
+    let connectionIdentifier: ObjectIdentifier?
+    let transportGeneration: UInt64?
+    let isExplicitlyDisconnected: Bool
+}
+
 @Observable
 @MainActor
 final class EngineClient: EngineTransport {
@@ -15,6 +24,9 @@ final class EngineClient: EngineTransport {
     /// `connectionState`, this changes for a rapid connected-to-connected
     /// socket replacement and therefore cannot lose a catch-up request.
     private(set) var continuityGeneration: UInt64 = 0
+    /// Distinguishes this server-bound client from a replacement whose local
+    /// generation counter may happen to have the same value.
+    let continuityOwnerId = UUID()
     private(set) var currentSessionId: String?
     private(set) var currentModel: String = ""
     private var streamSubscriptions: [EngineStreamSubscriptionKey: EngineSubscription] = [:]
@@ -38,6 +50,10 @@ final class EngineClient: EngineTransport {
     private var connectionAttemptKind: ConnectionAttemptKind?
     private var connectionAttemptGeneration: UInt64 = 0
     private var isInBackground = false
+    /// Explicit retirement (server switch, shutdown, or a bounded borrowed
+    /// client) is terminal until a caller intentionally invokes `connect` or
+    /// `manualRetry`. Deferred reads must never resurrect a retired server.
+    private var isExplicitlyDisconnected = false
     private var currentSessionInterestGeneration: UInt64 = 0
     /// Last socket generation whose connection-local subscription registry was
     /// reconciled. This catches rapid reconnects whose intermediate state is
@@ -178,6 +194,7 @@ final class EngineClient: EngineTransport {
             logger.debug("Connection request deferred while app is backgrounded", category: .engine)
             return
         }
+        isExplicitlyDisconnected = false
         if let connectionAttemptTask {
             await connectionAttemptTask.value
             return
@@ -225,6 +242,7 @@ final class EngineClient: EngineTransport {
         logger.info("Initializing connection to \(self.serverURL.absoluteString)", category: .engine)
 
         let ws = installEngineConnection()
+        let liveAttemptGeneration = ws.liveSessionAttemptGeneration
         await ws.connect()
         guard !Task.isCancelled,
               !isInBackground,
@@ -236,11 +254,24 @@ final class EngineClient: EngineTransport {
         if connectionState.isConnected {
             recordReadyTransport(ws)
             await restoreInterestedStreamSubscriptions()
+        } else if EngineClientConnectionPolicy.shouldOwnAutomaticRecovery(
+            attemptedLiveSession: ws.liveSessionAttemptGeneration != liveAttemptGeneration,
+            isInBackground: isInBackground,
+            state: connectionState
+        ) {
+            // A cold launch can begin while cellular or the paired-server VPN
+            // route is still waking. Keep the same foreground recovery
+            // contract as an established socket loss instead of parking until
+            // the user kills the app or taps Retry.
+            ws.connectionState = .reconnecting(attempt: 0, nextRetrySeconds: 0)
+            connectionState = ws.connectionState
+            ws.startReconnectOwnership(deployRestart: false)
         }
     }
 
     func disconnect() {
         logger.info("Disconnecting from server", category: .engine)
+        isExplicitlyDisconnected = true
         connectionAttemptGeneration &+= 1
         connectionAttemptTask?.cancel()
         connectionAttemptTask = nil
@@ -386,6 +417,38 @@ final class EngineClient: EngineTransport {
         connectionState = .disconnected
     }
 
+    /// Release background suspension and establish one authoritative
+    /// foreground transport owner. This keeps lifecycle recovery inside the
+    /// connection layer instead of requiring every app surface to kick it.
+    func resumeFromBackground() async {
+        guard !Task.isCancelled else { return }
+        setBackgroundState(false)
+        guard !Task.isCancelled, !isInBackground else { return }
+
+        switch connectionState {
+        case .connected:
+            if !(await verifyConnection()) {
+                logger.info(
+                    "Foreground verification retired a stale connection; retrying",
+                    category: .engine
+                )
+                await manualRetry()
+            }
+        case .disconnected, .failed:
+            logger.info(
+                "Starting foreground connection recovery from \(connectionState)",
+                category: .engine
+            )
+            await manualRetry()
+        case .connecting, .reconnecting, .deployRestarting:
+            // The existing foreground owner is already making progress.
+            break
+        case .unauthorized:
+            // Authorization is deliberately parked until re-pair.
+            break
+        }
+    }
+
     /// Verify connection is alive (proxy to EngineConnection).
     /// Returns true if connection responds to ping, false if dead.
     func verifyConnection() async -> Bool {
@@ -402,6 +465,7 @@ final class EngineClient: EngineTransport {
             logger.debug("Manual retry deferred while app is backgrounded", category: .engine)
             return
         }
+        isExplicitlyDisconnected = false
 
         if let connectionAttemptTask {
             let inFlightKind = connectionAttemptKind
@@ -573,8 +637,123 @@ final class EngineClient: EngineTransport {
         payload: P,
         options: EngineInvocationOptions = EngineInvocationOptions()
     ) async throws -> R {
-        let ws = try requireConnection()
-        return try await ws.invokeRead(functionId: functionId, payload: payload, options: options)
+        var failedConnection: EngineConnection?
+        var failedTransportGeneration: UInt64?
+
+        while true {
+            try Task.checkCancellation()
+
+            if isExplicitlyDisconnected {
+                throw EngineConnectionError.notConnected
+            }
+            let ws = try await readableConnection(
+                excluding: failedConnection,
+                transportGeneration: failedTransportGeneration
+            )
+            do {
+                return try await ws.invokeRead(
+                    functionId: functionId,
+                    payload: payload,
+                    options: options
+                )
+            } catch {
+                guard !(error is CancellationError),
+                      ConnectionErrorClassifier.requiresConnectionRecovery(error) else {
+                    throw error
+                }
+                // Reads are side-effect free. If their socket epoch disappears,
+                // wait for a different ready owner and replay the read. Writes
+                // retain their explicit fail-fast/idempotency behavior below.
+                failedConnection = ws
+                failedTransportGeneration = ws.transportGeneration
+                await ensureReadRecoveryOwner(for: ws)
+                logger.debug(
+                    "Deferring engine read until a replacement transport is ready",
+                    category: .engine
+                )
+            }
+        }
+    }
+
+    private func readableConnection(
+        excluding failedConnection: EngineConnection?,
+        transportGeneration failedTransportGeneration: UInt64?
+    ) async throws -> EngineConnection {
+        var requestedConnection = false
+        while true {
+            try Task.checkCancellation()
+
+            if isExplicitlyDisconnected {
+                throw EngineConnectionError.notConnected
+            }
+
+            if case .unauthorized(let reason) = connectionState {
+                throw EngineConnectionError.unauthorized(reason)
+            }
+
+            if !isInBackground,
+               connectionState.isConnected,
+               let ws = engineConnection {
+                let isFailedOwner = ws === failedConnection
+                    && ws.transportGeneration == failedTransportGeneration
+                if !isFailedOwner {
+                    return ws
+                }
+            }
+
+            if !isInBackground {
+                switch connectionState {
+                case .disconnected, .failed:
+                    if !requestedConnection {
+                        requestedConnection = true
+                        await connect()
+                        continue
+                    }
+                case .connecting, .connected, .reconnecting,
+                     .deployRestarting, .unauthorized:
+                    break
+                }
+            }
+
+            await waitForObservationChange { [weak self] in
+                self?.readinessObservation
+            }
+        }
+    }
+
+    /// A request can discover a broken socket before state observation or the
+    /// heartbeat does. Ensure that case still has one reconnect owner before
+    /// the read waits for a replacement epoch.
+    private func ensureReadRecoveryOwner(for failedConnection: EngineConnection) async {
+        guard !Task.isCancelled,
+              !isInBackground,
+              !isExplicitlyDisconnected,
+              engineConnection === failedConnection else { return }
+
+        switch failedConnection.connectionState {
+        case .connected:
+            if !(await failedConnection.verifyConnection()),
+               !Task.isCancelled,
+               !isInBackground,
+               engineConnection === failedConnection {
+                await manualRetry()
+            }
+        case .disconnected, .failed:
+            await manualRetry()
+        case .connecting, .reconnecting, .deployRestarting, .unauthorized:
+            break
+        }
+    }
+
+    private var readinessObservation: EngineReadinessObservation {
+        EngineReadinessObservation(
+            state: connectionState,
+            continuityGeneration: continuityGeneration,
+            isInBackground: isInBackground,
+            connectionIdentifier: engineConnection.map(ObjectIdentifier.init),
+            transportGeneration: engineConnection?.transportGeneration,
+            isExplicitlyDisconnected: isExplicitlyDisconnected
+        )
     }
 
     func invokeWrite<P: Encodable, R: Decodable>(

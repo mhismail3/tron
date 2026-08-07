@@ -6,8 +6,8 @@ import Foundation
 /// Behavioral tests for `EngineConnection`'s normal reconnect loop.
 ///
 /// These tests avoid real network I/O and lock down the timing contract:
-/// normal reconnect uses short foreground probes at a bounded cadence, while
-/// the initial open timeout remains longer for first connect/manual setup paths.
+/// normal reconnect gives a cold cellular/VPN route the same bounded opening
+/// budget as initial/manual setup paths, then retries while foregrounded.
 @Suite("EngineConnection reconnect integration")
 @MainActor
 struct EngineConnectionReconnectTests {
@@ -20,8 +20,8 @@ struct EngineConnectionReconnectTests {
     func normalReconnectPolicyMatchesPlan() {
         let expected = ReconnectProbePolicy()
         #expect(expected.maxAutomaticAttempts == nil)
-        #expect(expected.probeTimeout == 2.0)
-        #expect(expected.retryDelay == 3.0)
+        #expect(expected.probeTimeout == 10.0)
+        #expect(expected.retryDelay == 2.0)
         #expect(EngineConnection.automaticReconnectProbeTimeout == expected.probeTimeout)
         #expect(EngineConnection.automaticReconnectRetryDelay == expected.retryDelay)
     }
@@ -58,17 +58,17 @@ struct EngineConnectionReconnectTests {
         #expect(connection.negotiatedMaxMessageSize == 1_024)
     }
 
-    @Test("initial websocket open timeout remains longer than reconnect probe")
+    @Test("initial and reconnect opens both admit cold route establishment")
     func initialWebSocketOpenTimeoutIsBounded() {
         #expect(EngineConnection.connectionOpenTimeout == 10.0)
-        #expect(EngineConnection.connectionOpenTimeout > EngineConnection.automaticReconnectProbeTimeout)
+        #expect(EngineConnection.connectionOpenTimeout == EngineConnection.automaticReconnectProbeTimeout)
         #expect(EngineConnection.connectionOpenTimeout < 30.0)
     }
 
     @Test("manual retry uses the full open timeout")
     func manualRetryUsesFullOpenTimeout() {
         #expect(EngineConnection.manualRetryOpenTimeout == EngineConnection.connectionOpenTimeout)
-        #expect(EngineConnection.manualRetryOpenTimeout > EngineConnection.automaticReconnectProbeTimeout)
+        #expect(EngineConnection.manualRetryOpenTimeout == EngineConnection.automaticReconnectProbeTimeout)
     }
 
     @Test("foreground heartbeat detects idle disconnects quickly")
@@ -119,6 +119,7 @@ struct EngineConnectionReconnectTests {
 
         #expect(configuration.timeoutIntervalForRequest == 30.0)
         #expect(configuration.timeoutIntervalForResource.isInfinite)
+        #expect(configuration.waitsForConnectivity)
     }
 
     @Test("concurrent disconnect signals share one reconnect owner")

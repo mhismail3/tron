@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SettingsServerLoadKey: Equatable {
     let serverSelectionVersion: Int
-    let isConnected: Bool
+    let continuity: EngineConnectionContinuity
 }
 
 // MARK: - Settings View
@@ -35,6 +35,7 @@ struct SettingsView: View {
     }
 
     @State private var settingsState = SettingsState()
+    @State private var projectionOwnerId: UUID?
     private let launchServerOnboarding: (PairedServer?) -> Void
     private let draftSessionId: String?
 
@@ -63,11 +64,24 @@ struct SettingsView: View {
             && !connectionRepository.connectionState.isConnected
     }
 
+    var isRecoveringServerConnection: Bool {
+        guard dependencies.pairedServerStore.activeServer != nil else { return false }
+        switch connectionRepository.connectionState {
+        case .disconnected, .connecting, .reconnecting, .deployRestarting:
+            return true
+        case .connected, .failed, .unauthorized:
+            return false
+        }
+    }
+
     var showsServerUnavailableState: Bool {
         hasPairedServers && !serverSettingsReady
     }
 
     var serverUnavailableDescription: String {
+        if isRecoveringServerConnection {
+            return "Tron will refresh every server-backed page automatically as soon as the connection is ready."
+        }
         if activeServerUnavailable {
             return SettingsLabels.connectedServerUnavailableDescription
         }
@@ -75,6 +89,9 @@ struct SettingsView: View {
     }
 
     var serverUnavailableTitle: String {
+        if isRecoveringServerConnection {
+            return "Reconnecting to server"
+        }
         if activeServerUnavailable || settingsState.loadError != nil {
             return "Server settings unavailable"
         }
@@ -82,6 +99,9 @@ struct SettingsView: View {
     }
 
     var serverUnavailableIcon: String {
+        if isRecoveringServerConnection {
+            return "arrow.triangle.2.circlepath"
+        }
         if activeServerUnavailable || settingsState.loadError != nil {
             return "wifi.exclamationmark"
         }
@@ -165,21 +185,16 @@ struct SettingsView: View {
         settingsWithSheets
             .task(id: SettingsServerLoadKey(
                 serverSelectionVersion: dependencies.activeServerSelectionVersion,
-                isConnected: connectionRepository.connectionState.isConnected
+                continuity: connectionRepository.continuity
             )) {
-                cardsVisible = true
-                await loadServerOwnedState()
-            }
-            .onChange(of: dependencies.activeServerSelectionVersion) {
-                settingsState.clearServerSnapshot()
-                clearWorkerDispatchState()
-            }
-            .onChange(of: connectionRepository.connectionState) { oldState, newState in
-                guard hasPairedServers else { return }
-                if oldState.isConnected && !newState.isConnected {
+                let ownerId = connectionRepository.continuityOwnerId
+                if projectionOwnerId != ownerId {
+                    projectionOwnerId = ownerId
                     settingsState.clearServerSnapshot()
                     clearWorkerDispatchState()
                 }
+                cardsVisible = true
+                await loadServerOwnedState()
             }
             .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { _ in
                 dismiss()
@@ -246,7 +261,9 @@ struct SettingsView: View {
         case .artifacts:
             ArtifactInboxView(
                 repository: dependencies.workerKernelRepository,
-                draftSessionId: draftSessionId
+                draftSessionId: draftSessionId,
+                continuity: connectionRepository.continuity,
+                serverSelectionVersion: dependencies.activeServerSelectionVersion
             )
         }
     }
@@ -287,23 +304,12 @@ struct SettingsView: View {
         let selectionVersion = dependencies.activeServerSelectionVersion
         let connection = dependencies.connectionRepository
         guard connection.connectionState.isConnected else {
-            settingsState.clearServerSnapshot()
             return
         }
-        let isAlive = await dependencies.verifyConnection()
-        guard !Task.isCancelled,
-              connection.connectionState.isConnected,
-              dependencies.pairedServerStore.activeServer?.id == activeServer.id,
-              dependencies.activeServerSelectionVersion == selectionVersion else {
-            return
-        }
-        guard isAlive else {
-            settingsState.clearServerSnapshot()
-            await dependencies.manualRetry()
-            return
-        }
-        settingsState.clearServerSnapshot()
-        await settingsState.load(using: dependencies.settingsRepository) {
+        await settingsState.load(
+            using: dependencies.settingsRepository,
+            forceRefresh: true
+        ) {
             !Task.isCancelled
                 && dependencies.connectionRepository.connectionState.isConnected
                 && dependencies.pairedServerStore.activeServer?.id == activeServer.id
@@ -323,13 +329,12 @@ struct SettingsView: View {
     }
 
     func loadWorkerDispatchStateIfAvailable() async {
-        guard let activeServer = dependencies.pairedServerStore.activeServer,
-              connectionRepository.connectionState.isConnected else {
+        guard let activeServer = dependencies.pairedServerStore.activeServer else {
             clearWorkerDispatchState()
             return
         }
+        guard connectionRepository.connectionState.isConnected else { return }
         let selectionVersion = dependencies.activeServerSelectionVersion
-        workerDispatchLoaded = false
         workerDispatchError = nil
         do {
             let snapshot = try await dependencies.workerKernelRepository.workers(includeRetired: false)
@@ -343,7 +348,9 @@ struct SettingsView: View {
             guard !Task.isCancelled,
                   dependencies.pairedServerStore.activeServer?.id == activeServer.id,
                   dependencies.activeServerSelectionVersion == selectionVersion else { return }
-            workerDispatchError = error.localizedDescription
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                workerDispatchError = error.localizedDescription
+            }
         }
     }
 

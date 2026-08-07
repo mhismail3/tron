@@ -146,23 +146,33 @@ extension SettingsView {
                     }
                 }
 
-                HStack(spacing: 8) {
-                    Button("Retry") {
-                        Task {
-                            await dependencies.manualRetry()
-                            await loadServerSettingsIfAvailable()
+                if isRecoveringServerConnection {
+                    Label("Server content will catch up automatically", systemImage: "clock.arrow.circlepath")
+                        .font(TronTypography.sans(
+                            size: TronTypography.sizeBody3,
+                            weight: .medium
+                        ))
+                        .foregroundStyle(.tronTextSecondary)
+                        .padding(.leading, MainSettingsListLayout.unavailableActionLeadingPadding)
+                } else {
+                    HStack(spacing: 8) {
+                        Button("Retry") {
+                            Task {
+                                await dependencies.manualRetry()
+                                await loadServerSettingsIfAvailable()
+                            }
                         }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.tronEmerald)
+                        .buttonStyle(.borderedProminent)
+                        .tint(.tronEmerald)
 
-                    Button(SettingsLabels.repairActiveServerPairing) {
-                        startOnboarding(prefill: dependencies.pairedServerStore.activeServer)
+                        Button(SettingsLabels.repairActiveServerPairing) {
+                            startOnboarding(prefill: dependencies.pairedServerStore.activeServer)
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.bordered)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                    .padding(.leading, MainSettingsListLayout.unavailableActionLeadingPadding)
                 }
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                .padding(.leading, MainSettingsListLayout.unavailableActionLeadingPadding)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
