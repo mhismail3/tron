@@ -852,10 +852,9 @@ scripts/ios-release-runner-diagnostics.sh
 
 It continues collecting after an unhealthy check and exits nonzero at the end.
 The output contains fixed installed-file metadata and hashes, rollback-journal
-presence, filtered launchd state, the actual listener's `bsexec` audit-session
-identity correlated with its direct process UID, exact remote runner state,
-and the three most recent main CI and iOS release run records. It tails only
-the root-owned Tron logs and
+presence, filtered launchd state, the exact listener process and Unix UID,
+remote runner state, and the three most recent main CI and iOS release run
+records. It tails only the root-owned Tron logs and
 `component=ios-release-runner-session` guard lines; raw Actions `_diag` logs,
 job output, credentials, keychains, environments, and signing state are
 deliberately excluded. This is the first evidence bundle to capture before
@@ -872,14 +871,15 @@ manager type, effective UID, and audit UID before keychain state is prepared.
 The agent deliberately omits `SessionCreate`: the independent `user/<uid>`
 Background domain already owns the correct non-root audit session, while asking
 launchd to create another session gives the listener a different audit login
-identity. Repair also uses privileged `launchctl bsexec` against the actual new
-listener PID and correlates the adopted bootstrap/audit identity with that
-PID's direct Unix UID before restoring its GitHub scheduling label. The probe
-intentionally remains root: nesting `sudo -u tron-ci` inside an adopted
-Background audit session makes verification depend on `sudo` resolving a
-hidden headless account in that context, even though launchd has already
-started the valid service-account process. A domain probe alone is not
-accepted as evidence for the process GitHub will use.
+identity. The root-owned session entry point is the launchd program itself: it
+checks its own effective UID, manager UID/type, Security session, audit UID,
+home, and immutable file metadata before it can execute `runsvc.sh`. Repair
+therefore requires a different exact listener PID and the same GitHub runner
+ID to return online before restoring its scheduling label. It deliberately
+does not use `launchctl bsexec` as a second identity check; on current macOS,
+that command can preserve the verifier's audit identity instead of reporting
+the target process's identity. The pre-exec guard and job-time doctor inspect
+their own real contexts and remain the two fail-closed enforcement boundaries.
 
 Every Actions job reruns the doctor before any step receives release secrets.
 It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
@@ -995,12 +995,15 @@ agent used `SessionCreate=true`. It validates the exact old agent and helper,
 copies the three root-owned files into a mode-0700
 `background-service-backup` rollback journal, fences the idle runner, and
 replaces them with the inheriting agent, updated boot helper, and immutable
-session entry point. The replacement must create a different listener PID;
-`bsexec` must prove that PID's manager, effective UID, audit UID, and non-root
-Security session before the journal is committed and scheduling reopens. A
-failure restores the prior Background service, while a later repair resolves a
-durable interrupted journal by either validating and committing the corrected
-candidate or restoring the exact prior files before retrying the upgrade.
+session entry point. The replacement must pass that entry point, create a
+different exact listener PID, and bring the same fenced GitHub runner ID online
+before the journal is committed and scheduling reopens. Because the validated
+agent can invoke only the root-owned fail-closed entry point, a listener cannot
+exist when its Unix, manager, Security-session, or audit identity is invalid.
+A failure restores the prior Background service, while a later repair resolves
+a durable interrupted journal by either validating and committing the
+corrected candidate or restoring the exact prior files before retrying the
+upgrade.
 The current LaunchDaemon adds root-owned stdout/stderr journals and a 0077
 creation umask. Repair generates the exact former no-log LaunchDaemon contract
 separately from the current plist, so adding observability cannot invalidate an

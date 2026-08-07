@@ -1775,9 +1775,6 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "rollback_background_service_upgrade()",
         "create_background_service_backup()",
         "validate_background_service_backup()",
-        "verify_runner_listener_security_session()",
-        "run_in_runner_listener_session()",
-        "/bin/launchctl bsexec \"$listener_pid\"",
         "actions/runners/$repair_runner_id/labels/$runner_label",
         "wait_for_remote_runner_status offline",
         "wait_for_remote_runner_status online",
@@ -1952,8 +1949,7 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "component=ios-release-runner-diagnostics",
         "installed_file_observed",
         "launchd_target_observed",
-        "/bin/launchctl bsexec \"$listener_pid\"",
-        "security-session --require-non-root",
+        "listener_process_observed",
         "remote_runner_observed",
         "gh_executable\" run list --workflow",
         "workflow_run_observed",
@@ -2086,9 +2082,6 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     let listener_check = migration
         .find("wait_for_new_runner_listener")
         .expect("service repair must prove that the listener process changed");
-    let listener_session_check = migration
-        .find("verify_runner_listener_security_session")
-        .expect("service repair must verify the actual replacement listener session");
     let online_check = migration
         .find("wait_for_remote_runner_status online")
         .expect("service repair must bind the candidate's online transition");
@@ -2113,8 +2106,7 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
             && legacy_stop < candidate_install
             && candidate_install < candidate_start
             && candidate_start < listener_check
-            && listener_check < listener_session_check
-            && listener_session_check < online_check
+            && listener_check < online_check
             && online_check < migration_commit
             && migration_commit < legacy_remove,
         "service repair must fence scheduling, journal the legacy service, prove offline-to-online transition, and commit the Background listener before deleting its rollback journal"
@@ -2148,9 +2140,6 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     let background_listener = background_upgrade
         .find("wait_for_new_runner_listener")
         .expect("Background upgrade must prove the listener PID changed");
-    let background_session = background_upgrade
-        .find("verify_runner_listener_security_session")
-        .expect("Background upgrade must verify the replacement listener session");
     let background_online = background_upgrade
         .find("wait_for_remote_runner_status online")
         .expect("Background upgrade must bind the replacement online transition");
@@ -2171,12 +2160,11 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
             && background_stop < background_install
             && background_install < background_start
             && background_start < background_listener
-            && background_listener < background_session
-            && background_session < background_online
+            && background_listener < background_online
             && background_online < background_journal_remove
             && background_journal_remove < background_commit
             && background_commit < background_label_restore,
-        "Background service repair must journal, fence, replace, verify the actual listener, commit, and only then readmit jobs"
+        "Background service repair must journal, fence, replace through the fail-closed entry point, commit, and only then readmit jobs"
     );
     let fence_start = bootstrap
         .find("fence_remote_runner()")

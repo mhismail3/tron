@@ -108,14 +108,6 @@ configure_runner_service_plist() {
         "$plist"
 }
 
-listener_security_probe_identity_is_valid() {
-    local identity="$1" expected_uid="$2"
-    # `launchctl bsexec` preserves the privileged verifier's Unix credentials
-    # while adopting the target process's bootstrap and audit session. Verify
-    # that explicit shape and correlate the listener's own UID separately.
-    [[ "$identity" == "0:$expected_uid:0" ]]
-}
-
 configure_runner_bootstrap_plist() {
     local plist="$1" runner_uid="$2"
     /bin/rm -f "$plist"
@@ -227,13 +219,6 @@ bootstrap_self_test() {
     configure_runner_service_plist "$legacy_plist_probe" true
     [[ "$(plutil -extract SessionCreate raw -o - "$legacy_plist_probe")" == "true" ]] \
         || die "release runner repair cannot recognize the prior audit-session contract"
-    listener_security_probe_identity_is_valid "0:502:0" 502 \
-        || die "release runner listener probe classifier rejected a valid session"
-    if listener_security_probe_identity_is_valid "502:502:0" 502 \
-        || listener_security_probe_identity_is_valid "0:0:1" 502; then
-        die "release runner listener probe classifier accepted an invalid session"
-    fi
-
     configure_runner_bootstrap_plist "$bootstrap_plist_probe" 502
     plutil -lint "$bootstrap_plist_probe" >/dev/null
     [[ "$(plutil -extract ProgramArguments.1 raw -o - "$bootstrap_plist_probe")" == "$runner_user" ]] \
@@ -842,41 +827,6 @@ runner_listener_pid() {
         | /usr/bin/head -1
 }
 
-run_in_runner_listener_session() (
-    local listener_pid="$1"
-    shift
-    [[ "$listener_pid" =~ ^[0-9]+$ ]] || return 1
-    # bsexec adopts the listener's exact bootstrap and security audit session
-    # while preserving this verifier's root Unix credentials. Do not invoke a
-    # second `sudo` inside that adopted session: macOS sudo's account/audit
-    # plugins are not guaranteed to resolve a hidden headless account there.
-    # The caller correlates this audit proof with the listener PID's direct UID.
-    cd /
-    exec /usr/bin/sudo /bin/launchctl bsexec "$listener_pid" "$@"
-)
-
-verify_runner_listener_security_session() {
-    local listener_pid="${1:-}" identity listener_uid manager_name manager_uid
-    [[ -n "$listener_pid" ]] || listener_pid="$(runner_listener_pid || true)"
-    [[ "$listener_pid" =~ ^[0-9]+$ ]] || return 1
-    listener_uid="$(
-        sudo /bin/ps -o uid= -p "$listener_pid" 2>/dev/null \
-            | /usr/bin/xargs
-    )"
-    manager_uid="$(run_in_runner_listener_session "$listener_pid" /bin/launchctl manageruid 2>/dev/null || true)"
-    manager_name="$(run_in_runner_listener_session "$listener_pid" /bin/launchctl managername 2>/dev/null || true)"
-    identity="$(
-        run_in_runner_listener_session "$listener_pid" /usr/bin/python3 -c \
-            'import ctypes, os; security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security"); session_id = ctypes.c_uint32(); attributes = ctypes.c_uint32(); status = security.SessionGetInfo(ctypes.c_uint32(0xFFFFFFFF), ctypes.byref(session_id), ctypes.byref(attributes)); uid = ctypes.c_uint32(); process = ctypes.CDLL(None, use_errno=True); audit_status = process.getauid(ctypes.byref(uid)); print(f"{os.geteuid()}:{uid.value}:{1 if attributes.value & 1 else 0}" if status == 0 and audit_status == 0 else "error")'
-    )" || identity="unavailable"
-    log_event info listener_security_observed \
-        "pid=$listener_pid expected_uid=$runner_uid listener_uid=${listener_uid:-unavailable} manager_uid=${manager_uid:-unavailable} manager_name=${manager_name:-unavailable} probe_identity=${identity:-unavailable}"
-    [[ "$listener_uid" == "$runner_uid" \
-        && "$manager_uid" == "$runner_uid" \
-        && "$manager_name" == "Background" ]] \
-        && listener_security_probe_identity_is_valid "$identity" "$runner_uid"
-}
-
 wait_for_all_runner_listeners_exit() {
     for ((listener_poll = 1; listener_poll <= 30; listener_poll++)); do
         if [[ -z "$(runner_listener_pid || true)" ]]; then
@@ -1130,7 +1080,8 @@ validate_existing_background_service() {
     start_runner_service_files || return 1
     listener_pid="$(runner_listener_pid || true)"
     [[ -n "$listener_pid" ]] || return 1
-    verify_runner_listener_security_session "$listener_pid" || return 1
+    log_event info guarded_listener_observed \
+        "pid=$listener_pid entrypoint=$runner_session_entrypoint"
     if [[ -n "$repair_runner_id" ]]; then
         wait_for_remote_runner_status online
     else
@@ -1523,10 +1474,7 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
         start_runner_service_files \
             || die "could not start the corrected Background runner service"
         wait_for_new_runner_listener "$repair_previous_listener_pid" \
-            || die "corrected Background runner did not create a new listener"
-        repaired_listener_pid="$(runner_listener_pid || true)"
-        verify_runner_listener_security_session "$repaired_listener_pid" \
-            || die "corrected Background runner listener has a mixed security session"
+            || die "corrected Background runner did not pass its fail-closed session entry point"
         wait_for_remote_runner_status online \
             || die "GitHub did not observe the corrected Background runner transition online"
         remove_background_service_backup \
@@ -1586,10 +1534,7 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
     start_runner_service_files \
         || die "could not start the Background release runner service"
     wait_for_new_runner_listener "$repair_previous_listener_pid" \
-        || die "Background release runner did not create a new listener"
-    migrated_listener_pid="$(runner_listener_pid || true)"
-    verify_runner_listener_security_session "$migrated_listener_pid" \
-        || die "Background release runner listener has a mixed security session"
+        || die "Background release runner did not pass its fail-closed session entry point"
     wait_for_remote_runner_status online \
         || die "GitHub did not observe the exact Background runner transition online"
     validate_legacy_runner_service "$legacy_runner_service_backup"
@@ -1707,10 +1652,7 @@ install_runner_service_files \
 start_runner_service_files \
     || die "could not start the Background release runner service"
 wait_for_new_runner_listener "" \
-    || die "Background release runner did not create its listener"
-installed_listener_pid="$(runner_listener_pid || true)"
-verify_runner_listener_security_session "$installed_listener_pid" \
-    || die "Background release runner listener has a mixed security session"
+    || die "Background release runner did not pass its fail-closed session entry point"
 wait_for_runner_online \
     || die "release runner did not become online with its dedicated label"
 sudo /usr/bin/pmset -c sleep 0

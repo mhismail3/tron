@@ -29,12 +29,9 @@ emit() {
     [[ "$level" != "error" ]] || diagnostic_status=1
 }
 
-listener_observation_is_valid() {
-    local process_uid="$1" manager_uid="$2" manager_name="$3" security_session="$4" expected_uid="$5"
-    [[ "$process_uid" == "$expected_uid" \
-        && "$manager_uid" == "$expected_uid" \
-        && "$manager_name" == "Background" \
-        && "$security_session" == \{*\} ]]
+listener_process_is_valid() {
+    local process_uid="$1" expected_uid="$2"
+    [[ "$process_uid" == "$expected_uid" ]]
 }
 
 if [[ "${1:-}" == "--self-test" ]]; then
@@ -44,11 +41,10 @@ if [[ "${1:-}" == "--self-test" ]]; then
         || { echo "error: diagnostics logging did not sanitize multiline fields" >&2; exit 1; }
     [[ "$sample" != *$'\nline_two'* ]] \
         || { echo "error: diagnostics logging admitted a multiline field" >&2; exit 1; }
-    listener_observation_is_valid 502 502 Background '{"audit_uid":502,"is_root":false}' 502 \
-        || { echo "error: diagnostics rejected a valid listener observation" >&2; exit 1; }
-    if listener_observation_is_valid 0 502 Background '{"audit_uid":502,"is_root":false}' 502 \
-        || listener_observation_is_valid 502 502 Background 'verification-error' 502; then
-        echo "error: diagnostics accepted an invalid listener observation" >&2
+    listener_process_is_valid 502 502 \
+        || { echo "error: diagnostics rejected a valid listener process" >&2; exit 1; }
+    if listener_process_is_valid 0 502; then
+        echo "error: diagnostics accepted a root-owned listener process" >&2
         exit 1
     fi
     echo "iOS release runner diagnostics self-test passed"
@@ -165,31 +161,12 @@ if [[ "$runner_uid" =~ ^[0-9]+$ ]]; then
             /usr/bin/sudo /bin/ps -o pid=,ppid=,uid=,user= -p "$listener_pid" 2>/dev/null \
                 | /usr/bin/xargs
         )"
-        listener_manager_uid="$(
-            /usr/bin/sudo /bin/launchctl bsexec "$listener_pid" \
-                /bin/launchctl manageruid 2>/dev/null || true
-        )"
-        listener_manager_name="$(
-            /usr/bin/sudo /bin/launchctl bsexec "$listener_pid" \
-                /bin/launchctl managername 2>/dev/null || true
-        )"
-        listener_security="$(
-            /usr/bin/sudo /bin/launchctl bsexec "$listener_pid" \
-                /usr/bin/python3 "$project_dir/scripts/ios-release-verify.py" \
-                security-session --require-non-root \
-                --require-audit-uid "$runner_uid" 2>&1 || true
-        )"
-        if listener_observation_is_valid \
-            "$listener_process_uid" \
-            "$listener_manager_uid" \
-            "$listener_manager_name" \
-            "$listener_security" \
-            "$runner_uid"; then
-            emit info listener_identity_observed \
-                "process='$listener_process' process_uid=$listener_process_uid manager_uid=$listener_manager_uid manager_name=$listener_manager_name security_session=$listener_security"
+        if listener_process_is_valid "$listener_process_uid" "$runner_uid"; then
+            emit info listener_process_observed \
+                "process='$listener_process' process_uid=$listener_process_uid"
         else
-            emit error listener_identity_observed \
-                "process='${listener_process:-unavailable}' process_uid=${listener_process_uid:-unavailable} manager_uid=${listener_manager_uid:-unavailable} manager_name=${listener_manager_name:-unavailable} security_session=${listener_security:-unavailable}"
+            emit error listener_process_observed \
+                "process='${listener_process:-unavailable}' process_uid=${listener_process_uid:-unavailable} expected_uid=$runner_uid"
         fi
     else
         emit error listener_missing "expected_uid=$runner_uid"
