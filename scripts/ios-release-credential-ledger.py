@@ -56,7 +56,7 @@ MAX_PROFILES_PER_ATTEMPT = 16
 
 IDENTIFIER_PATTERN = re.compile(r"^[1-9][0-9]{0,19}$")
 UUID_PATTERN = re.compile(
-    r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$"
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
 LEDGER_NAME_PATTERN = re.compile(
     r"^attempt-([1-9][0-9]{0,19})-([1-9][0-9]{0,19})\.json$"
@@ -165,7 +165,7 @@ def positive_identifier(value: str, owner: str) -> str:
 
 def canonical_profile_uuid(value: str) -> str:
     if not isinstance(value, str) or not UUID_PATTERN.fullmatch(value):
-        raise LedgerError("profile UUID must use canonical uppercase UUID syntax")
+        raise LedgerError("profile UUID must use canonical lowercase UUID syntax")
     return value
 
 
@@ -897,8 +897,8 @@ def self_test() -> None:
         selected_runner = runner or FakeRunner()
         return CredentialLedgerStore(home, selected_runner), selected_runner
 
-    profile_a = "12345678-1234-1234-1234-1234567890AB"
-    profile_b = "ABCDEFAB-CDEF-CDEF-CDEF-ABCDEFABCDEF"
+    profile_a = "12345678-1234-1234-1234-1234567890ab"
+    profile_b = "abcdefab-cdef-cdef-cdef-abcdefabcdef"
 
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -978,7 +978,7 @@ def self_test() -> None:
             "completion for another run",
         )
         expect_failure(
-            lambda: store.plan_profile("300", "4", profile_a.lower()),
+            lambda: store.plan_profile("300", "4", profile_a.upper()),
             "noncanonical profile UUID",
         )
         store.complete("300", "4")

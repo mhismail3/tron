@@ -1213,7 +1213,7 @@ jobs:
                 return 1
               }
 
-            uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$decoded_plist" | tr '[:lower:]' '[:upper:]')"
+            uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$decoded_plist" | tr '[:upper:]' '[:lower:]')"
             name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$decoded_plist")"
             application_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$decoded_plist" 2>/dev/null || true)"
             provisions_all="$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$decoded_plist" 2>/dev/null || true)"
