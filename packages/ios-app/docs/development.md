@@ -746,18 +746,31 @@ Every Actions job reruns the doctor before any step receives release secrets.
 It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
 account with its exact home, mode-0700 ownership, baseline keychain, checkout,
 and temporary directory all inside the isolated Actions installation, and the
-process belongs to launchd's system domain while its Security framework audit
-session is non-root. That last check detects the mixed Unix/security context
-that macOS otherwise reports later as an opaque `errSecInternalComponent`.
-The system-domain service is
-deliberate: GitHub's generated Darwin `svc.sh` is created only after runner
-registration, installs a per-login LaunchAgent, and refuses root. The hidden
-service account has no Aqua login session, so the bootstrap instead uses the
-checksum-pinned package's documented `runsvc.sh` entry point from a root-owned
-LaunchDaemon that drops privileges to `tron-ci`. Hosted macOS CI also runs the
-bootstrap's non-privileged `--self-test`, which exercises the real BSD ownership
-query plus idempotent ACL denial semantics without creating an account or
-registering a runner.
+listener belongs to launchd's system domain while its Security framework
+session is non-root. Unix identity is not sufficient for CodeSign: a
+system-domain child can still retain the wrong Mach bootstrap and audit user,
+which prevents CodeSign from resolving the isolated account's `secd` and
+`trustd` services. Before credentials are exposed, the doctor therefore uses
+the checked-in `ios-release-user-context` boundary to enter `tron-ci`'s
+headless `Background` launchd domain and proves both that launchd's manager UID
+and the process audit UID equal the account's effective UID. Manual keychain
+preparation, archive, export, and teardown all run through that same boundary.
+
+The system-domain listener is deliberate: GitHub's generated Darwin `svc.sh`
+is created only after runner registration, installs a per-login LaunchAgent,
+and refuses root. The hidden service account has no Aqua login session, so the
+bootstrap instead uses the checksum-pinned package's documented `runsvc.sh`
+entry point from a root-owned LaunchDaemon that drops privileges to `tron-ci`.
+The documented `launchctl asuser` transition changes only the bootstrap and
+audit context; because the runner keeps its existing standard-account UID, it
+does not create the mixed Unix/security identity Apple warns against. Hosted
+macOS CI also runs the
+bootstrap's non-privileged `--self-test` and executes the user-context wrapper
+inside its Aqua account. Those checks exercise the real BSD ownership query,
+idempotent ACL denial semantics, launchd manager identity, and audit identity
+without creating an account or registering a runner. The real release doctor's
+Background-domain requirement covers the system-to-user transition that a
+hosted Aqua job cannot reproduce.
 
 The bootstrap requires an authenticated repository-admin `gh` session and an
 interactive `sudo` checkpoint. It fails rather than replacing an existing
@@ -834,8 +847,9 @@ The upload lane uses the exact Xcode 27 release pin with the `Tron` scheme and
 `Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
 Simulator and XCTest execution stays on hosted Xcode 26 CI, where a logged-in
 Aqua session owns CoreSimulator and TestManager. The isolated system-domain
-release runner does not duplicate those tests: it compiles and archives the
-same accepted `main` source with Xcode 27, which proves the SDK-linked product
+release listener does not duplicate those tests: signing-sensitive commands
+enter its account's headless Background domain, then compile and archive the
+same accepted `main` source with Xcode 27. This proves the SDK-linked product
 surface without weakening host isolation merely to create a GUI login session.
 All live lanes archive for `generic/platform=iOS`, export an App Store Connect
 IPA with Xcode's `app-store-connect` export method, validate the exported
@@ -913,10 +927,12 @@ either grant that access or use the local signing secrets.
 
 ASC authentication is environment-backed in CI; the workflow does not create
 a repo-local `.asc/config.json`. Before manual signing changes the user
-keychain search list or default, it records both exactly. The temporary search
-path includes the job keychain plus macOS's system and system-root keychains;
-the system-owned Apple root retains its built-in trust. An always-run final
-step restores the original preferences, deletes the temporary private key,
+keychain search list or default, it enters the release account's validated
+Background bootstrap and records both exactly. The temporary search path
+includes the job keychain plus macOS's system and system-root keychains; the
+system-owned Apple root retains its built-in trust. Archive and export remain
+in that same audit/bootstrap context. An always-run final step re-enters it,
+restores the original preferences, deletes the temporary private key,
 certificate, standard-directory keychain, and diagnostic files, and removes
 only provisioning profiles the job created. Identical pre-existing profiles
 are reused, while a UUID collision
@@ -998,8 +1014,12 @@ from the `.p12` and validates the exact leaf -> WWDR G3 -> Apple Root chain with
 ambient keychain lookup and issuer fetching disabled. Only WWDR G3 is imported
 into the temporary user keychain; the explicit system-root keychain preserves
 macOS's built-in trust instead of treating a copied root certificate as trust
-configuration. A throwaway Mach-O is
-signed through the exact identity hash and keychain, verified, and its
+configuration. These checks do not substitute for the execution-context gate:
+`security verify-cert` can validate explicit files from the system bootstrap
+even when CodeSign cannot reach the account's user-domain trust service. The
+doctor therefore proves the matching Background manager UID and audit UID
+first. A throwaway Mach-O is then signed in that context through the exact
+identity hash and keychain, verified, and its
 three embedded certificates are extracted and compared with the validated leaf
 and both repository pins. Any failure is reduced to a redacted category such as
 untrusted chain, forbidden keychain interaction, missing identity, or security

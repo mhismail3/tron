@@ -2764,14 +2764,20 @@ triggers TestFlight delivery. The dedicated macOS release runner is a
 system-domain launchd job that drops privileges to its isolated service account;
 hosted macOS CI retains Simulator/XCTest ownership because those tools require a
 logged-in user session, while the release runner owns only Xcode 27 archive,
-export, verification, upload, and distribution. The pre-secret doctor rejects a
-root Security framework session even though the process already runs with the
-service account's Unix identity. Manual signing validates its `.p12` leaf
-through the checksum-pinned WWDR G3 and Apple Root certificates without ambient
-issuer discovery, imports the leaf/private key plus WWDR into a unique
-standard-directory keychain, and keeps the trusted root in macOS's system-root
-store. Both provisioning profiles must admit that exact leaf. A throwaway
-Mach-O must sign through the exact identity hash and keychain;
+export, verification, upload, and distribution. The system-domain listener's
+Unix account does not by itself establish the matching macOS Keychain context.
+Before secrets are exposed, the doctor therefore rejects a root Security
+framework session, enters the same account's headless Background launchd
+domain through `launchctl asuser`, and proves that both launchd's manager UID
+and the audit UID equal the effective UID. Manual keychain preparation, archive,
+export, and teardown all use that boundary, so CodeSign reaches the isolated
+account's `secd` and `trustd` services without a GUI login or trust override.
+Manual signing validates its `.p12` leaf through the checksum-pinned WWDR G3
+and Apple Root certificates without ambient issuer discovery, imports the
+leaf/private key plus WWDR into a unique standard-directory keychain, and keeps
+the trusted root in macOS's system-root store. Both provisioning profiles must
+admit that exact leaf. A throwaway Mach-O must sign through the exact identity
+hash and keychain;
 the workflow then verifies its embedded three-certificate chain against the
 validated leaf and repository pins. Redacted failure classification preserves
 the owning trust, interaction, identity, or security-context layer without

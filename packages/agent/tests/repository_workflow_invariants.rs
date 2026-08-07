@@ -1098,8 +1098,19 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     let workflow = read_repo_file(".github/workflows/release-ios.yml");
     let ci = read_repo_file(".github/workflows/ci.yml");
     let doctor = read_repo_file("scripts/ios-release-runner-doctor.sh");
+    let user_context = read_repo_file("scripts/ios-release-user-context");
+    let release_verifier = read_repo_file("scripts/ios-release-verify.py");
     let bootstrap = read_repo_file("scripts/bootstrap-ios-release-runner.sh");
     let version = read_repo_file("scripts/tron-version");
+    assert_ne!(
+        std::fs::metadata(repo_path("scripts/ios-release-user-context"))
+            .expect("release user-context boundary must exist")
+            .permissions()
+            .mode()
+            & 0o111,
+        0,
+        "release user-context boundary must be executable"
+    );
 
     let doctor_gate = workflow
         .find("      - name: Verify dedicated release runner\n")
@@ -1118,6 +1129,9 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "ACTIONS_RUNNER_SVC",
         "launchctl manageruid",
         "security-session --require-non-root",
+        "scripts/ios-release-user-context",
+        "/bin/launchctl managername",
+        "--require-audit-uid \"$runner_uid\"",
         "/usr/bin/stat -f '%Lp' \"$HOME\"",
         "id -Gn \"$runner_user\"",
         "GITHUB_WORKSPACE",
@@ -1131,6 +1145,60 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         assert!(
             doctor.contains(required),
             "release runner doctor is missing boundary check {required}"
+        );
+    }
+    for required in [
+        "/bin/launchctl manageruid",
+        "/bin/launchctl managername",
+        "/bin/launchctl asuser \"$release_uid\"",
+        "Aqua | Background",
+        "does not change Unix credentials",
+        "session_verifier=\"$script_dir/ios-release-verify.py\"",
+        "--require-audit-uid \"$release_uid\"",
+        "exec /bin/launchctl asuser \"$release_uid\" \"$@\"",
+    ] {
+        assert!(
+            user_context.contains(required),
+            "release user-context boundary is missing {required}"
+        );
+    }
+    for required in [
+        "process.getauid",
+        "\"audit_uid\": audit_uid.value",
+        "\"effective_uid\": os.geteuid()",
+        "release runner audit user does not match its Unix account",
+        "--require-audit-uid",
+    ] {
+        assert!(
+            release_verifier.contains(required),
+            "release security-session verifier is missing {required}"
+        );
+    }
+    let user_shell = "shell: ./scripts/ios-release-user-context /bin/bash";
+    assert_eq!(
+        workflow.matches(user_shell).count(),
+        4,
+        "manual signing, archive, export, and credential teardown must share the user security context"
+    );
+    for step_name in [
+        "Prepare manual iOS signing assets",
+        "xcodebuild archive",
+        "Export App Store IPA",
+        "Tear down iOS release credentials",
+    ] {
+        let step = workflow
+            .find(&format!("      - name: {step_name}\n"))
+            .unwrap_or_else(|| panic!("release workflow is missing {step_name}"));
+        let following = &workflow[step..];
+        let shell = following
+            .find(user_shell)
+            .unwrap_or_else(|| panic!("{step_name} is missing the user-context shell"));
+        let run = following
+            .find("        run: |\n")
+            .unwrap_or_else(|| panic!("{step_name} is missing its run body"));
+        assert!(
+            shell < run,
+            "{step_name} must enter the user context before its run body"
         );
     }
     for required in [
@@ -1233,6 +1301,10 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
     assert!(
         ci.contains("../../scripts/bootstrap-ios-release-runner.sh --self-test"),
         "hosted macOS CI must execute the release-runner ACL and BSD-utility self-test"
+    );
+    assert!(
+        ci.contains("../../scripts/ios-release-user-context /usr/bin/true"),
+        "hosted macOS CI must execute the release user-context boundary"
     );
 }
 

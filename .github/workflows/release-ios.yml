@@ -6,9 +6,11 @@
 # `config/ci-toolchain.env`; hosted Xcode 26 CI continues to prove the iOS 26
 # floor. Release tags retain the external/public TestFlight path and Beta App
 # Review handling.
-# Simulator/XCTest remains on hosted CI because the isolated release runner is
-# a system-domain service with no logged-in Aqua session; its Xcode 27 archive
-# is the SDK-linked compilation and distribution proof.
+# Simulator/XCTest remains on hosted CI because the isolated release listener
+# is a system-domain service with no logged-in Aqua session. Signing-sensitive
+# commands cross into that same account's headless Background launchd domain,
+# where its Unix identity, audit identity, secd, and trustd namespace agree;
+# the Xcode 27 archive is the SDK-linked compilation and distribution proof.
 # Both channels use this workflow's monotonic GITHUB_RUN_NUMBER as the hosted
 # iOS CFBundleVersion; reruns reuse their original number. VERSION.env remains
 # the product-version and local/Mac build source.
@@ -40,12 +42,15 @@
 # dry-run may omit the ASC credentials; live internal/external deliveries fail
 # before the build when any required credential is missing.
 #
-# Credential lifecycle invariant: ASC uses the job's environment-backed key
-# directly. Manual signing snapshots the user keychain preferences before it
-# prepends and selects a unique job-owned file keychain while leaving Apple's
-# trusted root in the system-root store. A pre-archive Mach-O proves both private
-# key access and the exact embedded leaf/intermediate/root chain. One final
-# `if: always()` step restores those preferences and removes the private key,
+# Credential lifecycle invariant: the pre-secret doctor first proves the
+# release account's Background bootstrap and matching audit UID. ASC uses the
+# job's environment-backed key directly. Manual signing, Xcode archive/export,
+# and credential teardown then execute through that user context. Signing
+# snapshots the user keychain preferences before it prepends and selects a
+# unique job-owned file keychain while leaving Apple's trusted root in the
+# system-root store. A pre-archive Mach-O proves both private key access and the
+# exact embedded leaf/intermediate/root chain. One final `if: always()` step in
+# the same context restores those preferences and removes the private key,
 # certificate, diagnostics, created profiles, and keychain without deleting
 # state that predated the job.
 
@@ -373,7 +378,7 @@ jobs:
 
       - name: Prepare manual iOS signing assets
         if: steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true' && steps.signing.outputs.mode == 'manual'
-        shell: bash
+        shell: ./scripts/ios-release-user-context /bin/bash --noprofile --norc -e -o pipefail {0}
         env:
           IOS_DISTRIBUTION_CERT_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERT_P12_BASE64 }}
           IOS_DISTRIBUTION_CERT_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERT_PASSWORD }}
@@ -689,10 +694,10 @@ jobs:
 
       - name: xcodebuild archive
         if: steps.ver.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
-        working-directory: ${{ env.IOS_APP_DIR }}
-        shell: bash
+        shell: ./scripts/ios-release-user-context /bin/bash --noprofile --norc -e -o pipefail {0}
         run: |
           set -euo pipefail
+          cd "$IOS_APP_DIR"
           archive_path="$(pwd)/build/TronMobile.xcarchive"
           rm -rf "$archive_path"
           if [[ "${{ steps.ver.outputs.dry_run }}" == "true" ]]; then
@@ -771,10 +776,10 @@ jobs:
 
       - name: Export App Store IPA
         if: steps.ver.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
-        working-directory: ${{ env.IOS_APP_DIR }}
-        shell: bash
+        shell: ./scripts/ios-release-user-context /bin/bash --noprofile --norc -e -o pipefail {0}
         run: |
           set -euo pipefail
+          cd "$IOS_APP_DIR"
           export_dir="$(pwd)/build/export"
           ipa_path="$(pwd)/build/TronMobile.ipa"
           export_options="$RUNNER_TEMP/ios-export-options.plist"
@@ -1547,7 +1552,7 @@ jobs:
 
       - name: Tear down iOS release credentials
         if: always()
-        shell: bash
+        shell: ./scripts/ios-release-user-context /bin/bash --noprofile --norc {0}
         run: |
           set +e
           cleanup_failed=0
