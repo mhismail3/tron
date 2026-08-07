@@ -1014,7 +1014,7 @@ jobs:
           baseline_keychain="$HOME/Library/Keychains/tron-runner-baseline.keychain-db"
           system_keychain="/Library/Keychains/System.keychain"
           system_root_keychain="/System/Library/Keychains/SystemRootCertificates.keychain"
-          profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+          profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
           : > "$original_keychains_path"
           : > "$installed_profile_uuids"
 
@@ -2611,7 +2611,7 @@ jobs:
           original_default_path="$RUNNER_TEMP/ios-original-default-keychain"
           snapshot_ready="$RUNNER_TEMP/ios-keychain-snapshot-ready"
           installed_profile_uuids="$RUNNER_TEMP/ios-installed-profile-uuids"
-          profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+          profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 
           # Restore persistent user preferences before deleting the keychain
           # they currently reference. The marker is written before mutation.

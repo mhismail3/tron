@@ -188,7 +188,9 @@ class CredentialLedgerStore:
         self.profiles_dir = (
             self.home
             / "Library"
-            / "MobileDevice"
+            / "Developer"
+            / "Xcode"
+            / "UserData"
             / "Provisioning Profiles"
         )
         self.baseline_keychain = self.keychains_dir / BASELINE_KEYCHAIN_NAME
@@ -879,7 +881,14 @@ def self_test() -> None:
         home = root / name
         home.mkdir(mode=0o700)
         keychains = home / "Library" / "Keychains"
-        profiles = home / "Library" / "MobileDevice" / "Provisioning Profiles"
+        profiles = (
+            home
+            / "Library"
+            / "Developer"
+            / "Xcode"
+            / "UserData"
+            / "Provisioning Profiles"
+        )
         keychains.mkdir(parents=True, mode=0o700)
         profiles.mkdir(parents=True, mode=0o700)
         baseline = keychains / BASELINE_KEYCHAIN_NAME
@@ -998,11 +1007,11 @@ def self_test() -> None:
 
         store, _ = fixture(root, "profile-directory-symlink")
         store.profiles_dir.rmdir()
-        mobile_device = store.profiles_dir.parent
-        mobile_device.rmdir()
-        outside_profiles = root / "outside-mobile-device"
+        user_data = store.profiles_dir.parent
+        user_data.rmdir()
+        outside_profiles = root / "outside-user-data"
         outside_profiles.mkdir(mode=0o700)
-        mobile_device.symlink_to(outside_profiles, target_is_directory=True)
+        user_data.symlink_to(outside_profiles, target_is_directory=True)
         expect_failure(
             store.prepare_profile_directory,
             "symlinked provisioning profile ancestor",

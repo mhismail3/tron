@@ -1299,7 +1299,7 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
     let home = state.path().join("home");
     let bin = state.path().join("bin");
     let workspace = state.path().join("checkout");
-    let profiles = home.join("Library/MobileDevice/Provisioning Profiles");
+    let profiles = home.join("Library/Developer/Xcode/UserData/Provisioning Profiles");
     std::fs::create_dir_all(&runner_temp).unwrap();
     std::fs::create_dir_all(&profiles).unwrap();
     std::fs::create_dir_all(&bin).unwrap();
@@ -1522,6 +1522,27 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         !workflow.contains("mkdir -p \"$profiles_dir\""),
         "profile-directory creation must not bypass no-follow ledger validation"
     );
+    let current_profile_library = "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles";
+    assert_eq!(
+        workflow.matches(current_profile_library).count(),
+        2,
+        "manual signing and teardown must share Xcode's current provisioning-profile library"
+    );
+    assert!(
+        !workflow.contains("Library/MobileDevice") && !credential_ledger.contains("MobileDevice"),
+        "Xcode 16 and later must not receive profiles through the retired MobileDevice cache"
+    );
+    for component in [
+        "/ \"Developer\"",
+        "/ \"Xcode\"",
+        "/ \"UserData\"",
+        "/ \"Provisioning Profiles\"",
+    ] {
+        assert!(
+            credential_ledger.contains(component),
+            "credential cleanup must bind Xcode's current profile library component {component}"
+        );
+    }
     let recovery_environment = &workflow[recovery_gate..credential_gate];
     assert!(
         !recovery_environment.contains("secrets."),

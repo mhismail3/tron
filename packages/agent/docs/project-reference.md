@@ -3026,7 +3026,11 @@ legacy cleanup, and full rotation paths. A secretless recovery step then
 restores the baseline keychain preferences, removes only paths claimed by
 strict durable attempt ledgers, creates or validates the provisioning-profile
 directory component-by-component with no-follow ownership checks, and proves
-the persistent credential state is empty before GitHub injects secrets. Manual keychain preparation, archive,
+the persistent credential state is empty before GitHub injects secrets. The
+workflow and ledger share Xcode's current
+`~/Library/Developer/Xcode/UserData/Provisioning Profiles` library; the retired
+`~/Library/MobileDevice` cache is not part of the Xcode 27 signing contract.
+Manual keychain preparation, archive,
 export, and teardown all use that boundary, so CodeSign reaches the isolated
 account's `secd` and `trustd` services without a GUI login or trust override.
 Manual signing validates its `.p12` leaf through the checksum-pinned WWDR G3
