@@ -2673,6 +2673,10 @@ pins GitHub's synthetic merge ref, proves the bootstrap bytes executed before
 checkout match the merge, and distributes a history-bounded,
 prerequisite-excluding thin bundle proportional to the merge delta. Every
 workload then verifies the commit, tree, parents, and executed-bootstrap record.
+GitHub's aggregate evidence job keeps its exact merge checkout at depth one and
+reads the tree plus ordered parents from the immutable raw commit headers; it
+does not mistake shallow revision-walk output for a parentless source or fetch
+unneeded history.
 The same-ref fetch uses a bounded propagation retry for an unavailable or
 still-old merge ref. It accepts and checks out only the fetched object whose
 ordered parents equal the provider-cached GitHub webhook's immutable base/head

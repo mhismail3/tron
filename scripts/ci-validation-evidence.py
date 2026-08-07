@@ -29,6 +29,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 import zipfile
@@ -70,6 +71,60 @@ class ValidatedCandidate:
 
 def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True).strip()
+
+
+def parse_commit_object(payload: bytes) -> tuple[str, list[str]]:
+    """Return the tree and ordered parents recorded in a raw commit object.
+
+    Revision-walk commands honor ``.git/shallow`` and therefore hide parents at
+    a shallow boundary.  Validation provenance must instead use the immutable
+    headers stored in the checked-out commit object itself.
+    """
+
+    header, separator, _message = payload.partition(b"\n\n")
+    if not separator:
+        raise ValueError("checked-out commit object is missing its header terminator")
+
+    headers = header.split(b"\n")
+    if not headers or not headers[0].startswith(b"tree "):
+        raise ValueError("checked-out commit object must start with one tree header")
+
+    def decode_oid(encoded_oid: bytes, field: str) -> str:
+        try:
+            oid = encoded_oid.decode("ascii")
+        except UnicodeDecodeError as error:
+            raise ValueError(f"{field} must be an ASCII Git object ID") from error
+        return require_git_oid(oid, field)
+
+    tree = decode_oid(headers[0].removeprefix(b"tree "), "checked-out commit tree")
+    parents: list[str] = []
+    next_header = 1
+    while next_header < len(headers) and headers[next_header].startswith(b"parent "):
+        parents.append(
+            decode_oid(
+                headers[next_header].removeprefix(b"parent "),
+                "checked-out commit parent",
+            )
+        )
+        next_header += 1
+    if any(
+        line.startswith((b"tree ", b"parent ")) for line in headers[next_header:]
+    ):
+        raise ValueError("checked-out commit tree/parent headers are out of order")
+    return tree, parents
+
+
+def raw_commit_identity(
+    reference: str, *, cwd: Path | None = None
+) -> tuple[str, list[str]]:
+    try:
+        payload = subprocess.check_output(
+            ["git", "cat-file", "commit", reference],
+            cwd=cwd,
+        )
+    except subprocess.CalledProcessError as error:
+        raise ValueError("unable to read the checked-out raw commit object") from error
+    return parse_commit_object(payload)
 
 
 def require_text(value: Any, field: str) -> str:
@@ -760,13 +815,7 @@ def validate_provider_context_artifact(document: dict[str, Any], context: Any) -
 def create(output: Path, ios_metrics: Path | None, artifacts: list[Path]) -> None:
     context = normalized_creation_context()
     merge_sha = require_git_oid(git("rev-parse", "HEAD"), "pull_request.merge_sha")
-    merge_tree = require_git_oid(
-        git("show", "-s", "--format=%T", "HEAD"), "pull_request.merge_tree"
-    )
-    merge_parents = [
-        require_git_oid(value, "pull_request.merge_parent")
-        for value in git("show", "-s", "--format=%P", "HEAD").split()
-    ]
+    merge_tree, merge_parents = raw_commit_identity(merge_sha)
     if merge_parents != [context["base_sha"], context["head_sha"]]:
         raise ValueError("checked-out merge parents do not match the declared PR base/head")
     declared_source_sha = first_environment("TRON_CI_SOURCE_SHA")
@@ -1447,6 +1496,87 @@ def test_v2_document() -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def self_test() -> None:
+    commit_fixture = (
+        f"tree {'d' * 40}\n"
+        f"parent {'b' * 40}\n"
+        f"parent {'a' * 40}\n"
+        "author Tron CI <ci@example.invalid> 0 +0000\n"
+        "committer Tron CI <ci@example.invalid> 0 +0000\n"
+        "\nfixture\n"
+    ).encode()
+    assert parse_commit_object(commit_fixture) == (
+        "d" * 40,
+        ["b" * 40, "a" * 40],
+    )
+    for description, malformed_commit in (
+        ("header terminator", commit_fixture.replace(b"\n\nfixture", b"\nfixture")),
+        (
+            "duplicate tree",
+            commit_fixture.replace(
+                b"tree " + b"d" * 40,
+                b"tree " + b"d" * 40 + b"\ntree " + b"e" * 40,
+            ),
+        ),
+        (
+            "malformed parent",
+            commit_fixture.replace(b"parent " + b"a" * 40, b"parent not-an-object-id"),
+        ),
+    ):
+        try:
+            parse_commit_object(malformed_commit)
+        except ValueError:
+            continue
+        raise AssertionError(f"commit object with invalid {description} was accepted")
+
+    with tempfile.TemporaryDirectory(prefix="tron-validation-evidence-") as temporary:
+        source = Path(temporary) / "source"
+        shallow = Path(temporary) / "shallow"
+
+        def fixture_git(repository: Path, *args: str) -> str:
+            return subprocess.check_output(
+                ["git", "-C", str(repository), *args],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+
+        subprocess.run(
+            ["git", "init", "--quiet", "--initial-branch=main", str(source)],
+            check=True,
+            stderr=subprocess.DEVNULL,
+        )
+        fixture_git(source, "config", "user.name", "Tron CI")
+        fixture_git(source, "config", "user.email", "ci@example.invalid")
+        fixture_git(source, "config", "commit.gpgsign", "false")
+        fixture_git(source, "config", "core.hooksPath", "/dev/null")
+        fixture_git(source, "commit", "--quiet", "--allow-empty", "-m", "root")
+        fixture_git(source, "switch", "--quiet", "-c", "feature")
+        fixture_git(source, "commit", "--quiet", "--allow-empty", "-m", "head")
+        head_sha = fixture_git(source, "rev-parse", "HEAD")
+        fixture_git(source, "switch", "--quiet", "main")
+        fixture_git(source, "commit", "--quiet", "--allow-empty", "-m", "base")
+        base_sha = fixture_git(source, "rev-parse", "HEAD")
+        fixture_git(source, "merge", "--quiet", "--no-ff", "--no-edit", "feature")
+        merge_sha = fixture_git(source, "rev-parse", "HEAD")
+        expected_tree = fixture_git(source, "show", "-s", "--format=%T", "HEAD")
+        subprocess.run(
+            ["git", "clone", "--quiet", "--depth=1", source.as_uri(), str(shallow)],
+            check=True,
+            stderr=subprocess.DEVNULL,
+        )
+        assert fixture_git(shallow, "rev-parse", "--is-shallow-repository") == "true"
+        assert fixture_git(shallow, "show", "-s", "--format=%P", "HEAD") == ""
+        parent_object = subprocess.run(
+            ["git", "-C", str(shallow), "cat-file", "-e", f"{merge_sha}^1"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        assert parent_object.returncode != 0
+        assert raw_commit_identity(merge_sha, cwd=shallow) == (
+            expected_tree,
+            [base_sha, head_sha],
+        )
+
     for malformed_json in ('{"schema":"one","schema":"two"}', '{"seconds":NaN}'):
         try:
             parse_json(malformed_json)

@@ -148,7 +148,12 @@ owner. The same invariant owns generated-project hygiene by requiring iOS and
 Mac XcodeGen output to stay ignored and untracked; client workflows own project
 generation and the consuming builds, tests, and archives. `CI summary` is the
 single fail-closed merge gate. A successful ready-PR run publishes evidence for
-the exact synthetic merge tree. The `main` run verifies that evidence and its
+the exact synthetic merge tree. Its aggregate checkout stays at depth one and
+reads the tree plus ordered parents directly from the raw commit object;
+revision-walk formatting is not a provenance source because Git intentionally
+hides parents at shallow boundaries. This keeps evidence generation independent
+of a history fetch while still binding the stored merge object to the declared
+base and head. The `main` run verifies that evidence and its
 GitHub artifact digest before reusing it. Candidates are checked newest-first;
 the first fully valid exact proof is selected, while missing, stale, malformed,
 or tree-mismatched candidates are rejected and no valid proof automatically

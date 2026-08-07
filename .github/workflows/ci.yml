@@ -388,6 +388,10 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
         with:
           ref: ${{ github.sha }}
+          # Evidence reads raw commit headers, so the aggregate needs the exact
+          # merge object but not its history. Keep this checkout intentionally
+          # shallow.
+          fetch-depth: 1
       - name: Create merge validation evidence
         if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
         env:

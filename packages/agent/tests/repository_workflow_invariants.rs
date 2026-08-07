@@ -1750,6 +1750,12 @@ fn github_ci_stages_feedback_and_reuses_exact_evidence_fail_closed() {
         .split_once("\n  ci:\n")
         .map(|(_, summary)| summary)
         .expect("CI must define its aggregate summary job");
+    assert!(
+        ci_summary.contains("fetch-depth: 1")
+            && evidence.contains("\"cat-file\", \"commit\"")
+            && !evidence.contains("git(\"show\", \"-s\", \"--format=%P\", \"HEAD\")"),
+        "depth-one evidence must read ordered parents from the raw commit object"
+    );
     for required in [
         "needs: [provenance, personal-info-guard, version-drift, workflow-lint, rust, ios, mac]",
         "RESULT_PROVENANCE: ${{ needs.provenance.result }}",
