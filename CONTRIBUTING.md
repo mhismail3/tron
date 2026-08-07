@@ -78,12 +78,12 @@ A successful main-branch CI push is published to the private automatic internal
 TestFlight group for App ID `6761511764` only while it remains the current main
 head. Release tags independently advance selected builds through the public
 TestFlight path; contributor PRs do not deploy and do not need App Store Connect
-access. Hosted stable Xcode 26 CI proves the iOS 26 floor; a dedicated
-release-only runner archives the same source with the exact
+access. Hosted stable Xcode 26 CI proves the iOS 26 floor; an ephemeral
+GitHub-hosted macOS 26 job archives the same source with the exact
 App-Store-supported stable/RC Xcode pin and publishes sanitized provenance.
 Beta Xcode builds are limited to direct physical-device development until Apple
-accepts that toolchain for App Store Connect. Runner bootstrap and toolchain
-rotation are documented in the iOS development guide.
+accepts that toolchain for App Store Connect. Toolchain rotation is documented
+in the iOS development guide.
 
 ### Mac wrapper
 
@@ -477,16 +477,15 @@ Three distribution lanes:
 
 | What | How | Cadence |
 |---|---|---|
-| iOS internal TestFlight | A successful `CI` workflow for a `main` push triggers `release-ios.yml` for the exact tested SHA only while it remains the current `main` head. Intent-keyed concurrency serializes reruns of that upstream CI run without collapsing distinct commits. Attempt-unique eligibility, intent, provenance, head-check, ASC-admission, reuse, and completion evidence make delivery replay-safe; a completed intent skips the release runner. | Latest green main head. |
+| iOS internal TestFlight | A successful `CI` workflow for a `main` push triggers `release-ios.yml` for the exact tested SHA only while it remains the current `main` head. Intent-keyed concurrency serializes reruns of that upstream CI run without collapsing distinct commits. Attempt-unique eligibility, intent, provenance, head-check, ASC-admission, reuse, and completion evidence make delivery replay-safe; a completed intent skips the hosted release job. | Latest green main head. |
 | iOS public TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. Run-ID-scoped direct intent, source-check, ASC-admission, reuse, and completion evidence make tag/manual retries replay-safe; the same workflow submits Beta App Review when required and assigns externally-ready builds to the public group. | Same tag as server release. |
 | Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds and notarizes the macOS DMG, creates a draft release when absent, or refreshes assets on an existing release without changing its publish state. | Same tag as iOS release. |
 
-The iOS development runbook owns release-runner installation and repair. After
-any host-side or TestFlight startup failure, run
-`scripts/ios-release-runner-diagnostics.sh` before changing launchd state. It
-correlates secret-safe host journals, the actual listener identity, GitHub
-runner state, and recent CI/TestFlight run metadata while excluding credentials,
-keychains, signing material, process environments, and raw job logs.
+The iOS development runbook owns the exact hosted TestFlight image/toolchain,
+credential lifecycle, App Store Connect evidence, and rotation procedure. The
+release workflow log and retained provenance/diagnostic artifacts are the
+canonical failure evidence; no developer Mac or custom launchd service is in
+the delivery path.
 
 Versioning sources:
 - **Source of truth** — root `VERSION.env`. `TRON_VERSION` is canonical

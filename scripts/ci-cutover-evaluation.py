@@ -553,13 +553,14 @@ def load_policy() -> dict[str, Any]:
         ios_release["channels"], {"internal", "external"}, "release.ios.channels"
     )
     ios_runner = exact_object(
-        ios_release["runner"], {"labels", "environment"}, "release.ios.runner"
+        ios_release["runner"], {"image", "environment"}, "release.ios.runner"
     )
     if ios_channels != {"internal": "internal", "external": "external"} or ios_triggers != {
         "internal": "latest-green-main",
         "external": "server-v*",
     }:
         raise EvaluationError("release.ios channel/trigger semantics are not canonical")
+    require_text(ios_runner["image"], "release.ios.runner.image", identifier=True)
     gate = exact_object(
         policy.get("cutover_gate"),
         {

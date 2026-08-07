@@ -8,7 +8,7 @@ classify_paths() {
     while IFS= read -r path; do
         [[ -n "$path" ]] || continue
         case "$path" in
-            packages/ios-app/*|.github/workflows/ci.yml|.github/workflows/release-ios.yml|.buildkite/*|config/ci-policy.json|config/ci-toolchain.env|scripts/bootstrap-ios-*|scripts/ios-*|scripts/ci-provider-context.py|scripts/ci-validation-evidence.py|scripts/ci-parity-report.py|scripts/ci-cutover-evaluation.py|scripts/ci-shadow-run.sh|scripts/validate-ci-definitions.sh|scripts/tron-version|scripts/install-ci-tools.sh|scripts/verify-ci-toolchain.sh)
+            packages/ios-app/*|.github/workflows/ci.yml|.github/workflows/release-ios.yml|.buildkite/*|config/ci-policy.json|config/ci-toolchain.env|scripts/ios-*|scripts/ci-provider-context.py|scripts/ci-validation-evidence.py|scripts/ci-parity-report.py|scripts/ci-cutover-evaluation.py|scripts/ci-shadow-run.sh|scripts/validate-ci-definitions.sh|scripts/tron-version|scripts/install-ci-tools.sh|scripts/verify-ci-toolchain.sh)
                 ios=true
                 ;;
         esac
@@ -31,8 +31,6 @@ if [[ "${1:-}" == "--self-test" ]]; then
     result="$(printf '%s\n' scripts/tron-version | classify_paths)"
     [[ "$result" == $'ios=true\nmac=true' ]]
     result="$(printf '%s\n' scripts/ios-release-verify.py | classify_paths)"
-    [[ "$result" == $'ios=true\nmac=false' ]]
-    result="$(printf '%s\n' scripts/bootstrap-ios-release-runner.sh | classify_paths)"
     [[ "$result" == $'ios=true\nmac=false' ]]
     result="$(printf '%s\n' .buildkite/pipeline.yml scripts/ci-provider-context.py scripts/ci-parity-report.py scripts/ci-cutover-evaluation.py scripts/validate-ci-definitions.sh config/ci-policy.json | classify_paths)"
     [[ "$result" == $'ios=true\nmac=true' ]]
