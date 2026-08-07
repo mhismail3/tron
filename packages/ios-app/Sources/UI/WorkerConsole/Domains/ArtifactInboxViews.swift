@@ -1,6 +1,6 @@
 import QuickLook
 import SwiftUI
-import UniformTypeIdentifiers
+import UIKit
 
 private enum ArtifactInboxLayout {
     static let horizontalInset: CGFloat = 20
@@ -82,6 +82,9 @@ struct ArtifactInboxView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 1)
+            .contentMargins(.top, 15)
+            .contentMargins(.bottom, 30)
             .refreshable {
                 await viewModel.refresh(repository: repository)
             }
@@ -95,7 +98,7 @@ struct ArtifactInboxView: View {
             viewModel.deactivate()
         }
         .sheet(item: $selectedArtifact) { artifact in
-            ArtifactDetailView(
+            ArtifactPreviewSheet(
                 artifact: artifact,
                 repository: repository,
                 viewModel: viewModel,
@@ -108,7 +111,9 @@ struct ArtifactInboxView: View {
         .alert(
             "Artifact unavailable",
             isPresented: Binding(
-                get: { viewModel.errorMessage != nil },
+                get: {
+                    selectedArtifact == nil && viewModel.errorMessage != nil
+                },
                 set: { isPresented in
                     if !isPresented {
                         viewModel.clearError()
@@ -141,29 +146,30 @@ struct ArtifactInboxView: View {
                         .font(TronTypography.sans(size: TronTypography.sizeTitle))
                         .foregroundStyle(.tronEmerald)
                         .frame(width: 28)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(artifact.displayName)
-                            .font(TronTypography.sans(
-                                size: TronTypography.sizeBody,
-                                weight: .semibold
-                            ))
-                            .foregroundStyle(.tronTextPrimary)
-                            .lineLimit(1)
-                        Text(
-                            ByteCountFormatter.string(
-                                fromByteCount: Int64(artifact.sizeBytes),
-                                countStyle: .file
-                            )
+                    Text(artifact.displayName)
+                        .font(TronTypography.sans(
+                            size: TronTypography.sizeBody,
+                            weight: .semibold
+                        ))
+                        .foregroundStyle(.tronTextPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(
+                        ByteCountFormatter.string(
+                            fromByteCount: Int64(artifact.sizeBytes),
+                            countStyle: .file
                         )
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
-                    }
-                    Spacer()
+                    )
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextMuted)
+                    .fixedSize()
                 }
-                .padding(12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
             }
         }
         .buttonStyle(.plain)
+        .accessibilityHint("Opens the artifact")
     }
 
     private func storageAttentionCard(
@@ -199,7 +205,12 @@ struct ArtifactInboxView: View {
     }
 }
 
-private struct ArtifactDetailView: View {
+/// Direct, verified artifact presentation.
+///
+/// The inbox row opens this content surface without an intermediary action
+/// menu. Share and Delete live in the standard toolbar; the draft bridge is
+/// shown only when a mounted interactive chat can actually receive it.
+struct ArtifactPreviewSheet: View {
     let artifact: WorkerArtifactDTO
     let repository: any WorkerKernelRepository
     let viewModel: ArtifactInboxViewModel
@@ -208,9 +219,7 @@ private struct ArtifactDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var showDeleteConfirmation = false
-    @State private var showPreview = false
-    @State private var showExporter = false
-    @State private var exportDocument = ArtifactExportDocument(data: Data())
+    @State private var deleteErrorMessage: String?
     @State private var attachedToDraft = false
 
     private var content: MaterializedWorkerArtifact? {
@@ -218,13 +227,27 @@ private struct ArtifactDetailView: View {
     }
 
     var body: some View {
-        SettingsPageContainer(title: "Artifact") {
-            VStack(alignment: .leading, spacing: 16) {
-                metadataCard
-                actionsCard
+        SettingsPageContainer(
+            title: "Artifact",
+            scrollsContent: false,
+            leadingToolbar: {
+                toolbarActions
+            }
+        ) {
+            VStack(spacing: 0) {
+                fileHeader
+                Divider()
+                    .overlay(Color.tronBorder.opacity(0.7))
+                    .padding(.horizontal, ArtifactInboxLayout.horizontalInset)
+                previewBody
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                attachToDraftAction
             }
         }
         .workerConsoleSheetPresentation()
+        .tint(.tronEmerald)
         .task(id: artifact.id) {
             await viewModel.load(artifact, repository: repository)
         }
@@ -233,228 +256,264 @@ private struct ArtifactDetailView: View {
                 await viewModel.release(artifact)
             }
         }
-        .sheet(isPresented: $showPreview) {
-            if let url = content?.fileURL {
-                ArtifactPreviewSheet(artifact: artifact, url: url)
-            }
-        }
-        .fileExporter(
-            isPresented: $showExporter,
-            document: exportDocument,
-            contentType: exportType,
-            defaultFilename: artifact.displayName
-        ) { _ in }
         .alert("Delete artifact?", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
-                viewModel.delete(artifact, repository: repository)
-                onDeleted()
-                dismiss()
+                Task {
+                    if await viewModel.delete(
+                        artifact,
+                        repository: repository
+                    ) {
+                        onDeleted()
+                        dismiss()
+                    } else if !Task.isCancelled {
+                        deleteErrorMessage = viewModel.errorMessage
+                            ?? "The engine did not confirm deletion."
+                    }
+                }
             }
         } message: {
             Text("This permanently removes the artifact from the engine and every client inbox.")
         }
-    }
-
-    private var metadataCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "File")
-            SettingsCard(accent: .tronEmerald) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(artifact.displayName)
-                        .font(TronTypography.sans(
-                            size: TronTypography.sizeBody,
-                            weight: .semibold
-                        ))
-                    Text(artifact.mediaType)
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                    Text(
-                        ByteCountFormatter.string(
-                            fromByteCount: Int64(artifact.sizeBytes),
-                            countStyle: .file
-                        )
-                    )
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextMuted)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-            }
-        }
-    }
-
-    private var actionsCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Actions")
-            SettingsCard {
-                VStack(spacing: 0) {
-                    actionButton("Preview", icon: "eye", enabled: content != nil) {
-                        showPreview = true
-                    }
-                    divider
-                    if let url = content?.fileURL {
-                        ShareLink(item: url) {
-                            actionLabel("Share", icon: "square.and.arrow.up")
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        actionLabel("Share", icon: "square.and.arrow.up")
-                            .opacity(0.4)
-                    }
-                    divider
-                    actionButton("Export", icon: "folder.badge.plus", enabled: content != nil) {
-                        guard let content else { return }
-                        exportDocument = ArtifactExportDocument(data: content.data)
-                        showExporter = true
-                    }
-                    divider
-                    actionButton(
-                        attachedToDraft ? "Attached to Draft" : "Attach to Draft",
-                        icon: attachedToDraft ? "checkmark.circle.fill" : "paperclip",
-                        enabled: content != nil
-                            && draftSessionId != nil
-                            && !attachedToDraft
-                    ) {
-                        guard let draftSessionId,
-                              let attachment = viewModel.attachment(for: artifact) else { return }
-                        NotificationCenter.default.post(
-                            name: .attachArtifactToDraft,
-                            object: ArtifactDraftAttachmentRequest(
-                                sessionId: draftSessionId,
-                                attachment: attachment
-                            )
-                        )
-                        attachedToDraft = true
-                    }
-                    divider
-                    actionButton(
-                        "Delete",
-                        icon: "trash",
-                        accent: .tronError,
-                        enabled: viewModel.deletingArtifactId != artifact.id
-                    ) {
-                        showDeleteConfirmation = true
+        .alert(
+            "Could not delete artifact",
+            isPresented: Binding(
+                get: { deleteErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        deleteErrorMessage = nil
+                        viewModel.clearError()
                     }
                 }
-            }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deleteErrorMessage ?? "")
         }
     }
 
-    private var divider: some View {
-        Divider().padding(.leading, 42)
-    }
-
-    private func actionButton(
-        _ title: String,
-        icon: String,
-        accent: Color = .tronEmerald,
-        enabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            actionLabel(title, icon: icon, accent: accent)
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.4)
-    }
-
-    private func actionLabel(
-        _ title: String,
-        icon: String,
-        accent: Color = .tronEmerald
-    ) -> some View {
-        SettingsRow(icon: icon, label: title, accentColor: accent) {
-            if viewModel.loadingArtifactId == artifact.id {
-                ProgressView().controlSize(.small)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-    }
-
-    private var exportType: UTType {
-        let pathExtension = URL(fileURLWithPath: artifact.displayName).pathExtension
-        return UTType(filenameExtension: pathExtension) ?? .data
-    }
-}
-
-/// Standard Tron presentation around Quick Look's native artifact renderer.
-///
-/// Quick Look owns the format-specific content surface, while this sheet owns
-/// navigation, dismissal, sharing, safe-area layout, and detent behavior. Keep
-/// the controller out of `ignoresSafeArea()` so it cannot cover sheet chrome.
-private struct ArtifactPreviewSheet: View {
-    let artifact: WorkerArtifactDTO
-    let url: URL
-
-    var body: some View {
-        SettingsPageContainer(title: "Preview", scrollsContent: false) {
-            ShareLink(item: url) {
+    @ViewBuilder
+    private var toolbarActions: some View {
+        HStack(spacing: 14) {
+            if let url = content?.fileURL {
+                ShareLink(item: url) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(.tronEmerald)
+                }
+                .accessibilityLabel("Share artifact")
+            } else {
                 Image(systemName: "square.and.arrow.up")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(.tronTextMuted.opacity(0.45))
+                    .accessibilityHidden(true)
             }
-            .accessibilityLabel("Share artifact")
-        } content: {
-            ArtifactQuickLookView(url: url)
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    previewCaption
+            Button {
+                showDeleteConfirmation = true
+            } label: {
+                if viewModel.deletingArtifactId == artifact.id {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.tronError)
+                } else {
+                    Image(systemName: "trash")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(.tronError)
                 }
+            }
+            .disabled(viewModel.deletingArtifactId == artifact.id)
+            .accessibilityLabel("Delete artifact")
         }
-        .workerConsoleSheetPresentation()
-        .tint(.tronEmerald)
     }
 
-    private var previewCaption: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "doc")
+    private var fileHeader: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "doc.text")
+                .font(TronTypography.sans(size: TronTypography.sizeTitle))
                 .foregroundStyle(.tronEmerald)
-            Text(artifact.displayName)
-                .font(TronTypography.sans(
-                    size: TronTypography.sizeCaption,
-                    weight: .medium
-                ))
-                .foregroundStyle(.tronTextSecondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 0)
-            Text(
-                ByteCountFormatter.string(
-                    fromByteCount: Int64(artifact.sizeBytes),
-                    countStyle: .file
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(artifact.displayName)
+                    .font(TronTypography.sans(
+                        size: TronTypography.sizeBody,
+                        weight: .semibold
+                    ))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(
+                    "\(artifact.mediaType)  ·  \(formattedSize)"
                 )
-            )
-            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-            .foregroundStyle(.tronTextMuted)
+                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
-        .glassEffect(
-            .regular.tint(Color.tronPhthaloGreen.opacity(0.18)),
-            in: Capsule()
+        .padding(.horizontal, ArtifactInboxLayout.horizontalInset)
+        .padding(.vertical, 13)
+    }
+
+    @ViewBuilder
+    private var previewBody: some View {
+        if let content {
+            ArtifactContentPreview(materialized: content)
+        } else if viewModel.loadingArtifactId == artifact.id {
+            SheetLoadingState(label: "Loading artifact")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let error = viewModel.errorMessage {
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(TronTypography.sans(size: TronTypography.sizeXL))
+                    .foregroundStyle(.tronWarning)
+                Text("Artifact unavailable")
+                    .font(TronTypography.sans(
+                        size: TronTypography.sizeTitle,
+                        weight: .semibold
+                    ))
+                    .foregroundStyle(.tronTextPrimary)
+                Text(error)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronTextSecondary)
+                    .multilineTextAlignment(.center)
+                Button("Try Again") {
+                    Task {
+                        await viewModel.load(artifact, repository: repository)
+                    }
+                }
+                .font(TronTypography.sans(
+                    size: TronTypography.sizeBody,
+                    weight: .semibold
+                ))
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            SheetLoadingState(label: "Preparing artifact")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var attachToDraftAction: some View {
+        if let draftSessionId, content != nil {
+            Button {
+                guard let attachment = viewModel.attachment(for: artifact) else {
+                    return
+                }
+                NotificationCenter.default.post(
+                    name: .attachArtifactToDraft,
+                    object: ArtifactDraftAttachmentRequest(
+                        sessionId: draftSessionId,
+                        attachment: attachment
+                    )
+                )
+                attachedToDraft = true
+            } label: {
+                Label(
+                    attachedToDraft
+                        ? "Attached to Current Draft"
+                        : "Attach to Current Draft",
+                    systemImage: attachedToDraft
+                        ? "checkmark.circle.fill"
+                        : "paperclip"
+                )
+                .font(TronTypography.sans(
+                    size: TronTypography.sizeBodySM,
+                    weight: .semibold
+                ))
+                .foregroundStyle(.tronEmerald)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+            }
+            .buttonStyle(.plain)
+            .disabled(attachedToDraft)
+            .glassEffect(
+                .regular.tint(Color.tronPhthaloGreen.opacity(0.16)),
+                in: Capsule()
+            )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private var formattedSize: String {
+        ByteCountFormatter.string(
+            fromByteCount: Int64(artifact.sizeBytes),
+            countStyle: .file
         )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
     }
 }
 
-private struct ArtifactExportDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.data] }
-    let data: Data
+private struct ArtifactContentPreview: View {
+    let materialized: MaterializedWorkerArtifact
 
-    init(data: Data) {
-        self.data = data
+    private var preview: ArtifactPreviewContent {
+        ArtifactPreviewContent.resolve(
+            mediaType: materialized.artifact.mediaType,
+            displayName: materialized.artifact.displayName,
+            data: materialized.data
+        )
     }
 
-    init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
+    @ViewBuilder
+    var body: some View {
+        switch preview {
+        case .markdown(let text):
+            ScrollView {
+                TextContentView(text: text, role: .assistant)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 32)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .text(let text, let monospaced):
+            ArtifactReadOnlyTextView(text: text, monospaced: monospaced)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .quickLook:
+            ArtifactQuickLookView(url: materialized.fileURL)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct ArtifactReadOnlyTextView: UIViewRepresentable {
+    let text: String
+    let monospaced: Bool
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isScrollEnabled = true
+        textView.alwaysBounceVertical = true
+        textView.backgroundColor = .clear
+        textView.textColor = .label
+        textView.font = TronTypography.uiFont(
+            mono: monospaced,
+            size: TronTypography.sizeBody
+        )
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textContainerInset = UIEdgeInsets(
+            top: 16,
+            left: 16,
+            bottom: 32,
+            right: 16
+        )
+        textView.textContainer.lineFragmentPadding = 0
+        TronScrollEdgeEffects.applySoft(to: textView)
+        return textView
     }
 
-    func fileWrapper(configuration _: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
+    func updateUIView(_ textView: UITextView, context: Context) {
+        if textView.text != text {
+            textView.text = text
+        }
+        textView.font = TronTypography.uiFont(
+            mono: monospaced,
+            size: TronTypography.sizeBody
+        )
     }
 }
 

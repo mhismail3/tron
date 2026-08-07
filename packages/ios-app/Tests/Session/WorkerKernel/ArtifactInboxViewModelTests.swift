@@ -58,6 +58,7 @@ struct ArtifactInboxViewModelTests {
         let materialized = try #require(model.materialized[fixture.id])
         #expect(materialized.data == Data("hello".utf8))
         #expect(FileManager.default.fileExists(atPath: materialized.fileURL.path))
+        #expect(materialized.fileURL.lastPathComponent == fixture.displayName)
         let attachment = try #require(model.attachment(for: fixture))
         #expect(attachment.type == .document)
         #expect(attachment.mimeType == "text/markdown")
@@ -144,9 +145,11 @@ struct ArtifactInboxViewModelTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let files = WorkerArtifactFileCoordinator(rootURL: root)
         let data = Data("hello".utf8)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let staleURL = root.appendingPathComponent(
-            "\(fixture.contentSha256.replacingOccurrences(of: "sha256:", with: "")).md"
+        let staleURL = try await files.materialize(fixture, data: data)
+        await files.remove(staleURL)
+        try FileManager.default.createDirectory(
+            at: staleURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
         )
         try Data("stale".utf8).write(to: staleURL)
 
@@ -159,6 +162,34 @@ struct ArtifactInboxViewModelTests {
         #expect(FileManager.default.fileExists(atPath: secondURL.path))
         await files.remove(secondURL)
         #expect(!FileManager.default.fileExists(atPath: secondURL.path))
+    }
+
+    @Test("Equal content in distinct artifacts has independent preview custody")
+    func equalContentArtifactsDoNotShareCleanupOwnership() async throws {
+        let first = fixtureArtifact(
+            artifactId: "report-1",
+            displayName: "first.md"
+        )
+        let second = fixtureArtifact(
+            artifactId: "report-2",
+            displayName: "second.md"
+        )
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let files = WorkerArtifactFileCoordinator(rootURL: root)
+        let data = Data("hello".utf8)
+
+        let firstURL = try await files.materialize(first, data: data)
+        let secondURL = try await files.materialize(second, data: data)
+
+        #expect(firstURL != secondURL)
+        #expect(firstURL.lastPathComponent == "first.md")
+        #expect(secondURL.lastPathComponent == "second.md")
+        await files.remove(firstURL)
+        #expect(!FileManager.default.fileExists(atPath: firstURL.path))
+        #expect(FileManager.default.fileExists(atPath: secondURL.path))
+        #expect(try Data(contentsOf: secondURL) == data)
+        await files.remove(secondURL)
     }
 
     @Test("Artifact pages append once when the final visible row is reached")
@@ -212,18 +243,86 @@ struct ArtifactInboxViewModelTests {
         let model = ArtifactInboxViewModel()
         await model.refresh(repository: repository)
 
-        model.delete(fixture, repository: repository)
-        for _ in 0..<50 where model.deletingArtifactId != nil {
-            await Task.yield()
-        }
+        let deleted = await model.delete(fixture, repository: repository)
 
+        #expect(deleted)
         #expect(model.artifacts.isEmpty)
         #expect(repository.deletedArtifactIds == [fixture.id])
     }
 
+    @Test("Failed deletion keeps the artifact and exposes a retryable error")
+    func failedDeleteKeepsArtifactVisible() async throws {
+        let fixture = fixtureArtifact()
+        let repository = ArtifactRepositoryStub(
+            page: WorkerArtifactPageDTO(
+                artifacts: [fixture],
+                returned: 1,
+                total: 1,
+                nextOffset: nil,
+                storageAttention: normalAttention()
+            ),
+            content: WorkerArtifactContentDTO(
+                artifact: fixture,
+                data: "aGVsbG8="
+            ),
+            deleteError: EngineConnectionError.notConnected
+        )
+        let model = ArtifactInboxViewModel()
+        await model.refresh(repository: repository)
+
+        let deleted = await model.delete(fixture, repository: repository)
+
+        #expect(!deleted)
+        #expect(model.artifacts == [fixture])
+        #expect(model.errorMessage != nil)
+        #expect(model.deletingArtifactId == nil)
+    }
+
+    @Test("Markdown uses native Tron rendering while binary files use Quick Look")
+    func previewContentSelectsCohesiveRenderer() {
+        #expect(
+            ArtifactPreviewContent.resolve(
+                mediaType: "text/markdown; charset=utf-8",
+                displayName: "report.md",
+                data: Data("# Report".utf8)
+            ) == .markdown("# Report")
+        )
+        #expect(
+            ArtifactPreviewContent.resolve(
+                mediaType: "application/json",
+                displayName: "report.json",
+                data: Data("{\"ok\":true}".utf8)
+            ) == .text("{\"ok\":true}", monospaced: true)
+        )
+        #expect(
+            ArtifactPreviewContent.resolve(
+                mediaType: "application/pdf",
+                displayName: "report.pdf",
+                data: Data([0x25, 0x50, 0x44, 0x46])
+            ) == .quickLook
+        )
+    }
+
+    @Test("Large Markdown remains complete selectable text without rich block expansion")
+    func largeMarkdownUsesBoundedTextRenderer() {
+        let text = String(
+            repeating: "# Heading\nBody\n",
+            count: ArtifactPreviewContent.maximumRichMarkdownBytes / 10
+        )
+
+        #expect(
+            ArtifactPreviewContent.resolve(
+                mediaType: "text/markdown",
+                displayName: "large.md",
+                data: Data(text.utf8)
+            ) == .text(text, monospaced: false)
+        )
+    }
+
     private func fixtureArtifact(
         artifactId: String = "report-1",
-        referenceArtifactId: String? = nil
+        referenceArtifactId: String? = nil,
+        displayName: String = "report.md"
     ) -> WorkerArtifactDTO {
         let data = Data("hello".utf8)
         let hash = "sha256:" + SHA256.hash(data: data)
@@ -232,7 +331,7 @@ struct ArtifactInboxViewModelTests {
         return WorkerArtifactDTO(
             workerId: "document-artifact",
             artifactId: artifactId,
-            displayName: "report.md",
+            displayName: displayName,
             mediaType: "text/markdown",
             sizeBytes: UInt64(data.count),
             contentSha256: hash,
@@ -273,20 +372,23 @@ struct ArtifactInboxViewModelTests {
 }
 
 @MainActor
-private final class ArtifactRepositoryStub: WorkerKernelRepository {
+final class ArtifactRepositoryStub: WorkerKernelRepository {
     let pages: [UInt64: WorkerArtifactPageDTO]
     let content: WorkerArtifactContentDTO
+    let deleteError: Error?
     private(set) var deletedArtifactIds: [String] = []
 
     init(
         page: WorkerArtifactPageDTO,
         content: WorkerArtifactContentDTO,
-        additionalPages: [UInt64: WorkerArtifactPageDTO] = [:]
+        additionalPages: [UInt64: WorkerArtifactPageDTO] = [:],
+        deleteError: Error? = nil
     ) {
         var pages = additionalPages
         pages[0] = page
         self.pages = pages
         self.content = content
+        self.deleteError = deleteError
     }
 
     func artifactDeliveries(
@@ -314,6 +416,7 @@ private final class ArtifactRepositoryStub: WorkerKernelRepository {
         artifactId: String,
         idempotencyKey _: EngineIdempotencyKey
     ) async throws -> WorkerArtifactDeleteDTO {
+        if let deleteError { throw deleteError }
         deletedArtifactIds.append("\(workerId):\(artifactId)")
         return WorkerArtifactDeleteDTO(
             workerId: workerId,

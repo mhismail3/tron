@@ -51,16 +51,30 @@ actor WorkerArtifactFileCoordinator {
             at: rootURL,
             withIntermediateDirectories: true
         )
-        let extensionValue = URL(fileURLWithPath: artifact.displayName).pathExtension
         let digest = artifact.contentSha256
             .replacingOccurrences(of: "sha256:", with: "")
-        let fileName = extensionValue.isEmpty
-            ? digest
-            : "\(digest).\(extensionValue)"
-        let destination = rootURL.appendingPathComponent(fileName)
+        let requestedLeaf = URL(fileURLWithPath: artifact.displayName).lastPathComponent
+        let displayName = requestedLeaf.isEmpty
+            || requestedLeaf == "."
+            || requestedLeaf == ".."
+            ? "artifact"
+            : requestedLeaf
+        let artifactKey = SHA256.hash(data: Data(artifact.id.utf8)).hexString
+        let digestDirectory = rootURL.appendingPathComponent(digest, isDirectory: true)
+        let contentDirectory = digestDirectory.appendingPathComponent(
+            artifactKey,
+            isDirectory: true
+        )
+        let destination = contentDirectory.appendingPathComponent(displayName)
         if materializedURLReferences[destination] == nil {
             // Replace any previous-process remnant with the already verified
-            // bytes before giving Quick Look or Share access to the path.
+            // bytes before giving Quick Look or Share access to the path. The
+            // digest directory preserves content identity while the final path
+            // component preserves the user's filename in the share sheet.
+            try FileManager.default.createDirectory(
+                at: contentDirectory,
+                withIntermediateDirectories: true
+            )
             try data.write(
                 to: destination,
                 options: [.atomic, .completeFileProtection]
@@ -77,6 +91,7 @@ actor WorkerArtifactFileCoordinator {
         } else {
             materializedURLReferences.removeValue(forKey: url)
             try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
         }
     }
 
@@ -108,8 +123,6 @@ final class ArtifactInboxViewModel {
     private var generation: UInt64 = 0
     @ObservationIgnored
     private var lifecycleGeneration: UInt64 = 0
-    @ObservationIgnored
-    private var deleteTask: Task<Void, Never>?
 
     init(files: WorkerArtifactFileCoordinator = WorkerArtifactFileCoordinator()) {
         self.files = files
@@ -225,38 +238,42 @@ final class ArtifactInboxViewModel {
         }
     }
 
+    @discardableResult
     func delete(
         _ artifact: WorkerArtifactDTO,
         repository: any WorkerKernelRepository
-    ) {
-        deleteTask?.cancel()
+    ) async -> Bool {
+        guard deletingArtifactId == nil else { return false }
+        let lifecycleTicket = lifecycleGeneration
         deletingArtifactId = artifact.id
         errorMessage = nil
-        deleteTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let response = try await repository.deleteArtifact(
-                    workerId: artifact.workerId,
-                    artifactId: artifact.artifactId,
-                    idempotencyKey: .userAction("artifact.delete.\(artifact.id)")
-                )
-                guard !Task.isCancelled,
-                      response.workerId == artifact.workerId,
-                      response.artifactId == artifact.artifactId else {
-                    return
-                }
-                artifacts.removeAll { $0.id == artifact.id }
-                if let cached = materialized.removeValue(forKey: artifact.id) {
-                    await files.remove(cached.fileURL)
-                }
-            } catch is CancellationError {
-                return
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+        defer {
             if deletingArtifactId == artifact.id {
                 deletingArtifactId = nil
             }
+        }
+        do {
+            let response = try await repository.deleteArtifact(
+                workerId: artifact.workerId,
+                artifactId: artifact.artifactId,
+                idempotencyKey: .userAction("artifact.delete.\(artifact.id)")
+            )
+            guard !Task.isCancelled,
+                  lifecycleTicket == lifecycleGeneration,
+                  response.workerId == artifact.workerId,
+                  response.artifactId == artifact.artifactId else {
+                return false
+            }
+            artifacts.removeAll { $0.id == artifact.id }
+            if let cached = materialized.removeValue(forKey: artifact.id) {
+                await files.remove(cached.fileURL)
+            }
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -283,8 +300,6 @@ final class ArtifactInboxViewModel {
     func deactivate() {
         generation &+= 1
         lifecycleGeneration &+= 1
-        deleteTask?.cancel()
-        deleteTask = nil
         artifacts = []
         materialized = [:]
         nextOffset = nil

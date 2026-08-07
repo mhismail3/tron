@@ -3,9 +3,18 @@ import Foundation
 @Observable
 @MainActor
 final class EngineClient: EngineTransport {
+    private enum ConnectionAttemptKind: Equatable {
+        case connect
+        case manualRetry
+    }
+
     private(set) var engineConnection: EngineConnection?
 
     private(set) var connectionState: ConnectionState = .disconnected
+    /// Monotonic ready-transport epoch observed by session projections. Unlike
+    /// `connectionState`, this changes for a rapid connected-to-connected
+    /// socket replacement and therefore cannot lose a catch-up request.
+    private(set) var continuityGeneration: UInt64 = 0
     private(set) var currentSessionId: String?
     private(set) var currentModel: String = ""
     private var streamSubscriptions: [EngineStreamSubscriptionKey: EngineSubscription] = [:]
@@ -19,11 +28,21 @@ final class EngineClient: EngineTransport {
     private var streamAckCoalescer = EngineStreamAckCoalescer()
     private var streamAckTasks: [String: Task<Void, Never>] = [:]
     private var workerEventSubscriptionTask: Task<Void, any Error>?
+    /// Engine-global worker monitoring has no per-view release contract. Once
+    /// requested, keep that intent across connection epochs just like session
+    /// presentation/processing interests; explicit disconnect resets it.
+    private(set) var workerEventSubscriptionsRequested = false
     private var workerProjectionInvalidationTask: Task<Void, Never>?
     private var workerProjectionInvalidations = WorkerProjectionInvalidationAccumulator()
     private var connectionAttemptTask: Task<Void, Never>?
+    private var connectionAttemptKind: ConnectionAttemptKind?
     private var connectionAttemptGeneration: UInt64 = 0
+    private var isInBackground = false
     private var currentSessionInterestGeneration: UInt64 = 0
+    /// Last socket generation whose connection-local subscription registry was
+    /// reconciled. This catches rapid reconnects whose intermediate state is
+    /// coalesced before observation samples it.
+    private var readyTransportGeneration: UInt64?
 
     // MARK: - Domain Clients
 
@@ -155,6 +174,10 @@ final class EngineClient: EngineTransport {
     // MARK: - Connection
 
     func connect() async {
+        guard !isInBackground else {
+            logger.debug("Connection request deferred while app is backgrounded", category: .engine)
+            return
+        }
         if let connectionAttemptTask {
             await connectionAttemptTask.value
             return
@@ -168,13 +191,16 @@ final class EngineClient: EngineTransport {
             await self.performConnect()
         }
         connectionAttemptTask = task
+        connectionAttemptKind = .connect
         await task.value
         if connectionAttemptGeneration == generation {
             connectionAttemptTask = nil
+            connectionAttemptKind = nil
         }
     }
 
     private func performConnect() async {
+        guard !isInBackground else { return }
         // Also check connection state to prevent races during state transitions.
         // If we're already connecting or reconnecting, don't start another connection.
         if EngineClientConnectionPolicy.shouldSkipConnect(state: connectionState) {
@@ -200,12 +226,16 @@ final class EngineClient: EngineTransport {
 
         let ws = installEngineConnection()
         await ws.connect()
+        guard !Task.isCancelled,
+              !isInBackground,
+              engineConnection === ws else { return }
 
         // Sync state immediately — the observation task may not have run yet,
         // so it can miss the .connecting → .connected transition.
         connectionState = ws.connectionState
         if connectionState.isConnected {
-            await restoreInterestedSessionSubscriptions()
+            recordReadyTransport(ws)
+            await restoreInterestedStreamSubscriptions()
         }
     }
 
@@ -214,13 +244,16 @@ final class EngineClient: EngineTransport {
         connectionAttemptGeneration &+= 1
         connectionAttemptTask?.cancel()
         connectionAttemptTask = nil
+        connectionAttemptKind = nil
         observationTask?.cancel()
         observationTask = nil
         currentSessionId = nil
         sessionSubscriptionInterests.removeAll()
+        workerEventSubscriptionsRequested = false
         clearActiveStreamSubscriptions(reason: "explicit disconnect")
         engineConnection?.disconnect()
         engineConnection = nil
+        readyTransportGeneration = nil
         // Explicitly reset state to allow future connections.
         connectionState = .disconnected
     }
@@ -242,25 +275,37 @@ final class EngineClient: EngineTransport {
                     guard !Task.isCancelled, let self else { return }
                     let previousState = connectionState
                     let nextState = observedConnection.connectionState
+                    let transportChanged = nextState.isConnected
+                        && readyTransportGeneration
+                            != observedConnection.transportGeneration
                     connectionState = nextState
                     if EngineClientStreamSubscriptionPolicy.shouldClearSubscriptions(
                         previous: previousState,
-                        next: nextState
+                        next: nextState,
+                        transportChanged: transportChanged
                     ) {
-                        clearActiveStreamSubscriptions(reason: "engine transport left connected state")
+                        clearActiveStreamSubscriptions(
+                            reason: transportChanged
+                                ? "engine transport generation changed"
+                                : "engine transport left connected state"
+                        )
                     }
                     if EngineClientStreamSubscriptionPolicy.shouldResubscribe(
                         previous: previousState,
                         next: nextState,
-                        hasCurrentSession: !sessionSubscriptionInterests.isEmpty
+                        hasCurrentSession: !sessionSubscriptionInterests.isEmpty,
+                        transportChanged: transportChanged
                     ) {
                         shouldRestoreSessionSubscriptions = true
+                    }
+                    if nextState.isConnected {
+                        recordReadyTransport(observedConnection)
                     }
                 }
 
                 if shouldRestoreSessionSubscriptions {
                     guard !Task.isCancelled else { return }
-                    await self?.restoreInterestedSessionSubscriptions()
+                    await self?.restoreInterestedStreamSubscriptions()
                     // Re-read before installing the next observation so the
                     // final source state after subscription is reconciled.
                     continue
@@ -275,6 +320,7 @@ final class EngineClient: EngineTransport {
 
     private func installEngineConnection() -> EngineConnection {
         clearActiveStreamSubscriptions(reason: "installing a new engine transport")
+        readyTransportGeneration = nil
         let ws = EngineConnection(
             serverURL: serverURL,
             bearerTokenProvider: bearerTokenProvider,
@@ -300,9 +346,44 @@ final class EngineClient: EngineTransport {
         await connect()
     }
 
-    /// Forward background state to EngineConnection to pause heartbeats and save battery
+    /// Treat a real process-background transition as a transport epoch boundary.
+    ///
+    /// The session subscription *interests* and selected session survive. Socket-
+    /// local subscriptions, acknowledgements, pending RPCs, and observation work
+    /// do not. A brand-new `EngineConnection` is installed on foreground so an
+    /// opening task from the retired socket can never tear down its replacement.
     func setBackgroundState(_ inBackground: Bool) {
-        engineConnection?.setBackgroundState(inBackground)
+        isInBackground = inBackground
+        guard inBackground else {
+            engineConnection?.setBackgroundState(false)
+            return
+        }
+
+        connectionAttemptGeneration &+= 1
+        connectionAttemptTask?.cancel()
+        connectionAttemptTask = nil
+        connectionAttemptKind = nil
+        observationTask?.cancel()
+        observationTask = nil
+        clearActiveStreamSubscriptions(reason: "app entered background")
+
+        guard let ws = engineConnection else {
+            readyTransportGeneration = nil
+            connectionState = .disconnected
+            return
+        }
+
+        if case .unauthorized = ws.connectionState {
+            ws.setBackgroundState(true)
+            readyTransportGeneration = nil
+            connectionState = ws.connectionState
+            return
+        }
+
+        ws.setBackgroundState(true)
+        engineConnection = nil
+        readyTransportGeneration = nil
+        connectionState = .disconnected
     }
 
     /// Verify connection is alive (proxy to EngineConnection).
@@ -317,10 +398,67 @@ final class EngineClient: EngineTransport {
     /// Use this when user taps the reconnection pill.
     func manualRetry() async {
         logger.info("Manual retry triggered from UI", category: .engine)
+        guard !isInBackground else {
+            logger.debug("Manual retry deferred while app is backgrounded", category: .engine)
+            return
+        }
 
+        if let connectionAttemptTask {
+            let inFlightKind = connectionAttemptKind
+            await connectionAttemptTask.value
+            guard !Task.isCancelled else { return }
+            if inFlightKind == .connect {
+                switch connectionState {
+                case .disconnected, .failed:
+                    await manualRetry()
+                case .connected, .connecting, .reconnecting, .deployRestarting, .unauthorized:
+                    break
+                }
+            }
+            return
+        }
+
+        connectionAttemptGeneration &+= 1
+        let generation = connectionAttemptGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performManualRetry()
+        }
+        connectionAttemptTask = task
+        connectionAttemptKind = .manualRetry
+        await task.value
+        if connectionAttemptGeneration == generation {
+            connectionAttemptTask = nil
+            connectionAttemptKind = nil
+        }
+    }
+
+    private func performManualRetry() async {
+        guard !isInBackground else { return }
         let ws = engineConnection ?? installEngineConnection()
+        if observationTask == nil {
+            startConnectionStateObservation()
+        }
         await ws.manualRetry()
+        guard !Task.isCancelled,
+              !isInBackground,
+              engineConnection === ws else { return }
         connectionState = ws.connectionState
+        if connectionState.isConnected {
+            recordReadyTransport(ws)
+            await restoreInterestedStreamSubscriptions()
+        }
+    }
+
+    private func recordReadyTransport(_ connection: EngineConnection) {
+        let generation = connection.transportGeneration
+        guard readyTransportGeneration != generation else { return }
+        readyTransportGeneration = generation
+        continuityGeneration &+= 1
+        logger.info(
+            "Engine continuity generation advanced to \(continuityGeneration)",
+            category: .engine
+        )
     }
 
     // MARK: - Event Handling
@@ -535,6 +673,7 @@ final class EngineClient: EngineTransport {
     }
 
     func ensureWorkerEventSubscriptions() async throws {
+        workerEventSubscriptionsRequested = true
         if let workerEventSubscriptionTask {
             try await workerEventSubscriptionTask.value
             return
@@ -645,9 +784,12 @@ final class EngineClient: EngineTransport {
                 workspaceId: workspaceId
             )
         } catch {
-            if !connectionState.isConnected {
+            if !connectionState.isConnected
+                || ConnectionErrorClassifier.isTransientTransport(error) {
                 // Retain the domain interest so automatic reconnect can
                 // restore exactly the sessions still presented or processing.
+                // The observable connection state may still be stale-connected
+                // when a request reports the transport failure first.
                 throw error
             }
             sessionSubscriptionInterests[key]?.remove(interest)
@@ -698,6 +840,20 @@ final class EngineClient: EngineTransport {
             _ = try? await subscribeToSessionEvents(
                 sessionId: key.sessionId ?? "",
                 workspaceId: key.workspaceId
+            )
+        }
+    }
+
+    private func restoreInterestedStreamSubscriptions() async {
+        await restoreInterestedSessionSubscriptions()
+        guard connectionState.isConnected,
+              workerEventSubscriptionsRequested else { return }
+        do {
+            try await ensureWorkerEventSubscriptions()
+        } catch {
+            logger.warning(
+                "Failed to restore worker event subscriptions: \(error.localizedDescription)",
+                category: .events
             )
         }
     }

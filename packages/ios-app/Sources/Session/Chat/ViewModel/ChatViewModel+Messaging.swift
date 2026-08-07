@@ -36,7 +36,7 @@ extension ChatViewModel: MessagingContext {
     }
 
     func ensureLiveEventSubscription() async throws {
-        logger.info("Ensuring live engine event subscription before prompt send", category: .events)
+        logger.info("Ensuring live engine event subscription before continuity-sensitive work", category: .events)
         try await services.events.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
     }
 

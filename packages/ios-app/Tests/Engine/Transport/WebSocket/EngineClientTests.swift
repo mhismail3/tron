@@ -142,6 +142,40 @@ final class EnginePendingRequestLifecycleTests: XCTestCase {
         XCTAssertTrue(connection.pendingRequests.isEmpty)
     }
 
+    func testBackgroundRetirementImmediatelyFailsPendingRequests() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:9847/engine")!
+        )
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+        var didStart = false
+        let pending = Task { @MainActor in
+            try await connection.awaitPendingResponse(
+                id: "backgrounded",
+                operation: "session.reconstruct",
+                timeout: 60
+            ) {
+                didStart = true
+            }
+        }
+        while !didStart {
+            await Task.yield()
+        }
+
+        connection.setBackgroundState(true)
+
+        do {
+            _ = try await pending.value
+            XCTFail("Expected transport retirement")
+        } catch EngineConnectionError.notConnected {
+            // Expected: backgrounding resolves the stale RPC immediately.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertTrue(connection.pendingRequests.isEmpty)
+        XCTAssertEqual(connection.connectionState, .disconnected)
+    }
+
     func testInboundResponseRoutingDoesNotMaterializeResultPayload() {
         let data = Data(
             #"{"type":"response","id":"response-1","ok":true,"result":{"body":"private"}}"#.utf8

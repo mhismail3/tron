@@ -247,10 +247,10 @@ extension ChatView {
                     presentationMode == .workerAudit ? .bottom : .top,
                     for: .alignment
                 )
-                .defaultScrollAnchor(
-                    presentationMode == .workerAudit ? .bottom : .top,
-                    for: .initialOffset
-                )
+                // Native initial ownership starts at the newest content. The
+                // separate `.top` alignment rule still keeps a transcript that
+                // fits the viewport at the top instead of floating at its foot.
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .scrollPosition($transcriptScrollPosition)
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.size.height
@@ -341,7 +341,9 @@ extension ChatView {
                     viewportMeasurements.recordScrollGeometry(
                         contentHeight: metrics.contentHeight,
                         viewportHeight: metrics.viewportHeight,
-                        bottomInset: metrics.bottomInset
+                        bottomInset: metrics.bottomInset,
+                        distanceFromBottom: metrics.distanceFromBottom,
+                        messageCount: viewModel.messages.count
                     )
                     guard initialLoadComplete else { return }
                     viewportMeasurements.isNearTopHistoryDetent = metrics.historyTopMetrics.isNearTop
@@ -390,6 +392,9 @@ extension ChatView {
                     guard newCount > oldCount else { return }
 
                     if !initialLoadComplete {
+                        viewportMeasurements.beginTranscriptPositioning(
+                            messageCount: newCount
+                        )
                         logger.debug("[INIT] messages.count changed \(oldCount)→\(newCount) DURING initial load", category: .ui)
                     }
 
@@ -400,11 +405,18 @@ extension ChatView {
                     guard initialLoadComplete else { return }
 
                     scrollCoordinator.contentDidArrive()
-                    scrollToBottomIfAllowed(
-                        animated: true,
-                        animation: .easeOut(duration: 0.2),
-                        reason: "new message"
-                    )
+                    // Wait for this row's geometry before deciding whether the
+                    // formerly undersized transcript now has scrollable overflow.
+                    taskCoordinator.replaceTask(.liveTailScroll) { ticket in
+                        await Task.yield()
+                        try? await Task.sleep(for: .milliseconds(20))
+                        guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+                        scrollToBottomIfAllowed(
+                            animated: true,
+                            animation: .easeOut(duration: 0.2),
+                            reason: "new message"
+                        )
+                    }
                 }
                 // Content arrival tracking during streaming — 30fps (cheap: just sets a bool flag)
                 .onChange(of: viewModel.messages.last?.streamingVersion) { _, _ in

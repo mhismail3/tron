@@ -124,6 +124,10 @@ final class ChatViewModel {
     /// snapshot commits its sequence high-water mark and projection.
     @ObservationIgnored
     var eventBuffer: [ParsedEventV2] = []
+    /// A pathological live burst must not turn a slow reconstruction into
+    /// unbounded client memory. Overflow deliberately requests one more
+    /// authoritative snapshot, which recovers every dropped durable event.
+    static let maximumReconstructionEventBufferCount = 4_096
     /// Highest processed event sequence number. Events with seq <= this are dropped (dedup).
     var sequenceHighWaterMark: Int64 = -1
     /// Monotonic request observed by the mounted ChatView. The view owns the
@@ -395,6 +399,14 @@ final class ChatViewModel {
     /// Unified event handler - buffers during reconstruction, dispatches otherwise
     func handleEventV2(_ event: ParsedEventV2) {
         if isReconstructing {
+            if eventBuffer.count >= Self.maximumReconstructionEventBufferCount {
+                logger.error(
+                    "[RECONSTRUCT] Live suffix exceeded \(Self.maximumReconstructionEventBufferCount) events; replacing it and requesting another authoritative snapshot",
+                    category: .events
+                )
+                eventBuffer.removeAll(keepingCapacity: true)
+                advanceStreamRecoveryRequest()
+            }
             if eventBuffer.count < 3 {
                 // Log first few buffered events for debugging
                 logger.debug("[RECONSTRUCT] Buffering event during reconstruction: \(event.eventType) (buffer=\(eventBuffer.count + 1))", category: .events)

@@ -97,6 +97,21 @@ final class CatchUpEventBufferTests: XCTestCase {
         XCTAssertEqual(viewModel.streamRecoveryRequestGeneration, initialGeneration + 1)
     }
 
+    func testPathologicalLiveSuffixIsBoundedAndRequestsAuthoritativeRecovery() {
+        let initialGeneration = viewModel.streamRecoveryRequestGeneration
+        viewModel.isReconstructing = true
+
+        for index in 0...ChatViewModel.maximumReconstructionEventBufferCount {
+            viewModel.handleEventV2(.unknown("test.event.\(index)"))
+        }
+
+        XCTAssertEqual(viewModel.eventBuffer.count, 1)
+        XCTAssertEqual(
+            viewModel.streamRecoveryRequestGeneration,
+            initialGeneration + 1
+        )
+    }
+
     func testDrainIsNoOpWhenBufferEmpty() {
         // Given: No events buffered
         XCTAssertEqual(viewModel.eventBuffer.count, 0)

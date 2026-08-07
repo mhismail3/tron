@@ -14,6 +14,10 @@ final class DefaultAppConnectionRepository: AppConnectionRepository {
         client.connectionState
     }
 
+    var continuityGeneration: UInt64 {
+        client.continuityGeneration
+    }
+
     func connect() async {
         await client.connect()
     }

@@ -13,6 +13,16 @@ enum ChatPresentationMode: Equatable {
     case workerAudit
 }
 
+struct ChatConnectionContinuity: Equatable {
+    let state: ConnectionState
+    let generation: UInt64
+
+    func requiresRecovery(after previous: Self) -> Bool {
+        state.isConnected
+            && (!previous.state.isConnected || generation != previous.generation)
+    }
+}
+
 struct ChatView: View {
     // MARK: - Environment & State (internal for extension access)
     @Environment(\.dismiss) var dismiss
@@ -47,7 +57,7 @@ struct ChatView: View {
         get { viewportMeasurements.scrollProxy }
         nonmutating set { viewportMeasurements.scrollProxy = newValue }
     }
-    @State var transcriptScrollPosition = ScrollPosition()
+    @State var transcriptScrollPosition = ScrollPosition(edge: .bottom)
 
     // MARK: - Message Loading State (internal for extension access)
     @State var initialLoadComplete = false
@@ -166,6 +176,11 @@ struct ChatView: View {
             )
             guard initialLoadComplete else { return }
             scrollToBottomIfAllowed(reason: "foreground activation")
+            // Do not rely exclusively on a SwiftUI-observed connection edge:
+            // state mutations can be coalesced while the process is suspended.
+            // The keyed task is idempotent with the connected-edge owner and
+            // guarantees an authoritative catch-up on every foreground return.
+            scheduleCoalescedRecoveryRefresh()
         }
         .onDisappear {
             taskCoordinator.invalidate()
@@ -283,18 +298,6 @@ struct ChatView: View {
             let historyWasProvisional = !viewModel.hasAuthoritativeHistory
             let initialReconstructionOutcome = await viewModel.connectAndReconstruct()
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
-            do {
-                try await services.events.ensureSessionEventSubscription(
-                    sessionId: sessionId,
-                    workspaceId: nil
-                )
-            } catch {
-                logger.debug(
-                    "[INIT] Live session lease will retry on prompt/reconnect: \(error.localizedDescription)",
-                    category: .events
-                )
-            }
-            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             logger.debug("[INIT] connectAndReconstruct done, messages=\(viewModel.messages.count)", category: .ui)
 
             // Resolve initial visibility through the same owner used by a later
@@ -317,16 +320,19 @@ struct ChatView: View {
 
     var body: some View {
         lifecycleContent
-        .onChange(of: services.connection.connectionState) { oldState, newState in
+        .onChange(of: ChatConnectionContinuity(
+            state: services.connection.connectionState,
+            generation: services.connection.continuityGeneration
+        )) { oldContinuity, newContinuity in
             if presentationMode == .interactiveSession {
-                if newState.isConnected {
+                if newContinuity.state.isConnected {
                     viewModel.startSpeechTranscriptionMonitoring()
                 } else {
                     viewModel.stopSpeechTranscriptionMonitoring()
                 }
             }
-            // React when connection transitions to connected
-            if initialLoadComplete, newState.isConnected && !oldState.isConnected {
+            if initialLoadComplete,
+               newContinuity.requiresRecovery(after: oldContinuity) {
                 scheduleReconstructionRefresh()
             }
             // Composer actions read this same session transport state directly;

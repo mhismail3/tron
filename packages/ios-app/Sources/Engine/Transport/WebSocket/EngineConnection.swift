@@ -359,25 +359,31 @@ final class EngineConnection {
         logger.logWebSocketState("Disconnected")
     }
 
-    /// Pause heartbeat work and cancel in-flight reconnects while backgrounded.
+    /// Retire the connection while iOS suspends the process.
+    ///
+    /// URLSession cannot give a foreground app a useful guarantee about a
+    /// WebSocket that spent an arbitrary amount of time suspended. Keeping the
+    /// transport also leaves request timeout tasks suspended beside it, so they
+    /// can all fail against stale state when the process resumes. Retiring the
+    /// socket makes backgrounding a deterministic connection-epoch boundary;
+    /// `EngineClient` opens a fresh authenticated transport on foreground.
     func setBackgroundState(_ inBackground: Bool) {
         guard isInBackground != inBackground else { return }
         isInBackground = inBackground
 
         if inBackground {
-            logger.info("App entering background - pausing heartbeats", category: .websocket)
+            logger.info("App entering background - retiring WebSocket epoch", category: .websocket)
 
-            switch connectionState {
-            case .connecting, .reconnecting:
-                logger.info("Cancelling in-flight reconnect for background transition", category: .websocket)
-                cancelReconnectOwnership()
-                reconnectAttempts = 0
-                connectionState = .disconnected
-            case .connected, .disconnected, .failed, .deployRestarting, .unauthorized:
-                break
+            // Authentication failures are deliberately parked until the user
+            // re-pairs. There is no live transport or pending request to retire,
+            // and changing this state would cause an unwanted foreground retry.
+            if case .unauthorized = connectionState {
+                return
             }
+
+            disconnect()
         } else {
-            logger.info("App returning to foreground - resuming heartbeats", category: .websocket)
+            logger.info("App returning to foreground - awaiting a fresh WebSocket epoch", category: .websocket)
         }
     }
 

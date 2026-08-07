@@ -130,6 +130,7 @@ final class ChatViewModelObservationProbe {
 @MainActor
 final class ChatViewModelObservationConnectionRepository: AppConnectionRepository {
     var connectionState: ConnectionState = .connected
+    var continuityGeneration: UInt64 = 0
 
     func connect() async {}
 }

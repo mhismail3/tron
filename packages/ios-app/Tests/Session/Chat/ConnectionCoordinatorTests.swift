@@ -83,6 +83,31 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.reconstructSessionCalled)
     }
 
+    func testConnectAndReconstructEstablishesLiveLaneBeforeSnapshot() async {
+        mockContext.isConnected = true
+
+        let outcome = await coordinator.connectAndReconstruct(context: mockContext)
+
+        XCTAssertEqual(outcome, .completed)
+        XCTAssertTrue(mockContext.ensureLiveEventSubscriptionCalled)
+        XCTAssertEqual(
+            mockContext.connectionCallOrder,
+            ["connect", "resume", "subscribe", "reconstruct"]
+        )
+    }
+
+    func testLiveLaneFailureDoesNotFetchSnapshotAcrossAGap() async {
+        mockContext.isConnected = true
+        mockContext.liveEventSubscriptionError = EngineConnectionError.notConnected
+
+        let outcome = await coordinator.connectAndReconstruct(context: mockContext)
+
+        XCTAssertEqual(outcome, .retryableFailure)
+        XCTAssertFalse(mockContext.reconstructSessionCalled)
+        XCTAssertTrue(mockContext.isReconstructing)
+        XCTAssertFalse(mockContext.appendLocalErrorCalled)
+    }
+
     func testConnectAndReconstructUsesContextReconstructionLimit() async {
         mockContext.isConnected = true
         mockContext.reconstructionEventLimit = 250
@@ -239,6 +264,41 @@ final class ConnectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testTransientReconstructionFailureStaysOutOfTimeline() async {
+        mockContext.isConnected = true
+        mockContext.reconstructError = URLError(.networkConnectionLost)
+
+        let outcome = await coordinator.connectAndReconstruct(context: mockContext)
+
+        XCTAssertEqual(outcome, .retryableFailure)
+        XCTAssertTrue(mockContext.isReconstructing)
+        XCTAssertFalse(mockContext.appendLocalErrorCalled)
+        XCTAssertFalse(mockContext.drainEventBufferCalled)
+    }
+
+    func testSuccessfulRetryRemovesOnlyReconstructionError() async {
+        mockContext.isConnected = true
+
+        let outcome = await coordinator.connectAndReconstruct(context: mockContext)
+
+        XCTAssertEqual(outcome, .completed)
+        XCTAssertEqual(
+            mockContext.removedLocalNotificationDedupKeys,
+            ["session.reconstruct.failed"]
+        )
+    }
+
+    func testReadOnlyTransientFailureStaysOutOfTimeline() async {
+        mockContext.isConnected = true
+        mockContext.reconstructError = EngineConnectionError.timeout
+
+        let outcome = await coordinator.reconstructReadOnly(context: mockContext)
+
+        XCTAssertEqual(outcome, .retryableFailure)
+        XCTAssertFalse(mockContext.appendLocalErrorCalled)
+        XCTAssertFalse(mockContext.isReconstructing)
+    }
+
     func testCancellationDuringProjectionRetainsCommittedCutAndBufferedSuffix() async {
         mockContext.isConnected = true
         mockContext.reconstructResultLastSequence = 42
@@ -326,6 +386,9 @@ final class MockConnectionContext: ConnectionContext {
     var lastLocalErrorSuggestion: String?
     var cleanUpStreamingStateCalled = false
     var drainEventBufferCalled = false
+    var ensureLiveEventSubscriptionCalled = false
+    var removedLocalNotificationDedupKeys: [String] = []
+    var connectionCallOrder: [String] = []
     var captureReconstructingDuringConnect = false
     var wasReconstructingDuringConnect = false
 
@@ -333,12 +396,15 @@ final class MockConnectionContext: ConnectionContext {
     var connectWillSucceed = true
     var resumeSessionError: Error?
     var reconstructShouldFail = false
+    var reconstructError: Error?
+    var liveEventSubscriptionError: Error?
     var reconstructResultIsRunning = false
     var reconstructResultLastSequence: Int64 = 0
 
     // MARK: - Protocol Methods
 
     func connect() async {
+        connectionCallOrder.append("connect")
         connectCalled = true
         if captureReconstructingDuringConnect {
             wasReconstructingDuringConnect = isReconstructing
@@ -349,14 +415,17 @@ final class MockConnectionContext: ConnectionContext {
     }
 
     func resumeSession(sessionId: String) async throws {
+        connectionCallOrder.append("resume")
         resumeSessionCalled = true
         lastResumeSessionId = sessionId
         if let error = resumeSessionError { throw error }
     }
 
     func reconstructSession(sessionId: String, limit: Int?, beforeEventId: String?) async throws -> SessionReconstructResult {
+        connectionCallOrder.append("reconstruct")
         reconstructSessionCalled = true
         lastReconstructLimit = limit
+        if let reconstructError { throw reconstructError }
         if reconstructShouldFail { throw ConnectionTestError.generic }
 
         let json = """
@@ -404,6 +473,12 @@ final class MockConnectionContext: ConnectionContext {
         drainEventBufferCalled = true
     }
 
+    func ensureLiveEventSubscription() async throws {
+        connectionCallOrder.append("subscribe")
+        ensureLiveEventSubscriptionCalled = true
+        if let liveEventSubscriptionError { throw liveEventSubscriptionError }
+    }
+
     func setSessionProcessing(_ isProcessing: Bool) {
         setSessionProcessingCalled = true
         lastSessionProcessingValue = isProcessing
@@ -419,6 +494,10 @@ final class MockConnectionContext: ConnectionContext {
         lastLocalErrorTitle = title
         lastLocalErrorMessage = message
         lastLocalErrorSuggestion = suggestion
+    }
+
+    func removeLocalNotification(dedupKey: String) {
+        removedLocalNotificationDedupKeys.append(dedupKey)
     }
 
     // MARK: - Logging (no-op)

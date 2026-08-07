@@ -172,6 +172,35 @@ connection-local subscription identifiers. This prevents previously visited
 tasks from remaining in the engine's polling loop without losing the interests
 that a reconnect must restore.
 
+A real iOS `.background` transition is a connection-epoch boundary. The client
+immediately retires the WebSocket, fails its pending RPCs, cancels connection-
+local subscriptions and acknowledgements, and discards that transport object;
+selected-session, session-subscription interests, and previously requested
+engine-global worker-monitoring intent survive. `.inactive` is only a transient
+system interruption and does not tear down the socket. On returning active,
+Tron opens a fresh authenticated transport, restores those still-owned live
+lanes, refreshes engine projections, and asks every mounted chat for an
+authoritative continuity pass. This explicit foreground request is
+coalesced with the ordinary disconnected-to-connected observer, so SwiftUI
+state-update coalescing cannot skip catch-up. A separate monotonic ready-socket
+generation also forces that pass when a fast replacement is sampled as
+connected-to-connected. Unauthorized connections remain parked for re-pair
+rather than being retried by automatic session work. A process launched while
+already backgrounded installs the same suspension gate before app
+initialization, because no scene transition exists to do it later.
+
+Interactive reconstruction closes the durable-snapshot/live-stream race in one
+order: resume the session, establish its connection-local live subscription,
+fetch the authoritative snapshot, commit its sequence high-water mark, then
+drain the buffered live suffix through sequence deduplication. Connection loss,
+timeout, cancellation, and foreground socket churn retain cached rows and draft
+state and stay out of the chat timeline; protocol or data-integrity failures
+remain visible. A successful pass removes only its prior reconstruction error.
+The live suffix is bounded; pathological overflow requests another authoritative
+snapshot rather than admitting unbounded memory or treating a partial suffix as
+complete. Subscription interests survive transport-classified failures even if
+the observed connection state has not yet caught up with the failed request.
+
 An open WebSocket is transport state, not application readiness. The connection
 remains publicly `connecting` until the bounded `hello` exchange succeeds and
 supplies the negotiated frame ceiling. Session restoration, reconnect hooks,
@@ -714,6 +743,15 @@ one cancellable next-layout follow request keeps it above the composer only
 while the user still owns bottom-follow; its visibility does not animate layout
 height or override an intentional upward scroll.
 
+The native scroll position starts at the bottom while the independent alignment
+anchor remains top, giving overflowing history a correct latest-message default
+without moving short history to the foot of the viewport. Every provisional-to-
+authoritative replacement invalidates empty-shell geometry before classifying
+overflow and requests native bottom ownership before the bounded LazyVStack
+settle pass. Current bottom distance, not the initial probe's stale value, owns a
+late authoritative reconciliation. New rows wait one layout turn before testing
+whether a formerly short transcript has crossed into scrollable overflow.
+
 Assistant Markdown lists use the message edge as the marker origin: a root
 bullet or ordered marker is itself flush with neighboring paragraph text, not
 trailing-aligned inside an invisible inset column. Ordinary bullets reserve
@@ -1115,30 +1153,39 @@ reminders; they are not a general device-control surface.
   metadata rather than a second local content cache. Selecting an item performs
   one authenticated exact-content read, verifies worker/artifact identity,
   declared byte count, and SHA-256, then asks the actor-owned file coordinator
-  for a bounded temporary preview file. Quick Look, Share, and Export reuse that
-  file; identical content is reference-counted so one artifact cannot invalidate
-  another artifact's preview. Closing the detail or inbox cancels work and
-  removes temporary files. Metadata pages load lazily from the engine rather
-  than materializing an unbounded local array or content cache.
+  for a bounded temporary preview file whose final path component preserves the
+  verified display name for sharing. Repeated ownership of one artifact's
+  materialized file is reference-counted, while distinct artifact identities
+  have independent custody even when their bytes match. One sheet therefore
+  cannot invalidate another sheet's preview. Closing the preview or inbox
+  cancels work and removes temporary files.
+  Metadata pages load lazily from the engine rather than materializing an
+  unbounded local array or content cache.
   Server custody persists until explicit Delete. Storage pressure reflects the
   whole worker database and remains Engine Attention rather than silently
   evicting user artifacts.
-  The inbox and detail use the same Settings page container, cards,
+  Each inbox item is one compact filename/size row and opens verified content
+  directly, without a redundant metadata/action intermediary. The inbox and
+  preview use the same Settings page container, cards,
   typography, toolbar hierarchy, and medium/large sheet detents as the other
   Settings sheets; artifact ownership does not introduce a visual subsystem.
-  Preview uses that same Settings page container rather than bespoke navigation
-  chrome. It opens at medium, expands to large, provides standard dismiss/share
-  controls, and keeps a compact glass verified-file caption inside the safe
-  area. Quick Look's UIKit-owned descendant scroll views receive the same soft
-  edge treatment as SwiftUI sheets and OAuth web content, without forcing an
-  opaque or permanently hidden navigation-bar background.
+  Markdown and ordinary UTF-8 text render natively with selected Tron typography
+  on the sheet's own background; structured text uses the selected mono family.
+  Rich Markdown parsing is bounded, with oversized content falling back to an
+  efficient selectable text view that still displays every byte. Format-owned
+  binary documents fall back to Quick Look, whose UIKit-owned descendant scroll
+  views receive the same soft edge treatment as SwiftUI sheets and OAuth web
+  content. Share and confirmed Delete live in the standard leading toolbar;
+  Share already exposes Save to Files, so there is no duplicate Export action.
 - Attach to Draft is the only bridge from Artifact Inbox into chat. It converts
   already-verified bytes into the existing `Attachment` value and sends an
   explicit app-local intent carrying the target session ID. Only the matching
   mounted interactive chat may consume it, and that chat remains the sole
-  writer of its live draft state; other mounted chats ignore it. When Settings
-  has no selected session the action stays unavailable. Merely opening,
-  previewing, sharing, exporting, or deleting an artifact never mutates a draft.
+  writer of its live draft state; other mounted chats ignore it. The preview
+  labels this action `Attach to Current Draft` and shows it only when a selected
+  mounted chat makes the action valid, instead of displaying a disabled mystery
+  control. Merely opening, previewing, sharing, or deleting an artifact never
+  mutates a draft.
   The client does not interpret worker URLs, paths, HTML, or arbitrary commands.
 - The empty Artifact Inbox offers Create through chat. It posts one
   session-targeted request, dismisses Settings, and prefills an artifact request

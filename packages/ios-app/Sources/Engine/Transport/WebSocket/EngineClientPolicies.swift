@@ -19,9 +19,9 @@ enum EngineClientError: Error, LocalizedError {
 enum EngineClientConnectionPolicy {
     static func shouldSkipConnect(state: ConnectionState) -> Bool {
         switch state {
-        case .connected, .connecting, .reconnecting, .deployRestarting:
+        case .connected, .connecting, .reconnecting, .deployRestarting, .unauthorized:
             return true
-        case .disconnected, .failed, .unauthorized:
+        case .disconnected, .failed:
             return false
         }
     }
@@ -37,16 +37,24 @@ enum EngineClientStreamSubscriptionPolicy {
         "worker.invocations",
     ]
 
-    static func shouldClearSubscriptions(previous: ConnectionState, next: ConnectionState) -> Bool {
-        previous.isConnected && !next.isConnected
+    static func shouldClearSubscriptions(
+        previous: ConnectionState,
+        next: ConnectionState,
+        transportChanged: Bool = false
+    ) -> Bool {
+        (previous.isConnected && !next.isConnected)
+            || (next.isConnected && transportChanged)
     }
 
     static func shouldResubscribe(
         previous: ConnectionState,
         next: ConnectionState,
-        hasCurrentSession: Bool
+        hasCurrentSession: Bool,
+        transportChanged: Bool = false
     ) -> Bool {
-        !previous.isConnected && next.isConnected && hasCurrentSession
+        next.isConnected
+            && hasCurrentSession
+            && (!previous.isConnected || transportChanged)
     }
 
     static func isWorkerProjectionTopic(_ topic: String?) -> Bool {

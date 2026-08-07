@@ -31,6 +31,10 @@ enum ConnectionErrorClassifier {
     private static func classify(_ error: Error, depth: Int = 0) -> Classification {
         guard depth < 6 else { return .none }
 
+        if error is CancellationError {
+            return .transient
+        }
+
         if let ws = error as? EngineConnectionError {
             switch ws {
             case .notConnected, .connectionFailed:

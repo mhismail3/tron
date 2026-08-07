@@ -646,6 +646,10 @@ final class MockMessagingContext: MessagingContext {
         localErrorDedupKeys.insert(dedupKey)
     }
 
+    func removeLocalNotification(dedupKey: String) {
+        localErrorDedupKeys.remove(dedupKey)
+    }
+
     func showError(_ message: String) {
         showErrorCalled = true
     }
