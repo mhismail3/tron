@@ -170,15 +170,20 @@ summary` remains the protected check. The repository also contains an opt-in
 Buildkite shadow pipeline that runs the same required workloads for ready PRs
 and `main`, but it has no release lane, signing credentials, required status,
 or permission to satisfy merge policy. `scripts/ci-provider-context.py`
-normalizes provider metadata, pins GitHub's exact
-`refs/pull/<number>/merge` commit once, and makes every Buildkite workload
-verify that pinned commit, tree, and parents from a history-bounded,
+normalizes provider metadata, proves Actions' exact
+`refs/pull/<number>/merge` / `GITHUB_SHA` checkout against the event's ordered
+base/head parents, pins the corresponding GitHub merge ref once for Buildkite,
+and makes every Buildkite workload verify that pinned commit, tree, and parents
+from a history-bounded,
 prerequisite-excluding thin bundle proportional to the merge delta instead of
 trusting a moving branch checkout. The pre-checkout bootstrap bytes must match
 the merge's bootstrap and are carried into evidence. A bounded merge-ref fetch
-retry tolerates provider propagation delay without changing the immutable
-GitHub webhook base, head, and merge identities that the accepted merge must
-contain. Main builds likewise require the webhook's exact `before`/`after`
+retry tolerates both an unavailable ref and a still-old ref: Buildkite accepts
+and detaches only the fetched object whose two parents exactly equal the
+immutable webhook base/head. GitHub's webhook `merge_commit_sha` is nullable
+and can lag ref regeneration, so both adapters schema-check it when present but
+never use it as source authority. Main builds likewise require the webhook's
+exact `before`/`after`
 pair; neither path invents an absent base from Git history. The raw
 provider-cached webhook is read ephemerally and is never uploaded. Normalized context preserves
 the exact trigger action; an unsupported or substituted PR action fails before
@@ -248,7 +253,8 @@ status page or a handful of green builds is not migration evidence.
 The Buildkite provider must disable status publication, fork builds, tag
 builds, the GitHub-specific `build_pull_request_merge_commits`
 provider-generated PR merge checkout, and all queue secrets. The
-source adapter owns exact webhook merge resolution. Enable both Skip Intermediate Builds and Cancel
+source adapter owns exact merge-ref resolution anchored to the webhook's
+immutable base/head pair. Enable both Skip Intermediate Builds and Cancel
 Intermediate Builds with branch filter `!main`: superseded PR heads stop
 consuming Apple minutes, while `main` retains complete history. The always-run,
 soft-failing operational observer records all six post-bootstrap outcomes and

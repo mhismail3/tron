@@ -2673,8 +2673,12 @@ pins GitHub's synthetic merge ref, proves the bootstrap bytes executed before
 checkout match the merge, and distributes a history-bounded,
 prerequisite-excluding thin bundle proportional to the merge delta. Every
 workload then verifies the commit, tree, parents, and executed-bootstrap record.
-The same-ref fetch uses a bounded propagation retry while requiring the
-provider-cached GitHub webhook's exact base, head, and merge identities. Main
+The same-ref fetch uses a bounded propagation retry for an unavailable or
+still-old merge ref. It accepts and checks out only the fetched object whose
+ordered parents equal the provider-cached GitHub webhook's immutable base/head
+pair. The webhook's nullable `merge_commit_sha` can lag that regeneration and
+is observational rather than authoritative; Actions independently proves its
+exact merge-ref `GITHUB_SHA`, checkout, and ordered parents. Main
 uses that immutable payload's `before`/`after` rather than deriving a base from
 commit parents. The raw payload stays ephemeral and is never an artifact.
 Normalized context retains the exact provider trigger action. Missing,

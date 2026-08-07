@@ -121,6 +121,12 @@ def normalize_sha(value: Any, field: str) -> str:
     return text.lower()
 
 
+def optional_sha(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    return normalize_sha(value, field)
+
+
 def declared_sha(environment: Mapping[str, str], names: Sequence[str], field: str,
                  *, required: bool = False) -> str | None:
     declarations = [normalize_sha(value, name) for name in names
@@ -245,20 +251,27 @@ class Git:
         return value
 
     def fetch_pull_merge(self, remote: str, number: int, source_ref: str,
-                         local_ref: str) -> None:
+                         local_ref: str, expected_parents: Sequence[str]) -> str:
         expected = f"refs/pull/{number}/merge"
         if source_ref != expected:
             raise ContextError("pull-request merge ref does not match its number")
+        normalized_parents = [
+            normalize_sha(parent, "expected pull-request merge parent")
+            for parent in expected_parents
+        ]
+        if len(normalized_parents) != 2:
+            raise ContextError("pull-request merge requires exact base/head parents")
         arguments = [
             "git", "-C", str(self.root), "fetch", "--no-tags", "--force",
             "--no-recurse-submodules", "--depth=2", remote,
             f"+{source_ref}:{local_ref}",
         ]
         last_error = ""
-        # GitHub creates the synthetic merge ref asynchronously after some PR
-        # webhooks. Retry only this same ref inside the source step; the caller
-        # still rejects any fetched commit whose second parent is not the
-        # immutable webhook head, so a later PR update can never be repinned.
+        # GitHub creates or refreshes the synthetic merge ref asynchronously
+        # after some PR webhooks. Retry only this same ref inside the source
+        # step until the fetched commit has the immutable webhook base/head.
+        # A later PR update therefore never repins this build: its parents can
+        # never satisfy the event that created the build.
         for attempt, delay in enumerate((1, 2, 4, 8, 8, 0), start=1):
             process = subprocess.run(
                 arguments,
@@ -268,13 +281,22 @@ class Git:
                 check=False,
             )
             if process.returncode == 0:
-                return
-            details = process.stderr.strip().splitlines()
-            last_error = details[-1] if details else "unknown fetch failure"
+                fetched_sha = normalize_sha(
+                    self.run("rev-parse", "--verify", local_ref),
+                    "fetched pull-request merge",
+                )
+                _, parents = self.commit(fetched_sha)
+                if parents == normalized_parents:
+                    return fetched_sha
+                last_error = "fetched merge parents do not match the webhook base/head"
+            else:
+                details = process.stderr.strip().splitlines()
+                last_error = details[-1] if details else "unknown fetch failure"
             if delay:
                 time.sleep(delay)
         raise ContextError(
-            f"GitHub merge ref was unavailable after {attempt} bounded attempts: {last_error}"
+            f"GitHub merge ref did not stabilize after {attempt} bounded attempts: "
+            f"{last_error}"
         )
 
     def checkout(self, revision: str) -> None:
@@ -505,10 +527,14 @@ def github_context(policy: Mapping[str, Any], environment: Mapping[str, str],
             raise ContextError("GITHUB_REF_TYPE must be branch")
         base_sha = normalize_sha(base.get("sha"), "event.pull_request.base.sha")
         head_sha = normalize_sha(head.get("sha"), "event.pull_request.head.sha")
-        merge_sha = normalize_sha(pull.get("merge_commit_sha"),
-                                  "event.pull_request.merge_commit_sha")
-        if merge_sha != source_sha:
-            raise ContextError("GITHUB_SHA does not match the event merge commit")
+        # GitHub defines GITHUB_SHA as the commit currently selected by the
+        # pull-request merge ref. The webhook snapshot's merge_commit_sha may
+        # be null or may lag a ref regeneration, so it is schema-checked when
+        # present but never admitted as source authority. Exactness comes from
+        # the ref, GITHUB_SHA, checked-out HEAD, and ordered base/head parents.
+        optional_sha(
+            pull.get("merge_commit_sha"), "event.pull_request.merge_commit_sha"
+        )
         base_repo = normalize_repository(
             require_mapping(base.get("repo"), "event.pull_request.base.repo").get("full_name"),
             "event.pull_request.base.repo.full_name",
@@ -710,18 +736,23 @@ def buildkite_context(policy: Mapping[str, Any], environment: Mapping[str, str],
         declared_base = normalize_sha(
             webhook_base.get("sha"), "Buildkite webhook.pull_request.base.sha"
         )
-        declared_source = normalize_sha(
+        # The cached GitHub webhook has the same asynchronous merge-ref race as
+        # Actions: merge_commit_sha may be null or stale. It is observational,
+        # while immutable webhook base/head identities anchor the fetched ref.
+        optional_sha(
             webhook_pull.get("merge_commit_sha"),
             "Buildkite webhook.pull_request.merge_commit_sha",
         )
         source_ref = policy["pull_request_merge_ref"].format(number=number)
         local_ref = f"refs/tron-ci/provider-context/pull/{number}/merge"
         if fetch_merge:
-            git.fetch_pull_merge("origin", number, source_ref, local_ref)
-            git.checkout(local_ref)
+            fetched_source = git.fetch_pull_merge(
+                "origin", number, source_ref, local_ref, [declared_base, head_sha]
+            )
+            # Detach by the accepted object ID, never by a ref that could be
+            # changed by another local process between verification/checkout.
+            git.checkout(fetched_source)
         source_sha = git.head()
-        if declared_source != source_sha:
-            raise ContextError("checked-out merge commit differs from the immutable webhook")
         source = source_identity(git, source_ref, source_sha)
         if len(source["parents"]) != 2:
             raise ContextError("GitHub pull-request merge commit must have exactly two parents")
@@ -1271,6 +1302,37 @@ def self_test() -> None:
         github_pr_payload["action"] = "opened"
         github_pr_path.write_text(json.dumps(github_pr_payload))
 
+        # GitHub may regenerate refs/pull/<number>/merge after serializing the
+        # webhook snapshot. The checked-out GITHUB_SHA remains authoritative
+        # only when its ordered parents still equal the event base/head.
+        for observed_merge in (commits["head"], None):
+            lagged_payload = json.loads(json.dumps(github_pr_payload))
+            lagged_payload["pull_request"]["merge_commit_sha"] = observed_merge
+            github_pr_path.write_text(json.dumps(lagged_payload))
+            lagged_context = resolve_context(policy, github_pr, git)
+            assert lagged_context["source"] == github_pr_context["source"]
+        malformed_merge_payload = json.loads(json.dumps(github_pr_payload))
+        malformed_merge_payload["pull_request"]["merge_commit_sha"] = "not-a-sha"
+        github_pr_path.write_text(json.dumps(malformed_merge_payload))
+        expect_failure(
+            lambda: resolve_context(policy, github_pr, git),
+            "malformed observational GitHub merge SHA",
+        )
+        changed_base_payload = json.loads(json.dumps(github_pr_payload))
+        changed_base_payload["pull_request"]["base"]["sha"] = commits["head"]
+        github_pr_path.write_text(json.dumps(changed_base_payload))
+        expect_failure(
+            lambda: resolve_context(policy, github_pr, git),
+            "GitHub merge commit with the wrong ordered parents",
+        )
+        github_pr_path.write_text(json.dumps(github_pr_payload))
+        wrong_github_source = dict(github_pr)
+        wrong_github_source["GITHUB_SHA"] = commits["head"]
+        expect_failure(
+            lambda: resolve_context(policy, wrong_github_source, git),
+            "GitHub checkout that differs from GITHUB_SHA",
+        )
+
         github_main_path = root / "github-main.json"
         github_main = github_fixture(github_main_path, commits, pull_request=False)
         git.checkout(commits["head"])
@@ -1309,6 +1371,30 @@ def self_test() -> None:
         buildkite_pr = buildkite_fixture(commits, pull_request=True)
         buildkite_pr_webhook = buildkite_webhook(commits, pull_request=True)
         git.checkout(commits["head"])
+        original_commit = git.commit
+        inspected_merge_count = 0
+
+        def observe_propagating_merge(revision: str) -> tuple[str, list[str]]:
+            nonlocal inspected_merge_count
+            tree, parents = original_commit(revision)
+            inspected_merge_count += 1
+            if inspected_merge_count == 1:
+                return tree, [commits["base"], commits["base"]]
+            return tree, parents
+
+        git.commit = observe_propagating_merge  # type: ignore[method-assign]
+        try:
+            fetched_merge = git.fetch_pull_merge(
+                "origin",
+                42,
+                "refs/pull/42/merge",
+                "refs/tron-ci/provider-context/test/merge",
+                [commits["base"], commits["head"]],
+            )
+        finally:
+            git.commit = original_commit  # type: ignore[method-assign]
+        assert inspected_merge_count == 2
+        assert fetched_merge == commits["merge"]
         resolve_context(
             policy, buildkite_pr, git, fetch_merge=True, webhook=buildkite_pr_webhook
         )
@@ -1317,6 +1403,7 @@ def self_test() -> None:
         )
         assert buildkite_pr_context["source"]["sha"] == commits["merge"]
         assert buildkite_pr_context["authority"] == authority(policy, "buildkite")
+        assert buildkite_pr_context["source"] == github_pr_context["source"]
         exported = export_shell(buildkite_pr_context)
         assert f"export TRON_CI_SOURCE_SHA={commits['merge']}\n" in exported
         assert "export TRON_CI_SHADOW=true\n" in exported
@@ -1335,11 +1422,23 @@ def self_test() -> None:
         )
         changed_merge_webhook = json.loads(json.dumps(buildkite_pr_webhook))
         changed_merge_webhook["pull_request"]["merge_commit_sha"] = commits["head"]
+        changed_merge_context = resolve_context(
+            policy, buildkite_pr, git, webhook=changed_merge_webhook
+        )
+        assert changed_merge_context["source"] == buildkite_pr_context["source"]
+        null_merge_webhook = json.loads(json.dumps(buildkite_pr_webhook))
+        null_merge_webhook["pull_request"]["merge_commit_sha"] = None
+        null_merge_context = resolve_context(
+            policy, buildkite_pr, git, webhook=null_merge_webhook
+        )
+        assert null_merge_context["source"] == buildkite_pr_context["source"]
+        malformed_merge_webhook = json.loads(json.dumps(buildkite_pr_webhook))
+        malformed_merge_webhook["pull_request"]["merge_commit_sha"] = "not-a-sha"
         expect_failure(
             lambda: resolve_context(
-                policy, buildkite_pr, git, webhook=changed_merge_webhook
+                policy, buildkite_pr, git, webhook=malformed_merge_webhook
             ),
-            "Buildkite PR webhook merge race",
+            "malformed observational Buildkite merge SHA",
         )
 
         context_path = root / "provider-context.json"

@@ -15,7 +15,9 @@ Do not attach pipeline, cluster, queue, or organization secrets to either
 queue. In the GitHub provider settings, disable commit-status publication,
 fork builds, tag builds, and the GitHub-specific
 `build_pull_request_merge_commits` provider-generated merge checkout;
-the source adapter resolves GitHub's exact webhook merge itself. Enable pull-request and ready-for-review events,
+the source adapter resolves GitHub's merge ref itself and anchors it to the
+webhook's immutable base/head pair. Enable pull-request and ready-for-review
+events,
 including reopened PRs; keep "skip PR builds for existing commits" disabled.
 Enable branch builds only for `main`. Enable both Skip Intermediate Builds
 and Cancel Intermediate Builds with branch filter `!main`; this retires queued
@@ -46,9 +48,13 @@ re-reading the moving ref, and revalidates the context before running. This
 prevents one Buildkite build from mixing source trees when a PR changes midway.
 The source-context step has no automatic retry and explicitly rejects manual
 job retries inside a build. Its GitHub merge-ref fetch has a short bounded
-propagation retry, but every attempt targets the same ref and the accepted merge
-must retain the provider-cached GitHub webhook's exact base, head, and merge
-SHAs. Main similarly requires exact webhook `before`/`after` identities. That
+propagation retry for both unavailable and still-old refs, but every attempt
+targets the same ref and the accepted object must have exactly the
+provider-cached GitHub webhook's ordered base/head parents. It then checks out
+that immutable object ID rather than the local ref. The webhook's nullable
+`merge_commit_sha` can lag merge-ref regeneration, so it is schema-checked when
+present but is observational, not source authority. Main similarly requires
+exact webhook `before`/`after` identities. That
 raw payload is held only in a mode-0600 temporary file and never uploaded. If
 the agent is lost, start a new Buildkite build so source context is repinned in
 a new build rather than changing beneath already-uploaded jobs.
