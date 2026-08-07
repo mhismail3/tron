@@ -1196,6 +1196,8 @@ fn ios_release_credentials_are_ephemeral_and_restored() {
         "TRON_RELEASE_APPLE_WWDR_G3_URL",
         "TRON_RELEASE_APPLE_WWDR_G3_SHA256",
         "download_public_certificate()",
+        "openssl pkcs12 \\",
+        "-legacy \\",
         "-N \\",
         "-p codeSign \\",
         "-c \"$leaf_path\" \\",

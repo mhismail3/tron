@@ -1047,9 +1047,8 @@ jobs:
           printf '%s' "$IOS_DISTRIBUTION_CERT_P12_BASE64" | base64 -d > "$cert_path"
           test -s "$cert_path" || { echo "::error::decoded iOS distribution certificate is empty"; exit 1; }
 
-          # The isolated account intentionally has no interactive login
-          # keychain. Pin and validate the exact public chain independently of
-          # ambient keychains before admitting the private key.
+          # Pin and validate the exact public chain independently of ambient
+          # keychains before admitting the private key.
           download_public_certificate() {
             local label="$1" url="$2" expected_sha="$3" destination="$4" actual_sha
             curl --fail --location --silent --show-error \
@@ -1074,12 +1073,13 @@ jobs:
 
           if ! TRON_P12_PASSWORD="$IOS_DISTRIBUTION_CERT_PASSWORD" \
             openssl pkcs12 \
+              -legacy \
               -in "$cert_path" \
               -clcerts \
               -nokeys \
               -passin env:TRON_P12_PASSWORD \
               -out "$leaf_path" >/dev/null 2>&1; then
-            echo "::error::distribution .p12 could not be decoded with its configured password"
+            echo "::error::distribution .p12 could not be decoded by the hosted OpenSSL 3 toolchain with legacy PKCS#12 support enabled; verify the file and configured password"
             exit 1
           fi
           [[ "$(grep -c 'BEGIN CERTIFICATE' "$leaf_path")" == "1" ]] || {
