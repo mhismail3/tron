@@ -192,12 +192,14 @@ run_as_runner() (
 )
 
 run_in_runner_domain() (
-    # `launchctl asuser` selects a bootstrap and audit context but deliberately
-    # does not change Unix credentials. Drop credentials first so every facet
-    # of the process identity belongs to the isolated account.
+    # `launchctl asuser` adopts the target bootstrap and security audit session
+    # but deliberately does not change Unix credentials. Adopting another audit
+    # session requires privilege, so preserve this order: enter the domain as
+    # root, then immediately drop UID/GID before the requested command runs.
+    # Reversing the order fails with EPERM on a headless account.
     cd /
-    exec sudo -H -u "$runner_user" \
-        /bin/launchctl asuser "$runner_uid" "$@"
+    exec /usr/bin/sudo /bin/launchctl asuser "$runner_uid" \
+        /usr/bin/sudo -n -H -u "$runner_user" "$@"
 )
 
 validate_privileged_directory() {

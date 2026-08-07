@@ -1668,6 +1668,8 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
         "runner isolation ACL is not idempotent",
         "runner isolation ACL does not deny list and search access",
         "run_as_runner()",
+        "exec /usr/bin/sudo /bin/launchctl asuser \"$runner_uid\"",
+        "/usr/bin/sudo -n -H -u \"$runner_user\" \"$@\"",
         "cd /",
         "classify_existing_runner_directory_mode()",
         "normalize_existing_runner_directory_mode()",
@@ -1756,6 +1758,29 @@ fn ios_release_runner_is_isolated_before_credentials_are_admitted() {
             .count(),
         2,
         "fresh installation and legacy repair must both establish the mode-0700 runner directory as its unprivileged owner"
+    );
+    let runner_domain_start = bootstrap
+        .find("run_in_runner_domain()")
+        .expect("bootstrap must own a runner-domain command boundary");
+    let runner_domain_end = bootstrap[runner_domain_start..]
+        .find("\n)\n\nvalidate_privileged_directory()")
+        .map(|offset| runner_domain_start + offset)
+        .expect("runner-domain command boundary must have a bounded body");
+    let runner_domain = &bootstrap[runner_domain_start..runner_domain_end];
+    let audit_adoption = runner_domain
+        .find("exec /usr/bin/sudo /bin/launchctl asuser \"$runner_uid\"")
+        .expect("runner-domain boundary must adopt the audit session while privileged");
+    let credential_drop = runner_domain
+        .find("/usr/bin/sudo -n -H -u \"$runner_user\" \"$@\"")
+        .expect("runner-domain boundary must drop Unix credentials before execution");
+    assert!(
+        audit_adoption < credential_drop,
+        "runner-domain boundary must adopt the launchd/audit session before dropping Unix credentials"
+    );
+    assert!(
+        !runner_domain.contains("exec sudo -H -u \"$runner_user\"")
+            && !runner_domain.contains("exec /usr/bin/sudo -H -u \"$runner_user\""),
+        "an unprivileged process cannot adopt the hidden account's audit session"
     );
     assert!(
         !bootstrap.contains("chmod 700 \"$invoking_home\"")

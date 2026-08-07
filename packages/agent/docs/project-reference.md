@@ -2965,8 +2965,13 @@ headless `user/<uid>` Background domain. A one-shot root LaunchDaemon creates
 that independent domain at boot and loads the agent; the long-lived listener is
 never a system-domain process. `LimitLoadToSessionType=Background` and
 `SessionCreate=true` provide the matching bootstrap and non-root audit context
-without a GUI login. Hosted macOS CI retains Simulator/XCTest ownership because
-those tools require an Aqua session, while the release runner owns only Xcode
+without a GUI login. Bootstrap preparation adopts that launchd bootstrap and
+security audit session with privileged `launchctl asuser` first, then
+immediately drops UID/GID to the isolated account because `asuser` deliberately
+does not alter Unix credentials. Reversing those operations is rejected by
+macOS with `EPERM`; the boundary verifies manager, effective, and audit
+identities after the drop. Hosted macOS CI retains Simulator/XCTest ownership
+because those tools require an Aqua session, while the release runner owns only Xcode
 27 archive, export, verification, upload, and distribution. Before secrets are
 exposed, the doctor proves that launchd's manager UID and the Security framework
 audit UID both equal the effective UID, requires the Background manager type,

@@ -804,6 +804,15 @@ scripts/bootstrap-ios-release-runner.sh
 scripts/ios-release-runner-doctor.sh
 ```
 
+Bootstrap-only preparation commands enter the hidden account's launchd context
+in a strict order. Root first invokes `launchctl asuser`, which adopts the
+target bootstrap and security audit session but does not change Unix
+credentials; the boundary then immediately drops UID/GID to `tron-ci` before
+executing the requested command. Dropping privileges before `asuser` is invalid:
+the non-root process cannot adopt the separate Background audit session and
+macOS rejects it with `EPERM`. Every call verifies the resulting manager UID,
+manager type, effective UID, and audit UID before keychain state is prepared.
+
 Every Actions job reruns the doctor before any step receives release secrets.
 It rejects a mislabeled runner unless the process is the non-admin `tron-ci`
 account with its exact home, mode-0700 ownership, baseline keychain, checkout,
