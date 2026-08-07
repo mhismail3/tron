@@ -2975,9 +2975,15 @@ in that current context; it never uses `launchctl asuser` to mask a listener
 installed in the wrong domain. Fresh installation and service repair share one
 root-owned host lock. Existing legacy system-domain installations move through
 the bootstrap's `--repair-service` transaction: it fences the exact idle runner
-by removing its dedicated scheduling label. Busy state and label presence come
-from one validated remote snapshot, so API failures cannot masquerade as label
-absence. Repair then
+by removing its dedicated scheduling label. Before the service cutover, repair
+also recognizes the single known legacy filesystem state created when
+the former root tar extraction preserved the pinned archive root's 0755 mode
+over the precreated mode-0700 `actions-runner` directory. Only after the exact
+runner is remotely idle does the isolated account tighten that directory and
+the bootstrap revalidate every required runner file; other modes fail closed,
+and fresh installs reassert 0700 immediately after extraction. Busy state and
+label presence come from one validated remote snapshot, so API failures cannot
+masquerade as label absence. Repair then
 atomically moves the legacy plist to a root-owned non-autoloading journal,
 proves that exact runner offline, and admits the replacement only after its new
 listener takes the same ID online. Proving that candidate online is the logical

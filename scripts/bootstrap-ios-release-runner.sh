@@ -89,6 +89,18 @@ classify_runner_service_state() {
     fi
 }
 
+classify_existing_runner_directory_mode() {
+    local mode="$1"
+    case "$mode" in
+        700) echo private ;;
+        # The former installer extracted the checksum-pinned runner archive as
+        # root. BSD tar therefore preserved the archive's `./` mode (0755)
+        # over the mode-0700 directory that the bootstrap had just created.
+        755) echo legacy-archive ;;
+        *) echo invalid ;;
+    esac
+}
+
 bootstrap_self_test() {
     local acl_entry acl_listing acl_probe acl_tail bootstrap_plist_probe plist_probe
     acl_probe="$(mktemp -d -t tron-runner-acl)"
@@ -143,6 +155,12 @@ bootstrap_self_test() {
     [[ "$(classify_runner_service_state true true 3)" == "invalid" \
         && "$(classify_runner_service_state false false 1)" == "invalid" ]] \
         || die "release runner migration state machine accepted an ambiguous topology"
+    [[ "$(classify_existing_runner_directory_mode 700)" == "private" \
+        && "$(classify_existing_runner_directory_mode 755)" == "legacy-archive" ]] \
+        || die "release runner mode classifier rejected a supported state"
+    [[ "$(classify_existing_runner_directory_mode 750)" == "invalid" \
+        && "$(classify_existing_runner_directory_mode 777)" == "invalid" ]] \
+        || die "release runner mode classifier accepted an unsupported state"
     /bin/bash -n "$runner_bootstrap_helper_source"
     /bin/rm -f "$plist_probe" "$bootstrap_plist_probe"
     trap - EXIT
@@ -274,7 +292,7 @@ verify_runner_domain_security_session() {
     [[ "$identity" == "$runner_uid:$runner_uid" ]]
 }
 
-validate_private_runner_directory() {
+validate_runner_directory_identity() {
     local directory="$1"
     sudo /bin/test -d "$directory" \
         || die "release runner path is not a directory: $directory"
@@ -283,12 +301,23 @@ validate_private_runner_directory() {
     fi
     [[ "$(sudo /usr/bin/stat -f '%Su' "$directory")" == "$runner_user" ]] \
         || die "release runner path has the wrong owner: $directory"
+}
+
+validate_private_runner_directory() {
+    local directory="$1"
+    validate_runner_directory_identity "$directory"
     [[ "$(sudo /usr/bin/stat -f '%Lp' "$directory")" == "700" ]] \
         || die "release runner path must have mode 0700: $directory"
 }
 
 validate_existing_runner_install() {
-    validate_private_runner_directory "$runner_dir"
+    validate_runner_directory_identity "$runner_dir"
+    existing_runner_directory_mode="$(sudo /usr/bin/stat -f '%Lp' "$runner_dir")"
+    existing_runner_directory_state="$(
+        classify_existing_runner_directory_mode "$existing_runner_directory_mode"
+    )"
+    [[ "$existing_runner_directory_state" != "invalid" ]] \
+        || die "existing release runner path has unsupported mode 0$existing_runner_directory_mode"
     local path
     for path in \
         "$runner_dir/config.sh" \
@@ -311,6 +340,30 @@ validate_existing_runner_install() {
     )"
     [[ "$installed_runner_version" == "$TRON_RELEASE_RUNNER_VERSION" ]] \
         || die "installed release runner version $installed_runner_version does not match $TRON_RELEASE_RUNNER_VERSION"
+}
+
+normalize_existing_runner_directory_mode() {
+    validate_runner_directory_identity "$runner_dir"
+    local observed_mode
+    observed_mode="$(sudo /usr/bin/stat -f '%Lp' "$runner_dir")"
+    [[ "$observed_mode" == "$existing_runner_directory_mode" ]] \
+        || die "release runner directory mode changed during repair"
+    case "$existing_runner_directory_state" in
+        private) ;;
+        legacy-archive)
+            # Tighten the known legacy archive mode as the directory owner.
+            # Root must not follow or mutate paths below the runner-owned home.
+            run_as_runner /bin/chmod 700 "$runner_dir" \
+                || die "could not tighten the legacy release runner directory"
+            ;;
+        *) die "release runner directory mode is not repairable" ;;
+    esac
+    validate_private_runner_directory "$runner_dir"
+    # Revalidate every executable and registration file after the mutation so
+    # a path replacement cannot carry stale pre-normalization evidence forward.
+    validate_existing_runner_install
+    [[ "$existing_runner_directory_state" == "private" ]] \
+        || die "release runner directory did not reach the private mode"
 }
 
 stage_runner_service_files() {
@@ -678,6 +731,8 @@ repair_previous_listener_pid=""
 remote_runner_busy=""
 remote_runner_release_labeled=""
 remote_runner_status=""
+existing_runner_directory_mode=""
+existing_runner_directory_state=""
 
 cleanup_bootstrap() {
     local exit_status=$?
@@ -869,6 +924,7 @@ if [[ "$bootstrap_mode" == "--repair-service" ]]; then
         || die "repair could not read the exact registered runner state"
     [[ "$remote_runner_busy" == "false" ]] \
         || die "release runner is busy; wait for the active job before repairing its service"
+    normalize_existing_runner_directory_mode
 
     stage_runner_service_files
     candidate_path_count=0
@@ -1016,6 +1072,12 @@ validate_private_runner_directory "$runner_dir"
 # Stream the checksum-verified archive to tar running as the isolated account.
 # Root never follows or rewrites paths below the runner-owned home.
 run_as_runner /usr/bin/tar -xzf - -C "$runner_dir" < "$archive"
+# The archive owns executable modes below this directory, but its root `./`
+# entry must never broaden the service installation itself. Reassert the
+# private boundary explicitly so tar implementation or privilege differences
+# cannot recreate the legacy 0755 state.
+run_as_runner /bin/chmod 700 "$runner_dir"
+validate_private_runner_directory "$runner_dir"
 for runner_executable in "$runner_dir/config.sh" "$runner_dir/bin/runsvc.sh"; do
     sudo /bin/test -f "$runner_executable" \
         || die "verified runner archive is missing $(basename "$runner_executable")"
