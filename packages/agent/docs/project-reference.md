@@ -2664,8 +2664,9 @@ contracts.
 
 `request_user_input` uses the ordinary tool lifecycle as durable state. A
 successful completion is pending; the answer endpoint checks the invocation in
-that same session, validates every answer against the exact persisted question
-IDs/options, and appends one uniquely indexed structured user event. The answer
+that same session, validates a non-empty submitted subset against the exact
+persisted question IDs/options, and appends one uniquely indexed structured
+user event. Unanswered questions are intentionally omitted. The answer
 then enters the normal prompt admission/run guard. Duplicate delivery is
 idempotently acknowledged, concurrent answers cannot create two canonical user
 events, and restart/reconnect needs no in-memory continuation or second pause

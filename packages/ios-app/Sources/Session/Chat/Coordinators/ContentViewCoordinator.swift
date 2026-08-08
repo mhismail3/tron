@@ -206,6 +206,7 @@ final class ContentViewCoordinator {
            verification.attachments == request.attachments else {
             throw SessionPublicationError.draftNotPersisted
         }
+        dependencies.draftStore.revealTextEndOnNextLoad(sessionId: sessionId)
         return sessionId
     }
 }

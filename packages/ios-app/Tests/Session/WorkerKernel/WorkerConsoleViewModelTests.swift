@@ -22,15 +22,15 @@ struct WorkerConsoleViewModelTests {
         #expect(repository.snapshotSessionIds[0] == nil)
         #expect(viewModel.availableWorkerTools.map(\.workerId) == ["research"])
         #expect(viewModel.activityRuns.map(\.invocationId) == ["prior-run"])
-        #expect(viewModel.activityAttention.map(\.inboxId) == ["inbox-1"])
+        #expect(viewModel.activityResults.isEmpty)
 
         await viewModel.select("research", repository: repository)
         #expect(viewModel.inspection?.versions.first?.version == "v1")
         #expect(viewModel.runs.first?.invocationId == "prior-run")
         #expect(viewModel.attention.first?.inboxId == "inbox-1")
         #expect(repository.runLimits == [20, 20])
-        #expect(repository.inboxLimits == [20, 20])
-        #expect(repository.inboxAttentionFilters == [true, true])
+        #expect(repository.inboxLimits == [20])
+        #expect(repository.inboxAttentionFilters == [true])
 
         await viewModel.stop(repository: repository, connectionState: .connected)
         #expect(repository.stoppedWorkerIds == ["research"])
@@ -48,15 +48,28 @@ struct WorkerConsoleViewModelTests {
         let viewModel = WorkerConsoleViewModel()
 
         await viewModel.refresh(repository: repository, connectionState: .connected)
+        await viewModel.refreshResults(repository: repository, connectionState: .connected)
 
         #expect(viewModel.unhealthyWorkerCount == 1)
-        #expect(viewModel.activityAttention.count == 1)
+        #expect(viewModel.activityResults.count == 1)
 
         repository.health = "healthy"
         await viewModel.refresh(repository: repository, connectionState: .connected)
 
         #expect(viewModel.unhealthyWorkerCount == 0)
-        #expect(viewModel.activityAttention.count == 1)
+        #expect(viewModel.activityResults.count == 1)
+    }
+
+    @Test("Results use the complete durable inbox without loading execution history")
+    func resultsLoadTheirOwnBoundedProjection() async {
+        let repository = MockWorkerKernelRepository()
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.refreshResults(repository: repository, connectionState: .connected)
+
+        #expect(viewModel.activityResults.map(\.inboxId) == ["inbox-1"])
+        #expect(repository.runLimits.isEmpty)
+        #expect(repository.inboxAttentionFilters == [false])
     }
 
     @Test("Dashboard inventory separates active and retired workers")

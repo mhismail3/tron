@@ -26,6 +26,8 @@ final class UserInputSheetLayoutTests: XCTestCase {
         XCTAssertFalse(pageSource.contains("pageProgress"))
         XCTAssertTrue(sheet.contains(".sectionFill(accentColor, subtle: !selected"))
         XCTAssertTrue(sheet.contains(".focused($focusedQuestionId, equals: question.id)"))
+        XCTAssertTrue(sheet.contains("draft.answers(for: request.questions).isEmpty"))
+        XCTAssertTrue(sheet.contains("let answers = draft.answers(for: request.questions)"))
     }
 
     func testPendingAndAnsweredStatesOwnColorAndOneChatSurface() throws {

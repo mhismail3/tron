@@ -6,6 +6,35 @@ struct WorkerResultSelection: Identifiable {
     var id: String { invocationId }
 }
 
+struct WorkerInboxSelection: Identifiable {
+    let item: WorkerInboxItemDTO
+    let workerName: String?
+
+    var id: String { item.inboxId }
+}
+
+/// Stable parent-owned destination for either a current referenced result or
+/// the bounded legacy inline compatibility payload.
+struct WorkerInboxDetailSheet: View {
+    let selection: WorkerInboxSelection
+    let repository: any WorkerKernelRepository
+
+    var body: some View {
+        if let receipt = selection.item.result.receipt {
+            WorkerResultInspectorSheet(
+                invocationId: receipt.reference.invocationId,
+                repository: repository
+            )
+        } else if let legacy = selection.item.result.legacyInline {
+            WorkerJSONDetailSheet(
+                title: selection.workerName ?? "Legacy Delivery Record",
+                value: legacy,
+                accent: WorkerConsolePresentation.resultDisposition(selection.item).color
+            )
+        }
+    }
+}
+
 private struct WorkerResultLocation: Hashable {
     let pointer: String
     let offset: UInt64

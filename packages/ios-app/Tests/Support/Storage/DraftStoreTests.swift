@@ -48,6 +48,23 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertTrue(freshState.attachments.isEmpty)
     }
 
+    func testPreparedHandoffRevealsTextEndOnExactlyOneLoad() async throws {
+        let state = InputBarState()
+        state.text = String(repeating: "Prepared handoff\n", count: 20)
+        await draftStore.saveImmediately(sessionId: "handoff", inputBarState: state)
+        draftStore.revealTextEndOnNextLoad(sessionId: "handoff")
+
+        let first = InputBarState()
+        let firstLoaded = await draftStore.loadDraft(sessionId: "handoff", into: first)
+        XCTAssertTrue(firstLoaded)
+        XCTAssertEqual(first.textEndRevealRevision, 1)
+
+        let second = InputBarState()
+        let secondLoaded = await draftStore.loadDraft(sessionId: "handoff", into: second)
+        XCTAssertTrue(secondLoaded)
+        XCTAssertEqual(second.textEndRevealRevision, 0)
+    }
+
     func testSaveAndLoad_largeAttachmentUsesFileOwner() async throws {
         let attachmentData = Data(repeating: 0xAB, count: 2 * 1_024 * 1_024)
         let attachmentId = UUID()

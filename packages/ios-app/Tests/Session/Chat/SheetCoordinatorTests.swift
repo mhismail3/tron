@@ -125,4 +125,35 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertNil(coordinator.activeSheet)
     }
 
+    func testPendingUserInputDraftSurvivesSheetDismissalUntilSubmission() throws {
+        let coordinator = SheetCoordinator()
+        let request = UserInputRequest(
+            invocationId: "question-draft",
+            questions: [UserInputQuestion(
+                header: "Format",
+                id: "format",
+                question: "Which format?",
+                options: [
+                    UserInputOption(label: "Markdown", description: "Markdown file"),
+                    UserInputOption(label: "HTML", description: "HTML file"),
+                ]
+            )],
+            answers: [],
+            status: .pending
+        )
+        var draft = coordinator.userInputDraft(for: request)
+        draft.selectedLabels["format"] = "Markdown"
+        coordinator.updateUserInputDraft(draft, invocationId: request.invocationId)
+
+        coordinator.showUserInput(request)
+        coordinator.dismiss()
+
+        XCTAssertEqual(
+            coordinator.userInputDraft(for: request).selectedLabels["format"],
+            "Markdown"
+        )
+        coordinator.clearUserInputDraft(invocationId: request.invocationId)
+        XCTAssertNil(coordinator.userInputDraft(for: request).selectedLabels["format"])
+    }
+
 }

@@ -22,6 +22,7 @@ struct DelegationSheet: View {
     @State private var viewModel = DelegationViewModel()
     @State private var selectedSection = DelegationSection.tasks
     @State private var selectedRun: WorkerInvocationDTO?
+    @State private var selectedInboxItem: WorkerInboxSelection?
     @State private var showTechnicalDetails = false
     @State private var showOptionalGuidance = false
     @State private var technicalViewModel = WorkerConsoleViewModel()
@@ -108,6 +109,9 @@ struct DelegationSheet: View {
             }
             .sheet(isPresented: $showOptionalGuidance) {
                 DelegationGuidanceSheet(viewModel: viewModel)
+            }
+            .sheet(item: $selectedInboxItem) { selection in
+                WorkerInboxDetailSheet(selection: selection, repository: repository)
             }
             .task(id: refreshKey) {
                 prepareProjectionForCurrentOwner()
@@ -326,7 +330,17 @@ struct DelegationSheet: View {
                 )
             } else {
                 LazyVStack(spacing: 9) {
-                    ForEach(viewModel.attention) { WorkerInboxCard(item: $0) }
+                    ForEach(viewModel.attention) { item in
+                        WorkerInboxCard(
+                            item: item,
+                            onOpen: {
+                                selectedInboxItem = WorkerInboxSelection(
+                                    item: item,
+                                    workerName: nil
+                                )
+                            }
+                        )
+                    }
                 }
             }
 
@@ -355,7 +369,10 @@ struct DelegationSheet: View {
     }
 
     private var isPresentingChildSheet: Bool {
-        selectedRun != nil || showTechnicalDetails || showOptionalGuidance
+        selectedRun != nil
+            || selectedInboxItem != nil
+            || showTechnicalDetails
+            || showOptionalGuidance
     }
 
     private var refreshKey: DelegationRefreshKey {
@@ -399,6 +416,7 @@ struct DelegationSheet: View {
         viewModel.resetForServerChange()
         technicalViewModel.resetForServerChange()
         selectedRun = nil
+        selectedInboxItem = nil
         showTechnicalDetails = false
     }
 

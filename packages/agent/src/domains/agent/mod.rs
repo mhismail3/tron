@@ -43,8 +43,9 @@
 //!    inherits its parent worker's causal depth, and the executor copies that
 //!    depth onto nested direct tools so composition cannot reset loop limits.
 //!    `request_user_input` is the one foreground interaction primitive: its
-//!    successful tool completion opens a durable question, and a structured
-//!    user message resolves it by starting a fresh run. No provider stream or
+//!    successful tool completion opens durable questions, and a structured
+//!    non-empty answer subset resolves the request by starting a fresh run.
+//!    No provider stream or
 //!    in-memory task remains blocked while the user is away.
 //! 8. Optional Continuity and semantic-ranking workers run after prompt
 //!    admission. They may affect only a later safe turn in their originating

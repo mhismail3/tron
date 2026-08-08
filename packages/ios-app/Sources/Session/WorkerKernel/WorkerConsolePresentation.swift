@@ -44,6 +44,22 @@ struct WorkerProvenancePresentation: Equatable, Identifiable, Sendable {
     }
 }
 
+enum WorkerResultDisposition: Equatable, Sendable {
+    case available
+    case usedByAgent
+    case needsAttention
+    case resolved
+
+    var title: String {
+        switch self {
+        case .available: "Available"
+        case .usedByAgent: "Used by agent"
+        case .needsAttention: "Needs attention"
+        case .resolved: "Resolved"
+        }
+    }
+}
+
 /// Human-readable projection for the Worker Console. The server remains the
 /// owner of worker facts; this type only converts protocol vocabulary and
 /// extensible JSON into the compact presentation used by iOS.
@@ -200,6 +216,23 @@ enum WorkerConsolePresentation {
         } ?? (normalized(item.severity) == "error"
             ? "Worker execution failed"
             : "Durable worker result")
+    }
+
+    /// Human-readable lifecycle derived only from canonical inbox fields.
+    /// Opening a result does not mutate this status; `contextAttached` means
+    /// the result entered agent context, while `requiresAttention` already
+    /// accounts for verified recovery of an earlier failure.
+    static func resultDisposition(_ item: WorkerInboxItemDTO) -> WorkerResultDisposition {
+        if item.requiresAttention {
+            return .needsAttention
+        }
+        if normalized(item.severity) == "error" {
+            return .resolved
+        }
+        if item.contextAttached {
+            return .usedByAgent
+        }
+        return .available
     }
 
     static func timestamp(_ value: String?) -> String? {

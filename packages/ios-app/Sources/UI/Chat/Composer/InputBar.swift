@@ -25,6 +25,7 @@ struct InputBar: View {
     @State private var showFilePicker = false
     @State private var showingImagePicker = false
     @State private var showRecentInputs = false
+    @State private var textSelection: TextSelection?
 
     private let actionButtonSize: CGFloat = 40
 
@@ -196,6 +197,11 @@ struct InputBar: View {
                 )
             }
         }
+        .onAppear {
+            if state.textEndRevealRevision > 0 {
+                revealTextEnd()
+            }
+        }
     }
 
     // MARK: - Attachment Area
@@ -235,7 +241,12 @@ struct InputBar: View {
                 .accessibilityIdentifier("message-input-placeholder")
             }
 
-            TextField("", text: $state.text, axis: .vertical)
+            TextField(
+                "",
+                text: $state.text,
+                selection: $textSelection,
+                axis: .vertical
+            )
                 .textFieldStyle(.plain)
                 .font(TronTypography.input)
                 .foregroundStyle(config.allowsTextEntry ? .tronEmerald : .tronEmerald.opacity(0.5))
@@ -251,6 +262,9 @@ struct InputBar: View {
                 }
                 .onKeyPress(.tab) {
                     resignInputFocusForKeyboardTraversal()
+                }
+                .onChange(of: state.textEndRevealRevision) { _, _ in
+                    revealTextEnd()
                 }
         }
         .frame(minHeight: actionButtonSize)
@@ -268,6 +282,14 @@ struct InputBar: View {
         .animation(.easeOut(duration: 0.18), value: config.placeholderText)
         .animation(.easeOut(duration: 0.18), value: config.placeholderShowsProgress)
         .animation(.easeOut(duration: 0.18), value: config.isRecording)
+    }
+
+    private func revealTextEnd() {
+        guard !state.text.isEmpty else { return }
+        Task { @MainActor in
+            await Task.yield()
+            textSelection = TextSelection(insertionPoint: state.text.endIndex)
+        }
     }
 
     private func resignInputFocusForKeyboardTraversal() -> KeyPress.Result {

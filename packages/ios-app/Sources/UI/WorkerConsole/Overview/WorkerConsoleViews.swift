@@ -22,6 +22,7 @@ private enum EngineDashboardSection: String, CaseIterable {
     case workers = "Workers"
     case primitives = "Primitives"
     case activity = "Activity"
+    case results = "Results"
 }
 
 private struct EngineDashboardRefreshKey: Equatable {
@@ -116,7 +117,8 @@ struct WorkerConsoleSheet: View {
 
     @State private var selectedSection: EngineDashboardSection = .workers
     @State private var selectedPrimitiveTool: EngineSurfaceToolDTO?
-    @State private var showInboxAudit = false
+    @State private var selectedRun: WorkerInvocationDTO?
+    @State private var selectedInboxItem: WorkerInboxSelection?
 
     private var connectionState: ConnectionState {
         dependencies.connectionRepository.connectionState
@@ -191,14 +193,26 @@ struct WorkerConsoleSheet: View {
             .sheet(item: $selectedPrimitiveTool) { tool in
                 EnginePrimitiveToolDetailSheet(tool: tool)
             }
-            .sheet(isPresented: $showInboxAudit) {
-                WorkerInboxAuditSheet(
-                    workerId: nil,
-                    workerNames: Dictionary(
-                        uniqueKeysWithValues: viewModel.workers.map { ($0.workerId, $0.name) }
-                    ),
-                    repository: repository
+            .sheet(item: $selectedRun) { run in
+                WorkerRunDetailSheet(
+                    run: run,
+                    workerName: viewModel.workerName(for: run.workerId),
+                    onCancel: (run.status == "queued" || run.status == "running") ? {
+                        Task {
+                            await viewModel.cancel(
+                                run,
+                                repository: repository,
+                                connectionState: dependencies.connectionRepository.connectionState
+                            )
+                            selectedRun = viewModel.activityRuns.first {
+                                $0.invocationId == run.invocationId
+                            }
+                        }
+                    } : nil
                 )
+            }
+            .sheet(item: $selectedInboxItem) { selection in
+                WorkerInboxDetailSheet(selection: selection, repository: repository)
             }
             .task(id: EngineDashboardRefreshKey(
                 continuity: dependencies.connectionRepository.continuity,
@@ -209,6 +223,11 @@ struct WorkerConsoleSheet: View {
                 await refresh()
                 if selectedSection == .activity {
                     await viewModel.monitor(
+                        repository: repository,
+                        connectionState: dependencies.connectionRepository.connectionState
+                    )
+                } else if selectedSection == .results {
+                    await viewModel.monitorResults(
                         repository: repository,
                         connectionState: dependencies.connectionRepository.connectionState
                     )
@@ -233,6 +252,8 @@ struct WorkerConsoleSheet: View {
             workersContent
         case .activity:
             activityContent
+        case .results:
+            resultsContent
         }
     }
 
@@ -307,7 +328,8 @@ struct WorkerConsoleSheet: View {
                             WorkerRunCard(
                                 run: run,
                                 workerName: viewModel.workerName(for: run.workerId),
-                                callerWorkerName: viewModel.callerWorkerName(for: run)
+                                callerWorkerName: viewModel.callerWorkerName(for: run),
+                                onOpen: { selectedRun = run }
                             )
                         }
                     }
@@ -319,51 +341,77 @@ struct WorkerConsoleSheet: View {
                 }
             }
 
-            WorkerConsoleGroup(
-                title: "Attention",
-                detail: "Failures, system events, and pending background outcomes that merit review."
-            ) {
-                if viewModel.activityAttention.isEmpty {
-                    WorkerConsoleInlineEmptyState(
-                        symbol: "checkmark.circle",
-                        text: "Nothing needs attention."
-                    )
-                } else {
-                    LazyVStack(spacing: 9) {
-                        ForEach(viewModel.activityAttention) { item in
-                            WorkerInboxCard(
-                                item: item,
-                                workerName: viewModel.workerName(for: item.workerId)
-                            )
-                        }
-                    }
-                    if viewModel.activityAttentionNextOffset != nil {
-                        activityLoadMoreButton("Load older attention records") {
-                            await viewModel.loadOlderActivityAttention(repository: repository)
-                        }
-                    }
-                }
-            }
+        }
+    }
 
-            Button { showInboxAudit = true } label: {
-                HStack(spacing: 11) {
-                    Image(systemName: "tray.full")
-                        .frame(width: 24)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Open delivery audit")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        Text("Inspect the complete delivery ledger, including routine run-result copies.")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-                    Spacer(minLength: 0)
+    private var resultsContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if viewModel.activityResults.isEmpty {
+                WorkerConsoleGroup(
+                    title: "Durable results",
+                    detail: "Available outcomes, results used by an agent, unresolved failures, and verified recoveries."
+                ) {
+                    WorkerConsoleInlineEmptyState(
+                        symbol: "tray",
+                        text: "No durable results have been retained."
+                    )
                 }
-                .foregroundStyle(.tronInfo)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .sectionFill(.tronInfo, cornerRadius: 11, subtle: true, interactive: true)
+            } else {
+                resultSection(
+                    .needsAttention,
+                    title: "Needs attention",
+                    detail: "Unresolved failures that still merit investigation or correction."
+                )
+                resultSection(
+                    .available,
+                    title: "Available",
+                    detail: "Durable outcomes that have not entered an agent's context."
+                )
+                resultSection(
+                    .usedByAgent,
+                    title: "Used by agent",
+                    detail: "Results already attached to an agent context for follow-up."
+                )
+                resultSection(
+                    .resolved,
+                    title: "Resolved",
+                    detail: "Earlier failures the server no longer classifies as actionable after recovery or an owned fallback."
+                )
+                if viewModel.activityResultsNextOffset != nil {
+                    resultsLoadMoreButton("Load older results") {
+                        await viewModel.loadOlderActivityResults(repository: repository)
+                    }
+                }
             }
-            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private func resultSection(
+        _ disposition: WorkerResultDisposition,
+        title: String,
+        detail: String
+    ) -> some View {
+        let items = viewModel.activityResults.filter {
+            WorkerConsolePresentation.resultDisposition($0) == disposition
+        }
+        if !items.isEmpty {
+            WorkerConsoleGroup(title: title, detail: detail) {
+                LazyVStack(spacing: 9) {
+                    ForEach(items) { item in
+                        WorkerInboxCard(
+                            item: item,
+                            workerName: viewModel.workerName(for: item.workerId),
+                            onOpen: {
+                                selectedInboxItem = WorkerInboxSelection(
+                                    item: item,
+                                    workerName: viewModel.workerName(for: item.workerId)
+                                )
+                            }
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -390,6 +438,31 @@ struct WorkerConsoleSheet: View {
         }
         .buttonStyle(.plain)
         .disabled(viewModel.isLoadingMoreActivity)
+    }
+
+    private func resultsLoadMoreButton(
+        _ title: String,
+        action: @escaping () async -> Void
+    ) -> some View {
+        Button {
+            Task { await action() }
+        } label: {
+            HStack(spacing: 7) {
+                if viewModel.isLoadingMoreResults {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                Text(title)
+            }
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+            .foregroundStyle(.tronEmerald)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .sectionFill(.tronEmerald, cornerRadius: 10, subtle: true, interactive: true)
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isLoadingMoreResults)
     }
 
     @ViewBuilder
@@ -463,7 +536,10 @@ struct WorkerConsoleSheet: View {
     }
 
     private var isPresentingChildSheet: Bool {
-        viewModel.selectedWorkerId != nil || selectedPrimitiveTool != nil || showInboxAudit
+        viewModel.selectedWorkerId != nil
+            || selectedPrimitiveTool != nil
+            || selectedRun != nil
+            || selectedInboxItem != nil
     }
 
     private var consoleStatus: (title: String, detail: String, symbol: String, color: Color) {
@@ -510,6 +586,11 @@ struct WorkerConsoleSheet: View {
     private func refresh() async {
         if selectedSection == .activity {
             await viewModel.refresh(
+                repository: repository,
+                connectionState: dependencies.connectionRepository.connectionState
+            )
+        } else if selectedSection == .results {
+            await viewModel.refreshResults(
                 repository: repository,
                 connectionState: dependencies.connectionRepository.connectionState
             )

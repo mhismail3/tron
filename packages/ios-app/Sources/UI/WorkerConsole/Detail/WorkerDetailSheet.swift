@@ -28,6 +28,8 @@ struct WorkerDetailSheet: View {
     @State private var showSchema = false
     @State private var showTechnicalDetails = false
     @State private var showInboxAudit = false
+    @State private var selectedRun: WorkerInvocationDTO?
+    @State private var selectedInboxItem: WorkerInboxSelection?
     @State private var selectedSection = WorkerDetailSection.overview
 
     var body: some View {
@@ -132,6 +134,27 @@ struct WorkerDetailSheet: View {
                         repository: repository
                     )
                 }
+            }
+            .sheet(item: $selectedRun) { run in
+                WorkerRunDetailSheet(
+                    run: run,
+                    workerName: viewModel.workerName(for: run.workerId),
+                    onCancel: (run.status == "queued" || run.status == "running") ? {
+                        Task {
+                            await viewModel.cancel(
+                                run,
+                                repository: repository,
+                                connectionState: connectionState
+                            )
+                            selectedRun = viewModel.runs.first {
+                                $0.invocationId == run.invocationId
+                            }
+                        }
+                    } : nil
+                )
+            }
+            .sheet(item: $selectedInboxItem) { selection in
+                WorkerInboxDetailSheet(selection: selection, repository: repository)
             }
         }
         .workerConsoleSheetPresentation()
@@ -413,16 +436,9 @@ struct WorkerDetailSheet: View {
                         WorkerRunCard(
                             run: run,
                             workerName: viewModel.workerName(for: run.workerId),
-                            callerWorkerName: viewModel.callerWorkerName(for: run)
-                        ) {
-                            Task {
-                                await viewModel.cancel(
-                                    run,
-                                    repository: repository,
-                                    connectionState: connectionState
-                                )
-                            }
-                        }
+                            callerWorkerName: viewModel.callerWorkerName(for: run),
+                            onOpen: { selectedRun = run }
+                        )
                     }
                 }
             }
@@ -442,7 +458,16 @@ struct WorkerDetailSheet: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(viewModel.attention.prefix(20)) { item in
-                        WorkerInboxCard(item: item)
+                        WorkerInboxCard(
+                            item: item,
+                            workerName: viewModel.workerName(for: item.workerId),
+                            onOpen: {
+                                selectedInboxItem = WorkerInboxSelection(
+                                    item: item,
+                                    workerName: viewModel.workerName(for: item.workerId)
+                                )
+                            }
+                        )
                     }
                 }
             }

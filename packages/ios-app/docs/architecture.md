@@ -390,17 +390,20 @@ state.
 - refresh/mutation flags, stop-all status, and the last transport error.
 
 The lightweight summary refresh loads one authoritative profile-level engine
-snapshot. A full dashboard refresh loads that snapshot, bounded activity, and
-attention concurrently, then loads the selected worker's inspection, runs, and
-attention concurrently if it still exists. A
+snapshot. Activity and Results each have a section-scoped refresh: Activity
+loads the snapshot plus bounded runs, while Results loads the snapshot plus the
+complete bounded inbox projection. Neither tab queries the other's ledger.
+Selecting a worker loads its inspection, runs, and current attention
+concurrently. A
 disconnected refresh clears server-owned rows. Monitoring subscribes from each
 worker topic's current durable tail, coalesces the adjacent facts produced by
 one run, and then reloads authoritative state. It never replays historical
 worker events into UI invalidation. Invocation invalidations retain every
 durable originating-session identifier seen during the 200 ms coalescing
 window; lifecycle invalidations stay global and sessionless invocations do not
-refresh an unrelated Session Context. Refreshes are single-flight; a full request
-arriving during a summary read is preserved and runs next. Mutations serialize
+refresh an unrelated Session Context. Refreshes are single-flight; a section
+request arriving during a summary read is preserved and runs next, while a
+summary request is subsumed by an active section read. Mutations serialize
 through the view model's mutation state, call one repository operation, and
 reload canonical server truth.
 
@@ -414,8 +417,9 @@ The session sidebar contains a compact Engine band showing fixed-primitive, acti
 and current unhealthy-worker counts. It opens `WorkerConsoleSheet`, whose
 visible product identity is Engine. While the sheet is closed, the sidebar
 reloads only its compact snapshot after a live invalidation. While the sheet is
-open, Workers and Primitives retain that one-read summary lane; only the Activity tab
-loads and monitors bounded runs and attention. Switching scopes cancels the old
+open, Workers and Primitives retain that one-read summary lane; Activity loads
+and monitors bounded runs, while Results independently loads and monitors the
+bounded durable-result ledger. Switching scopes cancels the old
 view task without creating another server subscription because subscriptions
 are cached per socket. The dashboard uses
 the same selected typography, semantic color tokens, liquid-glass section
@@ -431,7 +435,7 @@ fill and press response as the navigation affordance; trailing chevrons are
 intentionally omitted throughout the dashboard and its nested sheets. It
 provides:
 
-- Workers, Primitives, and Activity modes in one compact cockpit, with Workers as the
+- Workers, Primitives, Activity, and Results modes in one compact cockpit, with Workers as the
   initial operator view; the always-visible
   summary owns profile-wide fixed/worker/current-health counts and any active
   worker-owned engine-policy hooks instead of duplicating them in an Overview
@@ -471,12 +475,13 @@ provides:
   workers when the bounded run snapshot contains that parent. Random invocation,
   version, trace, and idempotency identifiers remain in the canonical run-detail
   sheet rather than competing with operational facts in the activity list;
-  tapping a card opens that detail sheet with toolbar actions. Activity uses
-  runs as the primary execution ledger and shows a
-  separate Attention projection only for unresolved failures and pending
-  background outcomes. A later verified activation or rollback removes resolved
-  errors from Attention while the explicit Delivery Audit sheet and run ledger
-  retain their immutable evidence. The engine summary labels its independent
+  tapping a card opens that detail sheet with toolbar actions. Activity is only
+  the execution ledger. Results groups the independent durable ledger into
+  `Needs attention`, `Available`, `Used by agent`, and `Resolved` using the
+  server's canonical attention and context-attachment fields. Recovery or an
+  owned fallback moves an earlier failure out of `Needs attention` and into
+  `Resolved`; immutable evidence remains inspectable. Opening a result does
+  not pretend to consume it. The engine summary labels its independent
   current-state metric `Unhealthy`, so historical delivery evidence cannot be
   confused with current worker health;
 - completed results expose the same direct `Investigate with agent` action in
@@ -544,7 +549,10 @@ than decorative outer containers. Container sections remain reserved for
 cohesive forms, tables, and multi-row metadata whose rows are not independently
 actionable cards.
 
-Only the frontmost worker sheet observes live worker state. Presenting a run,
+Only the frontmost worker sheet observes live worker state. Lazy run and result
+rows emit selection intents only; the stable containing sheet owns the selected
+identity and the single child-sheet modifier. A row can therefore be recreated
+by lazy layout without destroying an already loaded detail. Presenting a run,
 technical detail, result, timeline, or other child sheet freezes the covered
 parent's polling and invalidation-triggered refreshes. Closing the child starts
 one authoritative catch-up read. This does not lose worker state: stream events
@@ -687,11 +695,15 @@ and a multiline `Other` value cannot clip the final choice. Pending presentation
 uses the warning accent; answered presentation uses
 the success accent and restores the selected values as non-interactive audit
 rows. A successful tool completion is the durable pending marker. The
-sheet admits choices immediately but enables submit only after the producing
-agent run releases its ordinary session guard. Submit first restores the live
+sheet admits choices immediately but enables submit after any one question has
+a valid option or non-empty custom response and after the producing agent run
+releases its ordinary session guard. Unanswered questions are omitted from the
+submission in canonical question order. Closing the sheet retains its unsent
+selection draft in the mounted chat coordinator; only a successful canonical
+submission clears it. Submit first restores the live
 session subscription, then invokes the session-scoped
 answer function with invocation-derived idempotency. The server validates the
-answers against its persisted question, appends one structured user event, and
+non-empty answer subset against its persisted questions, appends one structured user event, and
 starts a new run. Live state, cached reconstruction, pagination context, app
 foregrounding, reconnect, and server restart therefore derive pending/answered
 presentation from the same canonical events. The structured answer event is
@@ -1001,7 +1013,9 @@ headers remain visually attached to compact cards rather than sharing the
 inter-group spacing.
 Navigation rows across the Session Context surface remain fully tappable
 without trailing chevrons; their leading icon, title, supporting text, and
-interactive glass treatment carry the affordance.
+interactive glass treatment carry the affordance. A delivery row carrying a
+durable result invocation opens that exact bounded result inspector directly;
+the row never requires the user to rediscover the run in Engine history.
 
 The sheet seeds its inventory from the compact cached session projection; it
 does not predecode or prewarm an exact manifest. Provider Request and Tool
@@ -1288,6 +1302,11 @@ reminders; they are not a general device-control surface.
   navigates. Handoff creation is single-flight at the app root so repeated taps
   cannot create duplicate chats. Merely opening, previewing, sharing, or deleting an artifact never
   mutates a draft.
+  Worker and result handoffs use the same prepared-draft path. After durable
+  save verification, `DraftStore` records one app-local presentation intent;
+  the next mounted composer places its multiline selection at the final edit
+  point and reveals the request suffix without opening the keyboard. Ordinary
+  restored drafts retain their existing cursor behavior.
   The client does not interpret worker URLs, paths, HTML, or arbitrary commands.
 - The empty Artifact Inbox offers Create through chat. It posts one
   new-session handoff, dismisses Settings, and prefills an artifact request

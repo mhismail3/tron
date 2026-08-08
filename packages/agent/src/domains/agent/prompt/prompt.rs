@@ -190,9 +190,9 @@ fn validate_user_input_answers(
         .map_err(|error| ToolError::InvalidParams {
         message: format!("The pending question is invalid: {error}"),
     })?;
-    if request.questions.len() != answers.len() {
+    if answers.is_empty() {
         return Err(ToolError::InvalidParams {
-            message: "Every pending question requires exactly one answer".into(),
+            message: "At least one pending question requires an answer".into(),
         });
     }
     let mut seen = std::collections::BTreeSet::new();
@@ -845,6 +845,25 @@ mod tests {
             )
             .is_err()
         );
+
+        let multiple = json!({
+            "questions":[
+                {"id":"format","options":[{"label":"Markdown"},{"label":"HTML"}]},
+                {"id":"tone","options":[{"label":"Direct"},{"label":"Warm"}]}
+            ]
+        });
+        assert!(
+            validate_user_input_answers(
+                &multiple,
+                &[UserInputAnswerSubmission {
+                    question_id: "tone".into(),
+                    selected_label: Some("Warm".into()),
+                    free_text: None,
+                }]
+            )
+            .is_ok()
+        );
+        assert!(validate_user_input_answers(&multiple, &[]).is_err());
     }
 
     #[test]

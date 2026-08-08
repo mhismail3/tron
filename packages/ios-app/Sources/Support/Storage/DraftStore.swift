@@ -20,6 +20,7 @@ final class DraftStore {
     private static let debounceInterval: Duration = .milliseconds(500)
     private var pendingSessionId: String?
     private var pendingInputBarState: InputBarState?
+    private var textEndRevealSessionIds: Set<String> = []
 
     init(eventDatabase: EventDatabase, documentsURL: URL) {
         self.eventDatabase = eventDatabase
@@ -70,6 +71,9 @@ final class DraftStore {
                 sessionId: sessionId,
                 metadata: draft.attachmentMetadata
             )
+            if textEndRevealSessionIds.remove(sessionId) != nil {
+                inputBarState.requestTextEndReveal()
+            }
             lastSavedFingerprints[sessionId] = inputBarState.draftFingerprint
 
             return true
@@ -79,9 +83,16 @@ final class DraftStore {
         }
     }
 
+    /// Marks an externally prepared draft so the next mounted composer reveals
+    /// its editable tail without changing focus or opening the keyboard.
+    func revealTextEndOnNextLoad(sessionId: String) {
+        textEndRevealSessionIds.insert(sessionId)
+    }
+
     /// Clear a draft after sending a message.
     func clearDraft(sessionId: String) async {
         lastSavedFingerprints.removeValue(forKey: sessionId)
+        textEndRevealSessionIds.remove(sessionId)
         do {
             try await eventDatabase.drafts.delete(sessionId: sessionId)
         } catch {

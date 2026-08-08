@@ -268,7 +268,8 @@ struct WorkerConsoleInteractionTests {
         #expect(detail.contains("startAgentSessionHandoff(.worker("))
         #expect(!detail.contains("TextEditor(text: $viewModel.invocationInput)"))
         #expect(!detail.contains("title: \"New invocation\""))
-        #expect(components.contains("WorkerRunDetailSheet("))
+        #expect(components.contains("Button(action: onOpen)"))
+        #expect(!components.contains("WorkerRunDetailSheet("))
         #expect(components.contains("WorkerJSONDetailSheet("))
 
         let resultInspector = try String(
@@ -414,6 +415,10 @@ struct WorkerConsoleInteractionTests {
         #expect(mainSheet.contains(".containerRelativeFrame(.horizontal)"))
         #expect(mainSheet.contains(".scrollBounceBehavior(.basedOnSize, axes: .vertical)"))
         #expect(mainSheet.contains("SessionContextRefreshCoordinator()"))
+        #expect(mainSheet.contains("@State var selectedWorkerResult"))
+        #expect(mainSheet.contains(".sheet(item: $selectedWorkerResult)"))
+        #expect(context.contains("update.resultInvocationId"))
+        #expect(context.contains("selectedWorkerResult = WorkerResultSelection"))
         #expect(mainSheet.contains("SessionContextContinuityKey("))
         #expect(mainSheet.contains("continuity: dependencies.connectionRepository.continuity"))
         #expect(!mainSheet.contains("workerRefreshRevision"))
@@ -774,8 +779,8 @@ struct WorkerConsoleInteractionTests {
         #expect(!content.contains("openWorkerAuditSession"))
     }
 
-    @Test("Activity separates execution history from delivery audit")
-    func activityUsesRunsAttentionAndExplicitAudit() throws {
+    @Test("Engine separates execution activity from classified durable results")
+    func activityAndResultsHaveIndependentDestinations() throws {
         let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
         let shell = try String(
             contentsOf: workerRoot.appendingPathComponent("Overview/WorkerConsoleViews.swift"),
@@ -791,15 +796,53 @@ struct WorkerConsoleInteractionTests {
         )
 
         #expect(shell.contains("title: \"Worker runs\""))
-        #expect(shell.contains("title: \"Attention\""))
+        #expect(shell.contains("case results = \"Results\""))
+        #expect(shell.contains("title: \"Needs attention\""))
+        #expect(shell.contains("title: \"Available\""))
+        #expect(shell.contains("title: \"Used by agent\""))
+        #expect(shell.contains("title: \"Resolved\""))
+        #expect(shell.contains("refreshResults("))
+        #expect(shell.contains("monitorResults("))
         #expect(shell.contains("label: \"Unhealthy\""))
-        #expect(shell.contains("Text(\"Open delivery audit\")"))
+        #expect(!shell.contains("Text(\"Open delivery audit\")"))
         #expect(detail.contains("private var attention: some View"))
         #expect(detail.contains("private var inboxAudit: some View"))
         #expect(!shell.contains("title: \"Durable inbox\""))
         #expect(!detail.contains("title: \"Durable inbox\""))
         #expect(audit.contains("struct WorkerInboxAuditSheet"))
         #expect(audit.contains("attentionOnly: false"))
+    }
+
+    @Test("Lazy worker rows emit open intents while stable parents own detail sheets")
+    func workerRowsDoNotOwnReloadableSheets() throws {
+        let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
+        let components = try String(
+            contentsOf: workerRoot.appendingPathComponent("Presentation/WorkerConsoleComponents.swift"),
+            encoding: .utf8
+        )
+        let shell = try String(
+            contentsOf: workerRoot.appendingPathComponent("Overview/WorkerConsoleViews.swift"),
+            encoding: .utf8
+        )
+        let runCard = try sourceSlice(
+            components,
+            from: "struct WorkerRunCard: View",
+            through: "struct WorkerInboxCard: View"
+        )
+        let inboxCard = try sourceSlice(
+            components,
+            from: "struct WorkerInboxCard: View",
+            through: "extension WorkerResultDisposition"
+        )
+
+        #expect(runCard.contains("let onOpen: () -> Void"))
+        #expect(inboxCard.contains("let onOpen: () -> Void"))
+        #expect(!runCard.contains(".sheet("))
+        #expect(!inboxCard.contains(".sheet("))
+        #expect(shell.contains("@State private var selectedRun"))
+        #expect(shell.contains("@State private var selectedInboxItem"))
+        #expect(shell.contains(".sheet(item: $selectedRun)"))
+        #expect(shell.contains(".sheet(item: $selectedInboxItem)"))
     }
 
     @Test("Run cards use compact operational metadata while delegated tasks retain one leading edge")

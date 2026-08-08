@@ -26,6 +26,49 @@ struct UserInputAnswer: Codable, Equatable, Sendable {
     let freeText: String?
 }
 
+/// Sheet-owned selection state retained by the chat coordinator while a
+/// question request remains pending. It is deliberately separate from the
+/// canonical submitted answers so closing a sheet never fabricates history.
+struct UserInputDraft: Equatable, Sendable {
+    var selectedLabels: [String: String] = [:]
+    var customAnswers: [String: String] = [:]
+    var customQuestionIds: Set<String> = []
+
+    init(request: UserInputRequest) {
+        for answer in request.answers {
+            if let freeText = answer.freeText {
+                customQuestionIds.insert(answer.questionId)
+                customAnswers[answer.questionId] = freeText
+            } else if let selectedLabel = answer.selectedLabel {
+                selectedLabels[answer.questionId] = selectedLabel
+            }
+        }
+    }
+
+    func answer(for question: UserInputQuestion) -> UserInputAnswer? {
+        if customQuestionIds.contains(question.id) {
+            guard let freeText = customAnswers[question.id]?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !freeText.isEmpty else { return nil }
+            return UserInputAnswer(
+                questionId: question.id,
+                selectedLabel: nil,
+                freeText: freeText
+            )
+        }
+        guard let selectedLabel = selectedLabels[question.id] else { return nil }
+        return UserInputAnswer(
+            questionId: question.id,
+            selectedLabel: selectedLabel,
+            freeText: nil
+        )
+    }
+
+    func answers(for questions: [UserInputQuestion]) -> [UserInputAnswer] {
+        questions.compactMap(answer(for:))
+    }
+}
+
 struct UserInputRequest: Equatable, Identifiable, Sendable {
     let invocationId: String
     let questions: [UserInputQuestion]

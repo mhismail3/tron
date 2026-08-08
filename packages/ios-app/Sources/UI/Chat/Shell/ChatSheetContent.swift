@@ -79,13 +79,29 @@ struct ChatSheetContent: View {
             let request = viewModel.currentUserInputRequest(
                 invocationId: snapshot.invocationId
             ) ?? snapshot
+            let draft = Binding(
+                get: {
+                    sheetCoordinator?.userInputDraft(for: request)
+                        ?? UserInputDraft(request: request)
+                },
+                set: { value in
+                    sheetCoordinator?.updateUserInputDraft(
+                        value,
+                        invocationId: request.invocationId
+                    )
+                }
+            )
             UserInputSheet(
                 request: request,
-                isAgentActive: viewModel.agentPhase.isActive
+                isAgentActive: viewModel.agentPhase.isActive,
+                draft: draft
             ) { answers in
                 try await viewModel.submitUserInput(
                     invocationId: request.invocationId,
                     answers: answers
+                )
+                sheetCoordinator?.clearUserInputDraft(
+                    invocationId: request.invocationId
                 )
             }
 
