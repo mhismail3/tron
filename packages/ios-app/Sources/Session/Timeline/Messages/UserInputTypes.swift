@@ -24,10 +24,6 @@ struct UserInputAnswer: Codable, Equatable, Sendable {
     let questionId: String
     let selectedLabel: String?
     let freeText: String?
-
-    var displayValue: String {
-        freeText?.nilIfBlank ?? selectedLabel ?? "No answer"
-    }
 }
 
 struct UserInputRequest: Equatable, Identifiable, Sendable {
@@ -124,27 +120,8 @@ enum UserInputPresentation {
         }
     }
 
-    static func chatDetail(for request: UserInputRequest) -> String {
-        switch request.status {
-        case .pending:
-            return request.questions.first?.question ?? "Input requested"
-        case .answered:
-            let values = request.answers.map(\.displayValue)
-            return values.isEmpty ? "Answers saved" : values.joined(separator: " · ")
-        case .failed(let reason):
-            return reason
-        }
-    }
-
     private static func answeredTitle(count: Int) -> String {
         guard count > 0 else { return "Answered" }
         return "Answered \(count) question\(count == 1 ? "" : "s")"
-    }
-}
-
-private extension String {
-    var nilIfBlank: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 }

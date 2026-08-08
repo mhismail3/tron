@@ -18,7 +18,7 @@ struct UserInputPresentationTests {
         #expect(UserInputPresentation.chatTitle(for: multiple) == "Questions for you")
     }
 
-    @Test("Answered requests carry their answer count and audit summary")
+    @Test("Answered requests carry their answer count")
     func answeredCopy() {
         let questions = [question(id: "format"), question(id: "priority"), question(id: "audience")]
         let answers = [
@@ -30,10 +30,16 @@ struct UserInputPresentationTests {
 
         #expect(UserInputPresentation.sheetTitle(for: answered) == "Answers")
         #expect(UserInputPresentation.chatTitle(for: answered) == "Answered 3 questions")
-        #expect(UserInputPresentation.chatDetail(for: answered) == "First · Accuracy · Second")
+
+        let single = request(
+            questions: [question(id: "format")],
+            answers: [UserInputAnswer(questionId: "format", selectedLabel: "First", freeText: nil)],
+            status: .answered
+        )
+        #expect(UserInputPresentation.chatTitle(for: single) == "Answered 1 question")
     }
 
-    @Test("Failed requests expose their durable reason")
+    @Test("Failed requests use unavailable copy")
     func failedCopy() {
         let failed = request(
             questions: [question(id: "format")],
@@ -42,7 +48,6 @@ struct UserInputPresentationTests {
 
         #expect(UserInputPresentation.sheetTitle(for: failed) == "Unavailable")
         #expect(UserInputPresentation.chatTitle(for: failed) == "Question unavailable")
-        #expect(UserInputPresentation.chatDetail(for: failed) == "The request expired")
     }
 
     private func request(
