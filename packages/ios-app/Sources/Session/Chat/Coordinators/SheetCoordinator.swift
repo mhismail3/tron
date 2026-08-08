@@ -13,6 +13,7 @@ final class SheetCoordinator {
     /// Dismissal callback (called by SwiftUI when sheet dismisses)
     var onDismiss: (() -> Void)?
     private var queuedUserInputRequest: UserInputRequest?
+    private var userInputDrafts: [String: UserInputDraft] = [:]
 
     // MARK: - Computed Properties
 
@@ -132,6 +133,24 @@ final class SheetCoordinator {
         queuedUserInputRequest = nil
         guard case .userInput? = activeSheet else { return }
         dismiss()
+    }
+
+    func userInputDraft(for request: UserInputRequest) -> UserInputDraft {
+        guard request.isAnswerable else { return UserInputDraft(request: request) }
+        if let draft = userInputDrafts[request.invocationId] {
+            return draft
+        }
+        let draft = UserInputDraft(request: request)
+        userInputDrafts[request.invocationId] = draft
+        return draft
+    }
+
+    func updateUserInputDraft(_ draft: UserInputDraft, invocationId: String) {
+        userInputDrafts[invocationId] = draft
+    }
+
+    func clearUserInputDraft(invocationId: String) {
+        userInputDrafts.removeValue(forKey: invocationId)
     }
 
 }

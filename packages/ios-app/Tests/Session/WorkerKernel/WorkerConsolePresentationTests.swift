@@ -179,6 +179,42 @@ struct WorkerConsolePresentationTests {
         #expect(WorkerConsolePresentation.inboxSummary(item).count == 80)
     }
 
+    @Test("Result disposition uses canonical context and recovery state")
+    func resultDispositionProjection() {
+        func item(
+            severity: String = "info",
+            contextAttached: Bool = false,
+            requiresAttention: Bool = false
+        ) -> WorkerInboxItemDTO {
+            WorkerInboxItemDTO(
+                inboxId: UUID().uuidString,
+                invocationId: UUID().uuidString,
+                workerId: "worker",
+                severity: severity,
+                result: AnyCodable(["status": "complete"]),
+                contextAttached: contextAttached,
+                createdAt: "2026-08-08T12:00:00Z",
+                triggerKind: "manual",
+                hasInvocation: true,
+                requiresAttention: requiresAttention
+            )
+        }
+
+        #expect(WorkerConsolePresentation.resultDisposition(item()) == .available)
+        #expect(
+            WorkerConsolePresentation.resultDisposition(item(contextAttached: true))
+                == .usedByAgent
+        )
+        #expect(
+            WorkerConsolePresentation.resultDisposition(item(requiresAttention: true))
+                == .needsAttention
+        )
+        #expect(
+            WorkerConsolePresentation.resultDisposition(item(severity: "error"))
+                == .resolved
+        )
+    }
+
     @Test("Engine primitive groups use stable operator language")
     func engineDashboardProjection() {
         #expect(EngineDashboardPresentation.groupTitle("host") == "Host primitives")

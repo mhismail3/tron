@@ -3,6 +3,24 @@ import Testing
 
 @Suite("User input presentation")
 struct UserInputPresentationTests {
+    @Test("A pending draft submits any valid answered subset in canonical question order")
+    func partialDraftAnswersAreValid() {
+        let questions = [question(id: "first"), question(id: "second")]
+        var draft = UserInputDraft(request: request(
+            questions: questions,
+            answers: [],
+            status: .pending
+        ))
+        draft.selectedLabels["second"] = "First"
+
+        #expect(draft.answers(for: questions) == [
+            UserInputAnswer(
+                questionId: "second",
+                selectedLabel: "First",
+                freeText: nil
+            ),
+        ])
+    }
     @Test("Pending questions use singular and plural request copy")
     func pendingCopy() {
         let single = request(questions: [question(id: "format")])

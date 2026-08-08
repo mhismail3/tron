@@ -8,6 +8,14 @@ import SwiftUI
 final class InputBarState {
     // MARK: - Text Input
     var text: String = ""
+    /// One-shot presentation intent for externally prepared drafts. This is
+    /// not draft content and therefore never participates in persistence or
+    /// send admission.
+    var textEndRevealRevision: UInt64 = 0
+
+    func requestTextEndReveal() {
+        textEndRevealRevision &+= 1
+    }
 
     // MARK: - Media Selection
     var selectedImages: [PhotosPickerItem] = []

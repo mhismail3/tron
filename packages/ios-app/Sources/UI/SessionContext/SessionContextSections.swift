@@ -334,7 +334,25 @@ extension SessionContextSheet {
         )
     }
 
+    @ViewBuilder
     func agentUpdateCard(_ update: SessionAgentUpdateDTO) -> some View {
+        if let invocationId = update.resultInvocationId {
+            Button {
+                selectedWorkerResult = WorkerResultSelection(invocationId: invocationId)
+            } label: {
+                agentUpdateCardContent(update, interactive: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the exact durable worker result")
+        } else {
+            agentUpdateCardContent(update, interactive: false)
+        }
+    }
+
+    func agentUpdateCardContent(
+        _ update: SessionAgentUpdateDTO,
+        interactive: Bool
+    ) -> some View {
         HStack(alignment: .top, spacing: 11) {
             Image(systemName: agentUpdateSymbol(update.status))
                 .foregroundStyle(agentUpdateColor(update.status))
@@ -389,7 +407,7 @@ extension SessionContextSheet {
             agentUpdateColor(update.status),
             cornerRadius: 12,
             subtle: true,
-            interactive: false
+            interactive: interactive
         )
     }
 

@@ -6,9 +6,7 @@ struct UserInputSheet: View {
     let onSubmit: ([UserInputAnswer]) async throws -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedLabels: [String: String]
-    @State private var customAnswers: [String: String]
-    @State private var customQuestionIds: Set<String>
+    @Binding private var draft: UserInputDraft
     @State private var currentQuestionIndex = 0
     @State private var isSubmitting = false
     @State private var errorMessage: String?
@@ -17,26 +15,14 @@ struct UserInputSheet: View {
     init(
         request: UserInputRequest,
         isAgentActive: Bool,
+        draft: Binding<UserInputDraft>? = nil,
         onSubmit: @escaping ([UserInputAnswer]) async throws -> Void
     ) {
         self.request = request
         self.isAgentActive = isAgentActive
         self.onSubmit = onSubmit
 
-        var selectedLabels: [String: String] = [:]
-        var customAnswers: [String: String] = [:]
-        var customQuestionIds = Set<String>()
-        for answer in request.answers {
-            if let freeText = answer.freeText {
-                customQuestionIds.insert(answer.questionId)
-                customAnswers[answer.questionId] = freeText
-            } else if let selectedLabel = answer.selectedLabel {
-                selectedLabels[answer.questionId] = selectedLabel
-            }
-        }
-        _selectedLabels = State(initialValue: selectedLabels)
-        _customAnswers = State(initialValue: customAnswers)
-        _customQuestionIds = State(initialValue: customQuestionIds)
+        _draft = draft ?? .constant(UserInputDraft(request: request))
     }
 
     private var isReadOnly: Bool { !request.isAnswerable }
@@ -50,12 +36,9 @@ struct UserInputSheet: View {
     }
 
     private var canSubmit: Bool {
-        !isReadOnly && !isAgentActive && request.questions.allSatisfy { question in
-            if customQuestionIds.contains(question.id) {
-                return customAnswers[question.id]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            }
-            return selectedLabels[question.id] != nil
-        }
+        !isReadOnly
+            && !isAgentActive
+            && !draft.answers(for: request.questions).isEmpty
     }
 
     var body: some View {
@@ -176,15 +159,15 @@ struct UserInputSheet: View {
         question: UserInputQuestion,
         option: UserInputOption
     ) -> some View {
-        let selected = selectedLabels[question.id] == option.label
-            && !customQuestionIds.contains(question.id)
+        let selected = draft.selectedLabels[question.id] == option.label
+            && !draft.customQuestionIds.contains(question.id)
         Group {
             if isReadOnly {
                 optionRowContent(option: option, selected: selected)
             } else {
                 Button {
-                    selectedLabels[question.id] = option.label
-                    customQuestionIds.remove(question.id)
+                    draft.selectedLabels[question.id] = option.label
+                    draft.customQuestionIds.remove(question.id)
                     focusedQuestionId = nil
                 } label: {
                     optionRowContent(option: option, selected: selected)
@@ -218,14 +201,14 @@ struct UserInputSheet: View {
     }
 
     private func otherRow(_ question: UserInputQuestion) -> some View {
-        let selected = customQuestionIds.contains(question.id)
+        let selected = draft.customQuestionIds.contains(question.id)
         return VStack(alignment: .leading, spacing: 10) {
             if isReadOnly {
                 otherRowHeader(selected: selected)
             } else {
                 Button {
-                    customQuestionIds.insert(question.id)
-                    selectedLabels[question.id] = nil
+                    draft.customQuestionIds.insert(question.id)
+                    draft.selectedLabels[question.id] = nil
                     focusedQuestionId = question.id
                 } label: {
                     otherRowHeader(selected: selected)
@@ -235,7 +218,7 @@ struct UserInputSheet: View {
 
             if selected {
                 if isReadOnly {
-                    Text(customAnswers[question.id] ?? "No answer")
+                    Text(draft.customAnswers[question.id] ?? "No answer")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextPrimary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -278,27 +261,14 @@ struct UserInputSheet: View {
 
     private func customBinding(_ questionId: String) -> Binding<String> {
         Binding(
-            get: { customAnswers[questionId] ?? "" },
-            set: { customAnswers[questionId] = $0 }
+            get: { draft.customAnswers[questionId] ?? "" },
+            set: { draft.customAnswers[questionId] = $0 }
         )
     }
 
     private func submit() {
         guard canSubmit, !isSubmitting else { return }
-        let answers = request.questions.map { question in
-            if customQuestionIds.contains(question.id) {
-                return UserInputAnswer(
-                    questionId: question.id,
-                    selectedLabel: nil,
-                    freeText: customAnswers[question.id]?.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
-            }
-            return UserInputAnswer(
-                questionId: question.id,
-                selectedLabel: selectedLabels[question.id],
-                freeText: nil
-            )
-        }
+        let answers = draft.answers(for: request.questions)
         isSubmitting = true
         Task {
             do {

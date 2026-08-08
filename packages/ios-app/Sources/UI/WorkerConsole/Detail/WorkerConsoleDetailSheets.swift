@@ -42,6 +42,7 @@ struct WorkerInboxAuditSheet: View {
     @State private var error: String?
     @State private var loadGeneration = 0
     @State private var projectionOwnerId: UUID?
+    @State private var selectedInboxItem: WorkerInboxSelection?
 
     var body: some View {
         NavigationStack {
@@ -64,7 +65,13 @@ struct WorkerInboxAuditSheet: View {
                             ForEach(items) { item in
                                 WorkerInboxCard(
                                     item: item,
-                                    workerName: workerNames[item.workerId]
+                                    workerName: workerNames[item.workerId],
+                                    onOpen: {
+                                        selectedInboxItem = WorkerInboxSelection(
+                                            item: item,
+                                            workerName: workerNames[item.workerId]
+                                        )
+                                    }
                                 )
                             }
                         }
@@ -112,13 +119,16 @@ struct WorkerInboxAuditSheet: View {
                 guard dependencies.connectionRepository.connectionState.isConnected else { return }
                 await load(reset: true)
             }
+            .sheet(item: $selectedInboxItem) { selection in
+                WorkerInboxDetailSheet(selection: selection, repository: repository)
+            }
         }
         .workerConsoleSheetPresentation()
         .tint(.tronInfo)
     }
 
     private func load(reset: Bool) async {
-        guard reset || !isLoading else { return }
+        guard !isLoading else { return }
         loadGeneration &+= 1
         let generation = loadGeneration
         isLoading = true

@@ -251,9 +251,7 @@ struct WorkerRunCard: View {
     let run: WorkerInvocationDTO
     var workerName: String?
     var callerWorkerName: String?
-    var onCancel: (() -> Void)?
-
-    @State private var showDetail = false
+    let onOpen: () -> Void
 
     private var color: Color {
         switch WorkerConsolePresentation.normalized(run.status) {
@@ -265,7 +263,7 @@ struct WorkerRunCard: View {
     }
 
     var body: some View {
-        Button { showDetail = true } label: {
+        Button(action: onOpen) {
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: statusSymbol)
                     .font(
@@ -344,17 +342,6 @@ struct WorkerRunCard: View {
             .sectionFill(color, cornerRadius: 10, subtle: true, interactive: true)
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $showDetail) {
-            WorkerRunDetailSheet(
-                run: run,
-                workerName: workerName,
-                onCancel: canCancel ? onCancel : nil
-            )
-        }
-    }
-
-    private var canCancel: Bool {
-        run.status == "queued" || run.status == "running"
     }
 
     private var statusSymbol: String {
@@ -371,10 +358,7 @@ struct WorkerRunCard: View {
 struct WorkerInboxCard: View {
     let item: WorkerInboxItemDTO
     var workerName: String?
-
-    @Environment(\.dependencies) private var dependencies
-    @State private var selectedResult: WorkerResultSelection?
-    @State private var showLegacyDetail = false
+    let onOpen: () -> Void
 
     private var color: Color {
         switch WorkerConsolePresentation.normalized(item.severity) {
@@ -385,15 +369,7 @@ struct WorkerInboxCard: View {
     }
 
     var body: some View {
-        Button {
-            if let receipt = item.result.receipt {
-                selectedResult = WorkerResultSelection(
-                    invocationId: receipt.reference.invocationId
-                )
-            } else {
-                showLegacyDetail = true
-            }
-        } label: {
+        Button(action: onOpen) {
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: item.contextAttached ? "tray" : "tray.full.fill")
                     .foregroundStyle(color)
@@ -428,26 +404,26 @@ struct WorkerInboxCard: View {
                     }
                 }
                 Spacer(minLength: 8)
+                Text(WorkerConsolePresentation.resultDisposition(item).title)
+                    .font(TronTypography.pillValue)
+                    .foregroundStyle(WorkerConsolePresentation.resultDisposition(item).color)
+                    .lineLimit(1)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .padding(11)
         .sectionFill(color, cornerRadius: 10, subtle: true, interactive: true)
-        .sheet(item: $selectedResult) { selection in
-            WorkerResultInspectorSheet(
-                invocationId: selection.invocationId,
-                repository: dependencies.workerKernelRepository
-            )
-        }
-        .sheet(isPresented: $showLegacyDetail) {
-            if let legacy = item.result.legacyInline {
-                WorkerJSONDetailSheet(
-                    title: workerName ?? "Legacy Delivery Record",
-                    value: legacy,
-                    accent: color
-                )
-            }
+    }
+}
+
+extension WorkerResultDisposition {
+    var color: Color {
+        switch self {
+        case .available: .tronInfo
+        case .usedByAgent: .tronSuccess
+        case .needsAttention: .tronError
+        case .resolved: .tronPurple
         }
     }
 }

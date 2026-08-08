@@ -22,6 +22,8 @@ struct ResearchSuiteSheet: View {
     @State private var selectedSection = ResearchSuiteSection.overview
     @State private var selectedReport: ResearchReport?
     @State private var selectedTechnicalWorker: WorkerSummaryDTO?
+    @State private var selectedRun: WorkerInvocationDTO?
+    @State private var selectedInboxItem: WorkerInboxSelection?
     @State private var showReportHistoryWarnings = false
     @State private var technicalViewModel = WorkerConsoleViewModel()
     @State private var projectionOwnerId: UUID?
@@ -85,6 +87,15 @@ struct ResearchSuiteSheet: View {
                     values: viewModel.reportHistoryWarnings,
                     accent: .tronInfo
                 )
+            }
+            .sheet(item: $selectedRun) { run in
+                WorkerRunDetailSheet(
+                    run: run,
+                    workerName: viewModel.workerName(for: run.workerId)
+                )
+            }
+            .sheet(item: $selectedInboxItem) { selection in
+                WorkerInboxDetailSheet(selection: selection, repository: repository)
             }
             .task(id: refreshKey) {
                 prepareProjectionForCurrentOwner()
@@ -258,7 +269,8 @@ struct ResearchSuiteSheet: View {
                         WorkerRunCard(
                             run: run,
                             workerName: viewModel.workerName(for: run.workerId),
-                            callerWorkerName: viewModel.callerWorkerName(for: run)
+                            callerWorkerName: viewModel.callerWorkerName(for: run),
+                            onOpen: { selectedRun = run }
                         )
                     }
                 }
@@ -278,7 +290,13 @@ struct ResearchSuiteSheet: View {
                     ForEach(viewModel.attention) { item in
                         WorkerInboxCard(
                             item: item,
-                            workerName: viewModel.workerName(for: item.workerId)
+                            workerName: viewModel.workerName(for: item.workerId),
+                            onOpen: {
+                                selectedInboxItem = WorkerInboxSelection(
+                                    item: item,
+                                    workerName: viewModel.workerName(for: item.workerId)
+                                )
+                            }
                         )
                     }
                 }
@@ -318,10 +336,16 @@ struct ResearchSuiteSheet: View {
         technicalViewModel.resetForServerChange()
         selectedReport = nil
         selectedTechnicalWorker = nil
+        selectedRun = nil
+        selectedInboxItem = nil
     }
 
     private var isPresentingChildSheet: Bool {
-        selectedReport != nil || selectedTechnicalWorker != nil || showReportHistoryWarnings
+        selectedReport != nil
+            || selectedTechnicalWorker != nil
+            || selectedRun != nil
+            || selectedInboxItem != nil
+            || showReportHistoryWarnings
     }
 
     private var refreshKey: ResearchSuiteRefreshKey {

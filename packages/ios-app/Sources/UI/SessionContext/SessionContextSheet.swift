@@ -43,6 +43,7 @@ struct SessionContextSheet: View {
     @State var workerLoadingGeneration: UInt64?
     @State var workerLoadError: String?
     @State var selectedWorkerRun: WorkerInvocationDTO?
+    @State var selectedWorkerResult: WorkerResultSelection?
     @State var errorMessage: String?
     @State var refreshCoordinator = SessionContextRefreshCoordinator()
     @State var workerCatalogRevision: UInt64 = 0
@@ -262,6 +263,12 @@ struct SessionContextSheet: View {
             WorkerRunDetailSheet(
                 run: run,
                 workerName: workerNames[run.workerId]
+            )
+        }
+        .sheet(item: $selectedWorkerResult) { selection in
+            WorkerResultInspectorSheet(
+                invocationId: selection.invocationId,
+                repository: workerRepository
             )
         }
         .sheet(item: $selectedContextDetail) { selection in
