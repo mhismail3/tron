@@ -168,7 +168,7 @@ struct WorkerConsoleViewModelTests {
         await viewModel.refresh(repository: repository, connectionState: .disconnected)
 
         #expect(viewModel.workers.map(\.workerId) == ["research"])
-        #expect(viewModel.coreToolCount == 0)
+        #expect(viewModel.primitiveToolCount == 0)
         #expect(viewModel.lastError == nil)
 
         viewModel.resetForServerChange()

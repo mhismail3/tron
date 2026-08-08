@@ -95,8 +95,12 @@ final class WorkerConsoleViewModel {
         }.count
     }
 
-    var coreTools: [EngineSurfaceToolDTO] {
+    var primitiveTools: [EngineSurfaceToolDTO] {
         engineSnapshot?.fixedTools ?? []
+    }
+
+    var primitiveToolGroups: [EnginePrimitiveGroup] {
+        EngineDashboardPresentation.primitiveGroups(primitiveTools)
     }
 
     var availableWorkerTools: [AvailableWorkerToolDTO] {
@@ -107,8 +111,8 @@ final class WorkerConsoleViewModel {
         engineSnapshot?.activeEngineHooks ?? []
     }
 
-    var coreToolCount: Int {
-        coreTools.count
+    var primitiveToolCount: Int {
+        primitiveTools.count
     }
 
     var availableWorkerCount: Int {

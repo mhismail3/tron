@@ -20,7 +20,7 @@ enum WorkerVersionAction: Equatable {
 }
 private enum EngineDashboardSection: String, CaseIterable {
     case workers = "Workers"
-    case core = "Core"
+    case primitives = "Primitives"
     case activity = "Activity"
 }
 
@@ -54,7 +54,7 @@ struct WorkerConsoleDashboardBand: View {
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(2)
                     HStack(spacing: 8) {
-                        metric("Core", viewModel.coreToolCount)
+                        metric("Primitives", viewModel.primitiveToolCount)
                         metric("Workers", viewModel.enabledCount)
                         metric("Unhealthy", viewModel.unhealthyWorkerCount)
                     }
@@ -89,11 +89,11 @@ struct WorkerConsoleDashboardBand: View {
 
     private var summaryDetail: String {
         if viewModel.stopAll { return "Dispatch is paused; durable work remains queued." }
-        if viewModel.workers.isEmpty { return "Core ready; create persistent workers conversationally." }
+        if viewModel.workers.isEmpty { return "Primitives ready; create persistent workers conversationally." }
         if viewModel.unhealthyWorkerCount > 0 {
             return "\(viewModel.unhealthyWorkerCount) worker\(viewModel.unhealthyWorkerCount == 1 ? " needs" : "s need") review."
         }
-        return "Core primitives and persistent workers are ready."
+        return "Fixed primitives and persistent workers are ready."
     }
 
     private func metric(_ label: String, _ value: Int) -> some View {
@@ -116,7 +116,7 @@ struct WorkerConsoleSheet: View {
     let modelRepository: any ModelRepository
 
     @State private var selectedSection: EngineDashboardSection = .workers
-    @State private var selectedCoreTool: EngineSurfaceToolDTO?
+    @State private var selectedPrimitiveTool: EngineSurfaceToolDTO?
     @State private var showInboxAudit = false
 
     private var connectionState: ConnectionState {
@@ -191,8 +191,8 @@ struct WorkerConsoleSheet: View {
                     )
                 }
             }
-            .sheet(item: $selectedCoreTool) { tool in
-                EngineCoreToolDetailSheet(tool: tool)
+            .sheet(item: $selectedPrimitiveTool) { tool in
+                EnginePrimitiveToolDetailSheet(tool: tool)
             }
             .sheet(isPresented: $showInboxAudit) {
                 WorkerInboxAuditSheet(
@@ -230,8 +230,8 @@ struct WorkerConsoleSheet: View {
     @ViewBuilder
     private var dashboardContent: some View {
         switch selectedSection {
-        case .core:
-            coreContent
+        case .primitives:
+            primitiveContent
         case .workers:
             workersContent
         case .activity:
@@ -259,7 +259,7 @@ struct WorkerConsoleSheet: View {
             }
 
             HStack(spacing: 0) {
-                summaryMetric(value: viewModel.coreToolCount, label: "Core")
+                summaryMetric(value: viewModel.primitiveToolCount, label: "Primitives")
                 summaryDivider
                 summaryMetric(value: viewModel.enabledCount, label: "Workers")
                 summaryDivider
@@ -283,12 +283,11 @@ struct WorkerConsoleSheet: View {
         .sectionFill(consoleStatus.color, cornerRadius: 12, subtle: true, interactive: false)
     }
 
-    private var coreContent: some View {
+    private var primitiveContent: some View {
         VStack(alignment: .leading, spacing: 18) {
-            ForEach(["host", "session", "worker_interaction", "worker_administration"], id: \.self) { group in
-                let tools = viewModel.coreTools.filter { $0.primitiveGroup == group }
-                EngineCoreSection(group: group, tools: tools) { tool in
-                    selectedCoreTool = tool
+            ForEach(viewModel.primitiveToolGroups) { group in
+                EnginePrimitiveSection(group: group.id, tools: group.tools) { tool in
+                    selectedPrimitiveTool = tool
                 }
             }
         }
@@ -467,7 +466,7 @@ struct WorkerConsoleSheet: View {
     }
 
     private var isPresentingChildSheet: Bool {
-        viewModel.selectedWorkerId != nil || selectedCoreTool != nil || showInboxAudit
+        viewModel.selectedWorkerId != nil || selectedPrimitiveTool != nil || showInboxAudit
     }
 
     private var consoleStatus: (title: String, detail: String, symbol: String, color: Color) {
@@ -481,9 +480,9 @@ struct WorkerConsoleSheet: View {
             return ("Needs review", "A worker reported non-healthy server state.", "exclamationmark.triangle", .tronWarning)
         }
         if viewModel.workers.isEmpty {
-            return ("Core ready", "The fixed engine is active; create workers conversationally with Tron.", "bolt.horizontal.circle", .tronEmerald)
+            return ("Primitives ready", "The fixed engine is active; create workers conversationally with Tron.", "bolt.horizontal.circle", .tronEmerald)
         }
-        return ("Engine ready", "Core primitives and the persistent worker runtime are active.", "checkmark.seal", .tronEmerald)
+        return ("Engine ready", "Fixed primitives and the persistent worker runtime are active.", "checkmark.seal", .tronEmerald)
     }
 
     private var engineHookSummary: String {
