@@ -7,6 +7,7 @@ enum MessageBubbleTapAction {
     case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int?, summarizedTurns: Int?)
     case toolInvocation(ToolInvocationData)
     case toolInvocationGroup(ToolInvocationGroupData)
+    case userInput(UserInputRequest)
     /// User tapped the cancel button on a running tool chip.
     /// Handler should call `agent.abortToolInvocation(invocationId:)` to cooperatively abort
     /// the in-flight invocation without aborting the rest of the turn.

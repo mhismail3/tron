@@ -23,6 +23,14 @@ enum MessageEventProjection {
             return nil
         }
 
+        if let answer = parsed.userInputAnswer {
+            return ChatMessage(
+                role: .user,
+                content: .userInputAnswer(answer),
+                timestamp: timestamp
+            )
+        }
+
         // Skip empty user messages unless they have attachments.
         guard !parsed.content.isEmpty || parsed.attachments != nil else { return nil }
 

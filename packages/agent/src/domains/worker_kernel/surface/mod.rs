@@ -9,7 +9,9 @@
 //! evidence. `snapshots` owns provider-neutral DTOs. `filtering` owns fixed
 //! audiences, ordering, access paths, retrieval projection, and digests. This
 //! module remains the single selection entry point; `tests` covers the combined
-//! contract.
+//! contract. Foreground user input is deliberately omitted from delegated
+//! agent-worker surfaces; workers return missing information to their parent,
+//! and the parent owns the native user interaction.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -232,6 +234,12 @@ async fn resolve_tool_surface_inner(
         let Some(model_name) = model_tool_name(&function) else {
             continue;
         };
+        // Delegated agent workers cannot suspend their owning durable worker
+        // invocation on a foreground-only iOS interaction. They return missing
+        // information to the parent agent, which owns the user-facing request.
+        if origin_worker_id.is_some() && model_name == "request_user_input" {
+            continue;
+        }
         if explicit_agent_tools
             .as_ref()
             .is_some_and(|allowed| !allowed.contains(model_name.as_str()))

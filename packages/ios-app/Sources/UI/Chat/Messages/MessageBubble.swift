@@ -81,6 +81,14 @@ struct MessageBubble: View {
         case .toolResult(let result):
             ToolInvocationResultView(result: result)
 
+        case .userInputRequest(let request):
+            UserInputRequestChip(request: request) {
+                onTap?(.userInput(request))
+            }
+
+        case .userInputAnswer(let answer):
+            UserInputAnswerChip(answer: answer)
+
         case .error(let errorMessage):
             ErrorContentView(message: errorMessage)
 

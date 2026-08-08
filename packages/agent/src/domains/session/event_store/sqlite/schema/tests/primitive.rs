@@ -59,6 +59,31 @@ fn events_have_a_session_type_sequence_index() {
 }
 
 #[test]
+fn events_have_indexed_idempotent_user_input_state() {
+    let conn = open_memory();
+    ensure_schema(&conn).unwrap();
+
+    let lookup_sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE type='index' AND name=?1",
+            ["idx_events_session_invocation"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(lookup_sql.contains("events(session_id, type, tool_name, invocation_id)"));
+
+    let uniqueness_sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE type='index' AND name=?1",
+            ["idx_events_user_input_answer_unique"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(uniqueness_sql.contains("UNIQUE INDEX"));
+    assert!(uniqueness_sql.contains("request_user_input_answer"));
+}
+
+#[test]
 fn sessions_table_has_no_product_metadata_columns() {
     let conn = open_memory();
     ensure_schema(&conn).unwrap();

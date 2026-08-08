@@ -76,4 +76,26 @@ final class AgentClient: EngineDomainClient, AgentRepository {
         return result.aborted
     }
 
+    func answerUserInput(
+        invocationId: String,
+        answers: [UserInputAnswer],
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws {
+        let sessionId = try await requireLiveSessionEvents()
+        let params = AgentAnswerUserInputParams(
+            sessionId: sessionId,
+            invocationId: invocationId,
+            answers: answers
+        )
+        let result: AgentPromptResult = try await invokeWrite(
+            "agent::answer_user_input",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
+        guard result.acknowledged else {
+            throw EngineConnectionError.invalidResponse
+        }
+    }
+
 }

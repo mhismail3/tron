@@ -4,7 +4,7 @@ use serde_json::json;
 
 use crate::domains::registration::contract::FunctionContract;
 use crate::engine::{
-    EffectClass, FunctionDefinition, FunctionVisibility, IdempotencyContract,
+    EffectClass, FunctionDefinition, FunctionVisibility, IdempotencyContract, ModelToolAudience,
     Result as EngineResult, RiskLevel,
 };
 
@@ -31,10 +31,115 @@ pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
         FunctionContract::new("agent::status", "agent", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .build()?
+            .build()?,
+        FunctionContract::new(
+            "agent::request_user_input",
+            "agent",
+            EffectClass::IdempotentWrite,
+            RiskLevel::Low,
+        )
+        .request_schema(user_input_request_schema())
+        .response_schema(json!({
+            "type":"object","additionalProperties":false,
+            "required":["invocationId","status"],
+            "properties":{
+                "invocationId":{"type":"string"},
+                "status":{"type":"string","const":"pending"}
+            }
+        }))
+        .idempotency(IdempotencyContract::session())
+        .description("Ask the user one to three short, necessary questions through the native client. Provide two or three mutually exclusive choices per question; the client adds a free-form Other choice automatically. Use only when required intent cannot be inferred safely. Call this once, do not combine it with other tools, and stop until the user answers.")
+        .model_tool(
+            "request_user_input",
+            ModelToolAudience::Ordinary,
+            15,
+            "user_interaction",
+        )
+        .build()?,
+        FunctionContract::new(
+            "agent::answer_user_input",
+            "agent",
+            EffectClass::ExternalSideEffect,
+            RiskLevel::High,
+        )
+        .request_schema(user_input_answer_schema())
+        .response_schema(user_input_answer_response_schema())
+        .idempotency(IdempotencyContract::session())
+        .build()?
     ];
     specs.extend(internal_function_definitions()?);
     Ok(specs)
+}
+
+fn user_input_request_schema() -> serde_json::Value {
+    json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["questions"],
+        "properties":{
+            "questions":{
+                "type":"array","minItems":1,"maxItems":3,
+                "items":{
+                    "type":"object","additionalProperties":false,
+                    "required":["header","id","question","options"],
+                    "properties":{
+                        "header":{"type":"string","minLength":1,"maxLength":12},
+                        "id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,63}$"},
+                        "question":{"type":"string","minLength":1,"maxLength":500},
+                        "options":{
+                            "type":"array","minItems":2,"maxItems":3,
+                            "items":{
+                                "type":"object","additionalProperties":false,
+                                "required":["label","description"],
+                                "properties":{
+                                    "label":{"type":"string","minLength":1,"maxLength":80},
+                                    "description":{"type":"string","minLength":1,"maxLength":300}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn user_input_answer_schema() -> serde_json::Value {
+    json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["sessionId","invocationId","answers"],
+        "properties":{
+            "sessionId":{"type":"string","minLength":1},
+            "invocationId":{"type":"string","minLength":1},
+            "answers":{
+                "type":"array","minItems":1,"maxItems":3,
+                "items":{
+                    "type":"object","additionalProperties":false,
+                    "required":["questionId"],
+                    "properties":{
+                        "questionId":{"type":"string","minLength":1,"maxLength":64},
+                        "selectedLabel":{"type":"string","minLength":1,"maxLength":80},
+                        "freeText":{"type":"string","minLength":1,"maxLength":2000}
+                    },
+                    "anyOf":[{"required":["selectedLabel"]},{"required":["freeText"]}]
+                }
+            }
+        }
+    })
+}
+
+fn user_input_answer_response_schema() -> serde_json::Value {
+    json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["acknowledged","runId"],
+        "properties":{
+            "acknowledged":{"type":"boolean","const":true},
+            "runId":{"type":"string"},
+            "alreadyAnswered":{"type":"boolean"}
+        }
+    })
 }
 
 fn internal_function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
@@ -99,7 +204,8 @@ fn agent_prompt_apply_request_schema() -> serde_json::Value {
             "sessionId": {"type": "string"},
             "prompt": {"type": "string"},
             "reasoningLevel": {"type": "string"},
-            "attachments": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
+            "attachments": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+            "userInputAnswer": {"type":"object","additionalProperties":true}
         }
     })
 }
@@ -134,6 +240,8 @@ mod tests {
                 "agent::abort",
                 "agent::abort_invocation",
                 "agent::status",
+                "agent::request_user_input",
+                "agent::answer_user_input",
                 "agent::prompt_apply",
                 "agent::run_turn",
                 "agent::delivery_wake",
@@ -172,6 +280,11 @@ mod tests {
             ("agent::abort", vec!["sessionId"]),
             ("agent::abort_invocation", vec!["invocationId", "sessionId"]),
             ("agent::status", vec!["sessionId"]),
+            ("agent::request_user_input", vec!["questions"]),
+            (
+                "agent::answer_user_input",
+                vec!["answers", "invocationId", "sessionId"],
+            ),
             (
                 "agent::prompt_apply",
                 vec![
@@ -180,6 +293,7 @@ mod tests {
                     "reasoningLevel",
                     "runId",
                     "sessionId",
+                    "userInputAnswer",
                 ],
             ),
             (
@@ -190,6 +304,7 @@ mod tests {
                     "reasoningLevel",
                     "runId",
                     "sessionId",
+                    "userInputAnswer",
                 ],
             ),
             ("agent::delivery_wake", vec!["sessionId"]),

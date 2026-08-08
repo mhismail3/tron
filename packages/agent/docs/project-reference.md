@@ -1154,7 +1154,11 @@ automatic checksum locking, and the deterministic `files/` and
 requiring its contents to be copied through tool JSON.
 
 Prompt ownership follows the same boundary. The static agent seed is a short
-statement of behavioral intent. Provider request guidance contributes only the
+statement of behavioral intent, including concise user-facing progress before
+meaningful tool work and at natural milestones. Those updates remain ordinary
+provider-authored assistant text: the existing stream/event/chat pipeline
+persists and renders them in content-block order, and the engine never invents
+status prose or exposes private reasoning. Provider request guidance contributes only the
 current direct-tool inventory, strict-schema reminder, discovery path, and
 immediate post-upsert availability. Exact arguments and execution mechanics
 live in typed tool contracts, so adding or changing a worker updates the native
@@ -1176,6 +1180,7 @@ client payload.
 | `filesystem_edit` | `worker_kernel::filesystem_edit` | Exact occurrence-checked UTF-8 replacements with optional checksum and atomic publication |
 | `process_run` | `worker_kernel::process_run` | Local process with bounded output/timeout |
 | `web_fetch` | `worker_kernel::web_fetch` | Explicit raw UTF-8 HTTP(S) fetch with a 128 KiB/30-second default, explicit larger ceilings, redirect/status metadata, truncation evidence, and retained-content SHA-256 |
+| `request_user_input` | `agent::request_user_input` | One to three necessary native questions; a successful request ends the current run until a structured answer starts the next run |
 | `session_set_title` | `session::set_title` | Explicit user-requested title update for the current causal session; absent from unrelated provider turns |
 
 Filesystem reads, listings, searches, writes, and edits execute off the async
@@ -1487,6 +1492,9 @@ promotions are session-scoped durable engine state and survive server restarts.
 An agent-runner with `agentTools` bypasses relevance and promotion selection
 only for its closed child surface: exact named dynamic tools are projected
 alongside exact named fixed tools, within the 32-name bundle bound.
+`request_user_input` is intentionally removed from every delegated agent-worker
+surface even if named: a background worker returns its missing information to
+the parent agent, and only that foreground session owns native user interaction.
 Recent worker success evidence uses the other supported state extent,
 profile-global state. There is no generic workspace state scope. Unknown stored
 scope kinds fail closed rather than being interpreted as global state. A newly
@@ -1506,7 +1514,10 @@ invocation metadata bag. The resulting recoverable tool error advances the
 agent to a freshly resolved internal turn.
 
 A direct tool cannot terminate the agent loop through catalog metadata or a
-special result-envelope flag. Its typed result is committed to provider context
+special result-envelope flag. The sole interaction exception is a successful
+`request_user_input`: its durable completion ends the current run, and the
+validated client answer is appended as a structured `message.user` event before
+starting a fresh run. All other typed results are committed to provider context
 and the next provider turn sees the freshly resolved surface. Provider terminal
 responses, configured limits, cancellation, and runtime failure are the only
 owners of agent-run termination.
@@ -2623,9 +2634,19 @@ actual pagination and filtering inputs.
 
 The same rule applies to `agent::*`: prompt commands admit the session id,
 prompt, optional reasoning level, and attachments actually consumed by the run;
+`answer_user_input` admits the exact pending invocation and structured answers;
 status/abort commands admit only their behavioral identifiers. Ignored
 workspace and source-label fields are not part of public or hidden agent
 contracts.
+
+`request_user_input` uses the ordinary tool lifecycle as durable state. A
+successful completion is pending; the answer endpoint checks the invocation in
+that same session, validates every answer against the exact persisted question
+IDs/options, and appends one uniquely indexed structured user event. The answer
+then enters the normal prompt admission/run guard. Duplicate delivery is
+idempotently acknowledged, concurrent answers cannot create two canonical user
+events, and restart/reconnect needs no in-memory continuation or second pause
+database.
 
 Session events are the only durable owner of assistant output. Prompt completion
 emits lifecycle and runtime-stream status without recreating a parallel

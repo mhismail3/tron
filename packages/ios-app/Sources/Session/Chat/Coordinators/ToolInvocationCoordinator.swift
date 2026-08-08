@@ -11,6 +11,9 @@ final class ToolInvocationCoordinator {
         _ pluginResult: ToolInvocationGeneratingPlugin.Result,
         context: ToolInvocationContext
     ) {
+        if pluginResult.toolName == "request_user_input" {
+            return
+        }
         let eventTimestamp = pluginResult.timestamp ?? Date()
         context.finalizeThinkingMessageIfNeeded()
 
@@ -49,6 +52,38 @@ final class ToolInvocationCoordinator {
         context: ToolInvocationContext
     ) {
         let eventTimestamp = pluginResult.timestamp ?? Date()
+        if pluginResult.toolName == "request_user_input" {
+            context.finalizeThinkingMessageIfNeeded()
+            context.flushPendingTextUpdates()
+            context.finalizeStreamingMessage()
+            guard let request = UserInputRequest.decode(
+                invocationId: pluginResult.invocationId,
+                arguments: pluginResult.arguments
+            ) else {
+                context.logError("Could not decode request_user_input arguments")
+                return
+            }
+            if let existingIndex = context.messages.lastIndex(where: {
+                if case .userInputRequest(let existing) = $0.content {
+                    return existing.invocationId == pluginResult.invocationId
+                }
+                return false
+            }) {
+                context.updateMessage(at: existingIndex) { message in
+                    message.content = .userInputRequest(request)
+                }
+                context.pendingUserInputRequest = request
+                return
+            }
+            let message = ChatMessage(
+                role: .assistant,
+                content: .userInputRequest(request),
+                timestamp: eventTimestamp
+            )
+            context.appendToMessages(message)
+            context.pendingUserInputRequest = request
+            return
+        }
         let invocation = ToolInvocationData(
             id: pluginResult.invocationId,
             status: .running,
@@ -104,6 +139,22 @@ final class ToolInvocationCoordinator {
         _ pluginResult: ToolInvocationCompletedPlugin.Result,
         context: ToolInvocationContext
     ) {
+        if pluginResult.toolName == "request_user_input" {
+            guard let index = context.messages.lastIndex(where: {
+                if case .userInputRequest(let request) = $0.content {
+                    return request.invocationId == pluginResult.invocationId
+                }
+                return false
+            }), case .userInputRequest(var request) = context.messages[index].content else {
+                return
+            }
+            request.status = pluginResult.success ? .pending : .failed(pluginResult.displayResult)
+            context.updateMessage(at: index) { message in
+                message.content = .userInputRequest(request)
+            }
+            context.pendingUserInputRequest = pluginResult.success ? request : nil
+            return
+        }
         let statusLabel = pluginResult.success ? "success" : "error"
         context.logInfo("Tool ended: \(pluginResult.invocationId) status=\(statusLabel) duration=\(pluginResult.duration ?? 0)ms")
         context.logDebug("Tool result: \(pluginResult.displayResult.prefix(300))")

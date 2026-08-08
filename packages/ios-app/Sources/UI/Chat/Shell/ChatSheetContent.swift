@@ -75,6 +75,20 @@ struct ChatSheetContent: View {
         case .toolInvocationGroupDetail(let data):
             toolInvocationGroupDetailSheet(snapshot: data)
 
+        case .userInput(let snapshot):
+            let request = viewModel.currentUserInputRequest(
+                invocationId: snapshot.invocationId
+            ) ?? snapshot
+            UserInputSheet(
+                request: request,
+                isAgentActive: viewModel.agentPhase.isActive
+            ) { answers in
+                try await viewModel.submitUserInput(
+                    invocationId: request.invocationId,
+                    answers: answers
+                )
+            }
+
         case .providerErrorDetail(let data):
             ProviderErrorDetailSheet(data: data)
 

@@ -30,4 +30,12 @@ protocol AgentRepository: AnyObject {
         invocationId: String,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> Bool
+
+    /// Resolve one durable native question and admit the answers as the next
+    /// user turn. The invocation id makes retries idempotent across reconnects.
+    func answerUserInput(
+        invocationId: String,
+        answers: [UserInputAnswer],
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws
 }

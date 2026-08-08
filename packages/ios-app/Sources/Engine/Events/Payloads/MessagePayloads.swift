@@ -20,6 +20,7 @@ struct UserMessagePayload {
     let isToolResultContext: Bool
     /// Attachments to this message (images, PDFs, documents)
     let attachments: [Attachment]?
+    let userInputAnswer: UserInputAnswerPresentation?
     init?(from payload: [String: AnyCodable]) {
         var extractedAttachments: [Attachment] = []
 
@@ -93,8 +94,24 @@ struct UserMessagePayload {
         self.turn = payload.int("turn")
         self.imageCount = payload.int("imageCount")
         self.attachments = extractedAttachments.isEmpty ? nil : extractedAttachments
-
-        // Structured interactive-tool response metadata (server-provided).
+        if payload.string("messageKind") == "user_input_answer",
+           let invocationId = payload.string("invocationId"),
+           let rawAnswers = payload["answers"]?.value as? [[String: Any]] {
+            let answers = rawAnswers.compactMap { raw -> UserInputAnswer? in
+                guard let questionId = raw["questionId"] as? String else { return nil }
+                return UserInputAnswer(
+                    questionId: questionId,
+                    selectedLabel: raw["selectedLabel"] as? String,
+                    freeText: raw["freeText"] as? String
+                )
+            }
+            self.userInputAnswer = UserInputAnswerPresentation(
+                invocationId: invocationId,
+                answers: answers
+            )
+        } else {
+            self.userInputAnswer = nil
+        }
     }
 }
 

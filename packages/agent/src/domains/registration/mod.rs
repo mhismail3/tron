@@ -389,7 +389,7 @@ mod tests {
         let fixed_tools = value["fixedTools"]
             .as_array()
             .expect("fixed tool inventory");
-        assert_eq!(fixed_tools.len(), 29);
+        assert_eq!(fixed_tools.len(), 30);
         assert!(
             fixed_tools.iter().any(|tool| {
                 tool["modelName"] == "session_set_title" && tool["exposed"] == false
@@ -400,7 +400,12 @@ mod tests {
                 .iter()
                 .filter(|tool| tool["audience"] == "ordinary")
                 .count(),
-            16
+            17
+        );
+        assert!(
+            fixed_tools.iter().any(|tool| {
+                tool["modelName"] == "request_user_input" && tool["exposed"] == true
+            })
         );
         assert!(
             fixed_tools
@@ -413,7 +418,7 @@ mod tests {
                 && tool["exposed"] == true
         }));
         assert!(value["surface"]["catalogRevision"].is_u64());
-        assert_eq!(value["surface"]["fixedToolCount"], 16);
+        assert_eq!(value["surface"]["fixedToolCount"], 17);
         assert!(value["surface"]["surfaceHash"].is_string());
         assert!(value["surface"]["availableWorkers"].is_array());
         assert!(value["surface"].get("tools").is_none());
@@ -428,7 +433,7 @@ mod tests {
             .await
             .value
             .expect("rename surface snapshot");
-        assert_eq!(renamed["surface"]["fixedToolCount"], 17);
+        assert_eq!(renamed["surface"]["fixedToolCount"], 18);
         assert!(renamed["fixedTools"].as_array().is_some_and(|tools| {
             tools.iter().any(|tool| {
                 tool["modelName"] == "session_set_title"

@@ -62,6 +62,12 @@ struct AgentAbortInvocationResult: Decodable {
     let aborted: Bool
 }
 
+struct AgentAnswerUserInputParams: Encodable {
+    let sessionId: String
+    let invocationId: String
+    let answers: [UserInputAnswer]
+}
+
 /// Tool invocation info for in-progress turn (used by session::reconstruct inFlight state)
 struct CurrentTurnToolInvocation: Decodable {
     let invocationId: String

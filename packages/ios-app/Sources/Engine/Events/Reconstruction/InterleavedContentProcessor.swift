@@ -35,7 +35,8 @@ enum InterleavedContentProcessor {
         payload: [String: AnyCodable],
         timestamp: Date,
         startedInvocations: [String: ToolInvocationStartedPayload],
-        completedInvocations: [String: ToolInvocationCompletedPayload]
+        completedInvocations: [String: ToolInvocationCompletedPayload],
+        userInputAnswers: [String: [UserInputAnswer]] = [:]
     ) -> [ChatMessage] {
         guard let parsed = AssistantMessagePayload(from: payload) else {
             return []
@@ -99,7 +100,8 @@ enum InterleavedContentProcessor {
                     result: result,
                     toolName: toolName,
                     timestamp: timestamp,
-                    parsed: parsed
+                    parsed: parsed,
+                    userInputAnswers: userInputAnswers
                 ) {
                     messages.append(message)
                 }
@@ -184,9 +186,37 @@ enum InterleavedContentProcessor {
         result: ToolInvocationCompletedPayload?,
         toolName: String,
         timestamp: Date,
-        parsed: AssistantMessagePayload
+        parsed: AssistantMessagePayload,
+        userInputAnswers: [String: [UserInputAnswer]]
     ) -> ChatMessage? {
         let turn = invocationStart?.turn ?? parsed.turn
+
+        if toolName == "request_user_input" {
+            let arguments = invocationStart?.arguments
+                ?? ToolArgumentExtractor.extractArguments(
+                    invocationStart: invocationStart,
+                    contentBlock: block
+                )
+                ?? "{}"
+            guard var request = UserInputRequest.decode(
+                invocationId: invocationId,
+                argumentsJSON: arguments
+            ) else {
+                return nil
+            }
+            if let result, result.isError {
+                request.status = .failed(result.content)
+            } else if let answers = userInputAnswers[invocationId] {
+                request.answers = answers
+                request.status = .answered
+            }
+            return ChatMessage(
+                role: .assistant,
+                content: .userInputRequest(request),
+                timestamp: timestamp,
+                turnNumber: turn
+            )
+        }
 
         // Determine status based on result
         let status: ToolInvocationStatus
