@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct EngineCoreSection: View {
+struct EnginePrimitiveSection: View {
     let group: String
     let tools: [EngineSurfaceToolDTO]
     let onSelect: (EngineSurfaceToolDTO) -> Void
@@ -8,6 +8,7 @@ struct EngineCoreSection: View {
     private var color: Color {
         switch group {
         case "host": .tronCyan
+        case "user_interaction": .tronPurple
         default: .tronEmerald
         }
     }
@@ -24,7 +25,7 @@ struct EngineCoreSection: View {
                     Button {
                         onSelect(tool)
                     } label: {
-                        EngineCoreToolRow(tool: tool, color: color)
+                        EnginePrimitiveToolRow(tool: tool, color: color)
                     }
                     .buttonStyle(.plain)
                 }
@@ -33,7 +34,7 @@ struct EngineCoreSection: View {
     }
 }
 
-private struct EngineCoreToolRow: View {
+private struct EnginePrimitiveToolRow: View {
     let tool: EngineSurfaceToolDTO
     let color: Color
 
@@ -44,10 +45,16 @@ private struct EngineCoreToolRow: View {
                 .foregroundStyle(color)
                 .frame(width: 24, height: 24)
 
-            Text(EngineDashboardPresentation.toolTitle(tool.modelName))
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(EngineDashboardPresentation.toolTitle(tool.modelName))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1)
+                Text(EngineDashboardPresentation.toolAvailability(tool))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: 0)
         }
@@ -58,12 +65,13 @@ private struct EngineCoreToolRow: View {
     }
 }
 
-struct EngineCoreToolDetailSheet: View {
+struct EnginePrimitiveToolDetailSheet: View {
     let tool: EngineSurfaceToolDTO
 
     private var color: Color {
         switch tool.primitiveGroup {
         case "host": .tronCyan
+        case "user_interaction": .tronPurple
         default: .tronEmerald
         }
     }

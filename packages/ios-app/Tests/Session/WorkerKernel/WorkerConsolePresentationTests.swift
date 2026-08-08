@@ -189,6 +189,8 @@ struct WorkerConsolePresentationTests {
     @Test("Engine primitive groups use stable operator language")
     func engineDashboardProjection() {
         #expect(EngineDashboardPresentation.groupTitle("host") == "Host primitives")
+        #expect(EngineDashboardPresentation.groupTitle("user_interaction") == "User interaction")
+        #expect(EngineDashboardPresentation.groupTitle("session") == "Session metadata")
         #expect(
             EngineDashboardPresentation.groupTitle("worker_interaction")
                 == "Worker interaction"
@@ -198,11 +200,52 @@ struct WorkerConsolePresentationTests {
                 == "Worker administration"
         )
         #expect(EngineDashboardPresentation.toolTitle("filesystem_read") == "Read File")
+        #expect(EngineDashboardPresentation.toolTitle("request_user_input") == "Ask User")
         #expect(EngineDashboardPresentation.toolTitle("worker_upsert") == "Create or Update Worker")
         #expect(EngineDashboardPresentation.toolTitle("future_operation") == "Future Operation")
         #expect(
             EngineDashboardPresentation.groupDetail("host", count: 6)
-                .hasPrefix("6 fixed tools")
+                .hasPrefix("6 fixed primitives")
+        )
+
+        func tool(
+            _ name: String,
+            group: String?,
+            audience: String = "ordinary",
+            exposed: Bool = true
+        ) -> EngineSurfaceToolDTO {
+            EngineSurfaceToolDTO(
+                modelName: name,
+                functionId: "test::\(name)",
+                functionRevision: 1,
+                ownerWorker: "test",
+                description: "Test primitive",
+                inputSchema: AnyCodable(["type": "object"]),
+                outputSchema: nil,
+                effectClass: "pure_read",
+                risk: "low",
+                exposed: exposed,
+                workerId: nil,
+                workerVersion: nil,
+                primitiveGroup: group,
+                audience: audience,
+                accessPath: "fixed",
+                selectionReason: exposed ? "ordinary" : "not_projected"
+            )
+        }
+
+        let groups = EngineDashboardPresentation.primitiveGroups([
+            tool("session_set_title", group: "session", audience: "conditional", exposed: false),
+            tool("request_user_input", group: "user_interaction"),
+            tool("future_operation", group: "future_group"),
+            tool("filesystem_read", group: "host"),
+            tool("ungrouped_operation", group: nil),
+        ])
+        #expect(groups.map(\.id) == ["host", "user_interaction", "session", "future_group", "other"])
+        #expect(groups.flatMap(\.tools).count == 5)
+        #expect(
+            EngineDashboardPresentation.toolAvailability(groups[2].tools[0])
+                == "Conditional · Available only when requested"
         )
     }
 

@@ -409,11 +409,11 @@ the worker's actual input schema.
 
 ### Views
 
-The session sidebar contains a compact Engine band showing core, active-worker,
+The session sidebar contains a compact Engine band showing fixed-primitive, active-worker,
 and current unhealthy-worker counts. It opens `WorkerConsoleSheet`, whose
 visible product identity is Engine. While the sheet is closed, the sidebar
 reloads only its compact snapshot after a live invalidation. While the sheet is
-open, Workers and Core retain that one-read summary lane; only the Activity tab
+open, Workers and Primitives retain that one-read summary lane; only the Activity tab
 loads and monitors bounded runs and attention. Switching scopes cancels the old
 view task without creating another server subscription because subscriptions
 are cached per socket. The dashboard uses
@@ -430,17 +430,19 @@ fill and press response as the navigation affordance; trailing chevrons are
 intentionally omitted throughout the dashboard and its nested sheets. It
 provides:
 
-- Workers, Core, and Activity modes in one compact cockpit, with Workers as the
+- Workers, Primitives, and Activity modes in one compact cockpit, with Workers as the
   initial operator view; the always-visible
   summary owns profile-wide fixed/worker/current-health counts and any active
   worker-owned engine-policy hooks instead of duplicating them in an Overview
   tab;
 - the compiled kernel/product-boundary component map and profile-wide fixed and
   published worker-tool counts;
-- every fixed model-addressable function shown immediately under host, session,
-  worker-interaction, and worker-administration section headings, including its
-  ordinary/specialist/conditional audience and request-specific exposure; each
-  operation is a separate compact title-only card that
+- every fixed model-addressable function shown immediately under server-owned
+  group headings, including host, user interaction, session metadata, worker
+  interaction, worker administration, and any future group the client has not
+  named yet; grouping preserves server tool order and cannot discard an
+  unfamiliar group. Each row exposes its ordinary/specialist/conditional
+  audience and request-specific availability, then
   opens a dedicated detail sheet for its description, identifiers, exact
   schemas, effect, risk, and exposure state;
 - every published worker's profile-global availability to agents, without
@@ -700,7 +702,7 @@ worker, version, runner, or primitive-group contract.
 
 The detail sheet is action-first rather than a generic JSON viewer. It shows a
 plain-language outcome and status first; schema-valid worker request/result
-objects become bounded typed forms; core primitives use concise operation rows;
+objects become bounded typed forms; fixed primitives use concise operation rows;
 and artifacts remain in the primary flow only when they are user-relevant.
 Identifiers, protocol references, and raw request/result values share one
 `Technical details` entry and move through progressive disclosure into nested

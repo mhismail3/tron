@@ -212,7 +212,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertFalse(ollama.contains("Text(\"Endpoint\")"))
     }
 
-    func testEngineCoreUsesAlwaysVisibleCompactRowsAndSeparateDetailSheet() throws {
+    func testEnginePrimitivesUseCompleteDataDrivenGroupsAndSeparateDetailSheet() throws {
         let shell = try source(pathComponents: [
             "Sources", "UI", "WorkerConsole", "Overview", "WorkerConsoleViews.swift",
         ])
@@ -220,16 +220,19 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             "Sources", "UI", "WorkerConsole", "Domains", "EngineDashboardViews.swift",
         ])
         let compactRow = try XCTUnwrap(
-            views.components(separatedBy: "private struct EngineCoreToolRow").last?
-                .components(separatedBy: "struct EngineCoreToolDetailSheet").first
+            views.components(separatedBy: "private struct EnginePrimitiveToolRow").last?
+                .components(separatedBy: "struct EnginePrimitiveToolDetailSheet").first
         )
 
-        XCTAssertTrue(shell.contains("EngineCoreSection(group: group, tools: tools)"))
-        XCTAssertTrue(shell.contains(".sheet(item: $selectedCoreTool)"))
+        XCTAssertTrue(shell.contains("ForEach(viewModel.primitiveToolGroups)"))
+        XCTAssertTrue(shell.contains("EnginePrimitiveSection(group: group.id, tools: group.tools)"))
+        XCTAssertFalse(shell.contains(#"ForEach(["host""#))
+        XCTAssertTrue(shell.contains(".sheet(item: $selectedPrimitiveTool)"))
         XCTAssertTrue(views.contains("LazyVStack(spacing: 8)"))
         XCTAssertFalse(views.contains("DisclosureGroup(isExpanded: $isExpanded)"))
-        XCTAssertTrue(views.contains("EngineCoreToolDetailSheet"))
+        XCTAssertTrue(views.contains("EnginePrimitiveToolDetailSheet"))
         XCTAssertTrue(views.contains("EngineDashboardPresentation.toolTitle(tool.modelName)"))
+        XCTAssertTrue(compactRow.contains("EngineDashboardPresentation.toolAvailability(tool)"))
         XCTAssertFalse(compactRow.contains("tool.description"))
         XCTAssertFalse(compactRow.contains("tool.effectClass"))
         XCTAssertFalse(compactRow.contains("tool.risk"))
