@@ -9,6 +9,8 @@
 //!
 //! `StreamEvent` is purely in-memory (never persisted). `TronEvent` is
 //! published through engine streams and may be recorded as session events.
+//! Failed `AgentEnd` events retain the terminal failure's recoverability so
+//! downstream runtimes do not have to infer policy from display text.
 //!
 //! Shared event DTOs, stream DTOs, event factories, tool summaries, and
 //! the generated `TronEvent` catalog live here. The exhaustive `TronEvent`

@@ -16,8 +16,6 @@ final class WorkerConsoleViewModel {
     var inspection: WorkerInspectResultDTO?
     var runs: [WorkerInvocationDTO] = []
     var attention: [WorkerInboxItemDTO] = []
-    var invocationInput = "{}"
-    var invocationResult: String?
     var webhookCredential: WorkerWebhookCredentialDTO?
     var isRefreshing = false
     var isLoadingSelection = false
@@ -117,18 +115,6 @@ final class WorkerConsoleViewModel {
 
     var availableWorkerCount: Int {
         Int(engineSnapshot?.surface.availableWorkerCount ?? 0)
-    }
-
-    var invocationJSONIsValid: Bool {
-        (try? Self.decodeJSON(invocationInput)) != nil
-    }
-
-    var canInvokeSelectedWorker: Bool {
-        guard let selectedWorker else { return false }
-        return selectedWorker.enabled
-            && !selectedWorker.retired
-            && !isMutating
-            && invocationJSONIsValid
     }
 
     func refresh(
@@ -380,7 +366,6 @@ final class WorkerConsoleViewModel {
         inspection = nil
         runs = []
         attention = []
-        invocationResult = nil
         webhookCredential = nil
         isLoadingSelection = true
         defer {
@@ -396,9 +381,6 @@ final class WorkerConsoleViewModel {
             )
             guard projectionTicket == projectionGeneration,
                   selectedWorkerId == workerId else { return }
-            invocationInput = WorkerConsolePresentation.invocationTemplate(
-                from: inspection?.bundle["inputSchema"]
-            )
             lastError = nil
         } catch {
             guard projectionTicket == projectionGeneration else { return }
@@ -431,9 +413,6 @@ final class WorkerConsoleViewModel {
             )
             guard projectionTicket == projectionGeneration,
                   self.selectedWorkerId == selectedWorkerId else { return }
-            invocationInput = WorkerConsolePresentation.invocationTemplate(
-                from: inspection?.bundle["inputSchema"]
-            )
             lastError = nil
         } catch {
             guard projectionTicket == projectionGeneration else { return }
@@ -460,10 +439,6 @@ final class WorkerConsoleViewModel {
         self.inspection = inspection
         self.runs = runs
         self.attention = attention
-        invocationInput = WorkerConsolePresentation.invocationTemplate(
-            from: inspection.bundle["inputSchema"]
-        )
-        invocationResult = nil
         webhookCredential = nil
         isLoadingSelection = false
         lastError = nil
@@ -482,7 +457,6 @@ final class WorkerConsoleViewModel {
         inspection = nil
         runs = []
         attention = []
-        invocationResult = nil
         webhookCredential = nil
         isLoadingSelection = true
         lastError = nil
@@ -564,35 +538,6 @@ final class WorkerConsoleViewModel {
                 workerId: worker.workerId,
                 idempotencyKey: .userAction("worker.stop")
             )
-        }
-    }
-
-    func invoke(
-        repository: any WorkerKernelRepository,
-        connectionState: ConnectionState,
-        model: String? = nil,
-        reasoningLevel: String? = nil
-    ) async {
-        guard let worker = selectedWorker else { return }
-        await mutate(repository: repository, connectionState: connectionState) {
-            let input = try Self.decodeJSON(invocationInput)
-            let result = try await repository.invokeWorker(
-                workerId: worker.workerId,
-                input: input,
-                model: model,
-                reasoningLevel: reasoningLevel,
-                idempotencyKey: .userAction("worker.invoke")
-            )
-            var receipt: [String: Any] = [
-                "status": result.status,
-                "invocationId": result.invocationId,
-            ]
-            receipt["requestedModel"] = result.requestedModel
-            receipt["effectiveModel"] = result.effectiveModel
-            receipt["requestedReasoningLevel"] = result.requestedReasoningLevel
-            receipt["effectiveReasoningLevel"] = result.effectiveReasoningLevel
-            receipt["output"] = result.output?.presentationValue.value
-            invocationResult = Self.prettyJSON(AnyCodable(receipt))
         }
     }
 
@@ -748,11 +693,6 @@ final class WorkerConsoleViewModel {
         } catch {
             lastError = error.localizedDescription
         }
-    }
-
-    private static func decodeJSON(_ text: String) throws -> AnyCodable {
-        let data = Data(text.utf8)
-        return AnyCodable(try JSONSerialization.jsonObject(with: data))
     }
 
     static func prettyJSON(_ value: AnyCodable) -> String {

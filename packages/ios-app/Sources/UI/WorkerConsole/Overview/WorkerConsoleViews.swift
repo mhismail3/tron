@@ -113,7 +113,6 @@ struct WorkerConsoleSheet: View {
     @Environment(\.dependencies) private var dependencies
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
-    let modelRepository: any ModelRepository
 
     @State private var selectedSection: EngineDashboardSection = .workers
     @State private var selectedPrimitiveTool: EngineSurfaceToolDTO?
@@ -179,15 +178,13 @@ struct WorkerConsoleSheet: View {
                     case .genericConsole:
                         WorkerDetailSheet(
                             viewModel: viewModel,
-                            repository: repository,
-                            modelRepository: modelRepository
+                            repository: repository
                         )
                     }
                 } else {
                     WorkerDetailSheet(
                         viewModel: viewModel,
-                        repository: repository,
-                        modelRepository: modelRepository
+                        repository: repository
                     )
                 }
             }

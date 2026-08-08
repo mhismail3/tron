@@ -60,3 +60,13 @@ struct WorkerResultReceiptDTO: Codable, Equatable, Sendable {
     let reference: WorkerResultReferenceDTO
     let preview: String
 }
+
+/// A visible session created atomically with authority to read one exact
+/// durable worker result.
+struct WorkerResultHandoffDTO: Codable, Equatable, Sendable {
+    let sessionId: String
+    let workspaceId: String
+    let model: String
+    let workingDirectory: String
+    let createdAt: String
+}

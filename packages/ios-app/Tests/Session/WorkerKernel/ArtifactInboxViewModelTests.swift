@@ -89,37 +89,6 @@ struct ArtifactInboxViewModelTests {
         #expect(model.errorMessage != nil)
     }
 
-    @Test("Attach to Draft targets exactly one mounted session and deduplicates")
-    func attachmentRequestIsSessionScoped() {
-        let attachment = Attachment(
-            id: UUID(),
-            type: .document,
-            data: Data("hello".utf8),
-            mimeType: "text/plain",
-            fileName: "note.txt"
-        )
-        let request = ArtifactDraftAttachmentRequest(
-            sessionId: "session-a",
-            attachment: attachment
-        )
-
-        #expect(shouldAttachArtifact(
-            request,
-            to: "session-a",
-            existingAttachmentIds: []
-        ))
-        #expect(!shouldAttachArtifact(
-            request,
-            to: "session-b",
-            existingAttachmentIds: []
-        ))
-        #expect(!shouldAttachArtifact(
-            request,
-            to: "session-a",
-            existingAttachmentIds: [attachment.id]
-        ))
-    }
-
     @Test("Mismatched content-reference identity never reaches native file custody")
     func mismatchedContentReferenceIsRejected() async throws {
         let fixture = fixtureArtifact(referenceArtifactId: "different-artifact")

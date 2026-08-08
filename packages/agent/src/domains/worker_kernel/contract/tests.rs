@@ -63,6 +63,7 @@ fn profile_owned_worker_mutations_do_not_require_a_session() {
     for function_id in [
         "worker_kernel::upsert",
         "worker_kernel::invoke",
+        "worker_kernel::result_handoff",
         "worker_kernel::detach",
         "worker_kernel::cancel",
         "worker_kernel::stop",
@@ -632,6 +633,24 @@ fn worker_upsert_exposes_only_the_closed_declarative_presentation_vocabulary() {
             .unwrap()
             .contains(&json!("effectiveModel"))
     );
+    let runs = function_definitions()
+        .unwrap()
+        .into_iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::runs")
+        .expect("worker runs contract");
+    let detail_values = runs.request_schema.as_ref().unwrap()["properties"]["detail"]["enum"]
+        .as_array()
+        .unwrap();
+    assert!(detail_values.contains(&json!("metrics")));
+    let metrics = &runs.response_schema.unwrap()["properties"]["metrics"]["items"];
+    assert_eq!(
+        metrics["properties"]["timing"]["properties"]["wallMs"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        metrics["properties"]["usage"]["properties"]["cost"]["type"],
+        "number"
+    );
 }
 
 #[test]
@@ -868,6 +887,34 @@ fn worker_result_read_is_bounded_and_integrity_bound() {
 }
 
 #[test]
+fn worker_result_handoff_is_client_only_and_profile_idempotent() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let handoff = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::result_handoff")
+        .expect("worker result handoff contract");
+
+    assert_eq!(handoff.effect_class, EffectClass::IdempotentWrite);
+    assert!(handoff.model_tool.is_none());
+    assert_eq!(
+        handoff
+            .idempotency
+            .as_ref()
+            .map(|contract| contract.dedupe_scope),
+        Some(DedupeScope::Profile)
+    );
+    let request = handoff.request_schema.as_ref().expect("handoff request");
+    assert_eq!(request["additionalProperties"], false);
+    assert_eq!(
+        request["required"],
+        json!(["invocationId", "workingDirectory", "model", "title"])
+    );
+    let response = handoff.response_schema.as_ref().expect("handoff response");
+    assert_eq!(response["additionalProperties"], false);
+    assert_eq!(response["properties"]["workspaceId"]["type"], "string");
+}
+
+#[test]
 fn worker_history_defaults_to_compact_bounded_observations() {
     let definitions = function_definitions().expect("worker-kernel contracts");
     for function_id in ["worker_kernel::runs", "worker_kernel::inbox"] {
@@ -880,7 +927,7 @@ fn worker_history_defaults_to_compact_bounded_observations() {
         assert_eq!(request["properties"]["offset"]["minimum"], 0);
         assert_eq!(request["properties"]["detail"]["default"], "summary");
         let expected_detail = if function_id == "worker_kernel::runs" {
-            json!(["summary", "full", "graph"])
+            json!(["summary", "metrics", "full", "graph"])
         } else {
             json!(["summary", "full"])
         };

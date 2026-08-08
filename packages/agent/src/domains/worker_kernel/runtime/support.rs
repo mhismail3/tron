@@ -161,13 +161,13 @@ pub(super) async fn wait_for_agent_terminal(
     events: &mut tokio::sync::broadcast::Receiver<TronEvent>,
     session_id: &str,
     worker_invocation_id: &str,
-) -> Result<Option<String>, String> {
+) -> Result<AgentTerminalOutcome, String> {
     loop {
         match events.recv().await {
             Ok(event) if event.session_id() == session_id => {
                 runtime.observe_agent_model_tool_progress(worker_invocation_id, &event);
                 if let TronEvent::AgentEnd { error, .. } = event {
-                    return Ok(error);
+                    return Ok(AgentTerminalOutcome { error });
                 }
             }
             Ok(_) => {}
@@ -188,6 +188,16 @@ pub(super) async fn wait_for_agent_terminal(
             }
         }
     }
+}
+
+/// Terminal status for an agent-backed worker run.
+///
+/// Agent runtime, provider, tool, and result-loading failures belong to the
+/// invocation that encountered them. The worker kernel separately validates
+/// the terminal typed output, so only that structural boundary can quarantine
+/// an otherwise valid agent-backed worker bundle.
+pub(super) struct AgentTerminalOutcome {
+    pub(super) error: Option<String>,
 }
 
 pub(super) struct DynamicWorkerHandler {

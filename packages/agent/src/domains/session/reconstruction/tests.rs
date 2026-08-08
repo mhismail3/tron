@@ -559,6 +559,7 @@ async fn terminal_projection_stays_running_until_run_guard_release() {
     let _ = ctx.orchestrator.broadcast().emit(TronEvent::AgentEnd {
         base: BaseEvent::now(&session_id).with_sequence(3),
         error: None,
+        recoverable: None,
     });
 
     let result = SessionReconstructionService::reconstruct(

@@ -159,7 +159,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         EffectClass::ExternalSideEffect,
         RiskLevel::High,
         json!({"type":"object","additionalProperties":false,"required":["command"],"properties":{"command":{"type":"array","minItems":1,"maxItems":256,"items":{"type":"string"}},"cwd":{"type":"string"},"stdin":{},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":7200}}}),
-        "Run a local command directly with normal user permissions and bounded output.",
+        "Run a local command directly with normal user permissions and bounded output. Pass structured JSON directly as stdin and the engine serializes it once; string stdin is written verbatim, so never pre-encode a JSON object into a string.",
         "process_run",
         ModelToolAudience::Ordinary,
         50,
@@ -500,6 +500,23 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         148,
         "worker_interaction",
     )?);
+    specs.push(spec(
+        "worker_kernel::result_handoff",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Medium,
+        json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["invocationId","workingDirectory","model","title"],
+            "properties":{
+                "invocationId":{"type":"string","minLength":1,"maxLength":160},
+                "workingDirectory":{"type":"string","minLength":1},
+                "model":{"type":"string","minLength":1,"maxLength":160},
+                "title":{"type":"string","minLength":1,"maxLength":120}
+            }
+        }),
+        "Create one visible chat with a passive, exact-result grant for an authenticated client's completed worker result. The session and grant commit atomically; result bytes remain in durable worker custody.",
+    )?);
     specs.push(model_spec(
         "worker_kernel::detach",
         EffectClass::ReversibleSideEffect,
@@ -597,8 +614,8 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         "worker_kernel::runs",
         EffectClass::PureRead,
         RiskLevel::Low,
-        json!({"type":"object","additionalProperties":false,"properties":{"workerId":{"type":"string"},"originSessionId":{"type":"string"},"invocationId":{"type":"string"},"modelToolInvocationId":{"type":"string"},"status":{"type":"string","enum":["queued","running","completed","failed","cancelled"]},"limit":{"type":"integer","minimum":1,"maximum":20},"offset":{"type":"integer","minimum":0},"detail":{"type":"string","enum":["summary","full","graph"],"default":"summary"}}}),
-        "List a bounded page of durable worker invocations, optionally filtered by exact invocation, originating model-tool call, worker, originating chat session, or execution status. A session filter includes descendant worker calls from the same causal trace even when they ran through child agent sessions. Graph detail reconstructs at most ten causal roots from authoritative invocation, attempt, stage, agent-session, model-turn, and child-link evidence, with structured timing and timeline entries. Omit filters to query the profile; continue with nextOffset when present. Compact summaries omit expansion by default; explicit full detail is bounded to 20 records and 8 KiB per input or output.",
+        json!({"type":"object","additionalProperties":false,"properties":{"workerId":{"type":"string"},"originSessionId":{"type":"string"},"invocationId":{"type":"string"},"modelToolInvocationId":{"type":"string"},"status":{"type":"string","enum":["queued","running","completed","failed","cancelled"]},"limit":{"type":"integer","minimum":1,"maximum":20},"offset":{"type":"integer","minimum":0},"detail":{"type":"string","enum":["summary","metrics","full","graph"],"default":"summary"}}}),
+        "List a bounded page of durable worker invocations, optionally filtered by exact invocation, originating model-tool call, worker, originating chat session, or execution status. A session filter includes descendant worker calls from the same causal trace even when they ran through child agent sessions. Metrics detail returns a compact exact-invocation timing, usage, model, version, and status projection without the causal graph's nodes or timeline. Graph detail reconstructs at most ten causal roots from authoritative invocation, attempt, stage, agent-session, model-turn, and child-link evidence, with structured timing and timeline entries. Omit filters to query the profile; continue with nextOffset when present. Compact summaries omit expansion by default; explicit full detail is bounded to 20 records and 8 KiB per input or output.",
         "worker_runs",
         ModelToolAudience::Specialist,
         220,

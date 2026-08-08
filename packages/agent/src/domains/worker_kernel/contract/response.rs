@@ -175,6 +175,17 @@ pub(super) fn response_schema(function: &str) -> Value {
                 "total":{"type":"integer"},"nextOffset":{},"truncated":{"type":"boolean"}
             }
         }),
+        "worker_kernel::result_handoff" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["sessionId","workspaceId","model","workingDirectory","createdAt"],
+            "properties":{
+                "sessionId":{"type":"string"},
+                "workspaceId":{"type":"string"},
+                "model":{"type":"string"},
+                "workingDirectory":{"type":"string"},
+                "createdAt":{"type":"string"}
+            }
+        }),
         "worker_kernel::await" => json!({
             "type":"object","additionalProperties":false,"required":["invocation","timedOut"],
             "properties":{"invocation":invocation_response_schema(),"timedOut":{"type":"boolean"}}
@@ -254,8 +265,8 @@ pub(super) fn response_schema(function: &str) -> Value {
             "properties":{"detail":{"type":"string","enum":["summary","full"]},"items":{"type":"array"},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"nextOffset":{},"contentTruncated":{"type":"boolean"}}
         }),
         "worker_kernel::runs" => json!({
-            "type":"object","additionalProperties":false,"required":["detail","runs","attempts","traces","graphs","returned","truncated","nextOffset","contentTruncated"],
-            "properties":{"detail":{"type":"string","enum":["summary","full","graph"]},"runs":{"type":"array","items":invocation_response_schema()},"attempts":{"type":"object"},"traces":{"type":"object"},"graphs":{"type":"array","items":worker_run_graph_response_schema()},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"nextOffset":{},"contentTruncated":{"type":"boolean"}}
+            "type":"object","additionalProperties":false,"required":["detail","runs","attempts","traces","graphs","metrics","returned","truncated","nextOffset","contentTruncated"],
+            "properties":{"detail":{"type":"string","enum":["summary","metrics","full","graph"]},"runs":{"type":"array","items":invocation_response_schema()},"attempts":{"type":"object"},"traces":{"type":"object"},"graphs":{"type":"array","items":worker_run_graph_response_schema()},"metrics":{"type":"array","items":worker_run_metrics_response_schema()},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"nextOffset":{},"contentTruncated":{"type":"boolean"}}
         }),
         "worker_kernel::webhook_rotate" => webhook_credential_response_schema(),
         "worker_kernel::stop_all" => json!({
@@ -353,6 +364,53 @@ pub(crate) fn worker_result_reference_schema() -> Value {
     })
 }
 
+fn worker_run_metrics_response_schema() -> Value {
+    let requested_timing = json!({
+        "type":"object","additionalProperties":false,
+        "required":["queueMs","executionMs","wallMs"],
+        "properties":{
+            "queueMs":{"type":"integer"},"executionMs":{"type":"integer"},
+            "wallMs":{"type":"integer"}
+        }
+    });
+    let requested_usage = json!({
+        "type":"object","additionalProperties":false,
+        "required":["inputTokens","outputTokens","cacheReadTokens","cacheCreationTokens","cost","includesDescendants"],
+        "properties":{
+            "inputTokens":{"type":"integer"},"outputTokens":{"type":"integer"},
+            "cacheReadTokens":{"type":"integer"},"cacheCreationTokens":{"type":"integer"},
+            "cost":{"type":"number"},"includesDescendants":{"type":"boolean"}
+        }
+    });
+    let mut schema = json!({
+        "type":"object","additionalProperties":false,
+        "required":[
+            "invocationId","workerId","workerName","workerVersion","status",
+            "requestedModel","requestedReasoningLevel","effectiveModel",
+            "effectiveReasoningLevel","timing","usage"
+        ],
+        "properties":{
+            "invocationId":{"type":"string"},"workerId":{"type":"string"},
+            "workerName":{"type":"string"},"workerVersion":{"type":"string"},
+            "status":{"type":"string"},"timing":requested_timing,"usage":requested_usage
+        }
+    });
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        for field in [
+            "requestedModel",
+            "requestedReasoningLevel",
+            "effectiveModel",
+            "effectiveReasoningLevel",
+        ] {
+            properties.insert(
+                field.to_owned(),
+                json!({"oneOf":[{"type":"string"},{"type":"null"}]}),
+            );
+        }
+    }
+    schema
+}
+
 fn worker_run_graph_response_schema() -> Value {
     let stage = json!({
         "type":"string",
@@ -390,52 +448,7 @@ fn worker_run_graph_response_schema() -> Value {
             "cost":{"type":"number"}
         }
     });
-    let requested_timing = json!({
-        "type":"object","additionalProperties":false,
-        "required":["queueMs","executionMs","wallMs"],
-        "properties":{
-            "queueMs":{"type":"integer"},"executionMs":{"type":"integer"},
-            "wallMs":{"type":"integer"}
-        }
-    });
-    let requested_usage = json!({
-        "type":"object","additionalProperties":false,
-        "required":["inputTokens","outputTokens","cacheReadTokens","cacheCreationTokens","cost","includesDescendants"],
-        "properties":{
-            "inputTokens":{"type":"integer"},"outputTokens":{"type":"integer"},
-            "cacheReadTokens":{"type":"integer"},"cacheCreationTokens":{"type":"integer"},
-            "cost":{"type":"number"},"includesDescendants":{"type":"boolean"}
-        }
-    });
-    let mut requested_invocation = json!({
-        "type":"object","additionalProperties":false,
-        "required":[
-            "invocationId","workerId","workerName","workerVersion","status",
-            "requestedModel","requestedReasoningLevel","effectiveModel",
-            "effectiveReasoningLevel","timing","usage"
-        ],
-        "properties":{
-            "invocationId":{"type":"string"},"workerId":{"type":"string"},
-            "workerName":{"type":"string"},"workerVersion":{"type":"string"},
-            "status":{"type":"string"},"timing":requested_timing,"usage":requested_usage
-        }
-    });
-    if let Some(properties) = requested_invocation
-        .get_mut("properties")
-        .and_then(Value::as_object_mut)
-    {
-        for field in [
-            "requestedModel",
-            "requestedReasoningLevel",
-            "effectiveModel",
-            "effectiveReasoningLevel",
-        ] {
-            properties.insert(
-                field.to_owned(),
-                json!({"oneOf":[{"type":"string"},{"type":"null"}]}),
-            );
-        }
-    }
+    let requested_invocation = worker_run_metrics_response_schema();
     let mut node = json!({
         "type":"object","additionalProperties":false,
         "required":["id","kind","parentId","status","elapsedMs"],

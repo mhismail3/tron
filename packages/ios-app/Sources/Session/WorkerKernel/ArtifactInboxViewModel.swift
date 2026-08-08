@@ -1,36 +1,6 @@
 import CryptoKit
 import Foundation
 
-extension Notification.Name {
-    /// Explicit user action from the Artifact Inbox into one identified chat draft.
-    static let attachArtifactToDraft = Notification.Name("tron.attachArtifactToDraft")
-    static let createArtifactInChat = Notification.Name("tron.createArtifactInChat")
-}
-
-struct ArtifactChatDraftRequest: Equatable, Sendable {
-    let sessionId: String
-    let prompt: String
-}
-
-/// App-local bridge for the explicit Attach to Draft action.
-///
-/// The target session is mandatory so multiple mounted chat views cannot all
-/// consume the same artifact. The receiving chat remains the only writer of
-/// its live draft state.
-struct ArtifactDraftAttachmentRequest: Equatable, Sendable {
-    let sessionId: String
-    let attachment: Attachment
-}
-
-func shouldAttachArtifact(
-    _ request: ArtifactDraftAttachmentRequest,
-    to mountedSessionId: String,
-    existingAttachmentIds: Set<UUID>
-) -> Bool {
-    request.sessionId == mountedSessionId
-        && !existingAttachmentIds.contains(request.attachment.id)
-}
-
 struct MaterializedWorkerArtifact: Equatable, Sendable {
     let artifact: WorkerArtifactDTO
     let data: Data

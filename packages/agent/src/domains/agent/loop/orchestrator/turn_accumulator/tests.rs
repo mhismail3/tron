@@ -648,6 +648,7 @@ fn update_from_agent_end_clears() {
     map.update_from_event(&TronEvent::AgentEnd {
         base: BaseEvent::now("s1"),
         error: None,
+        recoverable: None,
     });
     assert!(state(&map, "s1").is_none());
 }
@@ -698,6 +699,7 @@ fn terminal_markers_clear_state_until_matching_run_release() {
     map.update_from_event(&TronEvent::AgentEnd {
         base: BaseEvent::now("s1").with_sequence(2),
         error: None,
+        recoverable: None,
     });
     let terminal = map.reconstruction_snapshot("s1", "run-1").unwrap();
     assert!(terminal.compaction_reason.is_none());

@@ -81,6 +81,50 @@ impl ModelResponderFactory for FailingResponderFactory {
     }
 }
 
+struct NonRecoverableFailingResponderFactory;
+
+#[async_trait]
+impl ModelResponderFactory for NonRecoverableFailingResponderFactory {
+    async fn create_for_model(
+        &self,
+        _model: &str,
+        _settings: &crate::domains::settings::ApiSettings,
+    ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
+        Err(ModelResponseError::other(
+            "synthetic non-recoverable model responder failure",
+        ))
+    }
+}
+
+struct HangingResponder;
+
+#[async_trait]
+impl ModelResponder for HangingResponder {
+    fn info(&self) -> ModelResponderInfo {
+        worker_test_responder_info()
+    }
+
+    async fn respond(
+        &self,
+        _request: ModelResponseRequest,
+    ) -> Result<ModelResponse, ModelResponseError> {
+        std::future::pending().await
+    }
+}
+
+struct HangingResponderFactory;
+
+#[async_trait]
+impl ModelResponderFactory for HangingResponderFactory {
+    async fn create_for_model(
+        &self,
+        _model: &str,
+        _settings: &crate::domains::settings::ApiSettings,
+    ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
+        Ok(Arc::new(HangingResponder))
+    }
+}
+
 #[tokio::test]
 async fn agent_runner_returns_typed_json() {
     let (runtime, _home) = test_runtime(Some(Arc::new(JsonResponderFactory)));
@@ -270,13 +314,95 @@ async fn agent_runner_captures_a_fast_terminal_provider_failure() {
         "fast provider failure was replaced by a generic result error: {result:?}"
     );
     assert!(
-        !runtime
+        runtime
             .store()
             .summary(&outcome.worker.worker_id)
             .unwrap()
             .unwrap()
-            .enabled
+            .enabled,
+        "a recoverable provider failure must fail only this invocation"
     );
+}
+
+#[tokio::test]
+async fn nonrecoverable_agent_runtime_failure_does_not_quarantine_worker() {
+    let (runtime, _home) = test_runtime(Some(Arc::new(NonRecoverableFailingResponderFactory)));
+    let mut bundle = command_bundle(Vec::new());
+    bundle.name = "Non-Recoverable Agent Failure Worker".to_owned();
+    bundle.description =
+        "Proves one agent runtime failure cannot quarantine an immutable worker".to_owned();
+    bundle.tool_name = Some("worker_nonrecoverable_agent_failure_test".to_owned());
+    bundle.runner = WorkerRunner::Agent {
+        instructions: "Return an object.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+
+    let result = runtime
+        .invoke(request(
+            &outcome.worker.worker_id,
+            json!({}),
+            "nonrecoverable-agent-failure",
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(result.status, "failed");
+    assert!(
+        result.error.as_deref().is_some_and(
+            |error| error.contains("synthetic non-recoverable model responder failure")
+        ),
+        "agent runtime failure was replaced by a generic result error: {result:?}"
+    );
+    let summary = runtime
+        .store()
+        .summary(&outcome.worker.worker_id)
+        .unwrap()
+        .unwrap();
+    assert!(summary.enabled, "agent runtime failure disabled the worker");
+    assert_eq!(summary.health, "healthy");
+}
+
+#[tokio::test]
+async fn agent_execution_timeout_does_not_quarantine_worker() {
+    let (runtime, _home) = test_runtime(Some(Arc::new(HangingResponderFactory)));
+    let mut bundle = command_bundle(Vec::new());
+    bundle.name = "Timed Agent Worker".to_owned();
+    bundle.description = "Proves one timeout cannot quarantine an immutable worker".to_owned();
+    bundle.tool_name = Some("worker_timed_agent_test".to_owned());
+    bundle.execution_limits.max_invocation_seconds = Some(1);
+    bundle.runner = WorkerRunner::Agent {
+        instructions: "Return an object.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+
+    let result = runtime
+        .invoke(request(
+            &outcome.worker.worker_id,
+            json!({}),
+            "timed-agent-failure",
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(result.status, "failed");
+    assert!(
+        result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("worker invocation exceeded 1 seconds")),
+        "agent timeout was replaced by a generic result error: {result:?}"
+    );
+    let summary = runtime
+        .store()
+        .summary(&outcome.worker.worker_id)
+        .unwrap()
+        .unwrap();
+    assert!(summary.enabled, "agent timeout disabled the worker");
+    assert_eq!(summary.health, "healthy");
 }
 
 struct NestedDepthResponder {

@@ -95,6 +95,8 @@ tron_events! {
     AgentEnd {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        recoverable: Option<bool>,
     } => "agent_end",
 
     /// Agent ready after the terminal event has been published.

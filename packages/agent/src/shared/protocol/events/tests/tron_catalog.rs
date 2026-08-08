@@ -9,6 +9,7 @@ fn tron_event_all_event_types() {
         TronEvent::AgentEnd {
             base: base.clone(),
             error: None,
+            recoverable: None,
         },
         TronEvent::AgentReady { base: base.clone() },
         TronEvent::SessionProcessingChanged {

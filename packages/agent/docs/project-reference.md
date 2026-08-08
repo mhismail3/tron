@@ -389,7 +389,11 @@ immutable worker may tighten that boundary with the generic
 `executionLimits.maxInvocationSeconds` field. Timeout and failure of continuity
 or mailbox curation remain ordinary durable worker evidence outside provider
 latency. A request-scoped hook failure fails only that invocation and does not
-globally disable its worker. Activation, artifact integrity, and invalid typed output remain
+globally disable its worker. Agent-runner provider, model, tool, timeout, and
+result-loading failures are likewise invocation-scoped regardless of whether
+the upstream failure is retryable: none proves that the immutable worker bundle
+is broken, and the worker remains enabled for a later retry. Activation,
+artifact integrity, command/service execution, and invalid typed output remain
 structural failures and still quarantine the broken version.
 Agent-runner bundles can declare default `model` and provider-neutral
 `reasoningLevel` values. Normal invocations may override either value; admission
@@ -1183,6 +1187,11 @@ client payload.
 | `request_user_input` | `agent::request_user_input` | One to three necessary native questions; a successful request ends the current run until a structured answer starts the next run |
 | `session_set_title` | `session::set_title` | Explicit user-requested title update for the current causal session; absent from unrelated provider turns |
 
+`process_run.stdin` accepts either a string for exact bytes or a structured JSON
+value that the engine serializes exactly once. Agent workers that call JSON
+helpers pass the object directly; manually embedding encoded JSON in a string
+adds an avoidable syntax and escaping failure boundary.
+
 Filesystem reads, listings, searches, writes, and edits execute off the async
 runtime thread. Reads never load the remainder of a truncated file; listing
 never accumulates an unbounded directory; writes stage, sync, recheck the
@@ -1221,6 +1230,20 @@ specialist-only and appear only in an exact agent-worker allowlist.
 
 `worker_webhook_rotate` and `worker_stop_all` remain authenticated dashboard
 operations and are intentionally not model tools.
+
+`worker_kernel::result_handoff` is a separate authenticated paired-client
+operation, not model vocabulary. It atomically creates one visible chat and a
+passive Agent Delivery grant for one completed invocation. Exact result bytes
+remain in the worker ledger; the new agent uses `worker_result_read` for only
+the paths it needs. Retrying the same client action cannot create a second
+session or grant, and the result invocation is retained as provenance rather
+than being presented as the root of a new causal worker tree.
+
+`worker_runs` keeps one bounded operation for both human inspection and worker
+evaluation. Its `metrics` detail returns only the exact requested invocation's
+status, immutable version, resolved model/reasoning, wall timing, and
+descendant-inclusive usage/cost. Evaluators therefore do not have to retain a
+large causal graph merely to record one case's measurements.
 
 The ordinary main-agent surface always contains the narrow worker-coordination
 set: discovery, generic invocation, bounded observation, authorized result

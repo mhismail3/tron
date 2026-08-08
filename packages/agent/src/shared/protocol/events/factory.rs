@@ -19,6 +19,7 @@ pub fn agent_end_event(session_id: impl Into<String>) -> TronEvent {
     TronEvent::AgentEnd {
         base: BaseEvent::now(session_id),
         error: None,
+        recoverable: None,
     }
 }
 

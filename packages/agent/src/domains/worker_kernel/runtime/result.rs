@@ -13,6 +13,94 @@ const MAX_RESULT_READ_BYTES: usize = DEFAULT_MAX_INLINE_MODEL_TOOL_RESULT_BYTES 
 const MAX_RESULT_READ_ITEMS: usize = 20;
 
 impl WorkerRuntime {
+    /// Create a visible client task with authority to inspect one exact result.
+    ///
+    /// This is a custody operation, not worker routing: the result remains in
+    /// the invocation ledger and the new session receives only a passive
+    /// Agent Delivery grant plus a bounded reference summary.
+    pub(crate) fn create_worker_result_handoff(
+        &self,
+        invocation: &Invocation,
+        invocation_id: &str,
+        working_directory: &str,
+        model: &str,
+        title: &str,
+    ) -> Result<Value, String> {
+        if invocation.causal_context.actor_kind != ActorKind::Client {
+            return Err("worker result handoff requires an authenticated client".to_owned());
+        }
+        if !crate::domains::model::routing::catalog::is_model_supported(model) {
+            return Err(format!("worker result handoff model '{model}' is unknown"));
+        }
+        if crate::domains::model::routing::catalog::is_model_retired(model) {
+            return Err(format!("worker result handoff model '{model}' is retired"));
+        }
+        let working_directory =
+            crate::shared::foundation::paths::normalize_working_directory(working_directory)?
+                .display()
+                .to_string();
+        let record = self
+            .store
+            .invocation(invocation_id)?
+            .ok_or_else(|| format!("worker invocation '{invocation_id}' was not found"))?;
+        if record.status != "completed" {
+            return Err(format!(
+                "worker invocation '{invocation_id}' has no completed result to hand off"
+            ));
+        }
+        let reference = self.result_reference(&record)?;
+        let preview = reference
+            .get("preview")
+            .and_then(Value::as_str)
+            .unwrap_or("Completed durable worker result");
+        let content = format!(
+            "A client attached the exact durable result from worker '{}' invocation '{}'. \
+Use worker_result_read with that exact invocation id and bounded JSON pointers/pages when \
+you need evidence. Do not ask the user to copy raw JSON. Result preview: {}",
+            record.worker_id,
+            record.invocation_id,
+            crate::shared::foundation::text::truncate_str(preview, 1_000)
+        );
+        let idempotency_key = invocation
+            .causal_context
+            .idempotency_key
+            .clone()
+            .unwrap_or_else(|| format!("result-handoff:{}", invocation.id));
+        let created = self
+            .event_store
+            .create_worker_result_task_with_delivery(
+                &crate::domains::session::event_store::NewWorkerResultTaskDelivery {
+                    idempotency_key,
+                    title: title.to_owned(),
+                    model: model.to_owned(),
+                    working_directory,
+                    result_invocation_id: record.invocation_id.clone(),
+                    source_trace_id: Some(record.trace_id.clone()),
+                    causal_depth: record.causal_depth,
+                    content,
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        let session = &created.session.session;
+        if created.created {
+            crate::domains::session::lifecycle::project_created_session(
+                &self.orchestrator,
+                self.host.clone(),
+                &session.id,
+                &session.latest_model,
+                &session.working_directory,
+                session.title.clone(),
+            );
+        }
+        Ok(json!({
+            "sessionId":session.id,
+            "workspaceId":session.workspace_id,
+            "model":session.latest_model,
+            "workingDirectory":session.working_directory,
+            "createdAt":session.created_at,
+        }))
+    }
+
     /// Project one terminal direct-worker output for a provider turn.
     ///
     /// The exact typed value remains durable and is returned inline while it is

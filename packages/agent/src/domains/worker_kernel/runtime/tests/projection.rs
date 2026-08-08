@@ -247,6 +247,48 @@ async fn graph_projects_linked_agent_and_model_session_truth() {
     assert!(nodes.iter().any(|node| {
         node["kind"] == "model" && node["model"] == "mock/model" && node["turn"] == 1
     }));
+
+    let metrics = runtime.project_run_metrics(&completed_child).unwrap();
+    assert_eq!(metrics["invocationId"], completed_child.invocation_id);
+    assert_eq!(metrics["workerId"], published.worker.worker_id);
+    assert_eq!(metrics["workerName"], published.worker.name);
+    assert_eq!(metrics["workerVersion"], published.version);
+    assert_eq!(metrics["status"], "completed");
+    assert_eq!(metrics["usage"]["inputTokens"], 500);
+    assert_eq!(metrics["usage"]["outputTokens"], 70);
+    assert_eq!(metrics["usage"]["cost"], 0.006);
+    assert_eq!(metrics["usage"]["includesDescendants"], true);
+    assert!(metrics["timing"]["wallMs"].is_u64());
+    assert!(metrics.get("nodes").is_none());
+    assert!(metrics.get("timeline").is_none());
+
+    for index in 0..127 {
+        runtime
+            .store
+            .begin_invocation_with_context(
+                &published.worker.worker_id,
+                &published.version,
+                &json!({"query":format!("Bounded descendant {index}")}),
+                &format!("graph-agent-bounded-child-{index}"),
+                "graph-agent-trace",
+                2,
+                "agent",
+                Some("origin-session"),
+                WorkerInteractionMode::Foreground,
+                None,
+                Some(&completed_child.invocation_id),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+    }
+    assert!(
+        runtime
+            .project_run_metrics(&completed_child)
+            .unwrap_err()
+            .contains("exceeds the bounded metrics projection")
+    );
 }
 
 #[test]

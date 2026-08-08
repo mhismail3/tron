@@ -7,6 +7,7 @@ final class ContentViewCoordinator {
     enum SessionPublicationError: LocalizedError {
         case coordinatorUnavailable
         case sessionNotPublished
+        case draftNotPersisted
 
         var errorDescription: String? {
             switch self {
@@ -14,6 +15,8 @@ final class ContentViewCoordinator {
                 "The session coordinator is not ready. Try again."
             case .sessionNotPublished:
                 "The session was created, but its local index could not be refreshed."
+            case .draftNotPersisted:
+                "The session was created, but its prepared draft could not be saved. Try again."
             }
         }
     }
@@ -133,5 +136,76 @@ final class ContentViewCoordinator {
                 TronLogger.shared.error("Failed to create quick session: \(error)", category: .session)
             }
         }
+    }
+
+    /// Create and publish a visible chat, durably persist its prepared draft,
+    /// and only then allow navigation to mount ChatView.
+    ///
+    /// Result handoffs use the kernel's atomic session-plus-grant operation;
+    /// worker and artifact handoffs use ordinary session creation. All sources
+    /// converge on the same local draft boundary.
+    func createSession(
+        for request: AgentSessionHandoffRequest,
+        selectedSessionId: String?
+    ) async throws -> String {
+        let workspace = resolveQuickSessionWorkspace(
+            setting: dependencies.quickSessionWorkspace,
+            defaultWorkspace: AppConstants.defaultWorkspace,
+            selectedSessionId: selectedSessionId,
+            sessions: eventStoreManager.sessions,
+            sortedSessions: eventStoreManager.sortedSessions
+        )
+        let model = dependencies.defaultModel
+        let created: NewSessionCreated
+        if let invocationId = request.resultInvocationId {
+            let result = try await dependencies.workerKernelRepository
+                .createWorkerResultHandoff(
+                    invocationId: invocationId,
+                    workingDirectory: workspace,
+                    model: model,
+                    title: String(request.title.prefix(120)),
+                    idempotencyKey: EngineIdempotencyKey(
+                        rawValue: "ios:user-action:agent-session-handoff:\(request.id.uuidString)"
+                    )
+                )
+            created = NewSessionCreated(
+                sessionId: result.sessionId,
+                workspaceId: result.workspaceId,
+                model: result.model,
+                workingDirectory: result.workingDirectory
+            )
+        } else {
+            let result = try await dependencies.sessionRepository.create(
+                workingDirectory: workspace,
+                model: model,
+                idempotencyKey: EngineIdempotencyKey(
+                    rawValue: "ios:user-action:agent-session-handoff:\(request.id.uuidString)"
+                )
+            )
+            created = NewSessionCreated(
+                sessionId: result.sessionId,
+                workspaceId: workspace,
+                model: result.model,
+                workingDirectory: workspace
+            )
+        }
+
+        let sessionId = try await publishCreatedSession(created)
+        let draft = InputBarState()
+        draft.text = request.prompt
+        draft.attachments = request.attachments
+        await dependencies.draftStore.saveImmediately(
+            sessionId: sessionId,
+            inputBarState: draft
+        )
+        let verification = InputBarState()
+        guard await dependencies.draftStore.loadDraft(
+            sessionId: sessionId,
+            into: verification
+        ), verification.text == request.prompt,
+           verification.attachments == request.attachments else {
+            throw SessionPublicationError.draftNotPersisted
+        }
+        return sessionId
     }
 }

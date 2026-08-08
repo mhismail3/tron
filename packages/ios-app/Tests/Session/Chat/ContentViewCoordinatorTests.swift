@@ -247,6 +247,51 @@ final class SettingsServerLoadKeyTests: XCTestCase {
     }
 }
 
+final class AgentSessionHandoffRequestTests: XCTestCase {
+    func testWorkerHandoffUsesNaturalLanguageInsteadOfSchemaInput() {
+        let request = AgentSessionHandoffRequest.worker(
+            workerId: "blogger",
+            name: "Blogger"
+        )
+
+        XCTAssertEqual(request.title, "Use Blogger")
+        XCTAssertTrue(request.prompt.contains("Blogger worker (`blogger`)"))
+        XCTAssertTrue(request.prompt.contains("Do not ask me to provide JSON"))
+        XCTAssertNil(request.resultInvocationId)
+        XCTAssertTrue(request.attachments.isEmpty)
+    }
+
+    func testResultHandoffRetainsOnlyExactInvocationAuthority() {
+        let request = AgentSessionHandoffRequest.workerResult(
+            invocationId: "worker-run-one",
+            workerName: "Worker Evaluator"
+        )
+
+        XCTAssertEqual(request.resultInvocationId, "worker-run-one")
+        XCTAssertTrue(request.prompt.contains("worker-run-one"))
+        XCTAssertTrue(request.prompt.contains("do not ask me to copy raw JSON"))
+        XCTAssertTrue(request.attachments.isEmpty)
+    }
+
+    func testArtifactHandoffCarriesExactAttachment() {
+        let attachment = Attachment(
+            id: UUID(),
+            type: .document,
+            data: Data("artifact".utf8),
+            mimeType: "text/markdown",
+            fileName: "report.md"
+        )
+        let request = AgentSessionHandoffRequest.artifact(
+            displayName: "report.md",
+            attachment: attachment
+        )
+
+        XCTAssertEqual(request.attachments, [attachment])
+        XCTAssertNil(request.resultInvocationId)
+        XCTAssertTrue(request.prompt.contains("Inspect its contents"))
+    }
+}
+
 // MARK: - resolveQuickSessionWorkspace (Pure Function Tests)
 
 /// Tests for the workspace resolution logic used by createQuickSession.

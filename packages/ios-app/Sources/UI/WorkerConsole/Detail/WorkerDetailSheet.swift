@@ -14,9 +14,9 @@ private enum WorkerDetailSection: Hashable {
 
 struct WorkerDetailSheet: View {
     @Environment(\.dependencies) private var dependencies
+    @Environment(\.dismiss) private var dismiss
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
-    let modelRepository: any ModelRepository
     var mode: WorkerDetailMode = .operational
 
     private var connectionState: ConnectionState {
@@ -29,9 +29,6 @@ struct WorkerDetailSheet: View {
     @State private var showTechnicalDetails = false
     @State private var showInboxAudit = false
     @State private var selectedSection = WorkerDetailSection.overview
-    @State private var availableModels: [ModelInfo] = []
-    @State private var invocationModel = ""
-    @State private var invocationReasoningLevel = ""
 
     var body: some View {
         NavigationStack {
@@ -93,13 +90,6 @@ struct WorkerDetailSheet: View {
             }
             .task(id: dependencies.connectionRepository.continuity) {
                 guard dependencies.connectionRepository.connectionState.isConnected else { return }
-                do {
-                    availableModels = try await modelRepository.list(forceRefresh: true)
-                } catch where ConnectionErrorClassifier.isTransientTransport(error) {
-                    // Keep the last model projection until the next epoch.
-                } catch {
-                    availableModels = modelRepository.cachedModels
-                }
                 await viewModel.reconcileSelection(repository: repository)
             }
             .confirmationDialog(
@@ -168,7 +158,7 @@ struct WorkerDetailSheet: View {
             inputContract(inspection)
             triggers(inspection)
         case .run:
-            invocation(inspection)
+            useInChat(worker)
         case .activity:
             recentRuns
             attention
@@ -342,175 +332,35 @@ struct WorkerDetailSheet: View {
         }
     }
 
-    private func invocation(_ inspection: WorkerInspectResultDTO) -> some View {
-        let schema = inspection.bundle["inputSchema"]
-        let fields = WorkerConsolePresentation.schemaFields(from: schema)
-        let selectedModel = availableModels.first { $0.id == invocationModel }
-        let reasoningLevels = selectedModel?.reasoningLevels ?? []
-
+    private func useInChat(_ worker: WorkerSummaryDTO) -> some View {
         return WorkerConsoleSection(
-            title: "New invocation",
-            detail: "Run this worker with typed input validated by its immutable schema.",
+            title: "Use in a new chat",
+            detail: "Describe what you want in normal language. The agent will gather genuinely missing details, translate your request into typed input, and invoke this worker.",
             accent: .tronEmerald
         ) {
             VStack(alignment: .leading, spacing: 13) {
-                HStack(spacing: 10) {
-                    Menu {
-                        Button("Worker default") {
-                            invocationModel = ""
-                            invocationReasoningLevel = ""
-                        }
-                        ForEach(availableModels.filter { !$0.isDisabled }) { model in
-                            Button(model.name) {
-                                invocationModel = model.id
-                                invocationReasoningLevel = model.defaultReasoningLevel ?? ""
-                            }
-                        }
-                    } label: {
-                        WorkerInvocationOptionLabel(
-                            title: "Model",
-                            value: selectedModel?.name ?? "Worker default",
-                            symbol: "cpu"
-                        )
-                    }
-
-                    if selectedModel?.supportsReasoning == true, !reasoningLevels.isEmpty {
-                        Menu {
-                            ForEach(reasoningLevels, id: \.self) { level in
-                                Button(level.capitalized) {
-                                    invocationReasoningLevel = level
-                                }
-                            }
-                        } label: {
-                            WorkerInvocationOptionLabel(
-                                title: "Reasoning",
-                                value: invocationReasoningLevel.isEmpty
-                                    ? "Model default"
-                                    : invocationReasoningLevel.capitalized,
-                                symbol: "brain"
-                            )
-                        }
-                    }
-                }
-
-                if fields.isEmpty {
-                    WorkerConsoleInlineEmptyState(
-                        symbol: "curlybraces",
-                        text: "This worker accepts an empty JSON object."
-                    )
-                } else {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("Input fields")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                            .foregroundStyle(.tronTextMuted)
-                        ForEach(fields) { field in
-                            WorkerSchemaFieldRow(field: field)
-                        }
-                    }
-                }
-
-                if schema != nil {
-                    Button { showSchema = true } label: {
-                        HStack {
-                            Label("Raw input schema", systemImage: "curlybraces.square")
-                            Spacer()
-                        }
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(.tronInfo)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack {
-                        Text("JSON input")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                            .foregroundStyle(.tronTextMuted)
-                        Spacer()
-                        if !viewModel.invocationJSONIsValid {
-                            Label("Invalid JSON", systemImage: "exclamationmark.triangle")
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                                .foregroundStyle(.tronError)
-                        }
-                    }
-
-                    TextEditor(text: $viewModel.invocationInput)
-                        .font(TronTypography.code(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronTextPrimary)
-                        .scrollContentBackground(.hidden)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .frame(minHeight: 116)
-                        .padding(10)
-                        .sectionFill(
-                            viewModel.invocationJSONIsValid ? .tronSlate : .tronError,
-                            cornerRadius: 10,
-                            subtle: true,
-                            compact: false,
-                            interactive: false
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(
-                                    viewModel.invocationJSONIsValid
-                                        ? Color.tronBorder.opacity(0.55)
-                                        : Color.tronError.opacity(0.55),
-                                    lineWidth: 0.5
-                                )
-                        }
-                }
+                Label("No JSON or schema knowledge required", systemImage: "text.bubble")
+                    .font(TronTypography.sans(
+                        size: TronTypography.sizeBodySM,
+                        weight: .semibold
+                    ))
+                    .foregroundStyle(.tronTextSecondary)
 
                 TronPrimaryActionButton(
-                    title: "Run worker",
-                    systemImage: "play.fill",
+                    title: "Start new chat",
+                    systemImage: "bubble.left.and.text.bubble.right.fill",
                     accent: .tronEmerald,
-                    isBusy: viewModel.isMutating,
                     isEnabled: connectionState.isConnected
-                        && viewModel.canInvokeSelectedWorker
+                        && worker.enabled
+                        && !worker.retired
                 ) {
-                    Task {
-                        await viewModel.invoke(
-                            repository: repository,
-                            connectionState: connectionState,
-                            model: invocationModel.isEmpty ? nil : invocationModel,
-                            reasoningLevel: invocationReasoningLevel.isEmpty
-                                ? nil
-                                : invocationReasoningLevel
-                        )
-                    }
-                }
-
-                if let result = viewModel.invocationResult {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Label("Invocation accepted", systemImage: "checkmark.circle.fill")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                            .foregroundStyle(.tronSuccess)
-                        WorkerCodeBlock(text: result, accent: .tronSuccess)
-                    }
+                    startAgentSessionHandoff(.worker(
+                        workerId: worker.workerId,
+                        name: worker.name
+                    ))
+                    dismiss()
                 }
             }
-        }
-    }
-
-    private struct WorkerInvocationOptionLabel: View {
-        let title: String
-        let value: String
-        let symbol: String
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 3) {
-                Label(title, systemImage: symbol)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(.tronTextMuted)
-                Text(value)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-                    .lineLimit(1)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .sectionFill(.tronEmerald, cornerRadius: 10, subtle: true, interactive: true)
         }
     }
 

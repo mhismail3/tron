@@ -87,6 +87,13 @@ struct WorkerAwaitResultDTO: Codable, Equatable, Sendable {
     let timedOut: Bool
 }
 
+struct WorkerResultHandoffRequestDTO: Codable, Equatable, Sendable {
+    let invocationId: String
+    let workingDirectory: String
+    let model: String
+    let title: String
+}
+
 struct WorkerRollbackRequestDTO: Codable, Equatable, Sendable {
     let workerId: String
     let version: String

@@ -362,6 +362,22 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
+    func createWorkerResultHandoff(
+        invocationId: String,
+        workingDirectory: String,
+        model: String,
+        title: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerResultHandoffDTO {
+        try await client.createWorkerResultHandoff(
+            invocationId: invocationId,
+            workingDirectory: workingDirectory,
+            model: model,
+            title: title,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func workerInbox(
         workerId: String?,
         limit: UInt64,

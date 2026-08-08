@@ -186,6 +186,42 @@ struct WorkerKernelClientTests {
         #expect(result.reference.sizeBytes == 12_000)
     }
 
+    @Test("Worker result handoff creates one visible session through the custody operation")
+    func resultHandoffUsesAtomicKernelOperation() async throws {
+        let transport = connectedTransport()
+        let client = WorkerKernelClient(transport: transport)
+        let key = EngineIdempotencyKey(rawValue: "handoff-one")
+
+        transport.writeHandler = { functionId, payload, receivedKey, options in
+            #expect(functionId.rawValue == "worker_kernel::result_handoff")
+            let request = try #require(payload as? WorkerResultHandoffRequestDTO)
+            #expect(request.invocationId == "run-1")
+            #expect(request.workingDirectory == "/tmp/project")
+            #expect(request.model == "gpt-5.6-sol")
+            #expect(request.title == "Investigate result")
+            #expect(receivedKey == key)
+            #expect(options.context == nil)
+            return WorkerResultHandoffDTO(
+                sessionId: "session-result",
+                workspaceId: "workspace-result",
+                model: request.model,
+                workingDirectory: request.workingDirectory,
+                createdAt: "2026-08-08T12:00:00Z"
+            )
+        }
+
+        let result = try await client.createWorkerResultHandoff(
+            invocationId: "run-1",
+            workingDirectory: "/tmp/project",
+            model: "gpt-5.6-sol",
+            title: "Investigate result",
+            idempotencyKey: key
+        )
+
+        #expect(result.sessionId == "session-result")
+        #expect(result.workspaceId == "workspace-result")
+    }
+
     @Test("Referenced native result hydration reuses its originating session")
     func referencedNativeResultHydrationReusesOriginSession() async throws {
         let transport = connectedTransport()

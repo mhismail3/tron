@@ -225,22 +225,22 @@ struct WorkerProjectionInfo {
 }
 
 #[derive(Clone, Copy, Default)]
-struct Timing {
-    queue_ms: u64,
-    execution_ms: u64,
-    wall_ms: u64,
+pub(super) struct Timing {
+    pub(super) queue_ms: u64,
+    pub(super) execution_ms: u64,
+    pub(super) wall_ms: u64,
 }
 
 #[derive(Clone, Copy, Default)]
-struct UsageTotals {
-    input_tokens: i64,
-    output_tokens: i64,
-    cache_read_tokens: i64,
-    cache_creation_tokens: i64,
-    cost: f64,
+pub(super) struct UsageTotals {
+    pub(super) input_tokens: i64,
+    pub(super) output_tokens: i64,
+    pub(super) cache_read_tokens: i64,
+    pub(super) cache_creation_tokens: i64,
+    pub(super) cost: f64,
 }
 
-fn subtree_usage(
+pub(super) fn subtree_usage(
     requested_invocation_id: &str,
     invocations: &[InvocationRecord],
     sessions_by_invocation: &HashMap<String, SessionRow>,
@@ -805,7 +805,10 @@ fn critical_path(
     path
 }
 
-fn invocation_timing(record: &InvocationRecord, now: chrono::DateTime<chrono::Utc>) -> Timing {
+pub(super) fn invocation_timing(
+    record: &InvocationRecord,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Timing {
     let queue_ms = duration_between(Some(&record.created_at), record.started_at.as_deref(), now);
     let execution_ms = record
         .started_at
