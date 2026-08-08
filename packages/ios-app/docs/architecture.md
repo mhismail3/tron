@@ -310,7 +310,8 @@ worker metadata from the client. The server supplies internal causal context.
 - `WorkerRunGraphDTOs.swift` for the graph and its node, timeline, stage,
   timing, usage, and child
   count DTOs for the bounded server-authored causal projection;
-- `WorkerResultDTOs.swift` for result references, chunks, and child descriptors for
+- `WorkerResultDTOs.swift` for result references, chunks, child descriptors,
+  and the authenticated result-handoff response for
   integrity-bound, on-demand reads of exact durable results without copying a
   large payload into run history or client state;
 - `WorkerInboxDTOs.swift` for compact durable result-reference receipts or bounded
@@ -454,8 +455,10 @@ provides:
 - one generic worker workflow split into Overview, Run, Activity, and Manage;
 - native-experience technical detail limited to Contract and Manage so domain
   tasks, reports, runs, and inbox results have one presentation owner;
-- readable schema fields, raw-schema detail sheets, generated valid JSON input,
-  inline syntax admission, and typed invocation results;
+- readable schema fields and raw-schema detail sheets for inspection, while the
+  Run tab starts a new natural-language chat pre-addressed to the exact worker;
+  users never have to construct schema JSON or manually select an invocation
+  model before asking the agent to use a worker;
 - trigger status and webhook rotation;
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
@@ -775,7 +778,11 @@ become leading content or decorative pills.
 The authenticated paired-client actor may inspect profile-local results from
 the engine-global Worker Console without inventing an originating session;
 agent and worker reads still require server-validated session or delivery-grant
-authority. The client never assembles an unbounded result copy. Raw run
+authority. The root result inspector offers a single agent continuation action.
+That action calls the authenticated result handoff, whose server transaction
+creates the visible session and its exact passive grant together, then saves a
+natural-language draft before navigation. The client never assembles an
+unbounded result copy. Raw run
 projections, schemas, trace identifiers, and technical process/filesystem
 entries likewise live in subordinate detail sheets. One-second polling is only
 a live/reconnect fallback; every refresh re-reads server truth. The client never
@@ -1265,20 +1272,19 @@ reminders; they are not a general device-control surface.
   standard leading toolbar group, so neither is compressed into an ad hoc
   stack;
   Share already exposes Save to Files, so there is no duplicate Export action.
-- Attach to Draft is the only bridge from Artifact Inbox into chat. It converts
-  already-verified bytes into the existing `Attachment` value and sends an
-  explicit app-local intent carrying the target session ID. Only the matching
-  mounted interactive chat may consume it, and that chat remains the sole
-  writer of its live draft state; other mounted chats ignore it. The preview
-  labels this action `Attach to Current Draft` and shows it only when a selected
-  mounted chat makes the action valid, instead of displaying a disabled mystery
-  control. Merely opening, previewing, sharing, or deleting an artifact never
+- Continue in New Chat is the artifact-to-agent bridge. It converts
+  already-verified bytes into the existing `Attachment` value and emits the
+  same explicit app-local handoff used by workers and results. The root content
+  coordinator creates and publishes a new visible session, persists the prompt
+  and attachment through `DraftStore`, verifies the saved draft, and only then
+  navigates. Handoff creation is single-flight at the app root so repeated taps
+  cannot create duplicate chats. Merely opening, previewing, sharing, or deleting an artifact never
   mutates a draft.
   The client does not interpret worker URLs, paths, HTML, or arbitrary commands.
 - The empty Artifact Inbox offers Create through chat. It posts one
-  session-targeted request, dismisses Settings, and prefills an artifact request
-  in the matching mounted chat without sending it. The user remains in control
-  of the final content, format, and submission.
+  new-session handoff, dismisses Settings, and prefills an artifact request
+  without sending it. The user remains in control of the final content, format,
+  and submission.
 - Open, Complete, Snooze, and clear-read mutations enter a durable per-server
   outbox, apply optimistically, retry after reconnect/foreground, and reconcile
   to the engine's first-wins terminal state. Quiet pushes refresh one server;

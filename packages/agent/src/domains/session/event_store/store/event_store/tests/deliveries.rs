@@ -2,7 +2,7 @@ use super::*;
 use crate::domains::session::event_store::{
     AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliverySourceKind, AgentDeliveryTarget,
     AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode, NewAgentDelivery,
-    NewAgentTaskDelivery, NewAgentWait, WorkerTerminalEvidence,
+    NewAgentTaskDelivery, NewAgentWait, NewWorkerResultTaskDelivery, WorkerTerminalEvidence,
 };
 
 fn session_delivery(
@@ -229,6 +229,78 @@ fn task_and_initial_delivery_are_created_atomically_and_replay_together() {
         first.session.session.working_directory,
         source.working_directory
     );
+}
+
+#[test]
+fn worker_result_task_atomically_creates_one_exact_result_grant() {
+    let store = setup();
+    let request = NewWorkerResultTaskDelivery {
+        idempotency_key: "client-result-handoff:one".to_owned(),
+        title: "🧪".repeat(120),
+        model: "gpt-5.6-sol".to_owned(),
+        working_directory: "/tmp/project".to_owned(),
+        result_invocation_id: "worker-run-one".to_owned(),
+        source_trace_id: Some("trace-one".to_owned()),
+        causal_depth: 0,
+        content: "Inspect the exact durable worker result.".to_owned(),
+    };
+
+    let first = store
+        .create_worker_result_task_with_delivery(&request)
+        .unwrap();
+    let replay = store
+        .create_worker_result_task_with_delivery(&request)
+        .unwrap();
+
+    assert!(first.created);
+    assert!(!replay.created);
+    assert_eq!(first.session.session.id, replay.session.session.id);
+    assert_eq!(first.delivery.delivery_id, replay.delivery.delivery_id);
+    assert_eq!(
+        first.delivery.result_invocation_id.as_deref(),
+        Some("worker-run-one")
+    );
+    assert_eq!(
+        first.delivery.source_kind,
+        AgentDeliverySourceKind::WorkerResult
+    );
+    assert_eq!(first.delivery.wake_policy, AgentDeliveryWakePolicy::Passive);
+    assert_eq!(first.delivery.source_root_invocation_id, None);
+    assert!(
+        store
+            .session_has_agent_result_grant(&first.session.session.id, "worker-run-one")
+            .unwrap()
+    );
+    assert!(
+        !store
+            .session_has_agent_result_grant(&first.session.session.id, "worker-run-two")
+            .unwrap()
+    );
+}
+
+#[test]
+fn worker_result_task_rejects_idempotency_reuse_for_another_result() {
+    let store = setup();
+    let mut request = NewWorkerResultTaskDelivery {
+        idempotency_key: "client-result-handoff:one".to_owned(),
+        title: "Investigate result".to_owned(),
+        model: "gpt-5.6-sol".to_owned(),
+        working_directory: "/tmp/project".to_owned(),
+        result_invocation_id: "worker-run-one".to_owned(),
+        source_trace_id: None,
+        causal_depth: 0,
+        content: "Inspect the exact durable worker result.".to_owned(),
+    };
+    store
+        .create_worker_result_task_with_delivery(&request)
+        .unwrap();
+
+    request.result_invocation_id = "worker-run-two".to_owned();
+    let error = store
+        .create_worker_result_task_with_delivery(&request)
+        .unwrap_err();
+
+    assert!(error.to_string().contains("belongs to another request"));
 }
 
 #[test]

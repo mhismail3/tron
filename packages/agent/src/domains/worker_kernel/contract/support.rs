@@ -103,6 +103,7 @@ fn profile_owned_worker_operation(function: &str) -> bool {
             | "worker_kernel::notification_device_upsert"
             | "worker_kernel::notification_device_disable"
             | "worker_kernel::notification_delivery_acknowledge"
+            | "worker_kernel::result_handoff"
             | "worker_kernel::invoke"
             | "worker_kernel::detach"
             | "worker_kernel::cancel"

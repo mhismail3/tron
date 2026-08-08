@@ -3,11 +3,14 @@ use super::*;
 pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
     match event {
         TronEvent::AgentStart { .. } => Some(session_scoped(event, "agent.start", Some(json!({})))),
-        TronEvent::AgentEnd { error, .. } => {
+        TronEvent::AgentEnd {
+            error, recoverable, ..
+        } => {
             let mut data = json!({ "agentPhase": "idle" });
             if let Some(message) = error {
                 data["error"] = json!(message);
             }
+            set_opt(&mut data, "recoverable", recoverable);
             Some(global(event, "agent.complete", Some(data)))
         }
         TronEvent::AgentReady { .. } => Some(global(

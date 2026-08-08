@@ -135,26 +135,6 @@ struct ChatView: View {
                 }
             )
         }
-        .onReceive(NotificationCenter.default.publisher(for: .attachArtifactToDraft)) { notification in
-            guard presentationMode == .interactiveSession,
-                  let request = notification.object as? ArtifactDraftAttachmentRequest,
-                  shouldAttachArtifact(
-                      request,
-                      to: sessionId,
-                      existingAttachmentIds: Set(
-                          viewModel.inputBarState.attachments.map(\.id)
-                      )
-                  ) else {
-                return
-            }
-            viewModel.inputBarState.attachments.append(request.attachment)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .createArtifactInChat)) { notification in
-            guard presentationMode == .interactiveSession,
-                  let request = notification.object as? ArtifactChatDraftRequest,
-                  request.sessionId == sessionId else { return }
-            viewModel.inputText = request.prompt
-        }
         .onChange(of: viewModel.pendingUserInputRequest) { _, request in
             guard presentationMode == .interactiveSession else { return }
             if let request {

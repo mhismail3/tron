@@ -161,13 +161,26 @@ pub(super) async fn wait_for_agent_terminal(
     events: &mut tokio::sync::broadcast::Receiver<TronEvent>,
     session_id: &str,
     worker_invocation_id: &str,
-) -> Result<Option<String>, String> {
+) -> Result<AgentTerminalOutcome, String> {
+    let mut recoverable_failure = false;
     loop {
         match events.recv().await {
             Ok(event) if event.session_id() == session_id => {
                 runtime.observe_agent_model_tool_progress(worker_invocation_id, &event);
-                if let TronEvent::AgentEnd { error, .. } = event {
-                    return Ok(error);
+                match event {
+                    TronEvent::TurnFailed { recoverable, .. } => {
+                        recoverable_failure = recoverable;
+                    }
+                    TronEvent::AgentEnd {
+                        error, recoverable, ..
+                    } => {
+                        return Ok(AgentTerminalOutcome {
+                            recoverable: error.is_some()
+                                && (recoverable_failure || recoverable.unwrap_or(false)),
+                            error,
+                        });
+                    }
+                    _ => {}
                 }
             }
             Ok(_) => {}
@@ -188,6 +201,16 @@ pub(super) async fn wait_for_agent_terminal(
             }
         }
     }
+}
+
+/// Terminal status for an agent-backed worker run.
+///
+/// `TurnFailed` is emitted before `AgentEnd` and owns the canonical typed
+/// recoverability classification. Keeping that bit here prevents a transient
+/// provider failure from being flattened into a structural worker failure.
+pub(super) struct AgentTerminalOutcome {
+    pub(super) error: Option<String>,
+    pub(super) recoverable: bool,
 }
 
 pub(super) struct DynamicWorkerHandler {

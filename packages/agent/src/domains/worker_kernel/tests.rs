@@ -72,7 +72,11 @@ fn ordinary_surface_always_contains_worker_coordination_primitives() {
 #[test]
 fn secret_and_engine_wide_operations_are_client_only() {
     let definitions = contract::function_definitions().expect("worker-kernel contracts");
-    for function_id in ["worker_kernel::webhook_rotate", "worker_kernel::stop_all"] {
+    for function_id in [
+        "worker_kernel::result_handoff",
+        "worker_kernel::webhook_rotate",
+        "worker_kernel::stop_all",
+    ] {
         let definition = definitions
             .iter()
             .find(|definition| definition.id.as_str() == function_id)

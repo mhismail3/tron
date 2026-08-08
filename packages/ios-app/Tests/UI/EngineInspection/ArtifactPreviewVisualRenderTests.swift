@@ -76,7 +76,6 @@ final class ArtifactPreviewVisualRenderTests: XCTestCase {
             artifact: artifact,
             repository: repository,
             viewModel: viewModel,
-            draftSessionId: "current-session",
             continuity: EngineConnectionContinuity(
                 state: .connected,
                 generation: 1

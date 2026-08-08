@@ -5,7 +5,7 @@ import Testing
 @MainActor
 @Suite("Worker Console View Model Tests")
 struct WorkerConsoleViewModelTests {
-    @Test("Refresh, inspect, typed invoke, stop, and disable use the worker kernel repository")
+    @Test("Refresh, inspect, stop, and disable use the worker kernel repository")
     func operationalFlowUsesWorkerKernelRepository() async {
         let repository = MockWorkerKernelRepository()
         let viewModel = WorkerConsoleViewModel()
@@ -31,12 +31,6 @@ struct WorkerConsoleViewModelTests {
         #expect(repository.runLimits == [20, 20])
         #expect(repository.inboxLimits == [20, 20])
         #expect(repository.inboxAttentionFilters == [true, true])
-
-        viewModel.invocationInput = #"{"query":"Tron"}"#
-        await viewModel.invoke(repository: repository, connectionState: .connected)
-        #expect(repository.invokedWorkerIds == ["research"])
-        #expect(repository.lastInput?["query"] as? String == "Tron")
-        #expect(viewModel.invocationResult?.contains("accepted") == true)
 
         await viewModel.stop(repository: repository, connectionState: .connected)
         #expect(repository.stoppedWorkerIds == ["research"])

@@ -32,7 +32,7 @@ pub(crate) use deliveries::{
     AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliveryRecord, AgentDeliverySourceKind,
     AgentDeliveryTarget, AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode,
     MAX_DELIVERIES_PER_TURN, NewAgentDelivery, NewAgentTaskDelivery, NewAgentWait,
-    WorkerTerminalEvidence,
+    NewWorkerResultTaskDelivery, WorkerTerminalEvidence,
 };
 pub use logs::{ClientLogEntry, ClientLogIngestResult, LogEntry, LogSessionFilter, RecentLogQuery};
 pub use organization::{

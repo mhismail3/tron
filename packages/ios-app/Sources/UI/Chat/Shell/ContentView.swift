@@ -86,6 +86,8 @@ struct ContentView: View {
     @State private var showNewSessionSheet = false
     @State private var showSettings = false
     @State private var deferredServerOnboardingLaunch = DeferredServerOnboardingLaunch()
+    @State private var sessionHandoffError: String?
+    @State private var isCreatingAgentSessionHandoff = false
 
     // Scroll target for deep link navigation (passed to ChatView)
     @State private var currentScrollTarget: ScrollTarget?
@@ -110,14 +112,31 @@ struct ContentView: View {
                 newSessionFlowSheet
             }
             .sheet(isPresented: $showSettings, onDismiss: launchDeferredServerOnboardingIfNeeded) {
-                SettingsView(draftSessionId: selectedSessionId) { server in
+                SettingsView { server in
                     deferredServerOnboardingLaunch.request(prefill: server)
                     showSettings = false
                 }
                     .environment(\.dependencies, dependencies)
             }
-            .onReceive(NotificationCenter.default.publisher(for: .createArtifactInChat)) { _ in
+            .alert(
+                "Could not start chat",
+                isPresented: Binding(
+                    get: { sessionHandoffError != nil },
+                    set: { if !$0 { sessionHandoffError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(sessionHandoffError ?? "")
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .startAgentSessionHandoff)
+            ) { notification in
+                guard let request = notification.object as? AgentSessionHandoffRequest else {
+                    return
+                }
                 showSettings = false
+                handleAgentSessionHandoff(request)
             }
             .onAppear {
                 // Initialize coordinator on first appear
@@ -365,6 +384,37 @@ struct ContentView: View {
     private func createQuickSession() {
         coordinator?.createQuickSession(selectedSessionId: selectedSessionId) { newId in
             presentSession(newId)
+        }
+    }
+
+    private func handleAgentSessionHandoff(
+        _ request: AgentSessionHandoffRequest
+    ) {
+        guard !isCreatingAgentSessionHandoff else { return }
+        isCreatingAgentSessionHandoff = true
+        let activeCoordinator: ContentViewCoordinator
+        if let coordinator {
+            activeCoordinator = coordinator
+        } else {
+            let created = ContentViewCoordinator(dependencies: dependencies)
+            coordinator = created
+            activeCoordinator = created
+        }
+        Task {
+            defer { isCreatingAgentSessionHandoff = false }
+            do {
+                let sessionId = try await activeCoordinator.createSession(
+                    for: request,
+                    selectedSessionId: selectedSessionId
+                )
+                presentSession(sessionId)
+            } catch {
+                TronLogger.shared.error(
+                    "Failed to create agent session handoff: \(error.localizedDescription)",
+                    category: .session
+                )
+                sessionHandoffError = error.localizedDescription
+            }
         }
     }
 

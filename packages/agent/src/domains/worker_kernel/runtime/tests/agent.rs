@@ -270,12 +270,13 @@ async fn agent_runner_captures_a_fast_terminal_provider_failure() {
         "fast provider failure was replaced by a generic result error: {result:?}"
     );
     assert!(
-        !runtime
+        runtime
             .store()
             .summary(&outcome.worker.worker_id)
             .unwrap()
             .unwrap()
-            .enabled
+            .enabled,
+        "a recoverable provider failure must fail only this invocation"
     );
 }
 

@@ -3,6 +3,7 @@ use super::*;
 #[tokio::test]
 async fn large_results_stay_exact_and_cross_provider_turns_by_reference() {
     let home = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
     let runtime = test_runtime_at(home.path(), None);
     let mut bundle = command_bundle(vec![
         "python3".to_owned(),
@@ -109,6 +110,87 @@ async fn large_results_stay_exact_and_cross_provider_turns_by_reference() {
             "{actor_id} must read the exact bounded result"
         );
     }
+
+    let handoff = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::result_handoff").unwrap(),
+            json!({
+                "invocationId":invocation_id,
+                "workingDirectory":workspace.path(),
+                "model":"gpt-5.6-sol",
+                "title":"Investigate large result"
+            }),
+            CausalContext::new(
+                ActorId::new("client:result-handoff").unwrap(),
+                ActorKind::Client,
+                TraceId::new("trace-result-handoff").unwrap(),
+            )
+            .with_idempotency_key("result-handoff-one"),
+        ))
+        .await;
+    assert!(
+        handoff.error.is_none(),
+        "handoff error: {:?}",
+        handoff.error
+    );
+    let handoff = handoff.value.unwrap();
+    let handoff_session_id = handoff["sessionId"].as_str().unwrap();
+    assert_eq!(
+        handoff["workingDirectory"],
+        workspace
+            .path()
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string()
+    );
+    assert!(
+        runtime
+            .event_store
+            .session_has_agent_result_grant(handoff_session_id, invocation_id)
+            .unwrap()
+    );
+
+    let granted = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::result_read").unwrap(),
+            json!({"invocationId":invocation_id,"pointer":"/summary"}),
+            CausalContext::new(
+                ActorId::new("agent:result-handoff-reader").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-result-handoff-reader").unwrap(),
+            )
+            .with_session_id(handoff_session_id),
+        ))
+        .await;
+    assert!(
+        granted.error.is_none(),
+        "granted read error: {:?}",
+        granted.error
+    );
+    assert_eq!(granted.value.unwrap()["value"], "large durable result");
+
+    let denied_handoff = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::result_handoff").unwrap(),
+            json!({
+                "invocationId":invocation_id,
+                "workingDirectory":workspace.path(),
+                "model":"gpt-5.6-sol",
+                "title":"Unauthorized handoff"
+            }),
+            CausalContext::new(
+                ActorId::new("agent:result-handoff").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("trace-result-handoff-denied").unwrap(),
+            )
+            .with_idempotency_key("result-handoff-denied"),
+        ))
+        .await;
+    assert!(denied_handoff.error.is_some());
 
     let fixed = runtime
         .host

@@ -320,6 +320,13 @@ protocol WorkerKernelRepository: AnyObject {
         limit: UInt8,
         sessionId: String?
     ) async throws -> WorkerResultChunkDTO
+    func createWorkerResultHandoff(
+        invocationId: String,
+        workingDirectory: String,
+        model: String,
+        title: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerResultHandoffDTO
     func workerInbox(
         workerId: String?,
         limit: UInt64,
@@ -416,6 +423,16 @@ protocol WorkerKernelRepository: AnyObject {
 }
 
 extension WorkerKernelRepository {
+    func createWorkerResultHandoff(
+        invocationId _: String,
+        workingDirectory _: String,
+        model _: String,
+        title _: String,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> WorkerResultHandoffDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
     func invokeWorker(
         workerId: String,
         input: AnyCodable,

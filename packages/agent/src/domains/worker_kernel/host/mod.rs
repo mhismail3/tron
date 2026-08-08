@@ -14,6 +14,8 @@
 //! - `search` owns bounded literal traversal of UTF-8 files.
 //! - `mutation` owns compare-and-swap edits and atomic writes.
 //! - `process` owns exact-argv execution and bounded process-tree I/O.
+//!   Structured stdin values are serialized exactly once; strings remain exact
+//!   bytes so callers never need a second JSON encoding layer.
 //! - `web` owns bounded explicit-URL retrieval.
 //! - `support` owns only shared admission, path resolution, and executor glue.
 

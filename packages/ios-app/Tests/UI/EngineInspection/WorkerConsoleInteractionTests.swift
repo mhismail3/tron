@@ -263,6 +263,10 @@ struct WorkerConsoleInteractionTests {
             encoding: .utf8
         )
         #expect(detail.contains("WorkerJSONDetailSheet(title: \"Input Schema\""))
+        #expect(detail.contains("title: \"Use in a new chat\""))
+        #expect(detail.contains("startAgentSessionHandoff(.worker("))
+        #expect(!detail.contains("TextEditor(text: $viewModel.invocationInput)"))
+        #expect(!detail.contains("title: \"New invocation\""))
         #expect(components.contains("WorkerRunDetailSheet("))
         #expect(components.contains("WorkerJSONDetailSheet("))
 
@@ -277,6 +281,8 @@ struct WorkerConsoleInteractionTests {
         #expect(resultInspector.contains("Open raw JSON"))
         #expect(resultInspector.contains("Result fields"))
         #expect(resultInspector.contains("StructuredDataFieldHeader("))
+        #expect(resultInspector.contains("title: \"Continue in a new chat\""))
+        #expect(resultInspector.contains("startAgentSessionHandoff(.workerResult("))
         #expect(!resultInspector.contains("Text(fieldMetadata(field))"))
         #expect(!resultInspector.contains(#"title: chunk.truncated ? "Result page" : "Result value""#))
         #expect(!resultInspector.contains("assembledResult"))
@@ -552,8 +558,8 @@ struct WorkerConsoleInteractionTests {
         #expect(versionMetadata.lowerBound < triggerMetadata.lowerBound)
         #expect(triggerMetadata.lowerBound < tags.lowerBound)
         let triggerStart = try #require(detail.range(of: "private func triggers"))
-        let invocationStart = try #require(detail.range(of: "private func invocation"))
-        let triggerSource = detail[triggerStart.lowerBound..<invocationStart.lowerBound]
+        let handoffStart = try #require(detail.range(of: "private func useInChat"))
+        let triggerSource = detail[triggerStart.lowerBound..<handoffStart.lowerBound]
         #expect(triggerSource.contains("WorkerConsoleGroup("))
         #expect(triggerSource.contains("WorkerConsoleInlineEmptyState"))
         #expect(!triggerSource.contains("WorkerConsoleSection("))
@@ -644,7 +650,7 @@ struct WorkerConsoleInteractionTests {
         #expect(toolRun.contains("if !isPresentingChildSheet,"))
     }
 
-    @Test("Artifact inbox uses Settings styling and targeted chat creation")
+    @Test("Artifact inbox uses Settings styling and new-chat handoffs")
     func artifactInboxUsesStandardSettingsPresentation() throws {
         let source = try String(
             contentsOf: iosAppRoot().appendingPathComponent(
@@ -657,20 +663,33 @@ struct WorkerConsoleInteractionTests {
         #expect(source.contains("SettingsCard(accent: .tronEmerald"))
         #expect(source.contains("TronTypography.sans"))
         #expect(source.contains("Create through chat"))
-        #expect(source.contains("ArtifactChatDraftRequest("))
-        #expect(source.contains(".disabled(draftSessionId == nil)"))
+        #expect(source.contains("startAgentSessionHandoff(.newArtifact)"))
         #expect(source.contains("struct ArtifactPreviewSheet: View"))
         #expect(!source.contains("ArtifactDetailView"))
         #expect(!source.contains("ArtifactExportDocument"))
         #expect(source.contains("ArtifactContentPreview(materialized: content)"))
         #expect(source.contains("TextContentView(text: text, role: .assistant)"))
-        #expect(source.contains("Attach to Current Draft"))
+        #expect(source.contains("Continue in New Chat"))
+        #expect(source.contains("startAgentSessionHandoff(.artifact("))
         #expect(source.contains(".workerConsoleSheetPresentation()"))
         #expect(source.contains(".safeAreaInset(edge: .bottom"))
         #expect(source.contains("ShareLink(item: url)"))
         #expect(source.contains("TronScrollEdgeEffects.applySoftToDescendantScrollViews"))
         #expect(source.contains(".glassEffect("))
         #expect(!source.contains("ArtifactQuickLookView(url: url)\n                    .ignoresSafeArea()"))
+    }
+
+    @Test("Agent-session handoffs admit only one chat creation at a time")
+    func agentSessionHandoffsAreSingleFlight() throws {
+        let source = try String(
+            contentsOf: iosAppRoot().appendingPathComponent(
+                "Sources/UI/Chat/Shell/ContentView.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("guard !isCreatingAgentSessionHandoff else { return }"))
+        #expect(source.contains("defer { isCreatingAgentSessionHandoff = false }"))
     }
 
     @Test("Engine dashboard renders retired workers in a final dedicated section")

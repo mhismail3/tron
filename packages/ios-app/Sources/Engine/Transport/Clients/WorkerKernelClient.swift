@@ -99,6 +99,25 @@ final class WorkerKernelClient: EngineDomainClient {
         )
     }
 
+    func createWorkerResultHandoff(
+        invocationId: String,
+        workingDirectory: String,
+        model: String,
+        title: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerResultHandoffDTO {
+        try await invokeWrite(
+            "worker_kernel::result_handoff",
+            WorkerResultHandoffRequestDTO(
+                invocationId: invocationId,
+                workingDirectory: workingDirectory,
+                model: model,
+                title: title
+            ),
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func workerInbox(
         workerId: String?,
         limit: UInt64 = 20,

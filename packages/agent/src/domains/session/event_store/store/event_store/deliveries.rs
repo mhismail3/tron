@@ -234,6 +234,23 @@ pub(crate) struct NewAgentTaskDelivery {
     pub(crate) causal_depth: u32,
 }
 
+/// One authenticated client action that creates a visible task and grants it
+/// read access to exactly one durable worker result.
+///
+/// The session and passive delivery commit in the same transaction so a UI
+/// can never navigate to a task that lacks the promised result authority.
+#[derive(Clone, Debug)]
+pub(crate) struct NewWorkerResultTaskDelivery {
+    pub(crate) idempotency_key: String,
+    pub(crate) title: String,
+    pub(crate) model: String,
+    pub(crate) working_directory: String,
+    pub(crate) result_invocation_id: String,
+    pub(crate) source_trace_id: Option<String>,
+    pub(crate) causal_depth: u32,
+    pub(crate) content: String,
+}
+
 #[derive(Debug)]
 pub(crate) struct CreateAgentTaskResult {
     pub(crate) session: CreateSessionResult,
@@ -634,13 +651,129 @@ fn to_sql_decode_error(error: EventStoreError) -> rusqlite::Error {
 }
 
 impl EventStore {
+    pub(crate) fn create_worker_result_task_with_delivery(
+        &self,
+        request: &NewWorkerResultTaskDelivery,
+    ) -> Result<CreateAgentTaskResult> {
+        if request.title.trim().is_empty() || request.title.chars().count() > 120 {
+            return Err(EventStoreError::InvalidOperation(
+                "worker-result task title must contain 1..=120 characters".to_owned(),
+            ));
+        }
+        if request.model.trim().is_empty() {
+            return Err(EventStoreError::InvalidOperation(
+                "worker-result task model must not be empty".to_owned(),
+            ));
+        }
+        if request.working_directory.trim().is_empty() {
+            return Err(EventStoreError::InvalidOperation(
+                "worker-result task working directory must not be empty".to_owned(),
+            ));
+        }
+        if request.result_invocation_id.trim().is_empty() {
+            return Err(EventStoreError::InvalidOperation(
+                "worker-result task invocation must not be empty".to_owned(),
+            ));
+        }
+
+        self.with_global_write_lock(|| {
+            let mut connection = self.conn()?;
+            let transaction =
+                connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+            if let Some(delivery) =
+                delivery_by_idempotency_key_in_tx(&transaction, &request.idempotency_key)?
+            {
+                if delivery.source_kind != AgentDeliverySourceKind::WorkerResult
+                    || delivery.result_invocation_id.as_deref()
+                        != Some(request.result_invocation_id.as_str())
+                {
+                    return Err(EventStoreError::InvalidOperation(
+                        "worker-result task idempotency key belongs to another request".to_owned(),
+                    ));
+                }
+                let target_session_id = delivery.target_session_id.as_deref().ok_or_else(|| {
+                    EventStoreError::InvalidOperation(
+                        "worker-result task delivery has no target session".to_owned(),
+                    )
+                })?;
+                let session =
+                    SessionRepo::get_by_id(&transaction, target_session_id)?.ok_or_else(|| {
+                        EventStoreError::SessionNotFound(target_session_id.to_owned())
+                    })?;
+                let root_event_id = session.root_event_id.as_deref().ok_or_else(|| {
+                    EventStoreError::InvalidOperation(
+                        "worker-result task has no root event".to_owned(),
+                    )
+                })?;
+                let root_event = EventRepo::get_by_id(&transaction, root_event_id)?
+                    .ok_or_else(|| EventStoreError::EventNotFound(root_event_id.to_owned()))?;
+                transaction.commit()?;
+                return Ok(CreateAgentTaskResult {
+                    session: CreateSessionResult {
+                        session,
+                        root_event,
+                    },
+                    delivery,
+                    created: false,
+                });
+            }
+
+            let session = create_session_in_tx(
+                &transaction,
+                &CreateSessionInTxOptions {
+                    model: request.model.trim(),
+                    workspace_path: request.working_directory.as_str(),
+                    title: Some(request.title.trim()),
+                    provider: None,
+                    tags: None,
+                },
+            )?;
+            let delivery = insert_delivery_in_tx(
+                &transaction,
+                &NewAgentDelivery {
+                    idempotency_key: request.idempotency_key.clone(),
+                    source_kind: AgentDeliverySourceKind::WorkerResult,
+                    intent: Some(AgentDeliveryIntent::Information),
+                    source_session_id: None,
+                    source_workspace_id: session.session.workspace_id.clone(),
+                    source_invocation_id: Some(request.result_invocation_id.clone()),
+                    source_trace_id: request.source_trace_id.clone(),
+                    // A paired client is the source of this handoff. The exact
+                    // result is provenance, but it must not be misrepresented
+                    // as the root of an agent-owned causal worker tree.
+                    source_root_invocation_id: None,
+                    causal_depth: request.causal_depth,
+                    target: AgentDeliveryTarget::Session {
+                        session_id: session.session.id.clone(),
+                    },
+                    wake_policy: AgentDeliveryWakePolicy::Passive,
+                    boundary: AgentDeliveryBoundary::NextTurn,
+                    originating_run_id: None,
+                    arrived_during_run_id: None,
+                    defer_until_run_id: None,
+                    result_invocation_id: Some(request.result_invocation_id.clone()),
+                    content: request.content.clone(),
+                    not_before: None,
+                    expires_at: None,
+                },
+            )?;
+            transaction.commit()?;
+            Ok(CreateAgentTaskResult {
+                session,
+                delivery,
+                created: true,
+            })
+        })
+    }
+
     pub(crate) fn create_agent_task_with_delivery(
         &self,
         request: &NewAgentTaskDelivery,
     ) -> Result<CreateAgentTaskResult> {
-        if request.title.trim().is_empty() || request.title.as_bytes().len() > 120 {
+        if request.title.trim().is_empty() || request.title.chars().count() > 120 {
             return Err(EventStoreError::InvalidOperation(
-                "agent-created task title must contain 1..=120 UTF-8 bytes".to_owned(),
+                "agent-created task title must contain 1..=120 characters".to_owned(),
             ));
         }
         self.with_global_write_lock(|| {

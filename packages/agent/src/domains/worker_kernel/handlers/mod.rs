@@ -67,6 +67,7 @@ operation_bindings! {
         "invoke" => |invocation, deps| { invocation::invoke_worker(invocation, deps).await },
         "await" => |invocation, deps| { support::response(invocation, invocation::await_worker(invocation, deps).await) },
         "result_read" => |invocation, deps| { support::response(invocation, invocation::read_worker_result(invocation, deps).await) },
+        "result_handoff" => |invocation, deps| { support::response(invocation, invocation::handoff_worker_result(invocation, deps).await) },
         "agent_send" => |invocation, deps| { support::response(invocation, agent_deliveries::send(invocation, deps).await) },
         "agent_wait_for_workers" => |invocation, deps| { support::response(invocation, agent_deliveries::wait_for_workers(invocation, deps).await) },
         "agent_mailbox_list" => |invocation, deps| { support::response(invocation, agent_deliveries::mailbox_list(invocation, deps).await) },

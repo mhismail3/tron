@@ -752,6 +752,27 @@ async fn worker_result_and_run_history_surfaces_remain_available() {
             .contains("StartedFinished")
     }));
 
+    let metric_runs = context
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::runs").unwrap(),
+            json!({"invocationId":source_invocation_id,"detail":"metrics"}),
+            actor().with_idempotency_key("read-metric-runs-source"),
+        ))
+        .await;
+    assert_eq!(metric_runs.error, None);
+    let metric_runs = metric_runs.value.unwrap();
+    assert_eq!(metric_runs["detail"], "metrics");
+    assert_eq!(metric_runs["graphs"], json!([]));
+    assert_eq!(metric_runs["metrics"].as_array().unwrap().len(), 1);
+    let metrics = &metric_runs["metrics"][0];
+    assert_eq!(metrics["invocationId"], source_invocation_id);
+    assert_eq!(metrics["workerId"], "background-report");
+    assert_eq!(metrics["status"], "completed");
+    assert!(metrics["timing"]["wallMs"].is_u64());
+    assert!(metrics["usage"]["cost"].is_number());
+    assert_eq!(metrics["usage"]["includesDescendants"], true);
+
     let graph_with_materialized_empty_filters = context
         .engine_host
         .invoke(Invocation::new_sync(

@@ -68,6 +68,9 @@
 //!   A delivery lease is preparation, not observation; only durable assistant
 //!   completion observes it, while setup failure or restart clears the lease
 //!   for at-least-once redelivery.
+//! - A paired-client result handoff creates its visible session and exact
+//!   passive result grant in one transaction. The result invocation remains
+//!   provenance, never a fabricated root of an agent-owned causal worker tree.
 //! - A successful `request_user_input` completion is the only pending marker;
 //!   its structured `message.user` answer resolves it. One partial unique
 //!   index enforces one answer per session/invocation, with no pause table or
@@ -138,7 +141,7 @@ pub(crate) use store::{
     AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliveryRecord, AgentDeliverySourceKind,
     AgentDeliveryTarget, AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode,
     AppendBatchItem, MAX_DELIVERIES_PER_TURN, NewAgentDelivery, NewAgentTaskDelivery, NewAgentWait,
-    UserInputRequestState, WorkerTerminalEvidence,
+    NewWorkerResultTaskDelivery, UserInputRequestState, WorkerTerminalEvidence,
 };
 pub use store::{
     AppendOptions, ClientLogEntry, ClientLogIngestResult, CreateSessionResult, EventStore,

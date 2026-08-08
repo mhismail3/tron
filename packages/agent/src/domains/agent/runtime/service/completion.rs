@@ -348,11 +348,17 @@ pub(super) fn publish_terminal_lifecycle(
     sequence_counter: Option<&AtomicI64>,
     failure_event: Option<TronEvent>,
 ) {
+    let recoverable = failure_event.as_ref().and_then(|event| match event {
+        TronEvent::Error { recoverable, .. } => *recoverable,
+        TronEvent::TurnFailed { recoverable, .. } => Some(*recoverable),
+        _ => None,
+    });
     emit_maybe_sequenced(
         broadcast,
         TronEvent::AgentEnd {
             base: BaseEvent::now(session_id),
             error,
+            recoverable,
         },
         sequence_counter,
     );
@@ -463,7 +469,13 @@ mod tests {
             events.recv().await.unwrap(),
             events.recv().await.unwrap(),
         ];
-        assert!(matches!(&received[0], TronEvent::AgentEnd { .. }));
+        assert!(matches!(
+            &received[0],
+            TronEvent::AgentEnd {
+                recoverable: Some(false),
+                ..
+            }
+        ));
         assert!(matches!(&received[1], TronEvent::Error { .. }));
         assert!(matches!(
             &received[2],

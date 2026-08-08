@@ -39,12 +39,28 @@ fn agent_complete_projects_to_idle_lifecycle_phase() {
     let event = TronEvent::AgentEnd {
         base: BaseEvent::now("s1"),
         error: None,
+        recoverable: None,
     };
 
     let projected = tron_event_to_projected(&event);
 
     assert_eq!(projected.server_event.event_type, "agent.complete");
     assert_eq!(projected.server_event.data.unwrap()["agentPhase"], "idle");
+}
+
+#[test]
+fn failed_agent_completion_projects_recoverability() {
+    let event = TronEvent::AgentEnd {
+        base: BaseEvent::now("s1"),
+        error: Some("provider temporarily unavailable".to_owned()),
+        recoverable: Some(true),
+    };
+
+    let projected = tron_event_to_projected(&event);
+    let data = projected.server_event.data.unwrap();
+
+    assert_eq!(data["error"], "provider temporarily unavailable");
+    assert_eq!(data["recoverable"], true);
 }
 
 #[test]

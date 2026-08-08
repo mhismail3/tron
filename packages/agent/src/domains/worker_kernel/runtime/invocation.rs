@@ -2,6 +2,30 @@
 
 use super::*;
 
+#[derive(Debug)]
+pub(super) struct WorkerExecutionError {
+    message: String,
+    disables_worker: bool,
+}
+
+impl WorkerExecutionError {
+    fn recoverable_agent_failure(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            disables_worker: false,
+        }
+    }
+}
+
+impl From<String> for WorkerExecutionError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            disables_worker: true,
+        }
+    }
+}
+
 /// Synchronous last-resort custody for one claimed attempt.
 ///
 /// Normal execution disarms this immediately after durable terminalization.
@@ -211,11 +235,11 @@ impl WorkerRuntime {
         );
         let execution = tokio::select! {
             result = timed => result
-                .map_err(|_| format!("worker invocation exceeded {invocation_timeout_seconds} seconds"))
+                .map_err(|_| WorkerExecutionError::from(format!("worker invocation exceeded {invocation_timeout_seconds} seconds")))
                 .and_then(|result| result),
-            () = global_stop.cancelled() => Err("worker invocation stopped by engine stop-all".to_owned()),
-            () = worker_stop.cancelled() => Err(self.worker_cancelled_error(&queued.worker_id, false)),
-            () = invocation_stop.cancelled() => Err("worker invocation cancelled explicitly".to_owned()),
+            () = global_stop.cancelled() => Err("worker invocation stopped by engine stop-all".to_owned().into()),
+            () = worker_stop.cancelled() => Err(self.worker_cancelled_error(&queued.worker_id, false).into()),
+            () = invocation_stop.cancelled() => Err("worker invocation cancelled explicitly".to_owned().into()),
         };
         if execution.is_ok() {
             self.store.record_run_stage(
@@ -314,16 +338,17 @@ impl WorkerRuntime {
             )) => self
                 .apply_session_title_result(&queued, &output)
                 .await
+                .map_err(WorkerExecutionError::from)
                 .and_then(|session_organization_dispatch| {
                     let mut worker_dispatches = worker_dispatches;
                     if let Some(dispatch) = session_organization_dispatch {
                         if worker_dispatches.len()
                             >= crate::domains::worker_kernel::dispatches::MAX_WORKER_DISPATCHES_PER_INVOCATION
                         {
-                            return Err(
+                            return Err(WorkerExecutionError::from(
                                 "session organization handoff exceeds the per-invocation worker dispatch limit"
                                     .to_owned(),
-                            );
+                            ));
                         }
                         worker_dispatches.push(dispatch);
                     }
@@ -363,13 +388,16 @@ impl WorkerRuntime {
                 )?,
             Err(error) => {
                 let secrets = self.load_all_runtime_secrets().unwrap_or_default();
-                let redacted = redact_known_secrets(&error, &secrets);
+                let redacted = redact_known_secrets(&error.message, &secrets);
                 let completed = self.store.complete_invocation(
                     &queued.invocation_id,
                     &queued.worker_id,
                     Err(&redacted),
                 )?;
-                if !was_stopped && execution_failure_disables_worker(&queued.trigger_kind) {
+                if !was_stopped
+                    && error.disables_worker
+                    && execution_failure_disables_worker(&queued.trigger_kind)
+                {
                     self.store
                         .mark_failed(&queued.worker_id, "execution", &redacted)?;
                     let _ = self
@@ -524,7 +552,7 @@ impl WorkerRuntime {
         self: &Arc<Self>,
         worker: &ActiveWorker,
         invocation: &InvocationRecord,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, WorkerExecutionError> {
         let secrets = self.load_secrets(&worker.bundle)?;
         match &worker.bundle.runner {
             WorkerRunner::Agent {
@@ -566,6 +594,7 @@ impl WorkerRuntime {
                     Some(invocation),
                 )
                 .await
+                .map_err(WorkerExecutionError::from)
             }
             WorkerRunner::Service {
                 command,
@@ -623,7 +652,7 @@ impl WorkerRuntime {
                 if remaining == 0 && !is_current {
                     self.stop_resident_key(&key).await;
                 }
-                result
+                result.map_err(WorkerExecutionError::from)
             }
         }
     }
@@ -658,7 +687,7 @@ impl WorkerRuntime {
         model: Option<&str>,
         reasoning_level: Option<&str>,
         secrets: &HashMap<String, String>,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, WorkerExecutionError> {
         let (ephemeral, workdir) = self.materialize_runtime_artifact(
             worker,
             "worker-invocations",
@@ -751,9 +780,9 @@ impl WorkerRuntime {
             ))
             .await;
         if let Some(error) = outcome.error {
-            return Err(format!("start agent worker: {error}"));
+            return Err(format!("start agent worker: {error}").into());
         }
-        let terminal_error = wait_for_agent_terminal(
+        let terminal = wait_for_agent_terminal(
             self,
             &mut agent_events,
             &session_id,
@@ -761,8 +790,13 @@ impl WorkerRuntime {
         )
         .await?;
         agent_run_guard.disarm();
-        if let Some(error) = terminal_error {
-            return Err(format!("agent worker failed: {error}"));
+        if let Some(error) = terminal.error {
+            let message = format!("agent worker failed: {error}");
+            return Err(if terminal.recoverable {
+                WorkerExecutionError::recoverable_agent_failure(message)
+            } else {
+                WorkerExecutionError::from(message)
+            });
         }
         let rows = self
             .event_store
@@ -772,14 +806,15 @@ impl WorkerRuntime {
             .event_store
             .resolve_event_payloads(&rows)
             .map_err(|error| format!("resolve agent worker result: {error}"))?;
-        rows.iter()
+        Ok(rows
+            .iter()
             .zip(payloads)
             .rev()
             .find(|(row, _)| row.event_type == "message.assistant")
             .map(|(_, payload)| {
                 normalize_agent_output(payload.get("content").cloned().unwrap_or(payload))
             })
-            .ok_or_else(|| "agent worker completed without an assistant result".to_owned())
+            .ok_or_else(|| "agent worker completed without an assistant result".to_owned())?)
     }
 
     pub(super) async fn ensure_resident(

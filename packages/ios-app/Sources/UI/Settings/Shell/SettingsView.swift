@@ -35,15 +35,12 @@ struct SettingsView: View {
     @State private var settingsState = SettingsState()
     @State private var projectionOwnerId: UUID?
     private let launchServerOnboarding: (PairedServer?) -> Void
-    private let draftSessionId: String?
 
     init(
-        draftSessionId: String? = nil,
         launchServerOnboarding: @escaping (PairedServer?) -> Void = {
             ServerOnboardingLauncher.post(prefill: $0)
         }
     ) {
-        self.draftSessionId = draftSessionId
         self.launchServerOnboarding = launchServerOnboarding
     }
 
@@ -244,7 +241,6 @@ struct SettingsView: View {
         case .artifacts:
             ArtifactInboxView(
                 repository: dependencies.workerKernelRepository,
-                draftSessionId: draftSessionId,
                 continuity: connectionRepository.continuity,
                 serverSelectionVersion: dependencies.activeServerSelectionVersion
             )

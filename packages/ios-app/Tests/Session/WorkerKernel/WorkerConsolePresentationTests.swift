@@ -16,8 +16,8 @@ struct WorkerConsolePresentationTests {
         )
     }
 
-    @Test("Input schemas become readable fields and a valid invocation template")
-    func schemaProjection() throws {
+    @Test("Input schemas become readable fields")
+    func schemaProjection() {
         let schema = AnyCodable([
             "type": "object",
             "properties": [
@@ -31,13 +31,6 @@ struct WorkerConsolePresentationTests {
         #expect(fields.map(\.name) == ["depth", "query"])
         #expect(fields.first(where: { $0.name == "query" })?.isRequired == true)
         #expect(fields.first(where: { $0.name == "query" })?.detail == "Question to research")
-
-        let template = WorkerConsolePresentation.invocationTemplate(from: schema)
-        let object = try #require(
-            JSONSerialization.jsonObject(with: Data(template.utf8)) as? [String: Any]
-        )
-        #expect(object["query"] as? String == "")
-        #expect(object["depth"] as? Int == 0)
     }
 
     @Test("Hashes, timestamps, labels, and provenance stay compact")

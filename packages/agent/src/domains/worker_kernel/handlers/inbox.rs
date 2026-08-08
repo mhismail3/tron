@@ -19,6 +19,7 @@ const FULL_VALUE_BYTES: usize = 8_192;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HistoryDetail {
     Summary,
+    Metrics,
     Full,
     Graph,
 }
@@ -32,6 +33,7 @@ impl HistoryDetail {
             .unwrap_or("summary")
         {
             "summary" => Ok(Self::Summary),
+            "metrics" => Ok(Self::Metrics),
             "full" => Ok(Self::Full),
             "graph" => Ok(Self::Graph),
             detail => Err(format!("unsupported worker history detail '{detail}'")),
@@ -41,6 +43,7 @@ impl HistoryDetail {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Summary => "summary",
+            Self::Metrics => "metrics",
             Self::Full => "full",
             Self::Graph => "graph",
         }
@@ -48,7 +51,7 @@ impl HistoryDetail {
 
     const fn maximum(self) -> u32 {
         match self {
-            Self::Summary => MAX_SUMMARY_HISTORY_LIMIT,
+            Self::Summary | Self::Metrics => MAX_SUMMARY_HISTORY_LIMIT,
             Self::Full => MAX_FULL_HISTORY_LIMIT,
             Self::Graph => MAX_GRAPH_HISTORY_LIMIT,
         }
@@ -188,6 +191,12 @@ pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, 
             }
         }
     }
+    let mut metrics = Vec::new();
+    if detail == HistoryDetail::Metrics {
+        for run in &runs {
+            metrics.push(deps.runtime.project_run_metrics(run)?);
+        }
+    }
     let (runs, content_truncated): (Vec<_>, Vec<_>) = runs
         .iter()
         .map(|run| project_invocation(run, detail))
@@ -200,6 +209,7 @@ pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, 
         "attempts":attempts,
         "traces":traces,
         "graphs":graphs,
+        "metrics":metrics,
         "returned":returned,
         "truncated":request_truncated || has_more,
         "nextOffset":next_offset,
@@ -219,7 +229,7 @@ fn project_invocation(record: &InvocationRecord, detail: HistoryDetail) -> (Valu
     }
     if let Some(error) = record.error.as_deref() {
         let maximum = match detail {
-            HistoryDetail::Summary => SUMMARY_VALUE_BYTES,
+            HistoryDetail::Summary | HistoryDetail::Metrics => SUMMARY_VALUE_BYTES,
             HistoryDetail::Full | HistoryDetail::Graph => FULL_VALUE_BYTES,
         };
         if error.len() > maximum {
@@ -242,11 +252,11 @@ fn project_history_value(value: &Value, detail: HistoryDetail) -> (Value, bool) 
     }
     let serialized = serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned());
     let maximum = match detail {
-        HistoryDetail::Summary => SUMMARY_VALUE_BYTES,
+        HistoryDetail::Summary | HistoryDetail::Metrics => SUMMARY_VALUE_BYTES,
         HistoryDetail::Full | HistoryDetail::Graph => FULL_VALUE_BYTES,
     };
     let truncated = serialized.len() > maximum;
-    if detail != HistoryDetail::Summary && !truncated {
+    if !matches!(detail, HistoryDetail::Summary | HistoryDetail::Metrics) && !truncated {
         return (value.clone(), false);
     }
     (

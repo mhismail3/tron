@@ -182,9 +182,13 @@ struct SessionSidebar: View {
         .sheet(isPresented: $showWorkerConsole) {
             WorkerConsoleSheet(
                 viewModel: workerConsole,
-                repository: dependencies.workerKernelRepository,
-                modelRepository: dependencies.modelRepository
+                repository: dependencies.workerKernelRepository
             )
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .startAgentSessionHandoff)
+        ) { _ in
+            showWorkerConsole = false
         }
     }
 

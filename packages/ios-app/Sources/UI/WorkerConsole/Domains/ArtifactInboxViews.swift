@@ -19,7 +19,6 @@ private struct ArtifactPreviewRefreshKey: Equatable {
 
 struct ArtifactInboxView: View {
     let repository: any WorkerKernelRepository
-    let draftSessionId: String?
     let continuity: EngineConnectionContinuity
     let serverSelectionVersion: Int
     @State private var viewModel = ArtifactInboxViewModel()
@@ -65,20 +64,12 @@ struct ArtifactInboxView: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     } actions: {
                         Button("Create through chat") {
-                            guard let draftSessionId else { return }
-                            NotificationCenter.default.post(
-                                name: .createArtifactInChat,
-                                object: ArtifactChatDraftRequest(
-                                    sessionId: draftSessionId,
-                                    prompt: "Create a document artifact for me. Ask what content and format I need before generating it."
-                                )
-                            )
+                            startAgentSessionHandoff(.newArtifact)
                         }
                         .font(TronTypography.sans(
                             size: TronTypography.sizeBodySM,
                             weight: .semibold
                         ))
-                        .disabled(draftSessionId == nil)
                     }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -140,7 +131,6 @@ struct ArtifactInboxView: View {
                 artifact: artifact,
                 repository: repository,
                 viewModel: viewModel,
-                draftSessionId: draftSessionId,
                 continuity: continuity,
                 onDeleted: {
                     selectedArtifact = nil
@@ -253,14 +243,12 @@ struct ArtifactPreviewSheet: View {
     let artifact: WorkerArtifactDTO
     let repository: any WorkerKernelRepository
     let viewModel: ArtifactInboxViewModel
-    let draftSessionId: String?
     let continuity: EngineConnectionContinuity
     let onDeleted: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var showDeleteConfirmation = false
     @State private var deleteErrorMessage: String?
-    @State private var attachedToDraft = false
 
     private var content: MaterializedWorkerArtifact? {
         viewModel.materialized[artifact.id]
@@ -283,7 +271,7 @@ struct ArtifactPreviewSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                attachToDraftAction
+                continueInChatAction
             }
         }
         .workerConsoleSheetPresentation()
@@ -452,28 +440,21 @@ struct ArtifactPreviewSheet: View {
     }
 
     @ViewBuilder
-    private var attachToDraftAction: some View {
-        if let draftSessionId, content != nil {
+    private var continueInChatAction: some View {
+        if content != nil {
             Button {
                 guard let attachment = viewModel.attachment(for: artifact) else {
                     return
                 }
-                NotificationCenter.default.post(
-                    name: .attachArtifactToDraft,
-                    object: ArtifactDraftAttachmentRequest(
-                        sessionId: draftSessionId,
-                        attachment: attachment
-                    )
-                )
-                attachedToDraft = true
+                startAgentSessionHandoff(.artifact(
+                    displayName: artifact.displayName,
+                    attachment: attachment
+                ))
+                dismiss()
             } label: {
                 Label(
-                    attachedToDraft
-                        ? "Attached to Current Draft"
-                        : "Attach to Current Draft",
-                    systemImage: attachedToDraft
-                        ? "checkmark.circle.fill"
-                        : "paperclip"
+                    "Continue in New Chat",
+                    systemImage: "bubble.left.and.text.bubble.right.fill"
                 )
                 .font(TronTypography.sans(
                     size: TronTypography.sizeBodySM,
@@ -484,7 +465,6 @@ struct ArtifactPreviewSheet: View {
                 .padding(.vertical, 11)
             }
             .buttonStyle(.plain)
-            .disabled(attachedToDraft)
             .glassEffect(
                 .regular.tint(Color.tronPhthaloGreen.opacity(0.16)),
                 in: Capsule()

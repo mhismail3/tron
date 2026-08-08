@@ -212,4 +212,38 @@ mod tests {
 
         assert_eq!(result["stdout"], "missing\n");
     }
+
+    #[tokio::test]
+    async fn structured_stdin_is_serialized_as_json_once() {
+        let home = tempfile::tempdir().unwrap();
+        let runtime = test_runtime(home.path());
+        let result = process_run(
+            &Invocation::new_sync(
+                FunctionId::new("worker_kernel::process_run").unwrap(),
+                json!({
+                    "command":[
+                        "python3",
+                        "-c",
+                        "import json,sys; value=json.load(sys.stdin); print(value['action'], len(value['metrics']))"
+                    ],
+                    "stdin":{
+                        "action":"record_case",
+                        "metrics":{}
+                    }
+                }),
+                CausalContext::new(
+                    ActorId::new("agent:structured-stdin").unwrap(),
+                    crate::engine::ActorKind::Agent,
+                    TraceId::generate(),
+                )
+                .with_working_directory(home.path().display().to_string()),
+            ),
+            &runtime,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["status"], 0);
+        assert_eq!(result["stdout"], "record_case 0\n");
+    }
 }

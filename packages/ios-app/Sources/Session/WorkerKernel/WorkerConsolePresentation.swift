@@ -251,19 +251,6 @@ enum WorkerConsolePresentation {
         }
     }
 
-    static func invocationTemplate(from schema: AnyCodable?) -> String {
-        let fields = schemaFields(from: schema)
-        guard !fields.isEmpty else { return "{}" }
-        let object = Dictionary(uniqueKeysWithValues: fields.map { field in
-            (field.name, exampleValue(for: field.type))
-        })
-        guard let data = try? JSONSerialization.data(
-            withJSONObject: object,
-            options: [.prettyPrinted, .sortedKeys]
-        ) else { return "{}" }
-        return String(decoding: data, as: UTF8.self)
-    }
-
     static func provenance(from value: AnyCodable?) -> [WorkerProvenancePresentation] {
         guard let value else { return [] }
         let entries: [[String: Any]]
@@ -313,15 +300,6 @@ enum WorkerConsolePresentation {
         return find(value.value, depth: 0)
     }
 
-    private static func exampleValue(for type: String) -> Any {
-        switch normalized(type) {
-        case "boolean": false
-        case "integer", "number": 0
-        case "array": []
-        case "object": [:]
-        default: ""
-        }
-    }
 }
 
 enum WorkerPresentationSectionKind: String, CaseIterable, Sendable {

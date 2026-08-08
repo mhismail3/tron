@@ -14,6 +14,8 @@
 //! to present a serialized worker input object as the run summary. Equal-time
 //! durable timeline facts retain lifecycle order (queued before detached)
 //! rather than falling back to display-text ordering.
+//! `run_metrics` projects the same requested-invocation timing and usage as a
+//! compact envelope without materializing graph nodes or timeline content.
 //! `admission` owns schema-checked durable enqueue, idempotent replay,
 //! exact-version latency prediction, bounded foreground ownership, atomic
 //! detachment, and observational waits plus the transient bridge to an
@@ -43,9 +45,10 @@
 //! invocation. Pure relevance derives short-lived exact-input idempotency from
 //! canonical JSON; session- and trace-bound hooks preserve their causal key. It
 //! owns neither a result cache nor a second execution path. Request-scoped
-//! failures from optional semantic hooks remain terminal evidence on that
-//! invocation without globally disabling their worker; structural activation,
-//! integrity, and invalid-output failures still quarantine broken versions.
+//! failures from optional semantic hooks and typed recoverable provider
+//! failures from agent runners remain terminal evidence on that invocation
+//! without globally disabling their worker; structural activation, integrity,
+//! and invalid-output failures still quarantine broken versions.
 //! `agent_deliveries`
 //! owns coordination tools, import ordering, waits, and safe delivery-only
 //! wakeups; `agent_delivery_import` projects closed terminal/effect envelopes
@@ -111,6 +114,7 @@ mod lifecycle;
 mod notifications;
 mod resident;
 mod result;
+mod run_metrics;
 mod run_projection;
 mod run_projection_format;
 mod secrets;

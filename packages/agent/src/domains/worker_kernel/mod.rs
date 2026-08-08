@@ -235,7 +235,10 @@
 //! exact direct child that its durable invocation admitted. Other agent and
 //! worker callers require the originating session or an explicit Agent
 //! Delivery grant; authenticated paired clients and system recovery may
-//! inspect profile-local results. That
+//! inspect profile-local results. The authenticated client-only result-handoff
+//! operation atomically creates one visible session and one passive grant for
+//! the selected invocation; it does not copy the result or add model
+//! vocabulary. That
 //! page is present in full for the immediately
 //! following provider turn, then the agent context keeps only its reference
 //! and pointer coordinates; a worker explicitly re-reads it if later reasoning

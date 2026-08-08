@@ -76,7 +76,6 @@ struct ResearchSuiteSheet: View {
                 WorkerDetailSheet(
                     viewModel: technicalViewModel,
                     repository: repository,
-                    modelRepository: dependencies.modelRepository,
                     mode: .technical
                 )
             }

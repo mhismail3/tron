@@ -218,6 +218,19 @@ pub(super) async fn read_worker_result(
     )
 }
 
+pub(super) async fn handoff_worker_result(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, String> {
+    deps.runtime.create_worker_result_handoff(
+        invocation,
+        &required_string(&invocation.payload, "invocationId")?,
+        &required_string(&invocation.payload, "workingDirectory")?,
+        &required_string(&invocation.payload, "model")?,
+        &required_string(&invocation.payload, "title")?,
+    )
+}
+
 pub(super) async fn project_worker_results(
     invocation: &Invocation,
     deps: &Deps,

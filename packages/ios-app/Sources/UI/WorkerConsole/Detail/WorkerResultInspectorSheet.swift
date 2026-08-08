@@ -214,6 +214,7 @@ struct WorkerResultInspectorSheet: View {
                     } else if let chunk {
                         if location.pointer.isEmpty {
                             resultSummary(chunk.reference)
+                            resultHandoffAction(chunk.reference)
                         } else {
                             resultPath
                         }
@@ -290,6 +291,30 @@ struct WorkerResultInspectorSheet: View {
         }
         .padding(.bottom, 4)
         .accessibilityIdentifier("worker-result-readable-summary")
+    }
+
+    private func resultHandoffAction(
+        _ reference: WorkerResultReferenceDTO
+    ) -> some View {
+        let workerName = WorkerConsolePresentation.displayLabel(reference.workerId)
+        return WorkerConsoleSection(
+            title: "Continue in a new chat",
+            detail: "Give this exact durable result to an agent that can explain, debug, or act on it. No JSON copying is required.",
+            accent: .tronEmerald
+        ) {
+            TronPrimaryActionButton(
+                title: "Investigate with agent",
+                systemImage: "bubble.left.and.text.bubble.right.fill",
+                accent: .tronEmerald,
+                isEnabled: dependencies.connectionRepository.connectionState.isConnected
+            ) {
+                startAgentSessionHandoff(.workerResult(
+                    invocationId: invocationId,
+                    workerName: workerName
+                ))
+                dismiss()
+            }
+        }
     }
 
     private var resultPath: some View {
