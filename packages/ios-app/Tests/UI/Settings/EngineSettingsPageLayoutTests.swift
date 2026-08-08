@@ -408,8 +408,8 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(
             settingsMain.contains("var settingsFooterDockView: some View")
                 && settingsMain.contains(".padding(.horizontal, MainSettingsFooterLayout.horizontalPadding)")
-                && settingsMain.contains(".padding(.leading, MainSettingsFooterLayout.taglineLeadingPadding)"),
-            "The pinned footer should align its content with the Settings rows"
+                && settingsMain.contains(".frame(maxWidth: .infinity, alignment: .center)"),
+            "The pinned large-detent footer should center its build text"
         )
         XCTAssertFalse(
             settingsMain.contains("SettingsFooterBackdrop()"),
@@ -423,7 +423,6 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
         XCTAssertTrue(
             support.contains("static let horizontalPadding")
-                && support.contains("static let taglineLeadingPadding")
                 && support.contains("static let verticalPadding")
                 && !support.contains("feedbackButton")
                 && !support.contains("textLeadingPadding")

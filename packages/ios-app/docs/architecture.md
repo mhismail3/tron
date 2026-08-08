@@ -798,11 +798,16 @@ lifecycle instead of reusing a cancelled destination shell.
 Configured session creation publishes the new local session projection before
 navigating or dismissing its sheet. Chat identity also includes the
 selected-server generation, so a deep link or server switch cannot reuse a
-view model backed by the previous server's repositories. Initial
-reconstruction first mounts any durable rows already held by the device event
-cache, then refreshes them from the server-authoritative snapshot. Successful
-snapshots update that cache; closing the chat performs no redundant history
-RPC. One `ConversationHistoryPhase` drives transcript reveal and the composer:
+view model backed by the previous server's repositories. Initial reconstruction
+first mounts an indexed, newest-first bounded window from the device event
+cache, then refreshes it from the server-authoritative bounded snapshot. Fork
+caches use one bounded recursive ancestor query across the session boundary.
+Older history remains cursor-paged and user-driven rather than being decoded
+during presentation. Successful snapshots update that cache; provider-request
+audit bodies are reduced to deferred markers at the cache-write boundary, and
+cache initialization compacts bodies left by older app builds. Closing the chat
+performs no redundant history RPC. One `ConversationHistoryPhase` drives
+transcript reveal and the composer:
 loading, cached-and-synchronizing, authoritative, or recoverable failure. Cached
 rows switch the prompt to `Type here` and permit draft text, attachment
 selection, and speech capture; only send waits for the server snapshot to
@@ -903,12 +908,16 @@ session truth. Token usage, model-window pressure, compaction, model switching,
 and `session::fork` retain their existing owners. The latest
 `model.provider_request` event is the sole durable explanation of what a model
 received. The sheet uses that one latest event rather than presenting a
-non-actionable request-history card. While connected it reads one lightweight
-summary through `session::context_requests(limit: 1)` and loads exact
-manifest/audit evidence through `session::context_request_detail` only when a
-detail row is opened. While offline it projects the latest provider-request
-event already held by EventDatabase. There is no context-specific database,
-cache, subscription, or polling service.
+non-actionable request-history card. Top-level reconstruction carries one
+bounded latest-request inventory, which iOS stores beside its existing cached
+session row. The sheet can therefore present that inventory offline without
+decoding transcript events. While connected it reconciles the summary through
+`session::context_requests(limit: 1)` and loads exact manifest/audit evidence
+through `session::context_request_detail` only when a detail row is opened.
+There is no context-specific database, subscription, or polling service, and
+exact provider audit bodies never enter the device transcript cache. Competing
+cache writes retain the highest server sequence so a slower reconstruction
+cannot overwrite a newer visible-sheet refresh.
 
 `UI/SessionContext/` keeps that ownership visible in source: the main sheet owns
 only presentation state and navigation; sections render the manifest; loading
@@ -939,19 +948,21 @@ Navigation rows across the Session Context surface remain fully tappable
 without trailing chevrons; their leading icon, title, supporting text, and
 interactive glass treatment carry the affordance.
 
-The sheet seeds its inventory synchronously from the already-reconstructed
-latest audit, then decodes that cached manifest off the main actor to prewarm
-detail navigation. Provider Request and Tool Surface show bounded structured
-evidence first. Their exact JSON stays inside one internally scrolling
-selectable text view rather than expanding the parent scroll by hundreds of
-kilobytes. While visible, a view-scoped coordinator owns independent worker,
-delivery/wait, and provider-audit lanes. Each lane allows one read in flight and
-retains a dirty bit so an invalidation during that read guarantees a follow-up
-without cancelling authoritative work. A session/server generation prevents
-stale responses from applying after switches or disconnects. The sheet reads
-all lanes on open, reconnect, and foreground resume. Only worker and
-delivery/wait state poll once per second while known activity remains; the
-immutable provider audit receives one final refresh when activity settles.
+The sheet seeds its inventory from the compact cached session projection; it
+does not predecode or prewarm an exact manifest. Provider Request and Tool
+Surface show bounded structured evidence first. Their exact JSON stays inside
+one internally scrolling selectable text view rather than expanding the parent
+scroll by hundreds of kilobytes. The main sheet uses a lazy vertical stack. Its
+view-scoped coordinator owns independent worker, delivery/wait, and provider
+summary lanes, each allowing one read in flight and retaining a dirty bit so an
+invalidation during that read guarantees a follow-up without cancelling
+authoritative work. Only the provider summary is eager. Worker and delivery/
+wait reads activate when their rows become visible, and reconnect or foreground
+refreshes only lanes that have been activated. A session/server generation
+prevents stale responses from applying after switches or disconnects. Only
+visible worker and delivery/wait state poll once per second while known
+activity remains; the immutable provider audit receives one final summary
+refresh when activity settles.
 Worker graphs publish before the optional friendly-name catalog lookup. Prior
 snapshots remain visible during refresh; cancellation is silent control flow,
 while a genuine refresh failure either offers retry for an empty lane or labels

@@ -47,10 +47,6 @@ struct SettingsView: View {
         self.launchServerOnboarding = launchServerOnboarding
     }
 
-    var hasPairedServers: Bool {
-        !dependencies.pairedServerStore.servers.isEmpty
-    }
-
     var serverSettingsReady: Bool {
         dependencies.pairedServerStore.activeServer != nil
             && connectionRepository.connectionState.isConnected
@@ -63,17 +59,18 @@ struct SettingsView: View {
     }
 
     var isRecoveringServerConnection: Bool {
-        guard dependencies.pairedServerStore.activeServer != nil else { return false }
-        switch connectionRepository.connectionState {
-        case .disconnected, .connecting, .reconnecting, .deployRestarting:
-            return true
-        case .connected, .failed, .unauthorized:
-            return false
-        }
+        SettingsServerStatusPolicy.isRecoveryInProgress(
+            activeServerExists: dependencies.pairedServerStore.activeServer != nil,
+            connectionState: connectionRepository.connectionState
+        )
     }
 
     var showsServerUnavailableState: Bool {
-        hasPairedServers && !serverSettingsReady
+        SettingsServerStatusPolicy.showsUnavailableState(
+            activeServerExists: dependencies.pairedServerStore.activeServer != nil,
+            connectionState: connectionRepository.connectionState,
+            loadError: settingsState.loadError
+        )
     }
 
     var serverUnavailableDescription: String {
@@ -83,7 +80,7 @@ struct SettingsView: View {
         if activeServerUnavailable {
             return SettingsLabels.connectedServerUnavailableDescription
         }
-        return settingsState.loadError ?? SettingsLabels.loadingServerSettingsDescription
+        return settingsState.loadError ?? SettingsLabels.connectedServerUnavailableDescription
     }
 
     var serverUnavailableTitle: String {
@@ -93,7 +90,7 @@ struct SettingsView: View {
         if activeServerUnavailable || settingsState.loadError != nil {
             return "Server settings unavailable"
         }
-        return "Loading server settings"
+        return "Reconnecting to server"
     }
 
     var serverUnavailableIcon: String {
@@ -103,7 +100,7 @@ struct SettingsView: View {
         if activeServerUnavailable || settingsState.loadError != nil {
             return "wifi.exclamationmark"
         }
-        return "hourglass"
+        return "arrow.triangle.2.circlepath"
     }
 
     private var selectedModelDisplayName: String {

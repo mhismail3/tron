@@ -34,7 +34,7 @@ final class DatabaseSchemaTests: XCTestCase {
             "output_tokens", "last_turn_input_tokens", "cache_read_tokens",
             "cache_creation_tokens", "cost", "is_fork", "is_processing", "server_origin",
             "activity_lines_json",
-            "labels_json", "organization_group",
+            "labels_json", "organization_group", "context_summary_json",
         ])
         await actor.close()
     }
@@ -51,7 +51,7 @@ final class DatabaseSchemaTests: XCTestCase {
         await actor.close()
     }
 
-    func testExistingSessionCacheAddsOrganizationProjectionColumns() async throws {
+    func testExistingSessionCacheAddsCurrentProjectionColumns() async throws {
         var db: OpaquePointer?
         XCTAssertEqual(sqlite3_open(dbPath, &db), SQLITE_OK)
         XCTAssertEqual(
@@ -83,6 +83,7 @@ final class DatabaseSchemaTests: XCTestCase {
         let columns = try await tableColumns("sessions", actor: actor)
         XCTAssertTrue(columns.contains("labels_json"))
         XCTAssertTrue(columns.contains("organization_group"))
+        XCTAssertTrue(columns.contains("context_summary_json"))
         await actor.close()
     }
 

@@ -24,7 +24,10 @@ extension ChatViewModel {
         }
 
         do {
-            let sessionEvents = try await manager.eventDB.events.getBySession(sessionId)
+            let sessionEvents = try await manager.eventDB.events.getRecentBySession(
+                sessionId,
+                limit: Self.initialReconstructionEventLimit
+            )
             guard !sessionEvents.isEmpty else {
                 sessionLoadDiagnostics.recordCache(hit: false, eventCount: 0, messageCount: 0)
                 return false
@@ -34,7 +37,10 @@ extension ChatViewModel {
             let cachedEvents: [SessionEvent]
             if cachedSession?.isFork == true,
                let latestCachedEventId = sessionEvents.last?.id {
-                cachedEvents = try await manager.eventDB.events.getAncestors(latestCachedEventId)
+                cachedEvents = try await manager.eventDB.events.getRecentAncestors(
+                    latestCachedEventId,
+                    limit: Self.initialReconstructionEventLimit
+                )
             } else {
                 cachedEvents = sessionEvents
             }
@@ -128,6 +134,9 @@ extension ChatViewModel {
             .first(where: { $0.id == sessionId })?
             .cost
         scheduleReconstructionEventCache(mergedEvents)
+        if let contextSummary = result.metadata.latestContextRequest {
+            scheduleContextSummaryCache(contextSummary)
+        }
 
         // INVARIANT: Do not suspend between this marker and
         // `conversationHistoryPhase = .authoritative`. Messages, controls,
@@ -271,6 +280,25 @@ extension ChatViewModel {
             } catch {
                 logger.warning(
                     "[CACHE] Could not persist reconstructed session history: \(error.localizedDescription)",
+                    category: .database
+                )
+            }
+        }
+    }
+
+    /// Keep the tiny Session Context inventory beside cached session metadata.
+    /// Exact audit manifests never enter the transcript cache and remain a
+    /// user-initiated server read.
+    private func scheduleContextSummaryCache(_ summary: SessionContextRequestSummaryDTO) {
+        guard let manager = eventStoreManager else { return }
+        let sessionsRepository = manager.eventDB.sessions
+        let sessionId = sessionId
+        Task {
+            do {
+                try await sessionsRepository.storeContextSummary(summary, sessionId: sessionId)
+            } catch {
+                logger.warning(
+                    "[CACHE] Could not persist Session Context summary: \(error.localizedDescription)",
                     category: .database
                 )
             }

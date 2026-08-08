@@ -232,6 +232,99 @@ final class SessionRepository: @unchecked Sendable {
 
     // MARK: - Query Operations
 
+    /// Read the latest bounded provider-context inventory cached beside the
+    /// session metadata. A malformed disposable value is treated as a cache
+    /// miss; the next authoritative reconstruction replaces it.
+    func getContextSummary(_ sessionId: String) async throws -> SessionContextRequestSummaryDTO? {
+        guard let transport else {
+            throw EventDatabaseError.executeFailed("Database transport not available")
+        }
+
+        return try await transport.withDB { db in
+            var statement: OpaquePointer?
+            let sql = "SELECT context_summary_json FROM sessions WHERE id = ?"
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
+            }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, sessionId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            guard sqlite3_step(statement) == SQLITE_ROW,
+                  let json = sqliteGetOptionalText(statement, 0),
+                  let data = json.data(using: .utf8) else {
+                return nil
+            }
+            do {
+                return try JSONDecoder().decode(SessionContextRequestSummaryDTO.self, from: data)
+            } catch {
+                logger.warning(
+                    "Discarding malformed cached Session Context summary",
+                    category: .database
+                )
+                return nil
+            }
+        }
+    }
+
+    /// Persist one compact inventory without rewriting the server-owned
+    /// session-list projection. Competing non-empty writes are monotonic by
+    /// server sequence. The row is intentionally optional: a direct deep link
+    /// can reconstruct before the session list has been cached.
+    func storeContextSummary(
+        _ summary: SessionContextRequestSummaryDTO?,
+        sessionId: String
+    ) async throws {
+        guard let transport else {
+            throw EventDatabaseError.executeFailed("Database transport not available")
+        }
+        let json: String?
+        if let summary {
+            let data = try JSONEncoder().encode(summary)
+            guard let encoded = String(data: data, encoding: .utf8) else {
+                throw EventDatabaseError.executeFailed("Could not encode Session Context summary")
+            }
+            json = encoded
+        } else {
+            json = nil
+        }
+
+        try await transport.withDB { db in
+            var statement: OpaquePointer?
+            let sql: String
+            if summary != nil {
+                // Reconstruction and a visible Session Context refresh can
+                // finish in either order. A snapshot at an older watermark
+                // must never replace a newer cached inventory.
+                sql = """
+                    UPDATE sessions
+                    SET context_summary_json = ?
+                    WHERE id = ?
+                      AND COALESCE(
+                          CASE WHEN json_valid(context_summary_json)
+                               THEN CAST(json_extract(context_summary_json, '$.sequence') AS INTEGER)
+                          END,
+                          -1
+                      ) <= ?
+                """
+            } else {
+                sql = "UPDATE sessions SET context_summary_json = NULL WHERE id = ?"
+            }
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
+            }
+            defer { sqlite3_finalize(statement) }
+            if let json {
+                sqlite3_bind_text(statement, 1, json, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+                sqlite3_bind_text(statement, 2, sessionId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+                sqlite3_bind_int64(statement, 3, summary?.sequence ?? -1)
+            } else {
+                sqlite3_bind_text(statement, 1, sessionId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            }
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw EventDatabaseError.insertFailed(sqliteErrorMessage(db))
+            }
+        }
+    }
+
     /// Get a single session by ID
     func get(_ id: String) async throws -> CachedSession? {
         guard let transport = transport else {

@@ -236,8 +236,7 @@ extension SettingsView {
         Text("Built by Moose \u{1FACE} \u{00B7} v0.1.0")
             .font(TronTypography.sans(size: TronTypography.sizeCaption))
             .foregroundStyle(.tronTextMuted)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, MainSettingsFooterLayout.taglineLeadingPadding)
+            .frame(maxWidth: .infinity, alignment: .center)
             .lineLimit(1)
             .minimumScaleFactor(0.92)
     }

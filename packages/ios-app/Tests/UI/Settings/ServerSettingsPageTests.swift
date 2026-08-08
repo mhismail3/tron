@@ -11,7 +11,38 @@ struct ServerSettingsPageTests {
         #expect(SettingsLabels.connectToNewServer == "Connect to a new server")
         #expect(SettingsLabels.repairActiveServerPairing == "Re-pair this server")
         #expect(SettingsLabels.connectedServerUnavailableDescription == "The connected server can't be reached.")
-        #expect(SettingsLabels.loadingServerSettingsDescription == "Loading server settings from the active server.")
+    }
+
+    @Test("server banner distinguishes snapshot hydration from connection recovery")
+    func serverBannerDistinguishesSnapshotHydrationFromConnectionRecovery() {
+        #expect(!SettingsServerStatusPolicy.showsUnavailableState(
+            activeServerExists: true,
+            connectionState: .connected,
+            loadError: nil
+        ))
+        #expect(SettingsServerStatusPolicy.showsUnavailableState(
+            activeServerExists: true,
+            connectionState: .connected,
+            loadError: "read failed"
+        ))
+        #expect(SettingsServerStatusPolicy.showsUnavailableState(
+            activeServerExists: true,
+            connectionState: .connecting,
+            loadError: nil
+        ))
+        #expect(SettingsServerStatusPolicy.isRecoveryInProgress(
+            activeServerExists: true,
+            connectionState: .connecting
+        ))
+        #expect(!SettingsServerStatusPolicy.isRecoveryInProgress(
+            activeServerExists: true,
+            connectionState: .disconnected
+        ))
+        #expect(!SettingsServerStatusPolicy.showsUnavailableState(
+            activeServerExists: false,
+            connectionState: .disconnected,
+            loadError: nil
+        ))
     }
 
     @Test("server onboarding CTAs keep label and prefill semantics aligned")

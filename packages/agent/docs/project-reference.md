@@ -1455,6 +1455,14 @@ requested page, so `limit: 1` never inflates into two full context reads. Curren
 summaries include instruction, attachment-message, Agent Delivery, and
 environment-presence counts; older clients and legacy audit rows remain valid.
 
+Ordinary `session::reconstruct` pages preserve every provider-request event ID,
+parent link, sequence, and cursor but replace each provider audit body with a
+small `projection: "deferred"` marker. A top-level snapshot embeds only the
+bounded latest-request inventory in `metadata.latestContextRequest`. This keeps
+chat reconstruction proportional to its bounded event page instead of the
+accumulated size of historical model audits; exact manifests remain server-owned
+and are read only through the explicit context-detail, export, and replay paths.
+
 At each provider request boundary, the worker-kernel-owned resolver captures the
 catalog revision and ranks dynamic workers by explicit session promotion,
 deterministic relevance score, recent successes, recency, and identity.
@@ -2876,11 +2884,13 @@ transport event; the resulting context size is reflected by later session/token
 truth rather than an unwritten `context.cleared` storage row. The iOS composer
 projects that same token truth as a context ring. Session Context uses the
 provider-request event as its sole request-context authority. It shows no
-request-history card: the already-reconstructed latest event supplies an
-immediate lightweight inventory, `session::context_requests(limit: 1)`
-reconciles that overview, and `session::context_request_detail` loads exact
-detail only for an opened row. Offline it decodes v3/v4 rows already present in
-the existing EventDatabase rather than maintaining another cache.
+request-history card: reconstruction metadata supplies an immediate bounded
+latest-request inventory, `session::context_requests(limit: 1)` reconciles that
+overview, and `session::context_request_detail` loads exact detail only for an
+opened row. iOS stores only that compact inventory beside its disposable
+session row for offline presentation. Provider audit bodies never enter the
+transcript cache, and older cached bodies are reduced to deferred markers when
+the cache schema opens.
 
 The sheet presents instructions, conversation/compaction, attachments,
 environment, request-specific Agent Delivery contributions, exact selected and

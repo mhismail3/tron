@@ -40,9 +40,18 @@
 //!   lastSequence: i64,       // highest sequence represented by this snapshot
 //!   isRunning: bool,
 //!   runId: string?,          // active run id, null when idle
-//!   metadata: {...},
+//!   metadata: {
+//!     latestContextRequest: {...}?, // compact inventory; full audit is lazy
+//!     ...
+//!   },
 //! }
 //! ```
+//!
+//! `model.provider_request` rows remain in the event chain so parent links and
+//! pagination cursors stay exact, but their audit bodies are replaced with a
+//! tiny deferred marker in `events`. Only the latest bounded inventory is
+//! projected through metadata. Full provider manifests are available solely
+//! through `session::context_request_detail`.
 //!
 //! `operations` exposes the authenticated function adapter; this module owns
 //! loading, generation validation, pagination, and projection through the
@@ -53,11 +62,11 @@
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 use crate::domains::agent::r#loop::orchestrator::turn_accumulator::TurnReconstructionSnapshot;
 use crate::domains::session::Deps;
-use crate::domains::session::event_store::{EventRow, EventStore};
+use crate::domains::session::event_store::{EventRow, EventStore, EventType};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, ToolError};
 use crate::shared::server::events::event_row_to_wire_with_payload;
@@ -128,6 +137,45 @@ fn same_reconstruction_generation(before: &ActiveSnapshot, after: &ActiveSnapsho
         }
         _ => false,
     }
+}
+
+fn reconstruction_wire_events(
+    event_store: &EventStore,
+    events: &[EventRow],
+) -> Result<(Vec<Value>, usize), ToolError> {
+    let ordinary_events = events
+        .iter()
+        .filter(|event| event.event_type != EventType::ModelProviderRequest.as_str())
+        .cloned()
+        .collect::<Vec<_>>();
+    let resolved_payloads = event_store
+        .resolve_event_payloads(&ordinary_events)
+        .map_err(|error| ToolError::Internal {
+            message: format!("Failed to resolve event payloads: {error}"),
+        })?;
+    let mut resolved_payloads = resolved_payloads.into_iter();
+    let mut deferred_provider_audits = 0;
+    let wire_events = events
+        .iter()
+        .map(|event| {
+            let payload = if event.event_type == EventType::ModelProviderRequest.as_str() {
+                deferred_provider_audits += 1;
+                json!({
+                    "projection": "deferred",
+                    "turn": event.turn,
+                    "model": event.model,
+                    "providerType": event.provider_type,
+                })
+            } else {
+                resolved_payloads
+                    .next()
+                    .expect("ordinary event payload count matches event rows")
+            };
+            event_row_to_wire_with_payload(event, Some(payload))
+        })
+        .collect();
+    debug_assert!(resolved_payloads.next().is_none());
+    Ok((wire_events, deferred_provider_audits))
 }
 
 async fn load_durable_reconstruction(
@@ -270,7 +318,7 @@ impl SessionReconstructionService {
         // Later events are already buffered by iOS and replay above the cut.
         // Turn/run transitions retry, while same-turn deltas do not invalidate
         // the earlier coherent snapshot.
-        let (events, has_more, session_metadata, captured_snapshot, run_id) = if is_top_level {
+        let (events, has_more, mut session_metadata, captured_snapshot, run_id) = if is_top_level {
             loop {
                 let captured = deps
                     .orchestrator
@@ -375,22 +423,36 @@ impl SessionReconstructionService {
         let last_sequence = represented_sequence.unwrap_or(durable_sequence);
         let oldest_event_id = events.first().map(|e| e.id.clone());
 
-        // 4. Convert events to wire format
-        let resolved_payloads =
-            deps.event_store
-                .resolve_event_payloads(&events)
-                .map_err(|error| ToolError::Internal {
-                    message: format!("Failed to resolve event payloads: {error}"),
-                })?;
-        let wire_events: Vec<Value> = events
-            .iter()
-            .zip(resolved_payloads)
-            .map(|(event, payload)| event_row_to_wire_with_payload(event, Some(payload)))
-            .collect();
+        if is_top_level {
+            match crate::domains::session::query::SessionQueryService::latest_context_request_summary(
+                deps,
+                session_id.clone(),
+                last_sequence,
+            )
+            .await
+            {
+                Ok(summary) => session_metadata["latestContextRequest"] =
+                    summary.unwrap_or(Value::Null),
+                Err(error) => {
+                    warn!(
+                        session_id,
+                        error = %error,
+                        "latest provider-context inventory unavailable during reconstruction"
+                    );
+                    session_metadata["latestContextRequest"] = Value::Null;
+                }
+            }
+        }
+
+        // 4. Convert events to the client reconstruction projection. Exact
+        // provider-request manifests are audit data, not transcript data.
+        let (wire_events, deferred_provider_audits) =
+            reconstruction_wire_events(&deps.event_store, &events)?;
 
         debug!(
             session_id,
             event_count = wire_events.len(),
+            deferred_provider_audits,
             has_more,
             is_running,
             last_sequence,

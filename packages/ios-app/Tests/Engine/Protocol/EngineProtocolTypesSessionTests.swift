@@ -2,6 +2,68 @@ import Testing
 import Foundation
 @testable import TronMobile
 
+@Suite("Reconstruction metadata decoding")
+struct ReconstructionMetadataDecodingTests {
+    @Test("Latest context inventory decodes without the provider audit body")
+    func latestContextInventoryDecodes() throws {
+        let data = Data("""
+        {
+          "model":"gpt-5.6-sol",
+          "turnCount":26,
+          "workingDirectory":"/workspace",
+          "title":"Research",
+          "tokenUsage":null,
+          "totalCost":3.69,
+          "latestContextRequest":{
+            "eventId":"provider-request-26",
+            "sequence":178,
+            "timestamp":"2026-08-07T12:00:00Z",
+            "format":"tron.model_provider_request.v4",
+            "turn":26,
+            "providerType":"openai",
+            "providerName":"OpenAI",
+            "model":"gpt-5.6-sol",
+            "requestClassification":"interactive",
+            "messageCount":62,
+            "toolCount":23,
+            "automaticContextCount":0,
+            "instructionCount":2,
+            "attachmentMessageCount":0,
+            "agentDeliveryCount":0,
+            "environmentAvailable":true,
+            "manifestAvailable":true,
+            "provenanceAvailability":"complete"
+          }
+        }
+        """.utf8)
+
+        let metadata = try JSONDecoder().decode(ReconstructMetadata.self, from: data)
+        let summary = try #require(metadata.latestContextRequest)
+
+        #expect(summary.eventId == "provider-request-26")
+        #expect(summary.messageCount == 62)
+        #expect(summary.toolCount == 23)
+    }
+
+    @Test("Older reconstruction metadata remains compatible")
+    func metadataWithoutContextInventoryDecodes() throws {
+        let data = Data("""
+        {
+          "model":"gpt-5.6-sol",
+          "turnCount":1,
+          "workingDirectory":"/workspace",
+          "title":"Legacy",
+          "tokenUsage":null,
+          "totalCost":0.01
+        }
+        """.utf8)
+
+        let metadata = try JSONDecoder().decode(ReconstructMetadata.self, from: data)
+
+        #expect(metadata.latestContextRequest == nil)
+    }
+}
+
 @Suite("SessionInfo Tests")
 struct SessionInfoTests {
 

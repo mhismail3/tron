@@ -228,9 +228,11 @@ cards. Their right-aligned descriptions stay to two or three short concepts:
 Servers/session defaults/context, OAuth/API keys, and
 appearance/notifications/behavior. A thin muted divider separates those
 destinations from the Archive All Sessions and Reset All Settings cards in the
-Danger Zone. When the paired server is unavailable or server-backed settings
-have not loaded, Providers is disabled and a server-unavailable card appears
-below the destination rows. That card labels its active-server-prefilled pairing action as
+Danger Zone. Providers remains disabled until server-backed settings have
+loaded. Ordinary hydration over an already connected transport is silent; the
+server-status card appears only for a real connecting/reconnecting state, a
+disconnected/failed/unauthorized transport, or an actual settings read error.
+That card labels its active-server-prefilled pairing action as
 `Re-pair this server`; `Connect to a new server` remains reserved for launches
 that do not prefill a paired server.
 Device-only preferences such as onboarding completion,
@@ -243,8 +245,8 @@ rows support local switching, retry, setup, and removal alongside `Connect to a
 new server`. No summary hero or separate Diagnostics block precedes those real
 controls. The compact medium Settings detent contains no footer. At the large
 phone detent, the version tagline appears once beneath the independently
-scrolling settings content and remains pinned to the sheet bottom without a
-separate solid backdrop. Settings has no feedback-mail action; local diagnostics
+scrolling settings content, centered in the sheet, and remains pinned to the
+sheet bottom without a separate solid backdrop. Settings has no feedback-mail action; local diagnostics
 remain available through Logs. Product update checks are not part of the
 primitive iOS shell. When the active paired server is unreachable, Engine
 remains available so those local server actions still work, while Providers
