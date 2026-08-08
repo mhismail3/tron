@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 
 final class UserInputSheetLayoutTests: XCTestCase {
-    func testQuestionsUseIndependentScrollablePagesAndDirectOptionRows() throws {
+    func testQuestionsUseIndependentScrollablePagesWithFixedProgressAndDirectOptionRows() throws {
         let sheet = try source(pathComponents: [
             "Sources", "UI", "Chat", "Sheets", "UserInputSheet.swift",
         ])
@@ -10,10 +10,20 @@ final class UserInputSheetLayoutTests: XCTestCase {
         XCTAssertTrue(sheet.contains("TabView(selection: $currentQuestionIndex)"))
         XCTAssertTrue(sheet.contains(".tabViewStyle(.page(indexDisplayMode: .never))"))
         XCTAssertTrue(sheet.contains("questionPage(question, index: index)"))
+        XCTAssertTrue(sheet.contains("fixedQuestionStatus"))
+        XCTAssertTrue(sheet.contains("private var pageProgress"))
+        XCTAssertTrue(sheet.contains("page == currentQuestionIndex"))
         XCTAssertTrue(sheet.contains("private func questionPage"))
         XCTAssertTrue(sheet.contains("ScrollView"))
         XCTAssertTrue(sheet.contains(".padding(.bottom, 40)"))
+        XCTAssertTrue(sheet.contains("VStack(spacing: 10)"))
         XCTAssertFalse(sheet.contains("private func questionSection"))
+        XCTAssertFalse(sheet.contains("question.header"))
+        let pageFunction = try XCTUnwrap(sheet.range(of: "private func questionPage"))
+        let progressProperty = try XCTUnwrap(sheet.range(of: "private var pageProgress"))
+        XCTAssertLessThan(pageFunction.lowerBound, progressProperty.lowerBound)
+        let pageSource = sheet[pageFunction.lowerBound..<progressProperty.lowerBound]
+        XCTAssertFalse(pageSource.contains("pageProgress"))
         XCTAssertTrue(sheet.contains(".sectionFill(accentColor, subtle: !selected"))
         XCTAssertTrue(sheet.contains(".focused($focusedQuestionId, equals: question.id)"))
     }
@@ -35,7 +45,10 @@ final class UserInputSheetLayoutTests: XCTestCase {
         XCTAssertTrue(sheet.contains("case .pending: .tronWarning"))
         XCTAssertTrue(sheet.contains("case .answered: .tronSuccess"))
         XCTAssertTrue(sheet.contains("UserInputPresentation.chatTitle(for: request)"))
-        XCTAssertTrue(sheet.contains("UserInputPresentation.chatDetail(for: request)"))
+        XCTAssertFalse(sheet.contains("UserInputPresentation.chatDetail"))
+        XCTAssertTrue(sheet.contains(".chipStyle(statusColor"))
+        XCTAssertTrue(sheet.contains(".contentShape(Capsule())"))
+        XCTAssertFalse(sheet.contains(".sectionFill(statusColor"))
         XCTAssertFalse(messageContent.contains("case userInputAnswer"))
         XCTAssertFalse(messageBubble.contains("UserInputAnswerChip"))
         XCTAssertFalse(messaging.contains("content: .userInputAnswer"))

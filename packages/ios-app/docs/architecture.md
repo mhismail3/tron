@@ -669,11 +669,13 @@ the standard medium/large native sheet; ordinary tool chips are not duplicated.
 If another sheet is active, the latest request waits for that presentation to
 dismiss. The sheet supports one to three questions, two or three explicit
 choices each, and a custom `Other` answer, using shared sheet chrome and Tron
-typography. Each question owns one horizontally swipeable page whose vertical
-content scrolls independently, so compact detents, the keyboard, large text,
-and a multiline `Other` value cannot clip the final choice. The question and
-header sit directly in the sheet while every choice is its own first-level
-row. Pending presentation uses the warning accent; answered presentation uses
+typography. A fixed status row owns the current page count and dots while each
+question and its choices occupy one horizontally swipeable page whose vertical
+content scrolls independently. Only the question content moves during a page
+gesture; page position updates in place. Compact choice spacing and independent
+rows keep the sheet concise, while compact detents, the keyboard, large text,
+and a multiline `Other` value cannot clip the final choice. Pending presentation
+uses the warning accent; answered presentation uses
 the success accent and restores the selected values as non-interactive audit
 rows. A successful tool completion is the durable pending marker. The
 sheet admits choices immediately but enables submit only after the producing
@@ -685,10 +687,12 @@ starts a new run. Live state, cached reconstruction, pagination context, app
 foregrounding, reconnect, and server restart therefore derive pending/answered
 presentation from the same canonical events. The structured answer event is
 folded into the original request card instead of producing a redundant second
-chat message; that card changes to `Answered N questions`, summarizes the saved
-values, and reopens the same read-only pages. There is no client pause object or
-blocked network continuation. Delegated background workers never receive this
-foreground primitive and return missing information to their parent agent.
+chat message. Its compact tool-style pill changes to `Answered N questions`
+without duplicating question or answer detail; tapping it reopens the same
+read-only pages with all context and saved selections. There is no client pause
+object or blocked network continuation. Delegated background workers never
+receive this foreground primitive and return missing information to their parent
+agent.
 
 Prompt submission is transactional at the composer boundary. The sendable text
 and prepared attachment ids are snapshotted. A pre-accept encoding, frame-size,

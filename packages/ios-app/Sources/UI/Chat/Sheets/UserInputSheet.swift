@@ -60,14 +60,18 @@ struct UserInputSheet: View {
 
     var body: some View {
         NavigationStack {
-            TabView(selection: $currentQuestionIndex) {
-                ForEach(Array(request.questions.enumerated()), id: \.element.id) { index, question in
-                    questionPage(question, index: index)
-                        .tag(index)
+            VStack(spacing: 0) {
+                fixedQuestionStatus
+
+                TabView(selection: $currentQuestionIndex) {
+                    ForEach(Array(request.questions.enumerated()), id: \.element.id) { index, question in
+                        questionPage(question, index: index)
+                            .tag(index)
+                    }
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .animation(.snappy(duration: 0.24), value: currentQuestionIndex)
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .animation(.snappy(duration: 0.24), value: currentQuestionIndex)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -100,34 +104,39 @@ struct UserInputSheet: View {
         .tronErrorAlert(message: $errorMessage)
     }
 
+    private var fixedQuestionStatus: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            pageProgress
+
+            if request.isAnswerable && isAgentActive {
+                Label("Finishing the current step…", systemImage: "arrow.triangle.2.circlepath")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
+    }
+
     private func questionPage(_ question: UserInputQuestion, index: Int) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                pageProgress(index: index)
-
-                if request.isAnswerable && isAgentActive {
-                    Label("Finishing the current step…", systemImage: "arrow.triangle.2.circlepath")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                Text(question.header.uppercased())
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(accentColor)
-
                 Text(question.question)
                     .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
                     .foregroundStyle(.tronTextPrimary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                ForEach(question.options) { option in
-                    optionRow(question: question, option: option)
+                VStack(spacing: 10) {
+                    ForEach(question.options) { option in
+                        optionRow(question: question, option: option)
+                    }
+                    otherRow(question)
                 }
-                otherRow(question)
             }
             .padding(.horizontal, 20)
-            .padding(.top, 16)
+            .padding(.top, 8)
             .padding(.bottom, 40)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
@@ -136,7 +145,7 @@ struct UserInputSheet: View {
         .accessibilityLabel("Question \(index + 1) of \(request.questions.count)")
     }
 
-    private func pageProgress(index: Int) -> some View {
+    private var pageProgress: some View {
         HStack(spacing: 10) {
             Text(isReadOnly ? "Review answer" : "Select one")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
@@ -148,17 +157,18 @@ struct UserInputSheet: View {
                 HStack(spacing: 5) {
                     ForEach(request.questions.indices, id: \.self) { page in
                         Circle()
-                            .fill(page == index ? accentColor : Color.tronTextMuted.opacity(0.35))
+                            .fill(page == currentQuestionIndex ? accentColor : Color.tronTextMuted.opacity(0.35))
                             .frame(width: 7, height: 7)
                     }
                 }
                 .accessibilityHidden(true)
             }
 
-            Text("\(index + 1)/\(request.questions.count)")
+            Text("\(currentQuestionIndex + 1)/\(request.questions.count)")
                 .font(TronTypography.codeCaption)
                 .foregroundStyle(accentColor)
         }
+        .animation(.easeInOut(duration: 0.18), value: currentQuestionIndex)
     }
 
     @ViewBuilder
@@ -306,34 +316,35 @@ struct UserInputRequestChip: View {
     let request: UserInputRequest
     let onTap: () -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 9) {
+            HStack(spacing: 7) {
                 Image(systemName: statusIcon)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(statusColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(UserInputPresentation.chatTitle(for: request))
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(UserInputPresentation.chatDetail(for: request))
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(.tronTextMuted)
+                    .foregroundStyle(statusColor)
+                    .frame(width: 18, height: 18)
+
+                Text(UserInputPresentation.chatTitle(for: request))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                    .foregroundStyle(statusColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+
+                Image(systemName: "chevron.right")
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                    .foregroundStyle(statusColor.opacity(0.56))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .sectionFill(statusColor, interactive: true)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .frame(maxWidth: 460, alignment: .leading)
+        .chipStyle(statusColor, tintOpacity: colorScheme == .light ? 0.30 : 0.38)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityLabel(accessibilityLabel)
     }
 
     private var statusIcon: String {
@@ -350,5 +361,12 @@ struct UserInputRequestChip: View {
         case .answered: .tronSuccess
         case .failed: .tronError
         }
+    }
+
+    private var accessibilityLabel: String {
+        if case .failed(let reason) = request.status {
+            return "\(UserInputPresentation.chatTitle(for: request)), \(reason)"
+        }
+        return UserInputPresentation.chatTitle(for: request)
     }
 }
