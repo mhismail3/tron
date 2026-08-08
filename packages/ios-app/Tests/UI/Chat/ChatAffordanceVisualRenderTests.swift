@@ -23,11 +23,15 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             ("chat-local-error-pill.png", AnyView(Self.localErrorView), CGSize(width: 430, height: 180)),
             ("chat-thinking-neural-spark.png", AnyView(Self.thinkingView), CGSize(width: 430, height: 180)),
             ("chat-tool-chip.png", AnyView(Self.toolChipView), CGSize(width: 430, height: 180)),
+            ("chat-question-chip-states.png", AnyView(Self.questionChipStatesView), CGSize(width: 430, height: 260)),
             ("chat-connection-toast.png", AnyView(Self.connectionToastView), CGSize(width: 430, height: 180)),
             ("chat-composer-idle.png", AnyView(ComposerFixture(phase: .authoritative)), CGSize(width: 430, height: 180)),
             ("chat-composer-loading.png", AnyView(ComposerFixture(phase: .loading)), CGSize(width: 430, height: 180)),
             ("chat-composer-cached-syncing.png", AnyView(ComposerFixture(phase: .cachedSynchronizing)), CGSize(width: 430, height: 180)),
             ("sheet-loading-typography.png", AnyView(Self.sheetLoadingView), CGSize(width: 430, height: 180)),
+            ("question-sheet-pending.png", AnyView(Self.pendingQuestionSheet), CGSize(width: 430, height: 700)),
+            ("question-sheet-other.png", AnyView(Self.otherQuestionSheet), CGSize(width: 430, height: 700)),
+            ("question-sheet-answered.png", AnyView(Self.answeredQuestionSheet), CGSize(width: 430, height: 700)),
         ]
 
         for (name, view, size) in samples {
@@ -107,6 +111,50 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             .background(Color(uiColor: .systemBackground))
     }
 
+    private static var questionChipStatesView: some View {
+        VStack(spacing: 14) {
+            UserInputRequestChip(request: pendingQuestionRequest, onTap: {})
+            UserInputRequestChip(request: answeredQuestionRequest, onTap: {})
+        }
+        .padding(20)
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private static var pendingQuestionSheet: some View {
+        UserInputSheet(
+            request: pendingQuestionRequest,
+            isAgentActive: false,
+            onSubmit: { _ in }
+        )
+    }
+
+    private static var answeredQuestionSheet: some View {
+        UserInputSheet(
+            request: answeredQuestionRequest,
+            isAgentActive: false,
+            onSubmit: { _ in }
+        )
+    }
+
+    private static var otherQuestionSheet: some View {
+        UserInputSheet(
+            request: UserInputRequest(
+                invocationId: "visual-other",
+                questions: [questionFixtures[0]],
+                answers: [
+                    UserInputAnswer(
+                        questionId: "color",
+                        selectedLabel: nil,
+                        freeText: "A custom ultraviolet accent"
+                    ),
+                ],
+                status: .pending
+            ),
+            isAgentActive: false,
+            onSubmit: { _ in }
+        )
+    }
+
     private static var connectionToastView: some View {
         let toastCenter = ToastCenter()
         toastCenter.push(
@@ -138,6 +186,61 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
                 traceId: "trace-visual"
             )
         )
+    }
+
+    private static var pendingQuestionRequest: UserInputRequest {
+        UserInputRequest(
+            invocationId: "visual-question",
+            questions: questionFixtures,
+            answers: [],
+            status: .pending
+        )
+    }
+
+    private static var answeredQuestionRequest: UserInputRequest {
+        UserInputRequest(
+            invocationId: "visual-question",
+            questions: questionFixtures,
+            answers: [
+                UserInputAnswer(questionId: "color", selectedLabel: "Green", freeText: nil),
+                UserInputAnswer(questionId: "format", selectedLabel: nil, freeText: "A concise brief"),
+                UserInputAnswer(questionId: "priority", selectedLabel: "Accuracy", freeText: nil),
+            ],
+            status: .answered
+        )
+    }
+
+    private static var questionFixtures: [UserInputQuestion] {
+        [
+            UserInputQuestion(
+                header: "Color",
+                id: "color",
+                question: "Which color do you prefer?",
+                options: [
+                    UserInputOption(label: "Blue", description: "Use a cool blue accent."),
+                    UserInputOption(label: "Green", description: "Use Tron's green accent."),
+                    UserInputOption(label: "Amber", description: "Use a warm amber accent."),
+                ]
+            ),
+            UserInputQuestion(
+                header: "Format",
+                id: "format",
+                question: "How detailed should the response be?",
+                options: [
+                    UserInputOption(label: "Concise", description: "Keep the response brief."),
+                    UserInputOption(label: "Detailed", description: "Include explanation and context."),
+                ]
+            ),
+            UserInputQuestion(
+                header: "Priority",
+                id: "priority",
+                question: "What should be prioritized?",
+                options: [
+                    UserInputOption(label: "Speed", description: "Complete the task quickly."),
+                    UserInputOption(label: "Accuracy", description: "Optimize for careful results."),
+                ]
+            ),
+        ]
     }
 
     private struct ComposerFixture: View {

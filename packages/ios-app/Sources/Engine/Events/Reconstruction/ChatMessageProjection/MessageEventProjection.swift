@@ -23,12 +23,11 @@ enum MessageEventProjection {
             return nil
         }
 
-        if let answer = parsed.userInputAnswer {
-            return ChatMessage(
-                role: .user,
-                content: .userInputAnswer(answer),
-                timestamp: timestamp
-            )
+        if parsed.userInputAnswer != nil {
+            // The answer is folded into its originating request by the
+            // reconstruction map. Rendering it again would create a redundant
+            // second chat pill for the same durable interaction.
+            return nil
         }
 
         // Skip empty user messages unless they have attachments.

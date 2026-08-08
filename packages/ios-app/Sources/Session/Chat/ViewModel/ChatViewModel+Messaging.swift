@@ -100,13 +100,6 @@ extension ChatViewModel {
                 message.content = .userInputRequest(request)
             }
         }
-        appendToMessages(ChatMessage(
-            role: .user,
-            content: .userInputAnswer(UserInputAnswerPresentation(
-                invocationId: invocationId,
-                answers: answers
-            ))
-        ))
         pendingUserInputRequest = nil
     }
 

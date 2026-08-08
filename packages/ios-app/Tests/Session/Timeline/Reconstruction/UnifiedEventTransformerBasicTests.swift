@@ -138,7 +138,7 @@ final class UnifiedEventTransformerBasicTests: UnifiedEventTransformerTestCase {
         }
     }
 
-    func testUserInputRequestAndAnswerReconstructAsDurableNativeMessages() throws {
+    func testUserInputAnswerReconstructsIntoItsDurableNativeRequest() throws {
         let events = [
             rawEvent(
                 id: "assistant-question",
@@ -200,17 +200,12 @@ final class UnifiedEventTransformerBasicTests: UnifiedEventTransformerTestCase {
 
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
 
-        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages.count, 1)
         guard case .userInputRequest(let request) = messages[0].content else {
             return XCTFail("Expected native request")
         }
         XCTAssertEqual(request.status, .answered)
         XCTAssertEqual(request.answers.first?.selectedLabel, "Markdown")
-        guard case .userInputAnswer(let answer) = messages[1].content else {
-            return XCTFail("Expected native answer")
-        }
-        XCTAssertEqual(answer.invocationId, "question-1")
-        XCTAssertEqual(answer.answers.first?.selectedLabel, "Markdown")
     }
 
     // MARK: - Tool Result Tests

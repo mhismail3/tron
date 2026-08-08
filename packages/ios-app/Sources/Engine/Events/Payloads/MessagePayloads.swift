@@ -20,7 +20,7 @@ struct UserMessagePayload {
     let isToolResultContext: Bool
     /// Attachments to this message (images, PDFs, documents)
     let attachments: [Attachment]?
-    let userInputAnswer: UserInputAnswerPresentation?
+    let userInputAnswer: UserInputAnswerRecord?
     init?(from payload: [String: AnyCodable]) {
         var extractedAttachments: [Attachment] = []
 
@@ -105,7 +105,7 @@ struct UserMessagePayload {
                     freeText: raw["freeText"] as? String
                 )
             }
-            self.userInputAnswer = UserInputAnswerPresentation(
+            self.userInputAnswer = UserInputAnswerRecord(
                 invocationId: invocationId,
                 answers: answers
             )

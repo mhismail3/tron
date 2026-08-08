@@ -86,9 +86,6 @@ struct MessageBubble: View {
                 onTap?(.userInput(request))
             }
 
-        case .userInputAnswer(let answer):
-            UserInputAnswerChip(answer: answer)
-
         case .error(let errorMessage):
             ErrorContentView(message: errorMessage)
 
