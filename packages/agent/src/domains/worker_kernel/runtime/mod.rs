@@ -45,10 +45,13 @@
 //! invocation. Pure relevance derives short-lived exact-input idempotency from
 //! canonical JSON; session- and trace-bound hooks preserve their causal key. It
 //! owns neither a result cache nor a second execution path. Request-scoped
-//! failures from optional semantic hooks and typed recoverable provider
-//! failures from agent runners remain terminal evidence on that invocation
-//! without globally disabling their worker; structural activation, integrity,
-//! and invalid-output failures still quarantine broken versions.
+//! failures from optional semantic hooks and runtime failures from agent
+//! runners remain terminal evidence on that invocation without globally
+//! disabling their worker. Provider HTTP/auth/API failures, tool failures,
+//! execution timeouts, and result-loading failures do not prove that an
+//! immutable worker is broken;
+//! structural activation, integrity, and invalid-output failures still
+//! quarantine broken versions.
 //! `agent_deliveries`
 //! owns coordination tools, import ordering, waits, and safe delivery-only
 //! wakeups; `agent_delivery_import` projects closed terminal/effect envelopes

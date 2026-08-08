@@ -162,25 +162,12 @@ pub(super) async fn wait_for_agent_terminal(
     session_id: &str,
     worker_invocation_id: &str,
 ) -> Result<AgentTerminalOutcome, String> {
-    let mut recoverable_failure = false;
     loop {
         match events.recv().await {
             Ok(event) if event.session_id() == session_id => {
                 runtime.observe_agent_model_tool_progress(worker_invocation_id, &event);
-                match event {
-                    TronEvent::TurnFailed { recoverable, .. } => {
-                        recoverable_failure = recoverable;
-                    }
-                    TronEvent::AgentEnd {
-                        error, recoverable, ..
-                    } => {
-                        return Ok(AgentTerminalOutcome {
-                            recoverable: error.is_some()
-                                && (recoverable_failure || recoverable.unwrap_or(false)),
-                            error,
-                        });
-                    }
-                    _ => {}
+                if let TronEvent::AgentEnd { error, .. } = event {
+                    return Ok(AgentTerminalOutcome { error });
                 }
             }
             Ok(_) => {}
@@ -205,12 +192,12 @@ pub(super) async fn wait_for_agent_terminal(
 
 /// Terminal status for an agent-backed worker run.
 ///
-/// `TurnFailed` is emitted before `AgentEnd` and owns the canonical typed
-/// recoverability classification. Keeping that bit here prevents a transient
-/// provider failure from being flattened into a structural worker failure.
+/// Agent runtime, provider, tool, and result-loading failures belong to the
+/// invocation that encountered them. The worker kernel separately validates
+/// the terminal typed output, so only that structural boundary can quarantine
+/// an otherwise valid agent-backed worker bundle.
 pub(super) struct AgentTerminalOutcome {
     pub(super) error: Option<String>,
-    pub(super) recoverable: bool,
 }
 
 pub(super) struct DynamicWorkerHandler {

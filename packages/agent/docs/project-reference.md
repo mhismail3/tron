@@ -389,9 +389,10 @@ immutable worker may tighten that boundary with the generic
 `executionLimits.maxInvocationSeconds` field. Timeout and failure of continuity
 or mailbox curation remain ordinary durable worker evidence outside provider
 latency. A request-scoped hook failure fails only that invocation and does not
-globally disable its worker. An agent runner likewise preserves the canonical
-terminal failure classification: a recoverable provider failure fails the
-invocation but leaves the immutable worker enabled for a later retry. Activation,
+globally disable its worker. Agent-runner provider, model, tool, timeout, and
+result-loading failures are likewise invocation-scoped regardless of whether
+the upstream failure is retryable: none proves that the immutable worker bundle
+is broken, and the worker remains enabled for a later retry. Activation,
 artifact integrity, command/service execution, and invalid typed output remain
 structural failures and still quarantine the broken version.
 Agent-runner bundles can declare default `model` and provider-neutral
