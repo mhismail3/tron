@@ -70,6 +70,7 @@ struct WorkerToolRunGraphView: View {
     let modelToolInvocationId: String
 
     @Environment(\.dependencies) private var dependencies
+    @Environment(\.dismiss) private var dismiss
     @State private var graph: WorkerRunGraphDTO?
     @State private var isMutating = false
     @State private var error: String?
@@ -98,6 +99,17 @@ struct WorkerToolRunGraphView: View {
                     selectedResult = WorkerResultSelection(
                         invocationId: graph.requestedInvocationId
                     )
+                }
+                if WorkerRunGraphPresentation.canInspectResult(status: graph.status) {
+                    WorkerResultAgentHandoffButton(
+                        invocationId: graph.requestedInvocationId,
+                        workerName: WorkerRunGraphPresentation.runTitle(
+                            workerName: graph.workerName,
+                            workerId: graph.workerId
+                        )
+                    ) {
+                        dismiss()
+                    }
                 }
                 WorkerRunExecutionOverviewView(graph: graph) {
                     showExecutionDetails = true

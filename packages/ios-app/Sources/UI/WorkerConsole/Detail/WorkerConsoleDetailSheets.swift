@@ -214,6 +214,17 @@ struct WorkerRunDetailSheet: View {
                                 invocationId: graph.requestedInvocationId
                             )
                         }
+                        if WorkerRunGraphPresentation.canInspectResult(status: graph.status) {
+                            WorkerResultAgentHandoffButton(
+                                invocationId: graph.requestedInvocationId,
+                                workerName: WorkerRunGraphPresentation.runTitle(
+                                    workerName: graph.workerName,
+                                    workerId: graph.workerId
+                                )
+                            ) {
+                                dismiss()
+                            }
+                        }
                         WorkerRunExecutionOverviewView(graph: graph) {
                             showExecutionDetails = true
                         }
