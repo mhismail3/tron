@@ -157,6 +157,7 @@ struct WorkerConsoleInteractionTests {
         #expect(graph.contains("fields.prefix(4)"))
         #expect(!graph.contains("Inspect result"))
         #expect(graph.contains("WorkerResultInspectorSheet("))
+        #expect(graphController.contains("WorkerResultAgentHandoffButton("))
         #expect(context.contains(".workerRunProjectionInvalidated"))
         #expect(!graph.contains("Started Filesystem"))
         #expect(!graph.contains("Finished Filesystem"))
@@ -283,6 +284,15 @@ struct WorkerConsoleInteractionTests {
         #expect(resultInspector.contains("StructuredDataFieldHeader("))
         #expect(resultInspector.contains("title: \"Continue in a new chat\""))
         #expect(resultInspector.contains("startAgentSessionHandoff(.workerResult("))
+        #expect(resultInspector.contains("struct WorkerResultAgentHandoffButton"))
+        let handoffAction = try sourceSlice(
+            resultInspector,
+            from: "private func resultHandoffAction(",
+            through: "private var resultPath: some View"
+        )
+        #expect(handoffAction.contains("WorkerConsoleSectionHeader("))
+        #expect(handoffAction.contains("WorkerResultAgentHandoffButton("))
+        #expect(!handoffAction.contains("WorkerConsoleSection("))
         #expect(!resultInspector.contains("Text(fieldMetadata(field))"))
         #expect(!resultInspector.contains(#"title: chunk.truncated ? "Result page" : "Result value""#))
         #expect(!resultInspector.contains("assembledResult"))
@@ -295,6 +305,7 @@ struct WorkerConsoleInteractionTests {
             encoding: .utf8
         )
         #expect(runDetail.contains("WorkerResultInspectorSheet("))
+        #expect(runDetail.contains("WorkerResultAgentHandoffButton("))
         #expect(runDetail.contains("WorkerRunTechnicalDetailsSheet"))
         #expect(runTechnicalDetail.contains("Legacy Worker Result"))
         #expect(!runDetail.contains("Inspect typed result"))

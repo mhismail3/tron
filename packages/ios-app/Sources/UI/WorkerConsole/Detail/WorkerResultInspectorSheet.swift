@@ -164,6 +164,41 @@ enum WorkerResultInspectorPresentation {
     }
 }
 
+/// Shared conversational continuation for any exact completed worker result.
+struct WorkerResultAgentHandoffButton: View {
+    let invocationId: String
+    let workerName: String
+    let onStart: () -> Void
+
+    @Environment(\.dependencies) private var dependencies
+
+    init(
+        invocationId: String,
+        workerName: String,
+        onStart: @escaping () -> Void = {}
+    ) {
+        self.invocationId = invocationId
+        self.workerName = workerName
+        self.onStart = onStart
+    }
+
+    var body: some View {
+        TronPrimaryActionButton(
+            title: "Investigate with agent",
+            systemImage: "bubble.left.and.text.bubble.right.fill",
+            accent: .tronEmerald,
+            isEnabled: dependencies.connectionRepository.connectionState.isConnected
+        ) {
+            startAgentSessionHandoff(.workerResult(
+                invocationId: invocationId,
+                workerName: workerName
+            ))
+            onStart()
+        }
+        .accessibilityIdentifier("worker-result-agent-handoff")
+    }
+}
+
 /// On-demand, bounded reader for the exact durable result owned by the server.
 ///
 /// The primary view is a readable field browser. Raw JSON and integrity
@@ -297,21 +332,15 @@ struct WorkerResultInspectorSheet: View {
         _ reference: WorkerResultReferenceDTO
     ) -> some View {
         let workerName = WorkerConsolePresentation.displayLabel(reference.workerId)
-        return WorkerConsoleSection(
-            title: "Continue in a new chat",
-            detail: "Give this exact durable result to an agent that can explain, debug, or act on it. No JSON copying is required.",
-            accent: .tronEmerald
-        ) {
-            TronPrimaryActionButton(
-                title: "Investigate with agent",
-                systemImage: "bubble.left.and.text.bubble.right.fill",
-                accent: .tronEmerald,
-                isEnabled: dependencies.connectionRepository.connectionState.isConnected
+        return VStack(alignment: .leading, spacing: 12) {
+            WorkerConsoleSectionHeader(
+                title: "Continue in a new chat",
+                detail: "Give this exact durable result to an agent that can explain, debug, or act on it. No JSON copying is required."
+            )
+            WorkerResultAgentHandoffButton(
+                invocationId: invocationId,
+                workerName: workerName
             ) {
-                startAgentSessionHandoff(.workerResult(
-                    invocationId: invocationId,
-                    workerName: workerName
-                ))
                 dismiss()
             }
         }

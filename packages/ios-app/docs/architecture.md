@@ -479,6 +479,12 @@ provides:
   retain their immutable evidence. The engine summary labels its independent
   current-state metric `Unhealthy`, so historical delivery evidence cannot be
   confused with current worker health;
+- completed results expose the same direct `Investigate with agent` action in
+  the canonical run detail reached from both worker Activity and engine-wide
+  Activity, in chat-owned worker run detail, and in Delivery Audit result
+  inspection. The action is a standalone primary control rather than a nested
+  section container, and every entry point uses the same exact-result handoff
+  request;
 - one emerald `Open Chat` toolbar action for agent-backed runs; run detail has
   no duplicate Model Context section. The read-only worker-session transcript
   initially reconstructs only the latest 120 events, pages older activity
@@ -778,7 +784,9 @@ become leading content or decorative pills.
 The authenticated paired-client actor may inspect profile-local results from
 the engine-global Worker Console without inventing an originating session;
 agent and worker reads still require server-validated session or delivery-grant
-authority. The root result inspector offers a single agent continuation action.
+authority. The root result inspector offers a single, directly listed agent
+continuation action without wrapping that primary control in another visual
+container.
 That action calls the authenticated result handoff, whose server transaction
 creates the visible session and its exact passive grant together, then saves a
 natural-language draft before navigation. The client never assembles an
