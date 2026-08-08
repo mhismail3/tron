@@ -29,5 +29,11 @@ operation_bindings! {
         "abort_invocation" => |invocation, deps| {
             abort_invocation_value(Some(&invocation.payload), deps).await
         },
+        "request_user_input" => |invocation, deps| {
+            request_user_input_value(invocation, deps).await
+        },
+        "answer_user_input" => |invocation, deps| {
+            answer_user_input_value(invocation, deps).await
+        },
     ];
 }

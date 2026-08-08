@@ -80,6 +80,8 @@ extension ChatView {
             sheetCoordinator.showToolInvocationDetail(data)
         case .toolInvocationGroup(let data):
             sheetCoordinator.showToolInvocationGroupDetail(data)
+        case .userInput(let request):
+            sheetCoordinator.showUserInput(request)
         case .cancelToolInvocation(let id):
             guard presentationMode == .interactiveSession else { return }
             viewModel.abortToolInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortToolInvocation"))

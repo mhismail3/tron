@@ -102,6 +102,7 @@ struct UnifiedEventTransformer {
         let maps = toolMaps ?? buildToolInvocationMaps(from: sorted)
         let startedInvocations = maps.startedInvocations
         let completedInvocations = maps.completedInvocations
+        let userInputAnswers = maps.userInputAnswers
 
         TronLogger.shared.debug("[RECONSTRUCT] Built maps: \(startedInvocations.count) tool.invocation.started, \(completedInvocations.count) tool.invocation.completed from \(sorted.count) events", category: .session)
 
@@ -122,7 +123,8 @@ struct UnifiedEventTransformer {
                     payload: event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     startedInvocations: startedInvocations,
-                    completedInvocations: completedInvocations
+                    completedInvocations: completedInvocations,
+                    userInputAnswers: userInputAnswers
                 )
                 if !interleaved.isEmpty {
                     interleaved[0].eventId = event.id
@@ -193,10 +195,12 @@ struct UnifiedEventTransformer {
     struct ToolInvocationMapResult {
         var startedInvocations: [String: ToolInvocationStartedPayload] = [:]
         var completedInvocations: [String: ToolInvocationCompletedPayload] = [:]
+        var userInputAnswers: [String: [UserInputAnswer]] = [:]
 
         mutating func merge(_ other: ToolInvocationMapResult) {
             startedInvocations.merge(other.startedInvocations) { current, _ in current }
             completedInvocations.merge(other.completedInvocations) { current, _ in current }
+            userInputAnswers.merge(other.userInputAnswers) { current, _ in current }
         }
     }
 
@@ -211,6 +215,11 @@ struct UnifiedEventTransformer {
             if event.type == SessionEventType.toolInvocationCompleted.rawValue,
                let payload = ToolInvocationCompletedPayload(from: event.payload) {
                 result.completedInvocations[payload.invocationId] = payload
+            }
+            if event.type == SessionEventType.messageUser.rawValue,
+               let payload = UserMessagePayload(from: event.payload),
+               let answer = payload.userInputAnswer {
+                result.userInputAnswers[answer.invocationId] = answer.answers
             }
         }
         return result
@@ -265,6 +274,7 @@ extension UnifiedEventTransformer {
         let maps = buildToolInvocationMaps(from: sorted)
         let startedInvocations = maps.startedInvocations
         let completedInvocations = maps.completedInvocations
+        let userInputAnswers = maps.userInputAnswers
 
         var deletedEventIds = Set<String>()
         for event in sorted {
@@ -291,7 +301,8 @@ extension UnifiedEventTransformer {
                     payload: event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     startedInvocations: startedInvocations,
-                    completedInvocations: completedInvocations
+                    completedInvocations: completedInvocations,
+                    userInputAnswers: userInputAnswers
                 )
                 if !interleaved.isEmpty {
                     interleaved[0].eventId = event.id

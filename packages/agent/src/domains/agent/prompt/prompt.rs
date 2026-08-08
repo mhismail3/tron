@@ -19,6 +19,249 @@ pub(crate) struct PromptSubmission {
     prompt: String,
     reasoning_level: Option<String>,
     attachments: Option<Vec<Value>>,
+    user_input_answer: Option<Value>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UserInputAnswerSubmission {
+    question_id: String,
+    selected_label: Option<String>,
+    free_text: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct UserInputRequestDefinition {
+    questions: Vec<UserInputQuestionDefinition>,
+}
+
+#[derive(serde::Deserialize)]
+struct UserInputQuestionDefinition {
+    id: String,
+    options: Vec<UserInputOptionDefinition>,
+}
+
+#[derive(serde::Deserialize)]
+struct UserInputOptionDefinition {
+    label: String,
+}
+
+pub(crate) async fn request_user_input_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, ToolError> {
+    if invocation.causal_context.origin_worker_id().is_some() {
+        return Err(ToolError::NotAvailable {
+            message: "Delegated workers return missing information to their parent agent; only the user-facing session can request input".into(),
+        });
+    }
+    let session_id = invocation
+        .causal_context
+        .session_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ToolError::InvalidParams {
+            message: "request_user_input requires a source session".into(),
+        })?;
+    let invocation_id = invocation
+        .causal_context
+        .model_tool_invocation_id()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ToolError::InvalidParams {
+            message: "request_user_input requires a provider invocation id".into(),
+        })?;
+    let request = serde_json::from_value::<UserInputRequestDefinition>(invocation.payload.clone())
+        .map_err(|error| ToolError::InvalidParams {
+            message: format!("invalid user input request: {error}"),
+        })?;
+    validate_user_input_request(&request)?;
+    let _ = AgentCommandService::load_prompt_session(deps, session_id).await?;
+    Ok(json!({
+        "invocationId": invocation_id,
+        "status": "pending",
+    }))
+}
+
+fn validate_user_input_request(request: &UserInputRequestDefinition) -> Result<(), ToolError> {
+    let mut question_ids = std::collections::BTreeSet::new();
+    for question in &request.questions {
+        if !question_ids.insert(question.id.as_str()) {
+            return Err(ToolError::InvalidParams {
+                message: format!("Question id '{}' is duplicated", question.id),
+            });
+        }
+        let mut option_labels = std::collections::BTreeSet::new();
+        for option in &question.options {
+            let normalized = option.label.trim().to_lowercase();
+            if normalized == "other" {
+                return Err(ToolError::InvalidParams {
+                    message: "Do not provide an Other option; the client adds it automatically"
+                        .into(),
+                });
+            }
+            if !option_labels.insert(normalized) {
+                return Err(ToolError::InvalidParams {
+                    message: format!(
+                        "Option labels for question '{}' must be unique",
+                        question.id
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn answer_user_input_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, ToolError> {
+    let session_id = require_string_param(Some(&invocation.payload), "sessionId")?;
+    let invocation_id = require_string_param(Some(&invocation.payload), "invocationId")?;
+    let answers =
+        invocation
+            .payload
+            .get("answers")
+            .cloned()
+            .ok_or_else(|| ToolError::InvalidParams {
+                message: "answers are required".into(),
+            })?;
+    let decoded = serde_json::from_value::<Vec<UserInputAnswerSubmission>>(answers.clone())
+        .map_err(|error| ToolError::InvalidParams {
+            message: format!("invalid user input answers: {error}"),
+        })?;
+    let event_store = deps.event_store.clone();
+    let lookup_session_id = session_id.clone();
+    let lookup_invocation_id = invocation_id.clone();
+    let (state, request_arguments) =
+        crate::shared::server::context::run_blocking_task("agent.user_input.state", move || {
+            let state = event_store
+                .user_input_request_state(&lookup_session_id, &lookup_invocation_id)
+                .map_err(crate::shared::server::error_mapping::map_event_store_error)?;
+            let arguments =
+                if state == crate::domains::session::event_store::UserInputRequestState::Pending {
+                    event_store
+                        .user_input_request_arguments(&lookup_session_id, &lookup_invocation_id)
+                        .map_err(crate::shared::server::error_mapping::map_event_store_error)?
+                } else {
+                    None
+                };
+            Ok((state, arguments))
+        })
+        .await?;
+    match state {
+        crate::domains::session::event_store::UserInputRequestState::Missing => {
+            return Err(ToolError::InvalidParams {
+                message: "The requested question is not pending in this session".into(),
+            });
+        }
+        crate::domains::session::event_store::UserInputRequestState::Answered => {
+            return Ok(json!({
+                "acknowledged": true,
+                "runId": "",
+                "alreadyAnswered": true,
+            }));
+        }
+        crate::domains::session::event_store::UserInputRequestState::Pending => {}
+    }
+    let request_arguments = request_arguments.ok_or_else(|| ToolError::InvalidParams {
+        message: "The pending question is missing its canonical arguments".into(),
+    })?;
+    validate_user_input_answers(&request_arguments, &decoded)?;
+
+    let prompt = format_user_input_answer(&decoded);
+    let mut forwarded = invocation.clone();
+    forwarded.payload = json!({
+        "sessionId": session_id,
+        "prompt": prompt,
+        "userInputAnswer": {
+            "invocationId": invocation_id,
+            "answers": answers,
+        }
+    });
+    prompt_value(&forwarded, deps).await
+}
+
+fn validate_user_input_answers(
+    request_arguments: &Value,
+    answers: &[UserInputAnswerSubmission],
+) -> Result<(), ToolError> {
+    let request = serde_json::from_value::<UserInputRequestDefinition>(request_arguments.clone())
+        .map_err(|error| ToolError::InvalidParams {
+        message: format!("The pending question is invalid: {error}"),
+    })?;
+    if request.questions.len() != answers.len() {
+        return Err(ToolError::InvalidParams {
+            message: "Every pending question requires exactly one answer".into(),
+        });
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for answer in answers {
+        if !seen.insert(answer.question_id.as_str()) {
+            return Err(ToolError::InvalidParams {
+                message: format!(
+                    "Question '{}' was answered more than once",
+                    answer.question_id
+                ),
+            });
+        }
+        let question = request
+            .questions
+            .iter()
+            .find(|question| question.id == answer.question_id)
+            .ok_or_else(|| ToolError::InvalidParams {
+                message: format!("Question '{}' is not pending", answer.question_id),
+            })?;
+        let selected = answer
+            .selected_label
+            .as_deref()
+            .filter(|value| !value.trim().is_empty());
+        let custom = answer
+            .free_text
+            .as_deref()
+            .filter(|value| !value.trim().is_empty());
+        if selected.is_some() == custom.is_some() {
+            return Err(ToolError::InvalidParams {
+                message: format!(
+                    "Question '{}' requires one selected option or one custom answer",
+                    answer.question_id
+                ),
+            });
+        }
+        if let Some(selected) = selected
+            && !question
+                .options
+                .iter()
+                .any(|option| option.label == selected)
+        {
+            return Err(ToolError::InvalidParams {
+                message: format!(
+                    "Option '{selected}' was not offered for question '{}'",
+                    answer.question_id
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn format_user_input_answer(answers: &[UserInputAnswerSubmission]) -> String {
+    let lines = answers
+        .iter()
+        .map(|answer| {
+            let value = answer
+                .free_text
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .or(answer.selected_label.as_deref())
+                .unwrap_or("No answer");
+            format!("- {}: {}", answer.question_id, value.trim())
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "User answered your pending questions:\n{lines}\nContinue the task using these answers."
+    )
 }
 
 pub(crate) async fn prompt_value(invocation: &Invocation, deps: &Deps) -> Result<Value, ToolError> {
@@ -119,6 +362,7 @@ pub(crate) async fn run_turn_value(
             },
             reasoning_level: submission.reasoning_level,
             attachments: submission.attachments,
+            user_event_metadata: submission.user_input_answer,
             engine_causality: Some(PromptEngineCausality::from_invocation(invocation)),
         },
     );
@@ -204,6 +448,7 @@ pub(crate) async fn delivery_wake_value(
             },
             reasoning_level: None,
             attachments: None,
+            user_event_metadata: None,
             engine_causality: Some(PromptEngineCausality::from_invocation(invocation)),
         },
     );
@@ -228,6 +473,9 @@ pub(crate) async fn validate_prompt_submission(
     let prompt = require_string_param(params, "prompt")?;
     validation::validate_string_param(&prompt, "prompt", validation::MAX_PROMPT_LENGTH)?;
     let attachments = opt_array(params, "attachments").cloned();
+    let user_input_answer = params
+        .and_then(|value| value.get("userInputAnswer"))
+        .cloned();
 
     if let Some(active_run_id) = deps.orchestrator.get_run_id(&session_id) {
         return Err(ToolError::Custom {
@@ -266,6 +514,7 @@ pub(crate) async fn validate_prompt_submission(
             prompt,
             reasoning_level: opt_string(params, "reasoningLevel"),
             attachments,
+            user_input_answer,
         },
         session,
         responder_factory,
@@ -553,5 +802,69 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn user_input_answers_must_match_each_canonical_question() {
+        let request = json!({
+            "questions":[{
+                "id":"format",
+                "options":[{"label":"Markdown"},{"label":"HTML"}]
+            }]
+        });
+        assert!(
+            validate_user_input_answers(
+                &request,
+                &[UserInputAnswerSubmission {
+                    question_id: "format".into(),
+                    selected_label: Some("Markdown".into()),
+                    free_text: None,
+                }]
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_user_input_answers(
+                &request,
+                &[UserInputAnswerSubmission {
+                    question_id: "format".into(),
+                    selected_label: Some("PDF".into()),
+                    free_text: None,
+                }]
+            )
+            .is_err()
+        );
+        assert!(
+            validate_user_input_answers(
+                &request,
+                &[UserInputAnswerSubmission {
+                    question_id: "other".into(),
+                    selected_label: None,
+                    free_text: Some("Custom".into()),
+                }]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn user_input_request_rejects_ambiguous_native_identifiers() {
+        let duplicate_questions = serde_json::from_value::<UserInputRequestDefinition>(json!({
+            "questions":[
+                {"id":"format","options":[{"label":"Markdown"},{"label":"HTML"}]},
+                {"id":"format","options":[{"label":"Short"},{"label":"Long"}]}
+            ]
+        }))
+        .unwrap();
+        assert!(validate_user_input_request(&duplicate_questions).is_err());
+
+        let reserved_other = serde_json::from_value::<UserInputRequestDefinition>(json!({
+            "questions":[{
+                "id":"format",
+                "options":[{"label":"Markdown"},{"label":"Other"}]
+            }]
+        }))
+        .unwrap();
+        assert!(validate_user_input_request(&reserved_other).is_err());
     }
 }

@@ -197,6 +197,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_sequence_unique
 CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events(session_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_events_session_type_sequence
   ON events(session_id, type, sequence DESC);
+CREATE INDEX IF NOT EXISTS idx_events_session_invocation
+  ON events(session_id, type, tool_name, invocation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_events_user_input_answer_unique
+  ON events(session_id, invocation_id)
+  WHERE type='message.user' AND tool_name='request_user_input_answer';
 
 CREATE TABLE IF NOT EXISTS blobs (
   id              TEXT    PRIMARY KEY,

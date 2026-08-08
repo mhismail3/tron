@@ -30,6 +30,8 @@ enum MessageContent: Equatable {
     case thinking(visible: String, isExpanded: Bool, isStreaming: Bool, kind: ThinkingDisplayKind)
     case toolInvocation(ToolInvocationData)
     case toolResult(ToolInvocationResultData)
+    case userInputRequest(UserInputRequest)
+    case userInputAnswer(UserInputAnswerPresentation)
     case error(String)
     case images([ImageContent])
     case attachments([Attachment])
@@ -93,6 +95,10 @@ enum MessageContent: Equatable {
             return "[\(invocation.displayName)]"
         case .toolResult(let result):
             return result.content
+        case .userInputRequest(let request):
+            return request.questions.map(\.question).joined(separator: "\n")
+        case .userInputAnswer(let answer):
+            return answer.answers.map(\.displayValue).joined(separator: ", ")
         case .error(let message):
             return message
         case .images:

@@ -66,6 +66,50 @@ extension ChatViewModel: MessagingContext {
 
 extension ChatViewModel {
 
+    func currentUserInputRequest(invocationId: String) -> UserInputRequest? {
+        for message in messages.reversed() {
+            guard case .userInputRequest(let request) = message.content,
+                  request.invocationId == invocationId else { continue }
+            return request
+        }
+        return nil
+    }
+
+    func submitUserInput(
+        invocationId: String,
+        answers: [UserInputAnswer]
+    ) async throws {
+        try await services.events.ensureSessionEventSubscription(
+            sessionId: sessionId,
+            workspaceId: nil
+        )
+        try await services.agent.answerUserInput(
+            invocationId: invocationId,
+            answers: answers,
+            idempotencyKey: .userAction("agent.answerUserInput.\(invocationId)")
+        )
+        if let index = messages.lastIndex(where: {
+            if case .userInputRequest(let request) = $0.content {
+                return request.invocationId == invocationId
+            }
+            return false
+        }), case .userInputRequest(var request) = messages[index].content {
+            request.answers = answers
+            request.status = .answered
+            updateMessage(at: index) { message in
+                message.content = .userInputRequest(request)
+            }
+        }
+        appendToMessages(ChatMessage(
+            role: .user,
+            content: .userInputAnswer(UserInputAnswerPresentation(
+                invocationId: invocationId,
+                answers: answers
+            ))
+        ))
+        pendingUserInputRequest = nil
+    }
+
     /// Send a message to the agent.
     func sendMessage(reasoningLevel: String? = nil, onPromptSent: ((String) -> Void)? = nil) {
         Task {

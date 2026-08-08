@@ -246,6 +246,7 @@ impl PromptFailureHarness {
                 trigger,
                 reasoning_level: None,
                 attachments: None,
+                user_event_metadata: None,
                 engine_causality: None,
             },
         })
@@ -557,6 +558,7 @@ async fn initial_provider_call_does_not_wait_for_optional_policy_workers() {
             },
             reasoning_level: None,
             attachments: None,
+            user_event_metadata: None,
             engine_causality: None,
         },
     }));

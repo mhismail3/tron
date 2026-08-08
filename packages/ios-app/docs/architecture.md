@@ -1,7 +1,8 @@
 # iOS App Architecture
 
-> Last verified: 2026-08-06 for authoritative/cached chat loading, canonical
-> reconstruction ownership, cohesive sheets, and iOS 26/27 delivery.
+> Last verified: 2026-08-08 for authoritative/cached chat loading, durable
+> native user input, canonical reconstruction ownership, cohesive sheets, and
+> iOS 26/27 delivery.
 
 ## Overview
 
@@ -653,6 +654,30 @@ InputBar
     → ChatViewModel
     → ChatMessage presentation
 ```
+
+Meaningful multi-turn work can include provider-authored progress text before
+tool calls and at natural milestones. It uses the same assistant content blocks
+as final prose, so live streaming and reconstruction preserve its exact order
+relative to thinking and tools. The client does not synthesize progress from a
+tool name or expose provider reasoning as a substitute for user-facing text.
+
+`request_user_input` is a fixed foreground agent primitive rather than a
+worker-owned feature. Its tool start becomes a typed question message and opens
+the standard medium/large native sheet; ordinary tool chips are not duplicated.
+If another sheet is active, the latest request waits for that presentation to
+dismiss. The sheet supports one to three questions, two or three explicit
+choices each, and a custom `Other` answer, using shared sheet chrome and Tron
+typography. A successful tool completion is the durable pending marker. The
+sheet admits choices immediately but enables submit only after the producing
+agent run releases its ordinary session guard. Submit first restores the live
+session subscription, then invokes the session-scoped
+answer function with invocation-derived idempotency. The server validates the
+answers against its persisted question, appends one structured user event, and
+starts a new run. Live state, cached reconstruction, pagination context, app
+foregrounding, reconnect, and server restart therefore derive pending/answered
+presentation from the same canonical events; there is no client pause object or
+blocked network continuation. Delegated background workers never receive this
+foreground primitive and return missing information to their parent agent.
 
 Prompt submission is transactional at the composer boundary. The sendable text
 and prepared attachment ids are snapshotted. A pre-accept encoding, frame-size,

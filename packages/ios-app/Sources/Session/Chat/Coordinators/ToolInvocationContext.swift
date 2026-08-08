@@ -12,6 +12,10 @@ protocol ToolInvocationContext: ChatCoordinatorContext, MessageMutating {
     /// Running tool counter for O(1) hasRunningToolInvocations check
     var runningToolInvocationCount: Int { get set }
 
+    /// Latest unresolved native question. Transcript state remains canonical;
+    /// this value only requests foreground presentation.
+    var pendingUserInputRequest: UserInputRequest? { get set }
+
     // MARK: - Streaming Management
 
     /// Flush any pending text updates before tool processing

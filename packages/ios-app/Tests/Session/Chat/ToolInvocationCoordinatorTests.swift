@@ -189,6 +189,77 @@ final class ToolInvocationCoordinatorTests: XCTestCase {
 
     // MARK: - Tool Start Tests
 
+    func testUserInputLifecycleUsesNativeRequestInsteadOfGenericToolChip() async throws {
+        let event = ToolInvocationStartedPlugin.Result(
+            toolName: "request_user_input",
+            invocationId: "question-1",
+            arguments: [
+                "questions": AnyCodable([[
+                    "header": "Format",
+                    "id": "format",
+                    "question": "Which format should I use?",
+                    "options": [
+                        ["label": "Markdown", "description": "Write a Markdown file."],
+                        ["label": "HTML", "description": "Write an HTML file."]
+                    ]
+                ]])
+            ],
+            formattedArguments: ""
+        )
+
+        coordinator.handleToolInvocationStarted(event, context: mockContext)
+
+        XCTAssertEqual(mockContext.messages.count, 1)
+        XCTAssertEqual(mockContext.runningToolInvocationCount, 0)
+        XCTAssertTrue(mockContext.enqueuedToolStarts.isEmpty)
+        let pending = try XCTUnwrap(mockContext.pendingUserInputRequest)
+        XCTAssertEqual(pending.invocationId, "question-1")
+        XCTAssertEqual(pending.questions.first?.options.map(\.label), ["Markdown", "HTML"])
+
+        coordinator.handleToolInvocationCompleted(
+            ToolInvocationCompletedPlugin.Result(
+                invocationId: "question-1",
+                toolName: "request_user_input",
+                isError: false,
+                content: "Question presented",
+                duration: 1,
+                details: nil,
+                rawDetails: nil,
+                identity: ToolIdentity()
+            ),
+            context: mockContext
+        )
+        XCTAssertEqual(mockContext.pendingUserInputRequest?.status, .pending)
+        XCTAssertTrue(mockContext.enqueuedToolEnds.isEmpty)
+
+        coordinator.handleToolInvocationStarted(event, context: mockContext)
+        XCTAssertEqual(mockContext.messages.count, 1, "replayed start must be idempotent")
+    }
+
+    func testMalformedUserInputDoesNotCreateAnUnanswerableSheet() {
+        let event = ToolInvocationStartedPlugin.Result(
+            toolName: "request_user_input",
+            invocationId: "question-bad",
+            arguments: [
+                "questions": AnyCodable([[
+                    "header": "Format",
+                    "id": "format",
+                    "question": "Which format?",
+                    "options": [
+                        ["label": "Other", "description": "Duplicate native Other"],
+                        ["label": "HTML", "description": "HTML file"]
+                    ]
+                ]])
+            ],
+            formattedArguments: ""
+        )
+
+        coordinator.handleToolInvocationStarted(event, context: mockContext)
+
+        XCTAssertTrue(mockContext.messages.isEmpty)
+        XCTAssertNil(mockContext.pendingUserInputRequest)
+    }
+
     func testToolInvocationStartCreatesToolMessage() async throws {
         // Given: A tool start event
         let event = ToolInvocationStartedPlugin.Result(
@@ -391,6 +462,7 @@ final class MockToolInvocationContext: ToolInvocationContext {
     let messageIndex = MessageIndex()
     var runningToolInvocationCount: Int = 0
     var currentTurnToolMessageIds: Set<UUID> = []
+    var pendingUserInputRequest: UserInputRequest?
 
     // MARK: - Tracking for Assertions
     var flushPendingTextUpdatesCalled = false

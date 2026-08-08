@@ -14,6 +14,8 @@
 //!   without duplicating bulk media or message bodies
 //! - **Agent deliveries and waits**: session/mailbox addressing, result grants,
 //!   safe-turn leasing, observation, wake retries, and crash recovery
+//! - **Foreground user input**: pending/answered state derived from indexed
+//!   tool lifecycle and structured user-message events
 //! - **Logs**: bounded operational log queries
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
 //!   history, preserving separate client display text and model-facing tool result text
@@ -66,6 +68,10 @@
 //!   A delivery lease is preparation, not observation; only durable assistant
 //!   completion observes it, while setup failure or restart clears the lease
 //!   for at-least-once redelivery.
+//! - A successful `request_user_input` completion is the only pending marker;
+//!   its structured `message.user` answer resolves it. One partial unique
+//!   index enforces one answer per session/invocation, with no pause table or
+//!   process-local waiter to recover after reconnect or restart.
 //! - Sender expiry is durably reconciled before delivery, mailbox, wake, and
 //!   result-grant reads. Expired rows remain audit evidence but confer no
 //!   result authority.
@@ -132,7 +138,7 @@ pub(crate) use store::{
     AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliveryRecord, AgentDeliverySourceKind,
     AgentDeliveryTarget, AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode,
     AppendBatchItem, MAX_DELIVERIES_PER_TURN, NewAgentDelivery, NewAgentTaskDelivery, NewAgentWait,
-    WorkerTerminalEvidence,
+    UserInputRequestState, WorkerTerminalEvidence,
 };
 pub use store::{
     AppendOptions, ClientLogEntry, ClientLogIngestResult, CreateSessionResult, EventStore,

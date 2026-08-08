@@ -3,6 +3,40 @@
 use super::promotions::MAX_STORED_SESSION_PROMOTIONS;
 use super::*;
 use crate::engine::{DirectWorkerToolContract, FunctionDefinition};
+use std::sync::Arc;
+
+struct StubHandler;
+
+#[async_trait::async_trait]
+impl crate::engine::InProcessFunctionHandler for StubHandler {
+    async fn invoke(
+        &self,
+        _invocation: crate::engine::Invocation,
+    ) -> crate::engine::Result<serde_json::Value> {
+        Ok(serde_json::json!({"status":"pending"}))
+    }
+}
+
+fn register_user_input_primitive(host: &EngineHostHandle) {
+    let mut definition = FunctionDefinition::new(
+        crate::engine::FunctionId::new("agent::request_user_input").unwrap(),
+        crate::engine::WorkerId::new("agent").unwrap(),
+        "Ask the user",
+        crate::engine::FunctionVisibility::Public,
+        crate::engine::EffectClass::IdempotentWrite,
+    )
+    .with_request_schema(serde_json::json!({"type":"object"}))
+    .with_idempotency(crate::engine::IdempotencyContract::session());
+    definition.model_tool = Some(crate::engine::ModelToolContract {
+        name: "request_user_input".to_owned(),
+        audience: crate::engine::ModelToolAudience::Ordinary,
+        order: Some(15),
+        group: Some("user_interaction".to_owned()),
+        worker: None,
+    });
+    host.register_function_for_setup(definition, Arc::new(StubHandler))
+        .unwrap();
+}
 
 fn conditional_definition() -> FunctionDefinition {
     let mut definition = FunctionDefinition::new(
@@ -131,4 +165,36 @@ async fn session_promotion_storage_prunes_oldest_records() {
     assert_eq!(promotions.len(), MAX_STORED_SESSION_PROMOTIONS);
     assert!(promotions.contains("worker-54"));
     assert!(!promotions.contains("worker-00"));
+}
+
+#[tokio::test]
+async fn user_input_is_foreground_only_and_workers_return_questions_to_parent() {
+    let host = EngineHostHandle::new_in_memory().expect("host");
+    register_user_input_primitive(&host);
+
+    let foreground = resolve_tool_surface(&host, "session", None, None, None)
+        .await
+        .expect("foreground surface");
+    assert!(
+        foreground
+            .functions
+            .iter()
+            .any(|tool| tool.model_name == "request_user_input")
+    );
+
+    let worker = resolve_tool_surface(
+        &host,
+        "session",
+        None,
+        Some("delegated-worker"),
+        Some(&["request_user_input".to_owned()]),
+    )
+    .await
+    .expect("worker surface");
+    assert!(
+        worker
+            .functions
+            .iter()
+            .all(|tool| tool.model_name != "request_user_input")
+    );
 }

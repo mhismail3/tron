@@ -140,8 +140,11 @@ fn cancellation_failure(session_id: &str) -> FailureEnvelope {
 fn determine_turn_stop_reason(
     tool_invocation_count: usize,
     llm_stop_reason: &str,
+    awaiting_user_input: bool,
 ) -> Option<StopReason> {
-    if tool_invocation_count == 0 {
+    if awaiting_user_input {
+        Some(StopReason::EndTurn)
+    } else if tool_invocation_count == 0 {
         if llm_stop_reason == "end_turn" {
             Some(StopReason::EndTurn)
         } else {
@@ -786,6 +789,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     let stop_reason = determine_turn_stop_reason(
         stream_result.tool_invocations.len(),
         &stream_result.stop_reason,
+        invocation_phase.awaiting_user_input,
     );
 
     let context_window_tokens = token_record_json
@@ -834,7 +838,8 @@ fn assistant_delivery_continuation(
 
 #[cfg(test)]
 mod delivery_continuation_tests {
-    use super::assistant_delivery_continuation;
+    use super::{assistant_delivery_continuation, determine_turn_stop_reason};
+    use crate::domains::agent::r#loop::errors::StopReason;
     use serde_json::json;
 
     #[test]
@@ -851,5 +856,14 @@ mod delivery_continuation_tests {
     #[test]
     fn omits_empty_delivery_continuation() {
         assert!(assistant_delivery_continuation(&[], &[]).is_none());
+    }
+
+    #[test]
+    fn successful_user_input_request_stops_before_another_provider_turn() {
+        assert_eq!(
+            determine_turn_stop_reason(1, "tool_use", true),
+            Some(StopReason::EndTurn)
+        );
+        assert_eq!(determine_turn_stop_reason(1, "tool_use", false), None);
     }
 }

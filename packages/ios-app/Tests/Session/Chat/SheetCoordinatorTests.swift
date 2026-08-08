@@ -83,4 +83,46 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertEqual(coordinator.activeSheet, .thinkingDetail("Thinking"))
     }
 
+    func testUserInputWaitsForCurrentSheetThenPresents() throws {
+        let coordinator = SheetCoordinator()
+        let request = UserInputRequest(
+            invocationId: "question-1",
+            questions: [UserInputQuestion(
+                header: "Format",
+                id: "format",
+                question: "Which format?",
+                options: [
+                    UserInputOption(label: "Markdown", description: "Markdown file"),
+                    UserInputOption(label: "HTML", description: "HTML file")
+                ]
+            )],
+            answers: [],
+            status: .pending
+        )
+        coordinator.showSettings()
+
+        coordinator.showUserInput(request)
+
+        XCTAssertEqual(coordinator.activeSheet, .settings)
+        coordinator.presentationDidDismiss()
+        XCTAssertEqual(coordinator.activeSheet, .userInput(request))
+    }
+
+    func testResolvedUserInputDoesNotPresentAfterAnotherSheetDismisses() {
+        let coordinator = SheetCoordinator()
+        let request = UserInputRequest(
+            invocationId: "question-1",
+            questions: [],
+            answers: [],
+            status: .pending
+        )
+        coordinator.showSettings()
+        coordinator.showUserInput(request)
+
+        coordinator.clearUserInput()
+        coordinator.presentationDidDismiss()
+
+        XCTAssertNil(coordinator.activeSheet)
+    }
+
 }

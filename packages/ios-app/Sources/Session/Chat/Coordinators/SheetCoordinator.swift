@@ -12,6 +12,7 @@ final class SheetCoordinator {
 
     /// Dismissal callback (called by SwiftUI when sheet dismisses)
     var onDismiss: (() -> Void)?
+    private var queuedUserInputRequest: UserInputRequest?
 
     // MARK: - Computed Properties
 
@@ -43,6 +44,10 @@ final class SheetCoordinator {
     func presentationDidDismiss() {
         activeSheet = nil
         finishDismissal()
+        if let request = queuedUserInputRequest {
+            queuedUserInputRequest = nil
+            present(.userInput(request))
+        }
     }
 
     private func finishDismissal() {
@@ -111,6 +116,22 @@ final class SheetCoordinator {
     /// Show a grouped tool invocation detail sheet.
     func showToolInvocationGroupDetail(_ data: ToolInvocationGroupData) {
         present(.toolInvocationGroupDetail(data))
+    }
+
+    func showUserInput(_ request: UserInputRequest) {
+        guard activeSheet == nil else {
+            if activeSheet != .userInput(request) {
+                queuedUserInputRequest = request
+            }
+            return
+        }
+        present(.userInput(request))
+    }
+
+    func clearUserInput() {
+        queuedUserInputRequest = nil
+        guard case .userInput? = activeSheet else { return }
+        dismiss()
     }
 
 }

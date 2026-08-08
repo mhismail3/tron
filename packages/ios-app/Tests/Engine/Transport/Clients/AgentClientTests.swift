@@ -143,4 +143,36 @@ struct AgentClientTests {
             Issue.record("unexpected prompt error: \(error)")
         }
     }
+
+    @Test("User input answer subscribes before the session-scoped write")
+    func answerUserInputUsesDurableSessionWrite() async throws {
+        let sessionId = "session-question"
+        let transport = makeConnectedTransport(sessionId: sessionId)
+        let client = AgentClient(transport: transport)
+        transport.writeHandler = { functionId, payload, _, options in
+            #expect(functionId.rawValue == "agent::answer_user_input")
+            #expect(options.context?.sessionId == sessionId)
+            let params = try #require(payload as? AgentAnswerUserInputParams)
+            #expect(params.sessionId == sessionId)
+            #expect(params.invocationId == "question-1")
+            #expect(params.answers.first?.questionId == "format")
+            #expect(params.answers.first?.selectedLabel == "Markdown")
+            return AgentPromptResult(acknowledged: true)
+        }
+
+        try await client.answerUserInput(
+            invocationId: "question-1",
+            answers: [UserInputAnswer(
+                questionId: "format",
+                selectedLabel: "Markdown",
+                freeText: nil
+            )],
+            idempotencyKey: .userAction("agent.answerUserInput.question-1")
+        )
+
+        #expect(transport.operationOrder.prefix(2) == [
+            "subscribe:\(sessionId)",
+            "write:agent::answer_user_input",
+        ])
+    }
 }

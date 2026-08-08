@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
+use serde_json::Value;
+
 use tracing::{info, trace, warn};
 
 use super::agent_build::{BuiltPromptAgent, build_prompt_agent};
@@ -98,6 +100,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         trigger,
         reasoning_level,
         attachments,
+        user_event_metadata,
         engine_causality,
     } = request;
     let user_prompt = match &trigger {
@@ -180,6 +183,17 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         Some(prompt) => {
             let mut user_event_payload = build_user_event_payload(prompt, attachments.as_deref());
             if let Some(object) = user_event_payload.as_object_mut() {
+                if let Some(metadata) = user_event_metadata.as_ref().and_then(Value::as_object) {
+                    object.insert(
+                        "messageKind".to_owned(),
+                        serde_json::json!("user_input_answer"),
+                    );
+                    object.insert(
+                        "toolName".to_owned(),
+                        serde_json::json!("request_user_input_answer"),
+                    );
+                    object.extend(metadata.clone());
+                }
                 object.insert("runId".to_owned(), serde_json::json!(run_id.clone()));
                 if let Some(causality) = engine_causality.as_ref() {
                     object.insert(

@@ -138,6 +138,81 @@ final class UnifiedEventTransformerBasicTests: UnifiedEventTransformerTestCase {
         }
     }
 
+    func testUserInputRequestAndAnswerReconstructAsDurableNativeMessages() throws {
+        let events = [
+            rawEvent(
+                id: "assistant-question",
+                type: "message.assistant",
+                payload: [
+                    "content": AnyCodable([[
+                        "type": "tool_invocation",
+                        "id": "question-1",
+                        "name": "request_user_input",
+                        "input": [String: Any]()
+                    ]]),
+                    "turn": AnyCodable(1),
+                    "model": AnyCodable("test-model"),
+                    "stopReason": AnyCodable("tool_use")
+                ],
+                sequence: 1
+            ),
+            rawEvent(
+                id: "question-start",
+                type: "tool.invocation.started",
+                payload: [
+                    "invocationId": AnyCodable("question-1"),
+                    "toolName": AnyCodable("request_user_input"),
+                    "arguments": AnyCodable("""
+                    {"questions":[{"header":"Format","id":"format","question":"Which format?","options":[{"label":"Markdown","description":"Markdown file"},{"label":"HTML","description":"HTML file"}]}]}
+                    """),
+                    "turn": AnyCodable(1)
+                ],
+                sequence: 2
+            ),
+            rawEvent(
+                id: "question-complete",
+                type: "tool.invocation.completed",
+                payload: [
+                    "invocationId": AnyCodable("question-1"),
+                    "toolName": AnyCodable("request_user_input"),
+                    "content": AnyCodable("Question presented"),
+                    "isError": AnyCodable(false),
+                    "duration": AnyCodable(1)
+                ],
+                sequence: 3
+            ),
+            rawEvent(
+                id: "question-answer",
+                type: "message.user",
+                payload: [
+                    "content": AnyCodable("Format: Markdown"),
+                    "messageKind": AnyCodable("user_input_answer"),
+                    "toolName": AnyCodable("request_user_input_answer"),
+                    "invocationId": AnyCodable("question-1"),
+                    "answers": AnyCodable([[
+                        "questionId": "format",
+                        "selectedLabel": "Markdown"
+                    ]])
+                ],
+                sequence: 4
+            )
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 2)
+        guard case .userInputRequest(let request) = messages[0].content else {
+            return XCTFail("Expected native request")
+        }
+        XCTAssertEqual(request.status, .answered)
+        XCTAssertEqual(request.answers.first?.selectedLabel, "Markdown")
+        guard case .userInputAnswer(let answer) = messages[1].content else {
+            return XCTFail("Expected native answer")
+        }
+        XCTAssertEqual(answer.invocationId, "question-1")
+        XCTAssertEqual(answer.answers.first?.selectedLabel, "Markdown")
+    }
+
     // MARK: - Tool Result Tests
 
     func testTransformToolResult() {

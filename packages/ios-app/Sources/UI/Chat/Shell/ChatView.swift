@@ -155,6 +155,14 @@ struct ChatView: View {
                   request.sessionId == sessionId else { return }
             viewModel.inputText = request.prompt
         }
+        .onChange(of: viewModel.pendingUserInputRequest) { _, request in
+            guard presentationMode == .interactiveSession else { return }
+            if let request {
+                sheetCoordinator.showUserInput(request)
+            } else {
+                sheetCoordinator.clearUserInput()
+            }
+        }
     }
 
     private var lifecycleContent: some View {

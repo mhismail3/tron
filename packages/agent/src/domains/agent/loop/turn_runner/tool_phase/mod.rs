@@ -67,6 +67,9 @@ pub(super) struct ToolPhaseParams<'a> {
 #[derive(Default)]
 pub(super) struct ToolPhaseOutcome {
     pub tool_invocations_executed: usize,
+    /// A successful foreground question ends this run after its durable tool
+    /// completion. The answer starts a new run from canonical session events.
+    pub awaiting_user_input: bool,
     pub interrupted: bool,
     pub error: Option<RuntimeError>,
 }
@@ -693,6 +696,9 @@ async fn process_tool_results(
         } = executed;
         outcome.tool_invocations_executed += 1;
         let is_error = exec_result.result.is_error.unwrap_or(false);
+        if tool_invocation.name == "request_user_input" && !is_error {
+            outcome.awaiting_user_input = true;
+        }
 
         params.context_manager.add_message_with_source(
             Message::ToolResult {

@@ -211,6 +211,14 @@ extension ChatViewModel {
             reconcileCompletedReconstructionState()
         }
 
+        pendingUserInputRequest = nil
+        for message in messages.reversed() {
+            guard case .userInputRequest(let request) = message.content,
+                  request.isAnswerable else { continue }
+            pendingUserInputRequest = request
+            break
+        }
+
         messageIndex.rebuild(from: messages)
         sessionLoadDiagnostics.recordAuthoritative(
             eventCount: result.events.count,
@@ -622,6 +630,35 @@ extension ChatViewModel {
         }
 
         logger.info("Reconstruction: tool \(toolName) status=\(toolInvocation.status)", category: .session)
+
+        if toolName == "request_user_input" {
+            guard var request = UserInputRequest.decode(
+                invocationId: toolInvocation.invocationId,
+                arguments: toolInvocation.arguments
+            ) else {
+                logger.warning("[RECONSTRUCT] Dropping malformed request_user_input", category: .session)
+                return
+            }
+            if toolInvocation.status == ToolInvocationStatusDTO.error.rawValue {
+                request.status = .failed(toolInvocation.result ?? "Question unavailable")
+            }
+            if let existingIndex = messages.lastIndex(where: {
+                if case .userInputRequest(let existing) = $0.content {
+                    return existing.invocationId == request.invocationId
+                }
+                return false
+            }) {
+                updateMessage(at: existingIndex) { message in
+                    message.content = .userInputRequest(request)
+                }
+            } else {
+                appendToMessages(ChatMessage(
+                    role: .assistant,
+                    content: .userInputRequest(request)
+                ))
+            }
+            return
+        }
 
         // Format arguments as string for display
         var argsString = "{}"

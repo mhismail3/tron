@@ -9,6 +9,9 @@ pub struct PromptRequest {
     pub trigger: AgentRunTrigger,
     pub reasoning_level: Option<String>,
     pub attachments: Option<Vec<Value>>,
+    /// Structured presentation metadata merged into the admitted user event.
+    /// Only trusted agent-domain handlers construct this value.
+    pub user_event_metadata: Option<Value>,
     /// Engine causality moved from the accepted invocation into the provider
     /// turn, completion events, and runtime stream records.
     pub engine_causality: Option<PromptEngineCausality>,

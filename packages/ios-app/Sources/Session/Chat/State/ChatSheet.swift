@@ -92,6 +92,7 @@ enum ChatSheet: Identifiable, Equatable {
     // Tool detail
     case toolInvocationDetail(ToolInvocationData)
     case toolInvocationGroupDetail(ToolInvocationGroupData)
+    case userInput(UserInputRequest)
 
 
     var id: String {
@@ -108,6 +109,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "tool-\(data.id)"
         case .toolInvocationGroupDetail(let data):
             return "tool-group-\(data.id)"
+        case .userInput(let request):
+            return "user-input-\(request.invocationId)"
         case .providerErrorDetail:
             return "providerError"
         case .localErrorDetail(let data):
@@ -131,6 +134,8 @@ enum ChatSheet: Identifiable, Equatable {
             return data1.id == data2.id
         case (.toolInvocationGroupDetail(let data1), .toolInvocationGroupDetail(let data2)):
             return data1.id == data2.id
+        case (.userInput(let lhs), .userInput(let rhs)):
+            return lhs.invocationId == rhs.invocationId
         case (.providerErrorDetail(let data1), .providerErrorDetail(let data2)):
             return data1 == data2
         case (.localErrorDetail(let data1), .localErrorDetail(let data2)):
