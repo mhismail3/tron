@@ -12,8 +12,6 @@ extension ChatMessage {
             return data.id
         case .userInputRequest(let data):
             return data.invocationId
-        case .userInputAnswer(let data):
-            return data.invocationId
         default:
             return nil
         }

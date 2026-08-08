@@ -96,9 +96,50 @@ struct UserInputRequest: Equatable, Identifiable, Sendable {
     }
 }
 
-struct UserInputAnswerPresentation: Equatable, Sendable {
+struct UserInputAnswerRecord: Equatable, Sendable {
     let invocationId: String
     let answers: [UserInputAnswer]
+}
+
+enum UserInputPresentation {
+    static func sheetTitle(for request: UserInputRequest) -> String {
+        switch request.status {
+        case .pending:
+            request.questions.count == 1 ? "Question" : "Questions"
+        case .answered:
+            "Answers"
+        case .failed:
+            "Unavailable"
+        }
+    }
+
+    static func chatTitle(for request: UserInputRequest) -> String {
+        switch request.status {
+        case .pending:
+            request.questions.count == 1 ? "Question for you" : "Questions for you"
+        case .answered:
+            answeredTitle(count: request.answers.count)
+        case .failed:
+            "Question unavailable"
+        }
+    }
+
+    static func chatDetail(for request: UserInputRequest) -> String {
+        switch request.status {
+        case .pending:
+            return request.questions.first?.question ?? "Input requested"
+        case .answered:
+            let values = request.answers.map(\.displayValue)
+            return values.isEmpty ? "Answers saved" : values.joined(separator: " · ")
+        case .failed(let reason):
+            return reason
+        }
+    }
+
+    private static func answeredTitle(count: Int) -> String {
+        guard count > 0 else { return "Answered" }
+        return "Answered \(count) question\(count == 1 ? "" : "s")"
+    }
 }
 
 private extension String {

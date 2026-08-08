@@ -669,7 +669,13 @@ the standard medium/large native sheet; ordinary tool chips are not duplicated.
 If another sheet is active, the latest request waits for that presentation to
 dismiss. The sheet supports one to three questions, two or three explicit
 choices each, and a custom `Other` answer, using shared sheet chrome and Tron
-typography. A successful tool completion is the durable pending marker. The
+typography. Each question owns one horizontally swipeable page whose vertical
+content scrolls independently, so compact detents, the keyboard, large text,
+and a multiline `Other` value cannot clip the final choice. The question and
+header sit directly in the sheet while every choice is its own first-level
+row. Pending presentation uses the warning accent; answered presentation uses
+the success accent and restores the selected values as non-interactive audit
+rows. A successful tool completion is the durable pending marker. The
 sheet admits choices immediately but enables submit only after the producing
 agent run releases its ordinary session guard. Submit first restores the live
 session subscription, then invokes the session-scoped
@@ -677,7 +683,10 @@ answer function with invocation-derived idempotency. The server validates the
 answers against its persisted question, appends one structured user event, and
 starts a new run. Live state, cached reconstruction, pagination context, app
 foregrounding, reconnect, and server restart therefore derive pending/answered
-presentation from the same canonical events; there is no client pause object or
+presentation from the same canonical events. The structured answer event is
+folded into the original request card instead of producing a redundant second
+chat message; that card changes to `Answered N questions`, summarizes the saved
+values, and reopens the same read-only pages. There is no client pause object or
 blocked network continuation. Delegated background workers never receive this
 foreground primitive and return missing information to their parent agent.
 
