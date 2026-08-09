@@ -963,8 +963,10 @@ server-backed `filesystem::inspect_source_control` read for that exact path and
 connection continuity. A usable Git working tree reveals a first-level checkout
 choice immediately after Workspace: use the existing checkout, create and
 switch to a new session branch, or create an isolated worktree. Non-repositories
-and unsupported older servers simply omit the choice. The app sends only the
-closed placement value to `session::create`; the engine owns branch names,
+omit the choice. A connected older server that lacks the bounded inspection
+function produces an explicit update-and-retry row instead of being
+misrepresented as a non-repository. The app sends only the closed placement
+value to `session::create`; the engine owns branch names,
 worktree paths, rollback, and durable ordering. A branch/worktree response must
 include the authoritative checkout directory, and the app stores that returned
 path as both the new session workspace identity and working directory instead

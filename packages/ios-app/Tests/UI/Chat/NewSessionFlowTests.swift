@@ -217,6 +217,18 @@ final class NewSessionFlowTests: XCTestCase {
         XCTAssertEqual(status.currentBranch, "main")
     }
 
+    func testSourceControlProbeFailureMakesVersionSkewExplicitAndRetryable() {
+        let versionSkew = NewSessionSourceControlProbeFailure(errorCode: "NOT_FOUND")
+        XCTAssertEqual(versionSkew, .serverUpgradeRequired)
+        XCTAssertEqual(versionSkew.value, "Server Update Required")
+        XCTAssertTrue(versionSkew.caption.contains("Update or restart"))
+
+        let retry = NewSessionSourceControlProbeFailure(errorCode: "INTERNAL_ERROR")
+        XCTAssertEqual(retry, .retry)
+        XCTAssertEqual(retry.value, "Could Not Check")
+        XCTAssertTrue(retry.caption.contains("Tap to retry"))
+    }
+
     func testWorkspaceSelectorUsesCurrentPathAsHeadTruncatedSheetTitle() throws {
         let source = try String(
             contentsOf: iosAppRoot()
