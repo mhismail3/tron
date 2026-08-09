@@ -195,12 +195,4 @@ extension ChatViewModel {
         )
     }
 
-    /// The shell loading budget is a presentation deadline, not permission to
-    /// treat cached or absent history as authoritative.
-    func markInitialReconstructionDelayed() {
-        guard !hasAuthoritativeHistory else { return }
-        conversationHistoryPhase = .recoverableFailure(
-            hasCachedTranscript: conversationHistoryPhase.showsCachedTranscript
-        )
-    }
 }

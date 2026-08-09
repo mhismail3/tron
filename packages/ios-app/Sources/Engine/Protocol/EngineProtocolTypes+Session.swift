@@ -205,6 +205,12 @@ struct SessionContextRequestsParams: Encodable, Equatable {
 struct SessionContextRequestDetailParams: Encodable, Equatable {
     let sessionId: String
     let eventId: String
+    let projection: SessionContextRequestDetailProjection
+}
+
+enum SessionContextRequestDetailProjection: String, Encodable, Equatable, Sendable {
+    case agentContext = "agent_context"
+    case technical
 }
 
 struct SessionContextRequestSummaryDTO: Codable, Equatable, Identifiable, Sendable {
@@ -445,7 +451,7 @@ struct SessionContextRequestDetailDTO: Decodable, Equatable, Sendable {
     let format: String
     let contextManifest: SessionContextManifestDTO?
     let providerAdditions: [ContextSystemContributionDTO]?
-    let providerAudit: AnyCodable
+    let providerAudit: AnyCodable?
     let provenanceAvailability: String
 }
 

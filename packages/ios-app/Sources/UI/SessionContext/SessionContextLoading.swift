@@ -143,7 +143,7 @@ extension SessionContextSheet {
             if latestContextSummary?.eventId != refreshedSummary?.eventId {
                 contextDetailLoadingGeneration &+= 1
                 contextDetailLoadingDestination = nil
-                latestContextDetail = nil
+                latestContextDetails.removeAll()
             }
             latestContextSummary = refreshedSummary
             storeCachedContextOverview(refreshedSummary)
@@ -195,7 +195,7 @@ extension SessionContextSheet {
 
     func openContextDetail(_ destination: SessionContextDetailDestination) {
         guard let summary = latestContextSummary else { return }
-        if let detail = latestContextDetail, detail.eventId == summary.eventId {
+        if let detail = latestContextDetails[destination], detail.eventId == summary.eventId {
             selectedContextDetail = contextDetailSelection(
                 destination,
                 detail: detail
@@ -216,12 +216,13 @@ extension SessionContextSheet {
             do {
                 let detail = try await sessionRepository.contextRequestDetail(
                     sessionId: sessionId,
-                    eventId: summary.eventId
+                    eventId: summary.eventId,
+                    projection: destination == .agentContext ? .agentContext : .technical
                 )
                 guard !Task.isCancelled,
                       contextDetailLoadingGeneration == generation,
                       latestContextSummary?.eventId == detail.eventId else { return }
-                latestContextDetail = detail
+                latestContextDetails[destination] = detail
                 selectedContextDetail = contextDetailSelection(
                     destination,
                     detail: detail

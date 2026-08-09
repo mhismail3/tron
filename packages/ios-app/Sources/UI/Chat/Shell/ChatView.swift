@@ -192,11 +192,10 @@ struct ChatView: View {
                 guard taskCoordinator.isCurrent(watchdogTicket),
                       !Task.isCancelled,
                       !viewModel.hasAuthoritativeHistory else { return }
-                logger.warning(
-                    "[INIT] Initial reconstruction exceeded the shell loading budget; presenting recoverable state",
+                logger.info(
+                    "[INIT] Initial reconstruction is still synchronizing after the shell loading budget",
                     category: .ui
                 )
-                viewModel.markInitialReconstructionDelayed()
                 if !initialLoadComplete {
                     viewModel.animationCoordinator.makeAllMessagesVisible(
                         count: viewModel.messages.count

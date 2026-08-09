@@ -14,7 +14,9 @@
 //!   lifecycle controls, and bounded durable-result reads.
 //! - `inbox` owns durable result and run-history projection; optional exact
 //!   string filters normalize provider-materialized blanks to omission.
-//! - `notifications` owns authenticated installation, inbox, and fixed-response operations.
+//! - `notifications` owns authenticated installation, inbox, and fixed-response
+//!   operations. Its SQLite reads and writes run on the shared bounded blocking
+//!   supervisor so device reconciliation cannot occupy an async runtime thread.
 //! - `webhook` owns credential rotation and authenticated ingress materialization.
 //! - `support` owns shared payload admission and response translation.
 

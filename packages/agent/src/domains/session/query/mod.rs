@@ -11,8 +11,9 @@
 //! only rows returned to the caller; its look-ahead row is metadata-only so a
 //! one-item mobile overview never reads a second large context manifest. The
 //! opt-in detail read enriches its message inventory from immutable source
-//! events in one bounded batch so clients can show model, tool, and turn facts
-//! without duplicating those facts in the provider-audit payload.
+//! events in one bounded batch so clients can show model, tool, and turn facts.
+//! Its closed projection keeps the product-facing Agent Context response small;
+//! the exact provider audit crosses the wire only for Technical Details.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -25,6 +26,12 @@ use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, ToolError};
 
 pub(crate) struct SessionQueryService;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ContextRequestDetailProjection {
+    AgentContext,
+    Technical,
+}
 
 const SESSION_LIST_DEFAULT_LIMIT: usize = 50;
 const SESSION_LIST_MAX_LIMIT: usize = 200;
@@ -182,6 +189,69 @@ fn enrich_context_message_source_metadata(manifest: &mut Value, events: &[EventR
             message.insert("sourceTurns".to_owned(), Value::Array(turns));
         }
     }
+}
+
+/// Keep the product-facing context projection proportional to what it renders.
+/// Exact schemas, hashes, omitted capabilities, and catalog evidence remain in
+/// the immutable technical provider audit rather than crossing the wire twice.
+fn project_agent_context_tool_surface(manifest: &mut Value) {
+    const FIXED_FIELDS: &[&str] = &[
+        "functionId",
+        "modelName",
+        "exposed",
+        "audience",
+        "accessPath",
+        "selectionReason",
+    ];
+    const WORKER_FIELDS: &[&str] = &[
+        "workerId",
+        "modelName",
+        "workerVersion",
+        "projected",
+        "selectionReason",
+        "rankingMechanism",
+        "relevanceScore",
+        "routerExplanation",
+    ];
+
+    fn project_items(surface: &Value, key: &str, admitted: &str, fields: &[&str]) -> Vec<Value> {
+        surface
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|item| item.get(admitted).and_then(Value::as_bool) == Some(true))
+            .filter_map(Value::as_object)
+            .map(|item| {
+                Value::Object(
+                    fields
+                        .iter()
+                        .filter_map(|field| {
+                            item.get(*field)
+                                .cloned()
+                                .map(|value| ((*field).to_owned(), value))
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
+    let Some(manifest) = manifest.as_object_mut() else {
+        return;
+    };
+    let Some(surface) = manifest.get("toolSurface") else {
+        return;
+    };
+    let fixed_tools = project_items(surface, "fixedTools", "exposed", FIXED_FIELDS);
+    let available_workers = project_items(surface, "availableWorkers", "projected", WORKER_FIELDS);
+    manifest.insert(
+        "toolSurface".to_owned(),
+        json!({
+            "fixedTools": fixed_tools,
+            "availableWorkers": available_workers,
+        }),
+    );
 }
 
 fn worker_evidence_text(value: &Value) -> Option<&str> {
@@ -484,6 +554,7 @@ impl SessionQueryService {
         deps: &Deps,
         session_id: String,
         event_id: String,
+        projection: ContextRequestDetailProjection,
     ) -> Result<Value, ToolError> {
         let event_store = deps.event_store.clone();
         run_blocking_task("session.context_request_detail", move || {
@@ -513,20 +584,26 @@ impl SessionQueryService {
                     message: error.to_string(),
                 })?;
             enrich_context_message_source_metadata(&mut context_manifest, &source_events);
-            Ok(json!({
+            if projection == ContextRequestDetailProjection::AgentContext {
+                project_agent_context_tool_surface(&mut context_manifest);
+            }
+            let mut detail = json!({
                 "eventId":row.id,
                 "sequence":row.sequence,
                 "timestamp":row.timestamp,
                 "format":format,
                 "contextManifest":context_manifest,
                 "providerAdditions":payload.get("providerAdditions").cloned().unwrap_or_else(|| json!([])),
-                "providerAudit":payload,
                 "provenanceAvailability":if crate::shared::protocol::model_audit::provider_audit_has_complete_provenance(format) {
                     "complete"
                 } else {
                     "legacy_unavailable"
                 },
-            }))
+            });
+            if projection == ContextRequestDetailProjection::Technical {
+                detail["providerAudit"] = payload;
+            }
+            Ok(detail)
         })
         .await
     }
@@ -916,6 +993,59 @@ mod tests {
     use super::*;
     use crate::domains::session::event_store::{AppendOptions, EventType};
     use crate::shared::server::test_support::make_test_context;
+
+    #[test]
+    fn agent_context_tool_surface_keeps_only_rendered_capability_fields() {
+        let mut manifest = json!({
+            "toolSurface": {
+                "catalogRevision": 42,
+                "fixedTools": [
+                    {
+                        "functionId": "filesystem_read",
+                        "modelName": "filesystem_read",
+                        "exposed": true,
+                        "selectionReason": "ordinary",
+                        "inputSchema": {"type": "object"},
+                        "inputSchemaSha256": "sha256:fixed"
+                    },
+                    {
+                        "functionId": "hidden_tool",
+                        "modelName": "hidden_tool",
+                        "exposed": false,
+                        "inputSchema": {"type": "object"}
+                    }
+                ],
+                "availableWorkers": [
+                    {
+                        "workerId": "research",
+                        "modelName": "research",
+                        "workerVersion": "v1",
+                        "projected": true,
+                        "selectionReason": "relevant",
+                        "outputSchema": {"type": "object"}
+                    },
+                    {
+                        "workerId": "omitted",
+                        "modelName": "omitted",
+                        "projected": false,
+                        "omissionReason": "not relevant"
+                    }
+                ],
+                "tools": [{"large": "technical-only"}]
+            }
+        });
+
+        project_agent_context_tool_surface(&mut manifest);
+
+        let surface = &manifest["toolSurface"];
+        assert_eq!(surface["fixedTools"].as_array().unwrap().len(), 1);
+        assert_eq!(surface["availableWorkers"].as_array().unwrap().len(), 1);
+        assert_eq!(surface["fixedTools"][0]["functionId"], "filesystem_read");
+        assert!(surface["fixedTools"][0].get("inputSchema").is_none());
+        assert!(surface["availableWorkers"][0].get("outputSchema").is_none());
+        assert!(surface.get("catalogRevision").is_none());
+        assert!(surface.get("tools").is_none());
+    }
 
     #[test]
     fn agent_update_preview_projects_worker_result_evidence_without_raw_json() {
@@ -1336,8 +1466,9 @@ mod tests {
 
         let detail = SessionQueryService::context_request_detail(
             &Deps::from_test_context(&ctx),
-            sid,
-            current.id,
+            sid.clone(),
+            current.id.clone(),
+            ContextRequestDetailProjection::AgentContext,
         )
         .await
         .unwrap();
@@ -1347,6 +1478,17 @@ mod tests {
             detail["providerAdditions"][0]["kind"],
             "provider_system_prefix"
         );
+        assert!(detail.get("providerAudit").is_none());
+
+        let technical_detail = SessionQueryService::context_request_detail(
+            &Deps::from_test_context(&ctx),
+            sid,
+            current.id,
+            ContextRequestDetailProjection::Technical,
+        )
+        .await
+        .unwrap();
+        assert!(technical_detail["providerAudit"].is_object());
     }
 
     #[tokio::test]
@@ -1375,6 +1517,7 @@ mod tests {
             &Deps::from_test_context(&ctx),
             second,
             audit.id,
+            ContextRequestDetailProjection::Technical,
         )
         .await
         .expect_err("cross-session audit read must fail");
@@ -1442,6 +1585,7 @@ mod tests {
             &Deps::from_test_context(&ctx),
             session_id,
             audit.id,
+            ContextRequestDetailProjection::AgentContext,
         )
         .await
         .unwrap();

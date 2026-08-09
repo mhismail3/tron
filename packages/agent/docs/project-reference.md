@@ -1499,6 +1499,13 @@ Authenticated clients read this same authority with
 and `session::context_request_detail` (exact event and session ID). These
 operations query only provider-request events and never invoke a model, hook,
 worker, or relevance calculation. Agent-worker session IDs use the same reads.
+The detail request has a closed `agent_context`/`technical` projection. The
+product projection returns the enriched manifest and provider additions but
+omits the raw provider envelope. Its tool surface contains only admitted
+tools/workers and the fields rendered by Agent Context; exact schemas, hashes,
+catalog evidence, and omitted candidates remain technical-only. The technical
+projection includes the complete audit. An
+omitted projection defaults to technical for existing authenticated clients.
 Legacy v2 rows retain their redacted provider audit and counts while
 request-specific provenance is explicitly labeled unavailable. The detail
 response joins each manifest message's immutable source event IDs through one
@@ -2680,6 +2687,14 @@ active subscriptions; disconnect still clears every remaining cursor. The cap
 and explicit release bound the server's 250 ms push-poll work without creating
 a durable subscription registry.
 
+Correlated invocation requests are admitted concurrently through one bounded
+connection-owned task set. A slow function can no longer monopolize the socket
+read loop and strand later session resume/reconstruction or subscription
+frames; correlation IDs own out-of-order responses, and disconnect cancels and
+boundedly drains all admitted work. Synchronous notification ledger reads and
+writes run through the shared blocking supervisor rather than occupying async
+runtime threads.
+
 Authenticated hello responses include a capability list. `terminal.v1`
 identifies the native Terminal seam and is also reported by
 `engine::surface_snapshot` as a native capability, separate from fixed
@@ -2989,8 +3004,10 @@ projects that same token truth as a context ring. The user-facing Manage Session
 sheet uses the provider-request event as its sole request-context authority. It shows no
 request-history card: reconstruction metadata supplies an immediate bounded
 latest-request inventory, `session::context_requests(limit: 1)` reconciles that
-overview, and `session::context_request_detail` loads exact detail only for an
-opened row. iOS stores only that compact inventory beside its disposable
+overview, and `session::context_request_detail` loads a lightweight
+`agent_context` or full `technical` projection only for an opened row. iOS
+caches those immutable projections separately while the sheet is mounted and
+stores only the compact inventory beside its disposable
 session row for offline presentation. Provider audit bodies never enter the
 transcript cache, and older cached bodies are reduced to deferred markers when
 the cache schema opens.

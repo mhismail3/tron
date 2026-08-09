@@ -76,7 +76,8 @@ protocol NetworkSessionRepository: AnyObject {
     /// Read one exact redacted provider-request audit.
     func contextRequestDetail(
         sessionId: String,
-        eventId: String
+        eventId: String,
+        projection: SessionContextRequestDetailProjection
     ) async throws -> SessionContextRequestDetailDTO
 
     /// Read durable delivery and non-blocking worker-wait state.
@@ -113,7 +114,8 @@ extension NetworkSessionRepository {
 
     func contextRequestDetail(
         sessionId _: String,
-        eventId _: String
+        eventId _: String,
+        projection _: SessionContextRequestDetailProjection
     ) async throws -> SessionContextRequestDetailDTO {
         throw URLError(.unsupportedURL)
     }
