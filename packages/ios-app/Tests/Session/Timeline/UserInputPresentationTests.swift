@@ -57,6 +57,55 @@ struct UserInputPresentationTests {
         #expect(UserInputPresentation.chatTitle(for: single) == "Answered 1 question")
     }
 
+    @Test("Manual taps open durable answers while automatic presentation stays pending and one-shot")
+    func presentationPolicySeparatesAuditFromAutomaticInterruption() {
+        let pending = request(questions: [question(id: "format")])
+        let answered = request(
+            questions: [question(id: "format")],
+            answers: [UserInputAnswer(
+                questionId: "format",
+                selectedLabel: "First",
+                freeText: nil
+            )],
+            status: .answered
+        )
+        let failed = request(
+            questions: [question(id: "format")],
+            status: .failed("The request expired")
+        )
+
+        #expect(UserInputPresentation.shouldPresentSheet(
+            for: pending,
+            automatically: false,
+            hasBeenPresented: true
+        ))
+        #expect(UserInputPresentation.shouldPresentSheet(
+            for: answered,
+            automatically: false,
+            hasBeenPresented: false
+        ))
+        #expect(UserInputPresentation.shouldPresentSheet(
+            for: failed,
+            automatically: false,
+            hasBeenPresented: false
+        ))
+        #expect(UserInputPresentation.shouldPresentSheet(
+            for: pending,
+            automatically: true,
+            hasBeenPresented: false
+        ))
+        #expect(!UserInputPresentation.shouldPresentSheet(
+            for: pending,
+            automatically: true,
+            hasBeenPresented: true
+        ))
+        #expect(!UserInputPresentation.shouldPresentSheet(
+            for: answered,
+            automatically: true,
+            hasBeenPresented: false
+        ))
+    }
+
     @Test("Failed requests use unavailable copy")
     func failedCopy() {
         let failed = request(

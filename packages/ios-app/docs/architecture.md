@@ -732,7 +732,10 @@ request auto-presents once; reconstructing an older unanswered request restores
 its tappable chip without reopening the sheet. The same local row records that
 the request has already auto-presented, closing a reconnect race in which a
 replayed live start could otherwise reopen it. Manual chip taps remain
-available. Submit first restores the live
+available for every durable state: pending requests reopen their editable
+draft, while answered and failed requests open their canonical read-only audit
+pages. Only automatic presentation applies the pending/one-shot gate. Submit
+first restores the live
 session subscription, then invokes the session-scoped
 answer function with invocation-derived idempotency. The server validates the
 non-empty answer subset against its persisted questions, appends one structured user event, and
