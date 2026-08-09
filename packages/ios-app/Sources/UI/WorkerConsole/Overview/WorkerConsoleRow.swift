@@ -87,14 +87,13 @@ struct WorkerConsoleRow: View {
     @ViewBuilder
     private var exposureTag: some View {
         if let architecture {
-            workerTag(
-                architecture.modelExposure == "direct"
-                    ? "Direct chat tool"
-                    : "Internal specialist",
-                color: architecture.modelExposure == "direct"
-                    ? .tronSuccess
-                    : .tronPurple
-            )
+            if !architecture.engineHooks.isEmpty {
+                workerTag("Engine specialist", color: .tronPurple)
+            } else if architecture.modelExposure == "direct" {
+                workerTag("Direct chat tool", color: .tronSuccess)
+            } else {
+                workerTag("Delegated worker", color: .tronInfo)
+            }
         } else if surface != nil {
             workerTag("Direct chat tool", color: .tronSuccess)
         } else if worker.enabled && !worker.retired {

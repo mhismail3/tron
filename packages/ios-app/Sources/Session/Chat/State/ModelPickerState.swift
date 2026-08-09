@@ -51,6 +51,7 @@ final class ModelPickerState {
     ///   - onOptimisticSet: Called when optimistic name is set (for context window update)
     ///   - onSuccess: Called on successful switch with previous and new model names
     ///   - onError: Called on failure with error message and model to revert to
+    @discardableResult
     func switchModel(
         to model: ModelInfo,
         sessionId: String,
@@ -58,7 +59,7 @@ final class ModelPickerState {
         onOptimisticSet: @escaping (String) -> Void,
         onSuccess: @escaping (String, String) -> Void,
         onError: @escaping (String, ModelInfo?) -> Void
-    ) async {
+    ) async -> ModelSwitchResult? {
         let previousModel = currentModel
 
         // Optimistic update - UI updates instantly
@@ -73,12 +74,31 @@ final class ModelPickerState {
             )
             // Clear optimistic update - real value now reflected
             optimisticModelName = nil
-            onSuccess(previousModel, result.newModel)
+            onSuccess(result.previousModel, result.newModel)
+            return result
         } catch {
             // Revert optimistic update on failure
             optimisticModelName = nil
             let revertModel = ModelInfo.matching(previousModel, in: modelRepository.cachedModels)
             onError(error.localizedDescription, revertModel)
+            return nil
+        }
+    }
+}
+
+/// Serializes session configuration writes whose validity depends on the
+/// preceding write (for example, selecting a model and then one of that
+/// model's reasoning levels from the same sheet commit).
+@MainActor
+final class SessionConfigurationQueue {
+    private var tail: Task<Void, Never>?
+
+    func enqueue(_ operation: @escaping @MainActor () async -> Void) {
+        let predecessor = tail
+        tail = Task { @MainActor in
+            await predecessor?.value
+            guard !Task.isCancelled else { return }
+            await operation()
         }
     }
 }

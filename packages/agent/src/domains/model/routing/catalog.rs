@@ -1,10 +1,11 @@
 //! Model provider catalog and session model-configuration helpers.
 //!
-//! `model.list` and `model.switch` are served by canonical engine functions.
+//! `model.list`, `model.switch`, and `model.set_reasoning_level` are served by
+//! canonical engine functions.
 //! The provider catalog helpers in this file remain
 //! the source of truth for model support/deprecation/default reasoning checks,
-//! and the model switch helper is a plain domain function rather than a
-//! transport dispatch branch.
+//! and the session configuration helpers are plain domain functions rather
+//! than transport dispatch branches.
 //!
 //! Model data is derived from the provider registries (single source of truth).
 //! See `anthropic/types.rs`, `openai/types.rs`, `google/types.rs`, `minimax/types.rs`.
@@ -157,6 +158,52 @@ pub(crate) fn active_openai_auth_path(deps: &Deps) -> OpenAIAuthPath {
         .unwrap_or(OpenAIAuthPath::ChatGptCodex)
 }
 
+/// Invalidate cached turn state and publish the authoritative event count after
+/// a durable session-configuration write. This is the catch-up signal paired
+/// clients use to discover the newly appended audit event immediately.
+fn publish_session_configuration_change(deps: &Deps, session_id: &str) -> Result<(), ToolError> {
+    deps.session_manager.invalidate_session(session_id);
+    let session = deps
+        .event_store
+        .get_session(session_id)
+        .map_err(|error| ToolError::Internal {
+            message: error.to_string(),
+        })?
+        .ok_or_else(|| ToolError::NotFound {
+            code: errors::SESSION_NOT_FOUND.into(),
+            message: format!("Session '{session_id}' was removed after configuration changed"),
+        })?;
+    let is_cached = deps.session_manager.is_cached(session_id);
+    let _ = deps.orchestrator.broadcast().emit(
+        crate::shared::protocol::events::TronEvent::SessionUpdated {
+            base: crate::shared::protocol::events::BaseEvent::now(session_id),
+            title: session.title.clone(),
+            model: Some(session.latest_model.clone()),
+            event_count: Some(session.event_count),
+            turn_count: Some(session.turn_count),
+            message_count: Some(session.message_count),
+            input_tokens: Some(session.total_input_tokens),
+            output_tokens: Some(session.total_output_tokens),
+            last_turn_input_tokens: Some(session.last_turn_input_tokens),
+            cache_read_tokens: Some(session.total_cache_read_tokens),
+            cache_creation_tokens: Some(session.total_cache_creation_tokens),
+            cost: Some(session.total_cost),
+            last_activity: session.last_activity_at.clone(),
+            // `isActive` reports session-cache residency.
+            is_active: is_cached,
+            last_user_prompt: None,
+            last_assistant_response: None,
+            parent_session_id: session.parent_session_id.clone(),
+            activity_lines: None,
+            labels: None,
+            organization_group: None,
+            organization_changed: None,
+            is_archived: None,
+        },
+    );
+    Ok(())
+}
+
 /// Switch the model for a session.
 pub(crate) async fn switch_model(params: Option<&Value>, deps: &Deps) -> Result<Value, ToolError> {
     let session_id = require_string_param(params, "sessionId")?;
@@ -191,8 +238,7 @@ pub(crate) async fn switch_model(params: Option<&Value>, deps: &Deps) -> Result<
         }
     }
 
-    let session = deps
-        .event_store
+    deps.event_store
         .get_session(&session_id)
         .map_err(|e| ToolError::Internal {
             message: e.to_string(),
@@ -202,8 +248,6 @@ pub(crate) async fn switch_model(params: Option<&Value>, deps: &Deps) -> Result<
             message: format!("Session '{session_id}' not found"),
         })?;
 
-    let previous_model = session.latest_model.clone();
-
     if deps.orchestrator.has_active_run(&session_id) {
         return Err(ToolError::Custom {
             code: "SESSION_BUSY".into(),
@@ -212,46 +256,90 @@ pub(crate) async fn switch_model(params: Option<&Value>, deps: &Deps) -> Result<
         });
     }
 
-    let _ = deps
+    let (previous_model, changed) = deps
         .event_store
         .update_latest_model(&session_id, &model)
-        .map_err(|e| ToolError::Internal {
-            message: e.to_string(),
+        .map_err(|error| match error {
+            crate::domains::session::event_store::EventStoreError::SessionNotFound(_) => {
+                ToolError::NotFound {
+                    code: errors::SESSION_NOT_FOUND.into(),
+                    message: format!("Session '{session_id}' was removed during model switch"),
+                }
+            }
+            other => ToolError::Internal {
+                message: other.to_string(),
+            },
         })?;
 
-    deps.session_manager.invalidate_session(&session_id);
-
-    let is_cached = deps.session_manager.is_cached(&session_id);
-    let _ = deps.orchestrator.broadcast().emit(
-        crate::shared::protocol::events::TronEvent::SessionUpdated {
-            base: crate::shared::protocol::events::BaseEvent::now(&session_id),
-            title: session.title.clone(),
-            model: Some(model.clone()),
-            event_count: Some(session.event_count),
-            turn_count: Some(session.turn_count),
-            message_count: Some(session.message_count),
-            input_tokens: Some(session.total_input_tokens),
-            output_tokens: Some(session.total_output_tokens),
-            last_turn_input_tokens: Some(session.last_turn_input_tokens),
-            cache_read_tokens: Some(session.total_cache_read_tokens),
-            cache_creation_tokens: Some(session.total_cache_creation_tokens),
-            cost: Some(session.total_cost),
-            last_activity: session.last_activity_at.clone(),
-            // `isActive` reports session-cache residency.
-            is_active: is_cached,
-            last_user_prompt: None,
-            last_assistant_response: None,
-            parent_session_id: session.parent_session_id.clone(),
-            activity_lines: None,
-            labels: None,
-            organization_group: None,
-            organization_changed: None,
-            is_archived: None,
-        },
-    );
+    if changed {
+        publish_session_configuration_change(deps, &session_id)?;
+    }
 
     Ok(serde_json::json!({
         "previousModel": previous_model,
         "newModel": model,
+    }))
+}
+
+/// Persist an exact reasoning level for the session's current model.
+pub(crate) async fn set_reasoning_level(
+    params: Option<&Value>,
+    deps: &Deps,
+) -> Result<Value, ToolError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let level = require_string_param(params, "level")?;
+    let session = deps
+        .event_store
+        .get_session(&session_id)
+        .map_err(|error| ToolError::Internal {
+            message: error.to_string(),
+        })?
+        .ok_or_else(|| ToolError::NotFound {
+            code: errors::SESSION_NOT_FOUND.into(),
+            message: format!("Session '{session_id}' not found"),
+        })?;
+
+    if deps.orchestrator.has_active_run(&session_id) {
+        return Err(ToolError::Custom {
+            code: "SESSION_BUSY".into(),
+            message: "Cannot change reasoning level while session is running".into(),
+            details: None,
+        });
+    }
+
+    validate_explicit_reasoning_level(&session.latest_model, &level, &deps.auth_path)
+        .map_err(|message| ToolError::InvalidParams { message })?;
+    let (previous_level, changed) = deps
+        .event_store
+        .update_reasoning_level(&session_id, &session.latest_model, &level)
+        .map_err(|error| match error {
+            crate::domains::session::event_store::EventStoreError::SessionNotFound(_) => {
+                ToolError::NotFound {
+                    code: errors::SESSION_NOT_FOUND.into(),
+                    message: format!(
+                        "Session '{session_id}' was removed while selecting reasoning"
+                    ),
+                }
+            }
+            crate::domains::session::event_store::EventStoreError::InvalidOperation(message) => {
+                ToolError::Custom {
+                    code: "SESSION_CONFIGURATION_CHANGED".into(),
+                    message,
+                    details: None,
+                }
+            }
+            other => ToolError::Internal {
+                message: other.to_string(),
+            },
+        })?;
+
+    if changed {
+        publish_session_configuration_change(deps, &session_id)?;
+    }
+
+    Ok(serde_json::json!({
+        "previousLevel": previous_level,
+        "newLevel": level,
+        "changed": changed,
     }))
 }

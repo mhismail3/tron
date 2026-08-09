@@ -1,6 +1,7 @@
 //! Event type definitions for the Tron event sourcing system.
 //!
-//! - [`EventType`]: durable primitive-loop event discriminators.
+//! - [`EventType`]: durable primitive-loop and session-configuration event
+//!   discriminators.
 //! - [`SessionEvent`]: Flat struct with base fields + opaque `payload` JSON.
 //! - [`payloads`]: Token totals and the two payload validators used before
 //!   tool-invocation persistence.

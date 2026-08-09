@@ -3,6 +3,38 @@ import Foundation
 /// Event projections for transforming system events into ChatMessages.
 enum SystemEventProjection {
 
+    static func transformModelChanged(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        guard let previous = payload.string("previousModel"),
+              let current = payload.string("newModel") else { return nil }
+        return ChatMessage(
+            role: .system,
+            content: .modelChange(
+                from: previous.shortModelName,
+                to: current.shortModelName
+            ),
+            timestamp: timestamp
+        )
+    }
+
+    static func transformReasoningChanged(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        guard let current = payload.string("newLevel") else { return nil }
+        let previous = payload.string("previousLevel") ?? "Default"
+        return ChatMessage(
+            role: .system,
+            content: .reasoningLevelChange(
+                from: previous.capitalized,
+                to: current.capitalized
+            ),
+            timestamp: timestamp
+        )
+    }
+
     /// Transform compact.boundary event into a ChatMessage.
     ///
     /// Compaction events indicate when context was compressed to fit window.

@@ -16,6 +16,7 @@ enum DatabaseSchema {
         try createEventsTable(db: db)
         try createSessionsTable(db: db)
         try createDraftsTable(db: db)
+        try createUserInputDraftsTable(db: db)
         try compactDeferredProviderAudits(db: db)
     }
 
@@ -102,6 +103,26 @@ enum DatabaseSchema {
                 updated_at TEXT NOT NULL
             )
         """)
+    }
+
+    /// Unsubmitted answers are local interaction drafts, just like composer
+    /// text. The canonical pending request and submitted answers remain in the
+    /// server event log; this table only lets a user leave and reopen a chat
+    /// without losing work.
+    private static func createUserInputDraftsTable(db: OpaquePointer?) throws {
+        try execute(db: db, """
+            CREATE TABLE IF NOT EXISTS session_user_input_drafts (
+                session_id TEXT NOT NULL,
+                invocation_id TEXT NOT NULL,
+                draft_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (session_id, invocation_id)
+            )
+        """)
+        try execute(
+            db: db,
+            "CREATE INDEX IF NOT EXISTS idx_user_input_drafts_session ON session_user_input_drafts(session_id)"
+        )
     }
 
     /// Provider request manifests are server-owned audit bodies, not

@@ -32,6 +32,25 @@ final class DraftStoreTests: XCTestCase {
         Attachment(id: id, type: .image, data: data, mimeType: "image/jpeg", fileName: "photo.jpg")
     }
 
+    private func makeQuestionRequest(invocationId: String) -> UserInputRequest {
+        UserInputRequest(
+            invocationId: invocationId,
+            questions: [
+                UserInputQuestion(
+                    header: "Choice",
+                    id: "choice",
+                    question: "Choose one",
+                    options: [
+                        UserInputOption(label: "First", description: "First option"),
+                        UserInputOption(label: "Second", description: "Second option")
+                    ]
+                )
+            ],
+            answers: [],
+            status: .pending
+        )
+    }
+
     // MARK: - Core Save/Load/Clear
 
     func testSaveAndLoad_textOnly() async throws {
@@ -146,6 +165,14 @@ final class DraftStoreTests: XCTestCase {
         state.text = "test"
         state.attachments = [makeAttachment()]
         await draftStore.saveImmediately(sessionId: "s1", inputBarState: state)
+        let request = makeQuestionRequest(invocationId: "question-to-delete")
+        var questionDraft = UserInputDraft(request: request)
+        questionDraft.selectedLabels["choice"] = "First"
+        await draftStore.saveUserInputDraft(
+            sessionId: "s1",
+            invocationId: request.invocationId,
+            draft: questionDraft
+        )
 
         let dir = draftStore.draftsDirectory(for: "s1")
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path))
@@ -157,6 +184,102 @@ final class DraftStoreTests: XCTestCase {
         let loaded = await draftStore.loadDraft(sessionId: "s1", into: freshState)
         XCTAssertFalse(loaded)
         XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path))
+        let restoredQuestion = await draftStore.loadUserInputDraft(sessionId: "s1", request: request)
+        XCTAssertNil(restoredQuestion)
+    }
+
+    func testQuestionDraftSurvivesStoreRecreationAndReconcilesCurrentContract() async throws {
+        let original = UserInputRequest(
+            invocationId: "question-1",
+            questions: [
+                UserInputQuestion(
+                    header: "Format",
+                    id: "format",
+                    question: "Choose a format",
+                    options: [
+                        UserInputOption(label: "Short", description: "Short response"),
+                        UserInputOption(label: "Long", description: "Long response")
+                    ]
+                )
+            ],
+            answers: [],
+            status: .pending
+        )
+        var draft = UserInputDraft(request: original)
+        draft.selectedLabels["format"] = "Long"
+        draft.selectedLabels["removed-question"] = "Stale"
+        draft.hasBeenPresented = true
+        draftStore.scheduleUserInputDraftSave(
+            sessionId: "s1",
+            invocationId: original.invocationId,
+            draft: draft
+        )
+        await draftStore.flushPending()
+
+        let recreated = DraftStore(
+            eventDatabase: database,
+            documentsURL: testState.documentsURL
+        )
+        let restored = await recreated.loadUserInputDraft(
+            sessionId: "s1",
+            request: original
+        )
+
+        XCTAssertEqual(restored?.selectedLabels, ["format": "Long"])
+        XCTAssertEqual(restored?.hasBeenPresented, true)
+    }
+
+    func testClearingQuestionDraftRemovesPersistedSelection() async throws {
+        let request = UserInputRequest(
+            invocationId: "question-2",
+            questions: [
+                UserInputQuestion(
+                    header: "Tone",
+                    id: "tone",
+                    question: "Choose a tone",
+                    options: [
+                        UserInputOption(label: "Warm", description: "Warm tone"),
+                        UserInputOption(label: "Direct", description: "Direct tone")
+                    ]
+                )
+            ],
+            answers: [],
+            status: .pending
+        )
+        var draft = UserInputDraft(request: request)
+        draft.selectedLabels["tone"] = "Warm"
+        draftStore.scheduleUserInputDraftSave(
+            sessionId: "s1",
+            invocationId: request.invocationId,
+            draft: draft
+        )
+        await draftStore.flushPending()
+
+        await draftStore.clearUserInputDraft(
+            sessionId: "s1",
+            invocationId: request.invocationId
+        )
+
+        let restored = await draftStore.loadUserInputDraft(sessionId: "s1", request: request)
+        XCTAssertNil(restored)
+    }
+
+    func testQuestionDraftDecodesRowsWrittenBeforePresentationMarkerExisted() throws {
+        let legacyJSON = """
+        {
+          "selectedLabels": {"choice": "First"},
+          "customAnswers": {},
+          "customQuestionIds": []
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(
+            UserInputDraft.self,
+            from: Data(legacyJSON.utf8)
+        )
+
+        XCTAssertEqual(decoded.selectedLabels, ["choice": "First"])
+        XCTAssertFalse(decoded.hasBeenPresented)
     }
 
     // MARK: - Edge Cases

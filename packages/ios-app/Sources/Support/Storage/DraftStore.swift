@@ -21,6 +21,9 @@ final class DraftStore {
     private var pendingSessionId: String?
     private var pendingInputBarState: InputBarState?
     private var textEndRevealSessionIds: Set<String> = []
+    private var userInputDebounceTasks: [String: Task<Void, Never>] = [:]
+    private var pendingUserInputDrafts: [String: (sessionId: String, invocationId: String, draft: UserInputDraft)] = [:]
+    private static let userInputDebounceInterval: Duration = .milliseconds(200)
 
     init(eventDatabase: EventDatabase, documentsURL: URL) {
         self.eventDatabase = eventDatabase
@@ -104,12 +107,102 @@ final class DraftStore {
     /// Clean up a draft when a session is deleted.
     func deleteSessionDraft(sessionId: String) async {
         await clearDraft(sessionId: sessionId)
+        let prefix = "\(sessionId)\u{1f}"
+        for key in userInputDebounceTasks.keys.filter({ $0.hasPrefix(prefix) }) {
+            userInputDebounceTasks.removeValue(forKey: key)?.cancel()
+            pendingUserInputDrafts.removeValue(forKey: key)
+        }
+        do {
+            try await eventDatabase.userInputDrafts.deleteSession(sessionId)
+        } catch {
+            logger.warning(
+                "Failed to delete question drafts for session \(sessionId): \(error.localizedDescription)",
+                category: .database
+            )
+        }
     }
 
     /// Flush any pending debounced save. Call on app background.
     func flushPending() async {
-        guard let sessionId = pendingSessionId, let state = pendingInputBarState else { return }
-        await saveImmediately(sessionId: sessionId, inputBarState: state)
+        if let sessionId = pendingSessionId, let state = pendingInputBarState {
+            await saveImmediately(sessionId: sessionId, inputBarState: state)
+        }
+        let pending = Array(pendingUserInputDrafts.values)
+        pendingUserInputDrafts.removeAll()
+        for task in userInputDebounceTasks.values { task.cancel() }
+        userInputDebounceTasks.removeAll()
+        for value in pending {
+            await saveUserInputDraftImmediately(
+                sessionId: value.sessionId,
+                invocationId: value.invocationId,
+                draft: value.draft
+            )
+        }
+    }
+
+    // MARK: - Question Drafts
+
+    func loadUserInputDraft(sessionId: String, request: UserInputRequest) async -> UserInputDraft? {
+        guard eventDatabase.isInitialized else { return nil }
+        do {
+            return try await eventDatabase.userInputDrafts.load(
+                sessionId: sessionId,
+                invocationId: request.invocationId
+            )?.reconciled(with: request)
+        } catch {
+            logger.warning(
+                "Failed to load question draft for \(request.invocationId): \(error.localizedDescription)",
+                category: .database
+            )
+            return nil
+        }
+    }
+
+    func scheduleUserInputDraftSave(
+        sessionId: String,
+        invocationId: String,
+        draft: UserInputDraft
+    ) {
+        let key = userInputKey(sessionId: sessionId, invocationId: invocationId)
+        pendingUserInputDrafts[key] = (sessionId, invocationId, draft)
+        userInputDebounceTasks[key]?.cancel()
+        userInputDebounceTasks[key] = Task { [weak self] in
+            try? await Task.sleep(for: DraftStore.userInputDebounceInterval)
+            guard !Task.isCancelled else { return }
+            await self?.flushUserInputDraft(key: key)
+        }
+    }
+
+    func saveUserInputDraft(
+        sessionId: String,
+        invocationId: String,
+        draft: UserInputDraft
+    ) async {
+        let key = userInputKey(sessionId: sessionId, invocationId: invocationId)
+        userInputDebounceTasks.removeValue(forKey: key)?.cancel()
+        pendingUserInputDrafts.removeValue(forKey: key)
+        await saveUserInputDraftImmediately(
+            sessionId: sessionId,
+            invocationId: invocationId,
+            draft: draft
+        )
+    }
+
+    func clearUserInputDraft(sessionId: String, invocationId: String) async {
+        let key = userInputKey(sessionId: sessionId, invocationId: invocationId)
+        userInputDebounceTasks.removeValue(forKey: key)?.cancel()
+        pendingUserInputDrafts.removeValue(forKey: key)
+        do {
+            try await eventDatabase.userInputDrafts.delete(
+                sessionId: sessionId,
+                invocationId: invocationId
+            )
+        } catch {
+            logger.warning(
+                "Failed to clear question draft for \(invocationId): \(error.localizedDescription)",
+                category: .database
+            )
+        }
     }
 
     // MARK: - File Paths
@@ -167,6 +260,40 @@ final class DraftStore {
         } catch {
             logger.warning("Failed to save draft for session \(sessionId): \(error.localizedDescription)", category: .database)
         }
+    }
+
+    private func flushUserInputDraft(key: String) async {
+        guard let pending = pendingUserInputDrafts.removeValue(forKey: key) else { return }
+        userInputDebounceTasks.removeValue(forKey: key)
+        await saveUserInputDraftImmediately(
+            sessionId: pending.sessionId,
+            invocationId: pending.invocationId,
+            draft: pending.draft
+        )
+    }
+
+    private func saveUserInputDraftImmediately(
+        sessionId: String,
+        invocationId: String,
+        draft: UserInputDraft
+    ) async {
+        guard eventDatabase.isInitialized else { return }
+        do {
+            try await eventDatabase.userInputDrafts.save(
+                sessionId: sessionId,
+                invocationId: invocationId,
+                draft: draft
+            )
+        } catch {
+            logger.warning(
+                "Failed to save question draft for \(invocationId): \(error.localizedDescription)",
+                category: .database
+            )
+        }
+    }
+
+    private func userInputKey(sessionId: String, invocationId: String) -> String {
+        "\(sessionId)\u{1f}\(invocationId)"
     }
 
 }

@@ -348,8 +348,8 @@ struct ModelPickerStateTests {
         #expect(state.optimisticModelName == nil)
     }
 
-    @Test("Switch model calls onSuccess with correct models")
-    func testSwitchModel_callsOnSuccessCallback() async {
+    @Test("Switch model reports server-authoritative previous model")
+    func testSwitchModel_callsOnSuccessWithAuthoritativeModels() async {
         let repository = MockModelRepository()
         repository.switchResult = ModelSwitchResult(
             previousModel: "claude-opus-4-20250514",
@@ -363,7 +363,7 @@ struct ModelPickerStateTests {
         await state.switchModel(
             to: targetModel,
             sessionId: "test-session",
-            currentModel: "claude-opus-4-20250514",
+            currentModel: "stale-client-model",
             onOptimisticSet: { _ in },
             onSuccess: { prev, new in
                 receivedPrevious = prev
@@ -432,8 +432,8 @@ struct ModelPickerStateTests {
         #expect(model.defaultReasoningLevel == "high")
     }
 
-    @Test("reasoning control is hidden when picker has no bound reasoning state")
-    func testReasoningControlHiddenWithoutBoundReasoningState() {
+    @Test("reasoning control follows explicit caller ownership, not a prior level")
+    func testReasoningControlUsesExplicitCallerOwnership() {
         let model = ModelInfo(
             id: "claude-opus-4-6",
             name: "Opus 4.6",
@@ -450,8 +450,12 @@ struct ModelPickerStateTests {
 
         #expect(ModelPickerReasoningVisibility.showsReasoningControl(
             selectedModel: model,
-            reasoningLevel: nil
+            allowsSelection: false
         ) == false)
+        #expect(ModelPickerReasoningVisibility.showsReasoningControl(
+            selectedModel: model,
+            allowsSelection: true
+        ))
     }
 
     @Test("reasoning control is visible when model and caller both support reasoning")
@@ -472,8 +476,38 @@ struct ModelPickerStateTests {
 
         #expect(ModelPickerReasoningVisibility.showsReasoningControl(
             selectedModel: model,
-            reasoningLevel: "medium"
+            allowsSelection: true
         ))
+    }
+
+    @Test("reasoning control does not fabricate levels missing from the catalog")
+    func testReasoningControlHiddenWhenCatalogHasNoLevels() {
+        let model = Self.makeModelInfo(id: "gpt-5.6-sol")
+        #expect(!ModelPickerReasoningVisibility.showsReasoningControl(
+            selectedModel: model,
+            allowsSelection: true
+        ))
+    }
+
+    @Test("reasoning selection normalizes to the selected model's exact catalog")
+    func testReasoningSelectionNormalizesToSelectedModelCatalog() {
+        let model = ModelInfo(
+            id: "gpt-5.6-sol",
+            name: "GPT-5.6 Sol",
+            provider: "openai",
+            contextWindow: 272_000,
+            supportsThinking: true,
+            supportsImages: true,
+            supportsDocuments: true,
+            tier: "frontier",
+            isRetiredGeneration: false,
+            supportsReasoning: true,
+            reasoningLevels: ["low", "medium", "high", "max"],
+            defaultReasoningLevel: "high"
+        )
+
+        #expect(ModelPickerReasoningVisibility.normalizedLevel("xhigh", for: model) == "high")
+        #expect(ModelPickerReasoningVisibility.normalizedLevel("low", for: model) == "low")
     }
 
     @Test("Switch model calls onError callback with error message")

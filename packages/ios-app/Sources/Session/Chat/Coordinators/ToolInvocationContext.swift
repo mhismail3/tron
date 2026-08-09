@@ -16,6 +16,11 @@ protocol ToolInvocationContext: ChatCoordinatorContext, MessageMutating {
     /// this value only requests foreground presentation.
     var pendingUserInputRequest: UserInputRequest? { get set }
 
+    /// Set only by a newly arriving live tool-start event. Reconstructed
+    /// pending requests intentionally leave this nil so reopening a chat does
+    /// not repeatedly force-present a question sheet.
+    var userInputAutoPresentationInvocationId: String? { get set }
+
     // MARK: - Streaming Management
 
     /// Flush any pending text updates before tool processing

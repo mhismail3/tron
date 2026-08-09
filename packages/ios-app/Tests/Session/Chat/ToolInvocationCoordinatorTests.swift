@@ -215,6 +215,7 @@ final class ToolInvocationCoordinatorTests: XCTestCase {
         let pending = try XCTUnwrap(mockContext.pendingUserInputRequest)
         XCTAssertEqual(pending.invocationId, "question-1")
         XCTAssertEqual(pending.questions.first?.options.map(\.label), ["Markdown", "HTML"])
+        XCTAssertEqual(mockContext.userInputAutoPresentationInvocationId, "question-1")
 
         coordinator.handleToolInvocationCompleted(
             ToolInvocationCompletedPlugin.Result(
@@ -463,6 +464,7 @@ final class MockToolInvocationContext: ToolInvocationContext {
     var runningToolInvocationCount: Int = 0
     var currentTurnToolMessageIds: Set<UUID> = []
     var pendingUserInputRequest: UserInputRequest?
+    var userInputAutoPresentationInvocationId: String?
 
     // MARK: - Tracking for Assertions
     var flushPendingTextUpdatesCalled = false

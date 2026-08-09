@@ -191,6 +191,57 @@ extension ChatViewModelPaginationTests {
         XCTAssertEqual(reason, "manual")
     }
 
+    func testReconstructedPendingQuestionRemainsAnswerableWithoutAutoPresentationIntent() async {
+        let (viewModel, _) = makeViewModel()
+        viewModel.userInputAutoPresentationInvocationId = "question-1"
+        let events = [
+            RawEvent(
+                id: "question-start",
+                parentId: nil,
+                sessionId: "test-session",
+                workspaceId: "/test/workspace",
+                type: "tool.invocation.started",
+                timestamp: "2026-01-01T00:00:00Z",
+                sequence: 1,
+                payload: [
+                    "invocationId": AnyCodable("question-1"),
+                    "toolName": AnyCodable("request_user_input"),
+                    "arguments": AnyCodable("""
+                    {"questions":[{"header":"Format","id":"format","question":"Which format?","options":[{"label":"Markdown","description":"Markdown file"},{"label":"HTML","description":"HTML file"}]}]}
+                    """),
+                    "turn": AnyCodable(1)
+                ]
+            ),
+            RawEvent(
+                id: "assistant-question",
+                parentId: nil,
+                sessionId: "test-session",
+                workspaceId: "/test/workspace",
+                type: "message.assistant",
+                timestamp: "2026-01-01T00:00:01Z",
+                sequence: 2,
+                payload: [
+                    "content": AnyCodable([[
+                        "type": "tool_invocation",
+                        "id": "question-1",
+                        "name": "request_user_input",
+                        "input": [String: Any]()
+                    ]]),
+                    "turn": AnyCodable(1),
+                    "model": AnyCodable("test-model"),
+                    "stopReason": AnyCodable("tool_use")
+                ]
+            )
+        ]
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(events: events, hasMoreEvents: false, oldestEventId: nil)
+        )
+
+        XCTAssertEqual(viewModel.pendingUserInputRequest?.invocationId, "question-1")
+        XCTAssertNil(viewModel.userInputAutoPresentationInvocationId)
+    }
+
     func testSuccessfulReconnectReconstructionClearsStalePrunedLiveBuffer() async {
         let (viewModel, _) = makeViewModel()
         viewModel.loadedReconstructionEvents = rawMessageEvents(range: 1...100)

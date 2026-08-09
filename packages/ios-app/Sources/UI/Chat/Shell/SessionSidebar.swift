@@ -12,6 +12,7 @@ struct SessionSidebar: View {
     @State private var sessionExpansion = SessionListSessionExpansion()
     @State private var workerConsole = WorkerConsoleViewModel()
     @State private var workerConsoleOwnerId: UUID?
+    @State private var workerConsoleLoadedContinuity: EngineConnectionContinuity?
     @State private var showWorkerConsole = false
 
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
@@ -170,10 +171,22 @@ struct SessionSidebar: View {
             let ownerId = dependencies.connectionRepository.continuityOwnerId
             if workerConsoleOwnerId != ownerId {
                 workerConsoleOwnerId = ownerId
+                workerConsoleLoadedContinuity = nil
                 workerConsole.resetForServerChange()
             }
             guard !showWorkerConsole else { return }
-            await refreshWorkerConsoleSummary()
+            let continuity = dependencies.connectionRepository.continuity
+            let isReconnect = workerConsoleLoadedContinuity != nil
+                && workerConsoleLoadedContinuity != continuity
+            workerConsoleLoadedContinuity = continuity
+            if isReconnect {
+                await workerConsole.refreshSummary(
+                    repository: dependencies.workerKernelRepository,
+                    connectionState: dependencies.connectionRepository.connectionState
+                )
+            } else {
+                await refreshWorkerConsoleSummary()
+            }
             await workerConsole.monitorSummary(
                 repository: dependencies.workerKernelRepository,
                 connectionState: dependencies.connectionRepository.connectionState
@@ -268,7 +281,7 @@ struct SessionSidebar: View {
     }
 
     private func refreshWorkerConsoleSummary() async {
-        await workerConsole.refreshSummary(
+        await workerConsole.ensureSummaryLoaded(
             repository: dependencies.workerKernelRepository,
             connectionState: dependencies.connectionRepository.connectionState
         )

@@ -169,6 +169,14 @@ class UnifiedEventTransformerTestCase: XCTestCase {
                 "model": AnyCodable("claude-sonnet-4"),
                 "stopReason": AnyCodable("end_turn")
             ],
+            .sessionModelChanged: [
+                "previousModel": AnyCodable("gpt-5.6-luna"),
+                "newModel": AnyCodable("gpt-5.6-sol")
+            ],
+            .sessionReasoningChanged: [
+                "previousLevel": AnyCodable("medium"),
+                "newLevel": AnyCodable("high")
+            ],
             .toolInvocationStarted: [
                 "invocationId": AnyCodable("tool-fixture"),
                 "toolName": AnyCodable("process_run"),

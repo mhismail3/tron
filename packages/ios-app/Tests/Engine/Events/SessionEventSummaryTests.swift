@@ -75,6 +75,18 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertTrue(event.summary.contains("unknown"))
     }
 
+    func testSessionConfigurationChangesHaveAuditSummaries() {
+        let model = makeEvent(type: "session.model_changed", payload: [
+            "newModel": AnyCodable("openai/gpt-5.6-sol"),
+        ])
+        let reasoning = makeEvent(type: "session.reasoning_changed", payload: [
+            "newLevel": AnyCodable("xhigh"),
+        ])
+
+        XCTAssertEqual(model.summary, "Model changed to GPT-5.6 Sol")
+        XCTAssertEqual(reasoning.summary, "Reasoning changed to Xhigh")
+    }
+
     func testToolInvocation_showsToolName() {
         let event = makeEvent(type: "tool.invocation.started", payload: [
             "toolName": AnyCodable("process_run"),

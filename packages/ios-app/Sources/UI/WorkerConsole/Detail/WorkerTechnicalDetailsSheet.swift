@@ -56,8 +56,12 @@ struct WorkerTechnicalDetailsSheet: View {
                         label: "Agent access",
                         value: architecture.modelExposure == "direct"
                             ? "Direct chat tool"
-                            : "Internal specialist"
+                            : "Delegated worker"
                     )
+                    if !architecture.engineHooks.isEmpty {
+                        WorkerMetadataDivider()
+                        WorkerMetadataRow(label: "Engine role", value: "Engine specialist")
+                    }
                     WorkerMetadataDivider()
                     WorkerMetadataRow(
                         label: "Execution",

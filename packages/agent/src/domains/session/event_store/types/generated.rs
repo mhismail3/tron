@@ -18,6 +18,12 @@ pub enum EventType {
     /// Session fork record.
     #[serde(rename = "session.fork")]
     SessionFork,
+    /// Durable model-selection change for the session.
+    #[serde(rename = "session.model_changed")]
+    SessionModelChanged,
+    /// Durable reasoning-level selection for the session.
+    #[serde(rename = "session.reasoning_changed")]
+    SessionReasoningChanged,
     /// User message record.
     #[serde(rename = "message.user")]
     MessageUser,
@@ -58,6 +64,8 @@ impl EventType {
             Self::SessionStart => "session.start",
             Self::SessionEnd => "session.end",
             Self::SessionFork => "session.fork",
+            Self::SessionModelChanged => "session.model_changed",
+            Self::SessionReasoningChanged => "session.reasoning_changed",
             Self::MessageUser => "message.user",
             Self::MessageAssistant => "message.assistant",
             Self::ModelProviderRequest => "model.provider_request",
@@ -86,6 +94,8 @@ impl std::str::FromStr for EventType {
             "session.start" => Ok(Self::SessionStart),
             "session.end" => Ok(Self::SessionEnd),
             "session.fork" => Ok(Self::SessionFork),
+            "session.model_changed" => Ok(Self::SessionModelChanged),
+            "session.reasoning_changed" => Ok(Self::SessionReasoningChanged),
             "message.user" => Ok(Self::MessageUser),
             "message.assistant" => Ok(Self::MessageAssistant),
             "model.provider_request" => Ok(Self::ModelProviderRequest),
@@ -105,10 +115,12 @@ impl std::str::FromStr for EventType {
 mod tests {
     use super::*;
 
-    const ALL: [EventType; 13] = [
+    const ALL: [EventType; 15] = [
         EventType::SessionStart,
         EventType::SessionEnd,
         EventType::SessionFork,
+        EventType::SessionModelChanged,
+        EventType::SessionReasoningChanged,
         EventType::MessageUser,
         EventType::MessageAssistant,
         EventType::ModelProviderRequest,

@@ -10,6 +10,41 @@ extension ChatView {
 
     // MARK: - Model Operations
 
+    func restoredUserInputDraft(for request: UserInputRequest) async -> UserInputDraft {
+        await dependencies.draftStore.loadUserInputDraft(
+            sessionId: sessionId,
+            request: request
+        ) ?? UserInputDraft(request: request)
+    }
+
+    func presentUserInput(_ request: UserInputRequest, automatically: Bool = false) {
+        Task {
+            var draft = await restoredUserInputDraft(for: request)
+            guard viewModel.currentUserInputRequest(invocationId: request.invocationId)?.isAnswerable == true else {
+                return
+            }
+            guard !automatically || !draft.hasBeenPresented else { return }
+            if !draft.hasBeenPresented {
+                draft.hasBeenPresented = true
+                sheetCoordinator.updateUserInputDraft(
+                    draft,
+                    invocationId: request.invocationId
+                )
+                await dependencies.draftStore.saveUserInputDraft(
+                    sessionId: sessionId,
+                    invocationId: request.invocationId,
+                    draft: draft
+                )
+            } else {
+                sheetCoordinator.updateUserInputDraft(
+                    draft,
+                    invocationId: request.invocationId
+                )
+            }
+            sheetCoordinator.showUserInput(request)
+        }
+    }
+
     /// Pre-fetch models for model picker menu
     func prefetchModels(guardedBy ticket: ChatViewTaskTicket? = nil) async {
         await viewModel.modelPickerState.prefetchModels { [weak viewModel] models in
@@ -18,13 +53,15 @@ extension ChatView {
         }
     }
 
-    /// Switch model with optimistic UI update for instant feedback
+    /// Switch model with optimistic presentation while serializing the durable
+    /// model and reasoning writes from one picker commit.
     func switchModel(to model: ModelInfo) {
         let modelPickerState = viewModel.modelPickerState
-        let currentModel = viewModel.currentModel
         let targetSessionId = sessionId
-        Task { [weak viewModel] in
-            await modelPickerState.switchModel(
+        sessionConfigurationQueue.enqueue { [weak viewModel] in
+            guard let viewModel else { return }
+            let currentModel = viewModel.currentModel
+            _ = await modelPickerState.switchModel(
                 to: model,
                 sessionId: targetSessionId,
                 currentModel: currentModel,
@@ -43,6 +80,40 @@ extension ChatView {
                     }
                     viewModel?.appendLocalError(dedupKey: "model.switch.failed", title: "Could not switch model", message: errorMessage)
                 }
+            )
+        }
+    }
+
+    func changeReasoningLevel(to level: String) {
+        sessionConfigurationQueue.enqueue { [weak viewModel] in
+            guard let viewModel else { return }
+            await persistReasoningLevel(level, viewModel: viewModel)
+        }
+    }
+
+    private func persistReasoningLevel(
+        _ level: String,
+        viewModel: ChatViewModel
+    ) async {
+        let previousLevel = viewModel.inputBarState.reasoningLevel
+        do {
+            let result = try await services.models.setReasoningLevel(
+                sessionId: sessionId,
+                level: level,
+                idempotencyKey: .userAction("model.setReasoningLevel")
+            )
+            viewModel.inputBarState.reasoningLevel = result.newLevel
+            if result.changed {
+                viewModel.addReasoningLevelChangeNotification(
+                    from: result.previousLevel ?? previousLevel,
+                    to: result.newLevel
+                )
+            }
+        } catch {
+            viewModel.appendLocalError(
+                dedupKey: "model.reasoning.failed",
+                title: "Could not change reasoning",
+                message: error.localizedDescription
             )
         }
     }

@@ -6,6 +6,8 @@ struct ChatSheetModifier: ViewModifier {
     let sheetCoordinator: SheetCoordinator
     let viewModel: ChatViewModel
     let sessionId: String
+    let onSelectModel: (ModelInfo) -> Void
+    let onSelectReasoningLevel: (String) -> Void
 
     func body(content: Content) -> some View {
         let observedActiveSheet = sheetCoordinator.activeSheet
@@ -15,7 +17,9 @@ struct ChatSheetModifier: ViewModifier {
                     sheet: sheet,
                     viewModel: viewModel,
                     sessionId: sessionId,
-                    sheetCoordinator: sheetCoordinator
+                    sheetCoordinator: sheetCoordinator,
+                    onSelectModel: onSelectModel,
+                    onSelectReasoningLevel: onSelectReasoningLevel
                 )
             }
             .onChange(of: viewModel.showSettings) { _, show in
@@ -42,12 +46,16 @@ extension View {
     func chatSheets(
         coordinator: SheetCoordinator,
         viewModel: ChatViewModel,
-        sessionId: String
+        sessionId: String,
+        onSelectModel: @escaping (ModelInfo) -> Void,
+        onSelectReasoningLevel: @escaping (String) -> Void
     ) -> some View {
         modifier(ChatSheetModifier(
             sheetCoordinator: coordinator,
             viewModel: viewModel,
-            sessionId: sessionId
+            sessionId: sessionId,
+            onSelectModel: onSelectModel,
+            onSelectReasoningLevel: onSelectReasoningLevel
         ))
     }
 }

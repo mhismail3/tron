@@ -17,6 +17,14 @@ extension SessionEvent {
         case .sessionFork:
             return "Forked session"
 
+        case .sessionModelChanged:
+            let model = payload.string("newModel")?.shortModelName ?? "model"
+            return "Model changed to \(model)"
+
+        case .sessionReasoningChanged:
+            let level = payload.string("newLevel")?.capitalized ?? "Default"
+            return "Reasoning changed to \(level)"
+
         case .messageUser:
             if let content = payload.string("content") {
                 return String(content.prefix(50)).trimmingCharacters(in: .whitespacesAndNewlines)

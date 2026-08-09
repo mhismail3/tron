@@ -154,6 +154,14 @@ non-chat audit evidence; it does not have a live plugin or render a chat
 message. `replay_manifest` is not an event at all: it is a pure-read
 tool/session result (`format: "tron.replay.v1"`), so no iOS persisted event case or live plugin is required for replay manifest exports.
 
+`session.model_changed` and `session.reasoning_changed` are persisted session
+configuration events. Their local action result updates the mounted composer
+immediately; stored reconstruction restores the latest effective values and
+the same visible timeline notices after leaving the chat, reconnecting, or
+relaunching. A changed write emits the ordinary `session.updated` catch-up hint
+with the new authoritative event count. They need no parallel live-plugin state
+or client-authored event.
+
 ## Failure Envelope Parity
 
 Server-authored failures use one canonical envelope. iOS represents it with

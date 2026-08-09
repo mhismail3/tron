@@ -1101,6 +1101,18 @@ retirement state, and recommendation order. A profile's explicit selected
 model survives catalog refreshes. Only new profiles receive the current
 balanced frontier default.
 
+Session model and reasoning choices are durable engine configuration, not
+client-only decoration. `model::switch` atomically updates the session model
+and appends `session.model_changed`; `model::set_reasoning_level` validates the
+exact level against that session's current server catalog entry and appends
+`session.reasoning_changed`. Both reject an active run, deduplicate no-op
+retries, and preserve a reconstruction-visible audit trail. A paired client
+serializes a model-plus-reasoning commit in that order, reconstructs the latest
+effective selection from the server log, and supplies that validated value on
+subsequent provider turns. Each changed write also invalidates cached turn
+state and publishes the authoritative session event count, so every paired
+client immediately enters its normal incremental catch-up path.
+
 Ollama is a first-class credential-free local provider. Its strict
 `api.ollama.baseUrl` setting accepts an absolute HTTP(S) endpoint without a
 query or fragment and is editable through complete iOS settings parity. A
@@ -2694,13 +2706,13 @@ topics are lossy observation hints: clients coalesce them and reread durable
 worker/session projections; delivery, wait, and completion correctness never
 depends on receiving an event.
 
-The durable session log has **13 event variants**. Live-only deltas, progress,
+The durable session log has **15 event variants**. Live-only deltas, progress,
 context notices, and errors remain transport events and are not duplicated as
 unwritten storage contracts:
 
 | Concern | Event types |
 |---|---|
-| session | `session.start`, `session.end`, `session.fork` |
+| session | `session.start`, `session.end`, `session.fork`, `session.model_changed`, `session.reasoning_changed` |
 | messages | `message.user`, `message.assistant`, `message.deleted` |
 | model | `model.provider_request` |
 | provider tools | `tool.invocation.started`, `tool.invocation.completed` |

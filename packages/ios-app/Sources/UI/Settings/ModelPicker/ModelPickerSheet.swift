@@ -10,6 +10,7 @@ struct ModelPickerSheet: View {
     var readOnly: Bool = false
     var reasoningLevel: String?
     let onSelect: (ModelInfo) -> Void
+    var onSelectReasoning: ((String) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -18,6 +19,8 @@ struct ModelPickerSheet: View {
     @State private var expandedDetails: Set<String> = []
     @State private var showReasoningPopover = false
     @State private var pendingModelId: String = ""
+    @State private var pendingReasoningLevel: String?
+    @State private var didSelectReasoningLevel = false
     @State private var hasCommitted = false
 
     private var providerGroups: [ProviderGroup] {
@@ -33,12 +36,15 @@ struct ModelPickerSheet: View {
     private var supportsReasoning: Bool {
         ModelPickerReasoningVisibility.showsReasoningControl(
             selectedModel: selectedModelInfo,
-            reasoningLevel: reasoningLevel
+            allowsSelection: !readOnly && onSelectReasoning != nil
         )
     }
 
     private var availableReasoningLevels: [String] {
-        selectedModelInfo?.reasoningLevels ?? ["minimal", "low", "medium", "high", "xhigh"]
+        selectedModelInfo?.reasoningLevels?.reduce(into: [String]()) { result, level in
+            guard !level.isEmpty, !result.contains(level) else { return }
+            result.append(level)
+        } ?? []
     }
 
     var body: some View {
@@ -108,6 +114,10 @@ struct ModelPickerSheet: View {
         }
         .onAppear {
             pendingModelId = currentModelId
+            pendingReasoningLevel = ModelPickerReasoningVisibility.normalizedLevel(
+                reasoningLevel,
+                for: selectedModelInfo
+            )
             // Expand the provider and family containing the currently selected
             // model so its row is visible on open. Also keep each provider's
             // "latest" family expanded as a helpful default for browsing.
@@ -124,12 +134,21 @@ struct ModelPickerSheet: View {
                 }
             }
         }
+        .onChange(of: pendingModelId) { _, _ in
+            showReasoningPopover = false
+            pendingReasoningLevel = ModelPickerReasoningVisibility.normalizedLevel(
+                pendingReasoningLevel,
+                for: selectedModelInfo
+            )
+        }
     }
 
     // MARK: - Reasoning Button
 
     private var reasoningButton: some View {
-        let currentReasoningLevel = reasoningLevel ?? "medium"
+        let currentReasoningLevel = pendingReasoningLevel
+            ?? availableReasoningLevels.first
+            ?? ""
         return Button {
             showReasoningPopover = true
         } label: {
@@ -148,7 +167,8 @@ struct ModelPickerSheet: View {
                 accentColor: ModelPickerPresentation.primaryAccent,
                 onSelect: { level in
                     showReasoningPopover = false
-                    NotificationCenter.default.post(name: .reasoningLevelAction, object: level)
+                    pendingReasoningLevel = level
+                    didSelectReasoningLevel = true
                 }
             )
             .popoverCompactAdaptation()
@@ -176,9 +196,16 @@ struct ModelPickerSheet: View {
 
     private func commitSelection() {
         guard !hasCommitted else { return }
-        guard pendingModelId != currentModelId,
-              let model = models.first(where: { $0.id == pendingModelId }) else { return }
         hasCommitted = true
-        onSelect(model)
+        if pendingModelId != currentModelId,
+           let model = models.first(where: { $0.id == pendingModelId }) {
+            onSelect(model)
+        }
+        let modelChanged = pendingModelId != currentModelId
+        if let pendingReasoningLevel,
+           (modelChanged || didSelectReasoningLevel),
+           pendingReasoningLevel != reasoningLevel {
+            onSelectReasoning?(pendingReasoningLevel)
+        }
     }
 }

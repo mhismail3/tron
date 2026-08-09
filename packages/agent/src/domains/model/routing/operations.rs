@@ -25,3 +25,7 @@ pub(crate) async fn list_models(deps: &Deps) -> Result<Value, ToolError> {
 pub(crate) async fn switch_model(payload: &Value, deps: &Deps) -> Result<Value, ToolError> {
     model_catalog::switch_model(Some(payload), deps).await
 }
+
+pub(crate) async fn set_reasoning_level(payload: &Value, deps: &Deps) -> Result<Value, ToolError> {
+    model_catalog::set_reasoning_level(Some(payload), deps).await
+}

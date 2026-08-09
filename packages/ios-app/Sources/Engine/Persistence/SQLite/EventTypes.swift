@@ -79,6 +79,8 @@ enum SessionEventType: String, Codable, Sendable, CaseIterable {
     case sessionStart = "session.start"
     case sessionEnd = "session.end"
     case sessionFork = "session.fork"
+    case sessionModelChanged = "session.model_changed"
+    case sessionReasoningChanged = "session.reasoning_changed"
     case messageUser = "message.user"
     case messageAssistant = "message.assistant"
 
@@ -102,6 +104,8 @@ enum SessionEventType: String, Codable, Sendable, CaseIterable {
         .sessionStart,
         .sessionEnd,
         .sessionFork,
+        .sessionModelChanged,
+        .sessionReasoningChanged,
         .messageUser,
         .messageAssistant,
         .modelProviderRequest,

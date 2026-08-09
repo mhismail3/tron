@@ -202,6 +202,9 @@ extension ChatViewModel {
         // Restore token state for the context progress pill.
         // Without this, contextWindowTokens stays 0 and the pill shows empty.
         updateTokenState(from: state, cachedSessionCost: cachedSessionCost)
+        if let reasoningLevel = state.latestReasoningLevel {
+            inputBarState.reasoningLevel = reasoningLevel
+        }
         // Use server-authoritative cost when available (avoids DB race on resume)
         if let cost = result.metadata.totalCost {
             contextState.accumulatedCost = cost
@@ -211,6 +214,9 @@ extension ChatViewModel {
             reconcileCompletedReconstructionState()
         }
 
+        // Reconstruction restores answerability, not presentation intent. A
+        // pending question auto-opens only for its first live tool call.
+        userInputAutoPresentationInvocationId = nil
         pendingUserInputRequest = nil
         for message in messages.reversed() {
             guard case .userInputRequest(let request) = message.content,

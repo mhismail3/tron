@@ -25,6 +25,8 @@ final class EventDatabase: DatabaseTransport {
     lazy var thinking: ThinkingRepository = ThinkingRepository(transport: self, eventRepository: events)
     @ObservationIgnored
     lazy var drafts: DraftRepository = DraftRepository(transport: self)
+    @ObservationIgnored
+    lazy var userInputDrafts: UserInputDraftRepository = UserInputDraftRepository(transport: self)
 
     // MARK: - Initialization
 
@@ -79,6 +81,7 @@ final class EventDatabase: DatabaseTransport {
         try await dbActor.exec("DELETE FROM events")
         try await dbActor.exec("DELETE FROM sessions")
         try await dbActor.exec("DELETE FROM session_drafts")
+        try await dbActor.exec("DELETE FROM session_user_input_drafts")
     }
 }
 

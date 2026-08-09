@@ -17,6 +17,7 @@ final class WorkerConsoleViewModel {
     var inspection: WorkerInspectResultDTO?
     var runs: [WorkerInvocationDTO] = []
     var attention: [WorkerInboxItemDTO] = []
+    var selectedResults: [WorkerInboxItemDTO] = []
     var webhookCredential: WorkerWebhookCredentialDTO?
     var isRefreshing = false
     var isLoadingSelection = false
@@ -24,6 +25,8 @@ final class WorkerConsoleViewModel {
     var isLoadingMoreActivity = false
     var isLoadingMoreResults = false
     var hasLoaded = false
+    private(set) var hasLoadedActivity = false
+    private(set) var hasLoadedResults = false
     var stopAll = false
     var lastError: String?
     var monitoringError: String?
@@ -42,6 +45,18 @@ final class WorkerConsoleViewModel {
     /// Current operational inventory, preserving the engine's canonical order.
     var activeWorkers: [WorkerSummaryDTO] {
         workers.filter { !$0.retired }
+    }
+
+    /// Ordinary workers remain dynamically replaceable because they own no
+    /// engine hook. Direct model exposure does not imply engine ownership.
+    var dynamicWorkers: [WorkerSummaryDTO] {
+        activeWorkers.filter { architecture(for: $0.workerId)?.engineHooks.isEmpty != false }
+    }
+
+    /// Workers with an explicit engine hook are compatibility-sensitive
+    /// specialists and are displayed separately from the dynamic inventory.
+    var engineSpecialistWorkers: [WorkerSummaryDTO] {
+        activeWorkers.filter { architecture(for: $0.workerId)?.engineHooks.isEmpty == false }
     }
 
     /// Retained historical workers shown separately after the active inventory.
@@ -123,6 +138,19 @@ final class WorkerConsoleViewModel {
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState
     ) async {
+        await refreshSummary(repository: repository, connectionState: connectionState)
+        await requestRefresh(
+            scope: .activity,
+            repository: repository,
+            connectionState: connectionState
+        )
+    }
+
+    func ensureActivityLoaded(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard !hasLoadedActivity else { return }
         await requestRefresh(
             scope: .activity,
             repository: repository,
@@ -134,6 +162,19 @@ final class WorkerConsoleViewModel {
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState
     ) async {
+        await refreshSummary(repository: repository, connectionState: connectionState)
+        await requestRefresh(
+            scope: .results,
+            repository: repository,
+            connectionState: connectionState
+        )
+    }
+
+    func ensureResultsLoaded(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard !hasLoadedResults else { return }
         await requestRefresh(
             scope: .results,
             repository: repository,
@@ -150,6 +191,14 @@ final class WorkerConsoleViewModel {
             repository: repository,
             connectionState: connectionState
         )
+    }
+
+    func ensureSummaryLoaded(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard !hasLoaded else { return }
+        await refreshSummary(repository: repository, connectionState: connectionState)
     }
 
     private func requestRefresh(
@@ -170,7 +219,6 @@ final class WorkerConsoleViewModel {
             if projectionTicket == projectionGeneration {
                 activeRefreshScope = nil
                 isRefreshing = false
-                hasLoaded = true
             }
         }
 
@@ -222,47 +270,37 @@ final class WorkerConsoleViewModel {
                 guard !Task.isCancelled,
                       projectionTicket == projectionGeneration else { return }
                 apply(snapshot)
+                hasLoaded = true
             case .activity:
-                let snapshotRequest = Task { @MainActor in
-                    try await repository.engineSurfaceSnapshot(
-                        sessionId: nil,
-                        relevanceQuery: nil
-                    )
-                }
                 let runsRequest = Task { @MainActor in
                     try await repository.workerRuns(workerId: nil, limit: 20)
                 }
-                let (snapshot, globalRuns): (
-                    EngineIntrospectionSnapshotDTO,
-                    WorkerRunsResultDTO
-                )
-                do {
-                    (snapshot, globalRuns) = try await withTaskCancellationHandler {
-                        try await (
-                            snapshotRequest.value,
-                            runsRequest.value
+                let snapshotRequest: Task<EngineIntrospectionSnapshotDTO, Error>? = if hasLoaded {
+                    nil
+                } else {
+                    Task { @MainActor in
+                        try await repository.engineSurfaceSnapshot(
+                            sessionId: nil,
+                            relevanceQuery: nil
                         )
-                    } onCancel: {
-                        snapshotRequest.cancel()
-                        runsRequest.cancel()
                     }
-                } catch {
-                    snapshotRequest.cancel()
-                    runsRequest.cancel()
-                    throw error
                 }
+                defer {
+                    runsRequest.cancel()
+                    snapshotRequest?.cancel()
+                }
+                let globalRuns = try await runsRequest.value
+                let snapshot = try await snapshotRequest?.value
                 guard !Task.isCancelled,
                       projectionTicket == projectionGeneration else { return }
-                apply(snapshot)
+                if let snapshot {
+                    apply(snapshot)
+                    hasLoaded = true
+                }
                 activityRuns = globalRuns.runs
                 activityRunsNextOffset = globalRuns.nextOffset
+                hasLoadedActivity = true
             case .results:
-                let snapshotRequest = Task { @MainActor in
-                    try await repository.engineSurfaceSnapshot(
-                        sessionId: nil,
-                        relevanceQuery: nil
-                    )
-                }
                 let resultsRequest = Task { @MainActor in
                     try await repository.workerInbox(
                         workerId: nil,
@@ -271,43 +309,40 @@ final class WorkerConsoleViewModel {
                         attentionOnly: false
                     )
                 }
-                let (snapshot, globalResults): (
-                    EngineIntrospectionSnapshotDTO,
-                    WorkerInboxResultDTO
-                )
-                do {
-                    (snapshot, globalResults) = try await withTaskCancellationHandler {
-                        try await (snapshotRequest.value, resultsRequest.value)
-                    } onCancel: {
-                        snapshotRequest.cancel()
-                        resultsRequest.cancel()
+                let snapshotRequest: Task<EngineIntrospectionSnapshotDTO, Error>? = if hasLoaded {
+                    nil
+                } else {
+                    Task { @MainActor in
+                        try await repository.engineSurfaceSnapshot(
+                            sessionId: nil,
+                            relevanceQuery: nil
+                        )
                     }
-                } catch {
-                    snapshotRequest.cancel()
-                    resultsRequest.cancel()
-                    throw error
                 }
+                defer {
+                    resultsRequest.cancel()
+                    snapshotRequest?.cancel()
+                }
+                let globalResults = try await resultsRequest.value
+                let snapshot = try await snapshotRequest?.value
                 guard !Task.isCancelled,
                       projectionTicket == projectionGeneration else { return }
-                apply(snapshot)
+                if let snapshot {
+                    apply(snapshot)
+                    hasLoaded = true
+                }
                 activityResults = globalResults.items
                 activityResultsNextOffset = globalResults.nextOffset
+                hasLoadedResults = true
             }
 
             if let selectedWorkerId,
-               workers.contains(where: { $0.workerId == selectedWorkerId }) {
-                if scope != .summary {
-                    try await loadWorker(
-                        selectedWorkerId,
-                        repository: repository,
-                        projectionTicket: projectionTicket
-                    )
-                }
-            } else {
-                selectedWorkerId = nil
+               !workers.contains(where: { $0.workerId == selectedWorkerId }) {
+                self.selectedWorkerId = nil
                 inspection = nil
                 runs = []
                 attention = []
+                selectedResults = []
             }
             lastError = nil
         } catch {
@@ -335,6 +370,8 @@ final class WorkerConsoleViewModel {
         isLoadingMoreResults = false
         isMutating = false
         hasLoaded = false
+        hasLoadedActivity = false
+        hasLoadedResults = false
         lastError = nil
         monitoringError = nil
     }
@@ -350,6 +387,7 @@ final class WorkerConsoleViewModel {
         inspection = nil
         runs = []
         attention = []
+        selectedResults = []
         stopAll = false
     }
 
@@ -417,6 +455,7 @@ final class WorkerConsoleViewModel {
         inspection = nil
         runs = []
         attention = []
+        selectedResults = []
         webhookCredential = nil
         isLoadingSelection = true
         defer {
@@ -473,6 +512,11 @@ final class WorkerConsoleViewModel {
         }
     }
 
+    func ensureSelectionLoaded(repository: any WorkerKernelRepository) async {
+        guard inspection == nil else { return }
+        await reconcileSelection(repository: repository)
+    }
+
     /// Presents already-read authoritative worker projections without issuing
     /// another round of inspection, run, and attention requests.
     func useLoadedSelection(
@@ -490,6 +534,7 @@ final class WorkerConsoleViewModel {
         self.inspection = inspection
         self.runs = runs
         self.attention = attention
+        selectedResults = attention
         webhookCredential = nil
         isLoadingSelection = false
         lastError = nil
@@ -508,6 +553,7 @@ final class WorkerConsoleViewModel {
         inspection = nil
         runs = []
         attention = []
+        selectedResults = []
         webhookCredential = nil
         isLoadingSelection = true
         lastError = nil
@@ -552,9 +598,10 @@ final class WorkerConsoleViewModel {
         connectionState: ConnectionState
     ) async {
         guard connectionState.isConnected else { return }
-        let invalidations = NotificationCenter.default.notifications(
-            named: .workerRunProjectionInvalidated
-        )
+        let invalidationName: Notification.Name = scope == .summary
+            ? .workerLifecycleProjectionInvalidated
+            : .workerRunProjectionInvalidated
+        let invalidations = NotificationCenter.default.notifications(named: invalidationName)
         do {
             try await repository.ensureWorkerEventSubscriptions()
             monitoringError = nil
@@ -701,30 +748,35 @@ final class WorkerConsoleViewModel {
         let runsRequest = Task { @MainActor in
             try await repository.workerRuns(workerId: workerId, limit: 20)
         }
-        let attentionRequest = Task { @MainActor in
-            try await repository.workerAttention(workerId: workerId, limit: 20)
+        let resultsRequest = Task { @MainActor in
+            try await repository.workerInbox(
+                workerId: workerId,
+                limit: 20,
+                offset: nil,
+                attentionOnly: false
+            )
         }
-        let (loadedInspection, loadedRuns, loadedAttention): (
+        let (loadedInspection, loadedRuns, loadedResults): (
             WorkerInspectResultDTO,
             WorkerRunsResultDTO,
             WorkerInboxResultDTO
         )
         do {
-            (loadedInspection, loadedRuns, loadedAttention) = try await withTaskCancellationHandler {
+            (loadedInspection, loadedRuns, loadedResults) = try await withTaskCancellationHandler {
                 try await (
                     inspectionRequest.value,
                     runsRequest.value,
-                    attentionRequest.value
+                    resultsRequest.value
                 )
             } onCancel: {
                 inspectionRequest.cancel()
                 runsRequest.cancel()
-                attentionRequest.cancel()
+                resultsRequest.cancel()
             }
         } catch {
             inspectionRequest.cancel()
             runsRequest.cancel()
-            attentionRequest.cancel()
+            resultsRequest.cancel()
             throw error
         }
         try Task.checkCancellation()
@@ -734,7 +786,10 @@ final class WorkerConsoleViewModel {
         }
         inspection = loadedInspection
         runs = loadedRuns.runs
-        attention = loadedAttention.items
+        selectedResults = loadedResults.items
+        attention = loadedResults.items.filter {
+            WorkerConsolePresentation.resultDisposition($0) == .needsAttention
+        }
     }
 
     private func mutate(
@@ -747,10 +802,13 @@ final class WorkerConsoleViewModel {
         defer { isMutating = false }
         do {
             try await operation()
-            await refresh(
+            await refreshSummary(
                 repository: repository,
                 connectionState: connectionState
             )
+            if selectedWorkerId != nil {
+                await reconcileSelection(repository: repository)
+            }
             lastError = nil
         } catch {
             lastError = error.localizedDescription

@@ -8,6 +8,9 @@
 //! session-scoped cleanup performed by [`EventStore::delete_session`];
 //! individual message removal is represented by a durable `message.deleted`
 //! event and applied during reconstruction.
+//! Model and reasoning selection use the same session write lock and transaction
+//! as their timeline events, so metadata, reconstruction, and audit history
+//! cannot diverge.
 
 use serde_json::Value;
 

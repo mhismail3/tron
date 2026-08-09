@@ -2,7 +2,8 @@
 //!
 //! This module owns canonical function execution for the model namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
-//! Model listing, switching, and provider-neutral registry helpers
+//! Model listing, durable per-session model/reasoning selection, and
+//! provider-neutral registry helpers
 //! live under `routing/`.
 //! Provider-native stream and function-call details are isolated under
 //! `providers/`, `protocol/`, and the `responder/` boundary before being
