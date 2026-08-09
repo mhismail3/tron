@@ -25,6 +25,7 @@ struct NewSessionFlow: View {
     @State private var isLoadingModels = false
     @State private var showModelPicker = false
     @State private var sourceControlStatus: WorkspaceSourceControlStatus?
+    @State private var sourceControlProbeFailure: NewSessionSourceControlProbeFailure?
     @State private var sourceControlPlacement: SessionSourceControlPlacement = .existing
     @State private var sourceControlProjectionOwnerId: UUID?
     @State private var showSourceControlPicker = false
@@ -150,6 +151,7 @@ struct NewSessionFlow: View {
             }
             .onChange(of: workingDirectory) {
                 sourceControlStatus = nil
+                sourceControlProbeFailure = nil
                 sourceControlPlacement = .existing
             }
         }
@@ -189,6 +191,17 @@ struct NewSessionFlow: View {
                     action: { showSourceControlPicker = true }
                 )
                 .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if let sourceControlProbeFailure,
+                      !workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                NewSessionSetupCard(
+                    icon: "exclamationmark.triangle",
+                    title: "Source Control",
+                    value: sourceControlProbeFailure.value,
+                    caption: sourceControlProbeFailure.caption,
+                    color: .tronAmber,
+                    isDisabled: isCreating,
+                    action: { Task { await loadSourceControlStatus() } }
+                )
             }
 
             NewSessionSetupCard(
@@ -407,6 +420,7 @@ struct NewSessionFlow: View {
         if sourceControlProjectionOwnerId != continuity.ownerId {
             sourceControlProjectionOwnerId = continuity.ownerId
             sourceControlStatus = nil
+            sourceControlProbeFailure = nil
             sourceControlPlacement = .existing
         }
         guard continuity.isConnected, !path.isEmpty else { return }
@@ -418,6 +432,7 @@ struct NewSessionFlow: View {
                   connectionRepository.continuity == continuity else { return }
             withAnimation(.smooth(duration: 0.2)) {
                 sourceControlStatus = status
+                sourceControlProbeFailure = nil
                 if !status.isGitRepository {
                     sourceControlPlacement = .existing
                 }
@@ -429,6 +444,9 @@ struct NewSessionFlow: View {
                   workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines) == path,
                   connectionRepository.continuity == continuity else { return }
             sourceControlStatus = nil
+            sourceControlProbeFailure = NewSessionSourceControlProbeFailure(
+                errorCode: (error as? EngineProtocolError)?.code
+            )
             sourceControlPlacement = .existing
         }
     }
