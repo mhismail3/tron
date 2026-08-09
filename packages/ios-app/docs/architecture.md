@@ -1,8 +1,8 @@
 # iOS App Architecture
 
 > Last verified: 2026-08-08 for authoritative/cached chat loading, durable
-> native user input, canonical reconstruction ownership, cohesive sheets, and
-> iOS 26/27 delivery.
+> native user input drafts, session model configuration, staged worker-console
+> projections, cohesive sheets, and iOS 26/27 delivery.
 
 ## Overview
 
@@ -71,6 +71,10 @@ replacement and shutdown; server switching replaces the engine client and
 clears server-owned projections through their owning stores.
 `DependencyContainerStorage` and `DependencyContainerRuntimeIO` are the only
 production composition points for these local persistence dependencies.
+Composer text and unsubmitted `request_user_input` choices are the only
+device-owned drafts in that database. Question drafts use a separate keyed
+table so transcript cache replacement cannot erase them; submitted answers and
+pending request truth remain server-event-owned.
 
 The Mac app is a packaging, launch-agent, and pairing shell. It is not a second
 operational `/engine` client, so iOS is the current client that owns the Engine
@@ -251,8 +255,8 @@ derived by the server from active immutable bundles and includes exposure,
 runner, hooks, client boundaries, triggers, dispatch routes, `agentTools`,
 suite, health, version, and provenance. The Engine dashboard merges that
 architecture into each canonical worker row and detail: rows identify health,
-direct/internal exposure, and runner kind together in one left-aligned bottom
-tag row,
+direct/delegated agent exposure, declared engine-hook ownership, and runner
+kind together in one left-aligned bottom tag row,
 omit a redundant status-icon column, keep the description primary, and begin
 one compact wrapping footer with the active version followed by trigger/run and
 hook/native/connection evidence. The worker's normal overview keeps health and
@@ -389,21 +393,29 @@ state.
 - one-time returned webhook credential;
 - refresh/mutation flags, stop-all status, and the last transport error.
 
-The lightweight summary refresh loads one authoritative profile-level engine
-snapshot. Activity and Results each have a section-scoped refresh: Activity
-loads the snapshot plus bounded runs, while Results loads the snapshot plus the
-complete bounded inbox projection. Neither tab queries the other's ledger.
-Selecting a worker loads its inspection, runs, and current attention
-concurrently. A
-disconnected refresh clears server-owned rows. Monitoring subscribes from each
-worker topic's current durable tail, coalesces the adjacent facts produced by
-one run, and then reloads authoritative state. It never replays historical
-worker events into UI invalidation. Invocation invalidations retain every
+The lightweight summary lane loads one authoritative profile-level engine
+snapshot once per server owner and reuses it when the dashboard opens or its
+detent changes. Activity and Results are independent, lazy projections:
+Activity reads one bounded run page and Results reads one bounded complete
+inbox page, each only when first selected or explicitly refreshed. If the
+summary is still cold, that section co-loads the snapshot rather than issuing
+a second request. Neither tab queries the other's ledger, and ordinary section
+switching never re-inspects a selected worker. Selecting a worker concurrently
+loads its inspection, bounded runs, and complete bounded result ledger; current
+attention is derived from those canonical results. Temporary disconnects keep
+the last authoritative projection visible and read-only. A changed connection
+continuity or server owner performs one explicit reconciliation.
+
+Monitoring subscribes from each worker topic's current durable tail, coalesces
+the adjacent facts produced by one run, and then reloads only the owning
+projection. It never replays historical worker events into UI invalidation.
+Invocation invalidations retain every
 durable originating-session identifier seen during the 200 ms coalescing
 window; lifecycle invalidations stay global and sessionless invocations do not
 refresh an unrelated Session Context. Refreshes are single-flight; a section
 request arriving during a summary read is preserved and runs next, while a
-summary request is subsumed by an active section read. Mutations serialize
+summary request is subsumed by an active section read. Explicit refresh and
+mutations reconcile canonical summary/detail truth. Mutations serialize
 through the view model's mutation state, call one repository operation, and
 reload canonical server truth.
 
@@ -452,15 +464,23 @@ provides:
   schemas, effect, risk, and exposure state;
 - every published worker's profile-global availability to agents, without
   leaking unnamed session promotion or queryless relevance diagnostics;
-- worker list with explicit runner type, health, active hash prefix, trigger
-  count, and successful-run evidence; compact metadata groups retain clear
+- worker list separated by actual ownership: dynamically replaceable direct or
+  delegated workers first, then engine specialists whose immutable bundles
+  declare non-empty `engineHooks`, and finally retired workers. Internal model
+  exposure alone never makes a worker an engine specialist. Rows retain runner
+  type, health, active hash prefix, trigger count, and successful-run evidence;
+  compact metadata groups retain clear
   separation while keeping each icon visually attached to its text;
 - bounded provenance tags with full accessible source labels;
-- one generic worker workflow split into Overview, Run, Activity, and Manage;
+- one generic worker workflow split into Overview, Manage, Activity, and
+  Results. Manage combines natural-language use, retained versions, lifecycle
+  controls, and a collapsed lifecycle-history disclosure; Activity is only
+  execution history, while Results is the independently classified durable
+  result ledger;
 - native-experience technical detail limited to Contract and Manage so domain
   tasks, reports, runs, and inbox results have one presentation owner;
-- readable schema fields and raw-schema detail sheets for inspection, while the
-  Run tab starts a new natural-language chat pre-addressed to the exact worker;
+- readable schema fields and raw-schema detail sheets for inspection, while
+  Manage starts a new natural-language chat pre-addressed to the exact worker;
   users never have to construct schema JSON or manually select an invocation
   model before asking the agent to use a worker;
 - trigger status and webhook rotation;
@@ -496,7 +516,12 @@ provides:
   explicitly, and uses a small vertical `LazyVStack` without interactive
   chat's viewport probes, geometry-driven autoload, speech monitoring, composer,
   or keyboard-aware scroll loop. A native bottom anchor plus two bounded layout
-  passes makes the newest evidence visible;
+  passes makes the newest evidence visible. Execution Details puts every
+  distinct model-backed child transcript first. Each link lazily reconstructs
+  the actual prompt, assistant response, provider-visible reasoning summary or
+  thinking block, and tool calls from the canonical child session rather than
+  copying unbounded text into the run graph. Command-only nodes retain their
+  server-authored stage and activity evidence;
   the transcript content stays transparent so the canonical sheet presentation
   is Liquid Glass at medium height and an opaque app surface at large height, while
   reserved worker child sessions remain excluded from ordinary Home navigation
@@ -699,8 +724,15 @@ sheet admits choices immediately but enables submit after any one question has
 a valid option or non-empty custom response and after the producing agent run
 releases its ordinary session guard. Unanswered questions are omitted from the
 submission in canonical question order. Closing the sheet retains its unsent
-selection draft in the mounted chat coordinator; only a successful canonical
-submission clears it. Submit first restores the live
+selection draft in a small app-local SQLite row keyed by session and
+invocation, so leaving and reopening the chat does not discard work. The draft
+is reconciled against current question IDs and option labels before reuse, and
+only a successful canonical submission clears it. A newly received live
+request auto-presents once; reconstructing an older unanswered request restores
+its tappable chip without reopening the sheet. The same local row records that
+the request has already auto-presented, closing a reconnect race in which a
+replayed live start could otherwise reopen it. Manual chip taps remain
+available. Submit first restores the live
 session subscription, then invokes the session-scoped
 answer function with invocation-derived idempotency. The server validates the
 non-empty answer subset against its persisted questions, appends one structured user event, and
@@ -1163,7 +1195,11 @@ The model picker additionally resolves the OpenAI neutral accent to the
 standard high-contrast secondary-text token in dark mode. Model-entry chrome,
 the picker title and confirmation action, and the reasoning control share the
 emerald product accent; provider and model cards retain their provider-specific
-colors.
+colors. A session-owned picker derives its reasoning menu solely from the
+selected catalog row's exact non-empty `reasoningLevels`, normalizes an old
+selection to that model's declared default (or first exact option), and routes
+the result through a direct sheet callback. It never fabricates a generic level
+list or broadcasts a selection that another mounted session could consume.
 
 Provider cards share one leading-icon and trailing-action column contract.
 Provider names and row labels therefore remain left-aligned across differing
@@ -1293,7 +1329,10 @@ reminders; they are not a general device-control surface.
   content. Share and confirmed Delete live as independent controls in the
   standard leading toolbar group, so neither is compressed into an ad hoc
   stack;
-  Share already exposes Save to Files, so there is no duplicate Export action.
+  Share presents one explicit native activity controller from a bottom sheet,
+  so nested artifact presentation does not choose an inconsistent popover
+  anchor. It already exposes Save to Files, so there is no duplicate Export
+  action.
 - Continue in New Chat is the artifact-to-agent bridge. It converts
   already-verified bytes into the existing `Attachment` value and emits the
   same explicit app-local handoff used by workers and results. The root content

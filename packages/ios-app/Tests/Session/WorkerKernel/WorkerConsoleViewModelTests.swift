@@ -30,7 +30,8 @@ struct WorkerConsoleViewModelTests {
         #expect(viewModel.attention.first?.inboxId == "inbox-1")
         #expect(repository.runLimits == [20, 20])
         #expect(repository.inboxLimits == [20])
-        #expect(repository.inboxAttentionFilters == [true])
+        #expect(repository.inboxAttentionFilters == [false])
+        #expect(viewModel.selectedResults.map(\.inboxId) == ["inbox-1"])
 
         await viewModel.stop(repository: repository, connectionState: .connected)
         #expect(repository.stoppedWorkerIds == ["research"])
@@ -102,6 +103,21 @@ struct WorkerConsoleViewModelTests {
         #expect(viewModel.selectedWorkerArchitecture?.workerId == "research")
     }
 
+    @Test("Only declared engine hooks classify a worker as an engine specialist")
+    func engineSpecialistClassificationUsesHooksRatherThanExposure() async {
+        let repository = MockWorkerKernelRepository()
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+        #expect(viewModel.engineSpecialistWorkers.map(\.workerId) == ["research"])
+        #expect(viewModel.dynamicWorkers.isEmpty)
+
+        repository.researchEngineHooks = []
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+        #expect(viewModel.engineSpecialistWorkers.isEmpty)
+        #expect(viewModel.dynamicWorkers.map(\.workerId) == ["research"])
+    }
+
     @Test("A retired worker exposes every retained version as a restore action")
     func retiredWorkerCanRestoreItsCurrentVersion() async throws {
         let repository = MockWorkerKernelRepository()
@@ -138,7 +154,7 @@ struct WorkerConsoleViewModelTests {
             await viewModel.monitorSummary(repository: repository, connectionState: .connected)
         }
         try? await Task.sleep(for: .milliseconds(20))
-        NotificationCenter.default.post(name: .workerRunProjectionInvalidated, object: nil)
+        NotificationCenter.default.post(name: .workerLifecycleProjectionInvalidated, object: nil)
         try? await Task.sleep(for: .milliseconds(50))
         monitor.cancel()
         await monitor.value
@@ -148,6 +164,24 @@ struct WorkerConsoleViewModelTests {
         #expect(repository.runLimits.isEmpty)
         #expect(repository.inboxLimits.isEmpty)
         #expect(viewModel.monitoringError == nil)
+    }
+
+    @Test("Opening dashboard sections reuses summary and loads each bounded projection once")
+    func sectionLoadingDoesNotRepeatTheEngineSnapshot() async {
+        let repository = MockWorkerKernelRepository()
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.ensureSummaryLoaded(repository: repository, connectionState: .connected)
+        await viewModel.ensureActivityLoaded(repository: repository, connectionState: .connected)
+        await viewModel.ensureActivityLoaded(repository: repository, connectionState: .connected)
+        await viewModel.ensureResultsLoaded(repository: repository, connectionState: .connected)
+        await viewModel.ensureResultsLoaded(repository: repository, connectionState: .connected)
+
+        #expect(repository.snapshotSessionIds.count == 1)
+        #expect(repository.runLimits == [20])
+        #expect(repository.inboxLimits == [20])
+        #expect(viewModel.hasLoadedActivity)
+        #expect(viewModel.hasLoadedResults)
     }
 
     @Test("Activity history loads every bounded page without duplicating runs")
@@ -216,6 +250,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var runOffsets: [UInt64?] = []
     var pagedActivity = false
     var includeRetiredFixture = false
+    var researchEngineHooks = ["research_context"]
     var snapshotError: Error?
 
     private var worker: WorkerSummaryDTO {
@@ -295,7 +330,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
                     modelExposure: "direct",
                     runnerKind: "command",
                     runnerModel: nil,
-                    engineHooks: ["research_context"],
+                    engineHooks: researchEngineHooks,
                     clientActions: [],
                     clientDeliveries: [],
                     triggerKinds: ["schedule"],

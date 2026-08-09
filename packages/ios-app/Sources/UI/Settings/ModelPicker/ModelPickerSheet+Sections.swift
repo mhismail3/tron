@@ -1,8 +1,31 @@
 import SwiftUI
 
 enum ModelPickerReasoningVisibility {
-    static func showsReasoningControl(selectedModel: ModelInfo?, reasoningLevel: String?) -> Bool {
-        reasoningLevel != nil && selectedModel?.supportsReasoning == true
+    static func showsReasoningControl(selectedModel: ModelInfo?, allowsSelection: Bool) -> Bool {
+        allowsSelection
+            && selectedModel?.supportsReasoning == true
+            && !(selectedModel?.reasoningLevels ?? []).isEmpty
+    }
+
+    static func normalizedLevel(
+        _ level: String?,
+        for model: ModelInfo?
+    ) -> String? {
+        guard let model,
+              model.supportsReasoning == true,
+              let levels = model.reasoningLevels,
+              !levels.isEmpty else { return nil }
+        let uniqueLevels = levels.reduce(into: [String]()) { result, candidate in
+            guard !candidate.isEmpty, !result.contains(candidate) else { return }
+            result.append(candidate)
+        }
+        guard !uniqueLevels.isEmpty else { return nil }
+        if let level, uniqueLevels.contains(level) { return level }
+        if let defaultLevel = model.defaultReasoningLevel,
+           uniqueLevels.contains(defaultLevel) {
+            return defaultLevel
+        }
+        return uniqueLevels.first
     }
 }
 

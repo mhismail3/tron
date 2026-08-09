@@ -119,6 +119,7 @@ struct WorkerConsoleSheet: View {
     @State private var selectedPrimitiveTool: EngineSurfaceToolDTO?
     @State private var selectedRun: WorkerInvocationDTO?
     @State private var selectedInboxItem: WorkerInboxSelection?
+    @State private var loadedContinuity: EngineConnectionContinuity?
 
     private var connectionState: ConnectionState {
         dependencies.connectionRepository.connectionState
@@ -220,7 +221,14 @@ struct WorkerConsoleSheet: View {
                 isCovered: isPresentingChildSheet
             )) {
                 guard !isPresentingChildSheet else { return }
-                await refresh()
+                let continuity = dependencies.connectionRepository.continuity
+                let isReconnect = loadedContinuity != nil && loadedContinuity != continuity
+                loadedContinuity = continuity
+                if isReconnect {
+                    await refresh()
+                } else {
+                    await ensureLoaded()
+                }
                 if selectedSection == .activity {
                     await viewModel.monitor(
                         repository: repository,
@@ -469,8 +477,8 @@ struct WorkerConsoleSheet: View {
     private var workersContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             WorkerConsoleGroup(
-                title: "Active workers",
-                detail: "Direct chat tools and internal policy specialists share one durable runtime."
+                title: "Workers",
+                detail: "Dynamic direct and delegated workers share one durable runtime."
             ) {
                 if !connectionState.isConnected, viewModel.workers.isEmpty {
                     WorkerConsoleEmptyState(
@@ -491,8 +499,22 @@ struct WorkerConsoleSheet: View {
                         symbol: "bolt.slash",
                         text: "No active workers. Restore a retired worker or create one through chat."
                     )
+                } else if viewModel.dynamicWorkers.isEmpty {
+                    WorkerConsoleInlineEmptyState(
+                        symbol: "bolt.horizontal.circle",
+                        text: "No dynamic workers. Engine specialists are listed separately below."
+                    )
                 } else {
-                    workerRows(viewModel.activeWorkers)
+                    workerRows(viewModel.dynamicWorkers)
+                }
+            }
+
+            if !viewModel.engineSpecialistWorkers.isEmpty {
+                WorkerConsoleGroup(
+                    title: "Engine specialists",
+                    detail: "Workers with declared hooks into core engine policy. Changes require compatibility review."
+                ) {
+                    workerRows(viewModel.engineSpecialistWorkers)
                 }
             }
 
@@ -598,6 +620,27 @@ struct WorkerConsoleSheet: View {
             await viewModel.refreshSummary(
                 repository: repository,
                 connectionState: dependencies.connectionRepository.connectionState
+            )
+        }
+    }
+
+    private func ensureLoaded() async {
+        let connectionState = dependencies.connectionRepository.connectionState
+        switch selectedSection {
+        case .activity:
+            await viewModel.ensureActivityLoaded(
+                repository: repository,
+                connectionState: connectionState
+            )
+        case .results:
+            await viewModel.ensureResultsLoaded(
+                repository: repository,
+                connectionState: connectionState
+            )
+        case .workers, .primitives:
+            await viewModel.ensureSummaryLoaded(
+                repository: repository,
+                connectionState: connectionState
             )
         }
     }

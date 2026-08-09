@@ -63,6 +63,9 @@ final class ToolInvocationCoordinator {
                 context.logError("Could not decode request_user_input arguments")
                 return
             }
+            if context.pendingUserInputRequest?.invocationId != request.invocationId {
+                context.userInputAutoPresentationInvocationId = request.invocationId
+            }
             if let existingIndex = context.messages.lastIndex(where: {
                 if case .userInputRequest(let existing) = $0.content {
                     return existing.invocationId == pluginResult.invocationId

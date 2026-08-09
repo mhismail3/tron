@@ -116,6 +116,26 @@ final class UnifiedEventTransformerCoverageBatchTests: UnifiedEventTransformerTe
         )
     }
 
+    func testReasoningSelectionReconstructsBothTimelineAndCurrentState() {
+        let event = rawEvent(
+            type: SessionEventType.sessionReasoningChanged.rawValue,
+            payload: [
+                "previousLevel": AnyCodable("medium"),
+                "newLevel": AnyCodable("high")
+            ]
+        )
+
+        let state = UnifiedEventTransformer.reconstructSessionState(from: [event])
+
+        XCTAssertEqual(state.latestReasoningLevel, "high")
+        XCTAssertEqual(state.messages.count, 1)
+        guard case .systemEvent(.reasoningLevelChange(let from, let to)) = state.messages[0].content else {
+            return XCTFail("Expected durable reasoning notification")
+        }
+        XCTAssertEqual(from, "Medium")
+        XCTAssertEqual(to, "High")
+    }
+
     // MARK: - Batch Transformation Tests
 
     func testTransformPersistedEventsRawEvent() {

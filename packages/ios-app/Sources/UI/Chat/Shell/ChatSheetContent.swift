@@ -8,6 +8,8 @@ struct ChatSheetContent: View {
     let viewModel: ChatViewModel
     let sessionId: String
     let sheetCoordinator: SheetCoordinator?
+    let onSelectModel: (ModelInfo) -> Void
+    let onSelectReasoningLevel: (String) -> Void
     @Environment(\.dependencies) var dependencies
 
     // Convenience accessor
@@ -42,9 +44,8 @@ struct ChatSheetContent: View {
                 modelRepository: dependencies.modelRepository,
                 sessionRepository: dependencies.sessionRepository,
                 workerRepository: dependencies.workerKernelRepository,
-                onSelectModel: { model in
-                    NotificationCenter.default.post(name: .modelPickerAction, object: model)
-                },
+                onSelectModel: onSelectModel,
+                onSelectReasoningLevel: onSelectReasoningLevel,
                 onFork: {
                     try await eventStoreManager.forkSession(sessionId)
                 }
@@ -89,6 +90,11 @@ struct ChatSheetContent: View {
                         value,
                         invocationId: request.invocationId
                     )
+                    dependencies.draftStore.scheduleUserInputDraftSave(
+                        sessionId: sessionId,
+                        invocationId: request.invocationId,
+                        draft: value
+                    )
                 }
             )
             UserInputSheet(
@@ -101,6 +107,10 @@ struct ChatSheetContent: View {
                     answers: answers
                 )
                 sheetCoordinator?.clearUserInputDraft(
+                    invocationId: request.invocationId
+                )
+                await dependencies.draftStore.clearUserInputDraft(
+                    sessionId: sessionId,
                     invocationId: request.invocationId
                 )
             }

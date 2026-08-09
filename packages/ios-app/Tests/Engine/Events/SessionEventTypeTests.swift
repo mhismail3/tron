@@ -2,13 +2,15 @@ import XCTest
 @testable import TronMobile
 
 final class SessionEventTypeTests: XCTestCase {
-    func testServerDurableCatalogMatchesTheThirteenEventContract() {
+    func testServerDurableCatalogMatchesTheFifteenEventContract() {
         XCTAssertEqual(
             SessionEventType.serverDurableCases.map(\.rawValue),
             [
                 "session.start",
                 "session.end",
                 "session.fork",
+                "session.model_changed",
+                "session.reasoning_changed",
                 "message.user",
                 "message.assistant",
                 "model.provider_request",

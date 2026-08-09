@@ -17,6 +17,24 @@ private struct ArtifactPreviewRefreshKey: Equatable {
     let continuity: EngineConnectionContinuity
 }
 
+private struct ArtifactShareItem: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct ArtifactActivitySheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+
+    func updateUIViewController(
+        _ uiViewController: UIActivityViewController,
+        context: Context
+    ) {}
+}
+
 struct ArtifactInboxView: View {
     let repository: any WorkerKernelRepository
     let continuity: EngineConnectionContinuity
@@ -249,6 +267,7 @@ struct ArtifactPreviewSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showDeleteConfirmation = false
     @State private var deleteErrorMessage: String?
+    @State private var shareItem: ArtifactShareItem?
 
     private var content: MaterializedWorkerArtifact? {
         viewModel.materialized[artifact.id]
@@ -323,12 +342,18 @@ struct ArtifactPreviewSheet: View {
         } message: {
             Text(deleteErrorMessage ?? "")
         }
+        .sheet(item: $shareItem) { item in
+            ArtifactActivitySheet(url: item.url)
+                .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        }
     }
 
     @ViewBuilder
     private var toolbarActions: some View {
         if let url = content?.fileURL {
-            ShareLink(item: url) {
+            Button {
+                shareItem = ArtifactShareItem(url: url)
+            } label: {
                 Image(systemName: "square.and.arrow.up")
                     .font(TronTypography.buttonSM)
                     .foregroundStyle(.tronEmerald)

@@ -52,7 +52,7 @@ final class ModelClient: EngineDomainClient {
 
         let params = ReasoningLevelParams(sessionId: sessionId, level: level)
         return try await invokeWrite(
-            "config::set_reasoning_level",
+            "model::set_reasoning_level",
             params,
             idempotencyKey: idempotencyKey,
             context: sessionInvocationContext(sessionId)

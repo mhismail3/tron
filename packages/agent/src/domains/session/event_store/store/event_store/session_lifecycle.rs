@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::domains::session::event_store::SessionRow;
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
 use crate::domains::session::event_store::identity::{
-    SessionCreationIdentity, SessionForkIdentity,
+    EventIdentity, SessionCreationIdentity, SessionForkIdentity,
 };
 use crate::domains::session::event_store::sqlite::repositories::event::EventRepo;
 use crate::domains::session::event_store::sqlite::repositories::session::{
@@ -15,7 +15,8 @@ use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::base::SessionEvent;
 use crate::shared::protocol::events::ActivitySummaryLine;
 
-use super::{CreateSessionResult, EventStore, ForkOptions, ForkResult};
+use super::event_log::append_event_in_tx_with_identity;
+use super::{AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult};
 
 /// Options for creating a session inside an already-open transaction.
 pub(super) struct CreateSessionInTxOptions<'a> {
@@ -355,11 +356,114 @@ impl EventStore {
         })
     }
 
-    /// Update the latest model for a session.
-    pub fn update_latest_model(&self, session_id: &str, model: &str) -> Result<bool> {
+    /// Update the latest model and append its durable timeline event atomically.
+    ///
+    /// A no-op switch writes nothing, which keeps retries idempotent and avoids
+    /// duplicate system notices during reconstruction. The returned prior
+    /// model is read under the same session lock, so concurrent clients cannot
+    /// receive a stale transition description.
+    pub fn update_latest_model(&self, session_id: &str, model: &str) -> Result<(String, bool)> {
         self.with_session_write_lock(session_id, || {
-            let conn = self.conn()?;
-            SessionRepo::update_latest_model(&conn, session_id, model)
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let session = SessionRepo::get_by_id(&tx, session_id)?
+                .ok_or_else(|| EventStoreError::SessionNotFound(session_id.to_owned()))?;
+            if session.latest_model == model {
+                return Ok((session.latest_model, false));
+            }
+
+            let previous_model = session.latest_model.clone();
+            let changed = SessionRepo::update_latest_model(&tx, session_id, model)?;
+            let _ = append_event_in_tx_with_identity(
+                &tx,
+                &session,
+                &AppendOptions {
+                    session_id,
+                    event_type: EventType::SessionModelChanged,
+                    payload: serde_json::json!({
+                        "previousModel": previous_model,
+                        "newModel": model,
+                    }),
+                    parent_id: None,
+                    sequence: None,
+                },
+                EventIdentity::generate_current(),
+            )?;
+            tx.commit()?;
+            Ok((previous_model, changed))
+        })
+    }
+
+    /// Persist the effective reasoning level and return its previous value.
+    ///
+    /// Reasoning is event-owned rather than another mutable session column:
+    /// the latest indexed event reconstructs current state while the full log
+    /// preserves the visible audit trail. The read/compare/append sequence is
+    /// serialized and transactional so retries cannot create duplicate rows.
+    /// The expected model is checked under that same lock, preventing a level
+    /// validated for one model from being committed after another client
+    /// switches the session.
+    pub fn update_reasoning_level(
+        &self,
+        session_id: &str,
+        expected_model: &str,
+        level: &str,
+    ) -> Result<(Option<String>, bool)> {
+        self.with_session_write_lock(session_id, || {
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let session = SessionRepo::get_by_id(&tx, session_id)?
+                .ok_or_else(|| EventStoreError::SessionNotFound(session_id.to_owned()))?;
+            if session.latest_model != expected_model {
+                return Err(EventStoreError::InvalidOperation(format!(
+                    "session model changed from '{expected_model}' to '{}' while selecting reasoning",
+                    session.latest_model
+                )));
+            }
+            let previous = EventRepo::get_latest_by_type(
+                &tx,
+                session_id,
+                EventType::SessionReasoningChanged.as_str(),
+            )?
+            .map(|row| {
+                crate::shared::storage::resolve_stored_json_value(&tx, &row.payload).map_err(
+                    |error| {
+                        EventStoreError::Internal(format!(
+                            "resolve reasoning selection {}: {error:#}",
+                            row.id
+                        ))
+                    },
+                )
+            })
+            .transpose()?
+            .and_then(|payload| {
+                payload
+                    .get("newLevel")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            });
+
+            if previous.as_deref() == Some(level) {
+                return Ok((previous, false));
+            }
+
+            let _ = append_event_in_tx_with_identity(
+                &tx,
+                &session,
+                &AppendOptions {
+                    session_id,
+                    event_type: EventType::SessionReasoningChanged,
+                    payload: serde_json::json!({
+                        "previousLevel": previous,
+                        "newLevel": level,
+                    }),
+                    parent_id: None,
+                    sequence: None,
+                },
+                EventIdentity::generate_current(),
+            )?;
+            tx.commit()?;
+            Ok((previous, true))
         })
     }
 

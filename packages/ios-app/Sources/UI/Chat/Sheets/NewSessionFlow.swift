@@ -117,12 +117,9 @@ struct NewSessionFlow: View {
                     reasoningLevel: selectedReasoningLevel,
                     onSelect: { model in
                         setSelectedModel(model.id)
-                    }
+                    },
+                    onSelectReasoning: { selectedReasoningLevel = $0 }
                 )
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .reasoningLevelAction)) { notification in
-                guard let level = notification.object as? String else { return }
-                selectedReasoningLevel = level
             }
             .task(id: connectionRepository.continuity) {
                 let ownerId = connectionRepository.continuityOwnerId

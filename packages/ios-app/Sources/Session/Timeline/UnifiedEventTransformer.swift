@@ -14,6 +14,7 @@ struct ReconstructedState {
         cacheCreationTokens: nil
     )
     var lastTurnInputTokens = 0
+    var latestReasoningLevel: String?
 }
 
 // =============================================================================
@@ -180,6 +181,10 @@ struct UnifiedEventTransformer {
             return ErrorEventProjection.transformTurnFailed(payload, timestamp: ts)
         case .compactBoundary:
             return SystemEventProjection.transformCompactBoundary(payload, timestamp: ts)
+        case .sessionModelChanged:
+            return SystemEventProjection.transformModelChanged(payload, timestamp: ts)
+        case .sessionReasoningChanged:
+            return SystemEventProjection.transformReasoningChanged(payload, timestamp: ts)
         default:
             return nil
         }
@@ -335,6 +340,19 @@ extension UnifiedEventTransformer {
                     // Update context tokens so pill reflects post-compaction state on resume.
                     // If a later message.assistant arrives with a tokenRecord, it overwrites with API ground truth.
                     state.lastTurnInputTokens = parsed.estimatedContextTokens ?? parsed.compactedTokens
+                }
+
+            case .sessionModelChanged:
+                if let message = transformPersistedEvent(event) {
+                    state.messages.append(message)
+                }
+
+            case .sessionReasoningChanged:
+                if let level = event.payload.string("newLevel") {
+                    state.latestReasoningLevel = level
+                }
+                if let message = transformPersistedEvent(event) {
+                    state.messages.append(message)
                 }
 
             default:

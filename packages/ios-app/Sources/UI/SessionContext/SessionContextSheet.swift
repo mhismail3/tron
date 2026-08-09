@@ -26,6 +26,7 @@ struct SessionContextSheet: View {
     let sessionRepository: any NetworkSessionRepository
     let workerRepository: any WorkerKernelRepository
     let onSelectModel: (ModelInfo) -> Void
+    let onSelectReasoningLevel: (String) -> Void
     let onFork: () async throws -> String
 
     @Environment(\.dismiss) var dismiss
@@ -251,7 +252,8 @@ struct SessionContextSheet: View {
                 currentModelId: currentModelId,
                 readOnly: !canMutate,
                 reasoningLevel: resolvedModelInfo?.supportsReasoning == true ? reasoningLevel : nil,
-                onSelect: onSelectModel
+                onSelect: onSelectModel,
+                onSelectReasoning: onSelectReasoningLevel
             )
         }
         .sheet(isPresented: $showForkConfirmation) {

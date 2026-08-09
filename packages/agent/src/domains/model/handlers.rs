@@ -18,6 +18,9 @@ pub(crate) mod model {
             "switch" => |invocation, deps| {
                 routing::switch_model(&invocation.payload, deps).await
             },
+            "set_reasoning_level" => |invocation, deps| {
+                routing::set_reasoning_level(&invocation.payload, deps).await
+            },
         ];
     }
 }

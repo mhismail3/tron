@@ -146,7 +146,9 @@ struct WorkerConsoleInteractionTests {
         #expect(graph.contains("filter { !$0.technical }"))
         #expect(graph.contains("WorkerRunExecutionOverviewView"))
         #expect(graph.contains("WorkerRunExecutionSheet"))
-        #expect(graph.contains("View full execution history"))
+        #expect(graph.contains("Inspect execution details"))
+        #expect(graph.contains("Agent transcripts"))
+        #expect(graph.contains("actual prompts, responses, reasoning"))
         #expect(!graph.contains("WorkerRunDetailLinksView"))
         #expect(!graph.contains("WorkerRunTreeSheet"))
         #expect(!graph.contains("WorkerRunTimelineSheet"))
@@ -249,10 +251,15 @@ struct WorkerConsoleInteractionTests {
 
         for file in files {
             let source = try String(contentsOf: file, encoding: .utf8)
-            #expect(
-                !source.contains("DisclosureGroup"),
-                "\(file.lastPathComponent) must route unbounded detail to a sheet"
-            )
+            if file.lastPathComponent == "WorkerDetailSheet.swift" {
+                #expect(source.contains("DisclosureGroup(isExpanded: $isLifecycleAuditExpanded)"))
+                #expect(source.components(separatedBy: "DisclosureGroup").count == 2)
+            } else {
+                #expect(
+                    !source.contains("DisclosureGroup"),
+                    "\(file.lastPathComponent) must route unbounded detail to a sheet"
+                )
+            }
         }
 
         let detail = try String(
@@ -526,7 +533,8 @@ struct WorkerConsoleInteractionTests {
         #expect(engine.contains("viewModel.architecture(for: worker.workerId)"))
         #expect(engine.contains("architecture: architecture"))
         #expect(row.contains("Direct chat tool"))
-        #expect(row.contains("Internal specialist"))
+        #expect(row.contains("Engine specialist"))
+        #expect(row.contains("Delegated worker"))
         #expect(!row.contains("Image(systemName: status.systemImage)"))
         #expect(row.contains("FlowLayout(spacing: 5)"))
         #expect(!row.contains("VStack(alignment: .trailing, spacing: 4)"))
@@ -553,7 +561,7 @@ struct WorkerConsoleInteractionTests {
         #expect(technicalDetail.contains(".filter { $0.targetWorkerId != nil }"))
         #expect(technicalDetail.contains(".filter { $0.targetWorkerId == nil }"))
         #expect(technicalDetail.contains(#"guard !values.isEmpty else { return "None" }"#))
-        #expect(!technicalDetail.contains("if !architecture.engineHooks.isEmpty"))
+        #expect(technicalDetail.contains("if !architecture.engineHooks.isEmpty"))
         #expect(technicalDetail.contains("if !boundaries.isEmpty"))
         #expect(!technicalDetail.contains("if !architecture.calls.isEmpty"))
         #expect(!technicalDetail.contains("if !callers.isEmpty"))
@@ -689,7 +697,9 @@ struct WorkerConsoleInteractionTests {
         #expect(source.contains("startAgentSessionHandoff(.artifact("))
         #expect(source.contains(".workerConsoleSheetPresentation()"))
         #expect(source.contains(".safeAreaInset(edge: .bottom"))
-        #expect(source.contains("ShareLink(item: url)"))
+        #expect(source.contains("ArtifactActivitySheet(url: item.url)"))
+        #expect(source.contains("UIActivityViewController(activityItems: [url]"))
+        #expect(!source.contains("ShareLink(item: url)"))
         #expect(source.contains("TronScrollEdgeEffects.applySoftToDescendantScrollViews"))
         #expect(source.contains(".glassEffect("))
         #expect(!source.contains("ArtifactQuickLookView(url: url)\n                    .ignoresSafeArea()"))
@@ -717,11 +727,15 @@ struct WorkerConsoleInteractionTests {
             encoding: .utf8
         )
 
-        let activeRange = try #require(source.range(of: "workerRows(viewModel.activeWorkers)"))
+        let dynamicRange = try #require(source.range(of: "workerRows(viewModel.dynamicWorkers)"))
+        let specialistTitleRange = try #require(source.range(of: "title: \"Engine specialists\""))
+        let specialistRowsRange = try #require(source.range(of: "workerRows(viewModel.engineSpecialistWorkers)"))
         let retiredTitleRange = try #require(source.range(of: "title: \"Retired workers\""))
         let retiredRowsRange = try #require(source.range(of: "workerRows(viewModel.retiredWorkers)"))
 
-        #expect(activeRange.lowerBound < retiredTitleRange.lowerBound)
+        #expect(dynamicRange.lowerBound < specialistTitleRange.lowerBound)
+        #expect(specialistTitleRange.lowerBound < specialistRowsRange.lowerBound)
+        #expect(specialistRowsRange.lowerBound < retiredTitleRange.lowerBound)
         #expect(retiredTitleRange.lowerBound < retiredRowsRange.lowerBound)
         #expect(source.contains("Inactive workers retained for audit, version history, and restoration."))
     }
@@ -805,7 +819,9 @@ struct WorkerConsoleInteractionTests {
         #expect(shell.contains("monitorResults("))
         #expect(shell.contains("label: \"Unhealthy\""))
         #expect(!shell.contains("Text(\"Open delivery audit\")"))
-        #expect(detail.contains("private var attention: some View"))
+        #expect(detail.contains("private var workerResults: some View"))
+        #expect(detail.contains("case results"))
+        #expect(detail.contains("private func lifecycleAudit"))
         #expect(detail.contains("private var inboxAudit: some View"))
         #expect(!shell.contains("title: \"Durable inbox\""))
         #expect(!detail.contains("title: \"Durable inbox\""))
@@ -895,10 +911,10 @@ struct WorkerConsoleInteractionTests {
             from: "private var recentRuns: some View",
             through: "private var inboxAudit: some View"
         )
-        let auditAndLifecycle = try sourceSlice(
+        let lifecycleAudit = try sourceSlice(
             detail,
-            from: "private func audit",
-            through: "\n}"
+            from: "private func lifecycleAudit",
+            through: "private var inboxAudit"
         )
         let group = try sourceSlice(
             components,
@@ -908,8 +924,9 @@ struct WorkerConsoleInteractionTests {
 
         #expect(activity.contains("WorkerConsoleGroup("))
         #expect(!activity.contains("WorkerConsoleSection("))
-        #expect(auditAndLifecycle.contains("WorkerConsoleGroup("))
-        #expect(!auditAndLifecycle.contains("WorkerConsoleSection("))
+        #expect(lifecycleAudit.contains("DisclosureGroup(isExpanded: $isLifecycleAuditExpanded)"))
+        #expect(lifecycleAudit.contains("sectionFill(.tronPurple"))
+        #expect(!lifecycleAudit.contains("WorkerConsoleSection("))
         #expect(group.contains("WorkerConsoleSectionHeader"))
         #expect(!group.contains("sectionFill"))
     }

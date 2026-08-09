@@ -33,6 +33,7 @@ final class ChatViewModel {
     var recordingAudioLevel: Double = 0
     var isTranscribing = false
     var pendingUserInputRequest: UserInputRequest?
+    var userInputAutoPresentationInvocationId: String?
     var speechTranscriptionOwner: ClientActionOwnerDTO?
     var isSpeechTranscriptionAvailable: Bool {
         speechTranscriptionOwner != nil

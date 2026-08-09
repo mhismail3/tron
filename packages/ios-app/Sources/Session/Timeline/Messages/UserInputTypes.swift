@@ -29,10 +29,21 @@ struct UserInputAnswer: Codable, Equatable, Sendable {
 /// Sheet-owned selection state retained by the chat coordinator while a
 /// question request remains pending. It is deliberately separate from the
 /// canonical submitted answers so closing a sheet never fabricates history.
-struct UserInputDraft: Equatable, Sendable {
+struct UserInputDraft: Codable, Equatable, Sendable {
     var selectedLabels: [String: String] = [:]
     var customAnswers: [String: String] = [:]
     var customQuestionIds: Set<String> = []
+    /// Device-local acknowledgement that this request already auto-presented.
+    /// It prevents a replayed live event from reopening the sheet after the
+    /// user deliberately dismissed it without answering.
+    var hasBeenPresented = false
+
+    private enum CodingKeys: String, CodingKey {
+        case selectedLabels
+        case customAnswers
+        case customQuestionIds
+        case hasBeenPresented
+    }
 
     init(request: UserInputRequest) {
         for answer in request.answers {
@@ -43,6 +54,54 @@ struct UserInputDraft: Equatable, Sendable {
                 selectedLabels[answer.questionId] = selectedLabel
             }
         }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        selectedLabels = try container.decodeIfPresent(
+            [String: String].self,
+            forKey: .selectedLabels
+        ) ?? [:]
+        customAnswers = try container.decodeIfPresent(
+            [String: String].self,
+            forKey: .customAnswers
+        ) ?? [:]
+        customQuestionIds = try container.decodeIfPresent(
+            Set<String>.self,
+            forKey: .customQuestionIds
+        ) ?? []
+        hasBeenPresented = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .hasBeenPresented
+        ) ?? false
+    }
+
+    /// Reconcile device-local draft state against the current canonical tool
+    /// request. A worker version can change while a question remains pending;
+    /// stale question IDs and option labels must never be submitted.
+    func reconciled(with request: UserInputRequest) -> UserInputDraft {
+        var result = UserInputDraft(request: request)
+        result.hasBeenPresented = hasBeenPresented
+        guard request.isAnswerable else { return result }
+
+        for question in request.questions {
+            if customQuestionIds.contains(question.id) {
+                result.customQuestionIds.insert(question.id)
+                if let answer = customAnswers[question.id] {
+                    result.customAnswers[question.id] = answer
+                }
+                result.selectedLabels.removeValue(forKey: question.id)
+                continue
+            }
+
+            if let label = selectedLabels[question.id],
+               question.options.contains(where: { $0.label == label }) {
+                result.selectedLabels[question.id] = label
+                result.customQuestionIds.remove(question.id)
+                result.customAnswers.removeValue(forKey: question.id)
+            }
+        }
+        return result
     }
 
     func answer(for question: UserInputQuestion) -> UserInputAnswer? {

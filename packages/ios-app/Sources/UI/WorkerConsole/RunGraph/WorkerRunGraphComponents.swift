@@ -83,6 +83,12 @@ enum WorkerRunGraphPresentation {
         return "\(entries.count) update\(entries.count == 1 ? "" : "s") · \(latest.summary)"
     }
 
+    static func transcriptCount(_ graph: WorkerRunGraphDTO) -> Int {
+        Set(graph.nodes.compactMap { node in
+            node.sessionId?.isEmpty == false ? node.sessionId : nil
+        }).count
+    }
+
     static func visibleTimeline(_ graph: WorkerRunGraphDTO) -> [WorkerRunTimelineEntryDTO] {
         graph.timeline.filter { !$0.technical }
     }
@@ -382,8 +388,8 @@ struct WorkerRunExecutionOverviewView: View {
 
                 WorkerMetadataDivider()
                 WorkerRunDisclosureRow(
-                    title: "View full execution history",
-                    detail: WorkerRunGraphPresentation.activitySummary(visibleTimeline),
+                    title: "Inspect execution details",
+                    detail: executionDetail,
                     symbol: "point.3.connected.trianglepath.dotted",
                     accent: .tronCyan,
                     action: openDetails
@@ -391,6 +397,14 @@ struct WorkerRunExecutionOverviewView: View {
             }
         }
         .accessibilityIdentifier("worker-run-execution-overview")
+    }
+
+    private var executionDetail: String {
+        let transcripts = WorkerRunGraphPresentation.transcriptCount(graph)
+        if transcripts > 0 {
+            return "\(transcripts) agent transcript\(transcripts == 1 ? "" : "s") with actual prompts, responses, reasoning, and tool calls · \(WorkerRunGraphPresentation.activitySummary(visibleTimeline))"
+        }
+        return WorkerRunGraphPresentation.activitySummary(visibleTimeline)
     }
 }
 
@@ -523,10 +537,52 @@ struct WorkerRunExecutionSheet: View {
         WorkerRunGraphPresentation.visibleTimeline(graph)
     }
 
+    private var transcriptNodes: [WorkerRunNodeDTO] {
+        var seen = Set<String>()
+        return graph.nodes.filter { node in
+            guard let sessionId = node.sessionId, !sessionId.isEmpty else { return false }
+            return seen.insert(sessionId).inserted
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
+                    if !transcriptNodes.isEmpty {
+                        WorkerConsoleSectionHeader(
+                            title: "Agent transcripts",
+                            detail: "Open the actual prompts, responses, reasoning traces, and tool calls for each model-backed work item."
+                        )
+                        LazyVStack(spacing: 9) {
+                            ForEach(transcriptNodes) { node in
+                                Button {
+                                    if let sessionId = node.sessionId {
+                                        selectedSession = WorkerToolSessionSelection(sessionId: sessionId)
+                                    }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "text.bubble.fill")
+                                            .foregroundStyle(.tronPurple)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(WorkerRunGraphPresentation.nodeTitle(node))
+                                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                                .foregroundStyle(.tronTextPrimary)
+                                            Text("View complete agent transcript")
+                                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                                .foregroundStyle(.tronTextSecondary)
+                                        }
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(11)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .sectionFill(.tronPurple, cornerRadius: 10, subtle: true, interactive: true)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
                     WorkerConsoleSectionHeader(
                         title: "Work structure",
                         detail: WorkerRunGraphPresentation.workBreakdown(graph)
@@ -561,7 +617,7 @@ struct WorkerRunExecutionSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Execution History", color: .tronCyan)
+                    SheetTitle(title: "Execution Details", color: .tronCyan)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     SheetDismissButton(color: .tronCyan)
@@ -596,9 +652,10 @@ struct WorkerRunCausalTreeView: View {
         .accessibilityIdentifier("worker-run-causal-tree")
     }
 
+    @ViewBuilder
     private func nodeRow(_ node: WorkerRunNodeDTO) -> some View {
         let color = WorkerRunGraphPresentation.color(status: node.status)
-        return HStack(alignment: .top, spacing: 9) {
+        let content = HStack(alignment: .top, spacing: 9) {
             Image(systemName: WorkerRunGraphPresentation.symbol(status: node.status))
                 .foregroundStyle(color)
                 .frame(width: 18)
@@ -629,18 +686,26 @@ struct WorkerRunCausalTreeView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if let sessionId = node.sessionId, !sessionId.isEmpty {
-                Button {
-                    openSession(sessionId)
-                } label: {
-                    Image(systemName: "text.bubble")
-                        .foregroundStyle(.tronPurple)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Open child session")
+                Label("Transcript", systemImage: "text.bubble")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(.tronPurple)
             }
         }
         .padding(10)
-        .sectionFill(color, cornerRadius: 10, subtle: true, interactive: false)
+        .sectionFill(
+            color,
+            cornerRadius: 10,
+            subtle: true,
+            interactive: node.sessionId?.isEmpty == false
+        )
+
+        if let sessionId = node.sessionId, !sessionId.isEmpty {
+            Button { openSession(sessionId) } label: { content }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open \(WorkerRunGraphPresentation.nodeTitle(node)) transcript")
+        } else {
+            content
+        }
     }
 }
 

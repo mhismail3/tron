@@ -26,6 +26,7 @@ struct ChatView: View {
     @State var inputHistory = InputHistoryStore(defaults: .standard)
     @State var scrollCoordinator = ScrollStateCoordinator()
     @State var taskCoordinator: ChatViewTaskCoordinator
+    @State var sessionConfigurationQueue = SessionConfigurationQueue()
 
     // MARK: - Sheet Coordinator (single sheet pattern)
     // Uses enum-based single .sheet(item:) modifier to avoid Swift compiler type-checking timeout
@@ -90,7 +91,9 @@ struct ChatView: View {
         .chatSheets(
             coordinator: sheetCoordinator,
             viewModel: viewModel,
-            sessionId: sessionId
+            sessionId: sessionId,
+            onSelectModel: { switchModel(to: $0) },
+            onSelectReasoningLevel: { changeReasoningLevel(to: $0) }
         )
         // iOS 26 menu actions route through NotificationCenter before state mutation.
         .onReceive(NotificationCenter.default.publisher(for: .chatMenuAction)) { notification in
@@ -99,30 +102,6 @@ struct ChatView: View {
                   let action = ChatMenuAction(rawValue: raw) else { return }
             switch action {
             case .settings: sheetCoordinator.showSettings()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .modelPickerAction)) { notification in
-            guard presentationMode == .interactiveSession else { return }
-            guard let model = notification.object as? ModelInfo else { return }
-            switchModel(to: model)
-        }
-        // Reasoning level uses the same iOS 26 menu action routing.
-        .onReceive(NotificationCenter.default.publisher(for: .reasoningLevelAction)) { notification in
-            guard presentationMode == .interactiveSession else { return }
-            guard let level = notification.object as? String else { return }
-            let previousLevel = viewModel.inputBarState.reasoningLevel
-            viewModel.inputBarState.reasoningLevel = level
-            // Add in-chat notification for reasoning level change
-            if previousLevel != level {
-                viewModel.addReasoningLevelChangeNotification(from: previousLevel, to: level)
-                // Persist to server (event-sourced, survives reinstall/migration)
-                Task {
-                    try? await services.models.setReasoningLevel(
-                        sessionId: sessionId,
-                        level: level,
-                        idempotencyKey: .userAction("config.setReasoningLevel")
-                    )
-                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pendingShareMessage)) { notification in
@@ -138,8 +117,13 @@ struct ChatView: View {
         .onChange(of: viewModel.pendingUserInputRequest) { _, request in
             guard presentationMode == .interactiveSession else { return }
             if let request {
-                sheetCoordinator.showUserInput(request)
+                guard viewModel.userInputAutoPresentationInvocationId == request.invocationId else {
+                    return
+                }
+                viewModel.userInputAutoPresentationInvocationId = nil
+                presentUserInput(request, automatically: true)
             } else {
+                viewModel.userInputAutoPresentationInvocationId = nil
                 sheetCoordinator.clearUserInput()
             }
         }
@@ -164,7 +148,13 @@ struct ChatView: View {
             taskCoordinator.invalidate()
             if presentationMode == .interactiveSession {
                 // Persist draft state before an interactive chat is destroyed.
-                Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
+                Task {
+                    await dependencies.draftStore.saveImmediately(
+                        sessionId: sessionId,
+                        inputBarState: viewModel.inputBarState
+                    )
+                    await dependencies.draftStore.flushPending()
+                }
             }
             viewModel.clearLocalNotifications()
             viewModel.deactivateMountedResources()
@@ -474,5 +464,4 @@ extension Notification.Name {
     static let pendingShareContent = Notification.Name("pendingShareContent")
     static let pendingShareMessage = Notification.Name("pendingShareMessage")
     static let switchToSession = Notification.Name("tron.switchToSession")
-    // modelPickerAction is defined in InputBar.swift
 }

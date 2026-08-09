@@ -48,6 +48,8 @@ final class DatabaseSchemaTests: XCTestCase {
 
         let columns = try await tableColumns("session_drafts", actor: actor)
         XCTAssertEqual(columns, ["session_id", "text", "attachment_metadata_json", "updated_at"])
+        let questionColumns = try await tableColumns("session_user_input_drafts", actor: actor)
+        XCTAssertEqual(questionColumns, ["session_id", "invocation_id", "draft_json", "updated_at"])
         await actor.close()
     }
 

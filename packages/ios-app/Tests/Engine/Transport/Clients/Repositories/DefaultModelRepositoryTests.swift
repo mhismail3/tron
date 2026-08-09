@@ -150,7 +150,7 @@ final class DefaultModelRepositoryTests: XCTestCase {
     func test_setReasoningLevel_callsClient() async throws {
         let idempotencyKey = EngineIdempotencyKey.userAction("reasoning.repository.test")
         transport.writeHandler = { functionId, payload, receivedKey, options in
-            XCTAssertEqual(functionId.rawValue, "config::set_reasoning_level")
+            XCTAssertEqual(functionId.rawValue, "model::set_reasoning_level")
             XCTAssertEqual((payload as? ReasoningLevelParams)?.sessionId, "session-123")
             XCTAssertEqual((payload as? ReasoningLevelParams)?.level, "high")
             XCTAssertEqual(receivedKey, idempotencyKey)
@@ -164,7 +164,7 @@ final class DefaultModelRepositoryTests: XCTestCase {
             idempotencyKey: idempotencyKey
         )
 
-        XCTAssertEqual(transport.operationOrder, ["write:config::set_reasoning_level"])
+        XCTAssertEqual(transport.operationOrder, ["write:model::set_reasoning_level"])
         XCTAssertEqual(result.newLevel, "high")
         XCTAssertTrue(result.changed)
     }

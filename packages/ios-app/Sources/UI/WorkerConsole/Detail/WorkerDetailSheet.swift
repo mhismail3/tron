@@ -7,9 +7,9 @@ enum WorkerDetailMode {
 
 private enum WorkerDetailSection: Hashable {
     case overview
-    case run
-    case activity
     case manage
+    case activity
+    case results
 }
 
 struct WorkerDetailSheet: View {
@@ -31,6 +31,8 @@ struct WorkerDetailSheet: View {
     @State private var selectedRun: WorkerInvocationDTO?
     @State private var selectedInboxItem: WorkerInboxSelection?
     @State private var selectedSection = WorkerDetailSection.overview
+    @State private var loadedContinuity: EngineConnectionContinuity?
+    @State private var isLifecycleAuditExpanded = false
 
     var body: some View {
         NavigationStack {
@@ -92,7 +94,14 @@ struct WorkerDetailSheet: View {
             }
             .task(id: dependencies.connectionRepository.continuity) {
                 guard dependencies.connectionRepository.connectionState.isConnected else { return }
-                await viewModel.reconcileSelection(repository: repository)
+                let continuity = dependencies.connectionRepository.continuity
+                let isReconnect = loadedContinuity != nil && loadedContinuity != continuity
+                loadedContinuity = continuity
+                if isReconnect {
+                    await viewModel.reconcileSelection(repository: repository)
+                } else {
+                    await viewModel.ensureSelectionLoaded(repository: repository)
+                }
             }
             .confirmationDialog(
                 "Archive and purge this worker?",
@@ -164,7 +173,7 @@ struct WorkerDetailSheet: View {
     private var sectionOptions: [(String, WorkerDetailSection)] {
         switch mode {
         case .operational:
-            [("Overview", .overview), ("Run", .run), ("Activity", .activity), ("Manage", .manage)]
+            [("Overview", .overview), ("Manage", .manage), ("Activity", .activity), ("Results", .results)]
         case .technical:
             [("Contract", .overview), ("Manage", .manage)]
         }
@@ -180,16 +189,16 @@ struct WorkerDetailSheet: View {
             overview(worker)
             inputContract(inspection)
             triggers(inspection)
-        case .run:
-            useInChat(worker)
-        case .activity:
-            recentRuns
-            attention
-            inboxAudit
-            audit(inspection)
         case .manage:
+            useInChat(worker)
             versions(worker, inspection: inspection)
             lifecycle(worker)
+            lifecycleAudit(inspection)
+        case .activity:
+            recentRuns
+        case .results:
+            workerResults
+            inboxAudit
         }
     }
 
@@ -445,19 +454,56 @@ struct WorkerDetailSheet: View {
         }
     }
 
-    private var attention: some View {
-        WorkerConsoleGroup(
-            title: "Attention",
-            detail: "Failures, system events, and pending background outcomes that merit review."
-        ) {
-            if viewModel.attention.isEmpty {
-                WorkerConsoleInlineEmptyState(
-                    symbol: "checkmark.circle",
-                    text: "Nothing needs attention."
-                )
+    private var workerResults: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if viewModel.selectedResults.isEmpty {
+                WorkerConsoleGroup(
+                    title: "Durable results",
+                    detail: "Outcomes retained independently from execution activity."
+                ) {
+                    WorkerConsoleInlineEmptyState(
+                        symbol: "tray",
+                        text: "No durable results have been retained."
+                    )
+                }
             } else {
+                workerResultSection(
+                    .needsAttention,
+                    title: "Needs attention",
+                    detail: "Unresolved failures that still merit investigation or correction."
+                )
+                workerResultSection(
+                    .available,
+                    title: "Available",
+                    detail: "Outcomes that have not entered an agent context."
+                )
+                workerResultSection(
+                    .usedByAgent,
+                    title: "Used by agent",
+                    detail: "Results already consumed for agent follow-up."
+                )
+                workerResultSection(
+                    .resolved,
+                    title: "Resolved",
+                    detail: "Earlier failures followed by verified recovery or an owned fallback."
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func workerResultSection(
+        _ disposition: WorkerResultDisposition,
+        title: String,
+        detail: String
+    ) -> some View {
+        let items = viewModel.selectedResults.filter {
+            WorkerConsolePresentation.resultDisposition($0) == disposition
+        }
+        if !items.isEmpty {
+            WorkerConsoleGroup(title: title, detail: detail) {
                 VStack(spacing: 10) {
-                    ForEach(viewModel.attention.prefix(20)) { item in
+                    ForEach(items) { item in
                         WorkerInboxCard(
                             item: item,
                             workerName: viewModel.workerName(for: item.workerId),
@@ -472,6 +518,37 @@ struct WorkerDetailSheet: View {
                 }
             }
         }
+    }
+
+    private func lifecycleAudit(_ inspection: WorkerInspectResultDTO) -> some View {
+        DisclosureGroup(isExpanded: $isLifecycleAuditExpanded) {
+            if inspection.audit.isEmpty {
+                WorkerConsoleInlineEmptyState(
+                    symbol: "checklist",
+                    text: "No lifecycle entries recorded."
+                )
+                .padding(.top, 10)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(inspection.audit.prefix(20)) { item in
+                        WorkerAuditCard(item: item)
+                    }
+                }
+                .padding(.top, 10)
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Lifecycle history")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                Text("Server-authored enable, update, rollback, failure, and retirement evidence.")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+            }
+        }
+        .tint(.tronPurple)
+        .padding(12)
+        .sectionFill(.tronPurple, cornerRadius: 11, subtle: true, interactive: true)
     }
 
     private var inboxAudit: some View {
@@ -494,23 +571,6 @@ struct WorkerDetailSheet: View {
             .sectionFill(.tronInfo, cornerRadius: 11, subtle: true, interactive: true)
         }
         .buttonStyle(.plain)
-    }
-
-    private func audit(_ inspection: WorkerInspectResultDTO) -> some View {
-        WorkerConsoleGroup(
-            title: "Audit history",
-            detail: "Server-authored lifecycle evidence for this worker."
-        ) {
-            if inspection.audit.isEmpty {
-                WorkerConsoleInlineEmptyState(symbol: "checklist", text: "No audit entries recorded.")
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(inspection.audit.prefix(20)) { item in
-                        WorkerAuditCard(item: item)
-                    }
-                }
-            }
-        }
     }
 
     private func lifecycle(_ worker: WorkerSummaryDTO) -> some View {

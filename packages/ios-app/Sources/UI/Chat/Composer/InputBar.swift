@@ -383,8 +383,6 @@ struct InputBar: View {
 extension Notification.Name {
     /// iOS 26 Menu bug: State mutations in button actions break gesture handling
     static let attachmentMenuAction = Notification.Name("attachmentMenuAction")
-    static let modelPickerAction = Notification.Name("modelPickerAction")
-    static let reasoningLevelAction = Notification.Name("reasoningLevelAction")
 }
 
 // MARK: - Preview
