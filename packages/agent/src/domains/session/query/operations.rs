@@ -125,8 +125,22 @@ pub(crate) async fn session_context_request_detail_value(
 ) -> Result<Value, ToolError> {
     let session_id = require_string_param(params, "sessionId")?;
     let event_id = require_string_param(params, "eventId")?;
+    let projection = match params
+        .and_then(|payload| payload.get("projection"))
+        .and_then(Value::as_str)
+    {
+        None | Some("technical") => super::ContextRequestDetailProjection::Technical,
+        Some("agent_context") => super::ContextRequestDetailProjection::AgentContext,
+        Some(value) => {
+            return Err(ToolError::InvalidParams {
+                message: format!(
+                    "projection must be 'agent_context' or 'technical', received '{value}'"
+                ),
+            });
+        }
+    };
     crate::domains::session::query::SessionQueryService::context_request_detail(
-        deps, session_id, event_id,
+        deps, session_id, event_id, projection,
     )
     .await
 }

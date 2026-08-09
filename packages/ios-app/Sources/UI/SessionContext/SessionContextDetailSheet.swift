@@ -218,10 +218,6 @@ struct SessionContextDetailSheet: View {
         cacheWriteTokens: Int
     ) -> some View {
         let manifest = detail.contextManifest
-        let auditOverview = SessionContextAuditFormatter.providerRequestOverview(
-            detail.providerAudit
-        )
-
         technicalSection(title: "Audit identity") {
             metadataContainer(.tronEmerald) {
                 metadataRow("Format", detail.format, code: true)
@@ -353,21 +349,34 @@ struct SessionContextDetailSheet: View {
         }
 
         technicalSection(title: "Redacted provider request") {
-            metadataContainer(.tronTextMuted) {
-                metadataRow(
-                    "Envelope",
-                    WorkerConsolePresentation.displayLabel(auditOverview.requestKind)
+            if let providerAudit = detail.providerAudit {
+                let auditOverview = SessionContextAuditFormatter.providerRequestOverview(
+                    providerAudit
                 )
-                Divider().opacity(0.35)
-                metadataRow("Messages", auditOverview.messageCount.map(String.init) ?? "Unavailable")
-                Divider().opacity(0.35)
-                metadataRow("Tools", auditOverview.toolCount.map(String.init) ?? "Unavailable")
+                metadataContainer(.tronTextMuted) {
+                    metadataRow(
+                        "Envelope",
+                        WorkerConsolePresentation.displayLabel(auditOverview.requestKind)
+                    )
+                    Divider().opacity(0.35)
+                    metadataRow(
+                        "Messages",
+                        auditOverview.messageCount.map(String.init) ?? "Unavailable"
+                    )
+                    Divider().opacity(0.35)
+                    metadataRow(
+                        "Tools",
+                        auditOverview.toolCount.map(String.init) ?? "Unavailable"
+                    )
+                }
+                rawJSONButton(
+                    title: "View redacted JSON",
+                    subtitle: "The exact bounded request audit",
+                    destination: .providerAudit(providerAudit)
+                )
+            } else {
+                emptyState("Exact request evidence was not included in this projection.")
             }
-            rawJSONButton(
-                title: "View redacted JSON",
-                subtitle: "The exact bounded request audit",
-                destination: .providerAudit(detail.providerAudit)
-            )
         }
     }
 

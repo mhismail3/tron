@@ -136,6 +136,7 @@ struct SessionClientTests {
             let params = try #require(payload as? SessionContextRequestDetailParams)
             #expect(params.sessionId == "session-123")
             #expect(params.eventId == "event-1")
+            #expect(params.projection == .agentContext)
             return SessionContextRequestDetailDTO(
                 eventId: "event-1",
                 sequence: 42,
@@ -155,7 +156,8 @@ struct SessionClientTests {
         )
         _ = try await client.contextRequestDetail(
             sessionId: "session-123",
-            eventId: "event-1"
+            eventId: "event-1",
+            projection: .agentContext
         )
     }
 

@@ -196,6 +196,13 @@ or event delivery returns to UI ownership. Transport logging APIs accept route,
 direction, byte count, and bounded session prefixes only; raw payload previews
 cannot be passed to them.
 
+The server admits correlated engine invocations concurrently through one
+bounded, connection-owned task set. A slow notification or database operation
+therefore cannot stop the socket read loop from admitting an independent
+session resume, reconstruction, or subscription request. Responses may finish
+out of order and are matched only by correlation ID; socket teardown cancels
+and drains every admitted invocation within a fixed bound.
+
 The canonical client connects on every cold active launch when a paired server
 exists; opening a chat is not a prerequisite for Settings, artifacts, worker
 state, notifications, or the session index to become live. A failed first live
@@ -253,6 +260,10 @@ drain the buffered live suffix through sequence deduplication. Connection loss,
 timeout, cancellation, and foreground socket churn retain cached rows and draft
 state and stay out of the chat timeline; protocol or data-integrity failures
 remain visible. A successful pass removes only its prior reconstruction error.
+The shell's short presentation budget may reveal already cached or empty UI,
+but it never changes history state to failed. Only an authoritative
+reconstruction outcome can present Conversation unavailable, so a busy but
+still-live connection remains truthfully labeled as synchronizing.
 The live suffix is bounded; pathological overflow requests another authoritative
 snapshot rather than admitting unbounded memory or treating a partial suffix as
 complete. Subscription interests survive transport-classified failures even if
@@ -1066,7 +1077,13 @@ which iOS stores beside its disposable session row for immediate/offline
 presentation. While connected, `session::context_requests(limit: 1)` reconciles
 that summary. The exact manifest is fetched through
 `session::context_request_detail` only after the user opens Agent Context or
-Technical Details, cached once per immutable event, and reused by both sheets.
+Technical Details. Agent Context requests a lightweight projection without the
+raw provider envelope; Technical Details explicitly requests that audit. Each
+projection is cached independently for the immutable event while the sheet is
+mounted, so the product-facing view never pays to transfer and decode technical
+JSON it does not render. That lightweight projection also reduces the tool
+surface to admitted tools/workers and their display evidence; schemas, hashes,
+catalog metadata, and omitted candidates stay technical-only.
 Exact provider audit bodies never enter the device transcript cache.
 
 Manage Session is deliberately a high-level operation surface. Below its

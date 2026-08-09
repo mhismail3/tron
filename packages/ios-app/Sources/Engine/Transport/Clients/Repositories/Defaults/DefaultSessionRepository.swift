@@ -92,11 +92,13 @@ final class DefaultSessionRepository: NetworkSessionRepository {
 
     func contextRequestDetail(
         sessionId: String,
-        eventId: String
+        eventId: String,
+        projection: SessionContextRequestDetailProjection
     ) async throws -> SessionContextRequestDetailDTO {
         try await sessionClient.contextRequestDetail(
             sessionId: sessionId,
-            eventId: eventId
+            eventId: eventId,
+            projection: projection
         )
     }
 

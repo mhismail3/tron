@@ -135,7 +135,7 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
         XCTAssertEqual(viewModel.allReconstructedMessages.last?.eventId, "cached-message-\(eventCount)")
     }
 
-    func testDelayedCachedReconstructionRetainsDraftPresentationWithoutBecomingAuthoritative() async throws {
+    func testCachedReconstructionRemainsSynchronizingUntilAnAuthoritativeOutcome() async throws {
         let testState = IsolatedTestState(label: "delayed-cached-transcript")
         testState.registerTeardown(with: self)
         let database = testState.makeDatabase()
@@ -162,11 +162,10 @@ final class ChatViewModelCachedTranscriptTests: XCTestCase {
 
         let restored = await reader.restoreCachedTranscript()
         XCTAssertTrue(restored)
-        reader.markInitialReconstructionDelayed()
 
         XCTAssertEqual(
             reader.conversationHistoryPhase,
-            .recoverableFailure(hasCachedTranscript: true)
+            .cachedSynchronizing
         )
         XCTAssertTrue(reader.conversationHistoryPhase.allowsLocalDraftActions)
         XCTAssertFalse(reader.hasAuthoritativeHistory)

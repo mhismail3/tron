@@ -48,6 +48,7 @@ extension SourceGuardTests {
         #expect(!messageList.contains("chat-history-loading-state"))
         #expect(!messageList.contains("interactionPolicy"))
         #expect(!chatView.contains("@Environment(\\.interactionPolicy)"))
+        #expect(!chatView.contains("markInitialReconstructionDelayed"))
         #expect(!timelineNotifications.contains("CatchingUpNotificationView"))
         #expect(!systemEvents.contains("case catchingUp"))
 

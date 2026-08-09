@@ -140,11 +140,16 @@ final class SessionClient: EngineDomainClient {
 
     func contextRequestDetail(
         sessionId: String,
-        eventId: String
+        eventId: String,
+        projection: SessionContextRequestDetailProjection
     ) async throws -> SessionContextRequestDetailDTO {
         try await invokeRead(
             "session::context_request_detail",
-            SessionContextRequestDetailParams(sessionId: sessionId, eventId: eventId),
+            SessionContextRequestDetailParams(
+                sessionId: sessionId,
+                eventId: eventId,
+                projection: projection
+            ),
             context: sessionContext(sessionId)
         )
     }

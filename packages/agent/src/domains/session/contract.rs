@@ -123,7 +123,8 @@ pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
                 "additionalProperties":false,
                 "properties":{
                     "sessionId":{"type":"string","minLength":1},
-                    "eventId":{"type":"string","minLength":1}
+                    "eventId":{"type":"string","minLength":1},
+                    "projection":{"type":"string","enum":["agent_context","technical"]}
                 },
                 "required":["sessionId","eventId"],
                 "type":"object"
@@ -236,7 +237,7 @@ mod tests {
             ),
             (
                 "session::context_request_detail",
-                &["eventId", "sessionId"][..],
+                &["eventId", "projection", "sessionId"][..],
             ),
             ("session::agent_updates", &["limit", "sessionId"][..]),
             ("session::set_title", &["title"][..]),

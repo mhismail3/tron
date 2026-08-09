@@ -1,11 +1,40 @@
 use super::*;
 
-use crate::engine::{EngineError, PublishStreamEvent, StreamVisibility};
+use crate::engine::{
+    EffectClass, EngineError, FunctionDefinition, FunctionId, FunctionVisibility,
+    InProcessFunctionHandler, Invocation, PublishStreamEvent, StreamVisibility, WorkerId,
+};
 use crate::shared::server::error_mapping::engine_error_to_tool_error;
 use crate::shared::server::events::ServerEventPayload;
 use crate::shared::server::failure::ENGINE_SCHEMA_VIOLATION;
 use crate::shared::server::test_support::make_test_context;
+use async_trait::async_trait;
 use serde_json::json;
+use tokio::sync::Notify;
+
+#[derive(Clone)]
+struct GatedSocketHandler {
+    started: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+#[async_trait]
+impl InProcessFunctionHandler for GatedSocketHandler {
+    async fn invoke(&self, invocation: Invocation) -> crate::engine::Result<Value> {
+        self.started.notify_one();
+        self.release.notified().await;
+        Ok(json!({"echo": invocation.payload}))
+    }
+}
+
+struct EchoSocketHandler;
+
+#[async_trait]
+impl InProcessFunctionHandler for EchoSocketHandler {
+    async fn invoke(&self, invocation: Invocation) -> crate::engine::Result<Value> {
+        Ok(json!({"echo": invocation.payload}))
+    }
+}
 
 fn test_session() -> (EngineWsSession, mpsc::Receiver<String>) {
     test_session_with_frame_limit(150 * 1024 * 1024)
@@ -69,6 +98,100 @@ async fn hello_sets_defaults() {
         response.get("maxMessageSize").and_then(Value::as_u64),
         Some(4096)
     );
+}
+
+#[tokio::test]
+async fn slow_invoke_does_not_block_independent_requests_on_the_same_socket() {
+    let (mut session, mut rx) = test_session();
+    let started = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    for (id, handler) in [
+        (
+            "test::slow",
+            Arc::new(GatedSocketHandler {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            }) as Arc<dyn InProcessFunctionHandler>,
+        ),
+        (
+            "test::fast",
+            Arc::new(EchoSocketHandler) as Arc<dyn InProcessFunctionHandler>,
+        ),
+    ] {
+        session
+            .ctx
+            .engine_host
+            .register_function(
+                FunctionDefinition::new(
+                    FunctionId::new(id).unwrap(),
+                    WorkerId::new("socket-test").unwrap(),
+                    "socket concurrency regression",
+                    FunctionVisibility::Public,
+                    EffectClass::PureRead,
+                ),
+                handler,
+            )
+            .await
+            .unwrap();
+    }
+
+    assert!(
+        session
+            .handle_text(
+                &json!({
+                    "type": "invoke",
+                    "id": "slow",
+                    "functionId": "test::slow",
+                    "payload": {"value": "slow"}
+                })
+                .to_string()
+            )
+            .await
+    );
+    tokio::time::timeout(Duration::from_secs(1), started.notified())
+        .await
+        .expect("slow handler should start");
+
+    assert!(
+        session
+            .handle_text(
+                &json!({
+                    "type": "invoke",
+                    "id": "fast",
+                    "functionId": "test::fast",
+                    "payload": {"value": "fast"}
+                })
+                .to_string()
+            )
+            .await
+    );
+    let fast_response = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+        .await
+        .expect("fast request must not wait behind the slow request")
+        .expect("socket response");
+    let fast_response: Value = serde_json::from_str(&fast_response).unwrap();
+    assert_eq!(
+        fast_response.get("id").and_then(Value::as_str),
+        Some("fast")
+    );
+    assert_eq!(
+        fast_response
+            .pointer("/result/echo/value")
+            .and_then(Value::as_str),
+        Some("fast")
+    );
+
+    release.notify_one();
+    let slow_response = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+        .await
+        .expect("slow request should complete after release")
+        .expect("socket response");
+    let slow_response: Value = serde_json::from_str(&slow_response).unwrap();
+    assert_eq!(
+        slow_response.get("id").and_then(Value::as_str),
+        Some("slow")
+    );
+    session.cleanup().await;
 }
 
 #[tokio::test]

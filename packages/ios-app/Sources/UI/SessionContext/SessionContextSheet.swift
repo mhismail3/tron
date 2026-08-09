@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum SessionContextDetailDestination: Equatable {
+enum SessionContextDetailDestination: Hashable {
     case agentContext
     case technical
 }
@@ -44,7 +44,7 @@ struct SessionContextSheet: View {
     @State var loadedWorkerCatalogRevision: UInt64?
     @State var loadOlderWorkerRunsPending = false
     @State var latestContextSummary: SessionContextRequestSummaryDTO?
-    @State var latestContextDetail: SessionContextRequestDetailDTO?
+    @State var latestContextDetails: [SessionContextDetailDestination: SessionContextRequestDetailDTO] = [:]
     @State var isLoadingInspectableContext = false
     @State var contextLoadingGeneration: UInt64?
     @State var contextLoadError: String?

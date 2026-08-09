@@ -81,13 +81,19 @@ impl WorkerRuntime {
         Ok(response)
     }
 
-    pub(in crate::domains::worker_kernel) async fn acknowledge_notification_delivery(
+    pub(in crate::domains::worker_kernel) fn acknowledge_notification_delivery(
         &self,
         request: NotificationAcknowledgeRequest,
     ) -> Result<Value, String> {
-        let response = self.store.acknowledge_notification_delivery(request)?;
+        self.store.acknowledge_notification_delivery(request)
+    }
+
+    pub(in crate::domains::worker_kernel) async fn publish_notification_acknowledgement(
+        &self,
+        response: &Value,
+    ) {
         if response["eventRequired"].as_bool().unwrap_or(false) {
-            let event = notification_response_event(&response);
+            let event = notification_response_event(response);
             self.publish_event(
                 "notification.responses",
                 serde_json::to_value(event).expect("notification response event serializes"),
@@ -97,7 +103,6 @@ impl WorkerRuntime {
             )
             .await;
         }
-        Ok(response)
     }
 
     pub(super) async fn dispatch_notifications(self: &Arc<Self>, runs: &mut JoinSet<()>) {

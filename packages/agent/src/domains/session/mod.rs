@@ -31,7 +31,9 @@
 //!   authenticated read-only projections over existing
 //!   `model.provider_request` events. They do not invoke a model, hook, worker,
 //!   or routing calculation and create no second context store or retention
-//!   policy. V2 rows remain readable with provenance labeled unavailable.
+//!   policy. Product-facing detail omits the raw provider envelope; Technical
+//!   Details opts into it explicitly. V2 rows remain readable with provenance
+//!   labeled unavailable.
 //! - `session::reconstruct` preserves provider-request event identities and
 //!   pagination cursors but defers their potentially large audit bodies. Its
 //!   top-level metadata carries one bounded latest-request inventory; exact

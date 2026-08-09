@@ -2,9 +2,9 @@
 //!
 //! This module owns only WebSocket framing, protocol validation, correlation
 //! ids, server-driven heartbeat, and stream cursor subscription state. One
-//! stack-owned connection lease covers registry accounting, while one bounded
-//! child-task set owns the socket writer and subscription pump. Worker/client
-//! invoke messages are translated into
+//! stack-owned connection lease covers registry accounting, while bounded
+//! connection-owned task sets own the socket writer, subscription pump, and
+//! concurrently dispatched invocations. Worker/client invoke messages are translated into
 //! [`crate::transport::engine::EngineTransportRequest`] and then dispatched
 //! through the canonical engine transport path. Public context is limited to
 //! session/workspace/trace correlation; authority scopes and trusted execution
@@ -16,6 +16,9 @@
 //! pumps, drops connection-local stream cursors, and bounds child-task drain.
 //! Explicit unsubscribe releases one cursor idempotently, while the fixed
 //! per-connection subscription ceiling bounds the 250 ms push-poll workload.
+//! Invocation dispatch is also bounded per connection: a slow read or write
+//! cannot prevent the socket from admitting independent resume, reconstruction,
+//! or subscription requests, while correlation ids preserve response ownership.
 //! Native terminal attachments share authentication and socket lifecycle but
 //! use ordered PTY sequences rather than the durable generic event stream.
 
@@ -50,6 +53,7 @@ const OUTBOUND_QUEUE_CAPACITY: usize = 256;
 const STREAM_DEFAULT_LIMIT: usize = 100;
 const STREAM_MAX_LIMIT: usize = 500;
 const MAX_ACTIVE_SUBSCRIPTIONS_PER_CONNECTION: usize = 64;
+const MAX_IN_FLIGHT_INVOCATIONS_PER_CONNECTION: usize = 32;
 const PUSH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 const CONTROL_QUEUE_CAPACITY: usize = 1;
 const CHILD_TASK_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -253,6 +257,7 @@ struct EngineWsSession {
     cancel: CancellationToken,
     max_frame_bytes: usize,
     hello: Option<HelloState>,
+    invoke_tasks: JoinSet<()>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -279,6 +284,7 @@ impl EngineWsSession {
             cancel,
             max_frame_bytes,
             hello: None,
+            invoke_tasks: JoinSet::new(),
         }
     }
 
@@ -512,7 +518,7 @@ impl EngineWsSession {
         self.send_value(json!({"type":"terminal.detach.ok","id":id,"attachmentId":attachment_id}))
     }
 
-    async fn handle_invoke(&self, id: Option<String>, value: Value) -> bool {
+    async fn handle_invoke(&mut self, id: Option<String>, value: Value) -> bool {
         let message = match serde_json::from_value::<InvokeMessage>(value) {
             Ok(message) => message,
             Err(error) => {
@@ -527,33 +533,71 @@ impl EngineWsSession {
             "payload": message.payload.unwrap_or_else(|| json!({})),
             "idempotencyKey": message.idempotency_key,
         });
-        self.dispatch_transport(message.id, payload, message.context)
-            .await
-    }
-
-    async fn dispatch_transport(
-        &self,
-        id: Option<String>,
-        params_payload: Value,
-        context_override: Option<WireContext>,
-    ) -> bool {
-        let context = self.merged_context(context_override);
-        let correlation_id = id
+        let context = self.merged_context(message.context);
+        let correlation_id = message
+            .id
             .clone()
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let envelope = match build_engine_transport_request(EngineTransportBuildRequest {
             correlation_id,
-            params_payload,
+            params_payload: payload,
             context,
         }) {
             Ok(envelope) => envelope,
-            Err(error) => return self.send_error(id, error),
+            Err(error) => return self.send_error(message.id, error),
         };
-        let trace_id = envelope.causal_context.trace_id.to_string();
-        match dispatch_engine_transport_request(&self.ctx, envelope).await {
-            Ok(result) => self.send_success(id, result, Some(trace_id)),
-            Err(error) => self.send_error_with_trace(id, error, Some(trace_id)),
+
+        while let Some(result) = self.invoke_tasks.try_join_next() {
+            if let Err(error) = result {
+                tracing::warn!(%error, "engine WebSocket invocation task failed");
+            }
         }
+        if self.invoke_tasks.len() >= MAX_IN_FLIGHT_INVOCATIONS_PER_CONNECTION {
+            return self.send_error(
+                message.id,
+                ToolError::NotAvailable {
+                    message: "engine WebSocket invocation limit reached; retry shortly".to_owned(),
+                },
+            );
+        }
+
+        let response_id = message.id;
+        let trace_id = envelope.causal_context.trace_id.to_string();
+        let ctx = Arc::clone(&self.ctx);
+        let out_tx = self.out_tx.clone();
+        let cancel = self.cancel.clone();
+        self.invoke_tasks.spawn(async move {
+            let result = tokio::select! {
+                biased;
+                () = cancel.cancelled() => return,
+                result = dispatch_engine_transport_request(&ctx, envelope) => result,
+            };
+            let response = match result {
+                Ok(result) => json!({
+                    "type": "response",
+                    "id": response_id,
+                    "ok": true,
+                    "result": result,
+                    "traceId": trace_id,
+                }),
+                Err(error) => {
+                    let failure = error
+                        .to_failure(FailureOrigin::Transport)
+                        .with_trace_id(Some(trace_id.clone()));
+                    json!({
+                        "type": "response",
+                        "id": response_id,
+                        "ok": false,
+                        "error": failure.to_value(),
+                        "traceId": trace_id,
+                    })
+                }
+            };
+            if !send_engine_ws_value_async(&out_tx, &cancel, response).await {
+                cancel.cancel();
+            }
+        });
+        true
     }
 
     async fn handle_heartbeat(&self, id: Option<String>, value: Value) -> bool {
@@ -644,6 +688,7 @@ impl EngineWsSession {
     async fn cleanup(&mut self) {
         self.cancel.cancel();
         self.subscriptions.lock().await.clear();
+        drain_child_tasks(&mut self.invoke_tasks).await;
     }
 }
 

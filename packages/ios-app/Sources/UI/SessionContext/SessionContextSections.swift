@@ -266,12 +266,6 @@ extension SessionContextSheet {
                             .foregroundStyle(accent)
                             .fixedSize(horizontal: true, vertical: false)
                     }
-                    Image(systemName: "chevron.right")
-                        .font(TronTypography.sans(
-                            size: TronTypography.sizeCaption,
-                            weight: .semibold
-                        ))
-                        .foregroundStyle(.tronTextMuted)
                 }
             }
             .padding(14)

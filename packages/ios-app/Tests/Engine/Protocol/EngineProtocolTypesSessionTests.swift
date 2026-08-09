@@ -426,6 +426,26 @@ struct SessionContextAuditDecodingTests {
         #expect(detail.contextManifest?.agentDeliveries == [])
     }
 
+    @Test("Agent Context detail decodes without the technical provider audit")
+    func agentContextDetailOmitsProviderAudit() throws {
+        let data = Data("""
+        {
+          "eventId":"event-agent-context",
+          "sequence":44,
+          "timestamp":"2026-08-09T12:00:00Z",
+          "format":"tron.model_provider_request.v4",
+          "contextManifest":null,
+          "providerAdditions":[],
+          "provenanceAvailability":"complete"
+        }
+        """.utf8)
+
+        let detail = try JSONDecoder().decode(SessionContextRequestDetailDTO.self, from: data)
+
+        #expect(detail.eventId == "event-agent-context")
+        #expect(detail.providerAudit == nil)
+    }
+
     @Test("V4 detail decodes exact agent delivery evidence")
     func v4AgentDeliveryDecodes() throws {
         let data = Data("""
