@@ -170,7 +170,11 @@ directory authority, PTY lifecycle, replay, and retention remain server-owned.
 The renderer has a transparent native surface inside the standard sheet rather
 than mounting a second opaque canvas. Tron replaces SwiftTerm's ambiguous stock
 accessory with one floating Liquid Glass command bar, a separately labeled
-extended-key keyboard, and an independent keyboard-dismiss action. Input stays
+extended-key keyboard, and an independent keyboard-dismiss action. The command
+strip clips at both capsule edges and scrolls inside a bounded viewport, while
+the dismiss action occupies a fixed trailing region and therefore never scrolls
+offscreen. The bar's safe-area inset retains explicit clearance above the glass
+so the terminal's final row does not touch the controls. Input stays
 PTY-authoritative—there is no incorrect local echo—but not-yet-submitted bytes
 coalesce behind the one in-flight idempotent write, avoiding a network round
 trip queue for every character in a typing burst.
