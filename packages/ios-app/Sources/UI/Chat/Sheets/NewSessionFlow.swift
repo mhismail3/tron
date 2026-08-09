@@ -24,6 +24,10 @@ struct NewSessionFlow: View {
     @State private var availableModels: [ModelInfo] = []
     @State private var isLoadingModels = false
     @State private var showModelPicker = false
+    @State private var sourceControlStatus: WorkspaceSourceControlStatus?
+    @State private var sourceControlPlacement: SessionSourceControlPlacement = .existing
+    @State private var sourceControlProjectionOwnerId: UUID?
+    @State private var showSourceControlPicker = false
     @State private var projectionOwnerId: UUID?
     @State private var modelLoadGeneration = 0
 
@@ -121,6 +125,12 @@ struct NewSessionFlow: View {
                     onSelectReasoning: { selectedReasoningLevel = $0 }
                 )
             }
+            .sheet(isPresented: $showSourceControlPicker) {
+                NewSessionSourceControlPlacementSheet(
+                    selection: $sourceControlPlacement,
+                    currentBranch: sourceControlStatus?.currentBranch
+                )
+            }
             .task(id: connectionRepository.continuity) {
                 let ownerId = connectionRepository.continuityOwnerId
                 if projectionOwnerId != ownerId {
@@ -131,6 +141,16 @@ struct NewSessionFlow: View {
                     errorMessage = nil
                 }
                 await loadModels()
+            }
+            .task(id: NewSessionSourceControlProbeKey(
+                workingDirectory: workingDirectory,
+                continuity: connectionRepository.continuity
+            )) {
+                await loadSourceControlStatus()
+            }
+            .onChange(of: workingDirectory) {
+                sourceControlStatus = nil
+                sourceControlPlacement = .existing
             }
         }
         .adaptivePresentationDetents(NewSessionFlowPresentation.detents, ipadSizing: .largeForm)
@@ -155,6 +175,21 @@ struct NewSessionFlow: View {
                 isDisabled: isCreating,
                 action: { showWorkspaceSelector = true }
             )
+
+            if sourceControlStatus?.isGitRepository == true {
+                NewSessionSetupCard(
+                    icon: sourceControlPlacement.icon,
+                    title: "Source Control",
+                    value: sourceControlPlacement.title,
+                    caption: sourceControlPlacement.caption(
+                        currentBranch: sourceControlStatus?.currentBranch
+                    ),
+                    color: .tronTeal,
+                    isDisabled: isCreating,
+                    action: { showSourceControlPicker = true }
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             NewSessionSetupCard(
                 icon: "cpu",
@@ -246,9 +281,13 @@ struct NewSessionFlow: View {
     }
 
     private func currentCreateIntent() -> NewSessionCreateIntent? {
-        NewSessionCreateIntent.make(
+        let sourceControl = sourceControlStatus?.isGitRepository == true
+            ? SessionSourceControlSelection(placement: sourceControlPlacement)
+            : nil
+        return NewSessionCreateIntent.make(
             workingDirectory: workingDirectory,
-            model: selectedModel
+            model: selectedModel,
+            sourceControl: sourceControl
         )
     }
 
@@ -325,8 +364,17 @@ struct NewSessionFlow: View {
                 let result = try await sessionRepository.create(
                     workingDirectory: intent.workingDirectory,
                     model: intent.model,
+                    sourceControl: intent.sourceControl,
                     idempotencyKey: .userAction("session.create")
                 )
+
+                guard let resolvedWorkingDirectory = NewSessionWorkingDirectoryResolution.resolve(
+                    requested: intent.workingDirectory,
+                    sourceControl: intent.sourceControl,
+                    serverWorkingDirectory: result.workingDirectory
+                ) else {
+                    throw EngineConnectionError.invalidResponse
+                }
 
                 // Persist non-default reasoning level to the new session.
                 if selectedReasoningLevel != "medium" {
@@ -340,9 +388,9 @@ struct NewSessionFlow: View {
                 guard !Task.isCancelled, projectionOwnerId == ownerId else { return }
                 try await onSessionCreated(NewSessionCreated(
                     sessionId: result.sessionId,
-                    workspaceId: intent.workingDirectory,
+                    workspaceId: resolvedWorkingDirectory,
                     model: result.model,
-                    workingDirectory: intent.workingDirectory
+                    workingDirectory: resolvedWorkingDirectory
                 ))
             } catch is CancellationError {
                 return
@@ -350,6 +398,38 @@ struct NewSessionFlow: View {
                 guard projectionOwnerId == ownerId else { return }
                 errorMessage = error.localizedDescription
             }
+        }
+    }
+
+    private func loadSourceControlStatus() async {
+        let path = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        let continuity = connectionRepository.continuity
+        if sourceControlProjectionOwnerId != continuity.ownerId {
+            sourceControlProjectionOwnerId = continuity.ownerId
+            sourceControlStatus = nil
+            sourceControlPlacement = .existing
+        }
+        guard continuity.isConnected, !path.isEmpty else { return }
+
+        do {
+            let status = try await workspaceBrowserRepository.inspectSourceControl(path: path)
+            guard !Task.isCancelled,
+                  workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines) == path,
+                  connectionRepository.continuity == continuity else { return }
+            withAnimation(.smooth(duration: 0.2)) {
+                sourceControlStatus = status
+                if !status.isGitRepository {
+                    sourceControlPlacement = .existing
+                }
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled,
+                  workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines) == path,
+                  connectionRepository.continuity == continuity else { return }
+            sourceControlStatus = nil
+            sourceControlPlacement = .existing
         }
     }
 }

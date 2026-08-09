@@ -28,6 +28,20 @@ final class DefaultSessionRepository: NetworkSessionRepository {
         )
     }
 
+    func create(
+        workingDirectory: String,
+        model: String? = nil,
+        sourceControl: SessionSourceControlSelection?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SessionCreateResult {
+        try await sessionClient.create(
+            workingDirectory: workingDirectory,
+            model: model,
+            sourceControl: sourceControl,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func list(workingDirectory: String? = nil, limit: Int = 50, cursor: String? = nil, includeArchived: Bool = false) async throws -> SessionListResult {
         try await sessionClient.list(workingDirectory: workingDirectory, limit: limit, cursor: cursor, includeArchived: includeArchived)
     }

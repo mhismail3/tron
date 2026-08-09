@@ -218,28 +218,29 @@ struct WorkerVersionRow: View {
                 }
             }
             Spacer()
-            if let versionAction = WorkerVersionAction.resolve(worker: worker, version: version) {
-                Button(versionAction.title, action: action)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(versionAction == .restore ? .tronEmerald : .tronPurple)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background {
-                        Capsule().fill(
-                            (versionAction == .restore ? Color.tronEmerald : .tronPurple)
-                                .opacity(0.13)
-                        )
-                    }
-                    .frame(minHeight: 30, alignment: .center)
-                    .contentShape(Capsule())
-                    .buttonStyle(.plain)
-                    .disabled(isMutating)
-            } else {
-                Text("Active")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(.tronSuccess)
-                    .frame(height: 30, alignment: .center)
+            Group {
+                if let versionAction = WorkerVersionAction.resolve(worker: worker, version: version) {
+                    Button(versionAction.title, action: action)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(versionAction == .restore ? .tronEmerald : .tronPurple)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background {
+                            Capsule().fill(
+                                (versionAction == .restore ? Color.tronEmerald : .tronPurple)
+                                    .opacity(0.13)
+                            )
+                        }
+                        .contentShape(Capsule())
+                        .buttonStyle(.plain)
+                        .disabled(isMutating)
+                } else {
+                    Text("Active")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(.tronSuccess)
+                }
             }
+            .frame(width: 82, height: 42, alignment: .center)
         }
         .padding(.vertical, 8)
     }

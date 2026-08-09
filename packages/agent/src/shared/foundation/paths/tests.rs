@@ -99,6 +99,11 @@ fn normalize_working_directory_rejects_missing_paths() {
 #[test]
 fn primitive_top_level_dirs_stay_under_tron_home() {
     assert!(internal_dir().ends_with(format!(".tron/{}", dirs::INTERNAL)));
+    assert!(session_worktrees_dir().ends_with(format!(
+        ".tron/{}/{}",
+        dirs::WORKSPACE,
+        dirs::SESSION_WORKTREES
+    )));
 }
 
 #[test]

@@ -236,6 +236,10 @@ final class DefaultWorkspaceBrowserRepository: WorkspaceBrowserRepository {
             idempotencyKey: idempotencyKey
         )
     }
+
+    func inspectSourceControl(path: String) async throws -> WorkspaceSourceControlStatus {
+        try await client.inspectSourceControl(path: path)
+    }
 }
 
 // MARK: - Default Worker Kernel Repository

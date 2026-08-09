@@ -30,7 +30,27 @@ const SESSION_RENAME_INTENT_PHRASES: &[&str] = &[
 pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     Ok(vec![
         FunctionContract::new("session::create", "session", EffectClass::IdempotentWrite, RiskLevel::Medium)
-            .request_schema(json!({"additionalProperties":false,"properties":{"model":{"type":"string"},"title":{"type":"string"},"workingDirectory":{"type":"string"}},"required":["workingDirectory"],"type":"object"}))
+            .request_schema(json!({
+                "additionalProperties": false,
+                "properties": {
+                    "model": {"type": "string"},
+                    "title": {"type": "string"},
+                    "workingDirectory": {"type": "string"},
+                    "sourceControl": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["placement"],
+                        "properties": {
+                            "placement": {
+                                "type": "string",
+                                "enum": ["existing", "branch", "worktree"]
+                            }
+                        }
+                    }
+                },
+                "required": ["workingDirectory"],
+                "type": "object"
+            }))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::profile())
             .build()?,
@@ -189,7 +209,7 @@ mod tests {
         let expected = BTreeMap::from([
             (
                 "session::create",
-                &["model", "title", "workingDirectory"][..],
+                &["model", "sourceControl", "title", "workingDirectory"][..],
             ),
             ("session::resume", &["sessionId"][..]),
             (

@@ -187,7 +187,7 @@ struct ToolInvocationBriefPresentation: Equatable {
             return issue.title
         }
         if backgroundInvocationId != nil {
-            return "\(title) was durably handed off after the foreground grace period. The conversation can continue now; current status, nested work, cancellation, and the eventual result remain available in Session Context."
+            return "\(title) was durably handed off after the foreground grace period. The conversation can continue now; current status, nested work, cancellation, and the eventual result remain available in Manage Session."
         }
         switch data.status {
         case .generating, .running:

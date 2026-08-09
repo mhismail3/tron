@@ -16,6 +16,8 @@ enum SessionContextPressure: Equatable {
 
 /// Pure presentation and action policy for the Session Context surface.
 enum SessionContextPresentation {
+    static let sheetTitle = "Manage Session"
+
     /// Completed cards separate clearly from the next section, while each
     /// heading remains visually attached to the content it introduces.
     static let sectionSpacing: CGFloat = 20

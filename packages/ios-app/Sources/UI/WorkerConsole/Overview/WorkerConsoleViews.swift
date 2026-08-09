@@ -81,7 +81,7 @@ struct WorkerConsoleDashboardBand: View {
     }
 
     private var summarySymbol: String {
-        viewModel.unhealthyWorkerCount > 0 ? "exclamationmark.triangle" : "bolt.horizontal.circle"
+        "cpu"
     }
 
     private var summaryColor: Color {

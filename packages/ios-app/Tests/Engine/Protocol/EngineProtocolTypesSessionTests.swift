@@ -254,6 +254,22 @@ struct SessionCreateParamsEncodingTests {
         #expect(json["title"] as? String == "Worker proof")
         #expect(Set(json.keys) == Set(["workingDirectory", "model", "title"]))
     }
+
+    @Test("source-control placement is one closed nested value")
+    func sourceControlPlacementEncodes() {
+        let params = SessionCreateParams(
+            workingDirectory: "/tmp",
+            model: "gpt-5.6-sol",
+            sourceControl: SessionSourceControlSelection(placement: .worktree)
+        )
+        let data = try! JSONEncoder().encode(params)
+        let json = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let sourceControl = json["sourceControl"] as? [String: Any]
+
+        #expect(sourceControl?["placement"] as? String == "worktree")
+        #expect(sourceControl?.count == 1)
+        #expect(Set(json.keys) == Set(["workingDirectory", "model", "sourceControl"]))
+    }
 }
 
 @Suite("Session context audit decoding")

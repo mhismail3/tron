@@ -494,7 +494,7 @@ xcodebuild test -scheme 'Tron Beta' \
   -only-testing:TronMobileTests/SettingsParityTests
 ```
 
-For Session Context, worker protocol layout, invocation presentation,
+For Manage Session (`UI/SessionContext`), worker protocol layout, invocation presentation,
 notification ownership helpers, or connection-policy moves, run this
 state-owner suite on Beta with parallel testing disabled so one hosted process
 owns teardown:
@@ -595,7 +595,7 @@ Tests/
 │   ├── Chat/          # Coordinators, Messaging, Navigation, State, ViewModel owner roots
 │   └── WorkerKernel/  # Worker state and repository fixtures
 ├── UI/                # Feature presentation and source-ownership contracts
-│   └── EngineInspection/ # Session Context and Worker Console contracts
+│   └── EngineInspection/ # Manage Session and Worker Console contracts
 ├── Support/           # Composition, diagnostics, foundation, pairing, and storage tests
 └── Infrastructure/    # Fakes, fixtures, SourceGuard, cleanup, and project-structure guards
 ```

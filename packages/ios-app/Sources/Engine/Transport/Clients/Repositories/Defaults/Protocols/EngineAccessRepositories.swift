@@ -285,6 +285,13 @@ protocol WorkspaceBrowserRepository: AnyObject {
         recursive: Bool,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkspaceCreateDirectoryResult
+    func inspectSourceControl(path: String) async throws -> WorkspaceSourceControlStatus
+}
+
+extension WorkspaceBrowserRepository {
+    func inspectSourceControl(path _: String) async throws -> WorkspaceSourceControlStatus {
+        throw URLError(.unsupportedURL)
+    }
 }
 
 // MARK: - Worker Kernel Repository

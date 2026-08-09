@@ -39,6 +39,33 @@ struct SessionClientTests {
         )
     }
 
+    @Test("Concrete create forwards the closed source-control placement")
+    func testConcreteCreateSendsSourceControlPlacement() async throws {
+        let transport = makeConnectedTransport()
+        let client = SessionClient(transport: transport)
+        transport.writeHandler = { functionId, payload, _, _ in
+            #expect(functionId.rawValue == "session::create")
+            let params = try #require(payload as? SessionCreateParams)
+            #expect(params.workingDirectory == "/tmp/project")
+            #expect(params.sourceControl == SessionSourceControlSelection(placement: .worktree))
+            return SessionCreateResult(
+                sessionId: "session-worktree",
+                model: "gpt-5.6-sol",
+                createdAt: "2026-08-09T12:00:00Z",
+                workingDirectory: "/tmp/session-worktree"
+            )
+        }
+
+        let result = try await client.create(
+            workingDirectory: "/tmp/project",
+            model: "gpt-5.6-sol",
+            sourceControl: SessionSourceControlSelection(placement: .worktree),
+            idempotencyKey: .userAction("session.create.test")
+        )
+
+        #expect(result.workingDirectory == "/tmp/session-worktree")
+    }
+
     @Test("Real session resume sends session-scoped engine context")
     func testRealResumeSendsSessionContext() async throws {
         let transport = makeConnectedTransport()

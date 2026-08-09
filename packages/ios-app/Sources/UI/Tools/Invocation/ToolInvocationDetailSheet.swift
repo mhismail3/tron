@@ -163,7 +163,7 @@ struct ToolInvocationDetailSheet: View {
 
     private var progressSupportText: String {
         if brief.isBackgroundHandoff {
-            return "The foreground turn has been released. Session Context owns current status, nested work, cancellation, and the eventual result."
+            return "The foreground turn has been released. Manage Session owns current status, nested work, cancellation, and the eventual result."
         }
         if surface.isAgentWorker {
             return "Current steps and streamed output update here as the child agent reports them."

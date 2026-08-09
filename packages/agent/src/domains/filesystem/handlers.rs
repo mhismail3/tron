@@ -3,7 +3,9 @@
 use crate::domains::registration::bindings::operation_bindings;
 
 use super::Deps;
-use super::service::{create_dir_value, get_home_value, list_dir_value};
+use super::service::{
+    create_dir_value, get_home_value, inspect_source_control_value, list_dir_value,
+};
 
 operation_bindings! {
     deps = Deps;
@@ -17,6 +19,9 @@ operation_bindings! {
         },
         "create_dir" => |invocation, deps| {
             create_dir_value(invocation.payload.clone(), deps).await
+        },
+        "inspect_source_control" => |invocation, deps| {
+            inspect_source_control_value(invocation.payload.clone(), deps).await
         },
     ];
 }

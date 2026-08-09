@@ -39,6 +39,12 @@ pub(super) struct CreateDirParams {
     pub(super) recursive: Option<bool>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct InspectSourceControlParams {
+    pub(super) path: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HomeResult {
@@ -111,6 +117,28 @@ pub(super) async fn create_dir_value(payload: Value, deps: &Deps) -> Result<Valu
         to_json_value(&result)
     })
     .await
+}
+
+pub(super) async fn inspect_source_control_value(
+    payload: Value,
+    deps: &Deps,
+) -> Result<Value, ToolError> {
+    let params: InspectSourceControlParams =
+        serde_json::from_value(payload).map_err(|error| ToolError::InvalidParams {
+            message: format!("Invalid filesystem inspect_source_control params: {error}"),
+        })?;
+    let path = normalize_user_path(&params.path, deps)?;
+    let path = path
+        .canonicalize()
+        .map_err(|error| map_io_error(error, &path))?;
+    if !path.is_dir() {
+        return Err(ToolError::Custom {
+            code: FILESYSTEM_NOT_DIRECTORY.to_owned(),
+            message: format!("Path is not a directory: {}", path.display()),
+            details: None,
+        });
+    }
+    to_json_value(&super::source_control::inspect_repository(&path).await?)
 }
 
 fn get_home(deps: &Deps) -> HomeResult {

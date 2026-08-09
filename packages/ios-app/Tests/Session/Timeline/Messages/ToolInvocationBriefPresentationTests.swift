@@ -255,7 +255,7 @@ final class ToolInvocationBriefPresentationTests: XCTestCase {
             "worker_run_019f9505-bd6d-7190-a683-698b1ce06b3b"
         )
         XCTAssertTrue(brief.headline.contains("continuing in the background"))
-        XCTAssertTrue(brief.narrative.contains("Session Context"))
+        XCTAssertTrue(brief.narrative.contains("Manage Session"))
         XCTAssertTrue(brief.factRows.contains { $0.label == "Status" && $0.value == "Background" })
         XCTAssertTrue(brief.factRows.contains { $0.label == "Foreground wait" && $0.value == "10.0s" })
         XCTAssertFalse(brief.narrative.contains("completed"))

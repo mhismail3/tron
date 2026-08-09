@@ -13,7 +13,7 @@
 //! | `session` | Durable conversation and event truth |
 //! | `auth`, `settings` | Authenticated product configuration |
 //! | `product` | Fixed client-only blob, logs, message, and system operations |
-//! | `filesystem` | Native workspace browsing used by clients |
+//! | `filesystem` | Native workspace browsing and bounded repository inspection used by clients |
 //! | `worker_kernel` | Worker bundles, runners, dispatch, inbox, and narrow native boundaries |
 //! | `registration` | Composition validation for this fixed set |
 //!

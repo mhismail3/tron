@@ -203,7 +203,7 @@ struct SessionContextSheet: View {
                     .accessibilityLabel("Model, \(currentModelDisplayName)")
                 }
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Session Context", color: .tronEmerald)
+                    SheetTitle(title: SessionContextPresentation.sheetTitle, color: .tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     SheetDismissButton(color: .tronEmerald)

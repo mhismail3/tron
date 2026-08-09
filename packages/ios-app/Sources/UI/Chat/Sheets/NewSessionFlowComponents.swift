@@ -114,3 +114,74 @@ struct NewSessionErrorCard: View {
         )
     }
 }
+
+struct NewSessionSourceControlPlacementSheet: View {
+    @Binding var selection: SessionSourceControlPlacement
+    let currentBranch: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 10) {
+                    ForEach(SessionSourceControlPlacement.allCases, id: \.self) { placement in
+                        Button {
+                            selection = placement
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: placement.icon)
+                                    .font(TronTypography.sans(
+                                        size: TronTypography.sizeBodySM,
+                                        weight: .semibold
+                                    ))
+                                    .foregroundStyle(.tronTeal)
+                                    .frame(width: 20, height: 24)
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(placement.title)
+                                        .font(TronTypography.sans(
+                                            size: TronTypography.sizeBodySM,
+                                            weight: .semibold
+                                        ))
+                                        .foregroundStyle(.tronTextPrimary)
+                                    Text(placement.caption(currentBranch: currentBranch))
+                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                        .foregroundStyle(.tronTextSecondary)
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
+                                Spacer(minLength: 8)
+
+                                Image(systemName: selection == placement ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(selection == placement ? .tronTeal : .tronTextMuted)
+                            }
+                            .padding(13)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .sectionFill(
+                                .tronTeal,
+                                cornerRadius: 12,
+                                subtle: selection != placement,
+                                interactive: true
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: "Source Control", color: .tronTeal)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: .tronTeal)
+                }
+            }
+        }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .tint(.tronTeal)
+    }
+}

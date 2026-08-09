@@ -396,6 +396,8 @@ struct WorkerConsoleInteractionTests {
         let primitivesCase = try #require(shell.range(of: "case primitives = \"Primitives\""))
         #expect(workersCase.lowerBound < primitivesCase.lowerBound)
         #expect(shell.contains("engineHookSummary"))
+        #expect(shell.contains("private var summarySymbol: String"))
+        #expect(shell.contains("\"cpu\""))
         #expect(!shell.contains("overviewContent"))
         #expect(!dashboard.contains("struct EngineSurfaceCard"))
     }
@@ -761,8 +763,26 @@ struct WorkerConsoleInteractionTests {
         )
 
         #expect(row.contains("HStack(alignment: .center"))
-        #expect(row.contains(".frame(height: 30, alignment: .center)"))
-        #expect(row.contains(".frame(minHeight: 30, alignment: .center)"))
+        #expect(row.contains(".frame(width: 82, height: 42, alignment: .center)"))
+        #expect(!row.contains(".frame(minHeight:"))
+    }
+
+    @Test("Lifecycle history wraps from one leading edge")
+    func lifecycleHistoryUsesLeadingAlignment() throws {
+        let source = try String(
+            contentsOf: iosAppRoot().appendingPathComponent(
+                "Sources/UI/WorkerConsole/Detail/WorkerDetailSheet.swift"
+            ),
+            encoding: .utf8
+        )
+        let label = try sourceSlice(
+            source,
+            from: "Text(\"Lifecycle history\")",
+            through: ".frame(maxWidth: .infinity, alignment: .leading)"
+        )
+
+        #expect(label.contains(".multilineTextAlignment(.leading)"))
+        #expect(label.contains(".fixedSize(horizontal: false, vertical: true)"))
     }
 
     @Test("Worker sessions stay read only and inside dashboard sheets")

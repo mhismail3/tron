@@ -13,7 +13,7 @@
 //! | Module | Responsibility |
 //! |--------|----------------|
 //! | `archive` | Archive, unarchive, and batch archive stale sessions through `ended_at`. |
-//! | `create` | Normalize working directories, create durable sessions, project first creation, initialize sequence counters, and start optional mailbox curation. |
+//! | `create` | Normalize working directories, transactionally prepare optional branch/worktree placement, create durable sessions, project first creation, initialize sequence counters, and start optional mailbox curation. |
 //! | `delete` | Delete a session through the session manager and clear session-scoped runtime projections. |
 //! | `fork` | Fork from an explicit event or session head and initialize the child runtime sequence counter. |
 //! | `operations` | JSON parameter parsing for lifecycle tool entry points. |
@@ -36,6 +36,10 @@
 //! - Ordinary and agent-created visible tasks share the same post-commit
 //!   `session.created` projection and asynchronous mailbox-curation entry
 //!   point; idempotent task replay does not duplicate that projection.
+//! - Source-control placement is admitted only during session creation. Git
+//!   preparation is serialized, bounded, and compensated if the durable
+//!   session transaction fails; the persisted working directory is always the
+//!   checkout the agent actually receives.
 
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 
@@ -45,6 +49,8 @@ pub(crate) struct CreateSessionRequest {
     pub(crate) working_directory: String,
     pub(crate) model: String,
     pub(crate) title: Option<String>,
+    pub(crate) source_control:
+        Option<crate::domains::filesystem::source_control::SessionSourceControlRequest>,
 }
 
 pub(crate) struct SessionLifecycleService;
