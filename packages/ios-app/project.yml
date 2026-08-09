@@ -8,6 +8,11 @@ options:
   generateEmptyDirectories: false
   createIntermediateGroups: true
 
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.16.0
+
 configFiles:
   Beta: Configuration/Beta.xcconfig
   ProdDebug: Configuration/ProdDebug.xcconfig
@@ -52,6 +57,7 @@ targets:
         embed:
           codeSign: true
           removeHeadersOnCopy: true
+      - package: SwiftTerm
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist

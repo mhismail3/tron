@@ -14,6 +14,7 @@
 //! | `auth`, `settings` | Authenticated product configuration |
 //! | `product` | Fixed client-only blob, logs, message, and system operations |
 //! | `filesystem` | Native workspace browsing and bounded repository inspection used by clients |
+//! | `terminal` | Authenticated native PTY custody and reconnect replay |
 //! | `worker_kernel` | Worker bundles, runners, dispatch, inbox, and narrow native boundaries |
 //! | `registration` | Composition validation for this fixed set |
 //!
@@ -34,4 +35,5 @@ pub mod registration;
 /// Session domain: lifecycle, reads, reconstruction, and context artifact services.
 pub mod session;
 pub mod settings;
+pub mod terminal;
 pub mod worker_kernel;

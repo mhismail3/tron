@@ -206,6 +206,7 @@ struct WorkerArchitectureNodeDTO: Codable, Equatable, Identifiable, Sendable {
 
 struct EngineIntrospectionSnapshotDTO: Codable, Equatable, Sendable {
     let dispatchStopped: Bool
+    let nativeCapabilities: [String]?
     let activeEngineHooks: [EngineHookOwnerDTO]
     let activeClientActions: [ClientActionOwnerDTO]
     let fixedTools: [EngineSurfaceToolDTO]
@@ -215,6 +216,7 @@ struct EngineIntrospectionSnapshotDTO: Codable, Equatable, Sendable {
 
     init(
         dispatchStopped: Bool,
+        nativeCapabilities: [String]? = nil,
         activeEngineHooks: [EngineHookOwnerDTO],
         activeClientActions: [ClientActionOwnerDTO],
         fixedTools: [EngineSurfaceToolDTO],
@@ -223,6 +225,7 @@ struct EngineIntrospectionSnapshotDTO: Codable, Equatable, Sendable {
         workerArchitecture: [WorkerArchitectureNodeDTO]? = nil
     ) {
         self.dispatchStopped = dispatchStopped
+        self.nativeCapabilities = nativeCapabilities
         self.activeEngineHooks = activeEngineHooks
         self.activeClientActions = activeClientActions
         self.fixedTools = fixedTools

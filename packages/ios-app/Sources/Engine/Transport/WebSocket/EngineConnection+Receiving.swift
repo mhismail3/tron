@@ -111,6 +111,7 @@ extension EngineConnection {
     enum ParsedInboundMessage: Sendable {
         case event(EngineEventDelivery)
         case response(id: String)
+        case terminal(TerminalInboundFrame)
         case invalid(reason: InvalidInboundMessageReason)
     }
 
@@ -153,6 +154,12 @@ extension EngineConnection {
             )
         }
 
+        if frame.type?.hasPrefix("terminal.") == true,
+           frame.id == nil,
+           let terminal = try? JSONDecoder().decode(TerminalInboundFrame.self, from: data) {
+            return .terminal(terminal)
+        }
+
         if let id = frame.id {
             return .response(id: id)
         }
@@ -184,6 +191,8 @@ extension EngineConnection {
             )
             #endif
             onEvent?(delivery)
+        case .terminal(let frame):
+            onTerminalFrame?(frame)
         case .response(let id):
             if finishPendingRequest(id: id, result: .success(data)) {
                 #if DEBUG || BETA

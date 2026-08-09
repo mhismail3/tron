@@ -25,10 +25,15 @@ async fn server_boots_and_responds() {
 
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
+    let terminal_service = crate::domains::terminal::TerminalService::new_with_root(
+        event_store.clone(),
+        home.join("internal/terminal"),
+    );
     let runtime_context = ServerRuntimeContext {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
+        terminal_service,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         settings_runtime: test_settings_runtime(&home),
         settings_path,
@@ -85,10 +90,15 @@ async fn server_graceful_shutdown() {
     let home = test_tron_home(&dir);
     let settings_path = test_settings_path(&home);
 
+    let terminal_service = crate::domains::terminal::TerminalService::new_with_root(
+        event_store.clone(),
+        home.join("internal/terminal"),
+    );
     let runtime_context = ServerRuntimeContext {
         orchestrator,
         session_manager,
         event_store,
+        terminal_service,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         settings_runtime: test_settings_runtime(&home),
         settings_path,

@@ -651,9 +651,10 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         .response_schema(json!({
             "type":"object",
             "additionalProperties":false,
-            "required":["dispatchStopped","activeEngineHooks","activeClientActions","activeClientDeliveries","fixedTools","surface","workers","workerArchitecture"],
+            "required":["dispatchStopped","nativeCapabilities","activeEngineHooks","activeClientActions","activeClientDeliveries","fixedTools","surface","workers","workerArchitecture"],
             "properties":{
                 "dispatchStopped":{"type":"boolean"},
+                "nativeCapabilities":{"type":"array","items":{"type":"string"}},
                 "activeEngineHooks":{
                     "type":"array",
                     "items":{

@@ -176,10 +176,15 @@ fn build_test_context(
     let settings_path = test_settings_path(home);
     let auth_path = test_auth_path(home);
     let settings_runtime = test_settings_runtime(home);
+    let terminal_service = crate::domains::terminal::TerminalService::new_with_root(
+        store.clone(),
+        home.join("internal/terminal"),
+    );
     ServerRuntimeContext {
         orchestrator: orch,
         session_manager: mgr,
         event_store: store,
+        terminal_service,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         settings_path,
         settings_runtime,

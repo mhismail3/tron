@@ -16,6 +16,8 @@
 //!   safe-turn leasing, observation, wake retries, and crash recovery
 //! - **Foreground user input**: pending/answered state derived from indexed
 //!   tool lifecycle and structured user-message events
+//! - **Native terminals**: bounded PTY launch metadata and 24-hour exited
+//!   history indexes; terminal byte journals remain private filesystem state
 //! - **Logs**: bounded operational log queries
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
 //!   history, preserving separate client display text and model-facing tool result text
@@ -94,6 +96,9 @@
 //!   sets session-row `ended_at`, message deletion appends `message.deleted`,
 //!   and physical event cleanup happens only when the owning session is
 //!   explicitly deleted.
+//! - At most one `running` terminal row exists per session. A restart marks
+//!   running rows interrupted before serving clients; output bytes are never
+//!   stored in SQLite and expired metadata/journals are purged together.
 //! - Asynchronous worker-owned session naming uses a storage-level
 //!   compare-and-set that updates only a null or blank title, so a delayed
 //!   policy result cannot overwrite an explicit concurrent user/model title.
@@ -141,7 +146,7 @@ pub(crate) use store::{
     AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliveryRecord, AgentDeliverySourceKind,
     AgentDeliveryTarget, AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode,
     AppendBatchItem, MAX_DELIVERIES_PER_TURN, NewAgentDelivery, NewAgentTaskDelivery, NewAgentWait,
-    NewWorkerResultTaskDelivery, UserInputRequestState, WorkerTerminalEvidence,
+    NewWorkerResultTaskDelivery, TerminalRecord, UserInputRequestState, WorkerTerminalEvidence,
 };
 pub use store::{
     AppendOptions, ClientLogEntry, ClientLogIngestResult, CreateSessionResult, EventStore,

@@ -273,10 +273,13 @@ fn build_server_runtime_context(
     settings_runtime: Arc<crate::domains::settings::SettingsRuntime>,
     origin: String,
 ) -> ServerRuntimeContext {
+    let terminal_service =
+        crate::domains::terminal::TerminalService::new(services.event_store.clone());
     ServerRuntimeContext {
         orchestrator: services.orchestrator.clone(),
         session_manager: services.session_manager.clone(),
         event_store: services.event_store.clone(),
+        terminal_service,
         engine_host,
         settings_path,
         settings_runtime,

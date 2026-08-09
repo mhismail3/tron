@@ -151,6 +151,23 @@ classification, stream identity and interest, subscription admission, and
 acknowledgement coalescing. It owns no socket, request continuation,
 subscription registry, cache, or background task.
 
+The authenticated hello response also negotiates native capabilities. Terminal
+Mode is advertised as `terminal.v1`; it is a fixed client/engine seam, not a
+model-callable primitive or worker. `TerminalClient` uses native-client-only
+typed operations for list/open/write/resize/terminate, while `terminal.attach`
+and `terminal.detach` multiplex ordered base64 PTY bytes over the existing
+socket. `DefaultTerminalRepository` projects capability, terminal metadata,
+attachments, and ordered stream updates into UI-safe values. Session and UI
+code depend on that repository and never reach through the composition root to
+the concrete engine transport; the repository is recreated on every server
+switch so it cannot retain a stale socket owner.
+The client applies sequence numbers exactly once, reattaches from its last
+applied sequence after a foreground/network epoch change, and rebuilds the
+renderer from a server checkpoint if its cursor fell behind bounded replay.
+Closing the sheet detaches without killing the shell; explicit termination owns
+process shutdown. SwiftTerm is only the VT renderer/input adapter—session
+directory authority, PTY lifecycle, replay, and retention remain server-owned.
+
 Connection, reconnect, and per-subscription admission are single-flight. Swift
 task cancellation removes exactly one request record; that record owns both
 its continuation and deadline, so timeout, response, cancellation, and

@@ -30,9 +30,35 @@ fn fresh_schema_contains_only_primitive_tables() {
             "logs",
             "sessions",
             "storage_payload_refs",
+            "terminals",
             "workspaces",
         ]
     );
+}
+
+#[test]
+fn terminals_enforce_one_live_process_per_session_and_retention_indexes() {
+    let conn = open_memory();
+    ensure_schema(&conn).unwrap();
+
+    let live_index: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE type='index' AND name='idx_terminals_one_running_per_session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(live_index.contains("UNIQUE INDEX"));
+    assert!(live_index.contains("WHERE state='running'"));
+
+    let retention_index: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE type='index' AND name='idx_terminals_retention'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(retention_index.contains("retained_until"));
 }
 
 #[test]

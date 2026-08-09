@@ -29,6 +29,16 @@ extension EngineConnection {
         try await invoke(functionId: functionId, payload: payload, idempotencyKey: nil, options: options)
     }
 
+    func attachTerminal(terminalId: String, attachmentId: String, afterSequence: UInt64) async throws -> TerminalAttachResult {
+        let frame = TerminalAttachFrame(id: UUID().uuidString, terminalId: terminalId, attachmentId: attachmentId, afterSequence: afterSequence)
+        return try await sendProtocolMessage(frame, id: frame.id, operation: "terminal.attach", timeout: nil)
+    }
+
+    func detachTerminal(attachmentId: String) async throws {
+        let frame = TerminalDetachFrame(id: UUID().uuidString, attachmentId: attachmentId)
+        let _: TerminalDetachResult = try await sendProtocolMessage(frame, id: frame.id, operation: "terminal.detach", timeout: nil)
+    }
+
     func invokeWrite<P: Encodable, R: Decodable>(
         functionId: EngineFunctionId,
         payload: P,

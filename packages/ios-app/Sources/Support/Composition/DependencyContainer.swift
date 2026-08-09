@@ -154,6 +154,9 @@ final class DependencyContainer {
     /// Server-backed workspace browser repository.
     private(set) var workspaceBrowserRepository: any WorkspaceBrowserRepository
 
+    /// Native terminal repository for session-scoped PTY operations.
+    private(set) var terminalRepository: any TerminalRepository
+
     /// Engine-global worker repository for the worker console.
     private(set) var workerKernelRepository: any WorkerKernelRepository
 
@@ -284,6 +287,7 @@ final class DependencyContainer {
         authRepository = DefaultAuthRepository(authClient: client.auth)
         messageRepository = DefaultMessageRepository(messageClient: client.message)
         workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: client.workspaceBrowser)
+        terminalRepository = DefaultTerminalRepository(client: client)
         workerKernelRepository = DefaultWorkerKernelRepository(client: client.workerKernel)
 
         // Wire draft store into event store manager for cleanup on session delete
@@ -513,6 +517,7 @@ final class DependencyContainer {
         authRepository = DefaultAuthRepository(authClient: newClient.auth)
         messageRepository = DefaultMessageRepository(messageClient: newClient.message)
         workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: newClient.workspaceBrowser)
+        terminalRepository = DefaultTerminalRepository(client: newClient)
         workerKernelRepository = DefaultWorkerKernelRepository(client: newClient.workerKernel)
         eventStoreManager.loadSessions()
         activeServerSelectionVersion += 1

@@ -2583,9 +2583,9 @@ behaviors should still be restored one proven worker at a time.
 ## Storage
 
 The primary `tron.sqlite` remains the source for sessions, messages, provider
-audits, streams, scoped engine state, and approval-message evidence. Worker
-bundles remain filesystem-canonical; the worker database owns their derived
-indexes and durable operational history.
+audits, streams, scoped engine state, terminal metadata, and approval-message
+evidence. Worker bundles remain filesystem-canonical; the worker database owns
+their derived indexes and durable operational history.
 
 ### Tables
 
@@ -2604,6 +2604,7 @@ indexes and durable operational history.
 | `logs` | structured session logs |
 | `sessions` | session metadata |
 | `storage_payload_refs` | payload ownership references |
+| `terminals` | native PTY launch identity, session ownership, replay cursors, process state, and bounded retention metadata; exact output bytes remain in private journals |
 | `workspaces` | workspace metadata |
 
 ### Worker database
@@ -2672,6 +2673,30 @@ client's presentation or processing owner ends. A socket admits at most 64
 active subscriptions; disconnect still clears every remaining cursor. The cap
 and explicit release bound the server's 250 ms push-poll work without creating
 a durable subscription registry.
+
+Authenticated hello responses include a capability list. `terminal.v1`
+identifies the native Terminal Mode seam and is also reported by
+`engine::surface_snapshot` as a native capability, separate from fixed
+model-facing primitives. The terminal domain owns one live login-shell PTY per
+session, always rooted in the session's normalized working directory.
+Native-client-only typed functions list/open/write/resize/terminate terminals;
+they admit authenticated app clients and the engine while excluding agents and
+workers. Socket-local
+`terminal.attach`/`terminal.detach` frames stream ordered output without routing
+terminal bytes through the session event log or model context.
+
+Each output record has a monotonic sequence and is appended to a mode-0600
+journal under `internal/terminal/`. Live replay is capped at 64 MiB; a vt100
+screen checkpoint atomically replaces the replay base when the cap is crossed,
+allowing reconnecting clients to reset and continue without unbounded memory or
+disk growth. Input carries a client-generated idempotency identity, resize is
+bounded, and the service admits no more than eight concurrent PTYs. Closing a
+client attachment does not terminate work. Server restart deliberately marks
+live terminals interrupted rather than pretending processes survived; exited
+and interrupted output remains read-only for 24 hours, then its SQLite index
+and private journal are purged together. Shutdown kills all owned process
+groups, and Tron transport-token environment variables are removed from the
+child shell environment.
 
 Closed `session::*` payload schemas admit only values their owning operation
 consumes. Session and workspace provenance belongs to the authenticated

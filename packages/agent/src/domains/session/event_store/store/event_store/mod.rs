@@ -29,6 +29,7 @@ mod logs;
 mod organization;
 mod session_lifecycle;
 mod state;
+mod terminal;
 mod user_input;
 
 pub(crate) use deliveries::{
@@ -42,6 +43,7 @@ pub use organization::{
     SESSION_ORGANIZATION_GROUP_TAG_PREFIX, SessionOrganizationArchiveAction,
     SessionOrganizationMutation, SessionOrganizationSnapshot, session_organization_from_tags,
 };
+pub(crate) use terminal::TerminalRecord;
 pub(crate) use user_input::UserInputRequestState;
 
 /// Result of creating a new session.

@@ -12,7 +12,7 @@ enum SessionContextDetailDestination: Equatable {
 }
 
 struct SessionContextSheet: View {
-    @Environment(\.dependencies) private var dependencies
+    @Environment(\.dependencies) var dependencies
     let sessionId: String
     let serverConnectionId: String
     let contextState: ContextTrackingState
@@ -37,6 +37,7 @@ struct SessionContextSheet: View {
     @State var isForking = false
     @State var showModelPicker = false
     @State var showForkConfirmation = false
+    @State var showTerminal = false
     @State var sessionWorkerRuns: [WorkerInvocationDTO] = []
     @State var workerNames: [String: String] = [:]
     @State var workerRunsNextOffset: UInt64?
@@ -260,6 +261,12 @@ struct SessionContextSheet: View {
             ForkSessionConfirmationSheet(isFork: isFork) {
                 Task { await forkSession() }
             }
+        }
+        .sheet(isPresented: $showTerminal) {
+            TerminalSessionSheet(
+                sessionId: sessionId,
+                repository: dependencies.terminalRepository
+            )
         }
         .sheet(item: $selectedWorkerRun) { run in
             WorkerRunDetailSheet(

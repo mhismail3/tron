@@ -14,8 +14,10 @@
 //! Discovery has one operation: return the functions visible to a concrete
 //! actor. Relevance ranking and health selection belong to the worker-kernel
 //! provider-surface resolver; the catalog has no generic search/filter DSL or
-//! unused visibility-promotion workflow. Actor context is provenance plus
-//! visibility scope, not an authorization token or permission object.
+//! unused visibility-promotion workflow. Public functions admit every actor,
+//! native-client functions admit authenticated clients and the System actor,
+//! and internal functions admit only System. Actor context is provenance plus
+//! this fixed visibility scope, not an open-ended permission object.
 
 pub mod discovery;
 pub mod registry;

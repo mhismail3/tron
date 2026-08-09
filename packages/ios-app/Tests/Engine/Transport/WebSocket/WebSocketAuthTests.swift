@@ -116,11 +116,29 @@ struct WebSocketAuthTests {
 
     @Test("hello advertises the canonical outbound frame budget")
     func helloDecodesFrameBudget() throws {
-        let data = Data(#"{"type":"hello.ok","id":"h1","protocolVersion":1,"minimumSupportedVersion":1,"serverId":"tron-engine","maxMessageSize":157286400}"#.utf8)
+        let data = Data(#"{"type":"hello.ok","id":"h1","protocolVersion":1,"minimumSupportedVersion":1,"serverId":"tron-engine","maxMessageSize":157286400,"capabilities":["terminal.v1"]}"#.utf8)
 
         let result = try JSONDecoder().decode(EngineHelloResult.self, from: data)
 
         #expect(result.maxMessageSize == 150 * 1024 * 1024)
+        #expect(result.capabilities == ["terminal.v1"])
+    }
+
+    @Test("terminal attach carries the client attachment identity before replay begins")
+    func terminalAttachEncodesClientIdentity() throws {
+        let frame = TerminalAttachFrame(
+            id: "request-1",
+            terminalId: "terminal-1",
+            attachmentId: "attachment-1",
+            afterSequence: 42
+        )
+        let object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(frame)) as? [String: Any]
+        )
+
+        #expect(object["type"] as? String == "terminal.attach")
+        #expect(object["attachmentId"] as? String == "attachment-1")
+        #expect(object["afterSequence"] as? Int == 42)
     }
 
     @Test("outbound requests fail before transport when they exceed the negotiated budget")

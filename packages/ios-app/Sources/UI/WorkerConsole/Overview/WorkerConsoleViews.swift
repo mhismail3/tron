@@ -311,6 +311,33 @@ struct WorkerConsoleSheet: View {
 
     private var primitiveContent: some View {
         VStack(alignment: .leading, spacing: 18) {
+            if !viewModel.nativeCapabilities.isEmpty {
+                WorkerConsoleGroup(
+                    title: "Native capabilities",
+                    detail: "Fixed authenticated client features. These are not model-callable primitives."
+                ) {
+                    LazyVStack(spacing: 8) {
+                        ForEach(viewModel.nativeCapabilities, id: \.self) { capability in
+                            HStack(spacing: 11) {
+                                Image(systemName: capability == "terminal.v1" ? "terminal" : "app.connected.to.app.below.fill")
+                                    .foregroundStyle(.tronCyan)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(capability == "terminal.v1" ? "Terminal Mode" : capability)
+                                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                    Text("Available to authenticated native clients")
+                                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
+                                        .foregroundStyle(.tronTextMuted)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 11)
+                            .sectionFill(.tronCyan, cornerRadius: 10, subtle: true, interactive: false)
+                        }
+                    }
+                }
+            }
             ForEach(viewModel.primitiveToolGroups) { group in
                 EnginePrimitiveSection(group: group.id, tools: group.tools) { tool in
                     selectedPrimitiveTool = tool

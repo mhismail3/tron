@@ -210,6 +210,21 @@ final class EnginePendingRequestLifecycleTests: XCTestCase {
         }
     }
 
+    func testInboundTerminalOutputRoutesWithoutCorrelationID() {
+        let data = Data(
+            #"{"type":"terminal.output","attachmentId":"attach-1","terminalId":"term-1","generation":1,"sequence":7,"dataBase64":"b2sK"}"#.utf8
+        )
+
+        switch EngineConnection.parseInboundMessage(data) {
+        case .terminal(let frame):
+            XCTAssertEqual(frame.attachmentId, "attach-1")
+            XCTAssertEqual(frame.sequence, 7)
+            XCTAssertEqual(frame.dataBase64, "b2sK")
+        default:
+            XCTFail("Expected terminal stream routing")
+        }
+    }
+
     func testConnectionOwnedFrameDecoderNormalizesTextOffMainActor() async {
         let decoder = EngineInboundFrameDecoder()
         let frame = await decoder.decode(

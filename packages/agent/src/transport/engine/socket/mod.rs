@@ -16,6 +16,8 @@
 //! pumps, drops connection-local stream cursors, and bounds child-task drain.
 //! Explicit unsubscribe releases one cursor idempotently, while the fixed
 //! per-connection subscription ceiling bounds the 250 ms push-poll workload.
+//! Native terminal attachments share authentication and socket lifecycle but
+//! use ordered PTY sequences rather than the durable generic event stream.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -34,7 +36,7 @@ use tokio_util::sync::CancellationToken;
 #[cfg(test)]
 use crate::engine::StreamCursor;
 use crate::shared::server::context::ServerRuntimeContext;
-use crate::shared::server::errors::{INVALID_PARAMS, ToolError};
+use crate::shared::server::errors::{INVALID_PARAMS, NOT_AVAILABLE, ToolError};
 use crate::shared::server::failure::FailureOrigin;
 use crate::shared::server::validation::{MAX_JSON_DEPTH, validate_json_depth};
 use crate::transport::engine::{
@@ -247,6 +249,7 @@ struct EngineWsSession {
     ctx: Arc<ServerRuntimeContext>,
     out_tx: mpsc::Sender<String>,
     subscriptions: Arc<tokio::sync::Mutex<BTreeMap<String, SubscriptionState>>>,
+    terminal_attachments: Arc<tokio::sync::Mutex<BTreeMap<String, CancellationToken>>>,
     cancel: CancellationToken,
     max_frame_bytes: usize,
     hello: Option<HelloState>,
@@ -272,6 +275,7 @@ impl EngineWsSession {
             ctx,
             out_tx,
             subscriptions,
+            terminal_attachments: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             cancel,
             max_frame_bytes,
             hello: None,
@@ -333,6 +337,8 @@ impl EngineWsSession {
             "poll" => self.handle_poll(id, value).await,
             "ack" => self.handle_ack(id, value).await,
             "heartbeat" => self.handle_heartbeat(id, value).await,
+            "terminal.attach" => self.handle_terminal_attach(id, value).await,
+            "terminal.detach" => self.handle_terminal_detach(id, value).await,
             "goodbye" => {
                 let _ = self.send_value(json!({
                     "type": "goodbye.ok",
@@ -389,7 +395,121 @@ impl EngineWsSession {
             "minimumSupportedVersion": MIN_PROTOCOL_VERSION,
             "serverId": "tron-engine",
             "maxMessageSize": self.max_frame_bytes,
+            "capabilities": self.ctx.terminal_service.capabilities(),
         }))
+    }
+
+    async fn handle_terminal_attach(&self, id: Option<String>, value: Value) -> bool {
+        let terminal_id = match value.get("terminalId").and_then(Value::as_str) {
+            Some(value) if !value.is_empty() => value.to_owned(),
+            _ => {
+                return self.send_error(
+                    id,
+                    protocol_error(INVALID_PARAMS, "terminalId is required", None),
+                );
+            }
+        };
+        let after = value
+            .get("afterSequence")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let attachment = match self.ctx.terminal_service.attach(&terminal_id, after) {
+            Ok(value) => value,
+            Err(error) => return self.send_error(id, error),
+        };
+        let attachment_id = match value.get("attachmentId") {
+            None => format!("termatt_{}", uuid::Uuid::now_v7().simple()),
+            Some(Value::String(value))
+                if !value.is_empty()
+                    && value.len() <= 96
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte)) =>
+            {
+                value.clone()
+            }
+            Some(_) => {
+                return self.send_error(
+                    id,
+                    protocol_error(INVALID_PARAMS, "attachmentId is invalid", None),
+                );
+            }
+        };
+        let token = self.cancel.child_token();
+        {
+            let mut attachments = self.terminal_attachments.lock().await;
+            if attachments.len() >= 8 {
+                return self.send_error(
+                    id,
+                    protocol_error(NOT_AVAILABLE, "terminal attachment limit reached", None),
+                );
+            }
+            if attachments.contains_key(&attachment_id) {
+                return self.send_error(
+                    id,
+                    protocol_error(INVALID_PARAMS, "attachmentId is already active", None),
+                );
+            }
+            attachments.insert(attachment_id.clone(), token.clone());
+        }
+        if !self.send_value(json!({"type":"terminal.attach.ok","id":id,"attachmentId":attachment_id,"terminalId":terminal_id,"generation":attachment.generation,"earliestSequence":attachment.earliest_sequence,"latestSequence":attachment.latest_sequence,"resetRequired":after>0 && after<attachment.earliest_sequence})) { return false; }
+        let out_tx = self.out_tx.clone();
+        let connection_cancel = self.cancel.clone();
+        let attachment_id_for_task = attachment_id.clone();
+        let attachments = Arc::clone(&self.terminal_attachments);
+        tokio::spawn(async move {
+            async {
+                let mut last = after;
+                for chunk in attachment.backlog {
+                    if chunk.sequence <= last {
+                        continue;
+                    }
+                    if !send_engine_ws_value_async(&out_tx, &connection_cancel, json!({"type":"terminal.output","attachmentId":attachment_id_for_task,"terminalId":chunk.terminal_id,"generation":chunk.generation,"sequence":chunk.sequence,"dataBase64":chunk.data_base64})).await { return; }
+                    last = chunk.sequence;
+                }
+                let Some(mut receiver) = attachment.receiver else {
+                    let _ = send_engine_ws_value_async(&out_tx, &connection_cancel, json!({"type":"terminal.status","attachmentId":attachment_id_for_task,"terminalId":terminal_id,"generation":attachment.generation,"state":attachment.state,"exitCode":attachment.exit_code,"lastSequence":last})).await;
+                    return;
+                };
+                loop {
+                    tokio::select! {
+                        () = token.cancelled() => return,
+                        received = receiver.recv() => match received {
+                            Ok(crate::domains::terminal::TerminalStreamEvent::Output(chunk)) if chunk.sequence > last => {
+                                if !send_engine_ws_value_async(&out_tx, &connection_cancel, json!({"type":"terminal.output","attachmentId":attachment_id_for_task,"terminalId":chunk.terminal_id,"generation":chunk.generation,"sequence":chunk.sequence,"dataBase64":chunk.data_base64})).await { return; }
+                                last = chunk.sequence;
+                            }
+                            Ok(crate::domains::terminal::TerminalStreamEvent::Output(_)) => {}
+                            Ok(crate::domains::terminal::TerminalStreamEvent::Status{terminal_id,generation,state,exit_code}) => {
+                                let _ = send_engine_ws_value_async(&out_tx, &connection_cancel, json!({"type":"terminal.status","attachmentId":attachment_id_for_task,"terminalId":terminal_id,"generation":generation,"state":state,"exitCode":exit_code,"lastSequence":last})).await;
+                                return;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                let _ = send_engine_ws_value_async(&out_tx, &connection_cancel, json!({"type":"terminal.status","attachmentId":attachment_id_for_task,"state":"catch_up_required","lastSequence":last})).await;
+                                return;
+                            }
+                            Err(_) => return,
+                        }
+                    }
+                }
+            }
+            .await;
+            attachments.lock().await.remove(&attachment_id_for_task);
+        });
+        true
+    }
+
+    async fn handle_terminal_detach(&self, id: Option<String>, value: Value) -> bool {
+        let Some(attachment_id) = value.get("attachmentId").and_then(Value::as_str) else {
+            return self.send_error(
+                id,
+                protocol_error(INVALID_PARAMS, "attachmentId is required", None),
+            );
+        };
+        if let Some(token) = self.terminal_attachments.lock().await.remove(attachment_id) {
+            token.cancel();
+        }
+        self.send_value(json!({"type":"terminal.detach.ok","id":id,"attachmentId":attachment_id}))
     }
 
     async fn handle_invoke(&self, id: Option<String>, value: Value) -> bool {

@@ -676,6 +676,31 @@ extension SessionContextSheet {
                 bottomPadding: SessionContextPresentation.headerToContentSpacing
             )
 
+            if dependencies.terminalRepository.isSupported {
+                Button { showTerminal = true } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "terminal")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .foregroundStyle(.tronCyan)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Terminal Mode")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                                .foregroundStyle(.tronTextPrimary)
+                            Text("Open a native shell in this session’s workspace")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextMuted)
+                        }
+                        Spacer()
+                    }
+                    .padding(14)
+                }
+                .buttonStyle(.plain)
+                .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: isConnected)
+                .disabled(!isConnected)
+                .padding(.bottom, 8)
+            }
+
             Button {
                 showForkConfirmation = true
             } label: {

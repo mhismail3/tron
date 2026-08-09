@@ -75,6 +75,10 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssert(sharedContainer.deepLinkRouter is DeepLinkRouter)
     }
 
+    func test_container_providesTerminalRepository() async throws {
+        XCTAssert(sharedContainer.terminalRepository is DefaultTerminalRepository)
+    }
+
     // MARK: - Singleton Behavior Tests (use shared container)
 
     func test_engineClient_returnsSameInstance() async throws {
@@ -262,6 +266,25 @@ final class DependencyContainerTests: XCTestCase {
         container.selectPairedServer(second, connectAfterSwitch: false)
 
         XCTAssert(originalClient !== container.engineClient, "engine client should be recreated after settings change")
+    }
+
+    func test_selectPairedServer_recreatesTerminalRepository() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19020)
+        let originalRepository = container.terminalRepository
+        let second = PairedServer(
+            id: "second-terminal",
+            label: "Second",
+            host: "second.example.com",
+            port: 19021
+        )
+        container.replacePairedServers([first, second], activeServer: first)
+
+        container.selectPairedServer(second, connectAfterSwitch: false)
+
+        XCTAssertFalse(
+            (originalRepository as AnyObject) === (container.terminalRepository as AnyObject),
+            "terminal repository must remain bound to the active server client"
+        )
     }
 
     func test_selectPairedServer_preservesEventDatabase() async throws {
