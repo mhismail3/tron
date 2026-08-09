@@ -477,8 +477,8 @@ struct WorkerConsoleSheet: View {
     private var workersContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             WorkerConsoleGroup(
-                title: "Workers",
-                detail: "Dynamic direct and delegated workers share one durable runtime."
+                title: "General workers",
+                detail: "Direct chat tools can be called from an ordinary session. Delegated workers run only through another worker, trigger, engine, or client integration."
             ) {
                 if !connectionState.isConnected, viewModel.workers.isEmpty {
                     WorkerConsoleEmptyState(
@@ -499,22 +499,22 @@ struct WorkerConsoleSheet: View {
                         symbol: "bolt.slash",
                         text: "No active workers. Restore a retired worker or create one through chat."
                     )
-                } else if viewModel.dynamicWorkers.isEmpty {
+                } else if viewModel.generalWorkers.isEmpty {
                     WorkerConsoleInlineEmptyState(
                         symbol: "bolt.horizontal.circle",
-                        text: "No dynamic workers. Engine specialists are listed separately below."
+                        text: "No general workers. Integrated workers are listed separately below."
                     )
                 } else {
-                    workerRows(viewModel.dynamicWorkers)
+                    workerRows(viewModel.generalWorkers)
                 }
             }
 
-            if !viewModel.engineSpecialistWorkers.isEmpty {
+            if !viewModel.integratedWorkers.isEmpty {
                 WorkerConsoleGroup(
-                    title: "Engine specialists",
-                    detail: "Workers with declared hooks into core engine policy. Changes require compatibility review."
+                    title: "Integrated workers",
+                    detail: "Workers with declared engine hooks or native client boundaries. Changes require compatibility review."
                 ) {
-                    workerRows(viewModel.engineSpecialistWorkers)
+                    workerRows(viewModel.integratedWorkers)
                 }
             }
 

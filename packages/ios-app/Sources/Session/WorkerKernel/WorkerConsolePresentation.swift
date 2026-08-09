@@ -133,7 +133,26 @@ enum WorkerConsolePresentation {
     }
 
     static func runSummary(_ run: WorkerInvocationDTO) -> String? {
-        summaryValue(from: run.input, preferredKeys: ["task", "question", "query", "action", "title"])
+        summaryValue(
+            from: run.input,
+            preferredKeys: ["task", "question", "query", "request", "prompt", "topic", "action", "title"]
+        )
+    }
+
+    static func runResultSummary(_ run: WorkerInvocationDTO) -> String? {
+        if let reference = run.output?.reference {
+            let preview = reference.preview.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !preview.isEmpty {
+                return WorkerRunGraphPresentation.resultPresentation(preview).summary
+            }
+            let message = reference.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            return message.isEmpty ? nil : compactText(message, maxLength: 640)
+        }
+        guard let output = run.output?.legacyInline else { return nil }
+        return summaryValue(
+            from: output,
+            preferredKeys: ["summary", "message", "result", "status", "error"]
+        )
     }
 
     static func runInvocationSource(

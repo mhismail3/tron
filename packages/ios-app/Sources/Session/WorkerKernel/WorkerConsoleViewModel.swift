@@ -47,16 +47,21 @@ final class WorkerConsoleViewModel {
         workers.filter { !$0.retired }
     }
 
-    /// Ordinary workers remain dynamically replaceable because they own no
-    /// engine hook. Direct model exposure does not imply engine ownership.
-    var dynamicWorkers: [WorkerSummaryDTO] {
-        activeWorkers.filter { architecture(for: $0.workerId)?.engineHooks.isEmpty != false }
+    /// General workers remain dynamically replaceable because they own no
+    /// declared engine hook or native-client boundary. Direct versus delegated
+    /// model exposure is an independent invocation concern.
+    var generalWorkers: [WorkerSummaryDTO] {
+        activeWorkers.filter {
+            architecture(for: $0.workerId)?.hasIntegrationBoundary != true
+        }
     }
 
-    /// Workers with an explicit engine hook are compatibility-sensitive
-    /// specialists and are displayed separately from the dynamic inventory.
-    var engineSpecialistWorkers: [WorkerSummaryDTO] {
-        activeWorkers.filter { architecture(for: $0.workerId)?.engineHooks.isEmpty == false }
+    /// Engine hooks and native client action/delivery seams are all
+    /// compatibility-sensitive integration boundaries and are shown together.
+    var integratedWorkers: [WorkerSummaryDTO] {
+        activeWorkers.filter {
+            architecture(for: $0.workerId)?.hasIntegrationBoundary == true
+        }
     }
 
     /// Retained historical workers shown separately after the active inventory.

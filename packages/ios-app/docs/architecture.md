@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-08-08 for authoritative/cached chat loading, durable
+> Last verified: 2026-08-09 for authoritative/cached chat loading, durable
 > native user input drafts, session model configuration, staged worker-console
 > projections, cohesive sheets, and iOS 26/27 delivery.
 
@@ -464,10 +464,14 @@ provides:
   schemas, effect, risk, and exposure state;
 - every published worker's profile-global availability to agents, without
   leaking unnamed session promotion or queryless relevance diagnostics;
-- worker list separated by actual ownership: dynamically replaceable direct or
-  delegated workers first, then engine specialists whose immutable bundles
-  declare non-empty `engineHooks`, and finally retired workers. Internal model
-  exposure alone never makes a worker an engine specialist. Rows retain runner
+- worker list separated by compatibility ownership: General workers first,
+  then Integrated workers whose immutable bundles declare an engine hook,
+  native client action, or native client delivery boundary, and finally retired
+  workers. Invocation exposure is an independent dimension: a direct chat tool
+  is projected into ordinary agent sessions, while a delegated worker runs only
+  through another agent, worker, trigger, or native boundary. A worker can
+  therefore be both direct and integrated (Notification Policy) or delegated
+  and integrated (Local Transcription). Rows retain runner
   type, health, active hash prefix, trigger count, and successful-run evidence;
   compact metadata groups retain clear
   separation while keeping each icon visually attached to its text;
@@ -510,14 +514,18 @@ provides:
   inspection. The action is a standalone primary control rather than a nested
   section container, and every entry point uses the same exact-result handoff
   request;
-- one emerald `Open Chat` toolbar action for agent-backed runs; run detail has
-  no duplicate Model Context section. The read-only worker-session transcript
+- one transcript action per distinct agent session, owned by that session's
+  worker-invocation node in the execution trace; run detail has no competing
+  toolbar transcript action or duplicate Model Context section. The read-only worker-session transcript
   initially reconstructs only the latest 120 events, pages older activity
   explicitly, and uses a small vertical `LazyVStack` without interactive
   chat's viewport probes, geometry-driven autoload, speech monitoring, composer,
   or keyboard-aware scroll loop. A native bottom anchor plus two bounded layout
-  passes makes the newest evidence visible. Execution Details puts every
-  distinct model-backed child transcript first. Each link lazily reconstructs
+  passes makes the newest evidence visible. Execution Trace combines causal
+  work structure and durable activity in one expandable sequence. Expanding a
+  worker invocation reveals its updates and its one transcript action; agent
+  and model-turn nodes that share the same session never duplicate that link.
+  Each link lazily reconstructs
   the actual prompt, assistant response, provider-visible reasoning summary or
   thinking block, and tool calls from the canonical child session rather than
   copying unbounded text into the run graph. Command-only nodes retain their
@@ -790,11 +798,13 @@ model-tool/invocation association through `worker_kernel::runs(detail:
 "graph")`, then renders the server's status, mode, meaningful stage, elapsed
 time, child counts, result or actionable failure, and links to execution
 detail. The primary sheet never embeds an unbounded causal tree or lifecycle
-history. Instead, one `Execution` section shows the work-item/attempt/model-turn
-counts and the latest three user-facing durable updates. One full execution
-history sheet then combines the server-ordered causal nodes, child-session
-links, and complete user-facing timeline; the same run is never split into
-parallel Work Breakdown and Activity destinations. Live invalidations refresh
+history. Instead, one compact `Execution trace` disclosure opens a full sheet
+that nests each node's durable updates and distinct child-session transcript
+  under its server-ordered causal work item. The trace disclosure remains in
+  place but cannot present a provisional sheet until that bounded graph is
+  available. Work structure, activity history,
+and transcript navigation are never rendered as parallel or duplicative
+destinations. Live invalidations refresh
 only an absent or active graph; a terminal chip remains stable instead of
 restarting its durable result read when unrelated workers run. Disclosure
 containers remain fully tappable without repeating right-aligned open-link
@@ -808,12 +818,12 @@ parent model event, and
 starts/finishes cannot collapse into a concatenated “Latest output” blob.
 
 The same generic graph surface offers detach, bounded await, causal-subtree
-cancel, terminal-failure retry, root/child session inspection, and typed-result
+cancel, terminal-failure retry, child-session inspection, and typed-result
 inspection according to server state. Terminal result previews remove
-protocol-only schema/status prefixes before presentation. A completed run
-loads one bounded root result page so its highest-signal fields appear ahead of
-Execution; the preview status is never the only visible output when readable
-fields are available. Exact result inspection still calls
+protocol-only schema/status prefixes before presentation. A selected invocation
+already contains the bounded request and result preview needed for the first
+paint, so loading the richer run graph never replaces the summary layout and no
+eager result-field query can make the sheet settle twice. Exact result inspection calls
 `worker_kernel::result_read` on demand: the complete-result sheet is a readable
 field browser over one server-bounded path or page and follows server-authored
 child pointers. Primitive values wrap vertically as content rather than

@@ -1,32 +1,5 @@
 import SwiftUI
 
-enum WorkerRunTranscriptDestination: Equatable {
-    case workerSession(String)
-
-    static func resolve(agentSessionId: String?) -> WorkerRunTranscriptDestination? {
-        if let agentSessionId = agentSessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !agentSessionId.isEmpty {
-            return .workerSession(agentSessionId)
-        }
-        return nil
-    }
-
-    var sessionId: String {
-        switch self {
-        case let .workerSession(sessionId):
-            sessionId
-        }
-    }
-
-    var title: String {
-        "Worker Session"
-    }
-
-    var accessibilityLabel: String {
-        "Open worker session"
-    }
-}
-
 /// Complete delivery ledger retained for audit without duplicating routine
 /// terminal results in the primary Activity timeline.
 struct WorkerInboxAuditSheet: View {
@@ -175,19 +148,13 @@ struct WorkerRunDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var currentRun: WorkerInvocationDTO
     @State private var graph: WorkerRunGraphDTO?
-    @State private var selectedSession: WorkerRunSessionSelection?
     @State private var selectedResult: WorkerResultSelection?
-    @State private var resultChunk: WorkerResultChunkDTO?
-    @State private var isLoadingResult = false
-    @State private var resultLoadingInvocationId: String?
-    @State private var resultLoadError: String?
     @State private var showTechnicalDetails = false
     @State private var showExecutionDetails = false
     @State private var confirmCancel = false
     @State private var isMutating = false
     @State private var loadError: String?
     @State private var refreshRevision = 0
-    @State private var resultLoadGeneration = 0
     @State private var projectionOwnerId: UUID?
 
     init(
@@ -209,35 +176,31 @@ struct WorkerRunDetailSheet: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    if let graph {
-                        WorkerRunGraphSummaryView(graph: graph)
-                        if let loadError {
-                            WorkerConsoleErrorBanner(message: loadError)
-                        }
-                        WorkerRunTerminalResultView(
-                            graph: graph,
-                            chunk: resultChunk,
-                            isLoading: isLoadingResult,
-                            loadError: resultLoadError
-                        ) {
-                            selectedResult = WorkerResultSelection(
-                                invocationId: graph.requestedInvocationId
+                    WorkerRunInvocationSummaryView(run: currentRun)
+                    if let loadError {
+                        WorkerConsoleErrorBanner(message: loadError)
+                    }
+                    WorkerRunInvocationResultView(run: currentRun) {
+                        selectedResult = WorkerResultSelection(
+                            invocationId: currentRun.invocationId
+                        )
+                    }
+                    if WorkerRunGraphPresentation.canInspectResult(status: currentRun.status) {
+                        WorkerResultAgentHandoffButton(
+                            invocationId: currentRun.invocationId,
+                            workerName: WorkerRunGraphPresentation.runTitle(
+                                workerName: graph?.workerName ?? workerName,
+                                workerId: currentRun.workerId
                             )
+                        ) {
+                            dismiss()
                         }
-                        if WorkerRunGraphPresentation.canInspectResult(status: graph.status) {
-                            WorkerResultAgentHandoffButton(
-                                invocationId: graph.requestedInvocationId,
-                                workerName: WorkerRunGraphPresentation.runTitle(
-                                    workerName: graph.workerName,
-                                    workerId: graph.workerId
-                                )
-                            ) {
-                                dismiss()
-                            }
-                        }
-                        WorkerRunExecutionOverviewView(graph: graph) {
-                            showExecutionDetails = true
-                        }
+                    }
+                    WorkerRunInvocationExecutionOverviewView(isReady: graph != nil) {
+                        guard graph != nil else { return }
+                        showExecutionDetails = true
+                    }
+                    if let graph {
                         WorkerRunDeclarativePresentationView(
                             graph: graph,
                             repository: dependencies.workerKernelRepository
@@ -251,15 +214,6 @@ struct WorkerRunDetailSheet: View {
                             cancel: { confirmCancel = true },
                             retry: { mutate(.retry) }
                         )
-                    } else {
-                        summaryFallback
-                        if let loadError {
-                            WorkerConsoleErrorBanner(message: loadError)
-                        } else {
-                            SheetLoadingState(label: "Loading authoritative run…", accent: color)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.vertical, 18)
-                        }
                     }
                     technicalControls
                 }
@@ -277,29 +231,9 @@ struct WorkerRunDetailSheet: View {
                         color: color
                     )
                 }
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    if let sessionId = currentRun.agentSessionId {
-                        LoadingToolbarButton(
-                            label: "Open Chat",
-                            icon: "text.bubble",
-                            color: .tronEmerald,
-                            isLoading: false,
-                            isEnabled: true
-                        ) {
-                            selectedSession = WorkerRunSessionSelection(sessionId: sessionId)
-                        }
-                        .accessibilityLabel("Open worker session")
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     SheetDismissButton(color: color)
                 }
-            }
-            .sheet(item: $selectedSession) { selection in
-                WorkerAuditSessionSheet(
-                    sessionId: selection.sessionId,
-                    title: "Worker Session"
-                )
             }
             .sheet(item: $selectedResult) { selection in
                 WorkerResultInspectorSheet(
@@ -317,7 +251,7 @@ struct WorkerRunDetailSheet: View {
                 WorkerRunTechnicalDetailsSheet(
                     run: currentRun,
                     graph: graph,
-                    initialResultChunk: resultChunk
+                    initialResultChunk: nil
                 )
             }
             .confirmationDialog(
@@ -358,40 +292,8 @@ struct WorkerRunDetailSheet: View {
         .tint(color)
     }
 
-    private var summaryFallback: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: WorkerRunGraphPresentation.symbol(status: currentRun.status))
-                    .foregroundStyle(color)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(workerName ?? WorkerConsolePresentation.displayLabel(currentRun.workerId))
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(WorkerConsolePresentation.runSummary(currentRun) ?? "Loading durable execution details.")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronTextSecondary)
-                }
-            }
-            if let error = currentRun.error {
-                Label(error, systemImage: "exclamationmark.circle")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronError)
-            } else if let reference = currentRun.output?.reference,
-                      !reference.preview.isEmpty {
-                Text(WorkerRunGraphPresentation.resultPresentation(reference.preview).summary)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .sectionFill(color, cornerRadius: 12, subtle: true, interactive: false)
-    }
-
     private var isPresentingChildSheet: Bool {
-        selectedSession != nil
-            || selectedResult != nil
+        selectedResult != nil
             || showExecutionDetails
             || showTechnicalDetails
     }
@@ -446,63 +348,11 @@ struct WorkerRunDetailSheet: View {
             loadError = refreshedGraph == nil
                 ? "The durable run graph is not available yet."
                 : nil
-            if let refreshedGraph {
-                await loadResultOverview(for: refreshedGraph)
-            }
         } catch {
             if ConnectionErrorClassifier.isTransientTransport(error) {
                 return
             }
             loadError = "Live worker state could not load: \(error.localizedDescription)"
-        }
-    }
-
-    private func loadResultOverview(for graph: WorkerRunGraphDTO) async {
-        guard WorkerRunGraphPresentation.canInspectResult(status: graph.status) else {
-            resultChunk = nil
-            resultLoadError = nil
-            isLoadingResult = false
-            resultLoadingInvocationId = nil
-            return
-        }
-        let invocationId = graph.requestedInvocationId
-        guard resultChunk?.reference.invocationId != invocationId else {
-            return
-        }
-
-        if resultChunk?.reference.invocationId != invocationId {
-            resultChunk = nil
-        }
-        isLoadingResult = true
-        resultLoadingInvocationId = invocationId
-        resultLoadGeneration &+= 1
-        let loadGeneration = resultLoadGeneration
-        resultLoadError = nil
-        defer {
-            if resultLoadingInvocationId == invocationId,
-               loadGeneration == resultLoadGeneration {
-                isLoadingResult = false
-                resultLoadingInvocationId = nil
-            }
-        }
-        do {
-            let loadedChunk = try await dependencies.workerKernelRepository.workerResult(
-                invocationId: invocationId,
-                pointer: "",
-                offset: 0,
-                limit: 4
-            )
-            guard !Task.isCancelled,
-                  resultLoadingInvocationId == invocationId,
-                  loadGeneration == resultLoadGeneration else { return }
-            resultChunk = loadedChunk
-        } catch {
-            guard resultLoadingInvocationId == invocationId,
-                  loadGeneration == resultLoadGeneration,
-                  !ConnectionErrorClassifier.isTransientTransport(error) else {
-                return
-            }
-            resultLoadError = error.localizedDescription
         }
     }
 
@@ -557,11 +407,6 @@ private struct WorkerRunDetailRefreshKey: Equatable {
     let refreshRevision: Int
     let isCovered: Bool
     let continuity: EngineConnectionContinuity
-}
-
-private struct WorkerRunSessionSelection: Identifiable {
-    let sessionId: String
-    var id: String { sessionId }
 }
 
 /// Read-only presentation for a worker child session or the originating chat.

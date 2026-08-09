@@ -67,6 +67,9 @@ struct WorkerConsoleRow: View {
             FlowLayout(spacing: 5) {
                 workerTag(status.title, color: status.color)
                 exposureTag
+                if architecture?.hasIntegrationBoundary == true {
+                    workerTag("Integrated worker", color: .tronPurple)
+                }
                 workerTag(
                     WorkerConsolePresentation.runnerLabel(worker.runnerKind),
                     color: .tronInfo
@@ -87,9 +90,7 @@ struct WorkerConsoleRow: View {
     @ViewBuilder
     private var exposureTag: some View {
         if let architecture {
-            if !architecture.engineHooks.isEmpty {
-                workerTag("Engine specialist", color: .tronPurple)
-            } else if architecture.modelExposure == "direct" {
+            if architecture.modelExposure == "direct" {
                 workerTag("Direct chat tool", color: .tronSuccess)
             } else {
                 workerTag("Delegated worker", color: .tronInfo)

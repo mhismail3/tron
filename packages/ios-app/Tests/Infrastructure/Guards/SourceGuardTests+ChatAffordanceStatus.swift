@@ -174,7 +174,7 @@ extension SourceGuardTests {
         #expect(viewModel.contains("sessionId: nil"))
         #expect(!viewModel.contains("currentSessionId"))
         #expect(consoleSurface.contains("Direct chat tool"))
-        #expect(consoleSurface.contains("Engine specialist"))
+        #expect(consoleSurface.contains("Integrated worker"))
         #expect(consoleSurface.contains("Delegated worker"))
         #expect(consoleSurface.contains("runnerLabel(worker.runnerKind)"))
         #expect(consoleSurface.contains("private func compactMetadataLabel"))

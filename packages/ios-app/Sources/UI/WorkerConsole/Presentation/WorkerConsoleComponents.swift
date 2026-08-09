@@ -230,6 +230,7 @@ struct WorkerVersionRow: View {
                                 .opacity(0.13)
                         )
                     }
+                    .frame(minHeight: 30, alignment: .center)
                     .contentShape(Capsule())
                     .buttonStyle(.plain)
                     .disabled(isMutating)
@@ -237,6 +238,7 @@ struct WorkerVersionRow: View {
                 Text("Active")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(.tronSuccess)
+                    .frame(height: 30, alignment: .center)
             }
         }
         .padding(.vertical, 8)

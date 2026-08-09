@@ -140,15 +140,19 @@ struct WorkerConsoleInteractionTests {
         )
 
         #expect(graph.contains("WorkerRunGraphSummaryView"))
-        #expect(graph.contains("WorkerRunCausalTreeView"))
+        #expect(graph.contains("WorkerRunExecutionTraceView"))
+        #expect(!graph.contains("WorkerRunCausalTreeView"))
         #expect(graph.contains("WorkerRunTimelineView"))
         #expect(graph.contains("entry.summary"))
         #expect(graph.contains("filter { !$0.technical }"))
         #expect(graph.contains("WorkerRunExecutionOverviewView"))
         #expect(graph.contains("WorkerRunExecutionSheet"))
-        #expect(graph.contains("Inspect execution details"))
-        #expect(graph.contains("Agent transcripts"))
-        #expect(graph.contains("actual prompts, responses, reasoning"))
+        #expect(graph.contains("Inspect execution trace"))
+        #expect(graph.contains("Open agent transcript"))
+        #expect(graph.contains("prompts, responses, reasoning, and tool calls"))
+        #expect(!graph.contains("Agent transcripts"))
+        #expect(!graph.contains("Work structure"))
+        #expect(!graph.contains("Activity history"))
         #expect(!graph.contains("WorkerRunDetailLinksView"))
         #expect(!graph.contains("WorkerRunTreeSheet"))
         #expect(!graph.contains("WorkerRunTimelineSheet"))
@@ -156,10 +160,11 @@ struct WorkerConsoleInteractionTests {
         #expect(graph.contains(".workerRunProjectionInvalidated"))
         #expect(graph.contains("WorkerRunGraphPresentation.shouldRefreshAfterInvalidation"))
         #expect(graph.contains("View complete result"))
-        #expect(graph.contains("fields.prefix(4)"))
         #expect(!graph.contains("Inspect result"))
         #expect(graph.contains("WorkerResultInspectorSheet("))
         #expect(graphController.contains("WorkerResultAgentHandoffButton("))
+        #expect(!graphController.contains("loadResultOverview"))
+        #expect(!graphController.contains("workerResult("))
         #expect(context.contains(".workerRunProjectionInvalidated"))
         #expect(!graph.contains("Started Filesystem"))
         #expect(!graph.contains("Finished Filesystem"))
@@ -189,43 +194,44 @@ struct WorkerConsoleInteractionTests {
             through: "private enum Mutation"
         )
         let resultPosition = try #require(
-            runSheet.range(of: "WorkerRunTerminalResultView(")?.lowerBound
+            runSheet.range(of: "WorkerRunInvocationResultView(")?.lowerBound
         )
         let executionPosition = try #require(
-            runSheet.range(of: "WorkerRunExecutionOverviewView(")?.lowerBound
+            runSheet.range(of: "WorkerRunInvocationExecutionOverviewView")?.lowerBound
         )
 
         #expect(resultPosition < executionPosition)
+        #expect(runSheet.contains("WorkerRunInvocationSummaryView("))
+        #expect(!runSheet.contains("summaryFallback"))
+        #expect(!runSheet.contains("Loading authoritative run"))
+        #expect(!runSheet.contains("loadResultOverview"))
         #expect(runSheet.contains("showExecutionDetails"))
         #expect(!runSheet.contains("showRunTree"))
         #expect(!runSheet.contains("showTimeline"))
         #expect(runSheet.contains("showsTechnicalDetails: false"))
-        #expect(runSheet.contains("initialResultChunk: resultChunk"))
+        #expect(runSheet.contains("initialResultChunk: nil"))
         #expect(technical.contains("Validated result JSON"))
         #expect(technical.contains("Output schema"))
         #expect(technical.contains("Technical timeline"))
         #expect(technical.contains("Worker input"))
     }
 
-    @Test("Worker run transcript exists only for a real child agent session")
-    func workerRunTranscriptResolution() {
+    @Test("Execution trace exposes one transcript per distinct agent session")
+    func executionTraceDeduplicatesTranscriptOwners() throws {
+        let data = #"""
+        [
+          {"id":"invocation:root","kind":"invocation","status":"completed","elapsedMs":10,"sessionId":"session-root"},
+          {"id":"agent:root","kind":"agent","status":"completed","elapsedMs":9,"sessionId":"session-root"},
+          {"id":"model:root:1","kind":"model","status":"completed","elapsedMs":4,"sessionId":"session-root"},
+          {"id":"invocation:child","kind":"invocation","status":"completed","elapsedMs":5,"sessionId":"session-child"},
+          {"id":"agent:child","kind":"agent","status":"completed","elapsedMs":4,"sessionId":"session-child"}
+        ]
+        """#.data(using: .utf8)!
+        let nodes = try JSONDecoder().decode([WorkerRunNodeDTO].self, from: data)
+
         #expect(
-            WorkerRunTranscriptDestination.resolve(agentSessionId: "child-session")
-                == .workerSession("child-session")
-        )
-        #expect(
-            WorkerRunTranscriptDestination.resolve(agentSessionId: nil) == nil
-        )
-        #expect(
-            WorkerRunTranscriptDestination.resolve(agentSessionId: "  ") == nil
-        )
-        #expect(
-            WorkerRunTranscriptDestination.workerSession("child-session").title
-                == "Worker Session"
-        )
-        #expect(
-            WorkerRunTranscriptDestination.workerSession("child-session").accessibilityLabel
-                == "Open worker session"
+            WorkerRunGraphPresentation.transcriptOwnerNodeIds(nodes)
+                == Set(["invocation:root", "invocation:child"])
         )
     }
 
@@ -533,7 +539,7 @@ struct WorkerConsoleInteractionTests {
         #expect(engine.contains("viewModel.architecture(for: worker.workerId)"))
         #expect(engine.contains("architecture: architecture"))
         #expect(row.contains("Direct chat tool"))
-        #expect(row.contains("Engine specialist"))
+        #expect(row.contains("Integrated worker"))
         #expect(row.contains("Delegated worker"))
         #expect(!row.contains("Image(systemName: status.systemImage)"))
         #expect(row.contains("FlowLayout(spacing: 5)"))
@@ -561,7 +567,7 @@ struct WorkerConsoleInteractionTests {
         #expect(technicalDetail.contains(".filter { $0.targetWorkerId != nil }"))
         #expect(technicalDetail.contains(".filter { $0.targetWorkerId == nil }"))
         #expect(technicalDetail.contains(#"guard !values.isEmpty else { return "None" }"#))
-        #expect(technicalDetail.contains("if !architecture.engineHooks.isEmpty"))
+        #expect(technicalDetail.contains("architecture.hasIntegrationBoundary"))
         #expect(technicalDetail.contains("if !boundaries.isEmpty"))
         #expect(!technicalDetail.contains("if !architecture.calls.isEmpty"))
         #expect(!technicalDetail.contains("if !callers.isEmpty"))
@@ -727,17 +733,36 @@ struct WorkerConsoleInteractionTests {
             encoding: .utf8
         )
 
-        let dynamicRange = try #require(source.range(of: "workerRows(viewModel.dynamicWorkers)"))
-        let specialistTitleRange = try #require(source.range(of: "title: \"Engine specialists\""))
-        let specialistRowsRange = try #require(source.range(of: "workerRows(viewModel.engineSpecialistWorkers)"))
+        let generalRange = try #require(source.range(of: "workerRows(viewModel.generalWorkers)"))
+        let integratedTitleRange = try #require(source.range(of: "title: \"Integrated workers\""))
+        let integratedRowsRange = try #require(source.range(of: "workerRows(viewModel.integratedWorkers)"))
         let retiredTitleRange = try #require(source.range(of: "title: \"Retired workers\""))
         let retiredRowsRange = try #require(source.range(of: "workerRows(viewModel.retiredWorkers)"))
 
-        #expect(dynamicRange.lowerBound < specialistTitleRange.lowerBound)
-        #expect(specialistTitleRange.lowerBound < specialistRowsRange.lowerBound)
-        #expect(specialistRowsRange.lowerBound < retiredTitleRange.lowerBound)
+        #expect(generalRange.lowerBound < integratedTitleRange.lowerBound)
+        #expect(integratedTitleRange.lowerBound < integratedRowsRange.lowerBound)
+        #expect(integratedRowsRange.lowerBound < retiredTitleRange.lowerBound)
         #expect(retiredTitleRange.lowerBound < retiredRowsRange.lowerBound)
         #expect(source.contains("Inactive workers retained for audit, version history, and restoration."))
+    }
+
+    @Test("Active worker version status aligns with rollback controls")
+    func activeWorkerVersionStatusUsesControlHeight() throws {
+        let source = try String(
+            contentsOf: iosAppRoot().appendingPathComponent(
+                "Sources/UI/WorkerConsole/Presentation/WorkerConsoleComponents.swift"
+            ),
+            encoding: .utf8
+        )
+        let row = try sourceSlice(
+            source,
+            from: "struct WorkerVersionRow: View",
+            through: "private var isActive"
+        )
+
+        #expect(row.contains("HStack(alignment: .center"))
+        #expect(row.contains(".frame(height: 30, alignment: .center)"))
+        #expect(row.contains(".frame(minHeight: 30, alignment: .center)"))
     }
 
     @Test("Worker sessions stay read only and inside dashboard sheets")
@@ -745,6 +770,12 @@ struct WorkerConsoleInteractionTests {
         let root = iosAppRoot()
         let details = try String(
             contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/Detail/WorkerConsoleDetailSheets.swift"),
+            encoding: .utf8
+        )
+        let executionTrace = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/RunGraph/WorkerRunGraphComponents.swift"
+            ),
             encoding: .utf8
         )
         let chat = try String(
@@ -771,11 +802,12 @@ struct WorkerConsoleInteractionTests {
         #expect(details.contains("WorkerAuditSessionSheet"))
         #expect(details.contains("presentationMode: .workerAudit"))
         #expect(details.contains("readOnlyTitle: title"))
-        #expect(details.contains("label: \"Open Chat\""))
-        #expect(details.contains("color: .tronEmerald"))
+        #expect(!details.contains("label: \"Open Chat\""))
+        #expect(executionTrace.contains("Open agent transcript"))
+        #expect(executionTrace.contains("node.sessionId"))
+        #expect(executionTrace.contains("accent: .tronPurple"))
         #expect(!details.contains("title: \"Model Context\""))
         #expect(!details.contains("Open model context"))
-        #expect(details.contains("agentSessionId"))
         #expect(chat.contains("reconstructReadOnlyTranscript"))
         #expect(chat.contains("if presentationMode == .interactiveSession"))
         #expect(chat.contains("if presentationMode == .workerAudit"))
