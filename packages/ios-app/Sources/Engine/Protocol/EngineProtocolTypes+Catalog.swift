@@ -195,6 +195,13 @@ struct WorkerArchitectureNodeDTO: Codable, Equatable, Identifiable, Sendable {
     let provenance: [AnyCodable]
 
     var id: String { workerId }
+
+    /// Compatibility-sensitive workers own a declared seam with the engine or
+    /// a native client. Model exposure is a separate concern: an integrated
+    /// worker may still be directly callable from an ordinary chat.
+    var hasIntegrationBoundary: Bool {
+        !engineHooks.isEmpty || !clientActions.isEmpty || !clientDeliveries.isEmpty
+    }
 }
 
 struct EngineIntrospectionSnapshotDTO: Codable, Equatable, Sendable {

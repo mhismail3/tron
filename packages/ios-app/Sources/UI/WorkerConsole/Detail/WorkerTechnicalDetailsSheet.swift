@@ -58,9 +58,9 @@ struct WorkerTechnicalDetailsSheet: View {
                             ? "Direct chat tool"
                             : "Delegated worker"
                     )
-                    if !architecture.engineHooks.isEmpty {
+                    if architecture.hasIntegrationBoundary {
                         WorkerMetadataDivider()
-                        WorkerMetadataRow(label: "Engine role", value: "Engine specialist")
+                        WorkerMetadataRow(label: "Integration role", value: "Integrated worker")
                     }
                     WorkerMetadataDivider()
                     WorkerMetadataRow(

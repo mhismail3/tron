@@ -157,6 +157,27 @@ struct WorkerConsolePresentationTests {
         )
     }
 
+    @Test("Retained invocation previews provide a stable run-detail first paint")
+    func retainedInvocationPreviewProjection() {
+        let invocation = run(
+            triggerKind: "manual",
+            input: AnyCodable(["request": "Repair the evaluation worker safely."]),
+            output: AnyCodable([
+                "status": "repaired",
+                "summary": "The worker was repaired and its validation passed.",
+            ])
+        )
+
+        #expect(
+            WorkerConsolePresentation.runSummary(invocation)
+                == "Repair the evaluation worker safely."
+        )
+        #expect(
+            WorkerConsolePresentation.runResultSummary(invocation)
+                == "The worker was repaired and its validation passed."
+        )
+    }
+
     @Test("Activity summaries prefer useful nested fields and remain bounded")
     func activitySummaryProjection() {
         let item = WorkerInboxItemDTO(
@@ -440,15 +461,17 @@ struct WorkerConsolePresentationTests {
         originSessionId: String? = nil,
         modelToolInvocationId: String? = nil,
         parentWorkerInvocationId: String? = nil,
-        attemptCount: UInt32 = 1
+        attemptCount: UInt32 = 1,
+        input: AnyCodable = AnyCodable([:]),
+        output: AnyCodable? = nil
     ) -> WorkerInvocationDTO {
         WorkerInvocationDTO(
             invocationId: "worker_run_test",
             workerId: "test-worker",
             workerVersion: "version",
             status: "completed",
-            input: AnyCodable([:]),
-            output: nil,
+            input: input,
+            output: output,
             error: nil,
             idempotencyKey: "test-key",
             traceId: "test-trace",

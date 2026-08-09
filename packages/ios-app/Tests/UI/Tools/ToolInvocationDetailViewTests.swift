@@ -241,19 +241,13 @@ final class ToolInvocationDetailViewTests: XCTestCase {
 
     func testWorkerRunSummaryRendersProgressiveDisclosureForVisualQA() throws {
         let size = CGSize(width: 430, height: 932)
-        let graph = Self.fixtureWorkerGraph
+        let run = Self.fixtureWorkerRun
         let view = NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    WorkerRunGraphSummaryView(graph: graph)
-                    WorkerRunTerminalResultView(
-                        graph: graph,
-                        chunk: Self.fixtureWorkerResult,
-                        isLoading: false,
-                        loadError: nil,
-                        inspectResult: {}
-                    )
-                    WorkerRunExecutionOverviewView(graph: graph, openDetails: {})
+                    WorkerRunInvocationSummaryView(run: run)
+                    WorkerRunInvocationResultView(run: run, inspectResult: {})
+                    WorkerRunInvocationExecutionOverviewView(isReady: true, openDetails: {})
                 }
                 .padding(18)
             }
@@ -502,32 +496,35 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         return try! JSONDecoder().decode(WorkerRunGraphDTO.self, from: data)
     }
 
-    private static var fixtureWorkerResult: WorkerResultChunkDTO {
-        WorkerResultChunkDTO(
-            kind: "worker_result_chunk",
-            reference: WorkerResultReferenceDTO(
-                kind: "worker_result_reference",
-                invocationId: "worker_run_fixture",
-                workerId: "research-coordinator",
-                workerVersion: "version",
-                outputSchemaSha256: "schema",
-                contentSha256: "content",
-                sizeBytes: 240,
-                preview: "research.report.v1 · partial · Bounded conclusion",
-                message: "Read selectively"
-            ),
-            pointer: "",
-            value: AnyCodable([
-                "summary": "The evidence supports a bounded conclusion.",
-                "sources": ["Source A", "Source B"],
-                "warnings": ["Two claims remain unresolved."],
+    private static var fixtureWorkerRun: WorkerInvocationDTO {
+        WorkerInvocationDTO(
+            invocationId: "worker_run_fixture",
+            workerId: "research-coordinator",
+            workerVersion: "version",
+            status: "completed",
+            input: AnyCodable([
+                "request": "Review the evidence and produce a bounded conclusion.",
             ]),
-            children: [],
-            offset: 0,
-            returned: 3,
-            total: 3,
-            nextOffset: nil,
-            truncated: false
+            output: AnyCodable([
+                "status": "partial",
+                "summary": "The evidence supports a bounded conclusion while two claims remain unresolved.",
+            ]),
+            error: nil,
+            idempotencyKey: "worker-run-fixture",
+            traceId: "trace-fixture",
+            causalDepth: 0,
+            triggerKind: "manual",
+            originSessionId: "origin-session",
+            agentSessionId: "worker-session",
+            interactionMode: "background",
+            requestedModel: "openai/gpt-5.6-sol",
+            requestedReasoningLevel: "medium",
+            effectiveModel: "openai/gpt-5.6-sol",
+            effectiveReasoningLevel: "medium",
+            attemptCount: 1,
+            createdAt: "2026-08-08T13:49:00Z",
+            startedAt: "2026-08-08T13:49:01Z",
+            completedAt: "2026-08-08T13:50:17Z"
         )
     }
 

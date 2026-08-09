@@ -103,19 +103,29 @@ struct WorkerConsoleViewModelTests {
         #expect(viewModel.selectedWorkerArchitecture?.workerId == "research")
     }
 
-    @Test("Only declared engine hooks classify a worker as an engine specialist")
-    func engineSpecialistClassificationUsesHooksRatherThanExposure() async {
+    @Test("Declared engine and native client boundaries classify integrated workers")
+    func integratedWorkerClassificationUsesBoundariesRatherThanExposure() async {
         let repository = MockWorkerKernelRepository()
         let viewModel = WorkerConsoleViewModel()
 
         await viewModel.refreshSummary(repository: repository, connectionState: .connected)
-        #expect(viewModel.engineSpecialistWorkers.map(\.workerId) == ["research"])
-        #expect(viewModel.dynamicWorkers.isEmpty)
+        #expect(viewModel.integratedWorkers.map(\.workerId) == ["research"])
+        #expect(viewModel.generalWorkers.isEmpty)
 
         repository.researchEngineHooks = []
+        repository.researchClientActions = ["speech_transcription"]
         await viewModel.refreshSummary(repository: repository, connectionState: .connected)
-        #expect(viewModel.engineSpecialistWorkers.isEmpty)
-        #expect(viewModel.dynamicWorkers.map(\.workerId) == ["research"])
+        #expect(viewModel.integratedWorkers.map(\.workerId) == ["research"])
+
+        repository.researchClientActions = []
+        repository.researchClientDeliveries = ["notification_delivery"]
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+        #expect(viewModel.integratedWorkers.map(\.workerId) == ["research"])
+
+        repository.researchClientDeliveries = []
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+        #expect(viewModel.integratedWorkers.isEmpty)
+        #expect(viewModel.generalWorkers.map(\.workerId) == ["research"])
     }
 
     @Test("A retired worker exposes every retained version as a restore action")
@@ -251,6 +261,8 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var pagedActivity = false
     var includeRetiredFixture = false
     var researchEngineHooks = ["research_context"]
+    var researchClientActions: [String] = []
+    var researchClientDeliveries: [String] = []
     var snapshotError: Error?
 
     private var worker: WorkerSummaryDTO {
@@ -331,8 +343,8 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
                     runnerKind: "command",
                     runnerModel: nil,
                     engineHooks: researchEngineHooks,
-                    clientActions: [],
-                    clientDeliveries: [],
+                    clientActions: researchClientActions,
+                    clientDeliveries: researchClientDeliveries,
                     triggerKinds: ["schedule"],
                     calls: [],
                     presentation: WorkerArchitecturePresentationDTO(

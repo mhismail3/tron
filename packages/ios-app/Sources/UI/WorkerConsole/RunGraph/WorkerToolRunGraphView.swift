@@ -77,12 +77,7 @@ struct WorkerToolRunGraphView: View {
     @State private var confirmCancel = false
     @State private var refreshRevision = 0
     @State private var selectedResult: WorkerResultSelection?
-    @State private var resultChunk: WorkerResultChunkDTO?
-    @State private var isLoadingResult = false
-    @State private var resultLoadingInvocationId: String?
-    @State private var resultLoadError: String?
     @State private var showExecutionDetails = false
-    @State private var resultLoadGeneration = 0
     @State private var projectionOwnerId: UUID?
 
     var body: some View {
@@ -91,10 +86,7 @@ struct WorkerToolRunGraphView: View {
                 WorkerRunGraphSummaryView(graph: graph)
 
                 WorkerRunTerminalResultView(
-                    graph: graph,
-                    chunk: resultChunk,
-                    isLoading: isLoadingResult,
-                    loadError: resultLoadError
+                    graph: graph
                 ) {
                     selectedResult = WorkerResultSelection(
                         invocationId: graph.requestedInvocationId
@@ -153,12 +145,7 @@ struct WorkerToolRunGraphView: View {
             if projectionOwnerId != ownerId {
                 projectionOwnerId = ownerId
                 graph = nil
-                resultChunk = nil
-                resultLoadError = nil
                 error = nil
-                resultLoadGeneration &+= 1
-                resultLoadingInvocationId = nil
-                isLoadingResult = false
             }
             guard !isPresentingChildSheet else { return }
             await observe()
@@ -227,63 +214,11 @@ struct WorkerToolRunGraphView: View {
             let refreshedGraph = page.graphs?.first
             graph = refreshedGraph
             error = nil
-            if let refreshedGraph {
-                await loadResultOverview(for: refreshedGraph)
-            }
         } catch {
             if ConnectionErrorClassifier.isTransientTransport(error) {
                 return
             }
             self.error = error.localizedDescription
-        }
-    }
-
-    private func loadResultOverview(for graph: WorkerRunGraphDTO) async {
-        guard WorkerRunGraphPresentation.canInspectResult(status: graph.status) else {
-            resultChunk = nil
-            resultLoadError = nil
-            isLoadingResult = false
-            resultLoadingInvocationId = nil
-            return
-        }
-        let targetInvocationId = graph.requestedInvocationId
-        guard resultChunk?.reference.invocationId != targetInvocationId else {
-            return
-        }
-
-        if resultChunk?.reference.invocationId != targetInvocationId {
-            resultChunk = nil
-        }
-        isLoadingResult = true
-        resultLoadingInvocationId = targetInvocationId
-        resultLoadGeneration &+= 1
-        let loadGeneration = resultLoadGeneration
-        resultLoadError = nil
-        defer {
-            if resultLoadingInvocationId == targetInvocationId,
-               loadGeneration == resultLoadGeneration {
-                isLoadingResult = false
-                resultLoadingInvocationId = nil
-            }
-        }
-        do {
-            let loadedChunk = try await dependencies.workerKernelRepository.workerResult(
-                invocationId: targetInvocationId,
-                pointer: "",
-                offset: 0,
-                limit: 4
-            )
-            guard !Task.isCancelled,
-                  resultLoadingInvocationId == targetInvocationId,
-                  loadGeneration == resultLoadGeneration else { return }
-            resultChunk = loadedChunk
-        } catch {
-            guard resultLoadingInvocationId == targetInvocationId,
-                  loadGeneration == resultLoadGeneration,
-                  !ConnectionErrorClassifier.isTransientTransport(error) else {
-                return
-            }
-            resultLoadError = error.localizedDescription
         }
     }
 
