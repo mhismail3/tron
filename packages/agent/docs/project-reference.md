@@ -2675,7 +2675,7 @@ and explicit release bound the server's 250 ms push-poll work without creating
 a durable subscription registry.
 
 Authenticated hello responses include a capability list. `terminal.v1`
-identifies the native Terminal Mode seam and is also reported by
+identifies the native Terminal seam and is also reported by
 `engine::surface_snapshot` as a native capability, separate from fixed
 model-facing primitives. The terminal domain owns one live login-shell PTY per
 session, always rooted in the session's normalized working directory.
@@ -2696,7 +2696,9 @@ live terminals interrupted rather than pretending processes survived; exited
 and interrupted output remains read-only for 24 hours, then its SQLite index
 and private journal are purged together. Shutdown kills all owned process
 groups, and Tron transport-token environment variables are removed from the
-child shell environment.
+child shell environment. Login shells otherwise retain the user's own startup
+configuration, while an empty `PROMPT_EOL_MARK` suppresses zsh's synthetic
+reverse-video `%` before the first real prompt.
 
 Closed `session::*` payload schemas admit only values their owning operation
 consumes. Session and workspace provenance belongs to the authenticated

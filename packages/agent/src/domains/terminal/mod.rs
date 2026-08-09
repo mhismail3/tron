@@ -11,7 +11,10 @@
 //! | [`journal`] | Mode-private ordered replay records and bounded vt100 checkpoints. |
 //!
 //! The module root owns process lifecycle, typed native-client contracts, and
-//! session cleanup because those invariants share the live PTY registry.
+//! session cleanup because those invariants share the live PTY registry. Login
+//! shells inherit the user's configuration, except that zsh's pre-prompt
+//! end-of-line marker is suppressed so a fresh native terminal never starts
+//! with a synthetic reverse-video `%` cell.
 
 use std::collections::{HashSet, VecDeque};
 use std::fs;
@@ -51,6 +54,11 @@ const MAX_REPLAY_BYTES: usize = 64 * 1024 * 1024;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const MAX_OUTPUT_CHUNK: usize = 32 * 1024;
 const CHECKPOINT_INTERVAL_BYTES: usize = 1024 * 1024;
+const SHELL_ENVIRONMENT: [(&str, &str); 3] = [
+    ("TERM", "xterm-256color"),
+    ("COLORTERM", "truecolor"),
+    ("PROMPT_EOL_MARK", ""),
+];
 
 /// Authenticated client capability negotiated during `hello`.
 pub const CAPABILITY: &str = "terminal.v1";
@@ -226,8 +234,9 @@ impl TerminalService {
         let mut command = CommandBuilder::new(&shell);
         command.arg("-l");
         command.cwd(&cwd);
-        command.env("TERM", "xterm-256color");
-        command.env("COLORTERM", "truecolor");
+        for (key, value) in SHELL_ENVIRONMENT {
+            command.env(key, value);
+        }
         for key in ["TRON_AUTH_TOKEN", "TRON_API_KEY"] {
             command.env_remove(key);
         }
@@ -798,6 +807,13 @@ mod tests {
     }
 
     #[test]
+    fn login_shell_environment_suppresses_zshs_synthetic_prompt_marker() {
+        assert!(SHELL_ENVIRONMENT.contains(&("PROMPT_EOL_MARK", "")));
+        assert!(SHELL_ENVIRONMENT.contains(&("TERM", "xterm-256color")));
+        assert!(SHELL_ENVIRONMENT.contains(&("COLORTERM", "truecolor")));
+    }
+
+    #[test]
     fn terminal_functions_are_native_client_only_and_schema_bounded() {
         let definitions = function_definitions().expect("terminal definitions");
         assert_eq!(definitions.len(), 5);
@@ -884,6 +900,11 @@ mod tests {
         })
         .await
         .expect("PTY exit timeout");
-        assert!(String::from_utf8_lossy(&output).contains("TRON_PTY_OK"));
+        let output = String::from_utf8_lossy(&output);
+        assert!(output.contains("TRON_PTY_OK"));
+        assert!(
+            !output.contains("\u{1b}[7m%\u{1b}[27m"),
+            "fresh zsh terminals must not emit the synthetic prompt marker"
+        );
     }
 }

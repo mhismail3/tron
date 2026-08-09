@@ -684,7 +684,7 @@ extension SessionContextSheet {
                             .foregroundStyle(.tronCyan)
                             .frame(width: 28)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Terminal Mode")
+                            Text(SessionContextPresentation.terminalActionTitle)
                                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                                 .foregroundStyle(.tronTextPrimary)
                             Text("Open a native shell in this session’s workspace")

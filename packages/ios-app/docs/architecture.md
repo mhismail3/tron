@@ -152,7 +152,7 @@ acknowledgement coalescing. It owns no socket, request continuation,
 subscription registry, cache, or background task.
 
 The authenticated hello response also negotiates native capabilities. Terminal
-Mode is advertised as `terminal.v1`; it is a fixed client/engine seam, not a
+is advertised as `terminal.v1`; it is a fixed client/engine seam, not a
 model-callable primitive or worker. `TerminalClient` uses native-client-only
 typed operations for list/open/write/resize/terminate, while `terminal.attach`
 and `terminal.detach` multiplex ordered base64 PTY bytes over the existing
@@ -167,6 +167,13 @@ renderer from a server checkpoint if its cursor fell behind bounded replay.
 Closing the sheet detaches without killing the shell; explicit termination owns
 process shutdown. SwiftTerm is only the VT renderer/input adapter—session
 directory authority, PTY lifecycle, replay, and retention remain server-owned.
+The renderer has a transparent native surface inside the standard sheet rather
+than mounting a second opaque canvas. Tron replaces SwiftTerm's ambiguous stock
+accessory with one floating Liquid Glass command bar, a separately labeled
+extended-key keyboard, and an independent keyboard-dismiss action. Input stays
+PTY-authoritative—there is no incorrect local echo—but not-yet-submitted bytes
+coalesce behind the one in-flight idempotent write, avoiding a network round
+trip queue for every character in a typing burst.
 
 Connection, reconnect, and per-subscription admission are single-flight. Swift
 task cancellation removes exactly one request record; that record owns both
