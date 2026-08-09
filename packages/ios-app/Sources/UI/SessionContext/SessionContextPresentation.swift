@@ -14,6 +14,11 @@ enum SessionContextPressure: Equatable {
     }
 }
 
+struct SessionTerminalAvailability: Equatable, Sendable {
+    let isEnabled: Bool
+    let detail: String
+}
+
 /// Pure presentation and action policy for the Session Context surface.
 enum SessionContextPresentation {
     static let sheetTitle = "Manage Session"
@@ -48,6 +53,28 @@ enum SessionContextPresentation {
         isBusy: Bool
     ) -> Bool {
         isConnected && !isAgentActive && !isCompacting && !isBusy
+    }
+
+    static func terminalAvailability(
+        isConnected: Bool,
+        isSupported: Bool
+    ) -> SessionTerminalAvailability {
+        if !isConnected {
+            return SessionTerminalAvailability(
+                isEnabled: false,
+                detail: "Available after reconnection"
+            )
+        }
+        if !isSupported {
+            return SessionTerminalAvailability(
+                isEnabled: false,
+                detail: "Requires a server with native Terminal support"
+            )
+        }
+        return SessionTerminalAvailability(
+            isEnabled: true,
+            detail: "Open a native shell in this session’s workspace"
+        )
     }
 
     static func mutationUnavailableReason(

@@ -300,7 +300,10 @@ struct SessionContextAuditDecodingTests {
               "preview":"Run acceptance",
               "projection":"provider_visible",
               "sourceKind":"durable_event",
-              "sourceEventIds":["event-user-1"]
+              "sourceEventIds":["event-user-1"],
+              "sourceModels":["gpt-5.6-sol"],
+              "sourceTools":["request_user_input"],
+              "sourceTurns":[7]
             }],
             "toolSurface":{"availableWorkers":[]},
             "automaticContext":[{
@@ -357,6 +360,9 @@ struct SessionContextAuditDecodingTests {
         #expect(detail.contextManifest?.cacheLayout?.requestContextBytes == 512)
         #expect(detail.contextManifest?.messages.first?.sourceKind == "durable_event")
         #expect(detail.contextManifest?.messages.first?.sourceEventIds == ["event-user-1"])
+        #expect(detail.contextManifest?.messages.first?.sourceModels == ["gpt-5.6-sol"])
+        #expect(detail.contextManifest?.messages.first?.sourceTools == ["request_user_input"])
+        #expect(detail.contextManifest?.messages.first?.sourceTurns == [7])
         #expect(detail.providerAdditions?.first?.kind == "provider_system_prefix")
         #expect(detail.provenanceAvailability == "complete")
     }
@@ -413,6 +419,9 @@ struct SessionContextAuditDecodingTests {
 
         #expect(detail.contextManifest?.systemContributions.count == 1)
         #expect(detail.contextManifest?.messages.first?.sourceEventIds == [])
+        #expect(detail.contextManifest?.messages.first?.sourceModels == [])
+        #expect(detail.contextManifest?.messages.first?.sourceTools == [])
+        #expect(detail.contextManifest?.messages.first?.sourceTurns == [])
         #expect(detail.contextManifest?.automaticContext.first?.sources == [])
         #expect(detail.contextManifest?.agentDeliveries == [])
     }

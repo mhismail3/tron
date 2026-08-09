@@ -105,6 +105,46 @@ impl EventRepo {
         Ok(row)
     }
 
+    /// Get immutable source events by ID while enforcing session ownership.
+    ///
+    /// Context manifests can reference many source events. Reading them in
+    /// bounded chunks avoids both N+1 queries and SQLite's parameter limit.
+    pub(crate) fn get_by_ids_for_session(
+        conn: &Connection,
+        session_id: &str,
+        event_ids: &[String],
+    ) -> Result<Vec<EventRow>> {
+        const QUERY_CHUNK_SIZE: usize = 500;
+
+        if event_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut rows = Vec::with_capacity(event_ids.len());
+        for event_ids in event_ids.chunks(QUERY_CHUNK_SIZE) {
+            let placeholders = (2..=event_ids.len() + 1)
+                .map(|index| format!("?{index}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT {EVENT_COLUMNS} FROM events \
+                 WHERE session_id = ?1 AND id IN ({placeholders}) \
+                 ORDER BY sequence ASC"
+            );
+            let mut parameters = Vec::with_capacity(event_ids.len() + 1);
+            parameters.push(session_id.to_owned());
+            parameters.extend(event_ids.iter().cloned());
+            let mut statement = conn.prepare(&sql)?;
+            rows.extend(
+                statement
+                    .query_map(rusqlite::params_from_iter(parameters.iter()), Self::map_row)?
+                    .collect::<std::result::Result<Vec<_>, _>>()?,
+            );
+        }
+        rows.sort_by_key(|row| row.sequence);
+        Ok(rows)
+    }
+
     /// Get the latest event for a session.
     pub fn get_latest(conn: &Connection, session_id: &str) -> Result<Option<EventRow>> {
         let sql = format!(

@@ -2179,6 +2179,26 @@ fn apple_ci_uses_one_checksum_pinned_toolchain_manifest() {
 }
 
 #[test]
+fn local_ios_test_selection_supports_unfiltered_full_validation_on_macos_bash() {
+    let helper = read_repo_file("scripts/tron-ios-simulator");
+    for required in [
+        "# macOS still ships Bash 3.2",
+        "set --\n    selection=",
+        "set -- \"$@\" \"-only-testing:$line\"",
+        "-derivedDataPath \"$TEST_DERIVED_DATA\" \\\n            \"$@\"",
+    ] {
+        assert!(
+            helper.contains(required),
+            "local iOS selection lost its empty-filter-safe argument contract: {required}"
+        );
+    }
+    assert!(
+        !helper.contains("test_args"),
+        "Bash 3.2 nounset must not expand an empty test-filter array"
+    );
+}
+
+#[test]
 fn tracked_ignored_files_stay_absent() {
     let tracked = git_output(&["ls-files"]);
     for generated_prefix in [

@@ -288,6 +288,17 @@ impl EventStore {
         EventRepo::get_by_id(&conn, event_id)
     }
 
+    /// Resolve immutable source events for one session without issuing one
+    /// query per context-message manifest entry.
+    pub(crate) fn get_events_by_ids_for_session(
+        &self,
+        session_id: &str,
+        event_ids: &[String],
+    ) -> Result<Vec<EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_by_ids_for_session(&conn, session_id, event_ids)
+    }
+
     /// Get all events for a session, ordered by sequence.
     pub fn get_events_by_session(
         &self,

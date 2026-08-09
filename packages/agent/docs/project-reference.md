@@ -1500,7 +1500,13 @@ and `session::context_request_detail` (exact event and session ID). These
 operations query only provider-request events and never invoke a model, hook,
 worker, or relevance calculation. Agent-worker session IDs use the same reads.
 Legacy v2 rows retain their redacted provider audit and counts while
-request-specific provenance is explicitly labeled unavailable.
+request-specific provenance is explicitly labeled unavailable. The detail
+response joins each manifest message's immutable source event IDs through one
+bounded, session-scoped batch and adds response-only `sourceModels`,
+`sourceTools`, and `sourceTurns` inventories when evidence exists. This gives
+clients useful model/tool/turn labels without rewriting the canonical audit,
+duplicating message text, or issuing one query per message. Missing source rows
+and older servers degrade to empty optional inventories.
 
 The context-request query uses `(session_id, type, sequence)` ordering and one
 metadata-only look-ahead row. It resolves blob-backed payloads only for the
@@ -2989,15 +2995,23 @@ session row for offline presentation. Provider audit bodies never enter the
 transcript cache, and older cached bodies are reduced to deferred markers when
 the cache schema opens.
 
-The sheet presents instructions, conversation/compaction, attachments,
-environment, request-specific Agent Delivery contributions, exact selected and
-omitted tools with routing evidence, and the advanced redacted provider audit.
+The sheet presents one high-level navigation inventory. Product-facing Agent
+Context contains instructions, conversation/compaction, attachments,
+request-specific Agent Delivery contributions, available tools, and continuity
+narratives. Technical Details alone contains digests, identifiers, redacted
+environment provenance, exact selected/omitted tools, cache layout, and the
+redacted provider audit. Session-scoped Background Activity and Session Workers
+open as bounded sub-sheets rather than mounting their histories in the main
+sheet. Empty included-delivery evidence is distinct from ordinary conversation
+and user-input answers. Rows remain represented while disconnected and disable
+only the unavailable action so reconnect reconciliation restores interaction
+without reshaping the sheet.
 Global worker architecture is inspected in the Engine dashboard, where each
 canonical worker row and detail merges direct/internal and agent/command shape,
 hook/native boundaries, dispatches, and `agentTools` calls/called-by
 relationships with that worker's health, activity, versions, and lifecycle.
 Manage Session does not load or duplicate that global directory. A bounded
-session-scoped worker section reads
+session-scoped worker sheet reads
 `worker_runs(originSessionId: ..., detail: "graph")`. The server pages by
 causal root so one coordinator's many descendants cannot crowd later runs out
 of Manage Session; exact child and originating model-tool filters reopen the
@@ -3006,7 +3020,7 @@ another activity store. Worker progress/output strings are not accumulated
 into client state or concatenated into a guessed stage; only non-worker tools
 retain the generic free-text lifecycle presentation. Lifecycle invalidation
 and reconnect re-fetch the graph, with one-second polling used only while a
-visible run remains active. Delivery/wait state shares that bounded live
+visible run remains active. Background delivery/wait state shares that bounded live
 cadence. Provider-context audits are immutable once written, so the sheet reads
 that lane on open, reconnect, and foreground, then once when activity settles
 rather than transferring a large manifest every second. An agent-runner row can

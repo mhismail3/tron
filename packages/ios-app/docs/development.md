@@ -305,6 +305,12 @@ scripts/tron-ios-simulator start
 scripts/tron-ios-simulator install
 ```
 
+`check-affected` and `iterate` use the repository-owned conservative selector:
+focused changes pass explicit XCTest filters, while a shared, test, project, or
+unmapped iOS change deliberately passes no filters and runs the complete Beta
+suite. The helper keeps that zero-filter path compatible with the Bash 3.2
+`nounset` behavior on macOS.
+
 Pairing is scoped to both the simulator UUID and bundle ID. Avoid name-only
 destinations when multiple iOS runtimes contain an identically named device,
 and do not uninstall, erase, or switch to the production bundle for simulator

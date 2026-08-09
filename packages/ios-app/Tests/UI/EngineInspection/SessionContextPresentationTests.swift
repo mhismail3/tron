@@ -69,6 +69,31 @@ struct SessionContextPresentationTests {
         ))
     }
 
+    @Test("Terminal remains represented while transport or capability is unavailable")
+    func terminalAvailability() {
+        #expect(SessionContextPresentation.terminalAvailability(
+            isConnected: false,
+            isSupported: true
+        ) == SessionTerminalAvailability(
+            isEnabled: false,
+            detail: "Available after reconnection"
+        ))
+        #expect(SessionContextPresentation.terminalAvailability(
+            isConnected: true,
+            isSupported: false
+        ) == SessionTerminalAvailability(
+            isEnabled: false,
+            detail: "Requires a server with native Terminal support"
+        ))
+        #expect(SessionContextPresentation.terminalAvailability(
+            isConnected: true,
+            isSupported: true
+        ) == SessionTerminalAvailability(
+            isEnabled: true,
+            detail: "Open a native shell in this session’s workspace"
+        ))
+    }
+
     @Test("Session usage appears only when the engine has reported usage")
     func sessionUsageVisibility() {
         #expect(!SessionContextPresentation.hasSessionUsage(

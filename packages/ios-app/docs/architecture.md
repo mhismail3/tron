@@ -1061,142 +1061,78 @@ The composer context ring and Manage Session sheet consume only existing
 session truth. Token usage, model-window pressure, compaction, model switching,
 and `session::fork` retain their existing owners. The latest
 `model.provider_request` event is the sole durable explanation of what a model
-received. The sheet uses that one latest event rather than presenting a
-non-actionable request-history card. Top-level reconstruction carries one
-bounded latest-request inventory, which iOS stores beside its existing cached
-session row. The sheet can therefore present that inventory offline without
-decoding transcript events. While connected it reconciles the summary through
-`session::context_requests(limit: 1)` and loads exact manifest/audit evidence
-through `session::context_request_detail` only when a detail row is opened.
-There is no context-specific database, subscription, or polling service, and
-exact provider audit bodies never enter the device transcript cache. Competing
-cache writes retain the highest server sequence so a slower reconstruction
-cannot overwrite a newer visible-sheet refresh.
+received. Top-level reconstruction carries one bounded latest-request summary,
+which iOS stores beside its disposable session row for immediate/offline
+presentation. While connected, `session::context_requests(limit: 1)` reconciles
+that summary. The exact manifest is fetched through
+`session::context_request_detail` only after the user opens Agent Context or
+Technical Details, cached once per immutable event, and reused by both sheets.
+Exact provider audit bodies never enter the device transcript cache.
 
-`UI/SessionContext/` keeps that ownership visible in source: the main sheet owns
-only presentation state and navigation; sections render the manifest; loading
-owns the sheet-scoped cancellable tasks; detail sheets load bounded
-evidence lazily; and the audit formatter projects redacted payloads. Cross-file
-extensions share the one sheet state rather than manufacturing feature view
-models or copies of provider-request data. Model metadata resolution accepts
-the engine's qualified, canonical, and alias identifiers, so a restored
-provider-local model id still recovers its catalog-owned context window instead
-of presenting a transient loading state. The main sheet constrains its content
-to the presentation width and owns only a vertical scroll axis; long live-state
-labels wrap within their cards rather than widening the scroll content. Global
-worker architecture remains in the Engine dashboard rather than being loaded
-again by Manage Session. The toolbar shows the current short model name and
-opens the model picker; the main body begins directly with actionable context
-inventory, so model switching does not consume a long body section. The latest
-audit retains its exact model identifier in durable evidence.
-The main context inventory has one Tool Surface disclosure row. Its
-available/omitted counts, relevance scores, and exact selected/omitted lists
-live together in the Tool Surface detail rather than being duplicated in
-another main-sheet summary card. Detail rows use lazy vertical layout so a
-large omitted-tool inventory does not mount all cards when the sheet opens.
-That detail orders the summary, selected fixed tools, selected direct workers,
-other fixed tools, omitted direct workers, and finally lazy exact evidence;
-headers remain visually attached to compact cards rather than sharing the
-inter-group spacing.
-Navigation rows across the Manage Session surface remain fully tappable
-without trailing chevrons; their leading icon, title, supporting text, and
-interactive glass treatment carry the affordance. A delivery row carrying a
-durable result invocation opens that exact bounded result inspector directly;
-the row never requires the user to rediscover the run in Engine history.
+Manage Session is deliberately a high-level operation surface. Below its
+compact token summary, it renders stable container rows for Agent Context,
+Background Activity, Session Workers, Terminal, Fork, and Technical Details.
+It does not inline unbounded instructions, deliveries, or worker runs. Every
+row remains mounted through disconnects and capability negotiation: an action
+that cannot currently run is disabled with a specific reason, then becomes
+interactive after reconciliation. In particular, Terminal never disappears
+when transport drops or an older server lacks native terminal support.
 
-The sheet seeds its inventory from the compact cached session projection; it
-does not predecode or prewarm an exact manifest. Provider Request and Tool
-Surface show bounded structured evidence first. Their exact JSON stays inside
-one internally scrolling selectable text view rather than expanding the parent
-scroll by hundreds of kilobytes. The main sheet uses a lazy vertical stack. Its
-view-scoped coordinator owns independent worker, delivery/wait, and provider
-summary lanes, each allowing one read in flight and retaining a dirty bit so an
-invalidation during that read guarantees a follow-up without cancelling
-authoritative work. Only the provider summary is eager. Worker and delivery/
-wait reads activate when their rows become visible, and reconnect or foreground
-refreshes only lanes that have been activated. A session/server generation
-prevents stale responses from applying after switches or disconnects. Only
-visible worker and delivery/wait state poll once per second while known
-activity remains; the immutable provider audit receives one final summary
-refresh when activity settles.
-Worker graphs publish before the optional friendly-name catalog lookup. Prior
-snapshots remain visible during refresh; cancellation is silent control flow,
-while a genuine refresh failure either offers retry for an empty lane or labels
-the retained snapshot as the last successful update. View teardown owns and
-cancels the coordinator. Manifest provenance arrays omitted by the server when
-empty decode as empty collections, preserving the rest of the audit instead of
-collapsing the visible sections to summary-only counts.
+Agent Context is the product-facing account of the selected request. It shows
+ordered instructions without byte counts or digests, conversation previews
+with the actual source model, tool, and model-turn facts when available,
+background updates included in that exact request, attachments, available
+tools/workers, and continuity narratives. `Updates included` means only durable
+background worker or agent deliveries admitted to that provider request;
+ordinary conversation messages and answers to `request_user_input` correctly
+remain under Conversation. An empty update list therefore explains the
+distinction instead of implying that loading failed.
 
-The v4 manifest drives standardized sections for ordered instructions,
-conversation/compaction, attachments and documents, environment, exact
-selected/omitted tools, durable Agent Deliveries, and the advanced redacted
-provider audit. V2/v3 remain readable; historical automatic-context outcomes
-stay visible and older v3 narratives without delivery evidence are labeled
-`System context (historical)`. The sheet also loads one bounded
-`session::agent_updates` projection. Request-specific evidence is named
-`Updates included` and counts only deliveries in the selected model request;
-its friendly summary leads to a lazy disclosure containing the unmodified
-model-visible v4 content. Live durable state is separately named `Delivery &
-wait status`, with active entries first. Resolved deliveries and waits remain
-behind one compact `Recent delivery history` button that opens a standard,
-width-bounded history sheet; nested history cards never expand inside the main
-Manage Session scroll.
-Passive results are `Available` and never called waits; pending wakes say `Will
-resume`, prepared entries say `In request`, observed entries say `Seen`, and
-retry-exhausted wakes say `Resume failed · Available passively`.
+Technical Details is the single audit surface. It owns event IDs, invocation
+IDs, hashes, byte counts, cache layout, exact selected/omitted tool evidence,
+the redacted provider envelope, and provider-visible environment provenance.
+Filesystem paths and server origins are redacted before durable audit storage
+to prevent personal paths or connection details from leaking into logs and
+exports; the technical sheet explains that boundary. No digest, raw identifier,
+redacted-path placeholder, or raw JSON appears in Agent Context or the main
+Manage Session sheet.
 
-The sheet reuses its bounded visible observer while an agent or session worker
-is active, a wait is pending, or a wake is pending/prepared, then performs one
-terminal refresh. Passive-only and historical state stop observation. Exact v4
-content and provenance remain request-specific evidence in the detail sheet.
-Delivery-only assistant continuations render without a fabricated user bubble
-and say `Resumed from …`; a natural turn says `Update included · …` only when
-that delivery belongs to the same provider request. If a later tool turn carries
-the run-level provenance onto the final answer, chat says `Update used earlier
-· …`, while Manage Session continues to count only the selected request. Wake
-provenance is persisted and broadcast on the first turn-start, before thinking,
-tools, or assistant text, while the completed assistant event retains the same
-metadata for replay. Live and reconstructed chat deduplicate that audit metadata
-by delivery identity within one resumed run, so a multi-turn tool exchange shows
-one compact provenance prelude with an eight-point gap before the resumed
-content. A later explicit redelivery remains presentable. Older servers that
-supply provenance only at response completion retain a bounded fallback. The
+The context-detail response enriches each message inventory entry from its
+immutable source events in one bounded, session-scoped batch. These response-
+only `sourceModels`, `sourceTools`, and `sourceTurns` fields do not mutate or
+duplicate the canonical provider audit. Older servers omit them and continue
+to decode with empty arrays. V2/v3/v4 manifests remain readable; historical
+automatic-context narratives without explicit delivery evidence remain labeled
+as historical system context.
+
+Background Activity and Session Workers are separate progressive-disclosure
+sheets. Their view-scoped coordinator owns independent single-flight lanes with
+dirty-bit follow-up, session/server generations, retained snapshots, and
+cancellation on teardown. Reads activate only after their high-level rows mount;
+foreground and reconnect refresh only activated lanes. Active state polls at a
+bounded cadence and performs one terminal refresh, while settled state stops
+polling. Detent changes do not restart reads. Background Activity separates
+active and historical deliveries/waits and opens exact durable results. Session
+Workers pages bounded `detail: "graph"` roots and their causal descendants;
+opening a run reuses the canonical worker detail rather than creating another
+activity store.
+
+`UI/SessionContext/` keeps this ownership visible in source: the main sheet
+owns navigation and shared snapshots; loading owns cancellable tasks and exact-
+detail caching; presentation owns pure availability and labeling policy; and
+the detail/activity sheets render bounded disclosures. Model metadata resolution
+accepts qualified, canonical, and alias identifiers, so restored sessions use
+the catalog-owned context window. Cross-file extensions share the one sheet
+state rather than manufacturing parallel view models or context stores.
+
+Delivery-only assistant continuations render without a fabricated user bubble.
+Wake provenance is persisted before thinking, tools, or assistant text and is
+deduplicated by delivery identity during live/reconstructed chat. The
 `agent_wait_for_workers` chip says `Auto-resume registered` while pending and
-does not imply that the worker has completed. Optional continuation metadata is
-backward-compatible and records source worker identity and presentation name,
-wake policy, safe boundary, and whether the continuation was wake-triggered.
-The summary shows cache-read percentage beside
-input, output, and cost using existing session token totals. Advanced detail
-shows session cache reads/writes and manifest-owned stable instruction,
-fixed/dynamic schema, and reference-context byte/digest evidence. No context-
-or delivery-specific client store is added. Binary media renders only metadata,
-size, and digest; it is never converted to audit text. Exact selected and
-omitted worker tools remain visible per provider request. Global exposure,
-runner, hook/native-boundary, relationship, suite, version, health, and
-provenance metadata is shown with each worker's canonical Engine inspection
-instead of a duplicate Worker System directory.
-
-The sheet also requests bounded `detail: "graph"` worker runs
-filtered by the durable originating session. Because causal descendants
-preserve the root session id, this includes direct and nested worker activity.
-Rows group by causal root and explicitly retain queued, running, detached,
-completed, failed, and cancelled descendants; opening any row resolves the
-same exact server graph, including child-session links and generic controls.
-Session sections share the same compact header typography and card
-geometry; headings remain attached to the content they introduce while wider
-inter-section spacing separates each completed card from the next section.
-The worker heading and explanatory line are one compact label block, and worker
-rows do not introduce a separate dashboard visual scale.
-Run detail offers one emerald `Open Chat` toolbar action only when the
-invocation created a real agent child session. The originating session remains
-provenance and never masquerades as a worker transcript; command and
-resident-service runs have no redundant empty Model Context section. Fork
-confirmation is a native animated liquid-glass sheet rather than an abrupt
-dialog overlay.
-Session actions are disabled while disconnected, compacting, or running a turn.
-There is no parallel context-control repository, resource/action audit,
-memory editor, or manual compact/clear façade. Those controls may appear only
-after the core exposes real production operations for them.
+does not imply completion. Session mutations remain disabled while disconnected,
+compacting, or running a turn. Fork confirmation remains a native animated
+liquid-glass sheet. There is no parallel context-control repository, resource/
+action audit, memory editor, or fabricated manual compact/clear API.
 
 ## Settings Parity
 
@@ -1250,11 +1186,13 @@ The model picker additionally resolves the OpenAI neutral accent to the
 standard high-contrast secondary-text token in dark mode. Model-entry chrome,
 the picker title and confirmation action, and the reasoning control share the
 emerald product accent; provider and model cards retain their provider-specific
-colors. A session-owned picker derives its reasoning menu solely from the
-selected catalog row's exact non-empty `reasoningLevels`, normalizes an old
-selection to that model's declared default (or first exact option), and routes
-the result through a direct sheet callback. It never fabricates a generic level
-list or broadcasts a selection that another mounted session could consume.
+colors. The reasoning control is a native toolbar `Menu`, matching the compact
+system menu used by Terminal rather than presenting a custom popover. A
+session-owned picker derives that menu solely from the selected catalog row's
+exact non-empty `reasoningLevels`, normalizes an old selection to that model's
+declared default (or first exact option), and routes the result through a direct
+sheet callback. It never fabricates a generic level list or broadcasts a
+selection that another mounted session could consume.
 
 Provider cards share one leading-icon and trailing-action column contract.
 Provider names and row labels therefore remain left-aligned across differing

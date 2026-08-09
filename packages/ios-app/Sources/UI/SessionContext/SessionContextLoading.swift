@@ -239,39 +239,11 @@ extension SessionContextSheet {
         _ destination: SessionContextDetailDestination,
         detail: SessionContextRequestDetailDTO
     ) -> SessionContextDetailSelection {
-        let manifest = detail.contextManifest
         switch destination {
-        case .instructions:
-            return .instructions(
-                (manifest?.systemContributions ?? []) + (detail.providerAdditions ?? [])
-            )
-        case .messages:
-            return .messages(manifest?.messages ?? [])
-        case .deliveries:
-            return .deliveries(manifest?.agentDeliveries ?? [])
-        case .attachments:
-            return .attachments(
-                manifest?.messages.filter {
-                    $0.contentKinds.contains("image")
-                        || $0.contentKinds.contains("document")
-                } ?? []
-            )
-        case .environment:
-            return .environment(manifest?.environment)
-        case .tools:
-            return .tools(
-                fixed: SessionContextPresentation.fixedToolSelections(
-                    from: manifest?.toolSurface
-                ),
-                workers: SessionContextPresentation.workerSelections(
-                    from: manifest?.toolSurface
-                ),
-                raw: manifest?.toolSurface
-            )
-        case .automaticContext:
-            return .automatic(manifest?.automaticContext ?? [])
-        case .providerAudit:
-            return .providerAudit(
+        case .agentContext:
+            return .agentContext(detail)
+        case .technical:
+            return .technical(
                 detail,
                 cacheReadTokens: contextState.accumulatedCacheReadTokens,
                 cacheWriteTokens: contextState.accumulatedCacheCreationTokens
