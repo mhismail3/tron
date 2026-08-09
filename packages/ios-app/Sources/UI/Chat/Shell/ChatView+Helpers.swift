@@ -19,29 +19,64 @@ extension ChatView {
 
     func presentUserInput(_ request: UserInputRequest, automatically: Bool = false) {
         Task {
-            var draft = await restoredUserInputDraft(for: request)
-            guard viewModel.currentUserInputRequest(invocationId: request.invocationId)?.isAnswerable == true else {
+            let currentRequest = viewModel.currentUserInputRequest(
+                invocationId: request.invocationId
+            ) ?? request
+
+            // Answered and failed chips are durable audit surfaces. They do
+            // not own mutable draft state, so a manual tap can present their
+            // canonical snapshot immediately. Automatic presentation remains
+            // exclusive to a newly received pending request.
+            guard currentRequest.isAnswerable else {
+                guard UserInputPresentation.shouldPresentSheet(
+                    for: currentRequest,
+                    automatically: automatically,
+                    hasBeenPresented: false
+                ) else { return }
+                sheetCoordinator.showUserInput(currentRequest)
                 return
             }
-            guard !automatically || !draft.hasBeenPresented else { return }
+
+            var draft = await restoredUserInputDraft(for: currentRequest)
+            guard let latestRequest = viewModel.currentUserInputRequest(
+                invocationId: currentRequest.invocationId
+            ) else { return }
+
+            // The request can resolve while its device-local draft is being
+            // read. Manual presentation follows that transition into the
+            // canonical read-only audit sheet; an automatic popup does not.
+            guard latestRequest.isAnswerable else {
+                guard UserInputPresentation.shouldPresentSheet(
+                    for: latestRequest,
+                    automatically: automatically,
+                    hasBeenPresented: draft.hasBeenPresented
+                ) else { return }
+                sheetCoordinator.showUserInput(latestRequest)
+                return
+            }
+            guard UserInputPresentation.shouldPresentSheet(
+                for: latestRequest,
+                automatically: automatically,
+                hasBeenPresented: draft.hasBeenPresented
+            ) else { return }
             if !draft.hasBeenPresented {
                 draft.hasBeenPresented = true
                 sheetCoordinator.updateUserInputDraft(
                     draft,
-                    invocationId: request.invocationId
+                    invocationId: latestRequest.invocationId
                 )
                 await dependencies.draftStore.saveUserInputDraft(
                     sessionId: sessionId,
-                    invocationId: request.invocationId,
+                    invocationId: latestRequest.invocationId,
                     draft: draft
                 )
             } else {
                 sheetCoordinator.updateUserInputDraft(
                     draft,
-                    invocationId: request.invocationId
+                    invocationId: latestRequest.invocationId
                 )
             }
-            sheetCoordinator.showUserInput(request)
+            sheetCoordinator.showUserInput(latestRequest)
         }
     }
 

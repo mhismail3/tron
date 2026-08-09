@@ -200,6 +200,18 @@ struct UserInputAnswerRecord: Equatable, Sendable {
 }
 
 enum UserInputPresentation {
+    /// Manual chip taps are an audit surface and may open any durable request
+    /// state. Automatic presentation is intentionally narrower: only a new,
+    /// pending request that has not already been shown may interrupt the user.
+    static func shouldPresentSheet(
+        for request: UserInputRequest,
+        automatically: Bool,
+        hasBeenPresented: Bool
+    ) -> Bool {
+        guard automatically else { return true }
+        return request.isAnswerable && !hasBeenPresented
+    }
+
     static func sheetTitle(for request: UserInputRequest) -> String {
         switch request.status {
         case .pending:
