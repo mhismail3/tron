@@ -263,7 +263,10 @@ struct SessionContextSheet: View {
             }
         }
         .sheet(isPresented: $showTerminal) {
-            TerminalSessionSheet(sessionId: sessionId, client: dependencies.engineClient)
+            TerminalSessionSheet(
+                sessionId: sessionId,
+                repository: dependencies.terminalRepository
+            )
         }
         .sheet(item: $selectedWorkerRun) { run in
             WorkerRunDetailSheet(

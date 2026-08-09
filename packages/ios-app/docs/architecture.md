@@ -156,7 +156,11 @@ Mode is advertised as `terminal.v1`; it is a fixed client/engine seam, not a
 model-callable primitive or worker. `TerminalClient` uses native-client-only
 typed operations for list/open/write/resize/terminate, while `terminal.attach`
 and `terminal.detach` multiplex ordered base64 PTY bytes over the existing
-socket.
+socket. `DefaultTerminalRepository` projects capability, terminal metadata,
+attachments, and ordered stream updates into UI-safe values. Session and UI
+code depend on that repository and never reach through the composition root to
+the concrete engine transport; the repository is recreated on every server
+switch so it cannot retain a stale socket owner.
 The client applies sequence numbers exactly once, reattaches from its last
 applied sequence after a foreground/network epoch change, and rebuilds the
 renderer from a server checkpoint if its cursor fell behind bounded replay.

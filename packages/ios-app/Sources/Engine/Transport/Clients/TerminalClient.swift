@@ -42,30 +42,46 @@ final class TerminalClient: EngineDomainClient {
         return result.terminal
     }
 
-    func write(_ bytes: [UInt8], terminal: TerminalSummaryDTO, inputId: String) async throws {
+    func write(
+        _ bytes: [UInt8],
+        terminalId: String,
+        generation: UInt64,
+        sessionId: String,
+        inputId: String
+    ) async throws {
         let _: TerminalWriteDTO = try await invokeWrite(
             "terminal::write",
-            WriteRequest(terminalId: terminal.id, generation: terminal.generation, inputId: inputId, dataBase64: Data(bytes).base64EncodedString()),
-            idempotencyKey: EngineIdempotencyKey(rawValue: "terminal-input:\(terminal.id):\(inputId)"),
-            context: sessionInvocationContext(terminal.sessionId)
+            WriteRequest(terminalId: terminalId, generation: generation, inputId: inputId, dataBase64: Data(bytes).base64EncodedString()),
+            idempotencyKey: EngineIdempotencyKey(rawValue: "terminal-input:\(terminalId):\(inputId)"),
+            context: sessionInvocationContext(sessionId)
         )
     }
 
-    func resize(terminal: TerminalSummaryDTO, rows: UInt16, columns: UInt16) async throws {
+    func resize(
+        terminalId: String,
+        generation: UInt64,
+        sessionId: String,
+        rows: UInt16,
+        columns: UInt16
+    ) async throws {
         let _: TerminalResizeDTO = try await invokeWrite(
             "terminal::resize",
-            ResizeRequest(terminalId: terminal.id, generation: terminal.generation, rows: rows, columns: columns),
-            idempotencyKey: .userAction("terminal-resize-\(terminal.id)-\(terminal.generation)-\(rows)x\(columns)"),
-            context: sessionInvocationContext(terminal.sessionId)
+            ResizeRequest(terminalId: terminalId, generation: generation, rows: rows, columns: columns),
+            idempotencyKey: .userAction("terminal-resize-\(terminalId)-\(generation)-\(rows)x\(columns)"),
+            context: sessionInvocationContext(sessionId)
         )
     }
 
-    func terminate(_ terminal: TerminalSummaryDTO) async throws {
+    func terminate(
+        terminalId: String,
+        generation: UInt64,
+        sessionId: String
+    ) async throws {
         let _: TerminalTerminateDTO = try await invokeWrite(
             "terminal::terminate",
-            IdentityRequest(terminalId: terminal.id, generation: terminal.generation),
-            idempotencyKey: .userAction("terminal-terminate-\(terminal.id)"),
-            context: sessionInvocationContext(terminal.sessionId)
+            IdentityRequest(terminalId: terminalId, generation: generation),
+            idempotencyKey: .userAction("terminal-terminate-\(terminalId)"),
+            context: sessionInvocationContext(sessionId)
         )
     }
 

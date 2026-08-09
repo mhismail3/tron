@@ -676,7 +676,7 @@ extension SessionContextSheet {
                 bottomPadding: SessionContextPresentation.headerToContentSpacing
             )
 
-            if dependencies.engineClient.supportsNativeTerminal {
+            if dependencies.terminalRepository.isSupported {
                 Button { showTerminal = true } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "terminal")
@@ -692,7 +692,6 @@ extension SessionContextSheet {
                                 .foregroundStyle(.tronTextMuted)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(.tronTextMuted)
                     }
                     .padding(14)
                 }

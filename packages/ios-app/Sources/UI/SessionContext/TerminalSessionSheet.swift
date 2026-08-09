@@ -8,15 +8,15 @@ final class TerminalSessionController {
     struct RenderChunk: Identifiable { let id: UInt64; let bytes: [UInt8] }
 
     let sessionId: String
-    private let client: EngineClient
-    private(set) var terminal: TerminalSummaryDTO?
+    private let repository: any TerminalRepository
+    private(set) var terminal: TerminalSnapshot?
     private(set) var chunks: [RenderChunk] = []
     private(set) var status = "Connecting"
     private(set) var errorMessage: String?
     private(set) var attachmentId: String?
     private(set) var lastSequence: UInt64 = 0
     private(set) var rendererGeneration: UInt64 = 0
-    private(set) var history: [TerminalSummaryDTO] = []
+    private(set) var history: [TerminalSnapshot] = []
     private var resizeTask: Task<Void, Never>?
     private var didStart = false
     private var isAttaching = false
@@ -26,9 +26,9 @@ final class TerminalSessionController {
     private var isFlushingInput = false
     private var isDetached = false
 
-    init(sessionId: String, client: EngineClient) {
+    init(sessionId: String, repository: any TerminalRepository) {
         self.sessionId = sessionId
-        self.client = client
+        self.repository = repository
     }
 
     var workingDirectory: String { terminal?.workingDirectory ?? "Session workspace" }
@@ -38,19 +38,21 @@ final class TerminalSessionController {
         guard !didStart else { return }
         didStart = true
         isDetached = false
-        client.setTerminalFrameHandler { [weak self] frame in self?.receive(frame) }
-        guard client.supportsNativeTerminal else {
+        errorMessage = nil
+        repository.setUpdateHandler { [weak self] update in self?.receive(update) }
+        guard repository.isSupported else {
+            didStart = false
             errorMessage = "This Tron server does not support Terminal Mode."
             status = "Unavailable"
             return
         }
         do {
-            let opened = try await client.terminal.open(sessionId: sessionId, rows: 24, columns: 80)
+            let opened = try await repository.open(sessionId: sessionId, rows: 24, columns: 80)
             terminal = opened
             processState = opened.state
             status = "Attaching"
             try await attach()
-            history = (try? await client.terminal.list(sessionId: sessionId)) ?? []
+            history = (try? await repository.list(sessionId: sessionId)) ?? []
             history.removeAll { $0.id == opened.id }
         } catch {
             didStart = false
@@ -77,8 +79,8 @@ final class TerminalSessionController {
     func detach() async {
         resizeTask?.cancel()
         isDetached = true
-        if let attachmentId { await client.detachTerminal(attachmentId) }
-        client.setTerminalFrameHandler(nil)
+        if let attachmentId { await repository.detach(attachmentId: attachmentId) }
+        repository.setUpdateHandler(nil)
         attachmentId = nil
     }
 
@@ -101,20 +103,20 @@ final class TerminalSessionController {
             guard !Task.isCancelled,
                   let rows = UInt16(exactly: max(5, min(rows, 200))),
                   let columns = UInt16(exactly: max(20, min(columns, 400))) else { return }
-            try? await client.terminal.resize(terminal: terminal, rows: rows, columns: columns)
+            try? await repository.resize(terminal: terminal, rows: rows, columns: columns)
         }
     }
 
     func terminate() {
         guard let terminal else { return }
         Task {
-            do { try await client.terminal.terminate(terminal); status = "Stopping" }
+            do { try await repository.terminate(terminal); status = "Stopping" }
             catch { errorMessage = error.localizedDescription }
         }
     }
 
-    func showHistory(_ selected: TerminalSummaryDTO) async {
-        if let attachmentId { await client.detachTerminal(attachmentId) }
+    func showHistory(_ selected: TerminalSnapshot) async {
+        if let attachmentId { await repository.detach(attachmentId: attachmentId) }
         attachmentId = nil
         terminal = selected
         processState = selected.state
@@ -130,9 +132,9 @@ final class TerminalSessionController {
 
     func showLiveTerminal() async {
         do {
-            let opened = try await client.terminal.open(sessionId: sessionId, rows: 24, columns: 80)
+            let opened = try await repository.open(sessionId: sessionId, rows: 24, columns: 80)
             await showHistory(opened)
-            history = try await client.terminal.list(sessionId: sessionId)
+            history = try await repository.list(sessionId: sessionId)
             history.removeAll { $0.id == opened.id }
         } catch {
             errorMessage = error.localizedDescription
@@ -144,13 +146,13 @@ final class TerminalSessionController {
         guard let terminal, !isAttaching else { return }
         isAttaching = true
         defer { isAttaching = false }
-        if let attachmentId { await client.detachTerminal(attachmentId) }
+        if let attachmentId { await repository.detach(attachmentId: attachmentId) }
         let proposedAttachmentId = "termatt_\(UUID().uuidString)"
         attachmentId = proposedAttachmentId
-        let attached: TerminalAttachResult
+        let attached: TerminalAttachmentSnapshot
         do {
-            attached = try await client.attachTerminal(
-                terminal.id,
+            attached = try await repository.attach(
+                terminalId: terminal.id,
                 attachmentId: proposedAttachmentId,
                 afterSequence: lastSequence
             )
@@ -173,7 +175,7 @@ final class TerminalSessionController {
         while !pendingInputs.isEmpty, !isDetached, processState == "running" {
             let input = pendingInputs[0]
             do {
-                try await client.terminal.write(input.bytes, terminal: terminal, inputId: input.id)
+                try await repository.write(input.bytes, terminal: terminal, inputId: input.id)
                 if pendingInputs.first?.id == input.id {
                     pendingInputs.removeFirst()
                     pendingInputBytes -= input.bytes.count
@@ -185,22 +187,19 @@ final class TerminalSessionController {
         }
     }
 
-    private func receive(_ frame: TerminalInboundFrame) {
-        guard frame.attachmentId == attachmentId else { return }
-        if frame.type == "terminal.status" {
-            if let state = frame.state, state != "catch_up_required" { processState = state }
-            status = frame.state == "catch_up_required" ? "Catching up" : (frame.state ?? "Connected")
-            if frame.state == "catch_up_required" { Task { try? await attach() } }
-            return
+    private func receive(_ update: TerminalStreamUpdate) {
+        switch update {
+        case .status(let updateAttachmentId, let state, _, _):
+            guard updateAttachmentId == attachmentId else { return }
+            if let state, state != "catch_up_required" { processState = state }
+            status = state == "catch_up_required" ? "Catching up" : (state ?? "Connected")
+            if state == "catch_up_required" { Task { try? await attach() } }
+        case .output(let updateAttachmentId, let sequence, let bytes):
+            guard updateAttachmentId == attachmentId, sequence > lastSequence else { return }
+            lastSequence = sequence
+            chunks.append(RenderChunk(id: sequence, bytes: bytes))
+            if chunks.count > 2_048 { chunks.removeFirst(chunks.count - 2_048) }
         }
-        guard frame.type == "terminal.output",
-              let sequence = frame.sequence,
-              sequence > lastSequence,
-              let encoded = frame.dataBase64,
-              let data = Data(base64Encoded: encoded) else { return }
-        lastSequence = sequence
-        chunks.append(RenderChunk(id: sequence, bytes: [UInt8](data)))
-        if chunks.count > 2_048 { chunks.removeFirst(chunks.count - 2_048) }
     }
 }
 
@@ -210,8 +209,13 @@ struct TerminalSessionSheet: View {
     @State private var controller: TerminalSessionController
     @State private var confirmTerminate = false
 
-    init(sessionId: String, client: EngineClient) {
-        _controller = State(initialValue: TerminalSessionController(sessionId: sessionId, client: client))
+    init(sessionId: String, repository: any TerminalRepository) {
+        _controller = State(
+            initialValue: TerminalSessionController(
+                sessionId: sessionId,
+                repository: repository
+            )
+        )
     }
 
     var body: some View {

@@ -502,6 +502,9 @@ struct WorkerConsoleInteractionTests {
         #expect(deliveryHistorySheet.contains(".containerRelativeFrame(.horizontal)"))
         #expect(detailSheet.contains("Exact model-visible content"))
         #expect(detailSheet.contains("includedDeliverySummary"))
+        #expect(context.contains("dependencies.terminalRepository.isSupported"))
+        #expect(mainSheet.contains("repository: dependencies.terminalRepository"))
+        #expect(!context.contains("dependencies.engineClient"))
     }
 
     @Test("Worker architecture is integrated into normal inventory and detail")
