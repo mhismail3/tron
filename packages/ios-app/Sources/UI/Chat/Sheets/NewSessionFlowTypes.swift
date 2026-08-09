@@ -35,6 +35,31 @@ struct NewSessionSourceControlProbeKey: Equatable, Sendable {
     let continuity: EngineConnectionContinuity
 }
 
+enum NewSessionSourceControlProbeFailure: Equatable, Sendable {
+    case serverUpgradeRequired
+    case retry
+
+    init(errorCode: String?) {
+        self = errorCode == "NOT_FOUND" ? .serverUpgradeRequired : .retry
+    }
+
+    var value: String {
+        switch self {
+        case .serverUpgradeRequired: "Server Update Required"
+        case .retry: "Could Not Check"
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .serverUpgradeRequired:
+            "The connected Tron server does not support Git session placement yet. Update or restart it, then retry."
+        case .retry:
+            "Could not inspect this workspace. Tap to retry."
+        }
+    }
+}
+
 enum NewSessionWorkingDirectoryResolution {
     static func resolve(
         requested: String,
