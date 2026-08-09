@@ -133,6 +133,12 @@ struct TerminalSessionControllerTests {
         #expect(source.contains(".glassEffect("))
         #expect(source.contains("accessibilityLabel: \"Command keys\""))
         #expect(source.contains("accessibilityLabel: \"Dismiss keyboard\""))
+        #expect(source.contains("private var scrollingControls: some View"))
+        #expect(source.contains("private var stickyDismissButton: some View"))
+        #expect(source.contains(".scrollClipDisabled(false)"))
+        #expect(source.contains(".clipShape(Capsule())"))
+        #expect(source.contains(".padding(.top, 12)"))
+        #expect(!source.contains(".scrollClipDisabled()"))
         #expect(!source.contains(".background(Color(uiColor: .systemBackground))"))
     }
 

@@ -594,63 +594,90 @@ private struct TerminalControlBar: View {
     let keyboard: TerminalKeyboardController
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 2) {
-                textButton("esc", accessibilityLabel: "Escape") {
-                    keyboard.send(EscapeSequences.cmdEsc)
-                }
-                toggleButton(
-                    "ctrl",
-                    accessibilityLabel: "Control modifier",
-                    isSelected: keyboard.isControlModifierEnabled,
-                    action: keyboard.toggleControlModifier
-                )
-                imageButton("arrow.right.to.line.compact", accessibilityLabel: "Tab") {
-                    keyboard.send(EscapeSequences.cmdTab)
-                }
-                textButton("~", accessibilityLabel: "Tilde") { keyboard.send("~") }
-                textButton("|", accessibilityLabel: "Pipe") { keyboard.send("|") }
-                textButton("/", accessibilityLabel: "Slash") { keyboard.send("/") }
-                textButton("−", accessibilityLabel: "Dash") { keyboard.send("-") }
-
-                Divider()
-                    .frame(height: 20)
-                    .padding(.horizontal, 2)
-
-                ForEach(TerminalCursorKey.allCases, id: \.self) { cursor in
-                    imageButton(cursor.symbolName, accessibilityLabel: "Move \(cursor)") {
-                        keyboard.sendCursor(cursor)
-                    }
-                }
-
-                toggleImageButton(
-                    keyboard.isTouchScrollingEnabled ? "hand.draw.fill" : "hand.draw",
-                    accessibilityLabel: "Touch scrolling",
-                    isSelected: keyboard.isTouchScrollingEnabled,
-                    action: keyboard.toggleTouchScrolling
-                )
-                toggleImageButton(
-                    "rectangle.grid.3x2",
-                    accessibilityLabel: "Command keys",
-                    isSelected: keyboard.isExtendedKeyboardPresented,
-                    action: keyboard.toggleExtendedKeyboard
-                )
-                imageButton(
-                    "keyboard.chevron.compact.down",
-                    accessibilityLabel: "Dismiss keyboard",
-                    action: keyboard.dismissKeyboard
-                )
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                scrollingControls
             }
-            .padding(.horizontal, 7)
-            .frame(height: 42)
+            // INVARIANT: controls clip to their allocated viewport. The
+            // capsule clips the curved outer edge; this scroll viewport clips
+            // the fixed dismiss region's straight inner edge.
+            .scrollClipDisabled(false)
+            .frame(maxWidth: .infinity)
+
+            Divider()
+                .frame(height: 22)
+                .accessibilityHidden(true)
+
+            stickyDismissButton
+                .frame(width: 44)
+                .layoutPriority(1)
         }
-        .scrollClipDisabled()
+        .frame(maxWidth: .infinity)
+        .frame(height: 42)
+        .clipShape(Capsule())
         .glassEffect(
             .regular.tint(Color.tronPhthaloGreen.opacity(0.2)).interactive(),
             in: Capsule()
         )
         .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        // Keep the terminal's last visible row comfortably clear of the
+        // floating control surface while preserving the keyboard attachment.
+        .padding(.top, 12)
+        .padding(.bottom, 5)
+    }
+
+    private var scrollingControls: some View {
+        HStack(spacing: 2) {
+            textButton("esc", accessibilityLabel: "Escape") {
+                keyboard.send(EscapeSequences.cmdEsc)
+            }
+            toggleButton(
+                "ctrl",
+                accessibilityLabel: "Control modifier",
+                isSelected: keyboard.isControlModifierEnabled,
+                action: keyboard.toggleControlModifier
+            )
+            imageButton("arrow.right.to.line.compact", accessibilityLabel: "Tab") {
+                keyboard.send(EscapeSequences.cmdTab)
+            }
+            textButton("~", accessibilityLabel: "Tilde") { keyboard.send("~") }
+            textButton("|", accessibilityLabel: "Pipe") { keyboard.send("|") }
+            textButton("/", accessibilityLabel: "Slash") { keyboard.send("/") }
+            textButton("−", accessibilityLabel: "Dash") { keyboard.send("-") }
+
+            Divider()
+                .frame(height: 20)
+                .padding(.horizontal, 2)
+
+            ForEach(TerminalCursorKey.allCases, id: \.self) { cursor in
+                imageButton(cursor.symbolName, accessibilityLabel: "Move \(cursor)") {
+                    keyboard.sendCursor(cursor)
+                }
+            }
+
+            toggleImageButton(
+                keyboard.isTouchScrollingEnabled ? "hand.draw.fill" : "hand.draw",
+                accessibilityLabel: "Touch scrolling",
+                isSelected: keyboard.isTouchScrollingEnabled,
+                action: keyboard.toggleTouchScrolling
+            )
+            toggleImageButton(
+                "rectangle.grid.3x2",
+                accessibilityLabel: "Command keys",
+                isSelected: keyboard.isExtendedKeyboardPresented,
+                action: keyboard.toggleExtendedKeyboard
+            )
+        }
+        .padding(.horizontal, 7)
+        .frame(height: 42)
+    }
+
+    private var stickyDismissButton: some View {
+        imageButton(
+            "keyboard.chevron.compact.down",
+            accessibilityLabel: "Dismiss keyboard",
+            action: keyboard.dismissKeyboard
+        )
     }
 
     private func textButton(
