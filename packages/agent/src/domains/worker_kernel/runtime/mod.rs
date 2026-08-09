@@ -411,6 +411,7 @@ impl WorkerRuntime {
             .collect::<Result<Vec<_>, String>>()?;
         Ok(json!({
             "dispatchStopped": self.store.stop_all()?,
+            "nativeCapabilities": [crate::domains::terminal::CAPABILITY],
             "activeEngineHooks": self.engine_hook_inventory()?,
             "activeClientActions": self.client_action_inventory()?,
             "activeClientDeliveries": self.client_delivery_inventory()?,

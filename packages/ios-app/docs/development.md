@@ -513,6 +513,14 @@ xcodebuild test -project TronMobile.xcodeproj -scheme 'Tron Beta' \
   -only-testing:TronMobileTests/EngineConnectionReconnectTests
 ```
 
+Terminal Mode additionally pins SwiftTerm in `project.yml`. Run `xcodegen
+generate` after dependency changes. The selected Xcode installation must have
+its matching Metal toolchain component installed because SwiftTerm ships a
+Metal-backed renderer resource; `xcodebuild -downloadComponent MetalToolchain`
+installs that Xcode-owned prerequisite. Terminal protocol tests belong with
+`EngineClientTests` and `WebSocketAuthTests`; a full Beta build verifies the
+SwiftTerm bridge and Swift 6 actor isolation.
+
 For the main Settings destination copy or the Engine/Providers sheet hierarchy,
 run the focused ownership and no-summary-hero contracts:
 

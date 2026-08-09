@@ -119,6 +119,10 @@ final class WorkerConsoleViewModel {
         engineSnapshot?.fixedTools ?? []
     }
 
+    var nativeCapabilities: [String] {
+        engineSnapshot?.nativeCapabilities ?? []
+    }
+
     var primitiveToolGroups: [EnginePrimitiveGroup] {
         EngineDashboardPresentation.primitiveGroups(primitiveTools)
     }

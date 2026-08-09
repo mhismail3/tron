@@ -30,6 +30,7 @@ final class EngineConnection {
     var reconnectAttempts = 0
     /// Exact outbound frame budget negotiated through `hello.ok`.
     var negotiatedMaxMessageSize: Int?
+    private(set) var negotiatedCapabilities: Set<String> = []
 
     /// Retry while foreground so dev rebuilds and Mac restarts recover centrally.
     let reconnectPolicy = ReconnectProbePolicy()
@@ -83,6 +84,7 @@ final class EngineConnection {
 
     /// Event callback with the decoded neutral payload plus stream cursor metadata.
     var onEvent: ((EngineEventDelivery) -> Void)?
+    var onTerminalFrame: ((TerminalInboundFrame) -> Void)?
 
     // MARK: - Background State
 
@@ -137,6 +139,7 @@ final class EngineConnection {
 
         isConnectedFlag = false
         negotiatedMaxMessageSize = nil
+        negotiatedCapabilities.removeAll(keepingCapacity: true)
         openedWebSocketTask = nil
         openTimeoutTask?.cancel()
         openTimeoutTask = nil
@@ -249,7 +252,10 @@ final class EngineConnection {
                 logger.debug("Protocol hello completed after socket teardown", category: .websocket)
                 return
             }
-            markProtocolReady(maxMessageSize: helloResult.maxMessageSize)
+            markProtocolReady(
+                maxMessageSize: helloResult.maxMessageSize,
+                capabilities: helloResult.capabilities ?? []
+            )
         } catch {
             logger.warning("Engine hello failed: \(error.localizedDescription)", category: .websocket)
             cleanupDeadConnection(error: error, stateAfterCleanup: stateOnFailure)
@@ -264,8 +270,9 @@ final class EngineConnection {
 
     /// Publish usable connection state only after the server has acknowledged
     /// the protocol and supplied its negotiated frame ceiling.
-    func markProtocolReady(maxMessageSize: Int?) {
+    func markProtocolReady(maxMessageSize: Int?, capabilities: [String] = []) {
         negotiatedMaxMessageSize = maxMessageSize
+        negotiatedCapabilities = Set(capabilities)
         reconnectAttempts = 0
         connectionState = .connected
         logger.logWebSocketState(

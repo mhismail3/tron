@@ -59,6 +59,11 @@ final class EngineClient: EngineTransport {
     /// reconciled. This catches rapid reconnects whose intermediate state is
     /// coalesced before observation samples it.
     private var readyTransportGeneration: UInt64?
+    private var terminalFrameHandler: ((TerminalInboundFrame) -> Void)?
+
+    var supportsNativeTerminal: Bool {
+        engineConnection?.negotiatedCapabilities.contains("terminal.v1") == true
+    }
 
     // MARK: - Domain Clients
 
@@ -108,6 +113,24 @@ final class EngineClient: EngineTransport {
     /// Authenticated fixed native-notification operations.
     @ObservationIgnored
     lazy var notifications: NotificationClient = NotificationClient(transport: self)
+
+    /// Authenticated native PTY controls. Output remains socket-attached.
+    @ObservationIgnored
+    lazy var terminal: TerminalClient = TerminalClient(transport: self)
+
+    func setTerminalFrameHandler(_ handler: ((TerminalInboundFrame) -> Void)?) {
+        terminalFrameHandler = handler
+        engineConnection?.onTerminalFrame = handler
+    }
+
+    func attachTerminal(_ terminalId: String, attachmentId: String, afterSequence: UInt64) async throws -> TerminalAttachResult {
+        guard let engineConnection else { throw EngineClientError.connectionNotEstablished }
+        return try await engineConnection.attachTerminal(terminalId: terminalId, attachmentId: attachmentId, afterSequence: afterSequence)
+    }
+
+    func detachTerminal(_ attachmentId: String) async {
+        try? await engineConnection?.detachTerminal(attachmentId: attachmentId)
+    }
 
     /// Session context visibility and context-boundary client.
     @ObservationIgnored
@@ -367,6 +390,7 @@ final class EngineClient: EngineTransport {
             self?.handleEventDelivery(delivery)
             // Engine responses are handled by EngineConnection via pendingRequests.
         }
+        ws.onTerminalFrame = terminalFrameHandler
 
         return ws
     }

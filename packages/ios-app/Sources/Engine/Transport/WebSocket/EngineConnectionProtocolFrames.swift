@@ -19,6 +19,48 @@ struct EngineHelloResult: Decodable, Equatable, Sendable {
     let minimumSupportedVersion: UInt64
     let serverId: String
     let maxMessageSize: Int
+    let capabilities: [String]?
+}
+
+struct TerminalAttachFrame: Encodable {
+    let type = "terminal.attach"
+    let id: String
+    let terminalId: String
+    let attachmentId: String
+    let afterSequence: UInt64
+}
+
+struct TerminalDetachFrame: Encodable {
+    let type = "terminal.detach"
+    let id: String
+    let attachmentId: String
+}
+
+struct TerminalAttachResult: Decodable, Sendable {
+    let attachmentId: String
+    let terminalId: String
+    let generation: UInt64
+    let earliestSequence: UInt64
+    let latestSequence: UInt64
+    let resetRequired: Bool
+}
+
+struct TerminalDetachResult: Decodable, Sendable {
+    let type: String
+    let id: String?
+    let attachmentId: String
+}
+
+struct TerminalInboundFrame: Decodable, Sendable {
+    let type: String
+    let attachmentId: String?
+    let terminalId: String?
+    let generation: UInt64?
+    let sequence: UInt64?
+    let dataBase64: String?
+    let state: String?
+    let exitCode: Int?
+    let lastSequence: UInt64?
 }
 
 struct EngineFunctionCallFrame<P: Encodable>: Encodable {

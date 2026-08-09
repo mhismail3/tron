@@ -29,6 +29,9 @@ revision_type!(FunctionRevision);
 pub enum FunctionVisibility {
     /// Callable by authenticated clients, agents, workers, and the engine.
     Public,
+    /// Callable by authenticated native clients and the engine, but never
+    /// projected into an agent or worker function plane.
+    NativeClient,
     /// Callable only by the engine's System actor.
     Internal,
 }

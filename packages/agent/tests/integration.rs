@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use futures::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -62,12 +63,17 @@ async fn boot_server_with_config(config: ServerConfig) -> TestServer {
     let event_store = Arc::new(EventStore::new(pool));
     let session_manager = Arc::new(SessionManager::new(Arc::clone(&event_store)));
     let orchestrator = Arc::new(Orchestrator::new(Arc::clone(&session_manager)));
+    let terminal_service = tron::domains::terminal::TerminalService::new_with_root(
+        Arc::clone(&event_store),
+        home.join("internal/terminal"),
+    );
     let settings_path = tron::shared::foundation::paths::settings_path_for_home(&home);
     let auth_path = tron::shared::foundation::paths::auth_path_for_home(&home);
     let runtime_context = ServerRuntimeContext {
         orchestrator: Arc::clone(&orchestrator),
         session_manager,
         event_store,
+        terminal_service,
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         settings_path,
         settings_runtime: Arc::new(SettingsRuntime::load(&home).unwrap()),
@@ -314,6 +320,7 @@ async fn engine_hello_and_ping_use_current_minimal_transport() {
     let hello = read_json(&mut ws).await;
     assert_eq!(hello["type"], "hello.ok");
     assert_eq!(hello["serverId"], "tron-engine");
+    assert_eq!(hello["capabilities"], json!(["terminal.v1"]));
 
     let ping = unwrap_invoke_value(
         invoke(
@@ -326,6 +333,103 @@ async fn engine_hello_and_ping_use_current_minimal_transport() {
     );
     assert_eq!(ping["pong"], true);
     assert_eq!(ping["serverProtocolVersion"], 1);
+
+    runtime.server.shutdown().shutdown();
+}
+
+#[tokio::test]
+async fn terminal_native_transport_replays_ordered_pty_output() {
+    let runtime = boot_server().await;
+    let mut ws = connect(&runtime.url, &runtime.auth_path).await;
+    let working_directory = runtime._temp.path().join("terminal-workspace");
+    std::fs::create_dir_all(&working_directory).unwrap();
+
+    let created = unwrap_invoke_value(
+        invoke(
+            &mut ws,
+            "terminal-session-create",
+            "session::create",
+            json!({
+                "workingDirectory": working_directory.to_string_lossy(),
+                "model": "openai/gpt-4o",
+                "title": "terminal transport integration"
+            }),
+        )
+        .await,
+    );
+    let session_id = created["sessionId"].as_str().unwrap();
+    let opened = unwrap_invoke_value(
+        invoke(
+            &mut ws,
+            "terminal-open",
+            "terminal::open",
+            json!({"sessionId": session_id, "rows": 24, "columns": 80}),
+        )
+        .await,
+    );
+    let terminal_id = opened["terminal"]["id"].as_str().unwrap();
+    let generation = opened["terminal"]["generation"].as_u64().unwrap();
+    let input = b"printf 'tron-terminal-transport-e2e\\n'\nexit\n";
+    let _ = unwrap_invoke_value(
+        invoke(
+            &mut ws,
+            "terminal-write",
+            "terminal::write",
+            json!({
+                "terminalId": terminal_id,
+                "generation": generation,
+                "inputId": "terminal-transport-input",
+                "dataBase64": base64::engine::general_purpose::STANDARD.encode(input)
+            }),
+        )
+        .await,
+    );
+
+    ws.send(Message::text(
+        json!({
+            "type": "terminal.attach",
+            "id": "terminal-attach",
+            "attachmentId": "terminal_transport_attachment",
+            "terminalId": terminal_id,
+            "afterSequence": 0
+        })
+        .to_string(),
+    ))
+    .await
+    .unwrap();
+
+    let mut attached = false;
+    let mut output = Vec::new();
+    timeout(TIMEOUT, async {
+        loop {
+            let frame = read_json(&mut ws).await;
+            match frame["type"].as_str() {
+                Some("terminal.attach.ok") => {
+                    assert_eq!(frame["attachmentId"], "terminal_transport_attachment");
+                    attached = true;
+                }
+                Some("terminal.output") => {
+                    assert!(attached, "output arrived before attach acknowledgement");
+                    let encoded = frame["dataBase64"].as_str().unwrap();
+                    output.extend(
+                        base64::engine::general_purpose::STANDARD
+                            .decode(encoded)
+                            .unwrap(),
+                    );
+                }
+                Some("terminal.status") if frame["state"] != "running" => break,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("terminal transport did not report process exit");
+    assert!(attached);
+    assert!(
+        String::from_utf8_lossy(&output).contains("tron-terminal-transport-e2e"),
+        "terminal replay omitted PTY output: {}",
+        String::from_utf8_lossy(&output)
+    );
 
     runtime.server.shutdown().shutdown();
 }

@@ -240,3 +240,29 @@ CREATE TABLE IF NOT EXISTS logs (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_client_dedup
   ON logs(timestamp, component, message)
   WHERE component LIKE 'ios.%';
+
+CREATE TABLE IF NOT EXISTS terminals (
+  id                TEXT PRIMARY KEY,
+  session_id        TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  generation        INTEGER NOT NULL,
+  working_directory TEXT NOT NULL,
+  shell             TEXT NOT NULL,
+  state             TEXT NOT NULL,
+  rows              INTEGER NOT NULL,
+  columns           INTEGER NOT NULL,
+  earliest_sequence INTEGER NOT NULL DEFAULT 0,
+  latest_sequence   INTEGER NOT NULL DEFAULT 0,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL,
+  exited_at         TEXT,
+  exit_code         INTEGER,
+  interruption_reason TEXT,
+  retained_until    TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_terminals_one_running_per_session
+  ON terminals(session_id) WHERE state='running';
+CREATE INDEX IF NOT EXISTS idx_terminals_session_updated
+  ON terminals(session_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_terminals_retention
+  ON terminals(retained_until);

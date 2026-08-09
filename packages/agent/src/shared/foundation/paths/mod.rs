@@ -182,6 +182,11 @@ pub fn journals_dir() -> PathBuf {
     db_dir().join(dirs::JOURNALS)
 }
 
+/// `~/.tron/internal/terminal/` — private PTY journals and checkpoints.
+pub fn terminal_dir() -> PathBuf {
+    internal_dir().join("terminal")
+}
+
 /// `~/.tron/internal/backups/`.
 pub fn backups_dir() -> PathBuf {
     internal_dir().join(dirs::BACKUPS)

@@ -173,6 +173,8 @@ pub struct ServerRuntimeContext {
     pub session_manager: Arc<SessionManager>,
     /// Event store for direct event queries.
     pub event_store: Arc<EventStore>,
+    /// Native terminal registry shared by client functions and socket attachments.
+    pub terminal_service: Arc<crate::domains::terminal::TerminalService>,
     /// Shared live typed-function engine host.
     pub engine_host: EngineHostHandle,
     /// Path to the sparse engine settings file.

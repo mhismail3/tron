@@ -78,6 +78,7 @@ pub(crate) struct Deps {
     pub(super) event_store: Arc<EventStore>,
     pub(super) orchestrator: Arc<Orchestrator>,
     pub(super) session_manager: Arc<SessionManager>,
+    pub(super) terminal_service: Arc<crate::domains::terminal::TerminalService>,
 }
 
 impl Deps {
@@ -87,6 +88,7 @@ impl Deps {
             event_store: deps.event_store.clone(),
             orchestrator: deps.orchestrator.clone(),
             session_manager: deps.session_manager.clone(),
+            terminal_service: deps.terminal_service.clone(),
         }
     }
 

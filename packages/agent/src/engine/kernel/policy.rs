@@ -5,8 +5,9 @@
 //! prompt policy.
 //!
 //! INVARIANT: internal functions are callable only by the engine-owned System
-//! actor. Agent, Worker, and authenticated Client actors share the public local
-//! function plane; actor identity is evidence, not a grant hierarchy.
+//! actor. Native-client functions additionally admit authenticated Client
+//! actors but exclude Agent and Worker actors. Public functions admit all four
+//! actor kinds; actor identity is evidence, not a grant hierarchy.
 
 use crate::engine::catalog::discovery::{ActorContext, ActorKind};
 use crate::engine::invocation::model::{CausalContext, Invocation};
@@ -65,6 +66,9 @@ fn validate_invocation_contract(
 pub fn is_visible_to_actor(function: &FunctionDefinition, actor: &ActorContext) -> bool {
     match function.visibility {
         FunctionVisibility::Public => true,
+        FunctionVisibility::NativeClient => {
+            matches!(actor.actor_kind, ActorKind::Client | ActorKind::System)
+        }
         FunctionVisibility::Internal => actor.actor_kind == ActorKind::System,
     }
 }
@@ -93,6 +97,23 @@ mod tests {
         let actor = |kind| ActorContext::new(ActorId::new("actor").expect("actor id"), kind);
 
         assert!(!is_visible_to_actor(&function, &actor(ActorKind::Client)));
+        assert!(!is_visible_to_actor(&function, &actor(ActorKind::Agent)));
+        assert!(!is_visible_to_actor(&function, &actor(ActorKind::Worker)));
+        assert!(is_visible_to_actor(&function, &actor(ActorKind::System)));
+    }
+
+    #[test]
+    fn native_client_visibility_excludes_model_backed_actors() {
+        let function = FunctionDefinition::new(
+            FunctionId::new("alpha::native").expect("function id"),
+            WorkerId::new("alpha").expect("worker id"),
+            "native client function",
+            FunctionVisibility::NativeClient,
+            EffectClass::PureRead,
+        );
+        let actor = |kind| ActorContext::new(ActorId::new("actor").expect("actor id"), kind);
+
+        assert!(is_visible_to_actor(&function, &actor(ActorKind::Client)));
         assert!(!is_visible_to_actor(&function, &actor(ActorKind::Agent)));
         assert!(!is_visible_to_actor(&function, &actor(ActorKind::Worker)));
         assert!(is_visible_to_actor(&function, &actor(ActorKind::System)));

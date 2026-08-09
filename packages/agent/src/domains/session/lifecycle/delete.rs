@@ -6,6 +6,7 @@ use serde_json::json;
 
 impl SessionLifecycleService {
     pub(crate) async fn delete(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
+        deps.terminal_service.prepare_session_deletion(&session_id);
         let session_manager = deps.session_manager.clone();
         let session_id_for_delete = session_id.clone();
         run_blocking_task("session.delete", move || {

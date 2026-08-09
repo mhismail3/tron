@@ -36,7 +36,9 @@ use crate::shared::server::context::ServerRuntimeContext;
 use crate::domains::registration::composition::{
     DomainFunctionRegistration, DomainRegistrationContext,
 };
-use crate::domains::{agent, auth, filesystem, model, product, session, settings, worker_kernel};
+use crate::domains::{
+    agent, auth, filesystem, model, product, session, settings, terminal, worker_kernel,
+};
 
 #[must_use = "activate after transport-trigger registration"]
 pub(crate) struct DomainLifecycleActivation {
@@ -136,6 +138,7 @@ fn compose_domains(ctx: &ServerRuntimeContext) -> EngineResult<DomainComposition
     functions.extend(agent::function_registrations(&deps)?);
     functions.extend(product::logs::function_registrations(&deps)?);
     functions.extend(session::function_registrations(&deps)?);
+    functions.extend(terminal::function_registrations(&deps)?);
     functions.extend(model::function_registrations(&deps)?);
     validate_domain_composition(&functions)?;
     validate_engine_extension_functions(&engine_functions)?;

@@ -85,6 +85,12 @@ impl TronServer {
         let shutdown = Arc::new(ShutdownCoordinator::new());
         // Inject shutdown coordinator into context so handlers can register tasks
         runtime_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
+        let terminal_service = Arc::clone(&runtime_context.terminal_service);
+        shutdown.register_phase_callback(
+            crate::app::lifecycle::shutdown::ShutdownPhase::Tools,
+            "native-terminals",
+            move || async move { terminal_service.shutdown().await },
+        );
         let auth_store = Arc::new(BearerTokenStore::new(runtime_context.auth_path.clone()));
         let engine_clients = Arc::new(EngineClientRegistry::new());
         Self {
