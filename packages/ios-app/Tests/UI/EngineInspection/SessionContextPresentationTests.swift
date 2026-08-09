@@ -6,6 +6,7 @@ struct SessionContextPresentationTests {
     @Test("The session operations sheet uses its product-facing name")
     func sheetTitle() {
         #expect(SessionContextPresentation.sheetTitle == "Manage Session")
+        #expect(SessionContextPresentation.terminalActionTitle == "Terminal")
     }
 
     @Test("Section rhythm separates sections while keeping labels attached")
