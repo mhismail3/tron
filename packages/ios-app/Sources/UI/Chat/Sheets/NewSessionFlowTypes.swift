@@ -12,15 +12,73 @@ struct NewSessionCreated: Equatable, Sendable {
 struct NewSessionCreateIntent: Equatable, Sendable {
     let workingDirectory: String
     let model: String
+    let sourceControl: SessionSourceControlSelection?
 
-    static func make(workingDirectory: String, model: String) -> NewSessionCreateIntent? {
+    static func make(
+        workingDirectory: String,
+        model: String,
+        sourceControl: SessionSourceControlSelection? = nil
+    ) -> NewSessionCreateIntent? {
         let workingDirectory = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !workingDirectory.isEmpty, !model.isEmpty else { return nil }
         return NewSessionCreateIntent(
             workingDirectory: workingDirectory,
-            model: model
+            model: model,
+            sourceControl: sourceControl
         )
+    }
+}
+
+struct NewSessionSourceControlProbeKey: Equatable, Sendable {
+    let workingDirectory: String
+    let continuity: EngineConnectionContinuity
+}
+
+enum NewSessionWorkingDirectoryResolution {
+    static func resolve(
+        requested: String,
+        sourceControl: SessionSourceControlSelection?,
+        serverWorkingDirectory: String?
+    ) -> String? {
+        if let resolved = serverWorkingDirectory?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !resolved.isEmpty {
+            return resolved
+        }
+        return sourceControl == nil ? requested : nil
+    }
+}
+
+extension SessionSourceControlPlacement {
+    var title: String {
+        switch self {
+        case .existing: "Use Existing"
+        case .branch: "New Branch"
+        case .worktree: "New Worktree"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .existing: "arrow.triangle.branch"
+        case .branch: "point.topleft.down.to.point.bottomright.curvepath"
+        case .worktree: "square.split.2x1"
+        }
+    }
+
+    func caption(currentBranch: String?) -> String {
+        switch self {
+        case .existing:
+            if let currentBranch, !currentBranch.isEmpty {
+                return "Use the selected checkout on \(currentBranch)."
+            }
+            return "Use the selected checkout at its current commit."
+        case .branch:
+            return "Create and switch this checkout to a new Tron session branch."
+        case .worktree:
+            return "Create an isolated checkout and branch from the current commit."
+        }
     }
 }
 

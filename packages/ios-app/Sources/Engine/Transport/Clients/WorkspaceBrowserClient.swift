@@ -29,4 +29,12 @@ final class WorkspaceBrowserClient: EngineDomainClient {
             idempotencyKey: idempotencyKey
         )
     }
+
+    func inspectSourceControl(path: String) async throws -> WorkspaceSourceControlStatus {
+        _ = try requireTransport().requireConnection()
+        return try await invokeRead(
+            "filesystem::inspect_source_control",
+            WorkspaceInspectSourceControlParams(path: path)
+        )
+    }
 }

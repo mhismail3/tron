@@ -1,6 +1,6 @@
 # Tron Worker-First Technical Reference
 
-> Last verified: 2026-08-05 on the worker-first implementation.
+> Last verified: 2026-08-09 on the worker-first implementation.
 
 This document describes the active worker-first implementation.
 
@@ -32,11 +32,24 @@ The source-owned kernel retains only:
 - product settings, auth, session-compaction custody, logging, and blobs needed
   by current clients.
 
-The authenticated `filesystem` product domain contains only the three iOS
-workspace-picker operations (`get_home`, `list_dir`, and `create_dir`). Model
+The authenticated `filesystem` product domain contains only four iOS
+workspace-picker operations (`get_home`, `list_dir`, `create_dir`, and the
+bounded `inspect_source_control` repository probe). The probe reports only
+whether the selected directory is in a usable Git working tree and its current
+branch; it is not a general Git or filesystem API. Model
 filesystem work has one owner in the seven direct worker-kernel
 filesystem/process/network primitives. Conditional session title mutation is
 owned by the Session domain rather than the host or worker kernel.
+
+New-session creation optionally admits one closed source-control placement:
+use the selected checkout, create and switch to a new session branch, or create
+an isolated session worktree and branch under Tron's workspace state. Branch
+names and paths derive from the preallocated session identity; clients cannot
+inject either. Git preparation and the durable session insert share one bounded
+creation critical section. If persistence fails, the engine restores the prior
+branch or removes the new worktree and branch before returning the error. The
+created session and response always retain the checkout directory the agent
+actually receives, including the selected relative subdirectory.
 
 Higher-level behavior belongs in worker bundles. The fixed tree owns the model
 loop, authenticated product transport, durable custody, direct host actuators,
@@ -1318,7 +1331,7 @@ its exact worker schema for the immediately following provider turn; larger
 and background results are references or receipts immediately. Session tool
 completion evidence stores the provider-call association rather than another
 typed body. Once the provider accepts the request, all retained history, run
-graphs, Session Context, and inbox reads expose references and previews only.
+graphs, Manage Session, and inbox reads expose references and previews only.
 An internal kernel projection resolves associations within the originating
 session or causal trace. It is not model vocabulary, and a missing or corrupt
 fresh association fails the turn before a provider request. Provider-call
@@ -2939,8 +2952,8 @@ but remain reachable from their run cards and native Delegation detail.
 Compaction is a direct durable session boundary. Context clearing is a live
 transport event; the resulting context size is reflected by later session/token
 truth rather than an unwritten `context.cleared` storage row. The iOS composer
-projects that same token truth as a context ring. Session Context uses the
-provider-request event as its sole request-context authority. It shows no
+projects that same token truth as a context ring. The user-facing Manage Session
+sheet uses the provider-request event as its sole request-context authority. It shows no
 request-history card: reconstruction metadata supplies an immediate bounded
 latest-request inventory, `session::context_requests(limit: 1)` reconciles that
 overview, and `session::context_request_detail` loads exact detail only for an
@@ -2956,11 +2969,11 @@ Global worker architecture is inspected in the Engine dashboard, where each
 canonical worker row and detail merges direct/internal and agent/command shape,
 hook/native boundaries, dispatches, and `agentTools` calls/called-by
 relationships with that worker's health, activity, versions, and lifecycle.
-Session Context does not load or duplicate that global directory. A bounded
+Manage Session does not load or duplicate that global directory. A bounded
 session-scoped worker section reads
 `worker_runs(originSessionId: ..., detail: "graph")`. The server pages by
 causal root so one coordinator's many descendants cannot crowd later runs out
-of Session Context; exact child and originating model-tool filters reopen the
+of Manage Session; exact child and originating model-tool filters reopen the
 same root graph. The client opens this canonical detail rather than inventing
 another activity store. Worker progress/output strings are not accumulated
 into client state or concatenated into a guessed stage; only non-worker tools
@@ -2970,7 +2983,7 @@ visible run remains active. Delivery/wait state shares that bounded live
 cadence. Provider-context audits are immutable once written, so the sheet reads
 that lane on open, reconnect, and foreground, then once when activity settles
 rather than transferring a large manifest every second. An agent-runner row can
-open the same Session Context
+open the same Manage Session
 inspection for its child `agentSessionId`; command workers truthfully report
 that no nested model context exists.
 It has no parallel context-control resource client, resource/action audit,

@@ -11,12 +11,21 @@ pub(crate) async fn session_create_value(
     let model =
         opt_string(params, "model").unwrap_or_else(|| "claude-sonnet-4-20250514".to_owned());
     let title = opt_string(params, "title");
+    let source_control = params
+        .and_then(|params| params.get("sourceControl"))
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|error| ToolError::InvalidParams {
+            message: format!("Invalid session sourceControl params: {error}"),
+        })?;
     crate::domains::session::lifecycle::SessionLifecycleService::create(
         deps,
         crate::domains::session::lifecycle::CreateSessionRequest {
             working_directory,
             model,
             title,
+            source_control,
         },
     )
     .await

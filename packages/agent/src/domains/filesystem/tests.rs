@@ -7,7 +7,7 @@ use super::service::{CreateDirParams, ListDirParams};
 use super::*;
 
 #[test]
-fn fixed_contract_is_exactly_the_three_workspace_picker_operations() {
+fn fixed_contract_is_exactly_the_four_workspace_picker_operations() {
     let functions = contract::function_definitions()
         .expect("workspace contracts")
         .into_iter()
@@ -18,7 +18,8 @@ fn fixed_contract_is_exactly_the_three_workspace_picker_operations() {
         [
             "filesystem::get_home",
             "filesystem::list_dir",
-            "filesystem::create_dir"
+            "filesystem::create_dir",
+            "filesystem::inspect_source_control"
         ]
     );
 }
@@ -162,4 +163,13 @@ async fn handlers_round_trip_workspace_browser_payloads() {
     .await
     .expect("create");
     assert_eq!(created["created"], true);
+
+    let inspected = service::inspect_source_control_value(
+        json!({"path": dir.path().display().to_string()}),
+        &deps,
+    )
+    .await
+    .expect("inspect source control");
+    assert_eq!(inspected["isGitRepository"], false);
+    assert!(inspected["currentBranch"].is_null());
 }

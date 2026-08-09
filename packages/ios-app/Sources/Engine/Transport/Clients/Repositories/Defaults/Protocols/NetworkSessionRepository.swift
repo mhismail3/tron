@@ -17,6 +17,14 @@ protocol NetworkSessionRepository: AnyObject {
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> SessionCreateResult
 
+    /// Create a session with an optional server-owned Git checkout placement.
+    func create(
+        workingDirectory: String,
+        model: String?,
+        sourceControl: SessionSourceControlSelection?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SessionCreateResult
+
     /// List available sessions.
     /// - Parameters:
     ///   - workingDirectory: Optional filter by working directory
@@ -79,6 +87,22 @@ protocol NetworkSessionRepository: AnyObject {
 }
 
 extension NetworkSessionRepository {
+    func create(
+        workingDirectory: String,
+        model: String?,
+        sourceControl: SessionSourceControlSelection?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SessionCreateResult {
+        guard sourceControl == nil else {
+            throw URLError(.unsupportedURL)
+        }
+        return try await create(
+            workingDirectory: workingDirectory,
+            model: model,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func contextRequests(
         sessionId _: String,
         beforeSequence _: Int64?,

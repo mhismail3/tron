@@ -2,19 +2,32 @@ import Foundation
 
 // MARK: - Session Methods
 
+enum SessionSourceControlPlacement: String, Codable, CaseIterable, Equatable, Sendable {
+    case existing
+    case branch
+    case worktree
+}
+
+struct SessionSourceControlSelection: Codable, Equatable, Sendable {
+    let placement: SessionSourceControlPlacement
+}
+
 struct SessionCreateParams: Encodable {
     let workingDirectory: String
     let model: String?
     let title: String?
+    let sourceControl: SessionSourceControlSelection?
 
     init(
         workingDirectory: String,
         model: String? = nil,
-        title: String? = nil
+        title: String? = nil,
+        sourceControl: SessionSourceControlSelection? = nil
     ) {
         self.workingDirectory = workingDirectory
         self.model = model
         self.title = title
+        self.sourceControl = sourceControl
     }
 }
 
@@ -22,6 +35,9 @@ struct SessionCreateResult: Decodable {
     let sessionId: String
     let model: String
     let createdAt: String
+    /// Added by the current engine. Optional keeps ordinary creation compatible
+    /// with an older paired server; worktree creation requires it at the UI seam.
+    let workingDirectory: String?
 }
 
 struct SessionListParams: Encodable {

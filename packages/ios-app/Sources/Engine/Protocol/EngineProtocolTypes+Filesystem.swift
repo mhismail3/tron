@@ -10,6 +10,10 @@ struct WorkspaceCreateDirectoryParams: Encodable {
     let recursive: Bool?
 }
 
+struct WorkspaceInspectSourceControlParams: Encodable {
+    let path: String
+}
+
 struct WorkspaceHomeResult: Decodable, Equatable {
     let homePath: String
     let suggestedPaths: [WorkspaceSuggestedPath]
@@ -44,4 +48,9 @@ struct WorkspaceDirectoryEntry: Decodable, Equatable, Identifiable, Hashable {
 struct WorkspaceCreateDirectoryResult: Decodable, Equatable {
     let created: Bool
     let path: String
+}
+
+struct WorkspaceSourceControlStatus: Decodable, Equatable, Sendable {
+    let isGitRepository: Bool
+    let currentBranch: String?
 }

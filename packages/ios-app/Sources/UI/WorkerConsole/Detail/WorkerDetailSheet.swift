@@ -544,7 +544,10 @@ struct WorkerDetailSheet: View {
                 Text("Server-authored enable, update, rollback, failure, and retirement evidence.")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .tint(.tronPurple)
         .padding(12)

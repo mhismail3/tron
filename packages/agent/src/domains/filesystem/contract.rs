@@ -2,8 +2,8 @@
 //!
 //! Model filesystem work belongs to the worker kernel's direct host
 //! primitives. This domain intentionally retains only the client-facing home,
-//! directory-listing, and directory-creation surface used during workspace
-//! selection.
+//! directory-listing, directory-creation, and bounded source-control
+//! inspection surface used during workspace selection.
 
 use serde_json::json;
 
@@ -17,6 +17,7 @@ use super::WORKER;
 pub(super) const GET_HOME_FUNCTION: &str = "filesystem::get_home";
 pub(super) const LIST_DIR_FUNCTION: &str = "filesystem::list_dir";
 pub(super) const CREATE_DIR_FUNCTION: &str = "filesystem::create_dir";
+pub(super) const INSPECT_SOURCE_CONTROL_FUNCTION: &str = "filesystem::inspect_source_control";
 
 pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     Ok(vec![
@@ -127,6 +128,30 @@ pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
             }
         }))
         .idempotency(IdempotencyContract::profile())
+        .build()?,
+        FunctionContract::new(
+            INSPECT_SOURCE_CONTROL_FUNCTION,
+            WORKER,
+            EffectClass::PureRead,
+            RiskLevel::Low,
+        )
+        .request_schema(json!({
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+                "path": {"type": "string", "minLength": 1}
+            }
+        }))
+        .response_schema(json!({
+            "type": "object",
+            "required": ["isGitRepository", "currentBranch"],
+            "additionalProperties": false,
+            "properties": {
+                "isGitRepository": {"type": "boolean"},
+                "currentBranch": {"type": ["string", "null"]}
+            }
+        }))
         .build()?,
     ])
 }

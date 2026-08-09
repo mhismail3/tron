@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// The ring is presentation only: its percentage comes from the server's turn
 /// token record and the selected model's advertised context window. Tapping it
-/// opens the minimal Session Context sheet; it does not introduce a parallel
+/// opens the session management sheet; it does not introduce a parallel
 /// context-control service or authority path.
 struct ContextProgressButton: View {
     let contextPercentage: Int
@@ -64,7 +64,7 @@ struct ContextProgressButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("session-context-button")
-        .accessibilityLabel("Session Context")
+        .accessibilityLabel(SessionContextPresentation.sheetTitle)
         .accessibilityValue(accessibilityValue)
         .accessibilityHint("Shows context usage, model selection, and session actions")
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: progressFraction)

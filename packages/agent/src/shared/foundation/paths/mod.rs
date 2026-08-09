@@ -46,6 +46,8 @@ pub mod dirs {
     pub const WORKERS: &str = "workers";
     /// Mutable profile-global state owned by persistent workers.
     pub const WORKER_STATE: &str = "worker-state";
+    /// Server-owned isolated Git checkouts created for individual sessions.
+    pub const SESSION_WORKTREES: &str = "session-worktrees";
 }
 
 /// Well-known file names under `~/.tron/`.
@@ -183,6 +185,17 @@ pub fn journals_dir() -> PathBuf {
 /// `~/.tron/internal/backups/`.
 pub fn backups_dir() -> PathBuf {
     internal_dir().join(dirs::BACKUPS)
+}
+
+/// `~/.tron/workspace/session-worktrees/`.
+///
+/// Session worktrees are active user work rather than runtime machinery. They
+/// remain outside repositories so creating one never dirties the selected
+/// checkout with an untracked management directory.
+pub fn session_worktrees_dir() -> PathBuf {
+    tron_home()
+        .join(dirs::WORKSPACE)
+        .join(dirs::SESSION_WORKTREES)
 }
 
 // ── Composite file path helpers ────────────────────────────────────────

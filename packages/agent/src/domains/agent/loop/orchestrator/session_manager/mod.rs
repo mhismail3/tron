@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::domains::session::event_store::EventStore;
+use crate::domains::session::event_store::identity::SessionCreationIdentity;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 use parking_lot::Mutex;
@@ -74,6 +75,28 @@ impl SessionManager {
         self.create_session_for_owner(model, workspace_path, title, false)
     }
 
+    /// Create an ordinary session with a preallocated durable identity.
+    ///
+    /// Source-control placement uses the future session ID to derive a unique
+    /// branch and worktree path before the database transaction commits. The
+    /// same identity must therefore reach durable creation unchanged.
+    pub(crate) fn create_session_with_identity(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        identity: SessionCreationIdentity,
+    ) -> Result<String, RuntimeError> {
+        let result = self
+            .event_store
+            .create_session_with_identity(model, workspace_path, title, None, identity)
+            .map_err(|error| RuntimeError::Persistence(error.to_string()))?;
+        let session_id = result.session.id;
+        self.cache_created_session(&session_id, model, workspace_path);
+        debug!(session_id, "session created with preallocated identity");
+        Ok(session_id)
+    }
+
     /// Create a durable model session owned by one worker invocation.
     pub(in crate::domains) fn create_worker_session(
         &self,
@@ -102,6 +125,12 @@ impl SessionManager {
 
         let session_id = result.session.id.clone();
 
+        self.cache_created_session(&session_id, model, workspace_path);
+        debug!(session_id, "session created");
+        Ok(session_id)
+    }
+
+    fn cache_created_session(&self, session_id: &str, model: &str, workspace_path: &str) {
         let state = Arc::new(ReconstructedState {
             model: model.to_owned(),
             working_directory: Some(workspace_path.to_owned()),
@@ -110,9 +139,7 @@ impl SessionManager {
 
         let _ = self
             .cached_sessions
-            .insert(session_id.clone(), CachedSession::new(state, false));
-        debug!(session_id, "session created");
-        Ok(session_id)
+            .insert(session_id.to_owned(), CachedSession::new(state, false));
     }
 
     /// Resume an existing session by reconstructing from persisted events.

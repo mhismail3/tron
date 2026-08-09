@@ -1,4 +1,5 @@
 use super::{BaseEvent, CreateSessionRequest, Deps, SessionLifecycleService, TronEvent};
+use crate::domains::session::event_store::identity::SessionCreationIdentity;
 use crate::engine::{ActorId, ActorKind, CausalContext, FunctionId, Invocation, TraceId};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::ToolError;
@@ -64,17 +65,61 @@ impl SessionLifecycleService {
         .map_err(|message| ToolError::InvalidParams { message })?
         .display()
         .to_string();
-        let model = request.model.clone();
-        let title = request.title.clone();
-        let stored_working_directory = working_directory.clone();
-        let session_id = run_blocking_task("session.create", move || {
-            session_manager
-                .create_session(&model, &stored_working_directory, title.as_deref())
-                .map_err(|error| ToolError::Internal {
-                    message: error.to_string(),
-                })
-        })
-        .await?;
+        let (working_directory, session_id) = if let Some(source_control) = request.source_control {
+            let _creation_guard =
+                crate::domains::filesystem::source_control::creation_guard().await;
+            let identity = SessionCreationIdentity::generate_current();
+            let prepared = crate::domains::filesystem::source_control::prepare_session_checkout(
+                std::path::Path::new(&working_directory),
+                source_control,
+                &identity.session.id,
+                &crate::shared::foundation::paths::session_worktrees_dir(),
+            )
+            .await?;
+            let prepared_working_directory = prepared.working_directory.display().to_string();
+            let model = request.model.clone();
+            let title = request.title.clone();
+            let stored_working_directory = prepared_working_directory.clone();
+            let create_result = run_blocking_task("session.create", move || {
+                session_manager
+                    .create_session_with_identity(
+                        &model,
+                        &stored_working_directory,
+                        title.as_deref(),
+                        identity,
+                    )
+                    .map_err(|error| ToolError::Internal {
+                        message: error.to_string(),
+                    })
+            })
+            .await;
+            match create_result {
+                Ok(session_id) => (prepared_working_directory, session_id),
+                Err(create_error) => {
+                    if let Err(rollback_error) = prepared.rollback().await {
+                        return Err(ToolError::Internal {
+                            message: format!(
+                                "Session creation failed ({create_error}); source-control rollback also failed ({rollback_error})."
+                            ),
+                        });
+                    }
+                    return Err(create_error);
+                }
+            }
+        } else {
+            let model = request.model.clone();
+            let title = request.title.clone();
+            let stored_working_directory = working_directory.clone();
+            let session_id = run_blocking_task("session.create", move || {
+                session_manager
+                    .create_session(&model, &stored_working_directory, title.as_deref())
+                    .map_err(|error| ToolError::Internal {
+                        message: error.to_string(),
+                    })
+            })
+            .await?;
+            (working_directory, session_id)
+        };
 
         project_created_session(
             &deps.orchestrator,

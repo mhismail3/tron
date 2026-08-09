@@ -245,7 +245,7 @@ protocol error. There is no nested child-invocation response envelope.
 
 `WorkerKernelClient.engineSurfaceSnapshot` calls the authenticated,
 non-model-facing `engine::surface_snapshot` read. The profile-level Engine
-Dashboard remains profile-scoped, while Session Context supplies its exact
+Dashboard remains profile-scoped, while Manage Session supplies its exact
 session and provider-request identity for per-turn routing evidence.
 Strongly typed catalog DTOs expose the complete executable fixed-tool
 inventory, catalog revision, surface hash/counts, function/worker versions,
@@ -412,7 +412,7 @@ projection. It never replays historical worker events into UI invalidation.
 Invocation invalidations retain every
 durable originating-session identifier seen during the 200 ms coalescing
 window; lifecycle invalidations stay global and sessionless invocations do not
-refresh an unrelated Session Context. Refreshes are single-flight; a section
+refresh an unrelated Manage Session sheet. Refreshes are single-flight; a section
 request arriving during a summary read is preserved and runs next, while a
 summary request is subsumed by an active section read. Explicit refresh and
 mutations reconcile canonical summary/detail truth. Mutations serialize
@@ -606,7 +606,7 @@ versions, and lifecycle controls. The native experience owns its tasks/reports
 and activity, preventing duplicate invocation, run, and inbox entrypoints while
 preserving a single server truth plane.
 
-Run lists, causal graphs, Session Context, and inbox pages never hydrate result
+Run lists, causal graphs, Manage Session, and inbox pages never hydrate result
 bodies. Their previews, sizes, schema/version identity, and integrity digests
 come from the server reference. `worker_kernel::result_read` is the only exact
 read path. Native request/response experiences may use the repository's bounded
@@ -958,6 +958,18 @@ compact displays truncate from the beginning so the selected folder and nearest
 ancestors stay visible. The browser does not repeat the path as a separate row
 above the folder list.
 
+After a workspace is selected, New Session performs one cancellable,
+server-backed `filesystem::inspect_source_control` read for that exact path and
+connection continuity. A usable Git working tree reveals a first-level checkout
+choice immediately after Workspace: use the existing checkout, create and
+switch to a new session branch, or create an isolated worktree. Non-repositories
+and unsupported older servers simply omit the choice. The app sends only the
+closed placement value to `session::create`; the engine owns branch names,
+worktree paths, rollback, and durable ordering. A branch/worktree response must
+include the authoritative checkout directory, and the app stores that returned
+path as both the new session workspace identity and working directory instead
+of guessing it from the request.
+
 ## Composer and Attachments
 
 The composer owns:
@@ -968,7 +980,7 @@ The composer owns:
   encoding when a healthy worker owns the `speech_transcription` client action;
 - prepared attachment ids and encoded-size preflight against
   `hello.maxMessageSize`;
-- the compact server-derived context progress ring and its Session Context
+- the compact server-derived context progress ring and its Manage Session
   presentation;
 - the trailing send/stop/record action.
 
@@ -1015,7 +1027,7 @@ and reconstruction project the same typed token counts, reason, summary, and
 turn counts into timeline pills. Tapping a completed compaction opens its event
 detail.
 
-The composer context ring and Session Context sheet consume only existing
+The composer context ring and Manage Session sheet consume only existing
 session truth. Token usage, model-window pressure, compaction, model switching,
 and `session::fork` retain their existing owners. The latest
 `model.provider_request` event is the sole durable explanation of what a model
@@ -1043,7 +1055,7 @@ of presenting a transient loading state. The main sheet constrains its content
 to the presentation width and owns only a vertical scroll axis; long live-state
 labels wrap within their cards rather than widening the scroll content. Global
 worker architecture remains in the Engine dashboard rather than being loaded
-again by Session Context. The toolbar shows the current short model name and
+again by Manage Session. The toolbar shows the current short model name and
 opens the model picker; the main body begins directly with actionable context
 inventory, so model switching does not consume a long body section. The latest
 audit retains its exact model identifier in durable evidence.
@@ -1056,7 +1068,7 @@ That detail orders the summary, selected fixed tools, selected direct workers,
 other fixed tools, omitted direct workers, and finally lazy exact evidence;
 headers remain visually attached to compact cards rather than sharing the
 inter-group spacing.
-Navigation rows across the Session Context surface remain fully tappable
+Navigation rows across the Manage Session surface remain fully tappable
 without trailing chevrons; their leading icon, title, supporting text, and
 interactive glass treatment carry the affordance. A delivery row carrying a
 durable result invocation opens that exact bounded result inspector directly;
@@ -1098,7 +1110,7 @@ model-visible v4 content. Live durable state is separately named `Delivery &
 wait status`, with active entries first. Resolved deliveries and waits remain
 behind one compact `Recent delivery history` button that opens a standard,
 width-bounded history sheet; nested history cards never expand inside the main
-Session Context scroll.
+Manage Session scroll.
 Passive results are `Available` and never called waits; pending wakes say `Will
 resume`, prepared entries say `In request`, observed entries say `Seen`, and
 retry-exhausted wakes say `Resume failed · Available passively`.
@@ -1111,7 +1123,7 @@ Delivery-only assistant continuations render without a fabricated user bubble
 and say `Resumed from …`; a natural turn says `Update included · …` only when
 that delivery belongs to the same provider request. If a later tool turn carries
 the run-level provenance onto the final answer, chat says `Update used earlier
-· …`, while Session Context continues to count only the selected request. Wake
+· …`, while Manage Session continues to count only the selected request. Wake
 provenance is persisted and broadcast on the first turn-start, before thinking,
 tools, or assistant text, while the completed assistant event retains the same
 metadata for replay. Live and reconstructed chat deduplicate that audit metadata

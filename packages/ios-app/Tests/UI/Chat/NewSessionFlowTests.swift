@@ -43,6 +43,55 @@ final class NewSessionFlowTests: XCTestCase {
 
         XCTAssertEqual(intent?.workingDirectory, "/tmp/tron-project")
         XCTAssertEqual(intent?.model, "claude-sonnet-4-6")
+        XCTAssertNil(intent?.sourceControl)
+    }
+
+    func testCreateIntentCarriesOnlyTheClosedSourceControlSelection() {
+        let sourceControl = SessionSourceControlSelection(placement: .worktree)
+        let intent = NewSessionCreateIntent.make(
+            workingDirectory: "/tmp/tron-project",
+            model: "gpt-5.6-sol",
+            sourceControl: sourceControl
+        )
+
+        XCTAssertEqual(intent?.sourceControl, sourceControl)
+    }
+
+    func testSourceControlPlacementPresentationExplainsAllThreeModes() {
+        XCTAssertEqual(SessionSourceControlPlacement.existing.title, "Use Existing")
+        XCTAssertEqual(SessionSourceControlPlacement.branch.title, "New Branch")
+        XCTAssertEqual(SessionSourceControlPlacement.worktree.title, "New Worktree")
+        XCTAssertTrue(
+            SessionSourceControlPlacement.existing.caption(currentBranch: "main")
+                .contains("main")
+        )
+        XCTAssertTrue(
+            SessionSourceControlPlacement.branch.caption(currentBranch: "main")
+                .contains("switch")
+        )
+        XCTAssertTrue(
+            SessionSourceControlPlacement.worktree.caption(currentBranch: "main")
+                .contains("isolated")
+        )
+    }
+
+    func testAuthoritativeCheckoutPathIsRequiredForGitPlacement() {
+        let worktree = SessionSourceControlSelection(placement: .worktree)
+        XCTAssertNil(NewSessionWorkingDirectoryResolution.resolve(
+            requested: "/tmp/project",
+            sourceControl: worktree,
+            serverWorkingDirectory: nil
+        ))
+        XCTAssertEqual(NewSessionWorkingDirectoryResolution.resolve(
+            requested: "/tmp/project",
+            sourceControl: worktree,
+            serverWorkingDirectory: " /tmp/session-worktree "
+        ), "/tmp/session-worktree")
+        XCTAssertEqual(NewSessionWorkingDirectoryResolution.resolve(
+            requested: "/tmp/project",
+            sourceControl: nil,
+            serverWorkingDirectory: nil
+        ), "/tmp/project")
     }
 
     func testWorkspaceSelectionOptionsIncludeDefaultThenRecentWorkspaces() {
@@ -108,6 +157,7 @@ final class NewSessionFlowTests: XCTestCase {
             "filesystem::get_home",
             "filesystem::list_dir",
             "filesystem::create_dir",
+            "filesystem::inspect_source_control",
             "showHidden",
             "Shortcuts",
             "Current folder",
@@ -139,6 +189,32 @@ final class NewSessionFlowTests: XCTestCase {
                 "workspace selector exposed a broad filesystem surface: \(fragment)"
             )
         }
+    }
+
+    func testGitPlacementIsConditionalAndPrecedesModelSelection() throws {
+        let source = try String(
+            contentsOf: iosAppRoot()
+                .appendingPathComponent("Sources/UI/Chat/Sheets/NewSessionFlow.swift"),
+            encoding: .utf8
+        )
+        let workspace = try XCTUnwrap(source.range(of: "title: \"Workspace\""))
+        let sourceControl = try XCTUnwrap(source.range(of: "title: \"Source Control\""))
+        let model = try XCTUnwrap(source.range(of: "title: \"Model\""))
+
+        XCTAssertLessThan(workspace.lowerBound, sourceControl.lowerBound)
+        XCTAssertLessThan(sourceControl.lowerBound, model.lowerBound)
+        XCTAssertTrue(source.contains("sourceControlStatus?.isGitRepository == true"))
+        XCTAssertTrue(source.contains(".task(id: NewSessionSourceControlProbeKey("))
+        XCTAssertTrue(source.contains("sourceControl: intent.sourceControl"))
+        XCTAssertTrue(source.contains("serverWorkingDirectory: result.workingDirectory"))
+    }
+
+    func testSourceControlStatusDecodesTheBoundedProbe() throws {
+        let data = Data(#"{"isGitRepository":true,"currentBranch":"main"}"#.utf8)
+        let status = try JSONDecoder().decode(WorkspaceSourceControlStatus.self, from: data)
+
+        XCTAssertTrue(status.isGitRepository)
+        XCTAssertEqual(status.currentBranch, "main")
     }
 
     func testWorkspaceSelectorUsesCurrentPathAsHeadTruncatedSheetTitle() throws {
