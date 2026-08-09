@@ -158,7 +158,10 @@ check_affected() {
     local simulator_id="$1"
     local base_ref="${2:-origin/main}"
     local selection mode reason line
-    local test_args=()
+    # macOS still ships Bash 3.2, where expanding an empty array under `set -u`
+    # fails. Reuse the function's positional parameters so full validation can
+    # pass zero filters while focused validation appends only selected tests.
+    set --
     selection="$(python3 "$ROOT_DIR/scripts/ios-test-selection.py" "$base_ref" --format lines)"
     mode="$(printf '%s\n' "$selection" | sed -n '1p')"
     reason="$(printf '%s\n' "$selection" | sed -n '2p')"
@@ -168,7 +171,7 @@ check_affected() {
     fi
     if [ "$mode" = "focused" ]; then
         while IFS= read -r line; do
-            [ -n "$line" ] && test_args+=("-only-testing:$line")
+            [ -n "$line" ] && set -- "$@" "-only-testing:$line"
         done < <(printf '%s\n' "$selection" | tail -n +3)
     fi
     echo "iOS validation mode: $mode ($reason)"
@@ -182,7 +185,7 @@ check_affected() {
             -configuration Beta \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$TEST_DERIVED_DATA" \
-            "${test_args[@]}"
+            "$@"
     )
 }
 

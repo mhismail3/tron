@@ -402,7 +402,7 @@ struct WorkerConsoleInteractionTests {
         #expect(!dashboard.contains("struct EngineSurfaceCard"))
     }
 
-    @Test("Session Context keeps model switching visible and raw JSON subordinate")
+    @Test("Manage Session is high-level while content and audit details disclose progressively")
     func sessionContextSheetHierarchy() throws {
         let root = iosAppRoot()
         let context = try sessionContextSource(root: root)
@@ -418,9 +418,15 @@ struct WorkerConsoleInteractionTests {
             ),
             encoding: .utf8
         )
-        let deliveryHistorySheet = try String(
+        let activitySheets = try String(
             contentsOf: root.appendingPathComponent(
-                "Sources/UI/SessionContext/SessionContextDeliveryHistorySheet.swift"
+                "Sources/UI/SessionContext/SessionContextActivitySheets.swift"
+            ),
+            encoding: .utf8
+        )
+        let modelPicker = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift"
             ),
             encoding: .utf8
         )
@@ -430,10 +436,14 @@ struct WorkerConsoleInteractionTests {
         #expect(mainSheet.contains(".containerRelativeFrame(.horizontal)"))
         #expect(mainSheet.contains(".scrollBounceBehavior(.basedOnSize, axes: .vertical)"))
         #expect(mainSheet.contains("SessionContextRefreshCoordinator()"))
-        #expect(mainSheet.contains("@State var selectedWorkerResult"))
-        #expect(mainSheet.contains(".sheet(item: $selectedWorkerResult)"))
-        #expect(context.contains("update.resultInvocationId"))
-        #expect(context.contains("selectedWorkerResult = WorkerResultSelection"))
+        #expect(mainSheet.contains("@State var showBackgroundActivity"))
+        #expect(mainSheet.contains("@State var showSessionWorkers"))
+        #expect(mainSheet.contains("SessionContextBackgroundActivitySheet("))
+        #expect(mainSheet.contains("SessionContextWorkersSheet("))
+        #expect(activitySheets.contains("update.resultInvocationId"))
+        #expect(activitySheets.contains("selectedResult = WorkerResultSelection"))
+        #expect(activitySheets.contains(".sheet(item: $selectedResult)"))
+        #expect(activitySheets.contains(".sheet(item: $selectedRun)"))
         #expect(mainSheet.contains("SessionContextContinuityKey("))
         #expect(mainSheet.contains("continuity: dependencies.connectionRepository.continuity"))
         #expect(!mainSheet.contains("workerRefreshRevision"))
@@ -448,8 +458,8 @@ struct WorkerConsoleInteractionTests {
         #expect(context.contains("loadCachedContextOverview()"))
         #expect(context.contains("limit: 1"))
         #expect(mainSheet.contains("LazyVStack(spacing: SessionContextPresentation.sectionSpacing)"))
-        #expect(mainSheet.contains("activateAgentUpdatesLane()"))
-        #expect(mainSheet.contains("activateWorkerLane()"))
+        #expect(context.contains("activateAgentUpdatesLane()"))
+        #expect(context.contains("activateWorkerLane()"))
         #expect(mainSheet.contains("WorkerProjectionInvalidation.affectsSession"))
         #expect(mainSheet.contains("requestAgentUpdatesRefresh()"))
         #expect(mainSheet.contains("if phase == .active"))
@@ -460,51 +470,47 @@ struct WorkerConsoleInteractionTests {
         #expect(!context.contains("showContextHistory"))
         #expect(!mainSheet.contains("SessionContextHistorySheet"))
         #expect(!mainSheet.contains("requestToolsSection"))
-        #expect(detailSheet.contains(#"title: "Tools available for this request""#))
-        #expect(detailSheet.contains("destination: .toolSurface(raw)"))
+        #expect(context.contains(#"title: "Agent Context""#))
+        #expect(context.contains(#"title: "Background Activity""#))
+        #expect(context.contains(#"title: "Session Workers""#))
+        #expect(context.contains(#"title: "Technical Details""#))
+        #expect(!context.contains(#"title: "What the agent received""#))
+        #expect(detailSheet.contains(#"technicalSection(title: "Redacted provider request")"#))
+        #expect(detailSheet.contains(#"contextSection(title: "Available tools")"#))
+        #expect(detailSheet.contains("destination: .toolSurface(manifest.toolSurface)"))
         #expect(detailSheet.contains("LazyVStack(alignment: .leading, spacing: 18)"))
-        #expect(detailSheet.contains("VStack(alignment: .leading, spacing: 14)"))
-        #expect(detailSheet.contains("VStack(alignment: .leading, spacing: 6)"))
-        #expect(detailSheet.contains("LazyVStack(spacing: 8)"))
-        let selectedFixed = try #require(
-            detailSheet.range(of: #"toolSurfaceSection(title: "Selected fixed tools")"#)
+        #expect(detailSheet.contains("No background worker or agent updates were included"))
+        #expect(detailSheet.contains("Ordinary messages and question answers appear in Conversation"))
+        #expect(detailSheet.contains("message.sourceModels.map"))
+        #expect(detailSheet.contains("message.sourceTools.map"))
+        let agentContext = try sourceSlice(
+            detailSheet,
+            from: "private func agentContext(",
+            through: "private func technicalDetails("
         )
-        let selectedWorkers = try #require(
-            detailSheet.range(of: #"toolSurfaceSection(title: "Selected direct workers")"#)
-        )
-        let otherFixed = try #require(
-            detailSheet.range(of: #"toolSurfaceSection(title: "Other fixed tools")"#)
-        )
-        let omittedWorkers = try #require(
-            detailSheet.range(of: #"toolSurfaceSection(title: "Omitted direct workers")"#)
-        )
-        #expect(selectedFixed.lowerBound < selectedWorkers.lowerBound)
-        #expect(selectedWorkers.lowerBound < otherFixed.lowerBound)
-        #expect(otherFixed.lowerBound < omittedWorkers.lowerBound)
+        #expect(!agentContext.contains("auditIdentifier("))
+        #expect(!agentContext.contains("sha256"))
+        #expect(!agentContext.contains("sourceEventIds"))
+        #expect(detailSheet.contains(#"technicalSection(title: "Provider-visible environment")"#))
+        #expect(detailSheet.contains("Filesystem paths and server origins are redacted"))
+        #expect(detailSheet.contains(#"technicalSection(title: "Integrity")"#))
+        #expect(detailSheet.contains(#"technicalSection(title: "Message provenance")"#))
         #expect(context.contains("SessionContextRawJSONSheet(selection: selection)"))
-        #expect(!detailSheet.contains(
-            "auditText(SessionContextAuditFormatter.projectedJSONString(detail.providerAudit))"
-        ))
-        #expect(!detailSheet.contains(
-            "auditText(SessionContextAuditFormatter.projectedJSONString(raw))"
-        ))
         #expect(context.contains("Task.detached(priority: .userInitiated)"))
         #expect(context.contains("textView.isScrollEnabled = true"))
-        #expect(!context.contains("chevron.right"))
-        #expect(context.contains(#"title: "Updates included""#))
-        #expect(context.contains(#"title: "Delivery & wait status""#))
-        #expect(context.contains("Recent delivery history"))
-        #expect(context.contains("showDeliveryHistorySheet = true"))
-        #expect(context.contains("SessionContextDeliveryHistorySheet"))
-        #expect(context.contains(#"SheetTitle(title: "Recent Delivery History""#))
-        #expect(!context.contains("DisclosureGroup(isExpanded: $showDeliveryHistory"))
-        #expect(deliveryHistorySheet.contains("ScrollView(.vertical, showsIndicators: true)"))
-        #expect(deliveryHistorySheet.contains(".containerRelativeFrame(.horizontal)"))
-        #expect(detailSheet.contains("Exact model-visible content"))
+        #expect(activitySheets.contains("ScrollView(.vertical, showsIndicators: true)"))
+        #expect(activitySheets.contains(".containerRelativeFrame(.horizontal)"))
+        #expect(detailSheet.contains("View included content"))
         #expect(detailSheet.contains("includedDeliverySummary"))
-        #expect(context.contains("dependencies.terminalRepository.isSupported"))
+        #expect(context.contains("SessionContextPresentation.terminalAvailability("))
+        #expect(!context.contains("if dependencies.terminalRepository.isSupported"))
+        #expect(context.contains(#""Available after reconnection""#))
         #expect(mainSheet.contains("repository: dependencies.terminalRepository"))
         #expect(!context.contains("dependencies.engineClient"))
+        #expect(modelPicker.contains("return Menu"))
+        #expect(modelPicker.contains("ForEach(availableReasoningLevels"))
+        #expect(!modelPicker.contains("ReasoningLevelPopover"))
+        #expect(!modelPicker.contains("showReasoningPopover"))
     }
 
     @Test("Worker architecture is integrated into normal inventory and detail")

@@ -9,7 +9,10 @@
 //! listing read `EventStore` directly; within this query path, `SessionManager`
 //! remains only for resume/cache data. Provider-context pagination resolves
 //! only rows returned to the caller; its look-ahead row is metadata-only so a
-//! one-item mobile overview never reads a second large context manifest.
+//! one-item mobile overview never reads a second large context manifest. The
+//! opt-in detail read enriches its message inventory from immutable source
+//! events in one bounded batch so clients can show model, tool, and turn facts
+//! without duplicating those facts in the provider-audit payload.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -96,6 +99,89 @@ fn context_request_summary(row: &EventRow, payload: &Value) -> Value {
             "legacy_unavailable"
         },
     })
+}
+
+fn context_source_event_ids(manifest: &Value) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    manifest
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|message| {
+            message
+                .get("sourceEventIds")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .filter_map(Value::as_str)
+        .filter(|event_id| seen.insert((*event_id).to_owned()))
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn enrich_context_message_source_metadata(manifest: &mut Value, events: &[EventRow]) {
+    let event_by_id = events
+        .iter()
+        .map(|event| (event.id.as_str(), event))
+        .collect::<std::collections::HashMap<_, _>>();
+    let Some(messages) = manifest.get_mut("messages").and_then(Value::as_array_mut) else {
+        return;
+    };
+
+    for message in messages {
+        let source_events = message
+            .get("sourceEventIds")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter_map(|event_id| event_by_id.get(event_id).copied())
+            .collect::<Vec<_>>();
+        let Some(message) = message.as_object_mut() else {
+            continue;
+        };
+
+        let unique_strings = |values: Vec<&String>| {
+            let mut seen = std::collections::HashSet::new();
+            values
+                .into_iter()
+                .filter(|value| seen.insert((*value).clone()))
+                .cloned()
+                .map(Value::String)
+                .collect::<Vec<_>>()
+        };
+        let models = unique_strings(
+            source_events
+                .iter()
+                .filter_map(|event| event.model.as_ref())
+                .collect(),
+        );
+        let tools = unique_strings(
+            source_events
+                .iter()
+                .filter_map(|event| event.tool_name.as_ref())
+                .collect(),
+        );
+        let mut seen_turns = std::collections::HashSet::new();
+        let turns = source_events
+            .iter()
+            .filter_map(|event| event.turn)
+            .filter(|turn| seen_turns.insert(*turn))
+            .map(|turn| Value::Number(turn.into()))
+            .collect::<Vec<_>>();
+
+        if !models.is_empty() {
+            message.insert("sourceModels".to_owned(), Value::Array(models));
+        }
+        if !tools.is_empty() {
+            message.insert("sourceTools".to_owned(), Value::Array(tools));
+        }
+        if !turns.is_empty() {
+            message.insert("sourceTurns".to_owned(), Value::Array(turns));
+        }
+    }
 }
 
 fn worker_evidence_text(value: &Value) -> Option<&str> {
@@ -416,12 +502,23 @@ impl SessionQueryService {
                 .get("format")
                 .and_then(Value::as_str)
                 .unwrap_or("unknown");
+            let mut context_manifest = payload
+                .get("contextManifest")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let source_event_ids = context_source_event_ids(&context_manifest);
+            let source_events = event_store
+                .get_events_by_ids_for_session(&session_id, &source_event_ids)
+                .map_err(|error| ToolError::Internal {
+                    message: error.to_string(),
+                })?;
+            enrich_context_message_source_metadata(&mut context_manifest, &source_events);
             Ok(json!({
                 "eventId":row.id,
                 "sequence":row.sequence,
                 "timestamp":row.timestamp,
                 "format":format,
-                "contextManifest":payload.get("contextManifest").cloned().unwrap_or(Value::Null),
+                "contextManifest":context_manifest,
                 "providerAdditions":payload.get("providerAdditions").cloned().unwrap_or_else(|| json!([])),
                 "providerAudit":payload,
                 "provenanceAvailability":if crate::shared::protocol::model_audit::provider_audit_has_complete_provenance(format) {
@@ -1282,6 +1379,85 @@ mod tests {
         .await
         .expect_err("cross-session audit read must fail");
         assert!(matches!(error, ToolError::NotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn context_request_detail_enriches_messages_from_batched_source_events() {
+        let ctx = make_test_context();
+        let session_id = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("source metadata"))
+            .unwrap();
+        let assistant = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &session_id,
+                event_type: EventType::MessageAssistant,
+                payload: json!({
+                    "role":"assistant",
+                    "content":"hello",
+                    "model":"gpt-5.6-sol",
+                    "providerType":"openai",
+                    "turn":7
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        let tool = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &session_id,
+                event_type: EventType::ToolInvocationCompleted,
+                payload: json!({
+                    "role":"tool",
+                    "content":"done",
+                    "toolName":"filesystem_read",
+                    "invocationId":"call-1"
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        let audit = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &session_id,
+                event_type: EventType::ModelProviderRequest,
+                payload: json!({
+                    "format":crate::shared::protocol::model_audit::MODEL_PROVIDER_REQUEST_AUDIT_FORMAT,
+                    "contextManifest":{
+                        "messages":[
+                            {"sourceEventIds":[assistant.id]},
+                            {"sourceEventIds":[tool.id]}
+                        ]
+                    }
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let detail = SessionQueryService::context_request_detail(
+            &Deps::from_test_context(&ctx),
+            session_id,
+            audit.id,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            detail["contextManifest"]["messages"][0]["sourceModels"],
+            json!(["gpt-5.6-sol"])
+        );
+        assert_eq!(
+            detail["contextManifest"]["messages"][0]["sourceTurns"],
+            json!([7])
+        );
+        assert_eq!(
+            detail["contextManifest"]["messages"][1]["sourceTools"],
+            json!(["filesystem_read"])
+        );
     }
 
     #[tokio::test]

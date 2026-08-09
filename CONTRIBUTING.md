@@ -339,7 +339,9 @@ The path classifier is repository-owned `scripts/ci-change-flags.sh`; fast
 feedback reports its result without letting path filtering weaken the merge
 gate. `scripts/ios-test-selection.py` conservatively powers local
 `check-affected` and `iterate` loops: unmapped, test, project, or shared paths
-fall back to the full iOS suite. Apple/release versions live only in
+fall back to the full iOS suite with no XCTest filters; focused paths pass only
+the selected filters. The simulator helper must keep the empty-filter path safe
+under the Bash 3.2 `nounset` behavior shipped by macOS. Apple/release versions live only in
 `config/ci-toolchain.env`. The same manifest pins the shadow Rust container
 digest plus the actionlint container and checksum-pinned Buildkite parser
 exercised by both providers.

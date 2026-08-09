@@ -305,6 +305,11 @@ struct ContextMessageManifestDTO: Decodable, Equatable, Identifiable, Sendable {
     let sourceKind: String?
     let sourceEventIds: [String]
     let invocationId: String?
+    /// User-facing execution facts joined from immutable source events by the
+    /// detail query. Optional for compatibility with older paired servers.
+    let sourceModels: [String]
+    let sourceTools: [String]
+    let sourceTurns: [Int64]
 
     var id: String { "\(ordinal):\(sha256)" }
 }
@@ -321,6 +326,9 @@ extension ContextMessageManifestDTO {
         case sourceKind
         case sourceEventIds
         case invocationId
+        case sourceModels
+        case sourceTools
+        case sourceTurns
     }
 
     init(from decoder: Decoder) throws {
@@ -338,6 +346,9 @@ extension ContextMessageManifestDTO {
             forKey: .sourceEventIds
         ) ?? []
         invocationId = try container.decodeIfPresent(String.self, forKey: .invocationId)
+        sourceModels = try container.decodeIfPresent([String].self, forKey: .sourceModels) ?? []
+        sourceTools = try container.decodeIfPresent([String].self, forKey: .sourceTools) ?? []
+        sourceTurns = try container.decodeIfPresent([Int64].self, forKey: .sourceTurns) ?? []
     }
 }
 

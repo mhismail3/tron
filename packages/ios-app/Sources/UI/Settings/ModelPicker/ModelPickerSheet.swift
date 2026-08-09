@@ -17,7 +17,6 @@ struct ModelPickerSheet: View {
     @State private var expandedProviders: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
     @State private var expandedDetails: Set<String> = []
-    @State private var showReasoningPopover = false
     @State private var pendingModelId: String = ""
     @State private var pendingReasoningLevel: String?
     @State private var didSelectReasoningLevel = false
@@ -135,7 +134,6 @@ struct ModelPickerSheet: View {
             }
         }
         .onChange(of: pendingModelId) { _, _ in
-            showReasoningPopover = false
             pendingReasoningLevel = ModelPickerReasoningVisibility.normalizedLevel(
                 pendingReasoningLevel,
                 for: selectedModelInfo
@@ -149,8 +147,21 @@ struct ModelPickerSheet: View {
         let currentReasoningLevel = pendingReasoningLevel
             ?? availableReasoningLevels.first
             ?? ""
-        return Button {
-            showReasoningPopover = true
+        return Menu {
+            ForEach(availableReasoningLevels, id: \.self) { level in
+                Button {
+                    pendingReasoningLevel = level
+                    didSelectReasoningLevel = true
+                } label: {
+                    Label {
+                        Text(reasoningLevelLabel(level))
+                    } icon: {
+                        Image(systemName: level == currentReasoningLevel
+                            ? "checkmark"
+                            : Color.reasoningLevelIcon(level))
+                    }
+                }
+            }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: Color.reasoningLevelIcon(currentReasoningLevel))
@@ -160,19 +171,7 @@ struct ModelPickerSheet: View {
             }
             .foregroundStyle(ModelPickerPresentation.primaryAccent)
         }
-        .popover(isPresented: $showReasoningPopover, arrowEdge: .top) {
-            ReasoningLevelPopover(
-                levels: availableReasoningLevels,
-                currentLevel: currentReasoningLevel,
-                accentColor: ModelPickerPresentation.primaryAccent,
-                onSelect: { level in
-                    showReasoningPopover = false
-                    pendingReasoningLevel = level
-                    didSelectReasoningLevel = true
-                }
-            )
-            .popoverCompactAdaptation()
-        }
+        .menuOrder(.fixed)
     }
 
     private func reasoningLevelLabel(_ level: String) -> String {

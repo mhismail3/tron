@@ -1,14 +1,8 @@
 import SwiftUI
 
 enum SessionContextDetailDestination: Equatable {
-    case instructions
-    case messages
-    case deliveries
-    case attachments
-    case environment
-    case tools
-    case automaticContext
-    case providerAudit
+    case agentContext
+    case technical
 }
 
 struct SessionContextSheet: View {
@@ -44,8 +38,6 @@ struct SessionContextSheet: View {
     @State var isLoadingWorkerRuns = false
     @State var workerLoadingGeneration: UInt64?
     @State var workerLoadError: String?
-    @State var selectedWorkerRun: WorkerInvocationDTO?
-    @State var selectedWorkerResult: WorkerResultSelection?
     @State var errorMessage: String?
     @State var refreshCoordinator = SessionContextRefreshCoordinator()
     @State var workerCatalogRevision: UInt64 = 0
@@ -66,7 +58,8 @@ struct SessionContextSheet: View {
     @State var agentUpdatesLoadingGeneration: UInt64?
     @State var agentUpdatesLaneActivated = false
     @State var workerLaneActivated = false
-    @State var showDeliveryHistorySheet = false
+    @State var showBackgroundActivity = false
+    @State var showSessionWorkers = false
     @State var selectedContextDetail: SessionContextDetailSelection?
 
     var isConnected: Bool {
@@ -112,34 +105,15 @@ struct SessionContextSheet: View {
     var workerRunGroups: [SessionWorkerRunGroup] {
         SessionContextPresentation.causalGroups(sessionWorkerRuns)
     }
-    var manifest: SessionContextManifestDTO? {
-        latestContextDetail?.contextManifest
-    }
-    var allSystemContributions: [ContextSystemContributionDTO] {
-        (manifest?.systemContributions ?? []) + (latestContextDetail?.providerAdditions ?? [])
-    }
     var activeAgentUpdates: [SessionAgentUpdateDTO] {
         agentUpdates.filter {
             SessionContextPresentation.isActiveAgentUpdate(status: $0.status)
-        }
-    }
-    var historicalAgentUpdates: [SessionAgentUpdateDTO] {
-        agentUpdates.filter {
-            !SessionContextPresentation.isActiveAgentUpdate(status: $0.status)
         }
     }
     var activeAgentWaits: [SessionAgentWaitDTO] {
         agentWaits.filter {
             SessionContextPresentation.isActiveAgentWait(status: $0.status)
         }
-    }
-    var historicalAgentWaits: [SessionAgentWaitDTO] {
-        agentWaits.filter {
-            !SessionContextPresentation.isActiveAgentWait(status: $0.status)
-        }
-    }
-    var deliveryHistoryCount: Int {
-        historicalAgentWaits.count + historicalAgentUpdates.count
     }
     var hasRunningSessionWorker: Bool {
         sessionWorkerRuns.contains { $0.status == "queued" || $0.status == "running" }
@@ -160,16 +134,7 @@ struct SessionContextSheet: View {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(spacing: SessionContextPresentation.sectionSpacing) {
                     sessionSummary
-                    receivedContextSection
-                    agentUpdatesSection
-                        .onAppear { activateAgentUpdatesLane() }
-                    if automaticContextCount > 0 {
-                        automaticContextSection
-                    }
-                    workerActivitySection
-                        .onAppear { activateWorkerLane() }
-                    sessionActionsSection
-                    providerAuditSection
+                    managementRows
 
                     if let reason = SessionContextPresentation.mutationUnavailableReason(
                         isConnected: isConnected,
@@ -268,30 +233,30 @@ struct SessionContextSheet: View {
                 repository: dependencies.terminalRepository
             )
         }
-        .sheet(item: $selectedWorkerRun) { run in
-            WorkerRunDetailSheet(
-                run: run,
-                workerName: workerNames[run.workerId]
+        .sheet(isPresented: $showBackgroundActivity) {
+            SessionContextBackgroundActivitySheet(
+                waits: agentWaits,
+                updates: agentUpdates,
+                loadError: agentUpdatesLoadError,
+                isLoading: isLoadingAgentUpdates,
+                hasLoadedSnapshot: hasLoadedAgentUpdatesSnapshot,
+                workerRepository: workerRepository,
+                onRetry: { requestAgentUpdatesRefresh() }
             )
         }
-        .sheet(item: $selectedWorkerResult) { selection in
-            WorkerResultInspectorSheet(
-                invocationId: selection.invocationId,
-                repository: workerRepository
+        .sheet(isPresented: $showSessionWorkers) {
+            SessionContextWorkersSheet(
+                runs: sessionWorkerRuns,
+                workerNames: workerNames,
+                nextOffset: workerRunsNextOffset,
+                isLoading: isLoadingWorkerRuns,
+                loadError: workerLoadError,
+                onRetry: { requestWorkerRefresh() },
+                onLoadOlder: { loadOlderSessionWorkerRuns() }
             )
         }
         .sheet(item: $selectedContextDetail) { selection in
-            SessionContextDetailSheet(selection: selection)
-        }
-        .sheet(isPresented: $showDeliveryHistorySheet) {
-            SessionContextDeliveryHistorySheet {
-                ForEach(historicalAgentWaits) { wait in
-                    agentWaitCard(wait)
-                }
-                ForEach(historicalAgentUpdates) { update in
-                    agentUpdateCard(update)
-                }
-            }
+            SessionContextDetailSheet(selection: selection, models: availableModels)
         }
         .tronErrorAlert(message: $errorMessage)
     }

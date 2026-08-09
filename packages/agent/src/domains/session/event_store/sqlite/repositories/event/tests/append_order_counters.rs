@@ -15,6 +15,35 @@ fn insert_and_get() {
 }
 
 #[test]
+fn batched_get_preserves_sequence_and_session_scope() {
+    let conn = setup();
+    for (id, sequence) in [("evt_1", 1), ("evt_2", 2), ("evt_3", 3)] {
+        EventRepo::insert(
+            &conn,
+            &make_event(id, sequence, EventType::MessageAssistant, None, json!({})),
+        )
+        .unwrap();
+    }
+
+    let rows = EventRepo::get_by_ids_for_session(
+        &conn,
+        "sess_1",
+        &["evt_3".into(), "missing".into(), "evt_1".into()],
+    )
+    .unwrap();
+
+    assert_eq!(
+        rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        ["evt_1", "evt_3"]
+    );
+    assert!(
+        EventRepo::get_by_ids_for_session(&conn, "another-session", &["evt_1".into()])
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn insert_extracts_role() {
     let conn = setup();
     let event = make_event(

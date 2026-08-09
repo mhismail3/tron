@@ -2,18 +2,8 @@ import Foundation
 import SwiftUI
 
 enum SessionContextDetailSelection: Identifiable, Equatable {
-    case instructions([ContextSystemContributionDTO])
-    case messages([ContextMessageManifestDTO])
-    case attachments([ContextMessageManifestDTO])
-    case environment(ContextEnvironmentManifestDTO?)
-    case deliveries([ContextAgentDeliveryDTO])
-    case tools(
-        fixed: [SessionContextFixedToolSelection],
-        workers: [SessionContextWorkerSelection],
-        raw: AnyCodable?
-    )
-    case automatic([ContextAutomaticEvaluationDTO])
-    case providerAudit(
+    case agentContext(SessionContextRequestDetailDTO)
+    case technical(
         SessionContextRequestDetailDTO,
         cacheReadTokens: Int,
         cacheWriteTokens: Int
@@ -21,47 +11,44 @@ enum SessionContextDetailSelection: Identifiable, Equatable {
 
     var id: String {
         switch self {
-        case .instructions: "instructions"
-        case .messages: "messages"
-        case .attachments: "attachments"
-        case .environment: "environment"
-        case .deliveries: "deliveries"
-        case .tools: "tools"
-        case .automatic: "automatic"
-        case .providerAudit(let detail, _, _): "provider:\(detail.eventId)"
+        case .agentContext(let detail): "context:\(detail.eventId)"
+        case .technical(let detail, _, _): "technical:\(detail.eventId)"
         }
     }
 
     var title: String {
         switch self {
-        case .instructions: "Instructions"
-        case .messages: "Conversation"
-        case .attachments: "Attachments"
-        case .environment: "Environment"
-        case .deliveries: "Updates Included"
-        case .tools: "Tool Surface"
-        case .automatic: "Legacy Automatic Context"
-        case .providerAudit: "Provider Request"
+        case .agentContext: "Agent Context"
+        case .technical: "Technical Details"
         }
     }
 }
 
+/// Progressive-disclosure detail for one immutable provider request.
+///
+/// `Agent Context` is deliberately product-facing. Exact identifiers,
+/// digests, redacted environment values, and raw envelopes are consolidated
+/// under `Technical Details` instead of leaking into every content card.
 struct SessionContextDetailSheet: View {
     let selection: SessionContextDetailSelection
+    var models: [ModelInfo] = []
 
     @State private var rawJSONSelection: SessionContextRawJSONSelection?
     @State private var expandedDeliveryIds: Set<String> = []
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     detailContent
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .padding(.bottom, 24)
+                .containerRelativeFrame(.horizontal)
+                .clipped()
             }
+            .scrollBounceBehavior(.basedOnSize, axes: .vertical)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -82,222 +69,161 @@ struct SessionContextDetailSheet: View {
     @ViewBuilder
     private var detailContent: some View {
         switch selection {
-        case .instructions(let contributions):
+        case .agentContext(let detail):
+            agentContext(detail)
+        case .technical(let detail, let cacheReadTokens, let cacheWriteTokens):
+            technicalDetails(
+                detail,
+                cacheReadTokens: cacheReadTokens,
+                cacheWriteTokens: cacheWriteTokens
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func agentContext(_ detail: SessionContextRequestDetailDTO) -> some View {
+        let manifest = detail.contextManifest
+        let contributions = (manifest?.systemContributions ?? [])
+            + (detail.providerAdditions ?? [])
+        let messages = manifest?.messages ?? []
+        let attachments = messages.filter {
+            $0.contentKinds.contains("image") || $0.contentKinds.contains("document")
+        }
+        let fixedToolSelections = SessionContextPresentation.fixedToolSelections(
+            from: manifest?.toolSurface
+        )
+        let workerSelections = SessionContextPresentation.workerSelections(
+            from: manifest?.toolSurface
+        )
+        let toolSummary = SessionContextPresentation.toolSummary(
+            fixed: fixedToolSelections,
+            workers: workerSelections
+        )
+        let fixedTools = fixedToolSelections.filter(\.projected)
+        let workers = workerSelections.filter(\.projected)
+
+        contextSection(title: "Instructions") {
             if contributions.isEmpty {
-                emptyState("No instruction manifest is available for this request.")
+                emptyState("No instructions were recorded for this request.")
             } else {
                 ForEach(contributions) { contribution in
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(contribution.label)
-                                .font(TronTypography.sans(
-                                    size: TronTypography.sizeBody,
-                                    weight: .semibold
-                                ))
-                            Spacer()
-                            Text(ByteCountFormatter.string(
-                                fromByteCount: Int64(contribution.byteCount),
-                                countStyle: .memory
+                        Text(contribution.label)
+                            .font(TronTypography.sans(
+                                size: TronTypography.sizeBody,
+                                weight: .semibold
                             ))
-                            .font(TronTypography.pillValue)
-                            .foregroundStyle(.tronEmerald)
-                        }
+                            .foregroundStyle(.tronTextPrimary)
                         Text(contribution.content)
                             .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                             .foregroundStyle(.tronTextSecondary)
                             .textSelection(.enabled)
-                        auditIdentifier("Digest", contribution.sha256)
                     }
                     .padding(14)
                     .sectionFill(.tronPurple, cornerRadius: 12, subtle: true, interactive: false)
                 }
             }
+        }
 
-        case .messages(let messages):
+        contextSection(title: "Conversation") {
             messageCards(messages, empty: "No provider-visible messages were recorded.")
+        }
 
-        case .attachments(let messages):
-            messageCards(messages, empty: "This request contained no image or document projections.")
-
-        case .environment(let environment):
-            if let environment {
-                SettingsSectionHeader(title: "Provider environment", bottomPadding: 4)
-                VStack(spacing: 0) {
-                    metadataRow(
-                        "Working directory",
-                        environment.workingDirectory ?? "Not supplied"
-                    )
-                    Divider().opacity(0.35)
-                    metadataRow("Server route", environment.serverOrigin ?? "Not supplied")
-                    Divider().opacity(0.35)
-                    metadataRow("Digest", environment.sha256, code: true)
-                }
-                .padding(.horizontal, 13)
-                .sectionFill(.tronAmber, cornerRadius: 12, subtle: true, interactive: false)
-            } else {
-                emptyState("Environment provenance is unavailable for this request.")
-            }
-
-        case .deliveries(let deliveries):
+        contextSection(title: "Background updates") {
+            let deliveries = manifest?.agentDeliveries ?? []
             if deliveries.isEmpty {
-                emptyState("No durable updates were included in this provider request.")
+                emptyState(
+                    "No background worker or agent updates were included in this request. "
+                        + "Ordinary messages and question answers appear in Conversation."
+                )
             } else {
                 ForEach(deliveries) { delivery in
-                    VStack(alignment: .leading, spacing: 8) {
+                    includedDeliveryCard(delivery)
+                }
+            }
+        }
+
+        if !attachments.isEmpty {
+            contextSection(title: "Attachments & documents") {
+                messageCards(attachments, empty: "No attachments were included.")
+            }
+        }
+
+        contextSection(title: "Available tools") {
+            if fixedTools.isEmpty, workers.isEmpty {
+                emptyState("No tools were available to the agent for this request.")
+            } else {
+                Text(
+                    "\(toolSummary.fixedAvailable) core "
+                        + (toolSummary.fixedAvailable == 1 ? "tool" : "tools")
+                        + " · \(toolSummary.workersAvailable) "
+                        + (toolSummary.workersAvailable == 1 ? "worker" : "workers")
+                )
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+
+                ForEach(fixedTools) { tool in
+                    capabilityCard(
+                        title: WorkerConsolePresentation.displayLabel(tool.modelName),
+                        detail: tool.selectionReason.map(WorkerConsolePresentation.displayLabel),
+                        symbol: "wrench.and.screwdriver"
+                    )
+                }
+                ForEach(workers) { worker in
+                    capabilityCard(
+                        title: WorkerConsolePresentation.displayLabel(worker.modelName),
+                        detail: (worker.explanation ?? worker.selectionReason)
+                            .map(WorkerConsolePresentation.displayLabel),
+                        symbol: "person.2"
+                    )
+                }
+            }
+        }
+
+        if let evaluations = manifest?.automaticContext, !evaluations.isEmpty {
+            contextSection(title: "Continuity & memory") {
+                ForEach(evaluations) { evaluation in
+                    VStack(alignment: .leading, spacing: 7) {
                         HStack {
-                            Text(SessionContextPresentation.includedDeliveryTitle(
-                                sourceKind: delivery.sourceKind,
-                                content: delivery.content
-                            ))
+                            Text(evaluation.kind == "continuity" ? "Continuity" : "Worker results")
                                 .font(TronTypography.sans(
                                     size: TronTypography.sizeBodySM,
                                     weight: .semibold
                                 ))
                             Spacer()
-                            Text(delivery.redelivery ? "Redelivery" : "In request")
+                            Text(SessionContextPresentation.automaticContextChannel(evaluation))
                                 .font(TronTypography.pillValue)
-                                .foregroundStyle(.tronEmerald)
+                                .foregroundStyle(.tronCyan)
                         }
-                        Text(SessionContextPresentation.includedDeliverySummary(
-                            sourceKind: delivery.sourceKind,
-                            content: delivery.content
-                        ))
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                            .foregroundStyle(.tronTextSecondary)
                         Text(
-                            [
-                                delivery.intent.map(WorkerConsolePresentation.displayLabel),
-                                WorkerConsolePresentation.displayLabel(delivery.wakePolicy),
-                                WorkerConsolePresentation.displayLabel(delivery.boundary),
-                            ]
-                            .compactMap { $0 }
-                            .joined(separator: " · ")
+                            evaluation.narrative
+                                ?? evaluation.detail
+                                ?? "No additional narrative was included."
                         )
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
-                        DisclosureGroup(
-                            isExpanded: Binding(
-                                get: { expandedDeliveryIds.contains(delivery.deliveryId) },
-                                set: { expanded in
-                                    if expanded {
-                                        expandedDeliveryIds.insert(delivery.deliveryId)
-                                    } else {
-                                        expandedDeliveryIds.remove(delivery.deliveryId)
-                                    }
-                                }
-                            )
-                        ) {
-                            Text(delivery.content)
-                                .font(TronTypography.code(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextSecondary)
-                                .textSelection(.enabled)
-                                .padding(.top, 6)
-                        } label: {
-                            Text("Exact model-visible content")
-                                .font(TronTypography.sans(
-                                    size: TronTypography.sizeCaption,
-                                    weight: .semibold
-                                ))
-                        }
-                        .tint(.tronEmerald)
-                        auditIdentifier("Delivery", delivery.deliveryId)
-                        auditText(
-                            SessionContextAuditFormatter.projectedJSONString(
-                                delivery.provenance
-                            )
-                        )
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(.tronTextSecondary)
+                        .textSelection(.enabled)
                     }
                     .padding(13)
-                    .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+                    .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
                 }
             }
+        }
+    }
 
-        case .tools(let fixed, let workers, let raw):
-            let selectedFixed = fixed.filter(\.projected)
-            let omittedFixed = fixed.filter { !$0.projected }
-            let selected = workers.filter(\.projected)
-            let omitted = workers.filter { !$0.projected }
-            let summary = SessionContextPresentation.toolSummary(
-                fixed: fixed,
-                workers: workers
-            )
-            VStack(alignment: .leading, spacing: 14) {
-                toolSurfaceSection(title: "Tools available for this request") {
-                    HStack(spacing: 0) {
-                        toolMetric(label: "Fixed", value: summary.fixedAvailable)
-                        Divider().frame(height: 32)
-                        toolMetric(label: "Workers", value: summary.workersAvailable)
-                        Divider().frame(height: 32)
-                        toolMetric(label: "Omitted", value: summary.omitted)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .sectionFill(
-                        .tronEmerald,
-                        cornerRadius: 12,
-                        subtle: true,
-                        interactive: false
-                    )
-                }
+    @ViewBuilder
+    private func technicalDetails(
+        _ detail: SessionContextRequestDetailDTO,
+        cacheReadTokens: Int,
+        cacheWriteTokens: Int
+    ) -> some View {
+        let manifest = detail.contextManifest
+        let auditOverview = SessionContextAuditFormatter.providerRequestOverview(
+            detail.providerAudit
+        )
 
-                toolSurfaceSection(title: "Selected fixed tools") {
-                    LazyVStack(spacing: 8) {
-                        fixedToolSelectionCards(
-                            selectedFixed,
-                            empty: "No fixed tools were selected for this request."
-                        )
-                    }
-                }
-                toolSurfaceSection(title: "Selected direct workers") {
-                    LazyVStack(spacing: 8) {
-                        workerSelectionCards(
-                            selected,
-                            empty: "No direct workers were selected."
-                        )
-                    }
-                }
-                toolSurfaceSection(title: "Other fixed tools") {
-                    LazyVStack(spacing: 8) {
-                        fixedToolSelectionCards(
-                            omittedFixed,
-                            empty: "No fixed tools were omitted."
-                        )
-                    }
-                }
-                toolSurfaceSection(title: "Omitted direct workers") {
-                    LazyVStack(spacing: 8) {
-                        workerSelectionCards(
-                            omitted,
-                            empty: "No direct workers were omitted."
-                        )
-                    }
-                }
-                if let raw {
-                    toolSurfaceSection(title: "Exact surface evidence") {
-                        rawJSONButton(
-                            title: "View exact surface JSON",
-                            subtitle: "Formatted only when opened",
-                            destination: .toolSurface(raw)
-                        )
-                    }
-                }
-            }
-
-        case .automatic(let evaluations):
-            if evaluations.isEmpty {
-                emptyState("No automatic context evaluations were recorded.")
-            } else {
-                ForEach(evaluations) { evaluation in
-                    automaticEvaluationDetail(evaluation)
-                }
-            }
-
-        case .providerAudit(let detail, let cacheReadTokens, let cacheWriteTokens):
-            let auditOverview = SessionContextAuditFormatter.providerRequestOverview(
-                detail.providerAudit
-            )
-            SettingsSectionHeader(title: "Audit identity", bottomPadding: 4)
-            VStack(spacing: 0) {
+        technicalSection(title: "Audit identity") {
+            metadataContainer(.tronEmerald) {
                 metadataRow("Format", detail.format, code: true)
                 Divider().opacity(0.35)
                 metadataRow("Sequence", "\(detail.sequence)")
@@ -309,143 +235,161 @@ struct SessionContextDetailSheet: View {
                     WorkerConsolePresentation.displayLabel(detail.provenanceAvailability)
                 )
             }
-            .padding(.horizontal, 13)
-            .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+        }
 
-            SettingsSectionHeader(title: "Session cache activity", bottomPadding: 4)
-            VStack(spacing: 0) {
-                metadataRow(
-                    "Read",
-                    "\(TokenFormatter.format(cacheReadTokens)) tokens"
-                )
-                Divider().opacity(0.35)
-                metadataRow(
-                    "Written",
-                    "\(TokenFormatter.format(cacheWriteTokens)) tokens"
-                )
+        technicalSection(title: "Provider-visible environment") {
+            Text(
+                "Filesystem paths and server origins are redacted before this durable audit is "
+                    + "stored, so personal paths and connection details cannot leak into logs or exports."
+            )
+            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+            .foregroundStyle(.tronTextMuted)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if let environment = manifest?.environment {
+                metadataContainer(.tronAmber) {
+                    metadataRow("Working directory", environment.workingDirectory ?? "Not supplied")
+                    Divider().opacity(0.35)
+                    metadataRow("Server route", environment.serverOrigin ?? "Not supplied")
+                    Divider().opacity(0.35)
+                    metadataRow("Digest", environment.sha256, code: true)
+                }
+            } else {
+                emptyState("Environment provenance is unavailable for this request.")
             }
-            .padding(.horizontal, 13)
-            .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+        }
 
-            if let cache = detail.contextManifest?.cacheLayout {
-                SettingsSectionHeader(title: "Cache layout", bottomPadding: 4)
-                VStack(spacing: 0) {
-                    metadataRow(
-                        "Stable instructions",
-                        formattedBytes(cache.stableInstructionBytes)
+        if let manifest {
+            technicalSection(title: "Integrity") {
+                metadataContainer(.tronPurple) {
+                    metadataRow("Instructions", manifest.systemPromptSha256, code: true)
+                    Divider().opacity(0.35)
+                    metadataRow("Messages", manifest.messagesSha256, code: true)
+                    Divider().opacity(0.35)
+                    metadataRow("Tools", manifest.toolsSha256, code: true)
+                    Divider().opacity(0.35)
+                    metadataRow("Complete context", manifest.contextSha256, code: true)
+                }
+
+                ForEach(manifest.systemContributions) { contribution in
+                    provenanceCard(
+                        title: contribution.label,
+                        rows: [
+                            ("Bytes", "\(contribution.byteCount)"),
+                            ("Digest", contribution.sha256),
+                        ]
                     )
-                    Divider().opacity(0.35)
-                    metadataRow("Instruction digest", cache.stableInstructionSha256, code: true)
-                    Divider().opacity(0.35)
-                    metadataRow(
-                        "Fixed tools",
-                        "\(cache.fixedToolCount) · \(formattedBytes(cache.fixedToolSchemaBytes))"
+                }
+                ForEach(detail.providerAdditions ?? []) { contribution in
+                    provenanceCard(
+                        title: contribution.label,
+                        rows: [
+                            ("Bytes", "\(contribution.byteCount)"),
+                            ("Digest", contribution.sha256),
+                        ]
                     )
-                    Divider().opacity(0.35)
-                    metadataRow("Fixed prefix digest", cache.fixedToolPrefixSha256, code: true)
-                    Divider().opacity(0.35)
-                    metadataRow(
-                        "Dynamic tools",
-                        "\(cache.dynamicToolCount) · \(formattedBytes(cache.dynamicToolSchemaBytes))"
-                    )
-                    Divider().opacity(0.35)
-                    metadataRow("Dynamic digest", cache.dynamicToolsSha256, code: true)
-                    Divider().opacity(0.35)
-                    metadataRow(
-                        "Reference context",
-                        formattedBytes(cache.requestContextBytes)
-                    )
-                    if let digest = cache.requestContextSha256 {
-                        Divider().opacity(0.35)
-                        metadataRow("Reference digest", digest, code: true)
+                }
+            }
+
+            technicalSection(title: "Message provenance") {
+                if manifest.messages.isEmpty {
+                    emptyState("No message-level provenance was recorded.")
+                } else {
+                    ForEach(manifest.messages) { message in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("\(message.ordinal + 1). \(friendlyRole(message.role))")
+                                .font(TronTypography.sans(
+                                    size: TronTypography.sizeBodySM,
+                                    weight: .semibold
+                                ))
+                            auditIdentifier("Source events", message.sourceEventIds.joined(separator: ", "))
+                            if let invocationId = message.invocationId {
+                                auditIdentifier("Invocation", invocationId)
+                            }
+                            auditIdentifier("Digest", message.sha256)
+                        }
+                        .padding(13)
+                        .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
                     }
                 }
-                .padding(.horizontal, 13)
-                .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
             }
 
-            SettingsSectionHeader(title: "Redacted provider request", bottomPadding: 4)
-            VStack(spacing: 0) {
+            technicalSection(title: "Cache") {
+                metadataContainer(.tronEmerald) {
+                    metadataRow("Read", "\(TokenFormatter.format(cacheReadTokens)) tokens")
+                    Divider().opacity(0.35)
+                    metadataRow("Written", "\(TokenFormatter.format(cacheWriteTokens)) tokens")
+                }
+                if let cache = manifest.cacheLayout {
+                    metadataContainer(.tronCyan) {
+                        metadataRow("Stable instructions", formattedBytes(cache.stableInstructionBytes))
+                        Divider().opacity(0.35)
+                        metadataRow("Instruction digest", cache.stableInstructionSha256, code: true)
+                        Divider().opacity(0.35)
+                        metadataRow(
+                            "Fixed tools",
+                            "\(cache.fixedToolCount) · \(formattedBytes(cache.fixedToolSchemaBytes))"
+                        )
+                        Divider().opacity(0.35)
+                        metadataRow("Fixed prefix digest", cache.fixedToolPrefixSha256, code: true)
+                        Divider().opacity(0.35)
+                        metadataRow(
+                            "Dynamic tools",
+                            "\(cache.dynamicToolCount) · \(formattedBytes(cache.dynamicToolSchemaBytes))"
+                        )
+                        Divider().opacity(0.35)
+                        metadataRow("Dynamic digest", cache.dynamicToolsSha256, code: true)
+                    }
+                }
+            }
+
+            technicalSection(title: "Exact tool surface") {
+                rawJSONButton(
+                    title: "View exact surface JSON",
+                    subtitle: "Identifiers, selection evidence, and omissions",
+                    destination: .toolSurface(manifest.toolSurface)
+                )
+            }
+        }
+
+        technicalSection(title: "Redacted provider request") {
+            metadataContainer(.tronTextMuted) {
                 metadataRow(
                     "Envelope",
                     WorkerConsolePresentation.displayLabel(auditOverview.requestKind)
                 )
                 Divider().opacity(0.35)
-                metadataRow(
-                    "Messages",
-                    auditOverview.messageCount.map(String.init) ?? "Unavailable"
-                )
+                metadataRow("Messages", auditOverview.messageCount.map(String.init) ?? "Unavailable")
                 Divider().opacity(0.35)
-                metadataRow(
-                    "Tools",
-                    auditOverview.toolCount.map(String.init) ?? "Unavailable"
-                )
+                metadataRow("Tools", auditOverview.toolCount.map(String.init) ?? "Unavailable")
             }
-            .padding(.horizontal, 13)
-            .sectionFill(.tronTextMuted, cornerRadius: 12, subtle: true, interactive: false)
-
             rawJSONButton(
                 title: "View redacted JSON",
-                subtitle: "Formatted only when opened",
+                subtitle: "The exact bounded request audit",
                 destination: .providerAudit(detail.providerAudit)
             )
         }
     }
 
     @ViewBuilder
-    private func automaticEvaluationDetail(
-        _ evaluation: ContextAutomaticEvaluationDTO
+    private func contextSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
     ) -> some View {
-        SettingsSectionHeader(
-            title: evaluation.kind == "continuity" ? "Continuity" : "Worker Results",
-            bottomPadding: 4
-        )
-        VStack(spacing: 0) {
-            metadataRow("Outcome", WorkerConsolePresentation.displayLabel(evaluation.outcome))
-            Divider().opacity(0.35)
-            metadataRow("Selection", WorkerConsolePresentation.displayLabel(evaluation.mechanism))
-            Divider().opacity(0.35)
-            metadataRow(
-                "Delivered as",
-                SessionContextPresentation.automaticContextChannel(evaluation)
-            )
-            Divider().opacity(0.35)
-            metadataRow("Policy worker", evaluation.workerId ?? "No worker ran")
-            Divider().opacity(0.35)
-            metadataRow("Version", evaluation.workerVersion ?? "Unavailable", code: true)
-            Divider().opacity(0.35)
-            metadataRow("Invocation", evaluation.invocationId ?? "Unavailable", code: true)
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsSectionHeader(title: title, bottomPadding: 0)
+            content()
         }
-        .padding(.horizontal, 13)
-        .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
+    }
 
-        SettingsSectionHeader(
-            title: evaluation.deliveryChannel == "reference"
-                ? "Reference context"
-                : "Injected narrative",
-            bottomPadding: 4
-        )
-        auditText(
-            evaluation.narrative
-                ?? evaluation.detail
-                ?? "No narrative was injected for this request."
-        )
-
-        SettingsSectionHeader(
-            title: "Sources (\(evaluation.sources.count))",
-            bottomPadding: 4
-        )
-        if evaluation.sources.isEmpty {
-            emptyState(
-                evaluation.detail
-                    ?? "This evaluation recorded no source-level provenance."
-            )
-        } else {
-            auditText(
-                SessionContextAuditFormatter.projectedJSONString(
-                    AnyCodable(evaluation.sources.map(\.value))
-                )
-            )
+    @ViewBuilder
+    private func technicalSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsSectionHeader(title: title, bottomPadding: 0)
+            content()
         }
     }
 
@@ -459,17 +403,19 @@ struct SessionContextDetailSheet: View {
         } else {
             ForEach(messages) { message in
                 VStack(alignment: .leading, spacing: 7) {
-                    HStack {
-                        Text("\(message.ordinal + 1). \(WorkerConsolePresentation.displayLabel(message.role))")
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("\(message.ordinal + 1). \(friendlyRole(message.role))")
                             .font(TronTypography.sans(
                                 size: TronTypography.sizeBodySM,
                                 weight: .semibold
                             ))
                             .foregroundStyle(.tronTextPrimary)
                         Spacer()
-                        Text(message.contentKinds.joined(separator: " · "))
-                            .font(TronTypography.pillValue)
-                            .foregroundStyle(.tronCyan)
+                        if !message.contentKinds.isEmpty {
+                            Text(message.contentKinds.map(WorkerConsolePresentation.displayLabel).joined(separator: " · "))
+                                .font(TronTypography.pillValue)
+                                .foregroundStyle(.tronCyan)
+                        }
                     }
                     if let preview = message.preview, !preview.isEmpty {
                         Text(preview)
@@ -477,28 +423,12 @@ struct SessionContextDetailSheet: View {
                             .foregroundStyle(.tronTextSecondary)
                             .textSelection(.enabled)
                     }
-                    HStack {
-                        Text(WorkerConsolePresentation.displayLabel(
-                            message.sourceKind ?? message.projection
-                        ))
-                        Spacer()
-                        Text(ByteCountFormatter.string(
-                            fromByteCount: Int64(message.byteCount),
-                            countStyle: .memory
-                        ))
+                    let facts = messageFacts(message)
+                    if !facts.isEmpty {
+                        Text(facts.joined(separator: " · "))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextMuted)
                     }
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextMuted)
-                    if !message.sourceEventIds.isEmpty {
-                        auditIdentifier(
-                            "Source events",
-                            message.sourceEventIds.joined(separator: ", ")
-                        )
-                    }
-                    if let invocationId = message.invocationId {
-                        auditIdentifier("Invocation", invocationId)
-                    }
-                    auditIdentifier("Digest", message.sha256)
                 }
                 .padding(13)
                 .sectionFill(.tronCyan, cornerRadius: 12, subtle: true, interactive: false)
@@ -506,131 +436,132 @@ struct SessionContextDetailSheet: View {
         }
     }
 
-    @ViewBuilder
-    private func toolSurfaceSection<Content: View>(
-        title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SettingsSectionHeader(title: title, bottomPadding: 0)
-            content()
-        }
-    }
-
-    @ViewBuilder
-    private func fixedToolSelectionCards(
-        _ tools: [SessionContextFixedToolSelection],
-        empty: String
-    ) -> some View {
-        if tools.isEmpty {
-            emptyState(empty)
-        } else {
-            ForEach(tools) { tool in
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text(WorkerConsolePresentation.displayLabel(tool.modelName))
-                            .font(TronTypography.sans(
-                                size: TronTypography.sizeBodySM,
-                                weight: .semibold
-                            ))
-                        Spacer()
-                        Text(tool.projected ? "Available" : "Not shown")
-                            .font(TronTypography.pillValue)
-                            .foregroundStyle(tool.projected ? .tronEmerald : .tronTextMuted)
-                    }
-                    Text(
-                        [
-                            tool.audience.map(WorkerConsolePresentation.displayLabel),
-                            tool.accessPath.map(WorkerConsolePresentation.displayLabel),
-                            (tool.projected ? tool.selectionReason : tool.omissionReason)
-                                .map(WorkerConsolePresentation.displayLabel),
-                        ]
-                        .compactMap { $0 }
-                        .joined(separator: " · ")
-                    )
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                    auditIdentifier("Function", tool.functionId)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .sectionFill(
-                    tool.projected ? .tronEmerald : .tronTextMuted,
-                    cornerRadius: 12,
-                    subtle: true,
-                    interactive: false
-                )
+    private func includedDeliveryCard(_ delivery: ContextAgentDeliveryDTO) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(SessionContextPresentation.includedDeliveryTitle(
+                    sourceKind: delivery.sourceKind,
+                    content: delivery.content
+                ))
+                    .font(TronTypography.sans(
+                        size: TronTypography.sizeBodySM,
+                        weight: .semibold
+                    ))
+                Spacer()
+                Text(delivery.redelivery ? "Redelivery" : "Included")
+                    .font(TronTypography.pillValue)
+                    .foregroundStyle(.tronEmerald)
             }
-        }
-    }
-
-    @ViewBuilder
-    private func workerSelectionCards(
-        _ workers: [SessionContextWorkerSelection],
-        empty: String
-    ) -> some View {
-        if workers.isEmpty {
-            emptyState(empty)
-        } else {
-            ForEach(workers) { worker in
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text(WorkerConsolePresentation.displayLabel(worker.modelName))
-                            .font(TronTypography.sans(
-                                size: TronTypography.sizeBodySM,
-                                weight: .semibold
-                            ))
-                        Spacer()
-                        if worker.score > 0 {
-                            Text("\(worker.score)")
-                                .font(TronTypography.pillValue)
-                                .foregroundStyle(worker.projected
-                                    ? .tronEmerald
-                                    : .tronTextMuted)
-                                .accessibilityLabel("Relevance score \(worker.score)")
+            Text(SessionContextPresentation.includedDeliverySummary(
+                sourceKind: delivery.sourceKind,
+                content: delivery.content
+            ))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronTextSecondary)
+            DisclosureGroup(
+                isExpanded: Binding(
+                    get: { expandedDeliveryIds.contains(delivery.deliveryId) },
+                    set: { expanded in
+                        if expanded {
+                            expandedDeliveryIds.insert(delivery.deliveryId)
+                        } else {
+                            expandedDeliveryIds.remove(delivery.deliveryId)
                         }
-                        Text(worker.projected ? "Selected" : "Omitted")
-                            .font(TronTypography.pillValue)
-                            .foregroundStyle(worker.projected ? .tronEmerald : .tronTextMuted)
                     }
-                    Text(
-                        WorkerConsolePresentation.displayLabel(
-                            worker.explanation
-                                ?? worker.selectionReason
-                                ?? worker.omissionReason
-                                ?? worker.mechanism
-                                ?? "Unavailable"
-                        )
-                    )
+                )
+            ) {
+                Text(delivery.content)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
-                    auditIdentifier("Worker", worker.workerId)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .sectionFill(
-                    worker.projected ? .tronEmerald : .tronTextMuted,
-                    cornerRadius: 12,
-                    subtle: true,
-                    interactive: false
-                )
+                    .textSelection(.enabled)
+                    .padding(.top, 6)
+            } label: {
+                Text("View included content")
+                    .font(TronTypography.sans(
+                        size: TronTypography.sizeCaption,
+                        weight: .semibold
+                    ))
             }
+            .tint(.tronEmerald)
+        }
+        .padding(13)
+        .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private func capabilityCard(title: String, detail: String?, symbol: String) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: symbol)
+                .foregroundStyle(.tronEmerald)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(TronTypography.sans(
+                        size: TronTypography.sizeBodySM,
+                        weight: .semibold
+                    ))
+                    .foregroundStyle(.tronTextPrimary)
+                if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private func messageFacts(_ message: ContextMessageManifestDTO) -> [String] {
+        var facts = message.sourceModels.map {
+            SessionContextPresentation.modelDisplayName(
+                $0,
+                models: models,
+                fallback: $0.shortModelName
+            )
+        }
+        facts.append(contentsOf: message.sourceTools.map {
+            WorkerConsolePresentation.displayLabel($0)
+        })
+        facts.append(contentsOf: message.sourceTurns.map { "Turn \($0)" })
+        if facts.isEmpty, message.projection == "compaction_summary" {
+            facts.append("Compaction summary")
+        }
+        return facts
+    }
+
+    private func friendlyRole(_ role: String) -> String {
+        switch role.lowercased() {
+        case "user": "You"
+        case "assistant": "Assistant"
+        case "tool": "Tool result"
+        case "system": "System"
+        default: WorkerConsolePresentation.displayLabel(role)
         }
     }
 
-    private func toolMetric(label: String, value: Int) -> some View {
-        VStack(spacing: 2) {
-            Text("\(value)")
+    private func provenanceCard(title: String, rows: [(String, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
                 .font(TronTypography.sans(
                     size: TronTypography.sizeBodySM,
                     weight: .semibold
                 ))
-                .foregroundStyle(.tronTextPrimary)
-            Text(label)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
+            ForEach(Array(rows.enumerated()), id: \.offset) { entry in
+                auditIdentifier(entry.element.0, entry.element.1)
+            }
         }
-        .frame(maxWidth: .infinity)
+        .padding(13)
+        .sectionFill(.tronPurple, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private func metadataContainer<Content: View>(
+        _ color: Color,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 0) { content() }
+            .padding(.horizontal, 13)
+            .sectionFill(color, cornerRadius: 12, subtle: true, interactive: false)
     }
 
     private func rawJSONButton(
@@ -638,9 +569,7 @@ struct SessionContextDetailSheet: View {
         subtitle: String,
         destination: SessionContextRawJSONSelection
     ) -> some View {
-        Button {
-            rawJSONSelection = destination
-        } label: {
+        Button { rawJSONSelection = destination } label: {
             HStack(spacing: 12) {
                 Image(systemName: "curlybraces.square")
                     .foregroundStyle(.tronTextMuted)
@@ -674,16 +603,6 @@ struct SessionContextDetailSheet: View {
             .sectionFill(.tronTextMuted, cornerRadius: 12, subtle: true, interactive: false)
     }
 
-    private func auditText(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: TronTypography.sizeCaption, design: .monospaced))
-            .foregroundStyle(.tronTextSecondary)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(13)
-            .sectionFill(.tronTextMuted, cornerRadius: 12, subtle: true, interactive: false)
-    }
-
     private func metadataRow(_ label: String, _ value: String, code: Bool = false) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(label)
@@ -704,7 +623,7 @@ struct SessionContextDetailSheet: View {
     private func auditIdentifier(_ label: String, _ value: String) -> some View {
         HStack(spacing: 6) {
             Text(label)
-            Text(value)
+            Text(value.isEmpty ? "Unavailable" : value)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
