@@ -194,17 +194,17 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertEqual(frame.width / frame.height, 4.0 / 3.0, accuracy: 0.001)
     }
 
-    func testImagePreviewChromeAndViewportStayConcentricWithTheSheet() {
+    func testImagePreviewTopChromeKeepsItsConcentricReferenceGeometry() {
         XCTAssertEqual(
-            ImagePreviewViewportLayout.viewportCornerRadius
+            ImagePreviewViewportLayout.minimumViewportTopCornerRadius
                 + ImagePreviewViewportLayout.viewportInset,
-            ImagePreviewViewportLayout.sheetCornerRadius,
+            ImagePreviewViewportLayout.topChromeCornerReferenceRadius,
             accuracy: 0.001
         )
         XCTAssertEqual(
             ImagePreviewViewportLayout.chromeEdgeInset
                 + ImagePreviewViewportLayout.dismissButtonDiameter * 0.5,
-            ImagePreviewViewportLayout.sheetCornerRadius,
+            ImagePreviewViewportLayout.topChromeCornerReferenceRadius,
             accuracy: 0.001
         )
         XCTAssertLessThanOrEqual(ImagePreviewViewportLayout.dismissButtonDiameter, 44)

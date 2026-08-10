@@ -173,7 +173,7 @@ struct WorkerConsoleInteractionTests {
         #expect(graph.contains("View complete result"))
         #expect(!graph.contains("Inspect result"))
         #expect(graph.contains("WorkerResultInspectorSheet("))
-        #expect(graphController.contains("WorkerResultAgentHandoffButton("))
+        #expect(graphController.contains("WorkerResultAgentHandoffCard("))
         #expect(!graphController.contains("loadResultOverview"))
         #expect(!graphController.contains("workerResult("))
         #expect(context.contains(".workerRunProjectionInvalidated"))
@@ -348,9 +348,10 @@ struct WorkerConsoleInteractionTests {
         #expect(resultInspector.contains("Open raw JSON"))
         #expect(resultInspector.contains("Result fields"))
         #expect(resultInspector.contains("StructuredDataFieldHeader("))
-        #expect(resultInspector.contains("title: \"Continue in a new chat\""))
+        #expect(resultInspector.contains("title: \"Investigate with Agent\""))
         #expect(resultInspector.contains("startAgentSessionHandoff(.workerResult("))
-        #expect(resultInspector.contains("struct WorkerResultAgentHandoffButton"))
+        #expect(resultInspector.contains("struct WorkerResultAgentHandoffCard"))
+        #expect(resultInspector.contains("Open a new chat with this exact durable result"))
         #expect(resultInspector.contains("struct WorkerAttentionResultSheet"))
         #expect(resultInspector.contains("title: \"View result details\""))
         #expect(resultInspector.contains("title: \"Dismiss result\""))
@@ -363,8 +364,8 @@ struct WorkerConsoleInteractionTests {
             from: "private func resultHandoffAction(",
             through: "@ViewBuilder\n    private func resultContent"
         )
-        #expect(handoffAction.contains("WorkerConsoleSectionHeader("))
-        #expect(handoffAction.contains("WorkerResultAgentHandoffButton("))
+        #expect(handoffAction.contains("WorkerResultAgentHandoffCard("))
+        #expect(!handoffAction.contains("WorkerConsoleSectionHeader("))
         #expect(!handoffAction.contains("WorkerConsoleSection("))
         #expect(!resultInspector.contains("Text(fieldMetadata(field))"))
         #expect(!resultInspector.contains(#"title: chunk.truncated ? "Result page" : "Result value""#))
@@ -382,7 +383,7 @@ struct WorkerConsoleInteractionTests {
             encoding: .utf8
         )
         #expect(runDetail.contains("WorkerResultInspectorSheet("))
-        #expect(runDetail.contains("WorkerResultAgentHandoffButton("))
+        #expect(runDetail.contains("WorkerResultAgentHandoffCard("))
         #expect(runDetail.contains("WorkerRunTechnicalDetailsSheet"))
         #expect(runDetail.contains("showsOverview: false"))
         #expect(runTechnicalDetail.contains("Legacy Worker Result"))
@@ -609,6 +610,12 @@ struct WorkerConsoleInteractionTests {
             ),
             encoding: .utf8
         )
+        let components = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Presentation/WorkerConsoleComponents.swift"
+            ),
+            encoding: .utf8
+        )
         let context = try sessionContextSource(root: root)
         let standaloneSheet = root.appendingPathComponent(
             "Sources/UI/SessionContext/WorkerSystemSheet.swift"
@@ -673,6 +680,21 @@ struct WorkerConsoleInteractionTests {
         #expect(triggerSource.contains("WorkerConsoleGroup("))
         #expect(triggerSource.contains("WorkerConsoleInlineEmptyState"))
         #expect(!triggerSource.contains("WorkerConsoleSection("))
+        let triggerCardStart = try #require(components.range(of: "struct WorkerTriggerCard"))
+        let versionRowStart = try #require(
+            components.range(
+                of: "struct WorkerVersionRow",
+                range: triggerCardStart.upperBound..<components.endIndex
+            )
+        )
+        let triggerCard = components[triggerCardStart.lowerBound..<versionRowStart.lowerBound]
+        #expect(triggerCard.contains("Button { showConfiguration = true }"))
+        #expect(triggerCard.contains("Opens trigger configuration"))
+        #expect(triggerCard.contains("WorkerJSONDetailSheet("))
+        #expect(triggerCard.contains("Configuration\""))
+        #expect(triggerCard.contains("Label(\"Next"))
+        #expect(!triggerCard.contains("Label(\"Configuration\""))
+        #expect(!triggerCard.contains("Cursor"))
         #expect(!context.contains("WorkerSystemSheet("))
         #expect(!context.contains("workerSystemSection"))
     }

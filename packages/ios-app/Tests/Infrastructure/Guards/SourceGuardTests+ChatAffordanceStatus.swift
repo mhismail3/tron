@@ -2,6 +2,23 @@ import Testing
 import Foundation
 
 extension SourceGuardTests {
+    @Test("Photo previews preserve system sheet geometry and device-concentric media corners")
+    func testPhotoPreviewUsesDeviceAdaptiveSheetGeometry() throws {
+        let source = try String(
+            contentsOf: iosAppRoot().appendingPathComponent(
+                "Sources/UI/Chat/Sheets/ChatImagePreviewSheet.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(source.contains(".presentationCornerRadius(nil)"))
+        #expect(source.contains("private var viewportShape: ConcentricRectangle"))
+        #expect(source.contains("uniformBottomCorners: .concentric"))
+        #expect(source.contains(".clipShape(viewportShape)"))
+        #expect(!source.contains(".presentationCornerRadius(ImagePreviewViewportLayout"))
+        #expect(!source.contains("ImagePreviewViewportLayout.viewportCornerRadius"))
+    }
+
     @Test("Interactive chat loading has one visible owner and one action policy")
     func testInteractiveChatLoadingPresentationRemainsCoherent() throws {
         let iosRoot = iosAppRoot()

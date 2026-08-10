@@ -93,7 +93,7 @@ struct WorkerToolRunGraphView: View {
                     )
                 }
                 if WorkerRunGraphPresentation.canInspectResult(status: graph.status) {
-                    WorkerResultAgentHandoffButton(
+                    WorkerResultAgentHandoffCard(
                         invocationId: graph.requestedInvocationId,
                         workerName: WorkerRunGraphPresentation.runTitle(
                             workerName: graph.workerName,

@@ -50,14 +50,19 @@ struct ChatImagePreviewSheet: View {
             isSelectedImageZoomed = false
         }
         .adaptivePresentationDetents([.medium], ipadSizing: .compactForm)
-        .presentationCornerRadius(ImagePreviewViewportLayout.sheetCornerRadius)
+        // The presentation owns its outer shape. In particular, iPhone sheets
+        // resolve their bottom corners concentrically against the current
+        // display, which a fixed presentation radius would override.
+        .presentationCornerRadius(nil)
         .presentationContentInteraction(.scrolls)
     }
 
-    private var viewportShape: RoundedRectangle {
-        RoundedRectangle(
-            cornerRadius: ImagePreviewViewportLayout.viewportCornerRadius,
-            style: .continuous
+    private var viewportShape: ConcentricRectangle {
+        ConcentricRectangle(
+            uniformTopCorners: .concentric(
+                minimum: .fixed(ImagePreviewViewportLayout.minimumViewportTopCornerRadius)
+            ),
+            uniformBottomCorners: .concentric
         )
     }
 
@@ -221,22 +226,21 @@ private struct PreviewDecodeRequest: Hashable {
 /// controls. Zoom then expands naturally into those protected regions without
 /// resizing (and therefore resetting) the native zoom view mid-gesture.
 enum ImagePreviewViewportLayout {
-    /// The media sheet owns its outer curve so every inner element can remain
-    /// mathematically concentric instead of approximating the system sheet.
-    static let sheetCornerRadius: CGFloat = 40
+    /// The system owns the presentation's device-relative outer corners. This
+    /// reference is only for positioning top chrome, whose sheet radius is
+    /// intentionally stable; the media viewport uses `ConcentricRectangle` so
+    /// its bottom corners follow the actual display rather than this value.
+    static let topChromeCornerReferenceRadius: CGFloat = 40
     static let viewportInset: CGFloat = 8
     static let dismissButtonDiameter: CGFloat = 44
     static let fittedPhotoCornerRadius: CGFloat = 18
-
-    static var viewportCornerRadius: CGFloat {
-        max(0, sheetCornerRadius - viewportInset)
-    }
+    static let minimumViewportTopCornerRadius: CGFloat = 32
 
     /// Aligns the circular close control's center with the sheet corner's
     /// center, producing equal curvature clearance along the top and trailing
     /// edges.
     static var chromeEdgeInset: CGFloat {
-        max(0, sheetCornerRadius - dismissButtonDiameter * 0.5)
+        max(0, topChromeCornerReferenceRadius - dismissButtonDiameter * 0.5)
     }
 
     /// At fitted scale the photo is an independent rounded object. Once zoomed,
@@ -354,8 +358,6 @@ private final class ImageZoomScrollView: UIScrollView, UIScrollViewDelegate {
         backgroundColor = .clear
         contentInsetAdjustmentBehavior = .never
         clipsToBounds = true
-        layer.cornerRadius = ImagePreviewViewportLayout.viewportCornerRadius
-        layer.cornerCurve = .continuous
 
         zoomContentView.backgroundColor = .clear
         addSubview(zoomContentView)

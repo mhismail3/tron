@@ -96,16 +96,17 @@ private struct WorkerAttentionResultSheet: View {
                     }
 
                     if let receipt = selection.item.result.receipt {
-                        WorkerResultAgentHandoffButton(
+                        WorkerResultAgentHandoffCard(
                             invocationId: receipt.reference.invocationId,
                             workerName: selection.workerName ?? "Worker"
                         ) {
                             dismiss()
                         }
                     } else {
-                        TronPrimaryActionButton(
-                            title: "Investigate with agent",
-                            systemImage: "bubble.left.and.text.bubble.right.fill",
+                        WorkerConsoleActionCard(
+                            title: "Investigate with Agent",
+                            detail: "Open a new chat with this failure evidence so an agent can explain what happened and help resolve it.",
+                            symbol: "bubble.left.and.text.bubble.right.fill",
                             accent: .tronEmerald,
                             isEnabled: dependencies.connectionRepository.connectionState.isConnected
                         ) {
@@ -367,7 +368,7 @@ enum WorkerResultInspectorPresentation {
 }
 
 /// Shared conversational continuation for any exact completed worker result.
-struct WorkerResultAgentHandoffButton: View {
+struct WorkerResultAgentHandoffCard: View {
     let invocationId: String
     let workerName: String
     let onStart: () -> Void
@@ -385,9 +386,10 @@ struct WorkerResultAgentHandoffButton: View {
     }
 
     var body: some View {
-        TronPrimaryActionButton(
-            title: "Investigate with agent",
-            systemImage: "bubble.left.and.text.bubble.right.fill",
+        WorkerConsoleActionCard(
+            title: "Investigate with Agent",
+            detail: "Open a new chat with this exact durable result so an agent can explain, debug, or act on it.",
+            symbol: "bubble.left.and.text.bubble.right.fill",
             accent: .tronEmerald,
             isEnabled: dependencies.connectionRepository.connectionState.isConnected
         ) {
@@ -549,17 +551,11 @@ struct WorkerResultInspectorSheet: View {
         _ reference: WorkerResultReferenceDTO
     ) -> some View {
         let workerName = WorkerConsolePresentation.displayLabel(reference.workerId)
-        return VStack(alignment: .leading, spacing: 12) {
-            WorkerConsoleSectionHeader(
-                title: "Continue in a new chat",
-                detail: "Give this exact durable result to an agent that can explain, debug, or act on it. No JSON copying is required."
-            )
-            WorkerResultAgentHandoffButton(
-                invocationId: invocationId,
-                workerName: workerName
-            ) {
-                dismiss()
-            }
+        return WorkerResultAgentHandoffCard(
+            invocationId: invocationId,
+            workerName: workerName
+        ) {
+            dismiss()
         }
     }
 
