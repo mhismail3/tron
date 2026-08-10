@@ -4,6 +4,7 @@ struct WorkerConsoleSection<Content: View>: View {
     let title: String
     let detail: String
     let accent: Color
+    var contentPadding: CGFloat = 13
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -13,7 +14,7 @@ struct WorkerConsoleSection<Content: View>: View {
                 content()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(13)
+            .padding(contentPadding)
             .sectionFill(accent, cornerRadius: 12, subtle: true, interactive: false)
         }
     }
@@ -64,6 +65,49 @@ struct WorkerConsoleSectionHeader: View {
                 .foregroundStyle(.tronTextMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// A first-level, single-destination worker card. Unlike
+/// `WorkerConsoleSection`, this surface does not add a second heading or a
+/// nested padded container around an action that is already self-explanatory.
+struct WorkerConsoleActionCard: View {
+    let title: String
+    let detail: String
+    let symbol: String
+    let accent: Color
+    var isEnabled = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 11) {
+                Image(systemName: symbol)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(accent)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(TronTypography.sans(
+                            size: TronTypography.sizeBodySM,
+                            weight: .semibold
+                        ))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(detail)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 11)
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.62)
+        .sectionFill(accent, cornerRadius: 11, subtle: true, interactive: true)
     }
 }
 
@@ -200,6 +244,7 @@ struct WorkerVersionRow: View {
     let worker: WorkerSummaryDTO
     let version: WorkerVersionDTO
     let isMutating: Bool
+    var verticalPadding: CGFloat = 8
     let action: () -> Void
 
     var body: some View {
@@ -242,7 +287,7 @@ struct WorkerVersionRow: View {
             }
             .frame(width: 82, height: 42, alignment: .center)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, verticalPadding)
     }
 
     private var isActive: Bool {

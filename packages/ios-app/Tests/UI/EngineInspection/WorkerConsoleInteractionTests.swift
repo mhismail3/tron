@@ -37,6 +37,18 @@ struct WorkerConsoleInteractionTests {
         )
         #expect(result.status == "Partial")
         #expect(result.summary == "The reviewed evidence supports a bounded conclusion.")
+
+        let repaired = WorkerRunGraphPresentation.resultPresentation(
+            "repaired · Repaired the compact metrics adapter."
+        )
+        #expect(repaired.status == "Repaired")
+        #expect(repaired.summary == "Repaired the compact metrics adapter.")
+
+        let inspected = WorkerRunGraphPresentation.resultPresentation(
+            "inspected · Confirmed the repository is clean."
+        )
+        #expect(inspected.status == "Inspected")
+        #expect(inspected.summary == "Confirmed the repository is clean.")
     }
 
     @Test("Worker result fields use bounded JSON-pointer navigation")
@@ -148,8 +160,7 @@ struct WorkerConsoleInteractionTests {
         #expect(graph.contains("WorkerRunExecutionOverviewView"))
         #expect(graph.contains("WorkerRunExecutionSheet"))
         #expect(graph.contains("Inspect execution trace"))
-        #expect(graph.contains("Open agent transcript"))
-        #expect(graph.contains("prompts, responses, reasoning, and tool calls"))
+        #expect(!graph.contains("Open agent transcript"))
         #expect(!graph.contains("Agent transcripts"))
         #expect(!graph.contains("Work structure"))
         #expect(!graph.contains("Activity history"))
@@ -188,6 +199,12 @@ struct WorkerConsoleInteractionTests {
             ),
             encoding: .utf8
         )
+        let components = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/RunGraph/WorkerRunGraphComponents.swift"
+            ),
+            encoding: .utf8
+        )
         let runSheet = try sourceSlice(
             detail,
             from: "struct WorkerRunDetailSheet: View",
@@ -209,30 +226,65 @@ struct WorkerConsoleInteractionTests {
         #expect(!runSheet.contains("showRunTree"))
         #expect(!runSheet.contains("showTimeline"))
         #expect(runSheet.contains("showsTechnicalDetails: false"))
+        #expect(runSheet.contains("showsOverview: false"))
         #expect(runSheet.contains("initialResultChunk: nil"))
+        #expect(runSheet.contains("label: \"Open Chat\""))
+        #expect(runSheet.contains("color: .tronEmerald"))
+        let technicalControls = try sourceSlice(
+            String(runSheet),
+            from: "private var technicalControls: some View",
+            through: "private func observeRun() async"
+        )
+        #expect(technicalControls.contains("WorkerConsoleActionCard("))
+        #expect(!technicalControls.contains("WorkerConsoleSectionHeader("))
+        let resultView = try sourceSlice(
+            components,
+            from: "struct WorkerRunInvocationResultView: View",
+            through: "struct WorkerRunInvocationExecutionOverviewView: View"
+        )
+        #expect(resultView.contains("WorkerConsoleActionCard("))
+        #expect(resultView.contains("title: \"View complete result\""))
+        #expect(!resultView.contains("runResultSummary"))
+        let executionView = try sourceSlice(
+            components,
+            from: "struct WorkerRunInvocationExecutionOverviewView: View",
+            through: "struct WorkerRunGraphSummaryView: View"
+        )
+        #expect(executionView.contains("WorkerConsoleActionCard("))
+        #expect(!executionView.contains("WorkerConsoleSectionHeader("))
         #expect(technical.contains("Validated result JSON"))
         #expect(technical.contains("Output schema"))
         #expect(technical.contains("Technical timeline"))
         #expect(technical.contains("Worker input"))
     }
 
-    @Test("Execution trace exposes one transcript per distinct agent session")
-    func executionTraceDeduplicatesTranscriptOwners() throws {
-        let data = #"""
-        [
-          {"id":"invocation:root","kind":"invocation","status":"completed","elapsedMs":10,"sessionId":"session-root"},
-          {"id":"agent:root","kind":"agent","status":"completed","elapsedMs":9,"sessionId":"session-root"},
-          {"id":"model:root:1","kind":"model","status":"completed","elapsedMs":4,"sessionId":"session-root"},
-          {"id":"invocation:child","kind":"invocation","status":"completed","elapsedMs":5,"sessionId":"session-child"},
-          {"id":"agent:child","kind":"agent","status":"completed","elapsedMs":4,"sessionId":"session-child"}
-        ]
-        """#.data(using: .utf8)!
-        let nodes = try JSONDecoder().decode([WorkerRunNodeDTO].self, from: data)
-
-        #expect(
-            WorkerRunGraphPresentation.transcriptOwnerNodeIds(nodes)
-                == Set(["invocation:root", "invocation:child"])
+    @Test("Worker run exposes one canonical emerald chat action outside the execution trace")
+    func workerRunUsesCanonicalChatAction() throws {
+        let root = iosAppRoot()
+        let detail = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Detail/WorkerConsoleDetailSheets.swift"
+            ),
+            encoding: .utf8
         )
+        let trace = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/RunGraph/WorkerRunGraphComponents.swift"
+            ),
+            encoding: .utf8
+        )
+        let runSheet = try sourceSlice(
+            detail,
+            from: "struct WorkerRunDetailSheet: View",
+            through: "private enum Mutation"
+        )
+
+        #expect(runSheet.contains("label: \"Open Chat\""))
+        #expect(runSheet.contains("color: .tronEmerald"))
+        #expect(runSheet.contains("showAuditSession = true"))
+        #expect(runSheet.contains("WorkerAuditSessionSheet(sessionId: sessionId)"))
+        #expect(!trace.contains("Open agent transcript"))
+        #expect(!trace.contains("node.sessionId"))
     }
 
     @Test("Engine containers do not use trailing navigation chevrons")
@@ -257,15 +309,10 @@ struct WorkerConsoleInteractionTests {
 
         for file in files {
             let source = try String(contentsOf: file, encoding: .utf8)
-            if file.lastPathComponent == "WorkerDetailSheet.swift" {
-                #expect(source.contains("DisclosureGroup(isExpanded: $isLifecycleAuditExpanded)"))
-                #expect(source.components(separatedBy: "DisclosureGroup").count == 2)
-            } else {
-                #expect(
-                    !source.contains("DisclosureGroup"),
-                    "\(file.lastPathComponent) must route unbounded detail to a sheet"
-                )
-            }
+            #expect(
+                !source.contains("DisclosureGroup"),
+                "\(file.lastPathComponent) must route unbounded detail to a sheet"
+            )
         }
 
         let detail = try String(
@@ -277,7 +324,12 @@ struct WorkerConsoleInteractionTests {
             encoding: .utf8
         )
         #expect(detail.contains("WorkerJSONDetailSheet(title: \"Input Schema\""))
-        #expect(detail.contains("title: \"Use in a new chat\""))
+        #expect(detail.contains("title: \"Invoke with Agent\""))
+        #expect(detail.contains("WorkerConsoleActionCard("))
+        #expect(detail.contains("WorkerLifecycleHistorySheet(audit: audit)"))
+        #expect(detail.contains(".sheet(isPresented: $showLifecycleHistory)"))
+        #expect(!detail.contains("No JSON or schema knowledge required"))
+        #expect(!detail.contains("Start new chat"))
         #expect(detail.contains("startAgentSessionHandoff(.worker("))
         #expect(!detail.contains("TextEditor(text: $viewModel.invocationInput)"))
         #expect(!detail.contains("title: \"New invocation\""))
@@ -309,7 +361,7 @@ struct WorkerConsoleInteractionTests {
         let handoffAction = try sourceSlice(
             resultInspector,
             from: "private func resultHandoffAction(",
-            through: "private var resultPath: some View"
+            through: "@ViewBuilder\n    private func resultContent"
         )
         #expect(handoffAction.contains("WorkerConsoleSectionHeader("))
         #expect(handoffAction.contains("WorkerResultAgentHandoffButton("))
@@ -317,6 +369,10 @@ struct WorkerConsoleInteractionTests {
         #expect(!resultInspector.contains("Text(fieldMetadata(field))"))
         #expect(!resultInspector.contains(#"title: chunk.truncated ? "Result page" : "Result value""#))
         #expect(!resultInspector.contains("assembledResult"))
+        #expect(resultInspector.contains(".sheet(item: $selectedField)"))
+        #expect(resultInspector.contains("selectedField = field"))
+        #expect(resultInspector.contains("showsOverview: false"))
+        #expect(resultInspector.contains("if showsOverview, location.pointer.isEmpty"))
         let runDetail = try String(
             contentsOf: workerRoot.appendingPathComponent("Detail/WorkerConsoleDetailSheets.swift"),
             encoding: .utf8
@@ -328,6 +384,7 @@ struct WorkerConsoleInteractionTests {
         #expect(runDetail.contains("WorkerResultInspectorSheet("))
         #expect(runDetail.contains("WorkerResultAgentHandoffButton("))
         #expect(runDetail.contains("WorkerRunTechnicalDetailsSheet"))
+        #expect(runDetail.contains("showsOverview: false"))
         #expect(runTechnicalDetail.contains("Legacy Worker Result"))
         #expect(!runDetail.contains("Inspect typed result"))
         #expect(!runDetail.contains("Run result projection"))
@@ -379,7 +436,8 @@ struct WorkerConsoleInteractionTests {
         #expect(action.contains(".glassEffect("))
         #expect(action.contains("@Environment(\\.usesLiquidGlassForControls)"))
         #expect(action.contains(".fill(accent.opacity(isEnabled ? 0.12 : 0.05))"))
-        #expect(workerDetail.contains("TronPrimaryActionButton("))
+        #expect(workerDetail.contains("WorkerConsoleActionCard("))
+        #expect(!workerDetail.contains("TronPrimaryActionButton("))
         #expect(delegation.contains("TronPrimaryActionButton("))
         #expect(!workerDetail.contains(".background(Color.tronEmerald"))
         #expect(!delegation.contains(".background(Color.tronPurple"))
@@ -770,9 +828,16 @@ struct WorkerConsoleInteractionTests {
 
     @Test("Active worker version status aligns with rollback controls")
     func activeWorkerVersionStatusUsesControlHeight() throws {
+        let root = iosAppRoot()
         let source = try String(
-            contentsOf: iosAppRoot().appendingPathComponent(
+            contentsOf: root.appendingPathComponent(
                 "Sources/UI/WorkerConsole/Presentation/WorkerConsoleComponents.swift"
+            ),
+            encoding: .utf8
+        )
+        let detail = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Detail/WorkerDetailSheet.swift"
             ),
             encoding: .utf8
         )
@@ -784,25 +849,32 @@ struct WorkerConsoleInteractionTests {
 
         #expect(row.contains("HStack(alignment: .center"))
         #expect(row.contains(".frame(width: 82, height: 42, alignment: .center)"))
+        #expect(row.contains("var verticalPadding: CGFloat = 8"))
+        #expect(row.contains(".padding(.vertical, verticalPadding)"))
+        #expect(detail.contains("verticalPadding: 0"))
+        #expect(detail.contains("contentPadding: 8"))
         #expect(!row.contains(".frame(minHeight:"))
     }
 
-    @Test("Lifecycle history wraps from one leading edge")
-    func lifecycleHistoryUsesLeadingAlignment() throws {
+    @Test("Lifecycle history opens a dedicated child sheet")
+    func lifecycleHistoryUsesChildSheet() throws {
         let source = try String(
             contentsOf: iosAppRoot().appendingPathComponent(
                 "Sources/UI/WorkerConsole/Detail/WorkerDetailSheet.swift"
             ),
             encoding: .utf8
         )
-        let label = try sourceSlice(
+        let action = try sourceSlice(
             source,
-            from: "Text(\"Lifecycle history\")",
-            through: ".frame(maxWidth: .infinity, alignment: .leading)"
+            from: "private var lifecycleAudit: some View",
+            through: "private var inboxAudit: some View"
         )
 
-        #expect(label.contains(".multilineTextAlignment(.leading)"))
-        #expect(label.contains(".fixedSize(horizontal: false, vertical: true)"))
+        #expect(action.contains("WorkerConsoleActionCard("))
+        #expect(action.contains("showLifecycleHistory = true"))
+        #expect(!action.contains("DisclosureGroup"))
+        #expect(source.contains("private struct WorkerLifecycleHistorySheet: View"))
+        #expect(source.contains("ForEach(audit)"))
     }
 
     @Test("Worker sessions stay read only and inside dashboard sheets")
@@ -842,10 +914,10 @@ struct WorkerConsoleInteractionTests {
         #expect(details.contains("WorkerAuditSessionSheet"))
         #expect(details.contains("presentationMode: .workerAudit"))
         #expect(details.contains("readOnlyTitle: title"))
-        #expect(!details.contains("label: \"Open Chat\""))
-        #expect(executionTrace.contains("Open agent transcript"))
-        #expect(executionTrace.contains("node.sessionId"))
-        #expect(executionTrace.contains("accent: .tronPurple"))
+        #expect(details.contains("label: \"Open Chat\""))
+        #expect(details.contains("color: .tronEmerald"))
+        #expect(!executionTrace.contains("Open agent transcript"))
+        #expect(!executionTrace.contains("node.sessionId"))
         #expect(!details.contains("title: \"Model Context\""))
         #expect(!details.contains("Open model context"))
         #expect(chat.contains("reconstructReadOnlyTranscript"))
@@ -896,7 +968,7 @@ struct WorkerConsoleInteractionTests {
         #expect(!shell.contains("Text(\"Open delivery audit\")"))
         #expect(detail.contains("private var workerResults: some View"))
         #expect(detail.contains("case results"))
-        #expect(detail.contains("private func lifecycleAudit"))
+        #expect(detail.contains("private var lifecycleAudit"))
         #expect(detail.contains("private var inboxAudit: some View"))
         #expect(!shell.contains("title: \"Durable inbox\""))
         #expect(!detail.contains("title: \"Durable inbox\""))
@@ -988,7 +1060,7 @@ struct WorkerConsoleInteractionTests {
         )
         let lifecycleAudit = try sourceSlice(
             detail,
-            from: "private func lifecycleAudit",
+            from: "private var lifecycleAudit",
             through: "private var inboxAudit"
         )
         let group = try sourceSlice(
@@ -999,8 +1071,9 @@ struct WorkerConsoleInteractionTests {
 
         #expect(activity.contains("WorkerConsoleGroup("))
         #expect(!activity.contains("WorkerConsoleSection("))
-        #expect(lifecycleAudit.contains("DisclosureGroup(isExpanded: $isLifecycleAuditExpanded)"))
-        #expect(lifecycleAudit.contains("sectionFill(.tronPurple"))
+        #expect(lifecycleAudit.contains("WorkerConsoleActionCard("))
+        #expect(lifecycleAudit.contains("accent: .tronPurple"))
+        #expect(lifecycleAudit.contains("showLifecycleHistory = true"))
         #expect(!lifecycleAudit.contains("WorkerConsoleSection("))
         #expect(group.contains("WorkerConsoleSectionHeader"))
         #expect(!group.contains("sectionFill"))

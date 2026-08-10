@@ -410,6 +410,8 @@ struct WorkerResultInspectorSheet: View {
     let invocationId: String
     let repository: any WorkerKernelRepository
     let showsTechnicalDetails: Bool
+    let showsOverview: Bool
+    let title: String
 
     @Environment(\.dependencies) private var dependencies
     @Environment(\.dismiss) private var dismiss
@@ -419,6 +421,7 @@ struct WorkerResultInspectorSheet: View {
     @State private var isLoading = false
     @State private var error: String?
     @State private var showTechnicalDetails = false
+    @State private var selectedField: WorkerResultFieldPresentation?
     @State private var loadGeneration = 0
     @State private var projectionOwnerId: UUID?
 
@@ -430,11 +433,15 @@ struct WorkerResultInspectorSheet: View {
         invocationId: String,
         repository: any WorkerKernelRepository,
         initialPointer: String = "",
-        showsTechnicalDetails: Bool = true
+        showsTechnicalDetails: Bool = true,
+        showsOverview: Bool = true,
+        title: String = "Worker Result"
     ) {
         self.invocationId = invocationId
         self.repository = repository
         self.showsTechnicalDetails = showsTechnicalDetails
+        self.showsOverview = showsOverview
+        self.title = title
         _locations = State(
             initialValue: [WorkerResultLocation(pointer: initialPointer, offset: 0)]
         )
@@ -449,11 +456,9 @@ struct WorkerResultInspectorSheet: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, 24)
                     } else if let chunk {
-                        if location.pointer.isEmpty {
+                        if showsOverview, location.pointer.isEmpty {
                             resultSummary(chunk.reference)
                             resultHandoffAction(chunk.reference)
-                        } else {
-                            resultPath
                         }
                         resultContent(chunk)
                         resultNavigation(chunk)
@@ -470,7 +475,7 @@ struct WorkerResultInspectorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Worker Result", color: .tronSuccess)
+                    SheetTitle(title: title, color: .tronSuccess)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     if locations.count > 1 {
@@ -490,6 +495,16 @@ struct WorkerResultInspectorSheet: View {
                 if let chunk {
                     WorkerResultTechnicalSheet(chunk: chunk)
                 }
+            }
+            .sheet(item: $selectedField) { field in
+                WorkerResultInspectorSheet(
+                    invocationId: invocationId,
+                    repository: repository,
+                    initialPointer: field.pointer,
+                    showsTechnicalDetails: false,
+                    showsOverview: false,
+                    title: field.label
+                )
             }
             .task(id: WorkerResultInspectorRefreshKey(
                 invocationId: invocationId,
@@ -548,18 +563,6 @@ struct WorkerResultInspectorSheet: View {
         }
     }
 
-    private var resultPath: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("SELECTED FIELD")
-                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                .foregroundStyle(.tronTextMuted)
-            Text(location.pointer)
-                .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .textSelection(.enabled)
-        }
-    }
-
     @ViewBuilder
     private func resultContent(_ chunk: WorkerResultChunkDTO) -> some View {
         let fields = WorkerResultInspectorPresentation.fields(in: chunk)
@@ -605,7 +608,7 @@ struct WorkerResultInspectorSheet: View {
 
     private func resultField(_ field: WorkerResultFieldPresentation) -> some View {
         Button {
-            locations.append(WorkerResultLocation(pointer: field.pointer, offset: 0))
+            selectedField = field
         } label: {
             HStack(alignment: .center, spacing: 11) {
                 Image(systemName: "doc.text.magnifyingglass")

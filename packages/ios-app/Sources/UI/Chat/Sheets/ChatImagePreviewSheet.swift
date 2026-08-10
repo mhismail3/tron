@@ -38,10 +38,10 @@ struct ChatImagePreviewSheet: View {
                 .ignoresSafeArea(.container, edges: .all)
                 .clipShape(viewportShape)
                 .contentShape(viewportShape)
-                .padding(8)
+                .padding(ImagePreviewViewportLayout.viewportInset)
                 .accessibilityValue(pageAccessibilityValue)
 
-                previewChrome(topInset: geometry.safeAreaInsets.top)
+                previewChrome
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -50,19 +50,28 @@ struct ChatImagePreviewSheet: View {
             isSelectedImageZoomed = false
         }
         .adaptivePresentationDetents([.medium], ipadSizing: .compactForm)
+        .presentationCornerRadius(ImagePreviewViewportLayout.sheetCornerRadius)
         .presentationContentInteraction(.scrolls)
     }
 
     private var viewportShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
+        RoundedRectangle(
+            cornerRadius: ImagePreviewViewportLayout.viewportCornerRadius,
+            style: .continuous
+        )
     }
 
-    private func previewChrome(topInset: CGFloat) -> some View {
-        ZStack(alignment: .topTrailing) {
+    private var previewChrome: some View {
+        let edgeInset = ImagePreviewViewportLayout.chromeEdgeInset
+
+        return ZStack(alignment: .topTrailing) {
             Text(sheetTitle)
                 .font(TronTypography.button)
                 .foregroundStyle(.tronEmerald)
-                .frame(maxWidth: .infinity, minHeight: 52)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: ImagePreviewViewportLayout.dismissButtonDiameter
+                )
                 .opacity(isSelectedImageZoomed ? 0 : 1)
                 .animation(
                     reduceMotion ? nil : .easeInOut(duration: 0.16),
@@ -75,7 +84,10 @@ struct ChatImagePreviewSheet: View {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
                     .foregroundStyle(.tronEmerald)
-                    .frame(width: 52, height: 52)
+                    .frame(
+                        width: ImagePreviewViewportLayout.dismissButtonDiameter,
+                        height: ImagePreviewViewportLayout.dismissButtonDiameter
+                    )
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -85,8 +97,8 @@ struct ChatImagePreviewSheet: View {
             )
             .accessibilityLabel("Close")
         }
-        .padding(.horizontal, 18)
-        .padding(.top, max(10, topInset + 8))
+        .padding(.horizontal, edgeInset)
+        .padding(.top, edgeInset)
         .frame(maxWidth: .infinity, alignment: .top)
     }
 
@@ -209,6 +221,31 @@ private struct PreviewDecodeRequest: Hashable {
 /// controls. Zoom then expands naturally into those protected regions without
 /// resizing (and therefore resetting) the native zoom view mid-gesture.
 enum ImagePreviewViewportLayout {
+    /// The media sheet owns its outer curve so every inner element can remain
+    /// mathematically concentric instead of approximating the system sheet.
+    static let sheetCornerRadius: CGFloat = 40
+    static let viewportInset: CGFloat = 8
+    static let dismissButtonDiameter: CGFloat = 44
+    static let fittedPhotoCornerRadius: CGFloat = 18
+
+    static var viewportCornerRadius: CGFloat {
+        max(0, sheetCornerRadius - viewportInset)
+    }
+
+    /// Aligns the circular close control's center with the sheet corner's
+    /// center, producing equal curvature clearance along the top and trailing
+    /// edges.
+    static var chromeEdgeInset: CGFloat {
+        max(0, sheetCornerRadius - dismissButtonDiameter * 0.5)
+    }
+
+    /// At fitted scale the photo is an independent rounded object. Once zoomed,
+    /// its transformed layer must become square so the single viewport mask owns
+    /// all visible edge curvature; otherwise the photo and sheet radii diverge.
+    static func photoCornerRadius(zoomScale: CGFloat, minimumScale: CGFloat) -> CGFloat {
+        zoomScale <= minimumScale + 0.01 ? fittedPhotoCornerRadius : 0
+    }
+
     static func fittedImageFrame(imageSize: CGSize, in viewportBounds: CGRect) -> CGRect {
         guard imageSize.width > 0,
               imageSize.height > 0,
@@ -317,7 +354,7 @@ private final class ImageZoomScrollView: UIScrollView, UIScrollViewDelegate {
         backgroundColor = .clear
         contentInsetAdjustmentBehavior = .never
         clipsToBounds = true
-        layer.cornerRadius = 22
+        layer.cornerRadius = ImagePreviewViewportLayout.viewportCornerRadius
         layer.cornerCurve = .continuous
 
         zoomContentView.backgroundColor = .clear
@@ -325,7 +362,7 @@ private final class ImageZoomScrollView: UIScrollView, UIScrollViewDelegate {
 
         imageView.contentMode = .scaleAspectFit
         imageView.clipsToBounds = true
-        imageView.layer.cornerRadius = 16
+        imageView.layer.cornerRadius = ImagePreviewViewportLayout.fittedPhotoCornerRadius
         imageView.layer.cornerCurve = .continuous
         imageView.isAccessibilityElement = true
         imageView.accessibilityTraits = .image
@@ -365,6 +402,7 @@ private final class ImageZoomScrollView: UIScrollView, UIScrollViewDelegate {
             updatePanOwnership()
         }
         imageView.frame = fittedImageFrame(in: zoomContentView.bounds)
+        updateImageCornerMask()
         centerZoomContent()
     }
 
@@ -373,6 +411,7 @@ private final class ImageZoomScrollView: UIScrollView, UIScrollViewDelegate {
     }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        updateImageCornerMask()
         centerZoomContent()
         reportTitleState(titleState.zoomChanged(
             scale: zoomScale,
@@ -394,6 +433,7 @@ private final class ImageZoomScrollView: UIScrollView, UIScrollViewDelegate {
         with view: UIView?,
         atScale scale: CGFloat
     ) {
+        updateImageCornerMask()
         reportTitleState(titleState.zoomEnded(
             scale: scale,
             minimumScale: minimumZoomScale
@@ -415,6 +455,13 @@ private final class ImageZoomScrollView: UIScrollView, UIScrollViewDelegate {
     private func updatePanOwnership() {
         let isZoomed = zoomScale > minimumZoomScale + 0.01
         panGestureRecognizer.isEnabled = isZoomed
+    }
+
+    private func updateImageCornerMask() {
+        imageView.layer.cornerRadius = ImagePreviewViewportLayout.photoCornerRadius(
+            zoomScale: zoomScale,
+            minimumScale: minimumZoomScale
+        )
     }
 
     private func fittedImageFrame(in containerBounds: CGRect) -> CGRect {

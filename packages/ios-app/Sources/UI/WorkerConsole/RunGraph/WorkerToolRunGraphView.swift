@@ -166,7 +166,9 @@ struct WorkerToolRunGraphView: View {
         .sheet(item: $selectedResult) { selection in
             WorkerResultInspectorSheet(
                 invocationId: selection.invocationId,
-                repository: dependencies.workerKernelRepository
+                repository: dependencies.workerKernelRepository,
+                showsTechnicalDetails: false,
+                showsOverview: false
             )
         }
         .confirmationDialog(

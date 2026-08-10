@@ -32,7 +32,7 @@ struct WorkerDetailSheet: View {
     @State private var selectedInboxItem: WorkerInboxSelection?
     @State private var selectedSection = WorkerDetailSection.overview
     @State private var loadedContinuity: EngineConnectionContinuity?
-    @State private var isLifecycleAuditExpanded = false
+    @State private var showLifecycleHistory = false
 
     var body: some View {
         NavigationStack {
@@ -144,6 +144,11 @@ struct WorkerDetailSheet: View {
                     )
                 }
             }
+            .sheet(isPresented: $showLifecycleHistory) {
+                if let audit = viewModel.inspection?.audit {
+                    WorkerLifecycleHistorySheet(audit: audit)
+                }
+            }
             .sheet(item: $selectedRun) { run in
                 WorkerRunDetailSheet(
                     run: run,
@@ -193,7 +198,7 @@ struct WorkerDetailSheet: View {
             useInChat(worker)
             versions(worker, inspection: inspection)
             lifecycle(worker)
-            lifecycleAudit(inspection)
+            lifecycleAudit
         case .activity:
             recentRuns
         case .results:
@@ -365,34 +370,20 @@ struct WorkerDetailSheet: View {
     }
 
     private func useInChat(_ worker: WorkerSummaryDTO) -> some View {
-        return WorkerConsoleSection(
-            title: "Use in a new chat",
+        WorkerConsoleActionCard(
+            title: "Invoke with Agent",
             detail: "Describe what you want in normal language. The agent will gather genuinely missing details, translate your request into typed input, and invoke this worker.",
-            accent: .tronEmerald
+            symbol: "bubble.left.and.text.bubble.right.fill",
+            accent: .tronEmerald,
+            isEnabled: connectionState.isConnected
+                && worker.enabled
+                && !worker.retired
         ) {
-            VStack(alignment: .leading, spacing: 13) {
-                Label("No JSON or schema knowledge required", systemImage: "text.bubble")
-                    .font(TronTypography.sans(
-                        size: TronTypography.sizeBodySM,
-                        weight: .semibold
-                    ))
-                    .foregroundStyle(.tronTextSecondary)
-
-                TronPrimaryActionButton(
-                    title: "Start new chat",
-                    systemImage: "bubble.left.and.text.bubble.right.fill",
-                    accent: .tronEmerald,
-                    isEnabled: connectionState.isConnected
-                        && worker.enabled
-                        && !worker.retired
-                ) {
-                    startAgentSessionHandoff(.worker(
-                        workerId: worker.workerId,
-                        name: worker.name
-                    ))
-                    dismiss()
-                }
-            }
+            startAgentSessionHandoff(.worker(
+                workerId: worker.workerId,
+                name: worker.name
+            ))
+            dismiss()
         }
     }
 
@@ -403,7 +394,8 @@ struct WorkerDetailSheet: View {
         WorkerConsoleSection(
             title: "Versions",
             detail: "Immutable retained bundles. Rollback changes canonical active state.",
-            accent: .tronPurple
+            accent: .tronPurple,
+            contentPadding: 8
         ) {
             if inspection.versions.isEmpty {
                 WorkerConsoleInlineEmptyState(symbol: "clock.arrow.circlepath", text: "No retained versions.")
@@ -413,7 +405,8 @@ struct WorkerDetailSheet: View {
                         WorkerVersionRow(
                             worker: worker,
                             version: version,
-                            isMutating: viewModel.isMutating || !connectionState.isConnected
+                            isMutating: viewModel.isMutating || !connectionState.isConnected,
+                            verticalPadding: 0
                         ) {
                             Task {
                                 await viewModel.rollback(
@@ -520,38 +513,15 @@ struct WorkerDetailSheet: View {
         }
     }
 
-    private func lifecycleAudit(_ inspection: WorkerInspectResultDTO) -> some View {
-        DisclosureGroup(isExpanded: $isLifecycleAuditExpanded) {
-            if inspection.audit.isEmpty {
-                WorkerConsoleInlineEmptyState(
-                    symbol: "checklist",
-                    text: "No lifecycle entries recorded."
-                )
-                .padding(.top, 10)
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(inspection.audit.prefix(20)) { item in
-                        WorkerAuditCard(item: item)
-                    }
-                }
-                .padding(.top, 10)
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Lifecycle history")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-                Text("Server-authored enable, update, rollback, failure, and retirement evidence.")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private var lifecycleAudit: some View {
+        WorkerConsoleActionCard(
+            title: "Lifecycle history",
+            detail: "Server-authored enable, update, rollback, failure, and retirement evidence.",
+            symbol: "checklist",
+            accent: .tronPurple
+        ) {
+            showLifecycleHistory = true
         }
-        .tint(.tronPurple)
-        .padding(12)
-        .sectionFill(.tronPurple, cornerRadius: 11, subtle: true, interactive: true)
     }
 
     private var inboxAudit: some View {
@@ -644,5 +614,41 @@ struct WorkerDetailSheet: View {
                 }
             }
         }
+    }
+}
+
+private struct WorkerLifecycleHistorySheet: View {
+    let audit: [WorkerAuditDTO]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if audit.isEmpty {
+                        WorkerConsoleInlineEmptyState(
+                            symbol: "checklist",
+                            text: "No lifecycle entries recorded."
+                        )
+                    } else {
+                        ForEach(audit) { item in
+                            WorkerAuditCard(item: item)
+                        }
+                    }
+                }
+                .padding(18)
+            }
+            .scrollContentBackground(.hidden)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: "Lifecycle History", color: .tronPurple)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: .tronPurple)
+                }
+            }
+        }
+        .workerConsoleSheetPresentation()
+        .tint(.tronPurple)
     }
 }

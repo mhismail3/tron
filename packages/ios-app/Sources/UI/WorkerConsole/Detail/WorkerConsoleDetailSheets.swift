@@ -151,6 +151,7 @@ struct WorkerRunDetailSheet: View {
     @State private var selectedResult: WorkerResultSelection?
     @State private var showTechnicalDetails = false
     @State private var showExecutionDetails = false
+    @State private var showAuditSession = false
     @State private var confirmCancel = false
     @State private var isMutating = false
     @State private var loadError: String?
@@ -231,6 +232,20 @@ struct WorkerRunDetailSheet: View {
                         color: color
                     )
                 }
+                if currentRun.agentSessionId?.isEmpty == false {
+                    ToolbarItem(placement: .topBarLeading) {
+                        LoadingToolbarButton(
+                            label: "Open Chat",
+                            icon: "text.bubble",
+                            color: .tronEmerald,
+                            isLoading: false,
+                            isEnabled: true
+                        ) {
+                            showAuditSession = true
+                        }
+                        .accessibilityLabel("Open worker session")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     SheetDismissButton(color: color)
                 }
@@ -239,12 +254,19 @@ struct WorkerRunDetailSheet: View {
                 WorkerResultInspectorSheet(
                     invocationId: selection.invocationId,
                     repository: dependencies.workerKernelRepository,
-                    showsTechnicalDetails: false
+                    showsTechnicalDetails: false,
+                    showsOverview: false
                 )
             }
             .sheet(isPresented: $showExecutionDetails) {
                 if let graph {
                     WorkerRunExecutionSheet(graph: graph)
+                }
+            }
+            .sheet(isPresented: $showAuditSession) {
+                if let sessionId = currentRun.agentSessionId,
+                   !sessionId.isEmpty {
+                    WorkerAuditSessionSheet(sessionId: sessionId)
                 }
             }
             .sheet(isPresented: $showTechnicalDetails) {
@@ -296,22 +318,17 @@ struct WorkerRunDetailSheet: View {
         selectedResult != nil
             || showExecutionDetails
             || showTechnicalDetails
+            || showAuditSession
     }
 
     private var technicalControls: some View {
-        WorkerConsoleSection(
-            title: "Technical details",
-            detail: "Raw input and result, identifiers, technical events, and timing evidence.",
+        WorkerConsoleActionCard(
+            title: "Open technical details",
+            detail: "Inspect raw input and result, identifiers, timing, and durability evidence.",
+            symbol: "wrench.and.screwdriver",
             accent: .tronSlate
         ) {
-            WorkerRunDisclosureRow(
-                title: "Open technical details",
-                detail: "Inspect the consolidated protocol and durability evidence.",
-                symbol: "wrench.and.screwdriver",
-                accent: .tronSlate
-            ) {
-                showTechnicalDetails = true
-            }
+            showTechnicalDetails = true
         }
     }
 
