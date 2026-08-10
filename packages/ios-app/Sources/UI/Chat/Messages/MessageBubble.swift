@@ -10,10 +10,27 @@ struct MessageBubble: View {
         message.role == .user
     }
 
+    private var hasPreviewableImage: Bool {
+        if message.attachments?.contains(where: \.isImage) == true {
+            return true
+        }
+        switch message.content {
+        case .images(let images):
+            return !images.isEmpty
+        case .attachments(let attachments):
+            return attachments.contains(where: \.isImage)
+        default:
+            return false
+        }
+    }
+
     var body: some View {
         VStack(alignment: isUserMessage ? .trailing : .leading, spacing: 4) {
             if let attachments = message.attachments, !attachments.isEmpty {
-                AttachedFileThumbnails(attachments: attachments)
+                AttachedFileThumbnails(
+                    attachments: attachments,
+                    onPreview: { onTap?(.imagePreview($0)) }
+                )
             }
 
             if !message.agentDeliveryProvenance.isEmpty {
@@ -29,7 +46,9 @@ struct MessageBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: isUserMessage ? .trailing : .leading)
-        .accessibilityElement(children: isUserMessage ? .ignore : .contain)
+        .accessibilityElement(
+            children: isUserMessage && !hasPreviewableImage ? .ignore : .contain
+        )
         .accessibilityLabel(isUserMessage
             ? "You: \(String(message.content.textContent.prefix(200)))"
             : "Assistant message"
@@ -90,11 +109,17 @@ struct MessageBubble: View {
             ErrorContentView(message: errorMessage)
 
         case .images(let images):
-            ImagesContentView(images: images)
+            ImagesContentView(
+                images: images,
+                onPreview: { onTap?(.imagePreview($0)) }
+            )
 
         case .attachments(let attachments):
             // Attachments-only message (no text) - show thumbnails
-            AttachedFileThumbnails(attachments: attachments)
+            AttachedFileThumbnails(
+                attachments: attachments,
+                onPreview: { onTap?(.imagePreview($0)) }
+            )
 
         case .localNotification(let notification):
             LocalChatNotificationView(notification: notification) { detail in

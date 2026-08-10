@@ -1,8 +1,8 @@
 # iOS App Architecture
 
-> Last verified: 2026-08-09 for authoritative/cached chat loading, durable
+> Last verified: 2026-08-10 for authoritative/cached chat loading, durable
 > native user input drafts, session model configuration, staged worker-console
-> projections, cohesive sheets, and iOS 26/27 delivery.
+> projections, cohesive sheets and image previews, and iOS 26/27 delivery.
 
 ## Overview
 
@@ -1098,6 +1098,16 @@ Attachment conversion commits before submission. Pending photo-picker objects
 remain with the conversion owner and are not treated as sendable attachments.
 The final encoded frame size is checked before socket send so an oversized
 prompt cannot disconnect the client or erase retryable content.
+
+Image attachments already admitted into a transcript are locally previewable.
+Their thumbnails remain first-level buttons and open through the chat's single
+sheet coordinator into a standardized large sheet with native pinch, pan, and
+double-tap zoom. Opening a preview performs no session reconstruction or
+network read: it retains the immutable bytes already owned by the message and
+decodes them asynchronously. The decoded-image cache includes the requested
+pixel dimensions in its key, preventing a small transcript thumbnail from
+being stretched when the same image is opened at sheet size. Decode failure is
+an explicit local state and never mutates or blocks the conversation.
 
 Streaming text uses a lazy, explicitly invalidated display link with a weak
 target. Received deltas drain from an append-only chunk queue, so each display

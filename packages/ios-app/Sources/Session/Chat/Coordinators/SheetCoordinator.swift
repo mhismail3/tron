@@ -129,6 +129,11 @@ final class SheetCoordinator {
         present(.userInput(request))
     }
 
+    /// Show an expanded, local preview for an image already in the transcript.
+    func showImagePreview(_ preview: ChatImagePreviewData) {
+        present(.imagePreview(preview))
+    }
+
     func clearUserInput() {
         queuedUserInputRequest = nil
         guard case .userInput? = activeSheet else { return }

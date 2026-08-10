@@ -115,6 +115,9 @@ struct ChatSheetContent: View {
                 )
             }
 
+        case .imagePreview(let preview):
+            ChatImagePreviewSheet(preview: preview)
+
         case .providerErrorDetail(let data):
             ProviderErrorDetailSheet(data: data)
 

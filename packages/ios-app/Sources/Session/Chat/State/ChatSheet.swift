@@ -75,6 +75,35 @@ struct ThinkingDetailData: Equatable {
     let kind: ThinkingDisplayKind
 }
 
+/// Immutable, local image payload for the chat attachment preview.
+///
+/// The source identifier owns sheet identity. Image bytes are retained by the
+/// already-loaded message and never fetched again when the preview opens.
+struct ChatImagePreviewData: Equatable {
+    let id: String
+    let data: Data
+    let title: String
+    let accessibilityLabel: String
+
+    init(attachment: Attachment) {
+        id = "attachment-\(attachment.id.uuidString)"
+        data = attachment.data
+        title = "Photo"
+        accessibilityLabel = "Preview \(attachment.displayName)"
+    }
+
+    init(image: ImageContent) {
+        id = "image-\(image.id.uuidString)"
+        data = image.data
+        title = "Photo"
+        accessibilityLabel = "Preview photo"
+    }
+
+    static func == (lhs: ChatImagePreviewData, rhs: ChatImagePreviewData) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
 /// Identifiable enum representing all possible sheets in ChatView.
 /// Uses single sheet(item:) modifier pattern per SwiftUI best practices.
 /// This avoids Swift compiler type-checking timeout with multiple .sheet() modifiers.
@@ -93,6 +122,7 @@ enum ChatSheet: Identifiable, Equatable {
     case toolInvocationDetail(ToolInvocationData)
     case toolInvocationGroupDetail(ToolInvocationGroupData)
     case userInput(UserInputRequest)
+    case imagePreview(ChatImagePreviewData)
 
 
     var id: String {
@@ -111,6 +141,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "tool-group-\(data.id)"
         case .userInput(let request):
             return "user-input-\(request.invocationId)"
+        case .imagePreview(let preview):
+            return "image-preview-\(preview.id)"
         case .providerErrorDetail:
             return "providerError"
         case .localErrorDetail(let data):
@@ -136,6 +168,8 @@ enum ChatSheet: Identifiable, Equatable {
             return data1.id == data2.id
         case (.userInput(let lhs), .userInput(let rhs)):
             return lhs.invocationId == rhs.invocationId
+        case (.imagePreview(let lhs), .imagePreview(let rhs)):
+            return lhs == rhs
         case (.providerErrorDetail(let data1), .providerErrorDetail(let data2)):
             return data1 == data2
         case (.localErrorDetail(let data1), .localErrorDetail(let data2)):
