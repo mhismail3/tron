@@ -1101,8 +1101,17 @@ prompt cannot disconnect the client or erase retryable content.
 
 Image attachments already admitted into a transcript are locally previewable.
 Their thumbnails remain first-level buttons and open through the chat's single
-sheet coordinator into a standardized large sheet with native pinch, pan, and
-double-tap zoom. Opening a preview performs no session reconstruction or
+sheet coordinator into a standardized medium sheet. Its near-edge viewport is
+continuously rounded and clips zoomed content, while native pinch, pan, and
+double-tap gestures stay inside that boundary. Images attached together form
+one ordered gallery: the tapped image opens first, a fitted image yields its
+horizontal pan gesture to page swipes, and a zoomed image owns panning until it
+returns to fitted scale. The gallery position in the standard sheet title fades
+as soon as zoom begins and returns only after the image settles back at fitted
+scale, avoiding title flashes during pinch bounce or animated reset. Only the
+selected page and its immediate neighbors decode, preserving responsive swipes
+without retaining an unbounded gallery of full preview images. Opening a
+preview performs no session reconstruction or
 network read: it retains the immutable bytes already owned by the message and
 decodes them asynchronously. The decoded-image cache includes the requested
 pixel dimensions in its key, preventing a small transcript thumbnail from

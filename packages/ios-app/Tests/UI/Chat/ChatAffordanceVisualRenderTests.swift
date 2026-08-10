@@ -20,7 +20,7 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
         let samples: [(String, AnyView, CGSize)] = [
             ("chat-normal.png", AnyView(Self.normalChatView), CGSize(width: 430, height: 360)),
             ("chat-image-thumbnail.png", AnyView(Self.imageAttachmentView), CGSize(width: 430, height: 220)),
-            ("chat-image-preview.png", AnyView(Self.imagePreviewSheet), CGSize(width: 430, height: 820)),
+            ("chat-image-preview.png", AnyView(Self.imagePreviewSheet), CGSize(width: 430, height: 420)),
             ("chat-response-presentation.png", AnyView(Self.responsePresentationView), CGSize(width: 430, height: 620)),
             ("chat-local-error-pill.png", AnyView(Self.localErrorView), CGSize(width: 430, height: 180)),
             ("chat-thinking-neural-spark.png", AnyView(Self.thinkingView), CGSize(width: 430, height: 180)),
@@ -68,8 +68,13 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
     }
 
     private static var imagePreviewSheet: some View {
-        ChatImagePreviewSheet(
-            preview: ChatImagePreviewData(attachment: imageAttachment)
+        let first = imageAttachment
+        let second = secondImageAttachment
+        return ChatImagePreviewSheet(
+            preview: ChatImagePreviewData(
+                attachments: [first, second],
+                selected: second
+            )
         )
     }
 
@@ -86,6 +91,22 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             data: data,
             mimeType: "image/png",
             fileName: "sample-photo.png"
+        )
+    }
+
+    private static var secondImageAttachment: Attachment {
+        let size = CGSize(width: 600, height: 900)
+        let data = UIGraphicsImageRenderer(size: size).pngData { context in
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor.systemTeal.setFill()
+            context.cgContext.fillEllipse(in: CGRect(x: 90, y: 240, width: 420, height: 420))
+        }
+        return Attachment(
+            type: .image,
+            data: data,
+            mimeType: "image/png",
+            fileName: "second-photo.png"
         )
     }
 
