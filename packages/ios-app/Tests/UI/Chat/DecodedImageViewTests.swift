@@ -66,4 +66,27 @@ struct DecodedImageViewTests {
         // Both should be the same cached instance
         #expect(first === second)
     }
+
+    @Test("Cache keeps a full preview distinct from its thumbnail")
+    func testCacheSeparatesRequestedPixelDimensions() async {
+        let pngData = Self.makeTestPNG(width: 600, height: 400)
+
+        let thumbnail = await DecodedImageView.decodeImage(
+            pngData,
+            fitting: CGSize(width: 40, height: 40),
+            scale: 1
+        )
+        let preview = await DecodedImageView.decodeImage(
+            pngData,
+            fitting: CGSize(width: 300, height: 300),
+            scale: 1
+        )
+
+        #expect(thumbnail != nil)
+        #expect(preview != nil)
+        if let thumbnail, let preview {
+            #expect(preview.size.width > thumbnail.size.width)
+            #expect(preview !== thumbnail)
+        }
+    }
 }

@@ -82,6 +82,8 @@ extension ChatView {
             sheetCoordinator.showToolInvocationGroupDetail(data)
         case .userInput(let request):
             presentUserInput(request)
+        case .imagePreview(let preview):
+            sheetCoordinator.showImagePreview(preview)
         case .cancelToolInvocation(let id):
             guard presentationMode == .interactiveSession else { return }
             viewModel.abortToolInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortToolInvocation"))

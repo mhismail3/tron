@@ -4,19 +4,36 @@ import SwiftUI
 
 struct ImagesContentView: View {
     let images: [ImageContent]
+    var onPreview: ((ChatImagePreviewData) -> Void)?
 
     var body: some View {
         HStack(spacing: 8) {
             ForEach(images) { image in
-                DecodedImageView(data: image.data, size: CGSize(width: 72, height: 72))
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .stroke(Color.tronBorder.opacity(0.5), lineWidth: 0.5)
-                    )
+                if let onPreview {
+                    Button {
+                        onPreview(ChatImagePreviewData(image: image))
+                    } label: {
+                        imageThumbnail(image)
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .accessibilityLabel("Preview photo")
+                    .accessibilityHint("Opens an expanded, zoomable preview")
+                } else {
+                    imageThumbnail(image)
+                }
             }
         }
         .padding(4)
+    }
+
+    private func imageThumbnail(_ image: ImageContent) -> some View {
+        DecodedImageView(data: image.data, size: CGSize(width: 72, height: 72))
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(Color.tronBorder.opacity(0.5), lineWidth: 0.5)
+            )
     }
 }
 
@@ -24,11 +41,24 @@ struct ImagesContentView: View {
 
 struct AttachedFileThumbnails: View {
     let attachments: [Attachment]
+    var onPreview: ((ChatImagePreviewData) -> Void)?
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(attachments) { attachment in
-                AttachmentThumbnail(attachment: attachment)
+                if attachment.isImage, let onPreview {
+                    Button {
+                        onPreview(ChatImagePreviewData(attachment: attachment))
+                    } label: {
+                        AttachmentThumbnail(attachment: attachment)
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityLabel("Preview \(attachment.displayName)")
+                    .accessibilityHint("Opens an expanded, zoomable preview")
+                } else {
+                    AttachmentThumbnail(attachment: attachment)
+                }
             }
         }
     }

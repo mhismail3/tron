@@ -19,6 +19,8 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
     func testApprovedChatAffordancesRenderForVisualQA() throws {
         let samples: [(String, AnyView, CGSize)] = [
             ("chat-normal.png", AnyView(Self.normalChatView), CGSize(width: 430, height: 360)),
+            ("chat-image-thumbnail.png", AnyView(Self.imageAttachmentView), CGSize(width: 430, height: 220)),
+            ("chat-image-preview.png", AnyView(Self.imagePreviewSheet), CGSize(width: 430, height: 820)),
             ("chat-response-presentation.png", AnyView(Self.responsePresentationView), CGSize(width: 430, height: 620)),
             ("chat-local-error-pill.png", AnyView(Self.localErrorView), CGSize(width: 430, height: 180)),
             ("chat-thinking-neural-spark.png", AnyView(Self.thinkingView), CGSize(width: 430, height: 180)),
@@ -50,6 +52,41 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
         }
         .padding(20)
         .background(Color(uiColor: .systemBackground))
+    }
+
+    private static var imageAttachmentView: some View {
+        MessageBubble(
+            message: ChatMessage(
+                role: .user,
+                content: .text("What is in this photo?"),
+                attachments: [imageAttachment]
+            ),
+            onTap: { _ in }
+        )
+        .padding(20)
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private static var imagePreviewSheet: some View {
+        ChatImagePreviewSheet(
+            preview: ChatImagePreviewData(attachment: imageAttachment)
+        )
+    }
+
+    private static var imageAttachment: Attachment {
+        let size = CGSize(width: 900, height: 600)
+        let data = UIGraphicsImageRenderer(size: size).pngData { context in
+            UIColor.systemIndigo.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor.systemMint.setFill()
+            context.cgContext.fillEllipse(in: CGRect(x: 240, y: 90, width: 420, height: 420))
+        }
+        return Attachment(
+            type: .image,
+            data: data,
+            mimeType: "image/png",
+            fileName: "sample-photo.png"
+        )
     }
 
     private static var localErrorView: some View {

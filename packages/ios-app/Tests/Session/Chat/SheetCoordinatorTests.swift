@@ -83,6 +83,28 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertEqual(coordinator.activeSheet, .thinkingDetail("Thinking"))
     }
 
+    func testShowImagePreviewUsesLoadedAttachmentIdentityAndBytes() throws {
+        let coordinator = SheetCoordinator()
+        let attachmentId = UUID()
+        let attachment = Attachment(
+            id: attachmentId,
+            type: .image,
+            data: Data([0x01, 0x02, 0x03]),
+            mimeType: "image/jpeg",
+            fileName: "camera-photo.jpg"
+        )
+
+        coordinator.showImagePreview(ChatImagePreviewData(attachment: attachment))
+
+        guard case .imagePreview(let preview) = coordinator.activeSheet else {
+            return XCTFail("Expected image preview sheet")
+        }
+        XCTAssertEqual(preview.id, "attachment-\(attachmentId.uuidString)")
+        XCTAssertEqual(preview.data, attachment.data)
+        XCTAssertEqual(preview.title, "Photo")
+        XCTAssertEqual(preview.accessibilityLabel, "Preview camera-photo.jpg")
+    }
+
     func testUserInputWaitsForCurrentSheetThenPresents() throws {
         let coordinator = SheetCoordinator()
         let request = UserInputRequest(
