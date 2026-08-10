@@ -35,6 +35,69 @@ struct NewSessionSourceControlProbeKey: Equatable, Sendable {
     let continuity: EngineConnectionContinuity
 }
 
+/// Path-owned source-control state for the New Session sheet.
+///
+/// A repository row remains mounted while a newly selected workspace is being
+/// inspected, which prevents a repo-to-repo selection from flashing. Only a
+/// result resolved for the currently requested path is authoritative for
+/// actions or session creation.
+struct NewSessionSourceControlProjection: Equatable, Sendable {
+    private(set) var requestedPath: String?
+    private(set) var resolvedPath: String?
+    private(set) var resolvedStatus: WorkspaceSourceControlStatus?
+    private(set) var presentedGitStatus: WorkspaceSourceControlStatus?
+    private(set) var failure: NewSessionSourceControlProbeFailure?
+
+    mutating func beginProbe(for path: String) {
+        let path = Self.normalized(path)
+        requestedPath = path
+        resolvedPath = nil
+        resolvedStatus = nil
+        failure = nil
+
+        // An empty selection has no meaningful projection to preserve. For a
+        // real path, retain the last Git presentation until this probe settles.
+        if path == nil {
+            presentedGitStatus = nil
+        }
+    }
+
+    mutating func resolve(_ status: WorkspaceSourceControlStatus, for path: String) {
+        guard let path = Self.normalized(path), requestedPath == path else { return }
+        resolvedPath = path
+        resolvedStatus = status
+        presentedGitStatus = status.isGitRepository ? status : nil
+        failure = nil
+    }
+
+    mutating func fail(errorCode: String?, for path: String) {
+        guard let path = Self.normalized(path), requestedPath == path else { return }
+        resolvedPath = path
+        resolvedStatus = nil
+        presentedGitStatus = nil
+        failure = NewSessionSourceControlProbeFailure(errorCode: errorCode)
+    }
+
+    mutating func reset() {
+        self = NewSessionSourceControlProjection()
+    }
+
+    func status(for path: String) -> WorkspaceSourceControlStatus? {
+        guard let path = Self.normalized(path), resolvedPath == path else { return nil }
+        return resolvedStatus
+    }
+
+    func isResolving(_ path: String) -> Bool {
+        guard let path = Self.normalized(path) else { return false }
+        return requestedPath == path && resolvedPath != path
+    }
+
+    private static func normalized(_ path: String) -> String? {
+        let path = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty ? nil : path
+    }
+}
+
 enum NewSessionSourceControlProbeFailure: Equatable, Sendable {
     case serverUpgradeRequired
     case retry

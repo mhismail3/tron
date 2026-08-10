@@ -24,8 +24,7 @@ struct NewSessionFlow: View {
     @State private var availableModels: [ModelInfo] = []
     @State private var isLoadingModels = false
     @State private var showModelPicker = false
-    @State private var sourceControlStatus: WorkspaceSourceControlStatus?
-    @State private var sourceControlProbeFailure: NewSessionSourceControlProbeFailure?
+    @State private var sourceControlProjection = NewSessionSourceControlProjection()
     @State private var sourceControlPlacement: SessionSourceControlPlacement = .existing
     @State private var sourceControlProjectionOwnerId: UUID?
     @State private var showSourceControlPicker = false
@@ -129,7 +128,7 @@ struct NewSessionFlow: View {
             .sheet(isPresented: $showSourceControlPicker) {
                 NewSessionSourceControlPlacementSheet(
                     selection: $sourceControlPlacement,
-                    currentBranch: sourceControlStatus?.currentBranch
+                    currentBranch: selectedSourceControlStatus?.currentBranch
                 )
             }
             .task(id: connectionRepository.continuity) {
@@ -148,11 +147,6 @@ struct NewSessionFlow: View {
                 continuity: connectionRepository.continuity
             )) {
                 await loadSourceControlStatus()
-            }
-            .onChange(of: workingDirectory) {
-                sourceControlStatus = nil
-                sourceControlProbeFailure = nil
-                sourceControlPlacement = .existing
             }
         }
         .adaptivePresentationDetents(NewSessionFlowPresentation.detents, ipadSizing: .largeForm)
@@ -178,20 +172,26 @@ struct NewSessionFlow: View {
                 action: { showWorkspaceSelector = true }
             )
 
-            if sourceControlStatus?.isGitRepository == true {
+            if let presentedSourceControlStatus = sourceControlProjection.presentedGitStatus {
                 NewSessionSetupCard(
                     icon: sourceControlPlacement.icon,
                     title: "Source Control",
                     value: sourceControlPlacement.title,
-                    caption: sourceControlPlacement.caption(
-                        currentBranch: sourceControlStatus?.currentBranch
-                    ),
+                    caption: sourceControlProjection.isResolving(workingDirectory)
+                        ? "Checking the selected workspace."
+                        : sourceControlPlacement.caption(
+                            currentBranch: presentedSourceControlStatus.currentBranch
+                        ),
                     color: .tronTeal,
-                    isDisabled: isCreating,
-                    action: { showSourceControlPicker = true }
+                    isBusy: sourceControlProjection.isResolving(workingDirectory),
+                    isDisabled: isCreating || selectedSourceControlStatus == nil,
+                    action: {
+                        guard selectedSourceControlStatus?.isGitRepository == true else { return }
+                        showSourceControlPicker = true
+                    }
                 )
                 .transition(.opacity.combined(with: .move(edge: .top)))
-            } else if let sourceControlProbeFailure,
+            } else if let sourceControlProbeFailure = sourceControlProjection.failure,
                       !workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 NewSessionSetupCard(
                     icon: "exclamationmark.triangle",
@@ -202,6 +202,7 @@ struct NewSessionFlow: View {
                     isDisabled: isCreating,
                     action: { Task { await loadSourceControlStatus() } }
                 )
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             NewSessionSetupCard(
@@ -275,6 +276,10 @@ struct NewSessionFlow: View {
         return "\(modelDescription) - \(reasoning)"
     }
 
+    private var selectedSourceControlStatus: WorkspaceSourceControlStatus? {
+        sourceControlProjection.status(for: workingDirectory)
+    }
+
     private func reasoningLevelLabel(_ level: String) -> String {
         switch level.lowercased() {
         case "minimal": return "Minimal"
@@ -294,7 +299,7 @@ struct NewSessionFlow: View {
     }
 
     private func currentCreateIntent() -> NewSessionCreateIntent? {
-        let sourceControl = sourceControlStatus?.isGitRepository == true
+        let sourceControl = selectedSourceControlStatus?.isGitRepository == true
             ? SessionSourceControlSelection(placement: sourceControlPlacement)
             : nil
         return NewSessionCreateIntent.make(
@@ -419,8 +424,13 @@ struct NewSessionFlow: View {
         let continuity = connectionRepository.continuity
         if sourceControlProjectionOwnerId != continuity.ownerId {
             sourceControlProjectionOwnerId = continuity.ownerId
-            sourceControlStatus = nil
-            sourceControlProbeFailure = nil
+            withAnimation(.smooth(duration: 0.2)) {
+                sourceControlProjection.reset()
+                sourceControlPlacement = .existing
+            }
+        }
+        withAnimation(.smooth(duration: 0.2)) {
+            sourceControlProjection.beginProbe(for: path)
             sourceControlPlacement = .existing
         }
         guard continuity.isConnected, !path.isEmpty else { return }
@@ -431,11 +441,7 @@ struct NewSessionFlow: View {
                   workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines) == path,
                   connectionRepository.continuity == continuity else { return }
             withAnimation(.smooth(duration: 0.2)) {
-                sourceControlStatus = status
-                sourceControlProbeFailure = nil
-                if !status.isGitRepository {
-                    sourceControlPlacement = .existing
-                }
+                sourceControlProjection.resolve(status, for: path)
             }
         } catch is CancellationError {
             return
@@ -443,11 +449,13 @@ struct NewSessionFlow: View {
             guard !Task.isCancelled,
                   workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines) == path,
                   connectionRepository.continuity == continuity else { return }
-            sourceControlStatus = nil
-            sourceControlProbeFailure = NewSessionSourceControlProbeFailure(
-                errorCode: (error as? EngineProtocolError)?.code
-            )
-            sourceControlPlacement = .existing
+            withAnimation(.smooth(duration: 0.2)) {
+                sourceControlProjection.fail(
+                    errorCode: (error as? EngineProtocolError)?.code,
+                    for: path
+                )
+                sourceControlPlacement = .existing
+            }
         }
     }
 }

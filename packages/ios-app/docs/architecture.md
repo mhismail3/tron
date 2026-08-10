@@ -1027,7 +1027,12 @@ server-backed `filesystem::inspect_source_control` read for that exact path and
 connection continuity. A usable Git working tree reveals a first-level checkout
 choice immediately after Workspace: use the existing checkout, create and
 switch to a new session branch, or create an isolated worktree. Non-repositories
-omit the choice. A connected older server that lacks the bounded inspection
+omit the choice. Source-control presentation is path-owned: while a replacement
+workspace is being inspected, an existing Git row remains mounted but cannot
+drive actions for the new path. A Git-to-Git result updates that row in place,
+while a confirmed non-repository or probe failure removes or replaces it with a
+single explicit animation. Late results from a previously selected workspace
+are ignored. A connected older server that lacks the bounded inspection
 function produces an explicit update-and-retry row instead of being
 misrepresented as a non-repository. The app sends only the closed placement
 value to `session::create`; the engine owns branch names,

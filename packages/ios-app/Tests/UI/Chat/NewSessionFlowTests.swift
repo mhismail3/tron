@@ -203,8 +203,10 @@ final class NewSessionFlowTests: XCTestCase {
 
         XCTAssertLessThan(workspace.lowerBound, sourceControl.lowerBound)
         XCTAssertLessThan(sourceControl.lowerBound, model.lowerBound)
-        XCTAssertTrue(source.contains("sourceControlStatus?.isGitRepository == true"))
+        XCTAssertTrue(source.contains("sourceControlProjection.presentedGitStatus"))
+        XCTAssertTrue(source.contains("selectedSourceControlStatus?.isGitRepository == true"))
         XCTAssertTrue(source.contains(".task(id: NewSessionSourceControlProbeKey("))
+        XCTAssertFalse(source.contains(".onChange(of: workingDirectory)"))
         XCTAssertTrue(source.contains("sourceControl: intent.sourceControl"))
         XCTAssertTrue(source.contains("serverWorkingDirectory: result.workingDirectory"))
     }
@@ -215,6 +217,55 @@ final class NewSessionFlowTests: XCTestCase {
 
         XCTAssertTrue(status.isGitRepository)
         XCTAssertEqual(status.currentBranch, "main")
+    }
+
+    func testSourceControlProjectionRetainsRepositoryWhileNextPathResolves() {
+        let first = WorkspaceSourceControlStatus(isGitRepository: true, currentBranch: "main")
+        let second = WorkspaceSourceControlStatus(isGitRepository: true, currentBranch: "feature")
+        var projection = NewSessionSourceControlProjection()
+
+        projection.beginProbe(for: "/tmp/first")
+        projection.resolve(first, for: "/tmp/first")
+        projection.beginProbe(for: "/tmp/second")
+
+        XCTAssertEqual(projection.presentedGitStatus, first)
+        XCTAssertNil(projection.status(for: "/tmp/second"))
+        XCTAssertTrue(projection.isResolving("/tmp/second"))
+
+        projection.resolve(second, for: "/tmp/second")
+
+        XCTAssertEqual(projection.presentedGitStatus, second)
+        XCTAssertEqual(projection.status(for: "/tmp/second"), second)
+        XCTAssertFalse(projection.isResolving("/tmp/second"))
+    }
+
+    func testSourceControlProjectionRemovesRepositoryOnlyAfterNonRepositoryResolves() {
+        let repository = WorkspaceSourceControlStatus(isGitRepository: true, currentBranch: "main")
+        let folder = WorkspaceSourceControlStatus(isGitRepository: false, currentBranch: nil)
+        var projection = NewSessionSourceControlProjection()
+
+        projection.beginProbe(for: "/tmp/repository")
+        projection.resolve(repository, for: "/tmp/repository")
+        projection.beginProbe(for: "/tmp/folder")
+        XCTAssertEqual(projection.presentedGitStatus, repository)
+
+        projection.resolve(folder, for: "/tmp/folder")
+
+        XCTAssertNil(projection.presentedGitStatus)
+        XCTAssertEqual(projection.status(for: "/tmp/folder"), folder)
+    }
+
+    func testSourceControlProjectionRejectsLateResultsFromPriorWorkspace() {
+        let repository = WorkspaceSourceControlStatus(isGitRepository: true, currentBranch: "main")
+        var projection = NewSessionSourceControlProjection()
+
+        projection.beginProbe(for: "/tmp/first")
+        projection.beginProbe(for: "/tmp/second")
+        projection.resolve(repository, for: "/tmp/first")
+
+        XCTAssertNil(projection.presentedGitStatus)
+        XCTAssertNil(projection.status(for: "/tmp/second"))
+        XCTAssertTrue(projection.isResolving("/tmp/second"))
     }
 
     func testSourceControlProbeFailureMakesVersionSkewExplicitAndRetryable() {
