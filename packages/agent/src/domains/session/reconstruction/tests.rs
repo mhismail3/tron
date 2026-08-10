@@ -286,7 +286,36 @@ fn run_or_turn_transition_invalidates_reconstruction_generation() {
 }
 
 #[tokio::test]
-async fn reconstruction_defers_provider_audits_and_embeds_latest_inventory() {
+async fn empty_session_reconstruction_does_not_wait_for_auxiliary_projections() {
+    let ctx = make_test_context();
+    let session_id = ctx
+        .session_manager
+        .create_session("model", "/tmp", Some("empty"))
+        .unwrap();
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        SessionReconstructionService::reconstruct(
+            &Deps::from_test_context(&ctx),
+            session_id,
+            None,
+            None,
+        ),
+    )
+    .await
+    .expect("an empty chat snapshot has no auxiliary work to wait for")
+    .unwrap();
+
+    let events = result["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["type"], "session.start");
+    assert_eq!(result["lastSequence"], 0);
+    assert_eq!(result["agentPhase"], "idle");
+    assert!(result["metadata"].get("latestContextRequest").is_none());
+}
+
+#[tokio::test]
+async fn reconstruction_defers_provider_audits_without_loading_context_inventory() {
     let ctx = make_test_context();
     let session_id = ctx
         .session_manager
@@ -358,11 +387,7 @@ async fn reconstruction_defers_provider_audits_and_embeds_latest_inventory() {
             && event["payload"].get("padding").is_none()
             && event["payload"].get("contextManifest").is_none()
     }));
-    assert_eq!(
-        result["metadata"]["latestContextRequest"]["messageCount"],
-        12
-    );
-    assert_eq!(result["metadata"]["latestContextRequest"]["toolCount"], 23);
+    assert!(result["metadata"].get("latestContextRequest").is_none());
     assert!(result.to_string().len() < 30_000);
 }
 

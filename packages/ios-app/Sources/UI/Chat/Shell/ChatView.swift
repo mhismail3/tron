@@ -248,10 +248,19 @@ struct ChatView: View {
 
             viewModel.startLiveEventStream()
 
-            // Restore draft state and wire draft store
-            await dependencies.draftStore.loadDraft(sessionId: sessionId, into: viewModel.inputBarState)
-            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+            // Draft attachment I/O is independent of authoritative history.
+            // Start it under the mounted lifecycle without delaying session
+            // resume/reconstruction, and never overwrite typing that begins
+            // before a slow draft read completes.
             viewModel.draftStore = dependencies.draftStore
+            let initialDraftFingerprint = viewModel.inputBarState.draftFingerprint
+            taskCoordinator.replaceTask(.draftRestore) { _ in
+                _ = await dependencies.draftStore.loadDraft(
+                    sessionId: sessionId,
+                    into: viewModel.inputBarState,
+                    ifUnchangedFrom: initialDraftFingerprint
+                )
+            }
 
             // Run model prefetch in parallel with connect/resume
             // This is a fire-and-forget operation that doesn't block session entry

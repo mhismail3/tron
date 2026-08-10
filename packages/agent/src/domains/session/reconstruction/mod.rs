@@ -40,18 +40,15 @@
 //!   lastSequence: i64,       // highest sequence represented by this snapshot
 //!   isRunning: bool,
 //!   runId: string?,          // active run id, null when idle
-//!   metadata: {
-//!     latestContextRequest: {...}?, // compact inventory; full audit is lazy
-//!     ...
-//!   },
+//!   metadata: {...},         // chat/session metadata only
 //! }
 //! ```
 //!
 //! `model.provider_request` rows remain in the event chain so parent links and
 //! pagination cursors stay exact, but their audit bodies are replaced with a
-//! tiny deferred marker in `events`. Only the latest bounded inventory is
-//! projected through metadata. Full provider manifests are available solely
-//! through `session::context_request_detail`.
+//! tiny deferred marker in `events`. Provider-context inventory and full
+//! manifests are separate, lazy reads through `session::context_requests` and
+//! `session::context_request_detail`; they never delay chat reconstruction.
 //!
 //! `operations` exposes the authenticated function adapter; this module owns
 //! loading, generation validation, pagination, and projection through the
@@ -62,7 +59,7 @@
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument};
 
 use crate::domains::agent::r#loop::orchestrator::turn_accumulator::TurnReconstructionSnapshot;
 use crate::domains::session::Deps;
@@ -318,7 +315,7 @@ impl SessionReconstructionService {
         // Later events are already buffered by iOS and replay above the cut.
         // Turn/run transitions retry, while same-turn deltas do not invalidate
         // the earlier coherent snapshot.
-        let (events, has_more, mut session_metadata, captured_snapshot, run_id) = if is_top_level {
+        let (events, has_more, session_metadata, captured_snapshot, run_id) = if is_top_level {
             loop {
                 let captured = deps
                     .orchestrator
@@ -422,27 +419,6 @@ impl SessionReconstructionService {
             .unwrap_or(0);
         let last_sequence = represented_sequence.unwrap_or(durable_sequence);
         let oldest_event_id = events.first().map(|e| e.id.clone());
-
-        if is_top_level {
-            match crate::domains::session::query::SessionQueryService::latest_context_request_summary(
-                deps,
-                session_id.clone(),
-                last_sequence,
-            )
-            .await
-            {
-                Ok(summary) => session_metadata["latestContextRequest"] =
-                    summary.unwrap_or(Value::Null),
-                Err(error) => {
-                    warn!(
-                        session_id,
-                        error = %error,
-                        "latest provider-context inventory unavailable during reconstruction"
-                    );
-                    session_metadata["latestContextRequest"] = Value::Null;
-                }
-            }
-        }
 
         // 4. Convert events to the client reconstruction projection. Exact
         // provider-request manifests are audit data, not transcript data.

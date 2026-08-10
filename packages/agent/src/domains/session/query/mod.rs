@@ -525,31 +525,6 @@ impl SessionQueryService {
         .await
     }
 
-    /// Return the latest context inventory at or below one reconstruction
-    /// watermark. This is embedded in the ordinary session snapshot so a
-    /// client can render Session Context from its local cache without issuing
-    /// three eager reads when a sheet opens.
-    pub(crate) async fn latest_context_request_summary(
-        deps: &Deps,
-        session_id: String,
-        through_sequence: i64,
-    ) -> Result<Option<Value>, ToolError> {
-        let event_store = deps.event_store.clone();
-        run_blocking_task("session.latest_context_request_summary", move || {
-            let before_sequence = through_sequence.checked_add(1);
-            let (rows, _) = event_store
-                .get_provider_request_audits(&session_id, before_sequence, 1)
-                .map_err(|error| ToolError::Internal {
-                    message: error.to_string(),
-                })?;
-            Ok(rows
-                .into_iter()
-                .next()
-                .map(|(row, payload)| context_request_summary(&row, &payload)))
-        })
-        .await
-    }
-
     pub(crate) async fn context_request_detail(
         deps: &Deps,
         session_id: String,

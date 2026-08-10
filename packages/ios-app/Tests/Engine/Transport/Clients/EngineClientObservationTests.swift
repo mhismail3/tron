@@ -275,6 +275,34 @@ struct EngineClientObservationTests {
         rpc.disconnect()
     }
 
+    @Test("a caller-managed read never waits behind transport recovery")
+    func currentTransportReadFailsFastWhileOffline() async {
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65529/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+        await rpc.connect()
+        let attemptCount = recorder.requests.count
+
+        do {
+            let _: EmptyParams = try await rpc.invokeRead(
+                functionId: "test::interactive-read",
+                payload: EmptyParams(),
+                options: EngineInvocationOptions(
+                    timeout: EngineSessionSynchronizationPolicy.requestTimeout,
+                    readRecoveryPolicy: .currentTransport
+                )
+            )
+            Issue.record("expected the current transport read to fail while offline")
+        } catch {
+            #expect(error as? EngineConnectionError == .notConnected)
+        }
+
+        #expect(recorder.requests.count == attemptCount)
+        rpc.disconnect()
+    }
+
     @Test("Connect policy discards stale disconnected transports")
     func testConnectPolicyDiscardsStaleDisconnectedTransport() {
         #expect(EngineClientConnectionPolicy.shouldSkipConnect(state: .disconnected) == false)

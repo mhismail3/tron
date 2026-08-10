@@ -155,14 +155,6 @@ final class ConnectionCoordinator {
             return .cancelled
         }
 
-        if !context.isConnected {
-            try? await Task.sleep(for: .milliseconds(100))
-        }
-        guard !Task.isCancelled else {
-            context.logInfo("[RECONSTRUCT] Cancelled during connect grace period; retaining buffered events")
-            return .cancelled
-        }
-
         guard context.isConnected else {
             context.logWarning("Failed to connect to server - isConnected=false")
             return .retryableFailure

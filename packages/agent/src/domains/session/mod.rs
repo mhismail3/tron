@@ -35,9 +35,10 @@
 //!   Details opts into it explicitly. V2 rows remain readable with provenance
 //!   labeled unavailable.
 //! - `session::reconstruct` preserves provider-request event identities and
-//!   pagination cursors but defers their potentially large audit bodies. Its
-//!   top-level metadata carries one bounded latest-request inventory; exact
-//!   manifests remain available through the explicit detail/export owners.
+//!   pagination cursors but defers their potentially large audit bodies.
+//!   Provider-context inventories and exact manifests remain separate lazy
+//!   reads through the explicit context/detail/export owners, so Manage
+//!   Session data cannot delay chat readiness.
 //! - `session::agent_updates` is a bounded read projection over durable
 //!   deliveries and waits. It does not claim mailboxes, run policy workers, or
 //!   alter wake state.

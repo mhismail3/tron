@@ -61,7 +61,11 @@ final class DraftStore {
 
     /// Load a draft into the given InputBarState. Returns true if a draft was found.
     @discardableResult
-    func loadDraft(sessionId: String, into inputBarState: InputBarState) async -> Bool {
+    func loadDraft(
+        sessionId: String,
+        into inputBarState: InputBarState,
+        ifUnchangedFrom expectedFingerprint: Int? = nil
+    ) async -> Bool {
         guard eventDatabase.isInitialized else { return false }
 
         do {
@@ -69,11 +73,24 @@ final class DraftStore {
                 return false
             }
 
-            inputBarState.text = draft.text
-            inputBarState.attachments = await attachmentFiles.read(
+            let attachments = await attachmentFiles.read(
                 sessionId: sessionId,
                 metadata: draft.attachmentMetadata
             )
+            guard !Task.isCancelled else { return false }
+            if let expectedFingerprint,
+               inputBarState.draftFingerprint != expectedFingerprint {
+                logger.debug(
+                    "Skipped stale draft restore because the composer changed while loading",
+                    category: .database
+                )
+                return false
+            }
+
+            // Publish draft text and attachments only after every async read is
+            // complete and the mounted composer still matches its initial cut.
+            inputBarState.text = draft.text
+            inputBarState.attachments = attachments
             if textEndRevealSessionIds.remove(sessionId) != nil {
                 inputBarState.requestTextEndReveal()
             }

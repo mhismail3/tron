@@ -1523,11 +1523,12 @@ environment-presence counts; older clients and legacy audit rows remain valid.
 
 Ordinary `session::reconstruct` pages preserve every provider-request event ID,
 parent link, sequence, and cursor but replace each provider audit body with a
-small `projection: "deferred"` marker. A top-level snapshot embeds only the
-bounded latest-request inventory in `metadata.latestContextRequest`. This keeps
-chat reconstruction proportional to its bounded event page instead of the
-accumulated size of historical model audits; exact manifests remain server-owned
-and are read only through the explicit context-detail, export, and replay paths.
+small `projection: "deferred"` marker. Provider-context inventory is not part of
+the chat snapshot: Manage Session loads its one-row overview independently via
+`session::context_requests` and then caches it on-device. This keeps chat
+reconstruction proportional to its bounded event page and prevents sheet/audit
+data from delaying the composer; exact manifests remain server-owned and are
+read only through the explicit context-detail, export, and replay paths.
 
 At each provider request boundary, the worker-kernel-owned resolver captures the
 catalog revision and ranks dynamic workers by explicit session promotion,
@@ -3002,15 +3003,15 @@ transport event; the resulting context size is reflected by later session/token
 truth rather than an unwritten `context.cleared` storage row. The iOS composer
 projects that same token truth as a context ring. The user-facing Manage Session
 sheet uses the provider-request event as its sole request-context authority. It shows no
-request-history card: reconstruction metadata supplies an immediate bounded
-latest-request inventory, `session::context_requests(limit: 1)` reconciles that
-overview, and `session::context_request_detail` loads a lightweight
+request-history card: `session::context_requests(limit: 1)` loads and caches the
+overview only after Manage Session is presented, and
+`session::context_request_detail` loads a lightweight
 `agent_context` or full `technical` projection only for an opened row. iOS
 caches those immutable projections separately while the sheet is mounted and
 stores only the compact inventory beside its disposable
 session row for offline presentation. Provider audit bodies never enter the
-transcript cache, and older cached bodies are reduced to deferred markers when
-the cache schema opens.
+transcript or chat-reconstruction path, and older cached bodies are reduced to
+deferred markers when the cache schema opens.
 
 The sheet presents one high-level navigation inventory. Product-facing Agent
 Context contains instructions, conversation/compaction, attachments,
