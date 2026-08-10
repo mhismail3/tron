@@ -173,7 +173,12 @@ accessory with one floating Liquid Glass command bar, a separately labeled
 extended-key keyboard, and an independent keyboard-dismiss action. The command
 strip clips at both capsule edges and scrolls inside a bounded viewport, while
 the dismiss action occupies a fixed trailing region and therefore never scrolls
-offscreen. The bar's safe-area inset retains explicit clearance above the glass
+offscreen. The terminal pane begins directly beneath the standard toolbar; it
+does not duplicate the absolute workspace path or a textual connection label.
+Instead, a typed connection phase drives a compact status dot immediately before
+the Terminal title (emerald when attached, amber while connecting or recovering,
+and red when unavailable), with the same state exposed as an accessibility value.
+The bar's safe-area inset retains explicit clearance above the glass
 so the terminal's final row does not touch the controls. Input stays
 PTY-authoritative—there is no incorrect local echo—but not-yet-submitted bytes
 coalesce behind the one in-flight idempotent write, avoiding a network round
