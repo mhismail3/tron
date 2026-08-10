@@ -557,7 +557,11 @@ provides:
   Manage starts a new natural-language chat pre-addressed to the exact worker;
   users never have to construct schema JSON or manually select an invocation
   model before asking the agent to use a worker;
-- trigger status and webhook rotation;
+- each trigger is one first-level summary card: the complete summary opens a
+  bounded configuration sheet, while a webhook's credential rotation remains
+  a separate secondary action below it. The summary keeps the trigger name,
+  kind, enabled state, next occurrence, and secured status readable without
+  leaking stream cursors or exposing a small text-only configuration control;
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
 - shared compact activity cards that identify the worker and plain-text status
@@ -583,12 +587,12 @@ provides:
   not pretend to consume it. The engine summary labels its independent
   current-state metric `Unhealthy`, so historical delivery evidence cannot be
   confused with current worker health;
-- completed results expose the same direct `Investigate with agent` action in
+- completed results expose the same direct `Investigate with Agent` action in
   the canonical run detail reached from both worker Activity and engine-wide
   Activity, in chat-owned worker run detail, and in Delivery Audit result
-  inspection. The action is a standalone primary control rather than a nested
-  section container, and every entry point uses the same exact-result handoff
-  request;
+  inspection. The shared emerald action card carries the same title-and-detail
+  hierarchy as `Invoke with Agent`, without a redundant section wrapper, and
+  every entry point uses the same exact-result handoff request;
 - one canonical emerald `Open Chat` action in the run-detail leading toolbar
   when the run owns an agent session. The execution trace remains focused on
   ordered evidence and never repeats transcript buttons on worker, agent, or
@@ -1113,9 +1117,13 @@ the media sheet owns floating chrome over one full-sheet native zoom viewport;
 it does not reserve a navigation-bar rectangle above the photo. Equal fitted-
 scale chrome protection at the top and bottom centers the complete image in the
 actual sheet, while zoom expands into both regions without resizing or resetting
-the scroll view mid-gesture. One shared geometry contract owns the explicit
-sheet curve, an inset-derived concentric viewport curve, and a compact close
-button whose center aligns with the outer corner center. At fitted scale the
+the scroll view mid-gesture. The system presentation owns the device-relative
+outer sheet curve instead of a fixed app radius. An inset
+`ConcentricRectangle` derives its bottom corners from that actual container and
+keeps a bounded minimum for the stable top chrome, while a compact close button
+remains aligned to the top-corner reference. This avoids device-specific radius
+tables and keeps the custom media surface nested like a standard sheet on every
+supported display. At fitted scale the
 photo may keep a smaller inner radius; as soon as it zooms that image-layer
 radius becomes square and the single viewport mask owns every visible edge.
 This prevents transformed corner radii from diverging from the sheet or

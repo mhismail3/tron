@@ -178,61 +178,80 @@ struct WorkerTriggerCard: View {
     @State private var showConfiguration = false
 
     private var color: Color { trigger.enabled ? .tronInfo : .tronTextMuted }
+    private var statusColor: Color { trigger.enabled ? .tronSuccess : .tronTextMuted }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 9) {
-                Image(systemName: trigger.enabled ? "alarm.fill" : "alarm")
-                    .foregroundStyle(color)
-                    .frame(width: 20)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(WorkerConsolePresentation.displayLabel(trigger.triggerId))
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text("\(WorkerConsolePresentation.displayLabel(trigger.kind)) · \(trigger.enabled ? "Enabled" : "Disabled")")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                }
-                Spacer()
-                if trigger.tokenConfigured {
-                    Label("Secured", systemImage: "lock.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                        .foregroundStyle(.tronSuccess)
-                }
-            }
-
-            HStack(spacing: 10) {
-                if let nextRun = WorkerConsolePresentation.timestamp(trigger.nextRunAt) {
-                    Label(nextRun, systemImage: "calendar")
-                }
-                Label("Cursor \(trigger.streamCursor)", systemImage: "point.3.connected.trianglepath.dotted")
-            }
-            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-            .foregroundStyle(.tronTextMuted)
-
+        VStack(alignment: .leading, spacing: 0) {
             Button { showConfiguration = true } label: {
-                HStack {
-                    Label("Configuration", systemImage: "slider.horizontal.3")
-                    Spacer()
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(alignment: .center, spacing: 10) {
+                        Image(systemName: trigger.enabled ? "alarm.fill" : "alarm")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(color)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(WorkerConsolePresentation.displayLabel(trigger.triggerId))
+                                .font(TronTypography.sans(
+                                    size: TronTypography.sizeBodySM,
+                                    weight: .semibold
+                                ))
+                                .foregroundStyle(.tronTextPrimary)
+                            Text(WorkerConsolePresentation.displayLabel(trigger.kind))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextSecondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(trigger.enabled ? "Enabled" : "Disabled")
+                            .font(TronTypography.sans(
+                                size: TronTypography.sizeCaption,
+                                weight: .semibold
+                            ))
+                            .foregroundStyle(statusColor)
+                    }
+
+                    if trigger.nextRunAt != nil || trigger.tokenConfigured {
+                        HStack(spacing: 12) {
+                            if let nextRun = WorkerConsolePresentation.timestamp(trigger.nextRunAt) {
+                                Label("Next \(nextRun)", systemImage: "calendar")
+                            }
+                            if trigger.tokenConfigured {
+                                Label("Secured", systemImage: "lock.fill")
+                                    .foregroundStyle(.tronSuccess)
+                            }
+                        }
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                        .lineLimit(1)
+                    }
                 }
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(color)
-                .contentShape(Rectangle())
+                .padding(11)
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
+            .accessibilityHint("Opens trigger configuration")
 
             if let rotate {
-                Button("Rotate webhook token", action: rotate)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(.tronInfo)
-                    .disabled(isMutating)
+                WorkerMetadataDivider()
+                Button(action: rotate) {
+                    Label("Rotate webhook token", systemImage: "arrow.clockwise")
+                        .font(TronTypography.sans(
+                            size: TronTypography.sizeCaption,
+                            weight: .semibold
+                        ))
+                        .foregroundStyle(.tronInfo)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 9)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isMutating)
             }
         }
-        .padding(11)
-        .sectionFill(color, cornerRadius: 10, subtle: true, interactive: false)
+        .sectionFill(color, cornerRadius: 10, subtle: true, interactive: true)
         .sheet(isPresented: $showConfiguration) {
             WorkerJSONDetailSheet(
-                title: "Trigger Configuration",
+                title: "\(WorkerConsolePresentation.displayLabel(trigger.triggerId)) Configuration",
                 value: trigger.configuration,
                 accent: color
             )
