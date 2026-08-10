@@ -164,6 +164,11 @@ struct TerminalSessionControllerTests {
         #expect(source.contains(".scrollClipDisabled(false)"))
         #expect(source.contains(".clipShape(Capsule())"))
         #expect(source.contains(".padding(.top, 12)"))
+        #expect(source.contains("Section(\"Recent terminals\")"))
+        #expect(source.contains("Text(terminal.exitedAt ?? terminal.createdAt)"))
+        #expect(!source.contains("systemImage: \"clock.arrow.circlepath\""))
+        #expect(source.contains("Button(\"Quit Terminal\", role: .destructive)"))
+        #expect(!source.contains("Terminate Terminal"))
         #expect(!source.contains(".scrollClipDisabled()"))
         #expect(!source.contains(".background(Color(uiColor: .systemBackground))"))
     }
