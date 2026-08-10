@@ -1,9 +1,18 @@
 import SwiftUI
 
+/// Optional state marker rendered immediately before a standard sheet title.
+/// The visible dot stays compact while `accessibilityValue` conveys the same
+/// state without relying on color alone.
+struct SheetTitleIndicator {
+    let color: Color
+    let accessibilityValue: String
+}
+
 /// Shared container for settings pages providing NavigationStack,
 /// viewport-constrained scrolling, toolbar, and standard padding.
 struct SettingsPageContainer<Leading: View, Content: View>: View {
     let title: String
+    let titleIndicator: SheetTitleIndicator?
     let scrollsContent: Bool
     let leadingToolbar: Leading
     @ViewBuilder let content: () -> Content
@@ -11,10 +20,12 @@ struct SettingsPageContainer<Leading: View, Content: View>: View {
 
     init(
         title: String,
+        titleIndicator: SheetTitleIndicator? = nil,
         scrollsContent: Bool = true,
         @ViewBuilder content: @escaping () -> Content
     ) where Leading == EmptyView {
         self.title = title
+        self.titleIndicator = titleIndicator
         self.scrollsContent = scrollsContent
         self.leadingToolbar = EmptyView()
         self.content = content
@@ -22,11 +33,13 @@ struct SettingsPageContainer<Leading: View, Content: View>: View {
 
     init(
         title: String,
+        titleIndicator: SheetTitleIndicator? = nil,
         scrollsContent: Bool = true,
         @ViewBuilder leadingToolbar: () -> Leading,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
+        self.titleIndicator = titleIndicator
         self.scrollsContent = scrollsContent
         self.leadingToolbar = leadingToolbar()
         self.content = content
@@ -43,9 +56,7 @@ struct SettingsPageContainer<Leading: View, Content: View>: View {
                         }
                     }
                     ToolbarItem(placement: .principal) {
-                        Text(title)
-                            .font(TronTypography.button)
-                            .foregroundStyle(.tronEmerald)
+                        toolbarTitle
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { dismiss() } label: {
@@ -55,6 +66,27 @@ struct SettingsPageContainer<Leading: View, Content: View>: View {
                         }
                     }
                 }
+        }
+    }
+
+    @ViewBuilder
+    private var toolbarTitle: some View {
+        if let titleIndicator {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(titleIndicator.color)
+                    .frame(width: 7, height: 7)
+                Text(title)
+                    .font(TronTypography.button)
+                    .foregroundStyle(.tronEmerald)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityValue(titleIndicator.accessibilityValue)
+        } else {
+            Text(title)
+                .font(TronTypography.button)
+                .foregroundStyle(.tronEmerald)
         }
     }
 

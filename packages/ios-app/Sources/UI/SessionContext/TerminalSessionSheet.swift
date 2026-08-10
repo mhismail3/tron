@@ -2,6 +2,22 @@ import SwiftUI
 import SwiftTerm
 import UIKit
 
+enum TerminalConnectionPhase: Equatable, Sendable {
+    case connecting
+    case connected
+    case reconnecting
+    case unavailable
+
+    var accessibilityValue: String {
+        switch self {
+        case .connecting: "Connecting"
+        case .connected: "Connected"
+        case .reconnecting: "Reconnecting"
+        case .unavailable: "Unavailable"
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class TerminalSessionController {
@@ -20,7 +36,7 @@ final class TerminalSessionController {
     private let repository: any TerminalRepository
     private(set) var terminal: TerminalSnapshot?
     private(set) var chunks: [RenderChunk] = []
-    private(set) var status = "Connecting"
+    private(set) var connectionPhase: TerminalConnectionPhase = .connecting
     private(set) var errorMessage: String?
     private(set) var attachmentId: String?
     private(set) var lastSequence: UInt64 = 0
@@ -41,7 +57,6 @@ final class TerminalSessionController {
         self.repository = repository
     }
 
-    var workingDirectory: String { terminal?.workingDirectory ?? "Session workspace" }
     var isRunning: Bool { processState == "running" }
 
     func start() async {
@@ -49,31 +64,31 @@ final class TerminalSessionController {
         didStart = true
         isDetached = false
         errorMessage = nil
+        connectionPhase = .connecting
         repository.setUpdateHandler { [weak self] update in self?.receive(update) }
         guard repository.isSupported else {
             didStart = false
             errorMessage = "This Tron server does not support Terminal."
-            status = "Unavailable"
+            connectionPhase = .unavailable
             return
         }
         do {
             let opened = try await repository.open(sessionId: sessionId, rows: 24, columns: 80)
             terminal = opened
             processState = opened.state
-            status = "Attaching"
             try await attach()
             history = (try? await repository.list(sessionId: sessionId)) ?? []
             history.removeAll { $0.id == opened.id }
         } catch {
             didStart = false
             errorMessage = error.localizedDescription
-            status = "Unavailable"
+            connectionPhase = .unavailable
         }
     }
 
     func reconcile(continuity: EngineConnectionContinuity) async {
         guard continuity.isConnected else {
-            if terminal != nil, processState == "running" { status = "Reconnecting" }
+            connectionPhase = .reconnecting
             return
         }
         if terminal == nil {
@@ -83,7 +98,7 @@ final class TerminalSessionController {
         do {
             try await attach()
             await flushPendingInputs()
-        } catch { status = "Reconnecting" }
+        } catch { connectionPhase = .reconnecting }
     }
 
     func detach() async {
@@ -145,7 +160,7 @@ final class TerminalSessionController {
     func terminate() {
         guard let terminal else { return }
         Task {
-            do { try await repository.terminate(terminal); status = "Stopping" }
+            do { try await repository.terminate(terminal) }
             catch { errorMessage = error.localizedDescription }
         }
     }
@@ -155,13 +170,13 @@ final class TerminalSessionController {
         attachmentId = nil
         terminal = selected
         processState = selected.state
-        status = "Loading history"
+        connectionPhase = .connecting
         lastSequence = 0
         chunks.removeAll(keepingCapacity: true)
         rendererGeneration &+= 1
         do { try await attach() } catch {
             errorMessage = error.localizedDescription
-            status = "Unavailable"
+            connectionPhase = .unavailable
         }
     }
 
@@ -173,7 +188,7 @@ final class TerminalSessionController {
             history.removeAll { $0.id == opened.id }
         } catch {
             errorMessage = error.localizedDescription
-            status = "Unavailable"
+            connectionPhase = .unavailable
         }
     }
 
@@ -200,7 +215,7 @@ final class TerminalSessionController {
             rendererGeneration &+= 1
         }
         attachmentId = attached.attachmentId
-        status = "Connected"
+        connectionPhase = .connected
     }
 
     private func flushPendingInputs() async {
@@ -225,7 +240,7 @@ final class TerminalSessionController {
                 }
                 inFlightInputId = nil
             } catch {
-                status = "Reconnecting"
+                connectionPhase = .reconnecting
                 return
             }
         }
@@ -236,7 +251,7 @@ final class TerminalSessionController {
         case .status(let updateAttachmentId, let state, _, _):
             guard updateAttachmentId == attachmentId else { return }
             if let state, state != "catch_up_required" { processState = state }
-            status = state == "catch_up_required" ? "Catching up" : (state ?? "Connected")
+            connectionPhase = state == "catch_up_required" ? .reconnecting : .connected
             if state == "catch_up_required" { Task { try? await attach() } }
         case .output(let updateAttachmentId, let sequence, let bytes):
             guard updateAttachmentId == attachmentId, sequence > lastSequence else { return }
@@ -433,23 +448,14 @@ struct TerminalSessionSheet: View {
     var body: some View {
         SettingsPageContainer(
             title: "Terminal",
+            titleIndicator: SheetTitleIndicator(
+                color: connectionIndicatorColor,
+                accessibilityValue: controller.connectionPhase.accessibilityValue
+            ),
             scrollsContent: false,
             leadingToolbar: { terminalMenu }
         ) {
-            VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Circle().fill(controller.status == "Connected" ? Color.tronEmerald : Color.tronAmber).frame(width: 7, height: 7)
-                    Text(controller.workingDirectory)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                        .lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Text(controller.status)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronTextMuted)
-                }
-                .padding(.horizontal, 16).padding(.vertical, 9)
-
+            Group {
                 if let error = controller.errorMessage, controller.terminal == nil {
                     ContentUnavailableView("Terminal unavailable", systemImage: "terminal", description: Text(error))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -477,6 +483,14 @@ struct TerminalSessionSheet: View {
             Button("Terminate Terminal", role: .destructive) { controller.terminate() }
             Button("Cancel", role: .cancel) {}
         } message: { Text("The shell and its running process group will stop. Closing the sheet alone only detaches.") }
+    }
+
+    private var connectionIndicatorColor: SwiftUI.Color {
+        switch controller.connectionPhase {
+        case .connected: .tronEmerald
+        case .connecting, .reconnecting: .tronAmber
+        case .unavailable: .tronError
+        }
     }
 
     private var terminalMenu: some View {

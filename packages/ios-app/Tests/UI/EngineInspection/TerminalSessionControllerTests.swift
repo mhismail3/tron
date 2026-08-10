@@ -17,7 +17,7 @@ struct TerminalSessionControllerTests {
 
         await controller.start()
 
-        #expect(controller.status == "Connected")
+        #expect(controller.connectionPhase == .connected)
         #expect(controller.terminal?.workingDirectory == "/workspace")
         let attachmentId = try! #require(controller.attachmentId)
         repository.emit(.output(attachmentId: attachmentId, sequence: 1, bytes: [65]))
@@ -42,7 +42,7 @@ struct TerminalSessionControllerTests {
 
         await controller.start()
         #expect(controller.terminal == nil)
-        #expect(controller.status == "Unavailable")
+        #expect(controller.connectionPhase == .unavailable)
 
         repository.isSupported = true
         await controller.reconcile(
@@ -50,8 +50,30 @@ struct TerminalSessionControllerTests {
         )
 
         #expect(repository.openCount == 1)
-        #expect(controller.status == "Connected")
+        #expect(controller.connectionPhase == .connected)
         #expect(controller.errorMessage == nil)
+    }
+
+    @Test("connection phase follows disconnect and successful reconciliation")
+    func connectionPhaseReconciles() async {
+        let repository = TerminalRepositoryDouble()
+        let controller = TerminalSessionController(
+            sessionId: "session",
+            repository: repository
+        )
+        await controller.start()
+
+        await controller.reconcile(
+            continuity: EngineConnectionContinuity(state: .disconnected, generation: 1)
+        )
+        #expect(controller.connectionPhase == .reconnecting)
+        #expect(controller.connectionPhase.accessibilityValue == "Reconnecting")
+
+        await controller.reconcile(
+            continuity: EngineConnectionContinuity(state: .connected, generation: 2)
+        )
+        #expect(controller.connectionPhase == .connected)
+        #expect(controller.connectionPhase.accessibilityValue == "Connected")
     }
 
     @Test("typing while a write is in flight coalesces into one ordered follow-up")
@@ -128,6 +150,10 @@ struct TerminalSessionControllerTests {
         )
 
         #expect(source.contains("SettingsPageContainer(\n            title: \"Terminal\""))
+        #expect(source.contains("titleIndicator: SheetTitleIndicator("))
+        #expect(source.contains("accessibilityValue: controller.connectionPhase.accessibilityValue"))
+        #expect(!source.contains("Text(controller.workingDirectory)"))
+        #expect(!source.contains("Text(controller.status)"))
         #expect(source.contains("view.backgroundColor = .clear"))
         #expect(source.contains("view.nativeBackgroundColor = .clear"))
         #expect(source.contains(".glassEffect("))

@@ -34,6 +34,14 @@ final class SettingsPageContainerTests: XCTestCase {
         )
     }
 
+    func testSettingsContainerSupportsAnAccessibleTitleStatusIndicator() throws {
+        let content = try source(named: "SettingsPageContainer.swift")
+
+        XCTAssertTrue(content.contains("let titleIndicator: SheetTitleIndicator?"))
+        XCTAssertTrue(content.contains("Circle()\n                    .fill(titleIndicator.color)"))
+        XCTAssertTrue(content.contains(".accessibilityValue(titleIndicator.accessibilityValue)"))
+    }
+
     private func source(named fileName: String) throws -> String {
         var url = try iosAppRoot()
         url.appendPathComponent("Sources")
