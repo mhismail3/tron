@@ -205,7 +205,8 @@ struct WorkerConsolePresentationTests {
         func item(
             severity: String = "info",
             contextAttached: Bool = false,
-            requiresAttention: Bool = false
+            requiresAttention: Bool = false,
+            operatorDisposition: String? = nil
         ) -> WorkerInboxItemDTO {
             WorkerInboxItemDTO(
                 inboxId: UUID().uuidString,
@@ -217,7 +218,8 @@ struct WorkerConsolePresentationTests {
                 createdAt: "2026-08-08T12:00:00Z",
                 triggerKind: "manual",
                 hasInvocation: true,
-                requiresAttention: requiresAttention
+                requiresAttention: requiresAttention,
+                operatorDisposition: operatorDisposition
             )
         }
 
@@ -233,6 +235,15 @@ struct WorkerConsolePresentationTests {
         #expect(
             WorkerConsolePresentation.resultDisposition(item(severity: "error"))
                 == .resolved
+        )
+        #expect(
+            WorkerConsolePresentation.resultDisposition(
+                item(
+                    severity: "error",
+                    requiresAttention: false,
+                    operatorDisposition: "dismissed"
+                )
+            ) == .dismissed
         )
     }
 

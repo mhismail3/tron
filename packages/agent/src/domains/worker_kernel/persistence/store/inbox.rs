@@ -1,6 +1,7 @@
 //! Durable worker inbox history and operator Attention.
 
 use super::*;
+use rusqlite::TransactionBehavior;
 
 // INVARIANT: Attention is a live projection of unresolved error evidence, not
 // a second delivery state for successful background work. A successful
@@ -10,6 +11,12 @@ use super::*;
 // operator Attention. Agent-context eligibility is a separate projection.
 const UNRESOLVED_INBOX_ERROR_SQL: &str = "
     i.severity='error'
+    AND NOT EXISTS (
+        SELECT 1
+        FROM worker_inbox_dispositions disposition
+        WHERE disposition.inbox_id=i.inbox_id
+          AND disposition.disposition='dismissed'
+    )
     AND NOT EXISTS (
         SELECT 1
         FROM worker_health recovery
@@ -112,9 +119,12 @@ impl WorkerStore {
                 "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
                         i.context_attached,i.created_at,COALESCE(r.trigger_kind,'system'),
                         CASE WHEN r.invocation_id IS NULL THEN 0 ELSE 1 END,
-                        CASE WHEN {attention_sql} THEN 1 ELSE 0 END
+                        CASE WHEN {attention_sql} THEN 1 ELSE 0 END,
+                        disposition.disposition,disposition.created_at
                  FROM worker_inbox i
                  LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
+                 LEFT JOIN worker_inbox_dispositions disposition
+                    ON disposition.inbox_id=i.inbox_id
                  WHERE (?1 IS NULL OR i.worker_id=?1)
                     AND (?2 IS NULL OR i.context_attached=?2)
                     AND (?3 IS NULL OR i.severity=?3)
@@ -145,12 +155,90 @@ impl WorkerStore {
                         "triggerKind": row.get::<_, String>(7)?,
                         "hasInvocation": row.get::<_, i64>(8)? != 0,
                         "requiresAttention": row.get::<_, i64>(9)? != 0,
+                        "operatorDisposition": row.get::<_, Option<String>>(10)?,
+                        "operatorResolvedAt": row.get::<_, Option<String>>(11)?,
                     }))
                 },
             )
             .map_err(|error| error.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| error.to_string())
+    }
+
+    /// Record an operator decision without mutating or deleting the retained
+    /// inbox evidence. Repeating the decision for the same row is idempotent,
+    /// even if a reconnect produces a fresh transport idempotency key.
+    pub fn dismiss_inbox(&self, inbox_id: &str, idempotency_key: &str) -> Result<Value, String> {
+        validate_runtime_identifier(inbox_id, "worker inbox id", 256)?;
+        validate_runtime_identifier(idempotency_key, "idempotency key", 256)?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("start worker inbox dismissal: {error}"))?;
+
+        if let Some((disposition, created_at)) = transaction
+            .query_row(
+                "SELECT disposition,created_at FROM worker_inbox_dispositions WHERE inbox_id=?1",
+                [inbox_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|error| format!("read worker inbox disposition: {error}"))?
+        {
+            transaction
+                .commit()
+                .map_err(|error| format!("finish replayed worker inbox dismissal: {error}"))?;
+            return Ok(json!({
+                "inboxId": inbox_id,
+                "disposition": disposition,
+                "resolvedAt": created_at,
+            }));
+        }
+
+        if let Some(existing_inbox_id) = transaction
+            .query_row(
+                "SELECT inbox_id FROM worker_inbox_dispositions WHERE idempotency_key=?1",
+                [idempotency_key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("read worker inbox dismissal idempotency: {error}"))?
+        {
+            return Err(format!(
+                "worker inbox dismissal idempotency key already belongs to '{existing_inbox_id}'"
+            ));
+        }
+
+        let severity = transaction
+            .query_row(
+                "SELECT severity FROM worker_inbox WHERE inbox_id=?1",
+                [inbox_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("read worker inbox item for dismissal: {error}"))?
+            .ok_or_else(|| format!("worker inbox item '{inbox_id}' was not found"))?;
+        if severity != "error" {
+            return Err("only error results can be dismissed".to_owned());
+        }
+
+        let resolved_at = chrono::Utc::now().to_rfc3339();
+        transaction
+            .execute(
+                "INSERT INTO worker_inbox_dispositions(
+                    inbox_id,disposition,idempotency_key,created_at
+                 ) VALUES (?1,'dismissed',?2,?3)",
+                params![inbox_id, idempotency_key, resolved_at],
+            )
+            .map_err(|error| format!("record worker inbox dismissal: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("commit worker inbox dismissal: {error}"))?;
+        Ok(json!({
+            "inboxId": inbox_id,
+            "disposition": "dismissed",
+            "resolvedAt": resolved_at,
+        }))
     }
 
     pub fn record_system_inbox(

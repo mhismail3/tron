@@ -49,6 +49,7 @@ enum WorkerResultDisposition: Equatable, Sendable {
     case usedByAgent
     case needsAttention
     case resolved
+    case dismissed
 
     var title: String {
         switch self {
@@ -56,6 +57,7 @@ enum WorkerResultDisposition: Equatable, Sendable {
         case .usedByAgent: "Used by agent"
         case .needsAttention: "Needs attention"
         case .resolved: "Resolved"
+        case .dismissed: "Dismissed"
         }
     }
 }
@@ -242,6 +244,9 @@ enum WorkerConsolePresentation {
     /// the result entered agent context, while `requiresAttention` already
     /// accounts for verified recovery of an earlier failure.
     static func resultDisposition(_ item: WorkerInboxItemDTO) -> WorkerResultDisposition {
+        if normalized(item.operatorDisposition ?? "") == "dismissed" {
+            return .dismissed
+        }
         if item.requiresAttention {
             return .needsAttention
         }

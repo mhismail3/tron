@@ -18,7 +18,9 @@
 //! writer intent before reading causal lineage, so concurrent engine hooks wait
 //! at the transaction boundary instead of failing a deferred read-to-write
 //! upgrade.
-//! Worker schema v17 adds durable requested/effective invocation model policy;
+//! Worker schema v18 adds immutable operator dispositions for worker inbox
+//! failures and an indexed scheduled-trigger projection; v17 added durable
+//! requested/effective invocation model policy;
 //! v16 added the immutable worker-to-agent terminal/effect outbox.
 //! Lifecycle transitions terminalize affected work with that evidence, and
 //! purge rechecks nonterminal/outbox custody under SQLite writer intent.
@@ -114,7 +116,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 17)?;
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 18)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
@@ -269,6 +271,8 @@ impl WorkerStore {
                     PRIMARY KEY(worker_id, trigger_id),
                     FOREIGN KEY(worker_id) REFERENCES workers(worker_id) ON DELETE CASCADE
                 );
+                CREATE INDEX IF NOT EXISTS worker_triggers_scheduled
+                    ON worker_triggers(kind, enabled, next_run_at);
                 CREATE TABLE IF NOT EXISTS worker_invocations (
                     invocation_id TEXT PRIMARY KEY,
                     worker_id TEXT NOT NULL,
@@ -366,6 +370,15 @@ impl WorkerStore {
                     context_attached INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS worker_inbox_dispositions (
+                    inbox_id TEXT PRIMARY KEY,
+                    disposition TEXT NOT NULL CHECK(disposition IN ('dismissed')),
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(inbox_id) REFERENCES worker_inbox(inbox_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS worker_inbox_dispositions_created
+                    ON worker_inbox_dispositions(created_at DESC);
                 CREATE TABLE IF NOT EXISTS agent_delivery_outbox (
                     outbox_id TEXT PRIMARY KEY,
                     deduplication_key TEXT NOT NULL UNIQUE,
@@ -476,6 +489,23 @@ impl WorkerStore {
             .map_err(|error| {
                 format!("index and backfill worker invocation relationships: {error}")
             })?;
+        connection
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS worker_inbox_dispositions (
+                    inbox_id TEXT PRIMARY KEY,
+                    disposition TEXT NOT NULL CHECK(disposition IN ('dismissed')),
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(inbox_id) REFERENCES worker_inbox(inbox_id) ON DELETE CASCADE
+                 );
+                 CREATE INDEX IF NOT EXISTS worker_inbox_dispositions_created
+                    ON worker_inbox_dispositions(created_at DESC);
+                 CREATE INDEX IF NOT EXISTS worker_triggers_scheduled
+                    ON worker_triggers(kind, enabled, next_run_at);
+                 INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                    VALUES (18, strftime('%Y-%m-%dT%H:%M:%fZ','now'));",
+            )
+            .map_err(|error| format!("initialize worker inbox disposition schema v18: {error}"))?;
         connection
             .execute(
                 "UPDATE worker_invocations AS child

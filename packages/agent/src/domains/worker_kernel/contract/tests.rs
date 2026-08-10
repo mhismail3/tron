@@ -64,6 +64,7 @@ fn profile_owned_worker_mutations_do_not_require_a_session() {
         "worker_kernel::upsert",
         "worker_kernel::invoke",
         "worker_kernel::result_handoff",
+        "worker_kernel::inbox_dismiss",
         "worker_kernel::detach",
         "worker_kernel::cancel",
         "worker_kernel::stop",
@@ -108,6 +109,35 @@ fn profile_owned_worker_mutations_do_not_require_a_session() {
             "{function_id} must retain causal session-scoped replay"
         );
     }
+}
+
+#[test]
+fn scheduled_work_and_inbox_dismissal_are_native_operator_contracts() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let scheduled = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::scheduled_work")
+        .expect("scheduled work contract");
+    assert_eq!(scheduled.effect_class, EffectClass::PureRead);
+    assert!(scheduled.model_tool.is_none());
+    assert_eq!(
+        scheduled.request_schema.as_ref().unwrap()["properties"]["limit"]["maximum"],
+        100
+    );
+
+    let dismiss = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::inbox_dismiss")
+        .expect("inbox dismissal contract");
+    assert_eq!(dismiss.effect_class, EffectClass::IdempotentWrite);
+    assert!(dismiss.model_tool.is_none());
+    assert_eq!(
+        dismiss
+            .idempotency
+            .as_ref()
+            .map(|contract| contract.dedupe_scope),
+        Some(DedupeScope::Profile)
+    );
 }
 
 #[test]

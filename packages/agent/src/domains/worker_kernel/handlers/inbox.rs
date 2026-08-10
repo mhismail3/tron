@@ -126,6 +126,51 @@ pub(super) async fn inbox(invocation: &Invocation, deps: &Deps) -> Result<Value,
     }))
 }
 
+pub(super) async fn scheduled_work(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
+    let limit = invocation
+        .payload
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(50)
+        .min(100) as u32;
+    let offset = history_offset(invocation);
+    let mut items = deps
+        .runtime
+        .store()
+        .scheduled_work_page(limit.saturating_add(1), offset)?;
+    let has_more = items.len() > limit as usize;
+    items.truncate(limit as usize);
+    let returned = items.len();
+    Ok(json!({
+        "items": items,
+        "returned": returned,
+        "truncated": has_more,
+        "nextOffset": has_more.then_some(offset.saturating_add(returned as u32)),
+    }))
+}
+
+pub(super) async fn dismiss_inbox(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
+    let inbox_id = optional_filter_string(invocation, "inboxId")
+        .ok_or_else(|| "worker inbox dismissal requires inboxId".to_owned())?;
+    let idempotency_key = invocation
+        .causal_context
+        .idempotency_key
+        .as_deref()
+        .unwrap_or(invocation.id.as_str());
+    let result = deps
+        .runtime
+        .store()
+        .dismiss_inbox(inbox_id, idempotency_key)?;
+    deps.runtime
+        .publish_event(
+            "worker.invocations",
+            json!({"action":"inbox_dismissed","inboxId":inbox_id}),
+            None,
+        )
+        .await;
+    Ok(result)
+}
+
 pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
     let detail = HistoryDetail::parse(invocation)?;
     let (limit, request_truncated) = history_limit(invocation, detail);

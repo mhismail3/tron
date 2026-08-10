@@ -340,6 +340,14 @@ protocol WorkerKernelRepository: AnyObject {
         offset: UInt64?,
         attentionOnly: Bool
     ) async throws -> WorkerInboxResultDTO
+    func scheduledWork(
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerScheduledWorkResultDTO
+    func dismissWorkerInboxItem(
+        inboxId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInboxDismissResultDTO
     func artifactDeliveries(
         limit: UInt16,
         offset: UInt64
@@ -635,6 +643,7 @@ extension WorkerKernelRepository {
             attentionOnly: true
         )
     }
+
 }
 
 // MARK: - Chat Session Services

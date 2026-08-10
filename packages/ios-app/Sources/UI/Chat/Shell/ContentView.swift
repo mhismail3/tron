@@ -85,6 +85,8 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showNewSessionSheet = false
     @State private var showSettings = false
+    @State private var primaryPage: TronPrimaryPage = .sessions
+    @State private var workerConsole = WorkerConsoleViewModel()
     @State private var deferredServerOnboardingLaunch = DeferredServerOnboardingLaunch()
     @State private var sessionHandoffError: String?
     @State private var isCreatingAgentSessionHandoff = false
@@ -203,7 +205,24 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        splitViewContent
+        switch primaryPage {
+        case .sessions:
+            splitViewContent
+        case .engine:
+            EngineDashboardPage(
+                primaryPage: $primaryPage,
+                viewModel: workerConsole,
+                repository: dependencies.workerKernelRepository,
+                actions: sessionListActions
+            )
+        case .activity:
+            WorkerActivityPage(
+                primaryPage: $primaryPage,
+                viewModel: workerConsole,
+                repository: dependencies.workerKernelRepository,
+                actions: sessionListActions
+            )
+        }
     }
 
     private var sessionListActions: ShellToolbarActions {
@@ -259,6 +278,7 @@ struct ContentView: View {
     private var sidebarContent: some View {
         SessionSidebar(
             selectedSessionId: sidebarSessionSelection,
+            primaryPage: $primaryPage,
             onNewSession: { showNewSessionSheet = true },
             onDeleteSession: { sessionId in
                 deleteSession(sessionId)
@@ -471,6 +491,7 @@ struct ContentView: View {
         _ sessionId: String?,
         scrollTarget: ScrollTarget? = nil
     ) {
+        primaryPage = .sessions
         selectedSessionId = sessionId
         currentScrollTarget = scrollTarget
         if horizontalSizeClass == .compact {

@@ -12,8 +12,9 @@
 //! - `discovery` owns list, inspect, and relevance-backed promotion.
 //! - `invocation` owns manual dispatch, nested worker-input admission errors,
 //!   lifecycle controls, and bounded durable-result reads.
-//! - `inbox` owns durable result and run-history projection; optional exact
-//!   string filters normalize provider-materialized blanks to omission.
+//! - `inbox` owns durable result, scheduled-work, run-history, and immutable
+//!   operator-disposition projection; optional exact string filters normalize
+//!   provider-materialized blanks to omission.
 //! - `notifications` owns authenticated installation, inbox, and fixed-response
 //!   operations. Its SQLite reads and writes run on the shared bounded blocking
 //!   supervisor so device reconciliation cannot occupy an async runtime thread.
@@ -85,6 +86,8 @@ operation_bindings! {
         "retire" => |invocation, deps| { support::response(invocation, invocation::retire(invocation, deps).await) },
         "purge" => |invocation, deps| { support::response(invocation, invocation::purge(invocation, deps).await) },
         "inbox" => |invocation, deps| { support::response(invocation, inbox::inbox(invocation, deps).await) },
+        "scheduled_work" => |invocation, deps| { support::response(invocation, inbox::scheduled_work(invocation, deps).await) },
+        "inbox_dismiss" => |invocation, deps| { support::response(invocation, inbox::dismiss_inbox(invocation, deps).await) },
         "runs" => |invocation, deps| { support::response(invocation, inbox::runs(invocation, deps).await) },
         "webhook_rotate" => |invocation, deps| { support::response(invocation, webhook::rotate_webhook(invocation, deps).await) },
         "stop_all" => |invocation, deps| { support::response(invocation, invocation::stop_all(invocation, deps).await) },

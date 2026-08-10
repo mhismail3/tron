@@ -93,6 +93,56 @@ struct WorkerKernelClientTests {
         ])
     }
 
+    @Test("Scheduled work and operator dismissal use dedicated native operations")
+    func scheduledWorkAndDismissalUseNativeKernelOperations() async throws {
+        let transport = connectedTransport()
+        let client = WorkerKernelClient(transport: transport)
+        let key = EngineIdempotencyKey(rawValue: "dismiss-one")
+
+        transport.readHandler = { functionId, payload, _ in
+            #expect(functionId.rawValue == "worker_kernel::scheduled_work")
+            let request = try #require(payload as? WorkerScheduledWorkRequestDTO)
+            #expect(request.limit == 100)
+            #expect(request.offset == 25)
+            return WorkerScheduledWorkResultDTO(
+                items: [
+                    WorkerScheduledWorkItemDTO(
+                        scheduledId: "schedule:research:nightly",
+                        workerId: "research",
+                        workerName: "Research",
+                        kind: "recurring",
+                        triggerId: "nightly",
+                        invocationId: nil,
+                        scheduledAt: "2026-08-11T07:00:00Z",
+                        everySeconds: 86_400,
+                        triggerKind: "schedule"
+                    ),
+                ],
+                truncated: false,
+                nextOffset: nil
+            )
+        }
+        transport.writeHandler = { functionId, payload, receivedKey, _ in
+            #expect(functionId.rawValue == "worker_kernel::inbox_dismiss")
+            #expect((payload as? WorkerInboxDismissRequestDTO)?.inboxId == "inbox-error")
+            #expect(receivedKey == key)
+            return WorkerInboxDismissResultDTO(
+                inboxId: "inbox-error",
+                disposition: "dismissed",
+                resolvedAt: "2026-08-10T12:00:00Z"
+            )
+        }
+
+        let scheduled = try await client.scheduledWork(limit: 500, offset: 25)
+        let dismissed = try await client.dismissWorkerInboxItem(
+            inboxId: "inbox-error",
+            idempotencyKey: key
+        )
+
+        #expect(scheduled.items.map(\.scheduledId) == ["schedule:research:nightly"])
+        #expect(dismissed.disposition == "dismissed")
+    }
+
     @Test("Worker graph lookup preserves exact durable association filters")
     func graphLookupUsesExactFilters() async throws {
         let transport = connectedTransport()

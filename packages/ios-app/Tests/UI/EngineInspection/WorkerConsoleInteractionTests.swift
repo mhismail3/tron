@@ -299,6 +299,13 @@ struct WorkerConsoleInteractionTests {
         #expect(resultInspector.contains("title: \"Continue in a new chat\""))
         #expect(resultInspector.contains("startAgentSessionHandoff(.workerResult("))
         #expect(resultInspector.contains("struct WorkerResultAgentHandoffButton"))
+        #expect(resultInspector.contains("struct WorkerAttentionResultSheet"))
+        #expect(resultInspector.contains("title: \"View result details\""))
+        #expect(resultInspector.contains("title: \"Dismiss result\""))
+        #expect(resultInspector.contains("repository.dismissWorkerInboxItem("))
+        #expect(resultInspector.contains(".workerFailure("))
+        #expect(resultInspector.contains("worker-failure-agent-handoff"))
+        #expect(resultInspector.contains("result and execution history will remain available for audit"))
         let handoffAction = try sourceSlice(
             resultInspector,
             from: "private func resultHandoffAction(",
@@ -391,13 +398,14 @@ struct WorkerConsoleInteractionTests {
         )
 
         #expect(!shell.contains("case overview = \"Overview\""))
-        #expect(shell.contains("selectedSection: EngineDashboardSection = .workers"))
+        #expect(shell.contains("case .engine: .workers"))
+        #expect(shell.contains("struct EngineDashboardPage: View"))
         let workersCase = try #require(shell.range(of: "case workers = \"Workers\""))
         let primitivesCase = try #require(shell.range(of: "case primitives = \"Primitives\""))
         #expect(workersCase.lowerBound < primitivesCase.lowerBound)
         #expect(shell.contains("engineHookSummary"))
-        #expect(shell.contains("private var summarySymbol: String"))
-        #expect(shell.contains("\"cpu\""))
+        #expect(shell.contains("consoleStatus.symbol"))
+        #expect(!shell.contains("WorkerConsoleDashboardBand"))
         #expect(!shell.contains("overviewContent"))
         #expect(!dashboard.contains("struct EngineSurfaceCard"))
     }
@@ -874,11 +882,14 @@ struct WorkerConsoleInteractionTests {
         )
 
         #expect(shell.contains("title: \"Worker runs\""))
+        #expect(shell.contains("case scheduled = \"Scheduled\""))
+        #expect(shell.contains("case pastWork = \"Past Work\""))
         #expect(shell.contains("case results = \"Results\""))
         #expect(shell.contains("title: \"Needs attention\""))
         #expect(shell.contains("title: \"Available\""))
         #expect(shell.contains("title: \"Used by agent\""))
         #expect(shell.contains("title: \"Resolved\""))
+        #expect(shell.contains("title: \"Dismissed\""))
         #expect(shell.contains("refreshResults("))
         #expect(shell.contains("monitorResults("))
         #expect(shell.contains("label: \"Unhealthy\""))

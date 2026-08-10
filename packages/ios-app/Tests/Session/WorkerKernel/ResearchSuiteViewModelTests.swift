@@ -316,6 +316,17 @@ private final class ResearchSuiteMockRepository: WorkerKernelRepository {
         return WorkerInboxResultDTO(items: [])
     }
 
+    func scheduledWork(limit: UInt64, offset: UInt64?) async throws -> WorkerScheduledWorkResultDTO {
+        throw MockError.unused
+    }
+
+    func dismissWorkerInboxItem(
+        inboxId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInboxDismissResultDTO {
+        throw MockError.unused
+    }
+
     func engineSurfaceSnapshot(sessionId: String?, relevanceQuery: String?) async throws -> EngineIntrospectionSnapshotDTO { throw MockError.unused }
     func workers(includeRetired: Bool) async throws -> WorkerListResultDTO { throw MockError.unused }
     func inspectWorker(_ workerId: String) async throws -> WorkerInspectResultDTO { throw MockError.unused }

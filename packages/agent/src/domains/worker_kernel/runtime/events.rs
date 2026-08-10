@@ -8,7 +8,7 @@ impl WorkerRuntime {
     /// Session Context must never infer invocation ownership from these
     /// unscoped events. Invocation evidence uses
     /// [`Self::publish_invocation_event`] instead.
-    pub(super) async fn publish_event(
+    pub(in crate::domains::worker_kernel) async fn publish_event(
         &self,
         topic: &str,
         payload: Value,

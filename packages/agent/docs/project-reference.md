@@ -890,7 +890,13 @@ Resolution never edits or deletes the failed run or delivery record: both
 remain in the complete inbox available through an explicit audit sheet, where
 historical `contextAttached` truthfully describes whether an old result was
 attached by the removed synchronous path—not whether a human opened the
-record. Both ledgers page on
+record. An authenticated operator may instead dismiss one still-actionable
+error. That writes a separate idempotent disposition, removes the row from the
+live Attention projection, and leaves its inbox, invocation, and result
+evidence intact. The native Scheduled view likewise reads one bounded
+chronological union of enabled recurring trigger cursors and queued future
+invocations; it does not create a parallel scheduler. The run and inbox
+ledgers page on
 demand, so they remain inspectable without one unbounded transport response.
 Durable state remains complete in canonical storage—these are bounded read
 projections, not retention limits.
@@ -2630,7 +2636,7 @@ operational evidence:
 
 | Table | Ownership |
 |---|---|
-| `worker_schema` | worker index schema version; v12 adds atomic worker handoffs and split notification ownership; v13 adds self-only delayed invocation custody; v14 adds artifact custody and storage attention; v15 adds the exact session-organization mutation outbox; v16 adds the immutable worker-to-agent terminal/effect outbox; v17 adds requested/effective invocation model and reasoning policy |
+| `worker_schema` | worker index schema version; v12 adds atomic worker handoffs and split notification ownership; v13 adds self-only delayed invocation custody; v14 adds artifact custody and storage attention; v15 adds the exact session-organization mutation outbox; v16 adds the immutable worker-to-agent terminal/effect outbox; v17 adds requested/effective invocation model and reasoning policy; v18 adds operator inbox dispositions and the scheduled-trigger projection index |
 | `blobs` | generic content-addressed compressed result bodies larger than 8 KiB |
 | `storage_payload_refs` | one generic ownership/integrity row for every successful invocation output |
 | `workers` | rebuildable current catalog |
@@ -2644,6 +2650,7 @@ operational evidence:
 | `worker_causal_traces` | trace roots, depth, delivery, and suppression counters |
 | `worker_trace_deliveries` | unique worker/trigger/idempotency combinations per trace |
 | `worker_inbox` | durable compact result-reference receipts, failure records, and agent-context attachment state |
+| `worker_inbox_dispositions` | immutable idempotent operator dismissals that remove retained failures from live Attention without editing result or execution evidence |
 | `agent_delivery_outbox` | immutable pending/imported/rejected terminal and worker-declared Agent Delivery effects |
 | `worker_audit` | lifecycle and mutation evidence |
 | `worker_health` | versioned activation/lifecycle/execution health history |

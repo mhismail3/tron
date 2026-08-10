@@ -10,12 +10,9 @@ struct SessionSidebar: View {
     @State private var showArchiveConfirmation = false
     @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
     @State private var sessionExpansion = SessionListSessionExpansion()
-    @State private var workerConsole = WorkerConsoleViewModel()
-    @State private var workerConsoleOwnerId: UUID?
-    @State private var workerConsoleLoadedContinuity: EngineConnectionContinuity?
-    @State private var showWorkerConsole = false
 
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
+    @Binding var primaryPage: TronPrimaryPage
     let onNewSession: () -> Void
     let onDeleteSession: (String) -> Void
     let actions: ShellToolbarActions
@@ -28,26 +25,9 @@ struct SessionSidebar: View {
         Dictionary(uniqueKeysWithValues: workspaceGroups.map { ($0.id, $0.sessions.count) })
     }
 
-    private var workerConsoleRefreshKey: WorkerConsoleRefreshKey {
-        WorkerConsoleRefreshKey(
-            serverSelectionVersion: dependencies.activeServerSelectionVersion,
-            continuity: dependencies.connectionRepository.continuity,
-            dashboardPresented: showWorkerConsole
-        )
-    }
-
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             List(selection: $selectedSessionId) {
-                Section {
-                    WorkerConsoleDashboardBand(viewModel: workerConsole) {
-                        showWorkerConsole = true
-                    }
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(SessionListLayout.dashboardInsets)
-                }
-
                 ForEach(workspaceGroups) { group in
                     let visibleSessions = sessionExpansion.visibleSessions(in: group)
                     let canViewMore = sessionExpansion.canViewMore(
@@ -159,49 +139,18 @@ struct SessionSidebar: View {
         }
         .tronScreenBackground()
         .navigationBarTitleDisplayMode(.inline)
-                .toolbar(removing: .sidebarToggle)
+        .toolbar(removing: .sidebarToggle)
         .toolbar {
-            ShellToolbarContent(title: "Tron", accent: .tronEmerald, actions: actions)
+            ShellToolbarContent(
+                title: "Tron",
+                accent: .tronEmerald,
+                actions: actions,
+                primaryPage: $primaryPage
+            )
         }
         .onChange(of: workspaceGroupCounts, initial: true) { _, groupCounts in
             sessionExpansion.reconcile(groupCounts: groupCounts)
             reconcileWorkspaceDisclosure(groupIds: Set(groupCounts.keys))
-        }
-        .task(id: workerConsoleRefreshKey) {
-            let ownerId = dependencies.connectionRepository.continuityOwnerId
-            if workerConsoleOwnerId != ownerId {
-                workerConsoleOwnerId = ownerId
-                workerConsoleLoadedContinuity = nil
-                workerConsole.resetForServerChange()
-            }
-            guard !showWorkerConsole else { return }
-            let continuity = dependencies.connectionRepository.continuity
-            let isReconnect = workerConsoleLoadedContinuity != nil
-                && workerConsoleLoadedContinuity != continuity
-            workerConsoleLoadedContinuity = continuity
-            if isReconnect {
-                await workerConsole.refreshSummary(
-                    repository: dependencies.workerKernelRepository,
-                    connectionState: dependencies.connectionRepository.connectionState
-                )
-            } else {
-                await refreshWorkerConsoleSummary()
-            }
-            await workerConsole.monitorSummary(
-                repository: dependencies.workerKernelRepository,
-                connectionState: dependencies.connectionRepository.connectionState
-            )
-        }
-        .sheet(isPresented: $showWorkerConsole) {
-            WorkerConsoleSheet(
-                viewModel: workerConsole,
-                repository: dependencies.workerKernelRepository
-            )
-        }
-        .onReceive(
-            NotificationCenter.default.publisher(for: .startAgentSessionHandoff)
-        ) { _ in
-            showWorkerConsole = false
         }
     }
 
@@ -280,13 +229,6 @@ struct SessionSidebar: View {
         }
     }
 
-    private func refreshWorkerConsoleSummary() async {
-        await workerConsole.ensureSummaryLoaded(
-            repository: dependencies.workerKernelRepository,
-            connectionState: dependencies.connectionRepository.connectionState
-        )
-    }
-
     @ViewBuilder
     private func sessionRow(_ session: CachedSession) -> some View {
         let isSelected = session.id == selectedSessionId
@@ -330,10 +272,4 @@ struct SessionSidebar: View {
             .tint(.tronEmerald)
         }
     }
-}
-
-private struct WorkerConsoleRefreshKey: Equatable {
-    let serverSelectionVersion: Int
-    let continuity: EngineConnectionContinuity
-    let dashboardPresented: Bool
 }

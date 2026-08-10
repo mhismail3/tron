@@ -2,6 +2,7 @@ import Foundation
 
 private enum WorkerConsoleRefreshScope {
     case summary
+    case scheduled
     case activity
     case results
 }
@@ -13,6 +14,7 @@ final class WorkerConsoleViewModel {
     var workers: [WorkerSummaryDTO] = []
     var activityRuns: [WorkerInvocationDTO] = []
     var activityResults: [WorkerInboxItemDTO] = []
+    var scheduledWork: [WorkerScheduledWorkItemDTO] = []
     var selectedWorkerId: String?
     var inspection: WorkerInspectResultDTO?
     var runs: [WorkerInvocationDTO] = []
@@ -24,16 +26,20 @@ final class WorkerConsoleViewModel {
     var isMutating = false
     var isLoadingMoreActivity = false
     var isLoadingMoreResults = false
+    var isLoadingMoreScheduled = false
     var hasLoaded = false
     private(set) var hasLoadedActivity = false
     private(set) var hasLoadedResults = false
+    private(set) var hasLoadedScheduled = false
     var stopAll = false
     var lastError: String?
     var monitoringError: String?
     private(set) var activityRunsNextOffset: UInt64?
     private(set) var activityResultsNextOffset: UInt64?
+    private(set) var scheduledWorkNextOffset: UInt64?
     private var activeRefreshScope: WorkerConsoleRefreshScope?
     private var pendingRefreshScope: WorkerConsoleRefreshScope?
+    private var projectionContinuity: EngineConnectionContinuity?
     /// Retires reads from a replaced server even if task cancellation races a
     /// response that was already being decoded.
     private var projectionGeneration = 0
@@ -147,7 +153,6 @@ final class WorkerConsoleViewModel {
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState
     ) async {
-        await refreshSummary(repository: repository, connectionState: connectionState)
         await requestRefresh(
             scope: .activity,
             repository: repository,
@@ -167,11 +172,29 @@ final class WorkerConsoleViewModel {
         )
     }
 
+    func refreshScheduled(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        await requestRefresh(
+            scope: .scheduled,
+            repository: repository,
+            connectionState: connectionState
+        )
+    }
+
+    func ensureScheduledLoaded(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard !hasLoadedScheduled else { return }
+        await refreshScheduled(repository: repository, connectionState: connectionState)
+    }
+
     func refreshResults(
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState
     ) async {
-        await refreshSummary(repository: repository, connectionState: connectionState)
         await requestRefresh(
             scope: .results,
             repository: repository,
@@ -280,6 +303,35 @@ final class WorkerConsoleViewModel {
                       projectionTicket == projectionGeneration else { return }
                 apply(snapshot)
                 hasLoaded = true
+            case .scheduled:
+                let scheduledRequest = Task { @MainActor in
+                    try await repository.scheduledWork(limit: 50, offset: nil)
+                }
+                let snapshotRequest: Task<EngineIntrospectionSnapshotDTO, Error>? = if hasLoaded {
+                    nil
+                } else {
+                    Task { @MainActor in
+                        try await repository.engineSurfaceSnapshot(
+                            sessionId: nil,
+                            relevanceQuery: nil
+                        )
+                    }
+                }
+                defer {
+                    scheduledRequest.cancel()
+                    snapshotRequest?.cancel()
+                }
+                let scheduled = try await scheduledRequest.value
+                let snapshot = try await snapshotRequest?.value
+                guard !Task.isCancelled,
+                      projectionTicket == projectionGeneration else { return }
+                if let snapshot {
+                    apply(snapshot)
+                    hasLoaded = true
+                }
+                scheduledWork = scheduled.items
+                scheduledWorkNextOffset = scheduled.nextOffset
+                hasLoadedScheduled = true
             case .activity:
                 let runsRequest = Task { @MainActor in
                     try await repository.workerRuns(workerId: nil, limit: 20)
@@ -368,8 +420,26 @@ final class WorkerConsoleViewModel {
         stopAll = snapshot.dispatchStopped
     }
 
+    /// Retains cached projections while navigating between top-level pages,
+    /// refreshes after an off-screen reconnect, and atomically retires state
+    /// when a different paired server becomes authoritative.
+    func reconcileServerProjection(_ continuity: EngineConnectionContinuity) -> Bool {
+        guard let previous = projectionContinuity else {
+            projectionContinuity = continuity
+            return false
+        }
+        if previous.ownerId != continuity.ownerId {
+            resetForServerChange()
+            projectionContinuity = continuity
+            return false
+        }
+        projectionContinuity = continuity
+        return continuity.requiresReconciliation(after: previous)
+    }
+
     func resetForServerChange() {
         projectionGeneration &+= 1
+        projectionContinuity = nil
         clearServerProjection()
         activeRefreshScope = nil
         pendingRefreshScope = nil
@@ -377,10 +447,12 @@ final class WorkerConsoleViewModel {
         isLoadingSelection = false
         isLoadingMoreActivity = false
         isLoadingMoreResults = false
+        isLoadingMoreScheduled = false
         isMutating = false
         hasLoaded = false
         hasLoadedActivity = false
         hasLoadedResults = false
+        hasLoadedScheduled = false
         lastError = nil
         monitoringError = nil
     }
@@ -390,8 +462,10 @@ final class WorkerConsoleViewModel {
         workers = []
         activityRuns = []
         activityResults = []
+        scheduledWork = []
         activityRunsNextOffset = nil
         activityResultsNextOffset = nil
+        scheduledWorkNextOffset = nil
         selectedWorkerId = nil
         inspection = nil
         runs = []
@@ -420,6 +494,30 @@ final class WorkerConsoleViewModel {
                   projectionTicket == projectionGeneration else { return }
             Self.appendUnique(page.runs, to: &activityRuns, id: \.invocationId)
             activityRunsNextOffset = page.nextOffset
+            lastError = nil
+        } catch {
+            guard projectionTicket == projectionGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                lastError = error.localizedDescription
+            }
+        }
+    }
+
+    func loadOlderScheduledWork(repository: any WorkerKernelRepository) async {
+        guard let offset = scheduledWorkNextOffset, !isLoadingMoreScheduled else { return }
+        let projectionTicket = projectionGeneration
+        isLoadingMoreScheduled = true
+        defer {
+            if projectionTicket == projectionGeneration {
+                isLoadingMoreScheduled = false
+            }
+        }
+        do {
+            let page = try await repository.scheduledWork(limit: 50, offset: offset)
+            guard !Task.isCancelled,
+                  projectionTicket == projectionGeneration else { return }
+            Self.appendUnique(page.items, to: &scheduledWork, id: \.scheduledId)
+            scheduledWorkNextOffset = page.nextOffset
             lastError = nil
         } catch {
             guard projectionTicket == projectionGeneration else { return }
@@ -585,6 +683,17 @@ final class WorkerConsoleViewModel {
     ) async {
         await monitor(
             scope: .results,
+            repository: repository,
+            connectionState: connectionState
+        )
+    }
+
+    func monitorScheduled(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        await monitor(
+            scope: .scheduled,
             repository: repository,
             connectionState: connectionState
         )
