@@ -138,6 +138,30 @@ final class WorkerKernelClient: EngineDomainClient {
         )
     }
 
+    func scheduledWork(
+        limit: UInt64 = 50,
+        offset: UInt64? = nil
+    ) async throws -> WorkerScheduledWorkResultDTO {
+        try await invokeRead(
+            "worker_kernel::scheduled_work",
+            WorkerScheduledWorkRequestDTO(
+                limit: min(max(limit, 1), 100),
+                offset: offset
+            )
+        )
+    }
+
+    func dismissWorkerInboxItem(
+        inboxId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInboxDismissResultDTO {
+        try await invokeWrite(
+            "worker_kernel::inbox_dismiss",
+            WorkerInboxDismissRequestDTO(inboxId: inboxId),
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func artifactDeliveries(
         limit: UInt16 = 100,
         offset: UInt64 = 0

@@ -145,6 +145,14 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/SessionSidebar.swift"),
             encoding: .utf8
         )
+        let content = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/ContentView.swift"),
+            encoding: .utf8
+        )
+        let toolbar = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/ShellToolbarContent.swift"),
+            encoding: .utf8
+        )
         let console = try String(
             contentsOf: iosRoot.appendingPathComponent(
                 "Sources/UI/WorkerConsole/Overview/WorkerConsoleViews.swift"
@@ -166,12 +174,16 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Theme/TronColors.swift"),
             encoding: .utf8
         )
-        #expect(sidebar.contains("WorkerConsoleDashboardBand("))
-        #expect(sidebar.contains("WorkerConsoleSheet("))
+        #expect(!sidebar.contains("WorkerConsoleDashboardBand("))
+        #expect(!sidebar.contains("WorkerConsoleSheet("))
         #expect(sidebar.contains("SessionListWorkspaceGroup.groups"))
-        #expect(sidebar.contains("workerConsoleRefreshKey"))
+        #expect(!sidebar.contains("workerConsoleRefreshKey"))
         #expect(!sidebar.contains("dashboardSessionId"))
         #expect(!sidebar.contains("sessionId: selectedSessionId"))
+        #expect(content.contains("@State private var primaryPage: TronPrimaryPage = .sessions"))
+        #expect(content.contains("EngineDashboardPage("))
+        #expect(content.contains("WorkerActivityPage("))
+        #expect(toolbar.contains("ForEach(TronPrimaryPage.allCases)"))
         #expect(viewModel.contains("sessionId: nil"))
         #expect(!viewModel.contains("currentSessionId"))
         #expect(consoleSurface.contains("Direct chat tool"))
@@ -183,19 +195,17 @@ extension SourceGuardTests {
         #expect(!consoleSurface.contains("\"This session\""))
         #expect(!consoleSurface.contains("\"Promoted\""))
         #expect(!consoleSurface.contains("routingEvidence"))
-        #expect(sidebar.contains("await workerConsole.monitorSummary("))
         #expect(console.contains("await viewModel.monitor("))
         #expect(console.contains("await viewModel.monitorSummary("))
-        #expect(console.contains("selectedSection == .activity"))
+        #expect(console.contains("case scheduled = \"Scheduled\""))
+        #expect(console.contains("case pastWork = \"Past Work\""))
         #expect(!viewModel.contains("pollWorkerEvents"))
-        #expect(sidebar.contains("continuity: dependencies.connectionRepository.continuity"))
-        #expect(sidebar.contains("workerConsoleOwnerId != ownerId"))
-        #expect(sidebar.contains(".task(id: workerConsoleRefreshKey)"))
+        #expect(console.contains("continuity: dependencies.connectionRepository.continuity"))
+        #expect(console.contains("reconcileServerProjection("))
+        #expect(console.contains(".task(id: EngineDashboardRefreshKey("))
         #expect(sidebar.contains(".contentShape(shape)\n                .glassEffect("))
         #expect(sidebar.contains(".buttonStyle(.plain)\n        .contentShape(shape)"))
         #expect(theme.contains(".glassEffect(\n                        .regular.tint(color.opacity(glassOpacity)).interactive(),\n                        in: shape\n                    )\n                    .contentShape(shape)"))
-        #expect(sidebar.components(separatedBy: ".task(id: workerConsoleRefreshKey)").count == 2)
-        #expect(sidebar.components(separatedBy: "WorkerConsoleSheet(").count == 2)
     }
 
     @Test("Session list rows use inset liquid glass containers")

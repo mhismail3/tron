@@ -54,6 +54,8 @@ struct WorkerInboxItemDTO: Codable, Equatable, Identifiable, Sendable {
     let triggerKind: String
     let hasInvocation: Bool
     let requiresAttention: Bool
+    let operatorDisposition: String?
+    let operatorResolvedAt: String?
 
     var id: String { inboxId }
 
@@ -67,7 +69,9 @@ struct WorkerInboxItemDTO: Codable, Equatable, Identifiable, Sendable {
         createdAt: String,
         triggerKind: String,
         hasInvocation: Bool,
-        requiresAttention: Bool
+        requiresAttention: Bool,
+        operatorDisposition: String? = nil,
+        operatorResolvedAt: String? = nil
     ) {
         self.inboxId = inboxId
         self.invocationId = invocationId
@@ -79,7 +83,15 @@ struct WorkerInboxItemDTO: Codable, Equatable, Identifiable, Sendable {
         self.triggerKind = triggerKind
         self.hasInvocation = hasInvocation
         self.requiresAttention = requiresAttention
+        self.operatorDisposition = operatorDisposition
+        self.operatorResolvedAt = operatorResolvedAt
     }
+}
+
+struct WorkerInboxDismissResultDTO: Codable, Equatable, Sendable {
+    let inboxId: String
+    let disposition: String
+    let resolvedAt: String
 }
 
 struct WorkerInboxResultDTO: Codable, Equatable, Sendable {

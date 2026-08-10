@@ -132,6 +132,42 @@ pub(super) fn response_schema(function: &str) -> Value {
                 "deleted":{"type":"boolean"}
             }
         }),
+        "worker_kernel::scheduled_work" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["items","returned","truncated","nextOffset"],
+            "properties":{
+                "items":{"type":"array","items":{
+                    "type":"object","additionalProperties":false,
+                    "required":[
+                        "scheduledId","workerId","workerName","kind",
+                        "triggerId","invocationId","scheduledAt",
+                        "everySeconds","triggerKind"
+                    ],
+                    "properties":{
+                        "scheduledId":{"type":"string"},
+                        "workerId":{"type":"string"},
+                        "workerName":{"type":"string"},
+                        "kind":{"type":"string","enum":["recurring","deferred"]},
+                        "triggerId":{},"invocationId":{},
+                        "scheduledAt":{"type":"string"},
+                        "everySeconds":{},
+                        "triggerKind":{"type":"string"}
+                    }
+                }},
+                "returned":{"type":"integer","minimum":0,"maximum":100},
+                "truncated":{"type":"boolean"},
+                "nextOffset":{}
+            }
+        }),
+        "worker_kernel::inbox_dismiss" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["inboxId","disposition","resolvedAt"],
+            "properties":{
+                "inboxId":{"type":"string"},
+                "disposition":{"const":"dismissed"},
+                "resolvedAt":{"type":"string"}
+            }
+        }),
         "worker_kernel::upsert" => json!({
             "type":"object","additionalProperties":false,
             "required":["worker","version","created","replacedWorkerId","webhooks"],

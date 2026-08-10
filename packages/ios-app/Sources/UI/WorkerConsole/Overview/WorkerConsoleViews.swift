@@ -18,123 +18,117 @@ enum WorkerVersionAction: Equatable {
         return version.version == worker.activeVersion ? nil : .rollback
     }
 }
-private enum EngineDashboardSection: String, CaseIterable {
+private enum WorkerConsolePageKind: Equatable {
+    case engine
+    case activity
+
+    var title: String {
+        switch self {
+        case .engine: "Engine"
+        case .activity: "Activity"
+        }
+    }
+
+    var initialSection: WorkerConsoleDashboardSection {
+        switch self {
+        case .engine: .workers
+        case .activity: .scheduled
+        }
+    }
+}
+
+private enum WorkerConsoleDashboardSection: String, CaseIterable {
     case workers = "Workers"
     case primitives = "Primitives"
-    case activity = "Activity"
+    case scheduled = "Scheduled"
+    case pastWork = "Past Work"
     case results = "Results"
 }
 
 private struct EngineDashboardRefreshKey: Equatable {
     let continuity: EngineConnectionContinuity
-    let section: EngineDashboardSection
+    let section: WorkerConsoleDashboardSection
     let isCovered: Bool
 }
 
-struct WorkerConsoleDashboardBand: View {
-    let viewModel: WorkerConsoleViewModel
-    let action: () -> Void
+struct EngineDashboardPage: View {
+    @Binding var primaryPage: TronPrimaryPage
+    @Bindable var viewModel: WorkerConsoleViewModel
+    let repository: any WorkerKernelRepository
+    let actions: ShellToolbarActions
 
     var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: SessionListLayout.iconTextSpacing) {
-                Image(systemName: summarySymbol)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(summaryColor)
-                    .frame(
-                        width: SessionListLayout.iconColumnWidth,
-                        height: SessionListLayout.iconColumnWidth
-                    )
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Engine")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(summaryDetail)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                        .lineLimit(2)
-                    HStack(spacing: 8) {
-                        metric("Primitives", viewModel.primitiveToolCount)
-                        metric("Workers", viewModel.enabledCount)
-                        metric("Unhealthy", viewModel.unhealthyWorkerCount)
-                    }
-                }
-
-                Spacer(minLength: 8)
-
-                if viewModel.isRefreshing {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(summaryColor)
-                }
-            }
-            .padding(.horizontal, SessionListLayout.rowContentHorizontalPadding)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .sectionFill(summaryColor, cornerRadius: 12, subtle: true, interactive: true)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("engine-dashboard-band")
-        .accessibilityLabel("Open engine dashboard")
-    }
-
-    private var summarySymbol: String {
-        "cpu"
-    }
-
-    private var summaryColor: Color {
-        viewModel.unhealthyWorkerCount > 0 ? .tronWarning : .tronEmerald
-    }
-
-    private var summaryDetail: String {
-        if viewModel.stopAll { return "Dispatch is paused; durable work remains queued." }
-        if viewModel.workers.isEmpty { return "Primitives ready; create persistent workers conversationally." }
-        if viewModel.unhealthyWorkerCount > 0 {
-            return "\(viewModel.unhealthyWorkerCount) worker\(viewModel.unhealthyWorkerCount == 1 ? " needs" : "s need") review."
-        }
-        return "Fixed primitives and persistent workers are ready."
-    }
-
-    private func metric(_ label: String, _ value: Int) -> some View {
-        HStack(spacing: 3) {
-            Text("\(value)")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(summaryColor)
-            Text(label)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-        }
-        .lineLimit(1)
+        WorkerConsolePage(
+            pageKind: .engine,
+            primaryPage: $primaryPage,
+            viewModel: viewModel,
+            repository: repository,
+            actions: actions
+        )
     }
 }
 
-struct WorkerConsoleSheet: View {
-    @Environment(\.dependencies) private var dependencies
+struct WorkerActivityPage: View {
+    @Binding var primaryPage: TronPrimaryPage
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
+    let actions: ShellToolbarActions
 
-    @State private var selectedSection: EngineDashboardSection = .workers
+    var body: some View {
+        WorkerConsolePage(
+            pageKind: .activity,
+            primaryPage: $primaryPage,
+            viewModel: viewModel,
+            repository: repository,
+            actions: actions
+        )
+    }
+}
+
+private struct WorkerConsolePage: View {
+    @Environment(\.dependencies) private var dependencies
+    let pageKind: WorkerConsolePageKind
+    @Binding var primaryPage: TronPrimaryPage
+    @Bindable var viewModel: WorkerConsoleViewModel
+    let repository: any WorkerKernelRepository
+    let actions: ShellToolbarActions
+
+    @State private var selectedSection: WorkerConsoleDashboardSection
     @State private var selectedPrimitiveTool: EngineSurfaceToolDTO?
     @State private var selectedRun: WorkerInvocationDTO?
     @State private var selectedInboxItem: WorkerInboxSelection?
-    @State private var loadedContinuity: EngineConnectionContinuity?
 
     private var connectionState: ConnectionState {
         dependencies.connectionRepository.connectionState
+    }
+
+    init(
+        pageKind: WorkerConsolePageKind,
+        primaryPage: Binding<TronPrimaryPage>,
+        viewModel: WorkerConsoleViewModel,
+        repository: any WorkerKernelRepository,
+        actions: ShellToolbarActions
+    ) {
+        self.pageKind = pageKind
+        _primaryPage = primaryPage
+        self.viewModel = viewModel
+        self.repository = repository
+        self.actions = actions
+        _selectedSection = State(initialValue: pageKind.initialSection)
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    summaryCard
+                    if pageKind == .engine {
+                        summaryCard
+                    }
                     if !connectionState.isConnected, viewModel.hasLoaded {
                         WorkerConsoleContinuityBanner()
                     }
                     TronSegmentedControl(
-                        options: EngineDashboardSection.allCases.map { ($0.rawValue, $0) },
+                        options: availableSections.map { ($0.rawValue, $0) },
                         selection: $selectedSection,
                         accent: .tronEmerald
                     )
@@ -148,22 +142,15 @@ struct WorkerConsoleSheet: View {
             .scrollContentBackground(.hidden)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Engine", color: .tronEmerald)
-                }
-                ToolbarItem(placement: .topBarLeading) {
-                    SheetPrimaryActionButton(
-                        icon: "arrow.clockwise",
-                        accent: .tronEmerald,
-                        isBusy: viewModel.isRefreshing,
-                        accessibilityLabel: "Refresh engine state"
-                    ) {
-                        Task { await refresh() }
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    SheetDismissButton(color: .tronEmerald)
-                }
+                ShellToolbarContent(
+                    title: pageKind.title,
+                    accent: .tronEmerald,
+                    actions: ShellToolbarActions(
+                        onSettings: actions.onSettings,
+                        onRefresh: { Task { await refresh() } }
+                    ),
+                    primaryPage: $primaryPage
+                )
             }
             .sheet(isPresented: selectedWorkerPresented) {
                 if let worker = viewModel.selectedWorker {
@@ -213,7 +200,16 @@ struct WorkerConsoleSheet: View {
                 )
             }
             .sheet(item: $selectedInboxItem) { selection in
-                WorkerInboxDetailSheet(selection: selection, repository: repository)
+                WorkerInboxDetailSheet(
+                    selection: selection,
+                    repository: repository,
+                    onDispositionChanged: {
+                        await viewModel.refreshResults(
+                            repository: repository,
+                            connectionState: dependencies.connectionRepository.connectionState
+                        )
+                    }
+                )
             }
             .task(id: EngineDashboardRefreshKey(
                 continuity: dependencies.connectionRepository.continuity,
@@ -222,20 +218,24 @@ struct WorkerConsoleSheet: View {
             )) {
                 guard !isPresentingChildSheet else { return }
                 let continuity = dependencies.connectionRepository.continuity
-                let isReconnect = loadedContinuity != nil && loadedContinuity != continuity
-                loadedContinuity = continuity
+                let isReconnect = viewModel.reconcileServerProjection(continuity)
                 if isReconnect {
                     await refresh()
                 } else {
                     await ensureLoaded()
                 }
-                if selectedSection == .activity {
+                if selectedSection == .pastWork {
                     await viewModel.monitor(
                         repository: repository,
                         connectionState: dependencies.connectionRepository.connectionState
                     )
                 } else if selectedSection == .results {
                     await viewModel.monitorResults(
+                        repository: repository,
+                        connectionState: dependencies.connectionRepository.connectionState
+                    )
+                } else if selectedSection == .scheduled {
+                    await viewModel.monitorScheduled(
                         repository: repository,
                         connectionState: dependencies.connectionRepository.connectionState
                     )
@@ -247,8 +247,49 @@ struct WorkerConsoleSheet: View {
                 }
             }
         }
-        .workerConsoleSheetPresentation()
+        .tronScreenBackground()
         .tint(.tronEmerald)
+    }
+
+    private var scheduledContent: some View {
+        WorkerConsoleGroup(
+            title: "Upcoming work",
+            detail: "Enabled recurring schedules and future runs already admitted to the durable queue."
+        ) {
+            if !connectionState.isConnected, viewModel.scheduledWork.isEmpty {
+                WorkerConsoleInlineEmptyState(
+                    symbol: "network.slash",
+                    text: "Reconnect to inspect upcoming work."
+                )
+            } else if !viewModel.hasLoadedScheduled && viewModel.isRefreshing {
+                WorkerConsoleLoadingState(title: "Loading scheduled work")
+            } else if viewModel.scheduledWork.isEmpty {
+                WorkerConsoleInlineEmptyState(
+                    symbol: "calendar.badge.clock",
+                    text: "No upcoming worker executions are scheduled."
+                )
+            } else {
+                LazyVStack(spacing: 9) {
+                    ForEach(viewModel.scheduledWork) { item in
+                        ScheduledWorkerCard(item: item) {
+                            Task { await viewModel.select(item.workerId, repository: repository) }
+                        }
+                    }
+                }
+                if viewModel.scheduledWorkNextOffset != nil {
+                    scheduledLoadMoreButton("Load more scheduled work") {
+                        await viewModel.loadOlderScheduledWork(repository: repository)
+                    }
+                }
+            }
+        }
+    }
+
+    private var availableSections: [WorkerConsoleDashboardSection] {
+        switch pageKind {
+        case .engine: [.workers, .primitives]
+        case .activity: [.scheduled, .pastWork, .results]
+        }
     }
 
     @ViewBuilder
@@ -258,7 +299,9 @@ struct WorkerConsoleSheet: View {
             primitiveContent
         case .workers:
             workersContent
-        case .activity:
+        case .scheduled:
+            scheduledContent
+        case .pastWork:
             activityContent
         case .results:
             resultsContent
@@ -412,6 +455,11 @@ struct WorkerConsoleSheet: View {
                     title: "Resolved",
                     detail: "Earlier failures the server no longer classifies as actionable after recovery or an owned fallback."
                 )
+                resultSection(
+                    .dismissed,
+                    title: "Dismissed",
+                    detail: "Failures an operator reviewed and dismissed. Their execution evidence remains available."
+                )
                 if viewModel.activityResultsNextOffset != nil {
                     resultsLoadMoreButton("Load older results") {
                         await viewModel.loadOlderActivityResults(repository: repository)
@@ -498,6 +546,31 @@ struct WorkerConsoleSheet: View {
         }
         .buttonStyle(.plain)
         .disabled(viewModel.isLoadingMoreResults)
+    }
+
+    private func scheduledLoadMoreButton(
+        _ title: String,
+        action: @escaping () async -> Void
+    ) -> some View {
+        Button {
+            Task { await action() }
+        } label: {
+            HStack(spacing: 7) {
+                if viewModel.isLoadingMoreScheduled {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "calendar.badge.plus")
+                }
+                Text(title)
+            }
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+            .foregroundStyle(.tronEmerald)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .sectionFill(.tronEmerald, cornerRadius: 10, subtle: true, interactive: true)
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isLoadingMoreScheduled)
     }
 
     @ViewBuilder
@@ -633,17 +706,23 @@ struct WorkerConsoleSheet: View {
     }
 
     private func refresh() async {
-        if selectedSection == .activity {
+        switch selectedSection {
+        case .pastWork:
             await viewModel.refresh(
                 repository: repository,
                 connectionState: dependencies.connectionRepository.connectionState
             )
-        } else if selectedSection == .results {
+        case .results:
             await viewModel.refreshResults(
                 repository: repository,
                 connectionState: dependencies.connectionRepository.connectionState
             )
-        } else {
+        case .scheduled:
+            await viewModel.refreshScheduled(
+                repository: repository,
+                connectionState: dependencies.connectionRepository.connectionState
+            )
+        case .workers, .primitives:
             await viewModel.refreshSummary(
                 repository: repository,
                 connectionState: dependencies.connectionRepository.connectionState
@@ -654,8 +733,13 @@ struct WorkerConsoleSheet: View {
     private func ensureLoaded() async {
         let connectionState = dependencies.connectionRepository.connectionState
         switch selectedSection {
-        case .activity:
+        case .pastWork:
             await viewModel.ensureActivityLoaded(
+                repository: repository,
+                connectionState: connectionState
+            )
+        case .scheduled:
+            await viewModel.ensureScheduledLoaded(
                 repository: repository,
                 connectionState: connectionState
             )
@@ -672,4 +756,65 @@ struct WorkerConsoleSheet: View {
         }
     }
 
+}
+
+private struct ScheduledWorkerCard: View {
+    let item: WorkerScheduledWorkItemDTO
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: item.kind == "recurring" ? "repeat" : "clock")
+                    .foregroundStyle(.tronInfo)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.workerName)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(scheduleDetail)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
+                        .lineLimit(2)
+                    if let scheduledAt = WorkerConsolePresentation.timestamp(item.scheduledAt) {
+                        Text(scheduledAt)
+                            .font(TronTypography.sans(size: TronTypography.sizeSM))
+                            .foregroundStyle(.tronTextMuted)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text(item.kind == "recurring" ? "Recurring" : "Scheduled")
+                    .font(TronTypography.pillValue)
+                    .foregroundStyle(.tronInfo)
+            }
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .sectionFill(.tronInfo, cornerRadius: 10, subtle: true, interactive: true)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var scheduleDetail: String {
+        if item.kind == "recurring", let everySeconds = item.everySeconds {
+            return "Repeats \(Self.intervalLabel(everySeconds))"
+        }
+        return WorkerConsolePresentation.displayLabel(item.triggerKind)
+    }
+
+    private static func intervalLabel(_ seconds: UInt64) -> String {
+        if seconds.isMultiple(of: 86_400) {
+            let days = seconds / 86_400
+            return "every \(days) day\(days == 1 ? "" : "s")"
+        }
+        if seconds.isMultiple(of: 3_600) {
+            let hours = seconds / 3_600
+            return "every \(hours) hour\(hours == 1 ? "" : "s")"
+        }
+        if seconds.isMultiple(of: 60) {
+            let minutes = seconds / 60
+            return "every \(minutes) minute\(minutes == 1 ? "" : "s")"
+        }
+        return "every \(seconds) second\(seconds == 1 ? "" : "s")"
+    }
 }

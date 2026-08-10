@@ -181,14 +181,6 @@ enum SessionListLayout {
         )
     }
 
-    static var dashboardInsets: EdgeInsets {
-        EdgeInsets(
-            top: 10,
-            leading: rowContainerHorizontalInset,
-            bottom: 6,
-            trailing: rowContainerHorizontalInset
-        )
-    }
 }
 
 enum SessionListStatus: Equatable {

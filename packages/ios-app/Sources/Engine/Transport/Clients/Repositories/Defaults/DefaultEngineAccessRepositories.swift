@@ -396,6 +396,23 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
+    func scheduledWork(
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerScheduledWorkResultDTO {
+        try await client.scheduledWork(limit: limit, offset: offset)
+    }
+
+    func dismissWorkerInboxItem(
+        inboxId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInboxDismissResultDTO {
+        try await client.dismissWorkerInboxItem(
+            inboxId: inboxId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func artifactDeliveries(
         limit: UInt16,
         offset: UInt64

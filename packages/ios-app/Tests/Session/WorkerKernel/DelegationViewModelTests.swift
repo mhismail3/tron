@@ -310,6 +310,17 @@ private final class DelegationMockRepository: WorkerKernelRepository {
         return WorkerInboxResultDTO(items: [])
     }
 
+    func scheduledWork(limit: UInt64, offset: UInt64?) async throws -> WorkerScheduledWorkResultDTO {
+        throw MockError.unused
+    }
+
+    func dismissWorkerInboxItem(
+        inboxId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInboxDismissResultDTO {
+        throw MockError.unused
+    }
+
     func enqueueWorker(
         workerId: String,
         input: AnyCodable,

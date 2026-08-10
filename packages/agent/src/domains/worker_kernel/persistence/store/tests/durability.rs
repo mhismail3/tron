@@ -3,6 +3,94 @@
 use super::*;
 
 #[test]
+fn scheduled_work_unifies_recurring_triggers_and_deferred_invocations() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(directory.path().to_path_buf()).unwrap();
+    let mut candidate = bundle();
+    candidate.triggers = vec![WorkerTrigger::Schedule {
+        id: "hourly-review".to_owned(),
+        every_seconds: 3_600,
+        input: json!({"topic":"review"}),
+    }];
+    let mut prepared = store.prepare(candidate, None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let deferred_at = (chrono::Utc::now() + chrono::Duration::minutes(15)).to_rfc3339();
+    let created_at = chrono::Utc::now().to_rfc3339();
+    store
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO worker_invocations(
+                invocation_id,worker_id,worker_version,status,input_json,
+                idempotency_key,trace_id,causal_depth,trigger_kind,
+                interaction_mode,not_before,created_at
+             ) VALUES (
+                'worker_run_deferred',?1,?2,'queued','{}',
+                'deferred-test','trace-deferred',0,'self_wakeup',
+                'background',?3,?4
+             )",
+            params![
+                published.worker.worker_id,
+                published.version,
+                deferred_at,
+                created_at,
+            ],
+        )
+        .unwrap();
+
+    let items = store.scheduled_work_page(10, 0).unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(
+        items
+            .iter()
+            .any(|item| { item["kind"] == "recurring" && item["triggerId"] == "hourly-review" })
+    );
+    assert!(items.iter().any(|item| {
+        item["kind"] == "deferred"
+            && item["invocationId"] == "worker_run_deferred"
+            && item["triggerKind"] == "self_wakeup"
+    }));
+}
+
+#[test]
+fn dismissing_attention_is_idempotent_and_preserves_inbox_evidence() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(directory.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    store
+        .record_system_inbox(
+            &published.worker.worker_id,
+            "operator-test",
+            &json!({"status":"failed","error":"review me"}),
+        )
+        .unwrap();
+    let before = store
+        .inbox_filtered_page(None, None, None, true, 10, 0)
+        .unwrap();
+    assert_eq!(before.len(), 1);
+    let inbox_id = before[0]["inboxId"].as_str().unwrap();
+
+    let first = store.dismiss_inbox(inbox_id, "dismiss-test").unwrap();
+    let replay = store.dismiss_inbox(inbox_id, "dismiss-retry").unwrap();
+    assert_eq!(first["resolvedAt"], replay["resolvedAt"]);
+    assert!(
+        store
+            .inbox_filtered_page(None, None, None, true, 10, 0)
+            .unwrap()
+            .is_empty()
+    );
+    let retained = store
+        .inbox_filtered_page(None, None, None, false, 10, 0)
+        .unwrap();
+    assert_eq!(retained.len(), 1);
+    assert_eq!(retained[0]["operatorDisposition"], "dismissed");
+    assert_eq!(retained[0]["requiresAttention"], false);
+}
+
+#[test]
 fn self_wakeup_completion_is_atomic_deduplicated_and_not_early() {
     let directory = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(directory.path().to_path_buf()).unwrap();
@@ -1201,7 +1289,7 @@ fn session_organization_outbox_is_atomic_due_bounded_and_recovers_stale_claims()
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        17
+        18
     );
     connection
         .execute(
@@ -1224,14 +1312,15 @@ fn session_organization_outbox_is_atomic_due_bounded_and_recovers_stale_claims()
 }
 
 #[test]
-fn schema_v15_upgrades_through_invocation_model_policy_v17() {
+fn schema_v15_upgrades_through_inbox_disposition_v18() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
     let connection = store.connection().unwrap();
     connection
         .execute_batch(
             "DROP TABLE agent_delivery_outbox;
-             DELETE FROM worker_schema WHERE version IN (16,17);",
+             DROP TABLE worker_inbox_dispositions;
+             DELETE FROM worker_schema WHERE version IN (16,17,18);",
         )
         .unwrap();
     drop(connection);
@@ -1245,7 +1334,7 @@ fn schema_v15_upgrades_through_invocation_model_policy_v17() {
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        17
+        18
     );
     let outbox_exists = connection
         .query_row(
@@ -1258,4 +1347,15 @@ fn schema_v15_upgrades_through_invocation_model_policy_v17() {
         )
         .unwrap();
     assert!(outbox_exists);
+    let dispositions_exist = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_schema
+                WHERE type='table' AND name='worker_inbox_dispositions'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap();
+    assert!(dispositions_exist);
 }

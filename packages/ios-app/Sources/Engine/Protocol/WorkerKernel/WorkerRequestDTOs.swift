@@ -54,6 +54,15 @@ struct WorkerInboxRequestDTO: Codable, Equatable, Sendable {
     let attentionOnly: Bool
 }
 
+struct WorkerScheduledWorkRequestDTO: Codable, Equatable, Sendable {
+    let limit: UInt64
+    let offset: UInt64?
+}
+
+struct WorkerInboxDismissRequestDTO: Codable, Equatable, Sendable {
+    let inboxId: String
+}
+
 enum WorkerInvocationMode: String, Codable, Equatable, Sendable {
     case wait
     case enqueue

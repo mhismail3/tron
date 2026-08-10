@@ -18,9 +18,27 @@ struct WorkerInboxSelection: Identifiable {
 struct WorkerInboxDetailSheet: View {
     let selection: WorkerInboxSelection
     let repository: any WorkerKernelRepository
+    let onDispositionChanged: @MainActor () async -> Void
 
+    init(
+        selection: WorkerInboxSelection,
+        repository: any WorkerKernelRepository,
+        onDispositionChanged: @escaping @MainActor () async -> Void = {}
+    ) {
+        self.selection = selection
+        self.repository = repository
+        self.onDispositionChanged = onDispositionChanged
+    }
+
+    @ViewBuilder
     var body: some View {
-        if let receipt = selection.item.result.receipt {
+        if WorkerConsolePresentation.resultDisposition(selection.item) == .needsAttention {
+            WorkerAttentionResultSheet(
+                selection: selection,
+                repository: repository,
+                onDispositionChanged: onDispositionChanged
+            )
+        } else if let receipt = selection.item.result.receipt {
             WorkerResultInspectorSheet(
                 invocationId: receipt.reference.invocationId,
                 repository: repository
@@ -31,6 +49,161 @@ struct WorkerInboxDetailSheet: View {
                 value: legacy,
                 accent: WorkerConsolePresentation.resultDisposition(selection.item).color
             )
+        }
+    }
+}
+
+/// Operator-facing resolution surface for an actionable failure. Dismissal is
+/// an explicit durable disposition; it never deletes or rewrites the retained
+/// result and execution evidence.
+private struct WorkerAttentionResultSheet: View {
+    let selection: WorkerInboxSelection
+    let repository: any WorkerKernelRepository
+    let onDispositionChanged: @MainActor () async -> Void
+
+    @Environment(\.dependencies) private var dependencies
+    @Environment(\.dismiss) private var dismiss
+    @State private var showResultDetails = false
+    @State private var confirmDismissal = false
+    @State private var isDismissing = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    WorkerConsoleGroup(
+                        title: "Needs attention",
+                        detail: "Review this retained failure, continue in a new chat, or dismiss it after deciding no further action is needed."
+                    ) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(selection.workerName ?? "Worker result")
+                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                                .foregroundStyle(.tronTextPrimary)
+                            Text(WorkerConsolePresentation.inboxSummary(selection.item))
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                                .foregroundStyle(.tronTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let timestamp = WorkerConsolePresentation.timestamp(selection.item.createdAt) {
+                                Text(timestamp)
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                    .foregroundStyle(.tronTextMuted)
+                            }
+                        }
+                        .padding(13)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .sectionFill(.tronError, cornerRadius: 12, subtle: true, interactive: false)
+                    }
+
+                    if let receipt = selection.item.result.receipt {
+                        WorkerResultAgentHandoffButton(
+                            invocationId: receipt.reference.invocationId,
+                            workerName: selection.workerName ?? "Worker"
+                        ) {
+                            dismiss()
+                        }
+                    } else {
+                        TronPrimaryActionButton(
+                            title: "Investigate with agent",
+                            systemImage: "bubble.left.and.text.bubble.right.fill",
+                            accent: .tronEmerald,
+                            isEnabled: dependencies.connectionRepository.connectionState.isConnected
+                        ) {
+                            startAgentSessionHandoff(.workerFailure(
+                                inboxId: selection.item.inboxId,
+                                invocationId: selection.item.invocationId,
+                                workerId: selection.item.workerId,
+                                workerName: selection.workerName ?? "Worker",
+                                summary: WorkerConsolePresentation.inboxSummary(selection.item)
+                            ))
+                            dismiss()
+                        }
+                        .accessibilityIdentifier("worker-failure-agent-handoff")
+                    }
+
+                    TronPrimaryActionButton(
+                        title: "View result details",
+                        systemImage: "doc.text.magnifyingglass",
+                        accent: .tronPurple
+                    ) {
+                        showResultDetails = true
+                    }
+
+                    TronPrimaryActionButton(
+                        title: "Dismiss result",
+                        systemImage: "checkmark.circle",
+                        accent: .tronError,
+                        isBusy: isDismissing,
+                        isEnabled: dependencies.connectionRepository.connectionState.isConnected
+                    ) {
+                        confirmDismissal = true
+                    }
+
+                    if let error {
+                        WorkerConsoleErrorBanner(message: error)
+                    }
+                }
+                .padding(18)
+            }
+            .scrollContentBackground(.hidden)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: selection.workerName ?? "Worker Result", color: .tronError)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: .tronError)
+                }
+            }
+            .sheet(isPresented: $showResultDetails) {
+                resultDetails
+            }
+            .confirmationDialog(
+                "Dismiss this result?",
+                isPresented: $confirmDismissal,
+                titleVisibility: .visible
+            ) {
+                Button("Dismiss Result", role: .destructive) {
+                    Task { await dismissResult() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("It will leave Needs Attention, but its result and execution history will remain available for audit.")
+            }
+        }
+        .workerConsoleSheetPresentation()
+        .tint(.tronEmerald)
+    }
+
+    @ViewBuilder
+    private var resultDetails: some View {
+        if let receipt = selection.item.result.receipt {
+            WorkerResultInspectorSheet(
+                invocationId: receipt.reference.invocationId,
+                repository: repository
+            )
+        } else if let legacy = selection.item.result.legacyInline {
+            WorkerJSONDetailSheet(
+                title: selection.workerName ?? "Worker Result",
+                value: legacy,
+                accent: .tronError
+            )
+        }
+    }
+
+    private func dismissResult() async {
+        guard !isDismissing else { return }
+        isDismissing = true
+        defer { isDismissing = false }
+        do {
+            _ = try await repository.dismissWorkerInboxItem(
+                inboxId: selection.item.inboxId,
+                idempotencyKey: .userAction("worker.inbox.dismiss")
+            )
+            await onDispositionChanged()
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 }

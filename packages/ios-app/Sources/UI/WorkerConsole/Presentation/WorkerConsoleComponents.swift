@@ -427,6 +427,7 @@ extension WorkerResultDisposition {
         case .usedByAgent: .tronSuccess
         case .needsAttention: .tronError
         case .resolved: .tronPurple
+        case .dismissed: .tronTextMuted
         }
     }
 }

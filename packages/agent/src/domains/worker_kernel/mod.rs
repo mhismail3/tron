@@ -115,7 +115,10 @@
 //! caps each retained input, output, or result, preventing durable history from
 //! becoming an unbounded provider-context or transport payload.
 //! Inbox Attention is derived rather than stored: only unresolved error and
-//! setup-blocker evidence is active. Successful informational outcomes remain
+//! setup-blocker evidence is active. An authenticated operator may add an
+//! immutable dismissal disposition that removes one error from Attention
+//! without editing its inbox row, run, or result custody. Successful
+//! informational outcomes remain
 //! immutable history even when they came from schedules, dispatches, or
 //! background work. Detached top-level background results originating from an
 //! ordinary agent session are delivered exactly once through the transactional
@@ -197,6 +200,10 @@
 //! contracts are not duplicated into the client response. It is not itself
 //! model vocabulary and reports executable runtime facts rather than a
 //! separately maintained description of the source tree.
+//! Authenticated clients also read one bounded chronological upcoming-work
+//! projection directly from canonical schedule cursors and future queued
+//! invocations. This projection maintains no second scheduler or materialized
+//! server-side cache and is not model vocabulary.
 //! Fixed inventory is always inspectable, while contract-declared latest-user
 //! intent exposure may keep an actuator out of unrelated provider turns.
 //! Worker-first operation is the engine architecture rather than an editable

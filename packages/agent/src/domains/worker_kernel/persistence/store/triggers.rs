@@ -3,6 +3,65 @@
 use super::*;
 
 impl WorkerStore {
+    /// Project upcoming recurring triggers and already-admitted deferred runs
+    /// through one bounded, chronological operator view. This reads the same
+    /// durable cursors used by dispatch; it does not maintain a second queue.
+    pub fn scheduled_work_page(&self, limit: u32, offset: u32) -> Result<Vec<Value>, String> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "WITH scheduled(
+                    scheduled_id,worker_id,worker_name,kind,trigger_id,
+                    invocation_id,scheduled_at,every_seconds,trigger_kind
+                 ) AS (
+                    SELECT 'schedule:' || t.worker_id || ':' || t.trigger_id,
+                           t.worker_id,w.name,'recurring',t.trigger_id,NULL,
+                           t.next_run_at,
+                           CAST(json_extract(t.config_json,'$.everySeconds') AS INTEGER),
+                           'schedule'
+                    FROM worker_triggers t
+                    JOIN workers w ON w.worker_id=t.worker_id
+                    WHERE t.kind='schedule' AND t.enabled=1
+                      AND w.enabled=1 AND w.retired=0
+                      AND t.next_run_at IS NOT NULL
+                    UNION ALL
+                    SELECT 'invocation:' || invocation.invocation_id,
+                           invocation.worker_id,w.name,'deferred',NULL,
+                           invocation.invocation_id,invocation.not_before,NULL,
+                           invocation.trigger_kind
+                    FROM worker_invocations invocation
+                    JOIN workers w ON w.worker_id=invocation.worker_id
+                    WHERE invocation.status='queued'
+                      AND invocation.not_before IS NOT NULL
+                      AND julianday(invocation.not_before)>julianday('now')
+                      AND w.enabled=1 AND w.retired=0
+                 )
+                 SELECT scheduled_id,worker_id,worker_name,kind,trigger_id,
+                        invocation_id,scheduled_at,every_seconds,trigger_kind
+                 FROM scheduled
+                 ORDER BY julianday(scheduled_at),scheduled_id
+                 LIMIT ?1 OFFSET ?2",
+            )
+            .map_err(|error| format!("prepare scheduled worker projection: {error}"))?;
+        statement
+            .query_map(params![limit.min(101), offset], |row| {
+                Ok(json!({
+                    "scheduledId": row.get::<_, String>(0)?,
+                    "workerId": row.get::<_, String>(1)?,
+                    "workerName": row.get::<_, String>(2)?,
+                    "kind": row.get::<_, String>(3)?,
+                    "triggerId": row.get::<_, Option<String>>(4)?,
+                    "invocationId": row.get::<_, Option<String>>(5)?,
+                    "scheduledAt": row.get::<_, String>(6)?,
+                    "everySeconds": row.get::<_, Option<u64>>(7)?,
+                    "triggerKind": row.get::<_, String>(8)?,
+                }))
+            })
+            .map_err(|error| format!("query scheduled worker projection: {error}"))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| format!("decode scheduled worker projection: {error}"))
+    }
+
     pub fn due_schedules(&self) -> Result<Vec<(String, WorkerTrigger, String)>, String> {
         let now = chrono::Utc::now().to_rfc3339();
         let connection = self.connection()?;

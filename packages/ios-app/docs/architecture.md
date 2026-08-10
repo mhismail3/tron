@@ -132,7 +132,7 @@ EngineClient.workerKernel
     → DefaultWorkerKernelRepository
     → DependencyContainer.workerKernelRepository
     → WorkerConsoleViewModel
-    → WorkerConsoleSheet
+    → EngineDashboardPage / WorkerActivityPage / nested worker sheets
 ```
 
 This chain is recreated when the paired server changes. No prior server's
@@ -357,7 +357,9 @@ worker metadata from the client. The server supplies internal causal context.
 
 - `WorkerSummaryDTOs.swift` for identity, tool name, runner, health, active version,
   enabled/retired status, trigger count, immutable presentation/suite binding,
-  its optional closed native section descriptor, and update time;
+  its optional closed native section descriptor, update time, and the bounded
+  chronological upcoming-work projection shared by recurring triggers and
+  already-admitted deferred executions;
 - `WorkerSummaryDTOs.swift` also contains `WorkerInspectResultDTO` for the
   bundle, versions, triggers, audit, and
   canonical version directory;
@@ -376,8 +378,9 @@ worker metadata from the client. The server supplies internal causal context.
   integrity-bound, on-demand reads of exact durable results without copying a
   large payload into run history or client state;
 - `WorkerInboxDTOs.swift` for compact durable result-reference receipts or bounded
-  failure evidence, trigger provenance, attention classification, and truthful
-  agent-context attachment state;
+  failure evidence, trigger provenance, attention classification, truthful
+  agent-context attachment state, and optional server-authored operator
+  disposition evidence;
 - `WorkerRequestDTOs.swift` for invocation and lifecycle request/response
   contracts, exact invocation cancellation,
   per-worker stop, rollback, stop-all, archive-backed purge, and webhook token
@@ -419,7 +422,10 @@ invalidation/change-feed contract only.
   the invocation. Retry remains server-pinned and exposes no override control;
 
 - list and inspect;
-- bounded run history, exact invocation/model-tool graph lookup, and inbox;
+- bounded run history, exact invocation/model-tool graph lookup, inbox, and
+  upcoming scheduled work;
+- idempotent operator dismissal of one actionable inbox failure without
+  deleting its result or execution evidence;
 - bounded RFC 6901 result reads for a completed invocation;
 - typed invocation with an explicit `wait` mode for request/response actions and
   an explicit `enqueue` mode for durable background work;
@@ -443,7 +449,7 @@ state.
 
 - the profile-level engine snapshot, fixed inventory, and published worker
   projection state;
-- engine-wide activity runs and inbox results;
+- independently cached engine-wide scheduled work, past runs, and inbox results;
 - current list and selection;
 - selected inspection, runs, and inbox;
 - editable JSON invocation input and rendered result;
@@ -451,12 +457,16 @@ state.
 - refresh/mutation flags, stop-all status, and the last transport error.
 
 The lightweight summary lane loads one authoritative profile-level engine
-snapshot once per server owner and reuses it when the dashboard opens or its
-detent changes. Activity and Results are independent, lazy projections:
-Activity reads one bounded run page and Results reads one bounded complete
-inbox page, each only when first selected or explicitly refreshed. If the
+snapshot once per connected transport epoch and reuses it while moving between
+top-level pages. The shared state owner records continuity even while those
+pages are off-screen, so the first return after a reconnect performs one
+authoritative refresh while an outage continues to display the last usable
+projection. Scheduled, Past Work, and Results are independent, lazy projections:
+Scheduled reads one chronological page, Past Work reads one bounded run page,
+and Results reads one bounded complete inbox page, each only when first
+selected or explicitly refreshed. If the
 summary is still cold, that section co-loads the snapshot rather than issuing
-a second request. Neither tab queries the other's ledger, and ordinary section
+a second request. No tab queries another tab's ledger, and ordinary section
 switching never re-inspects a selected worker. Selecting a worker concurrently
 loads its inspection, bounded runs, and complete bounded result ledger; current
 attention is derived from those canonical results. Temporary disconnects keep
@@ -482,13 +492,15 @@ the worker's actual input schema.
 
 ### Views
 
-The session sidebar contains a compact Engine band showing fixed-primitive, active-worker,
-and current unhealthy-worker counts. It opens `WorkerConsoleSheet`, whose
-visible product identity is Engine. While the sheet is closed, the sidebar
-reloads only its compact snapshot after a live invalidation. While the sheet is
-open, Workers and Primitives retain that one-read summary lane; Activity loads
-and monitors bounded runs, while Results independently loads and monitors the
-bounded durable-result ledger. Switching scopes cancels the old
+The session list, Engine, and Activity are peer top-level destinations. Tapping
+the Tron mark opens one native menu that switches among them without creating
+a sheet or rebuilding cached engine projections. The Sessions destination owns
+only workspace-grouped chats and therefore performs no worker-dashboard reads.
+Engine owns the profile summary plus Workers and Primitives. Activity owns
+Scheduled, Past Work, and Results: Scheduled combines enabled recurring
+trigger cursors with queued future `notBefore` executions; Past Work is the
+bounded execution ledger; Results is the independently classified durable
+outcome ledger. Switching scopes cancels the old
 view task without creating another server subscription because subscriptions
 are cached per socket. The dashboard uses
 the same selected typography, semantic color tokens, liquid-glass section
@@ -504,8 +516,8 @@ fill and press response as the navigation affordance; trailing chevrons are
 intentionally omitted throughout the dashboard and its nested sheets. It
 provides:
 
-- Workers, Primitives, Activity, and Results modes in one compact cockpit, with Workers as the
-  initial operator view; the always-visible
+- Workers and Primitives in the Engine destination, with Workers as the initial
+  operator view; the always-visible
   summary owns profile-wide fixed/worker/current-health counts and any active
   worker-owned engine-policy hooks instead of duplicating them in an Overview
   tab;
@@ -555,13 +567,18 @@ provides:
   agent sessions, the Worker Console, schedules, self-wakeups, and parent
   workers when the bounded run snapshot contains that parent. Random invocation,
   version, trace, and idempotency identifiers remain in the canonical run-detail
-  sheet rather than competing with operational facts in the activity list;
-  tapping a card opens that detail sheet with toolbar actions. Activity is only
-  the execution ledger. Results groups the independent durable ledger into
-  `Needs attention`, `Available`, `Used by agent`, and `Resolved` using the
+  sheet rather than competing with operational facts in the past-work list;
+  tapping a card opens that detail sheet with toolbar actions. Results groups
+  the independent durable ledger into
+  `Needs attention`, `Available`, `Used by agent`, `Resolved`, and `Dismissed` using the
   server's canonical attention and context-attachment fields. Recovery or an
   owned fallback moves an earlier failure out of `Needs attention` and into
-  `Resolved`; immutable evidence remains inspectable. Opening a result does
+  `Resolved`; an explicit operator decision moves it to `Dismissed`. Both
+  transitions preserve immutable result and execution evidence. Actionable
+  failures expose an exact-result agent handoff when a completed receipt
+  exists, or a bounded explicitly untrusted failure-evidence continuation when
+  no result grant exists, plus detail inspection and a confirmation-backed
+  dismissal. Opening a result does
   not pretend to consume it. The engine summary labels its independent
   current-state metric `Unhealthy`, so historical delivery evidence cannot be
   confused with current worker health;

@@ -297,6 +297,29 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Explicitly delete one native artifact and its content custody. Artifacts are never removed by normal diagnostic retention.",
     )?);
+    specs.push(spec(
+        "worker_kernel::scheduled_work",
+        EffectClass::PureRead,
+        RiskLevel::Low,
+        json!({
+            "type":"object","additionalProperties":false,
+            "properties":{
+                "limit":{"type":"integer","minimum":1,"maximum":100},
+                "offset":{"type":"integer","minimum":0}
+            }
+        }),
+        "Read a bounded chronological projection of enabled recurring worker schedules and already-admitted deferred worker runs.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::inbox_dismiss",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Low,
+        json!({
+            "type":"object","additionalProperties":false,"required":["inboxId"],
+            "properties":{"inboxId":{"type":"string","minLength":1,"maxLength":256}}
+        }),
+        "Record an auditable operator dismissal for one retained worker error without deleting its result or execution evidence.",
+    )?);
     specs.push(model_spec(
         "worker_kernel::upsert",
         EffectClass::ExternalSideEffect,

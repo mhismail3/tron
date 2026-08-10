@@ -504,6 +504,20 @@ final class ArtifactRepositoryStub: WorkerKernelRepository {
         throw EngineConnectionError.invalidResponse
     }
 
+    func scheduledWork(
+        limit _: UInt64,
+        offset _: UInt64?
+    ) async throws -> WorkerScheduledWorkResultDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func dismissWorkerInboxItem(
+        inboxId _: String,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> WorkerInboxDismissResultDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
     func invokeWorker(
         workerId _: String,
         input _: AnyCodable,

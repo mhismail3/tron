@@ -132,7 +132,7 @@ final class ToolInvocationDetailViewTests: XCTestCase {
                 try source(pathComponents: [
                     "Sources", "UI", "WorkerConsole", "Detail", "WorkerResultInspectorSheet.swift",
                 ]),
-                2
+                3
             ),
             (
                 try source(pathComponents: [

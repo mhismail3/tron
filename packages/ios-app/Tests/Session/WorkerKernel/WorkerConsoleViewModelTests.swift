@@ -55,7 +55,7 @@ struct WorkerConsoleViewModelTests {
         #expect(viewModel.activityResults.count == 1)
 
         repository.health = "healthy"
-        await viewModel.refresh(repository: repository, connectionState: .connected)
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
 
         #expect(viewModel.unhealthyWorkerCount == 0)
         #expect(viewModel.activityResults.count == 1)
@@ -184,13 +184,19 @@ struct WorkerConsoleViewModelTests {
         await viewModel.ensureSummaryLoaded(repository: repository, connectionState: .connected)
         await viewModel.ensureActivityLoaded(repository: repository, connectionState: .connected)
         await viewModel.ensureActivityLoaded(repository: repository, connectionState: .connected)
+        await viewModel.ensureScheduledLoaded(repository: repository, connectionState: .connected)
+        await viewModel.ensureScheduledLoaded(repository: repository, connectionState: .connected)
         await viewModel.ensureResultsLoaded(repository: repository, connectionState: .connected)
         await viewModel.ensureResultsLoaded(repository: repository, connectionState: .connected)
 
         #expect(repository.snapshotSessionIds.count == 1)
         #expect(repository.runLimits == [20])
+        #expect(repository.scheduledRequests.count == 1)
+        #expect(repository.scheduledRequests[0].limit == 50)
+        #expect(repository.scheduledRequests[0].offset == nil)
         #expect(repository.inboxLimits == [20])
         #expect(viewModel.hasLoadedActivity)
+        #expect(viewModel.hasLoadedScheduled)
         #expect(viewModel.hasLoadedResults)
     }
 
@@ -227,6 +233,45 @@ struct WorkerConsoleViewModelTests {
         #expect(viewModel.engineSnapshot == nil)
     }
 
+    @Test("An off-screen reconnect invalidates cached projections exactly once")
+    func offscreenReconnectReconcilesSharedProjection() async {
+        let repository = MockWorkerKernelRepository()
+        let viewModel = WorkerConsoleViewModel()
+        let ownerId = UUID()
+
+        #expect(viewModel.reconcileServerProjection(EngineConnectionContinuity(
+            state: .connected,
+            generation: 1,
+            ownerId: ownerId
+        )) == false)
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+        #expect(viewModel.workers.map(\.workerId) == ["research"])
+
+        #expect(viewModel.reconcileServerProjection(EngineConnectionContinuity(
+            state: .disconnected,
+            generation: 1,
+            ownerId: ownerId
+        )) == false)
+        #expect(viewModel.workers.map(\.workerId) == ["research"])
+        #expect(viewModel.reconcileServerProjection(EngineConnectionContinuity(
+            state: .connected,
+            generation: 2,
+            ownerId: ownerId
+        )))
+        #expect(viewModel.reconcileServerProjection(EngineConnectionContinuity(
+            state: .connected,
+            generation: 2,
+            ownerId: ownerId
+        )) == false)
+
+        #expect(viewModel.reconcileServerProjection(EngineConnectionContinuity(
+            state: .connected,
+            generation: 0,
+            ownerId: UUID()
+        )) == false)
+        #expect(viewModel.workers.isEmpty)
+    }
+
     @Test("Transient transport error does not replace worker projection with an error")
     func transientRefreshErrorPreservesDashboardProjection() async {
         let repository = MockWorkerKernelRepository()
@@ -258,6 +303,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var inboxLimits: [UInt64] = []
     var inboxAttentionFilters: [Bool] = []
     var runOffsets: [UInt64?] = []
+    var scheduledRequests: [(limit: UInt64, offset: UInt64?)] = []
     var pagedActivity = false
     var includeRetiredFixture = false
     var researchEngineHooks = ["research_context"]
@@ -457,6 +503,41 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
                 requiresAttention: true
             ),
         ])
+    }
+
+    func scheduledWork(
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerScheduledWorkResultDTO {
+        scheduledRequests.append((limit, offset))
+        return WorkerScheduledWorkResultDTO(
+            items: [
+                WorkerScheduledWorkItemDTO(
+                    scheduledId: "schedule:research:nightly",
+                    workerId: "research",
+                    workerName: "Research",
+                    kind: "recurring",
+                    triggerId: "nightly",
+                    invocationId: nil,
+                    scheduledAt: "2026-08-11T07:00:00Z",
+                    everySeconds: 86_400,
+                    triggerKind: "schedule"
+                ),
+            ],
+            truncated: false,
+            nextOffset: nil
+        )
+    }
+
+    func dismissWorkerInboxItem(
+        inboxId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInboxDismissResultDTO {
+        WorkerInboxDismissResultDTO(
+            inboxId: inboxId,
+            disposition: "dismissed",
+            resolvedAt: "2026-07-19T12:00:02Z"
+        )
     }
 
     func invokeWorker(

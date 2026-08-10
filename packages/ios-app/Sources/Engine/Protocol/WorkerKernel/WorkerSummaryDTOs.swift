@@ -131,6 +131,26 @@ struct WorkerListResultDTO: Codable, Equatable, Sendable {
     let stopAll: Bool
 }
 
+struct WorkerScheduledWorkItemDTO: Codable, Equatable, Identifiable, Sendable {
+    let scheduledId: String
+    let workerId: String
+    let workerName: String
+    let kind: String
+    let triggerId: String?
+    let invocationId: String?
+    let scheduledAt: String
+    let everySeconds: UInt64?
+    let triggerKind: String
+
+    var id: String { scheduledId }
+}
+
+struct WorkerScheduledWorkResultDTO: Codable, Equatable, Sendable {
+    let items: [WorkerScheduledWorkItemDTO]
+    let truncated: Bool
+    let nextOffset: UInt64?
+}
+
 struct WorkerVersionDTO: Codable, Equatable, Identifiable, Sendable {
     let version: String
     let contentHash: String
