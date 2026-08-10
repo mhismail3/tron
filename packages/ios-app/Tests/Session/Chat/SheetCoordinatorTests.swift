@@ -100,9 +100,61 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
             return XCTFail("Expected image preview sheet")
         }
         XCTAssertEqual(preview.id, "attachment-\(attachmentId.uuidString)")
-        XCTAssertEqual(preview.data, attachment.data)
+        XCTAssertEqual(preview.items.map(\.data), [attachment.data])
+        XCTAssertEqual(preview.initialItemID, preview.items[0].id)
+        XCTAssertEqual(preview.initialIndex, 0)
         XCTAssertEqual(preview.title, "Photo")
-        XCTAssertEqual(preview.accessibilityLabel, "Preview camera-photo.jpg")
+        XCTAssertEqual(preview.items[0].accessibilityLabel, "Preview camera-photo.jpg")
+    }
+
+    func testImagePreviewGalleryKeepsSiblingPhotosAndSelectedOrder() throws {
+        let first = Attachment(
+            type: .image,
+            data: Data([0x01]),
+            mimeType: "image/jpeg",
+            fileName: "first.jpg"
+        )
+        let document = Attachment(
+            type: .document,
+            data: Data([0x02]),
+            mimeType: "text/plain",
+            fileName: "notes.txt"
+        )
+        let second = Attachment(
+            type: .image,
+            data: Data([0x03]),
+            mimeType: "image/jpeg",
+            fileName: "second.jpg"
+        )
+
+        let preview = ChatImagePreviewData(
+            attachments: [first, document, second],
+            selected: second
+        )
+
+        XCTAssertEqual(preview.items.map(\.id), [
+            "attachment-\(first.id.uuidString)",
+            "attachment-\(second.id.uuidString)",
+        ])
+        XCTAssertEqual(preview.initialItemID, "attachment-\(second.id.uuidString)")
+        XCTAssertEqual(preview.initialIndex, 1)
+        XCTAssertEqual(preview.items.map(\.data), [first.data, second.data])
+    }
+
+    func testImagePreviewTitleReturnsOnlyAfterZoomEndsAtFittedScale() {
+        var state = ImagePreviewZoomTitleState()
+
+        XCTAssertNil(state.zoomChanged(scale: 1, minimumScale: 1))
+        XCTAssertFalse(state.isHidden)
+        XCTAssertEqual(state.zoomChanged(scale: 1.02, minimumScale: 1), true)
+        XCTAssertTrue(state.isHidden)
+
+        // Returning to fitted scale during an active pinch must not flash the
+        // title before the gesture settles.
+        XCTAssertNil(state.zoomChanged(scale: 1, minimumScale: 1))
+        XCTAssertTrue(state.isHidden)
+        XCTAssertEqual(state.zoomEnded(scale: 1, minimumScale: 1), false)
+        XCTAssertFalse(state.isHidden)
     }
 
     func testUserInputWaitsForCurrentSheetThenPresents() throws {

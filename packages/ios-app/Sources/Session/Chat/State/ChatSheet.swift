@@ -75,28 +75,71 @@ struct ThinkingDetailData: Equatable {
     let kind: ThinkingDisplayKind
 }
 
-/// Immutable, local image payload for the chat attachment preview.
-///
-/// The source identifier owns sheet identity. Image bytes are retained by the
-/// already-loaded message and never fetched again when the preview opens.
-struct ChatImagePreviewData: Equatable {
+/// One immutable, local image in a chat attachment preview.
+struct ChatImagePreviewItem: Identifiable, Equatable {
     let id: String
     let data: Data
-    let title: String
     let accessibilityLabel: String
 
     init(attachment: Attachment) {
         id = "attachment-\(attachment.id.uuidString)"
         data = attachment.data
-        title = "Photo"
         accessibilityLabel = "Preview \(attachment.displayName)"
     }
 
     init(image: ImageContent) {
         id = "image-\(image.id.uuidString)"
         data = image.data
-        title = "Photo"
         accessibilityLabel = "Preview photo"
+    }
+
+    static func == (lhs: ChatImagePreviewItem, rhs: ChatImagePreviewItem) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+/// Immutable, local gallery payload for chat image previews.
+///
+/// A gallery contains only the images from the originating attachment group,
+/// preserving their visible order and the item the user selected. Image bytes
+/// are retained by the already-loaded message and never fetched again when the
+/// preview opens.
+struct ChatImagePreviewData: Equatable {
+    let id: String
+    let items: [ChatImagePreviewItem]
+    let initialItemID: String
+    let title: String
+
+    init(attachments: [Attachment], selected: Attachment) {
+        let selectedItem = ChatImagePreviewItem(attachment: selected)
+        let groupedItems = attachments
+            .filter(\.isImage)
+            .map(ChatImagePreviewItem.init(attachment:))
+        items = groupedItems.contains(selectedItem) ? groupedItems : [selectedItem]
+        initialItemID = selectedItem.id
+        id = selectedItem.id
+        title = "Photo"
+    }
+
+    init(images: [ImageContent], selected: ImageContent) {
+        let selectedItem = ChatImagePreviewItem(image: selected)
+        let groupedItems = images.map(ChatImagePreviewItem.init(image:))
+        items = groupedItems.contains(selectedItem) ? groupedItems : [selectedItem]
+        initialItemID = selectedItem.id
+        id = selectedItem.id
+        title = "Photo"
+    }
+
+    init(attachment: Attachment) {
+        self.init(attachments: [attachment], selected: attachment)
+    }
+
+    init(image: ImageContent) {
+        self.init(images: [image], selected: image)
+    }
+
+    var initialIndex: Int {
+        items.firstIndex { $0.id == initialItemID } ?? 0
     }
 
     static func == (lhs: ChatImagePreviewData, rhs: ChatImagePreviewData) -> Bool {

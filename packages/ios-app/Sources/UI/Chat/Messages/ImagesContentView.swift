@@ -11,7 +11,7 @@ struct ImagesContentView: View {
             ForEach(images) { image in
                 if let onPreview {
                     Button {
-                        onPreview(ChatImagePreviewData(image: image))
+                        onPreview(ChatImagePreviewData(images: images, selected: image))
                     } label: {
                         imageThumbnail(image)
                     }
@@ -48,7 +48,10 @@ struct AttachedFileThumbnails: View {
             ForEach(attachments) { attachment in
                 if attachment.isImage, let onPreview {
                     Button {
-                        onPreview(ChatImagePreviewData(attachment: attachment))
+                        onPreview(ChatImagePreviewData(
+                            attachments: attachments,
+                            selected: attachment
+                        ))
                     } label: {
                         AttachmentThumbnail(attachment: attachment)
                     }
