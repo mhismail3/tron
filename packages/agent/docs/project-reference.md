@@ -722,17 +722,20 @@ records. Candidate smoke and health tests receive a temporary isolated state
 directory, so activation cannot mutate live data. Update, rollback, disable,
 and retirement preserve state.
 
-Before a newer worker database schema first opens an existing profile, Tron
-creates and verifies one owner-only, checksummed `tar.zst` snapshot under
-`~/.tron/internal/backups/`. Snapshots contain settings, authentication state,
-vault files, canonical worker bundles/state, and compact consistent copies of
-the session and worker databases. Runtime caches, logs, journals, WAL/SHM
-files, and disposable process trees are excluded. The manifest records source
-home, schema versions, checksums, and restoration instructions. Operators can
-use `tron state snapshot`, `tron state snapshots`, `tron state verify <path>`,
-and—only while the server is stopped—`tron state restore <path>`. Restore first
-moves replaced state into a dated recovery directory and rolls back if
-publication fails.
+Before a worker database migration that rewrites or removes existing durable
+data first opens a profile, Tron creates and verifies one owner-only,
+checksummed `tar.zst` snapshot under `~/.tron/internal/backups/`. Additive
+SQLite migrations use transactional DDL and do not synchronously traverse the
+profile, so a schema-only app update cannot block server readiness by copying
+large immutable worker runtimes. Full snapshots contain settings,
+authentication state, vault files, canonical worker bundles/state, and compact
+consistent copies of the session and worker databases. Runtime caches, logs,
+journals, WAL/SHM files, and disposable process trees are excluded. The
+manifest records source home, schema versions, checksums, and restoration
+instructions. Operators can use `tron state snapshot`, `tron state snapshots`,
+`tron state verify <path>`, and—only while the server is stopped—`tron state
+restore <path>`. Restore first moves replaced state into a dated recovery
+directory and rolls back if publication fails.
 
 Permanent worker purge is similarly recoverable. Before deletion, Tron creates
 and verifies an owner-only archive containing the worker's immutable bundles,

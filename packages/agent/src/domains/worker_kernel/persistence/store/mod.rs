@@ -19,8 +19,11 @@
 //! at the transaction boundary instead of failing a deferred read-to-write
 //! upgrade.
 //! Worker schema v18 adds immutable operator dispositions for worker inbox
-//! failures and an indexed scheduled-trigger projection; v17 added durable
-//! requested/effective invocation model policy;
+//! failures and an indexed scheduled-trigger projection. Both changes are
+//! additive and transaction-safe, so v18 deliberately does not request a
+//! blocking full-profile snapshot; v17 remains the latest migration whose
+//! recovery policy requires one. v17 added durable requested/effective
+//! invocation model policy;
 //! v16 added the immutable worker-to-agent terminal/effect outbox.
 //! Lifecycle transitions terminalize affected work with that evidence, and
 //! purge rechecks nonterminal/outbox custody under SQLite writer intent.
@@ -116,7 +119,7 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 18)?;
+        let _ = super::snapshot::ensure_required_worker_schema_snapshot(&home)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);

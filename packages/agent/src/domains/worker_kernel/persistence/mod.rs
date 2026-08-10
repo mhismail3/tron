@@ -12,6 +12,9 @@
 //!   implementation used by publication and reconstruction.
 //! - `rebuild` projects canonical bundles into disposable SQLite indexes.
 //! - `snapshot` creates, verifies, and restores owner-only profile archives.
+//!   Schema-open callers request those archives only for migrations that
+//!   rewrite or remove durable data; additive transactional DDL stays on the
+//!   bounded database-open path.
 //! - `store` owns canonical publication plus durable invocation, attempt,
 //!   generic run-stage evidence, historical result/Attention records, trigger,
 //!   health, audit ledgers, and the immutable worker-to-agent outbox.
