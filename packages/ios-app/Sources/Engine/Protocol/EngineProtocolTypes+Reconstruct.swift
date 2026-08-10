@@ -64,9 +64,6 @@ struct ReconstructMetadata: Decodable {
     let title: String?
     let tokenUsage: ReconstructTokenUsage?
     let totalCost: Double?
-    /// Bounded inventory for the latest provider request at this snapshot's
-    /// watermark. Exact messages, instructions, and audit JSON remain lazy.
-    let latestContextRequest: SessionContextRequestSummaryDTO?
 
     init(
         model: String?,
@@ -74,8 +71,7 @@ struct ReconstructMetadata: Decodable {
         workingDirectory: String?,
         title: String?,
         tokenUsage: ReconstructTokenUsage?,
-        totalCost: Double?,
-        latestContextRequest: SessionContextRequestSummaryDTO? = nil
+        totalCost: Double?
     ) {
         self.model = model
         self.turnCount = turnCount
@@ -83,7 +79,6 @@ struct ReconstructMetadata: Decodable {
         self.title = title
         self.tokenUsage = tokenUsage
         self.totalCost = totalCost
-        self.latestContextRequest = latestContextRequest
     }
 }
 

@@ -72,6 +72,7 @@ struct SessionClientTests {
         transport.writeHandler = { functionId, _, _, options in
             #expect(functionId.rawValue == "session::resume")
             #expect(options.context?.sessionId == "session-123")
+            #expect(options.timeout == EngineSessionSynchronizationPolicy.requestTimeout)
             return SessionResumeResult(
                 sessionId: "session-123",
                 model: "claude-sonnet-4-6",
@@ -85,6 +86,47 @@ struct SessionClientTests {
 
         #expect(transport.lastSetSessionId == "session-123")
         #expect(transport.lastSetModel == "claude-sonnet-4-6")
+    }
+
+    @Test("Interactive reconstruction is bounded to its current transport epoch")
+    func testReconstructionUsesCallerManagedRecoveryBudget() async throws {
+        let transport = makeConnectedTransport()
+        transport.readHandler = { functionId, payload, options in
+            #expect(functionId.rawValue == "session::reconstruct")
+            let params = try #require(payload as? SessionReconstructParams)
+            #expect(params.sessionId == "session-123")
+            #expect(params.limit == 300)
+            #expect(params.beforeEventId == nil)
+            #expect(options.context?.sessionId == "session-123")
+            #expect(options.timeout == EngineSessionSynchronizationPolicy.requestTimeout)
+            #expect(options.readRecoveryPolicy == .currentTransport)
+            return SessionReconstructResult(
+                events: [],
+                hasMoreEvents: false,
+                oldestEventId: nil,
+                inFlight: nil,
+                lastSequence: 0,
+                isRunning: false,
+                isCompacting: false,
+                compactionReason: nil,
+                agentPhase: "idle",
+                metadata: ReconstructMetadata(
+                    model: "gpt-5.6-sol",
+                    turnCount: 0,
+                    workingDirectory: "/tmp/project",
+                    title: "Empty",
+                    tokenUsage: nil,
+                    totalCost: 0
+                )
+            )
+        }
+        let client = SessionClient(transport: transport)
+
+        _ = try await client.reconstruct(
+            sessionId: "session-123",
+            limit: 300,
+            beforeEventId: nil
+        )
     }
 
     @Test("Real session mutations send target session context")

@@ -134,9 +134,6 @@ extension ChatViewModel {
             .first(where: { $0.id == sessionId })?
             .cost
         scheduleReconstructionEventCache(mergedEvents)
-        if let contextSummary = result.metadata.latestContextRequest {
-            scheduleContextSummaryCache(contextSummary)
-        }
 
         // INVARIANT: Do not suspend between this marker and
         // `conversationHistoryPhase = .authoritative`. Messages, controls,
@@ -294,25 +291,6 @@ extension ChatViewModel {
             } catch {
                 logger.warning(
                     "[CACHE] Could not persist reconstructed session history: \(error.localizedDescription)",
-                    category: .database
-                )
-            }
-        }
-    }
-
-    /// Keep the tiny Session Context inventory beside cached session metadata.
-    /// Exact audit manifests never enter the transcript cache and remain a
-    /// user-initiated server read.
-    private func scheduleContextSummaryCache(_ summary: SessionContextRequestSummaryDTO) {
-        guard let manager = eventStoreManager else { return }
-        let sessionsRepository = manager.eventDB.sessions
-        let sessionId = sessionId
-        Task {
-            do {
-                try await sessionsRepository.storeContextSummary(summary, sessionId: sessionId)
-            } catch {
-                logger.warning(
-                    "[CACHE] Could not persist Session Context summary: \(error.localizedDescription)",
                     category: .database
                 )
             }

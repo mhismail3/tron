@@ -34,13 +34,18 @@ class EngineDomainClient {
         _ functionId: EngineFunctionId,
         _ payload: P,
         context: EngineInvocationContext? = nil,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        recoveryPolicy: EngineReadRecoveryPolicy = .waitForReadyTransport
     ) async throws -> R {
         let transport = try requireTransport()
         return try await transport.invokeRead(
             functionId: functionId,
             payload: payload,
-            options: EngineInvocationOptions(context: context, timeout: timeout)
+            options: EngineInvocationOptions(
+                context: context,
+                timeout: timeout,
+                readRecoveryPolicy: recoveryPolicy
+            )
         )
     }
 

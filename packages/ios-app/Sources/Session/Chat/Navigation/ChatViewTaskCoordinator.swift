@@ -12,6 +12,7 @@ import Foundation
 final class ChatViewTaskCoordinator {
     enum Key: Hashable {
         case initialLoadWatchdog
+        case draftRestore
         case modelPrefetch
         case connectionRefresh
         case deepLinkScroll

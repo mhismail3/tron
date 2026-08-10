@@ -66,7 +66,8 @@ final class SessionClient: EngineDomainClient {
             "session::resume",
             params,
             idempotencyKey: idempotencyKey,
-            context: sessionContext(sessionId)
+            context: sessionContext(sessionId),
+            timeout: EngineSessionSynchronizationPolicy.requestTimeout
         )
 
         currentTransport?.setCurrentSessionId(result.sessionId)
@@ -189,7 +190,10 @@ final class SessionClient: EngineDomainClient {
 
         let result: SessionReconstructResult = try await invokeRead(
             "session::reconstruct",
-            params
+            params,
+            context: sessionContext(sessionId),
+            timeout: EngineSessionSynchronizationPolicy.requestTimeout,
+            recoveryPolicy: .currentTransport
         )
 
         logger.info("Reconstructed session \(sessionId): \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence)", category: .session)

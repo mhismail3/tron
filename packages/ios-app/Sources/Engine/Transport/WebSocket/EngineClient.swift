@@ -661,6 +661,18 @@ final class EngineClient: EngineTransport {
         payload: P,
         options: EngineInvocationOptions = EngineInvocationOptions()
     ) async throws -> R {
+        if options.readRecoveryPolicy == .currentTransport {
+            if isExplicitlyDisconnected {
+                throw EngineConnectionError.notConnected
+            }
+            let ws = try requireConnection()
+            return try await ws.invokeRead(
+                functionId: functionId,
+                payload: payload,
+                options: options
+            )
+        }
+
         var failedConnection: EngineConnection?
         var failedTransportGeneration: UInt64?
 
@@ -1082,7 +1094,8 @@ final class EngineClient: EngineTransport {
                 topic: key.topic,
                 cursor: nil,
                 filters: filters,
-                context: EngineInvocationContext(sessionId: sessionId, workspaceId: workspaceId)
+                context: EngineInvocationContext(sessionId: sessionId, workspaceId: workspaceId),
+                timeout: EngineSessionSynchronizationPolicy.requestTimeout
             )
             let shouldInstall = engineConnection === ws
                 && streamSubscriptionGeneration == generation

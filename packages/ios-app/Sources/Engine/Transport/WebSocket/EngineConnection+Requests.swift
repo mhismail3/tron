@@ -53,7 +53,8 @@ extension EngineConnection {
         cursor: EngineStreamCursor? = nil,
         filters: [String: AnyCodable]? = nil,
         limit: Int? = nil,
-        context: EngineInvocationContext? = nil
+        context: EngineInvocationContext? = nil,
+        timeout: TimeInterval? = nil
     ) async throws -> EngineSubscription {
         let message = EngineSubscribeFrame(
             id: UUID().uuidString,
@@ -63,7 +64,12 @@ extension EngineConnection {
             limit: limit,
             context: context
         )
-        return try await sendResponseMessage(message, id: message.id, operation: "subscribe", timeout: nil)
+        return try await sendResponseMessage(
+            message,
+            id: message.id,
+            operation: "subscribe",
+            timeout: timeout
+        )
     }
 
     func poll(

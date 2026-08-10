@@ -128,6 +128,26 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertEqual(state.text, "should not change")
     }
 
+    func testGuardedDraftRestoreDoesNotOverwriteNewTyping() async throws {
+        let persisted = InputBarState()
+        persisted.text = "older persisted draft"
+        await draftStore.saveImmediately(sessionId: "s1", inputBarState: persisted)
+
+        let mountedComposer = InputBarState()
+        let initialFingerprint = mountedComposer.draftFingerprint
+        mountedComposer.text = "typing started while the draft loaded"
+
+        let loaded = await draftStore.loadDraft(
+            sessionId: "s1",
+            into: mountedComposer,
+            ifUnchangedFrom: initialFingerprint
+        )
+
+        XCTAssertFalse(loaded)
+        XCTAssertEqual(mountedComposer.text, "typing started while the draft loaded")
+        XCTAssertTrue(mountedComposer.attachments.isEmpty)
+    }
+
     func testClearDraft_removesSqliteRow() async throws {
         let state = InputBarState()
         state.text = "will be cleared"

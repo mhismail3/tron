@@ -212,10 +212,15 @@ budget, URLSession waits for connectivity within that budget, and failed
 probes retry after two seconds. Backgrounding remains the hard stop for that
 loop.
 
-Read and write recovery are deliberately different. A side-effect-free engine
-read waits for a usable foreground transport and, if its socket epoch fails,
-replays only after a different ready epoch exists. A request-discovered broken
-socket also establishes the shared recovery owner before waiting. Explicit
+Read and write recovery are deliberately different. Ordinary side-effect-free
+engine projections wait for a usable foreground transport and, if their socket
+epoch fails, replay only after a different ready epoch exists. A
+request-discovered broken socket also establishes the shared recovery owner
+before waiting. Presentation-critical chat reconstruction is the deliberate
+exception: its resume, live-tail subscription, and snapshot each use one bounded
+request budget, and the snapshot is scoped to the current transport epoch. The
+chat coordinator already owns ordered backoff and retry, so transport-level
+waiting there would strand the composer without producing an outcome. Explicit
 client retirement prevents a deferred read from resurrecting a replaced
 server. Mutations remain fail-fast and use their existing idempotency contracts;
 the transport never guesses that a write is safe to replay.
@@ -260,6 +265,11 @@ drain the buffered live suffix through sequence deduplication. Connection loss,
 timeout, cancellation, and foreground socket churn retain cached rows and draft
 state and stay out of the chat timeline; protocol or data-integrity failures
 remain visible. A successful pass removes only its prior reconstruction error.
+Every request after connection establishment finishes within the shared
+session-synchronization budget; a transport epoch loss returns a retryable
+outcome instead of suspending behind the global read-recovery owner. Healthy
+local-server responses still commit immediately, while a genuinely slow route
+continues through the same bounded reconnect/backoff state machine.
 The shell's short presentation budget may reveal already cached or empty UI,
 but it never changes history state to failed. Only an authoritative
 reconstruction outcome can present Conversation unavailable, so a busy but
@@ -971,9 +981,16 @@ current connection state instead of a second debounced readiness owner.
 Reconstruction prepares its projection before one non-suspending MainActor
 commit publishes transcript rows, context state, agent state, and the
 authoritative composer phase together. Device-cache persistence then runs off
-the presentation critical path. A five-second presentation watchdog ends stale
-loading copy without promoting cached or absent data to authority. An uncached
-failure shows recoverable status and continues bounded reconnect attempts.
+the presentation critical path. Draft text and attachment restoration has its
+own mounted task and publishes atomically only if the composer has not changed,
+so attachment file I/O cannot delay reconstruction or overwrite fresh typing.
+Manage Session and its worker, delivery, provider-context, and technical
+projections start only after their sheets or rows are presented and never join
+the chat lifecycle task. A five-second presentation watchdog reveals a usable
+cached or empty shell without promoting cached or absent data to authority; the
+composer continues to describe genuine synchronization until a bounded attempt
+returns. An uncached failure shows recoverable status and continues bounded
+reconnect attempts.
 
 Cached and authoritative rows use the same bounded geometry settle and fade.
 After authoritative replacement changes lazy row heights, the shell performs
@@ -1072,10 +1089,10 @@ The composer context ring and Manage Session sheet consume only existing
 session truth. Token usage, model-window pressure, compaction, model switching,
 and `session::fork` retain their existing owners. The latest
 `model.provider_request` event is the sole durable explanation of what a model
-received. Top-level reconstruction carries one bounded latest-request summary,
-which iOS stores beside its disposable session row for immediate/offline
-presentation. While connected, `session::context_requests(limit: 1)` reconciles
-that summary. The exact manifest is fetched through
+received. Chat reconstruction does not query or carry provider-context
+inventory. When Manage Session is actually presented, its local cache provides
+any available offline overview and `session::context_requests(limit: 1)`
+reconciles it independently. The exact manifest is fetched through
 `session::context_request_detail` only after the user opens Agent Context or
 Technical Details. Agent Context requests a lightweight projection without the
 raw provider envelope; Technical Details explicitly requests that audit. Each

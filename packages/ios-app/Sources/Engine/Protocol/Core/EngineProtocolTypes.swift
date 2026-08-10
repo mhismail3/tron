@@ -61,17 +61,39 @@ struct EngineInvocationContext: Codable, Equatable, Sendable {
     }
 }
 
+/// Selects who owns recovery when a side-effect-free read loses its socket.
+///
+/// Most projections can transparently wait for a replacement transport. A
+/// presentation-critical read whose caller already owns bounded retry must
+/// instead finish against the current transport epoch so it cannot strand the
+/// UI behind an unbounded recovery wait.
+enum EngineReadRecoveryPolicy: Equatable, Sendable {
+    case waitForReadyTransport
+    case currentTransport
+}
+
 struct EngineInvocationOptions: Sendable {
     var context: EngineInvocationContext?
     var timeout: TimeInterval?
+    var readRecoveryPolicy: EngineReadRecoveryPolicy
 
     init(
         context: EngineInvocationContext? = nil,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        readRecoveryPolicy: EngineReadRecoveryPolicy = .waitForReadyTransport
     ) {
         self.context = context
         self.timeout = timeout
+        self.readRecoveryPolicy = readRecoveryPolicy
     }
+}
+
+/// One bounded request budget for the resume → live-tail → snapshot chain.
+/// Connection establishment has its own route-aware budget; once connected,
+/// these small local-engine operations should either complete or yield to the
+/// chat coordinator's backoff/retry owner.
+enum EngineSessionSynchronizationPolicy {
+    nonisolated static let requestTimeout: TimeInterval = 8
 }
 
 struct EngineSubscription: Decodable, Equatable, Sendable {

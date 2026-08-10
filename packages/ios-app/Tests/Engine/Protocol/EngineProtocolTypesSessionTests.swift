@@ -4,8 +4,8 @@ import Foundation
 
 @Suite("Reconstruction metadata decoding")
 struct ReconstructionMetadataDecodingTests {
-    @Test("Latest context inventory decodes without the provider audit body")
-    func latestContextInventoryDecodes() throws {
+    @Test("Chat metadata ignores the independently loaded context inventory")
+    func contextInventoryDoesNotEnterChatMetadata() throws {
         let data = Data("""
         {
           "model":"gpt-5.6-sol",
@@ -38,11 +38,8 @@ struct ReconstructionMetadataDecodingTests {
         """.utf8)
 
         let metadata = try JSONDecoder().decode(ReconstructMetadata.self, from: data)
-        let summary = try #require(metadata.latestContextRequest)
-
-        #expect(summary.eventId == "provider-request-26")
-        #expect(summary.messageCount == 62)
-        #expect(summary.toolCount == 23)
+        #expect(metadata.model == "gpt-5.6-sol")
+        #expect(metadata.turnCount == 26)
     }
 
     @Test("Older reconstruction metadata remains compatible")
@@ -60,7 +57,7 @@ struct ReconstructionMetadataDecodingTests {
 
         let metadata = try JSONDecoder().decode(ReconstructMetadata.self, from: data)
 
-        #expect(metadata.latestContextRequest == nil)
+        #expect(metadata.turnCount == 1)
     }
 }
 
