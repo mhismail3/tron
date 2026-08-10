@@ -562,6 +562,8 @@ provides:
   a separate secondary action below it. The summary keeps the trigger name,
   kind, enabled state, next occurrence, and secured status readable without
   leaking stream cursors or exposing a small text-only configuration control;
+  next-occurrence metadata reuses the primary icon and text columns so both
+  lines remain optically aligned;
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
 - shared compact activity cards that identify the worker and plain-text status

@@ -692,7 +692,13 @@ struct WorkerConsoleInteractionTests {
         #expect(triggerCard.contains("Opens trigger configuration"))
         #expect(triggerCard.contains("WorkerJSONDetailSheet("))
         #expect(triggerCard.contains("Configuration\""))
-        #expect(triggerCard.contains("Label(\"Next"))
+        #expect(triggerCard.contains("HStack(alignment: .center, spacing: 10)"))
+        #expect(triggerCard.contains(
+            #"Image(systemName: trigger.nextRunAt != nil ? "calendar" : "lock.fill")"#
+        ))
+        #expect(triggerCard.contains(".frame(width: 24)"))
+        #expect(triggerCard.contains("Text(\"Next"))
+        #expect(!triggerCard.contains("Label(\"Next"))
         #expect(!triggerCard.contains("Label(\"Configuration\""))
         #expect(!triggerCard.contains("Cursor"))
         #expect(!context.contains("WorkerSystemSheet("))

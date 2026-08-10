@@ -210,14 +210,25 @@ struct WorkerTriggerCard: View {
                     }
 
                     if trigger.nextRunAt != nil || trigger.tokenConfigured {
-                        HStack(spacing: 12) {
-                            if let nextRun = WorkerConsolePresentation.timestamp(trigger.nextRunAt) {
-                                Label("Next \(nextRun)", systemImage: "calendar")
+                        HStack(alignment: .center, spacing: 10) {
+                            Image(systemName: trigger.nextRunAt != nil ? "calendar" : "lock.fill")
+                                .foregroundStyle(
+                                    trigger.nextRunAt != nil
+                                        ? Color.tronTextMuted
+                                        : Color.tronSuccess
+                                )
+                                .frame(width: 24)
+                                .accessibilityHidden(true)
+                            HStack(spacing: 12) {
+                                if let nextRun = WorkerConsolePresentation.timestamp(trigger.nextRunAt) {
+                                    Text("Next \(nextRun)")
+                                }
+                                if trigger.tokenConfigured {
+                                    Label("Secured", systemImage: "lock.fill")
+                                        .foregroundStyle(.tronSuccess)
+                                }
                             }
-                            if trigger.tokenConfigured {
-                                Label("Secured", systemImage: "lock.fill")
-                                    .foregroundStyle(.tronSuccess)
-                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
