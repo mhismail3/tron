@@ -178,6 +178,9 @@ does not duplicate the absolute workspace path or a textual connection label.
 Instead, a typed connection phase drives a compact status dot immediately before
 the Terminal title (emerald when attached, amber while connecting or recovering,
 and red when unavailable), with the same state exposed as an accessibility value.
+The overflow menu presents retained terminals as timestamp-only choices and calls
+the destructive user action **Quit Terminal**; termination remains the protocol
+term for the underlying process-group shutdown operation.
 The bar's safe-area inset retains explicit clearance above the glass
 so the terminal's final row does not touch the controls. Input stays
 PTY-authoritative—there is no incorrect local echo—but not-yet-submitted bytes

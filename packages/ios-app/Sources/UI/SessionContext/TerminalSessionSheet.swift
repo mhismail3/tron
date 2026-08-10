@@ -479,8 +479,8 @@ struct TerminalSessionSheet: View {
             await controller.reconcile(continuity: dependencies.connectionRepository.continuity)
         }
         .onDisappear { Task { await controller.detach() } }
-        .confirmationDialog("Terminate this terminal?", isPresented: $confirmTerminate, titleVisibility: .visible) {
-            Button("Terminate Terminal", role: .destructive) { controller.terminate() }
+        .confirmationDialog("Quit this terminal?", isPresented: $confirmTerminate, titleVisibility: .visible) {
+            Button("Quit Terminal", role: .destructive) { controller.terminate() }
             Button("Cancel", role: .cancel) {}
         } message: { Text("The shell and its running process group will stop. Closing the sheet alone only detaches.") }
     }
@@ -506,15 +506,12 @@ struct TerminalSessionSheet: View {
                         Button {
                             Task { await controller.showHistory(terminal) }
                         } label: {
-                            Label(
-                                terminal.exitedAt ?? terminal.createdAt,
-                                systemImage: "clock.arrow.circlepath"
-                            )
+                            Text(terminal.exitedAt ?? terminal.createdAt)
                         }
                     }
                 }
             }
-            Button("Terminate Terminal", role: .destructive) { confirmTerminate = true }
+            Button("Quit Terminal", role: .destructive) { confirmTerminate = true }
                 .disabled(!controller.isRunning)
         } label: {
             Image(systemName: "ellipsis")
