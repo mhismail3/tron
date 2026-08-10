@@ -157,6 +157,43 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertFalse(state.isHidden)
     }
 
+    func testImagePreviewFitIsCenteredInTheCompleteSheetViewport() {
+        let viewport = CGRect(x: 0, y: 0, width: 574, height: 644)
+        let portrait = CGSize(width: 3_024, height: 4_032)
+
+        let frame = ImagePreviewViewportLayout.fittedImageFrame(
+            imageSize: portrait,
+            in: viewport
+        )
+
+        XCTAssertEqual(frame.midX, viewport.midX, accuracy: 0.001)
+        XCTAssertEqual(frame.midY, viewport.midY, accuracy: 0.001)
+        XCTAssertGreaterThanOrEqual(frame.minX, viewport.minX)
+        XCTAssertLessThanOrEqual(frame.maxX, viewport.maxX)
+        XCTAssertGreaterThan(frame.minY, viewport.minY)
+        XCTAssertLessThan(frame.maxY, viewport.maxY)
+        XCTAssertEqual(frame.width / frame.height, 0.75, accuracy: 0.001)
+
+        // At ordinary pinch scale the centered fitted image naturally expands
+        // into both chrome regions without changing the scroll-view viewport.
+        XCTAssertGreaterThan(frame.height * 1.30, viewport.height)
+    }
+
+    func testImagePreviewFitKeepsLandscapePhotosCentered() {
+        let viewport = CGRect(x: 0, y: 0, width: 574, height: 644)
+        let landscape = CGSize(width: 4_032, height: 3_024)
+
+        let frame = ImagePreviewViewportLayout.fittedImageFrame(
+            imageSize: landscape,
+            in: viewport
+        )
+
+        XCTAssertEqual(frame.midX, viewport.midX, accuracy: 0.001)
+        XCTAssertEqual(frame.midY, viewport.midY, accuracy: 0.001)
+        XCTAssertEqual(frame.width, viewport.width, accuracy: 0.001)
+        XCTAssertEqual(frame.width / frame.height, 4.0 / 3.0, accuracy: 0.001)
+    }
+
     func testUserInputWaitsForCurrentSheetThenPresents() throws {
         let coordinator = SheetCoordinator()
         let request = UserInputRequest(

@@ -13,7 +13,6 @@ struct SheetTitleIndicator {
 struct SettingsPageContainer<Leading: View, Content: View>: View {
     let title: String
     let titleIndicator: SheetTitleIndicator?
-    let titleOpacity: Double
     let scrollsContent: Bool
     let leadingToolbar: Leading
     @ViewBuilder let content: () -> Content
@@ -22,13 +21,11 @@ struct SettingsPageContainer<Leading: View, Content: View>: View {
     init(
         title: String,
         titleIndicator: SheetTitleIndicator? = nil,
-        titleOpacity: Double = 1,
         scrollsContent: Bool = true,
         @ViewBuilder content: @escaping () -> Content
     ) where Leading == EmptyView {
         self.title = title
         self.titleIndicator = titleIndicator
-        self.titleOpacity = titleOpacity
         self.scrollsContent = scrollsContent
         self.leadingToolbar = EmptyView()
         self.content = content
@@ -37,20 +34,16 @@ struct SettingsPageContainer<Leading: View, Content: View>: View {
     init(
         title: String,
         titleIndicator: SheetTitleIndicator? = nil,
-        titleOpacity: Double = 1,
         scrollsContent: Bool = true,
         @ViewBuilder leadingToolbar: () -> Leading,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
         self.titleIndicator = titleIndicator
-        self.titleOpacity = titleOpacity
         self.scrollsContent = scrollsContent
         self.leadingToolbar = leadingToolbar()
         self.content = content
     }
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         NavigationStack {
@@ -64,12 +57,6 @@ struct SettingsPageContainer<Leading: View, Content: View>: View {
                     }
                     ToolbarItem(placement: .principal) {
                         toolbarTitle
-                            .opacity(titleOpacity)
-                            .animation(
-                                reduceMotion ? nil : .easeInOut(duration: 0.16),
-                                value: titleOpacity
-                            )
-                            .accessibilityHidden(titleOpacity < 0.01)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { dismiss() } label: {

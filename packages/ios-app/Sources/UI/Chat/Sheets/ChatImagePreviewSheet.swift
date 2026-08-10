@@ -7,6 +7,8 @@ import UIKit
 struct ChatImagePreviewSheet: View {
     let preview: ChatImagePreviewData
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedItemID: String
     @State private var isSelectedImageZoomed = false
 
@@ -16,12 +18,8 @@ struct ChatImagePreviewSheet: View {
     }
 
     var body: some View {
-        SettingsPageContainer(
-            title: sheetTitle,
-            titleOpacity: isSelectedImageZoomed ? 0 : 1,
-            scrollsContent: false
-        ) {
-            GeometryReader { geometry in
+        GeometryReader { geometry in
+            ZStack(alignment: .top) {
                 TabView(selection: $selectedItemID) {
                     ForEach(Array(preview.items.enumerated()), id: \.element.id) { index, item in
                         ChatImagePreviewPage(
@@ -32,19 +30,22 @@ struct ChatImagePreviewSheet: View {
                                 isSelectedImageZoomed = isZoomed
                             }
                         )
+                        .ignoresSafeArea(.container, edges: .all)
                         .tag(item.id)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .frame(width: geometry.size.width, height: geometry.size.height)
+                .ignoresSafeArea(.container, edges: .all)
                 .clipShape(viewportShape)
                 .contentShape(viewportShape)
-                .padding(.horizontal, 8)
-                .padding(.top, 4)
-                .padding(.bottom, 8)
+                .padding(8)
                 .accessibilityValue(pageAccessibilityValue)
+
+                previewChrome(topInset: geometry.safeAreaInsets.top)
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
+        .ignoresSafeArea(.container, edges: .all)
         .onChange(of: selectedItemID) { _, _ in
             isSelectedImageZoomed = false
         }
@@ -54,6 +55,39 @@ struct ChatImagePreviewSheet: View {
 
     private var viewportShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: 22, style: .continuous)
+    }
+
+    private func previewChrome(topInset: CGFloat) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Text(sheetTitle)
+                .font(TronTypography.button)
+                .foregroundStyle(.tronEmerald)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .opacity(isSelectedImageZoomed ? 0 : 1)
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 0.16),
+                    value: isSelectedImageZoomed
+                )
+                .accessibilityHidden(isSelectedImageZoomed)
+                .allowsHitTesting(false)
+
+            Button { dismiss() } label: {
+                Image(systemName: "checkmark")
+                    .font(TronTypography.buttonSM)
+                    .foregroundStyle(.tronEmerald)
+                    .frame(width: 52, height: 52)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .glassEffect(
+                .regular.tint(Color.tronEmerald.opacity(0.08)).interactive(),
+                in: .circle
+            )
+            .accessibilityLabel("Close")
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, max(10, topInset + 8))
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     private var selectedIndex: Int {
@@ -169,6 +203,46 @@ private struct PreviewDecodeRequest: Hashable {
     let shouldLoad: Bool
 }
 
+/// Geometry contract for the immersive media viewport. The scroll view owns
+/// the complete sheet rectangle; at fitted scale, equal top and bottom chrome
+/// protection keeps the photo centered in the sheet rather than below its
+/// controls. Zoom then expands naturally into those protected regions without
+/// resizing (and therefore resetting) the native zoom view mid-gesture.
+enum ImagePreviewViewportLayout {
+    static func fittedImageFrame(imageSize: CGSize, in viewportBounds: CGRect) -> CGRect {
+        guard imageSize.width > 0,
+              imageSize.height > 0,
+              viewportBounds.width > 0,
+              viewportBounds.height > 0 else {
+            return viewportBounds
+        }
+
+        let desiredChromeInset = min(
+            68,
+            max(48, viewportBounds.height * 0.10)
+        )
+        let verticalInset = min(
+            desiredChromeInset,
+            max(0, (viewportBounds.height - 1) * 0.5)
+        )
+        let fittedBounds = viewportBounds.insetBy(dx: 0, dy: verticalInset)
+        let scale = min(
+            fittedBounds.width / imageSize.width,
+            fittedBounds.height / imageSize.height
+        )
+        let size = CGSize(
+            width: imageSize.width * scale,
+            height: imageSize.height * scale
+        )
+        return CGRect(
+            x: viewportBounds.midX - size.width * 0.5,
+            y: viewportBounds.midY - size.height * 0.5,
+            width: size.width,
+            height: size.height
+        )
+    }
+}
+
 /// UIKit owns zoom physics, panning, centering, and double-tap behavior. At
 /// minimum zoom the inner pan recognizer stands down so the surrounding native
 /// page view can swipe between sibling photos. Once zoomed, panning belongs to
@@ -268,6 +342,7 @@ private final class ImageZoomScrollView: UIScrollView, UIScrollViewDelegate {
             return
         }
         setZoomScale(minimumZoomScale, animated: false)
+        contentOffset = .zero
         imageView.image = image
         imageView.accessibilityLabel = accessibilityLabel
         reportTitleState(titleState.reset())
@@ -285,6 +360,7 @@ private final class ImageZoomScrollView: UIScrollView, UIScrollViewDelegate {
             zoomContentView.transform = .identity
             zoomContentView.frame = bounds
             contentSize = bounds.size
+            contentOffset = .zero
             reportTitleState(titleState.reset())
             updatePanOwnership()
         }
@@ -342,27 +418,13 @@ private final class ImageZoomScrollView: UIScrollView, UIScrollViewDelegate {
     }
 
     private func fittedImageFrame(in containerBounds: CGRect) -> CGRect {
-        guard let image = imageView.image,
-              image.size.width > 0,
-              image.size.height > 0,
-              containerBounds.width > 0,
-              containerBounds.height > 0 else {
+        guard let image = imageView.image else {
             return containerBounds
         }
-        let scale = min(
-            containerBounds.width / image.size.width,
-            containerBounds.height / image.size.height
+        return ImagePreviewViewportLayout.fittedImageFrame(
+            imageSize: image.size,
+            in: containerBounds
         )
-        let size = CGSize(
-            width: image.size.width * scale,
-            height: image.size.height * scale
-        )
-        return CGRect(
-            x: (containerBounds.width - size.width) * 0.5,
-            y: (containerBounds.height - size.height) * 0.5,
-            width: size.width,
-            height: size.height
-        ).integral
     }
 
     private func centerZoomContent() {
