@@ -194,6 +194,41 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertEqual(frame.width / frame.height, 4.0 / 3.0, accuracy: 0.001)
     }
 
+    func testImagePreviewChromeAndViewportStayConcentricWithTheSheet() {
+        XCTAssertEqual(
+            ImagePreviewViewportLayout.viewportCornerRadius
+                + ImagePreviewViewportLayout.viewportInset,
+            ImagePreviewViewportLayout.sheetCornerRadius,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ImagePreviewViewportLayout.chromeEdgeInset
+                + ImagePreviewViewportLayout.dismissButtonDiameter * 0.5,
+            ImagePreviewViewportLayout.sheetCornerRadius,
+            accuracy: 0.001
+        )
+        XCTAssertLessThanOrEqual(ImagePreviewViewportLayout.dismissButtonDiameter, 44)
+    }
+
+    func testImagePreviewUsesOneOuterCornerMaskWhileZoomed() {
+        XCTAssertEqual(
+            ImagePreviewViewportLayout.photoCornerRadius(
+                zoomScale: 1,
+                minimumScale: 1
+            ),
+            ImagePreviewViewportLayout.fittedPhotoCornerRadius,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ImagePreviewViewportLayout.photoCornerRadius(
+                zoomScale: 1.02,
+                minimumScale: 1
+            ),
+            0,
+            accuracy: 0.001
+        )
+    }
+
     func testUserInputWaitsForCurrentSheetThenPresents() throws {
         let coordinator = SheetCoordinator()
         let request = UserInputRequest(

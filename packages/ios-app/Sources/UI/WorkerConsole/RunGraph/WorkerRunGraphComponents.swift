@@ -46,21 +46,37 @@ enum WorkerRunGraphPresentation {
     }
 
     static func resultPresentation(_ preview: String) -> WorkerRunResultPresentation {
-        let components = preview.components(separatedBy: " · ")
-        guard components.count >= 3,
-              components[0].contains("."),
-              isResultStatus(components[1]) else {
+        let components = preview
+            .components(separatedBy: " · ")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if components.count >= 3,
+           components[0].contains("."),
+           isResultStatus(components[1]) {
             return WorkerRunResultPresentation(
-                status: nil,
-                summary: WorkerConsolePresentation.compactText(preview, maxLength: 640)
+                status: WorkerConsolePresentation.displayLabel(components[1]),
+                summary: WorkerConsolePresentation.compactText(
+                    components.dropFirst(2).joined(separator: " · "),
+                    maxLength: 640
+                )
             )
         }
-        return WorkerRunResultPresentation(
-            status: WorkerConsolePresentation.displayLabel(components[1]),
-            summary: WorkerConsolePresentation.compactText(
-                components.dropFirst(2).joined(separator: " · "),
-                maxLength: 640
+
+        if components.count >= 2,
+           isResultStatus(components[0]) {
+            return WorkerRunResultPresentation(
+                status: WorkerConsolePresentation.displayLabel(components[0]),
+                summary: WorkerConsolePresentation.compactText(
+                    components.dropFirst().joined(separator: " · "),
+                    maxLength: 640
+                )
             )
+        }
+
+        return WorkerRunResultPresentation(
+            status: nil,
+            summary: WorkerConsolePresentation.compactText(preview, maxLength: 640)
         )
     }
 
@@ -81,35 +97,6 @@ enum WorkerRunGraphPresentation {
     static func activitySummary(_ entries: [WorkerRunTimelineEntryDTO]) -> String {
         guard let latest = entries.last else { return "Waiting for the first durable update" }
         return "\(entries.count) update\(entries.count == 1 ? "" : "s") · \(latest.summary)"
-    }
-
-    static func transcriptCount(_ graph: WorkerRunGraphDTO) -> Int {
-        Set(graph.nodes.compactMap { node in
-            node.sessionId?.isEmpty == false ? node.sessionId : nil
-        }).count
-    }
-
-    /// One transcript belongs to one agent session even though the server
-    /// projects that session onto its invocation, agent, and model-turn nodes.
-    /// The invocation node is the clearest owner because it names the worker
-    /// whose agent performed the work.
-    static func transcriptOwnerNodeIds(_ nodes: [WorkerRunNodeDTO]) -> Set<String> {
-        var owners: [String: (rank: Int, index: Int, nodeId: String)] = [:]
-        for (index, node) in nodes.enumerated() {
-            guard let sessionId = node.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !sessionId.isEmpty else { continue }
-            let rank: Int = switch node.kind {
-            case "invocation": 0
-            case "agent": 1
-            default: 2
-            }
-            if let owner = owners[sessionId],
-               (owner.rank, owner.index) <= (rank, index) {
-                continue
-            }
-            owners[sessionId] = (rank, index, node.id)
-        }
-        return Set(owners.values.map(\.nodeId))
     }
 
     static func stageLabel(status: String) -> String {
@@ -238,7 +225,8 @@ enum WorkerRunGraphPresentation {
 
     private static func isResultStatus(_ value: String) -> Bool {
         switch WorkerConsolePresentation.normalized(value) {
-        case "complete", "completed", "partial", "validationfailed", "failed", "cancelled":
+        case "complete", "completed", "succeeded", "passed", "partial",
+             "repaired", "inspected", "validationfailed", "failed", "cancelled":
             true
         default:
             false
@@ -290,6 +278,18 @@ struct WorkerRunInvocationSummaryView: View {
         WorkerRunGraphPresentation.color(status: run.status)
     }
 
+    private var outcomeSummary: String? {
+        if let error = run.error?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !error.isEmpty {
+            return error
+        }
+        return WorkerConsolePresentation.runResultSummary(run)
+    }
+
+    private var outcomeHeading: String {
+        outcomeSummary == nil ? "STATUS" : "RESULT"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 5) {
@@ -305,33 +305,44 @@ struct WorkerRunInvocationSummaryView: View {
 
             WorkerMetadataDivider()
 
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: WorkerRunGraphPresentation.symbol(status: run.status))
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(color)
-                    .frame(width: 22)
-                    .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(outcomeHeading)
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
+                HStack(alignment: .center, spacing: 9) {
+                    Image(systemName: WorkerRunGraphPresentation.symbol(status: run.status))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(color)
+                        .frame(width: 22)
                     Text(WorkerRunGraphPresentation.stageLabel(status: run.status))
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(color)
-                    Text("\(WorkerConsolePresentation.runInteractionMode(run)) run")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                    Text(WorkerConsolePresentation.runAttemptLabel(run))
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                    if let model = run.effectiveModel ?? run.requestedModel {
-                        Text(
-                            [model, run.effectiveReasoningLevel ?? run.requestedReasoningLevel]
-                                .compactMap { $0 }
-                                .joined(separator: " · ")
-                        )
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
-                    }
                 }
-                Spacer(minLength: 0)
+
+                if let outcomeSummary {
+                    Text(outcomeSummary)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(run.error == nil ? .tronTextPrimary : .tronError)
+                        .lineLimit(10)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Text(
+                    "\(WorkerConsolePresentation.runInteractionMode(run)) run · "
+                        + WorkerConsolePresentation.runAttemptLabel(run)
+                )
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+
+                if let model = run.effectiveModel ?? run.requestedModel {
+                    Text(
+                        [model, run.effectiveReasoningLevel ?? run.requestedReasoningLevel]
+                            .compactMap { $0 }
+                            .joined(separator: " · ")
+                    )
+                    .font(TronTypography.code(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextMuted)
+                }
             }
         }
         .padding(14)
@@ -347,41 +358,23 @@ struct WorkerRunInvocationResultView: View {
     let run: WorkerInvocationDTO
     let inspectResult: () -> Void
 
+    private var hasError: Bool {
+        guard let error = run.error?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return false
+        }
+        return !error.isEmpty
+    }
+
     var body: some View {
-        if let error = run.error?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !error.isEmpty {
-            WorkerConsoleSection(
-                title: "Action needed",
-                detail: "The durable invocation reported this terminal failure.",
-                accent: .tronError
-            ) {
-                Text(error)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronError)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        } else if WorkerRunGraphPresentation.canInspectResult(status: run.status) {
-            WorkerConsoleSection(
-                title: "Result",
-                detail: "Validated durable output from this worker run.",
-                accent: .tronSuccess
-            ) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(WorkerConsolePresentation.runResultSummary(run) ?? "Validated worker result")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(10)
-                        .fixedSize(horizontal: false, vertical: true)
-                    WorkerMetadataDivider()
-                    WorkerRunDisclosureRow(
-                        title: "View complete result",
-                        detail: "Browse every field and nested value on demand.",
-                        symbol: "doc.text.magnifyingglass",
-                        accent: .tronSuccess,
-                        action: inspectResult
-                    )
-                }
-            }
+        if !hasError,
+           WorkerRunGraphPresentation.canInspectResult(status: run.status) {
+            WorkerConsoleActionCard(
+                title: "View complete result",
+                detail: "Browse every field and nested value on demand.",
+                symbol: "doc.text.magnifyingglass",
+                accent: .tronSuccess,
+                action: inspectResult
+            )
             .accessibilityIdentifier("worker-run-result-summary")
         }
     }
@@ -392,22 +385,16 @@ struct WorkerRunInvocationExecutionOverviewView: View {
     let openDetails: () -> Void
 
     var body: some View {
-        WorkerConsoleSection(
-            title: "Execution trace",
-            detail: "Ordered worker, attempt, model, and durable activity evidence.",
-            accent: .tronCyan
-        ) {
-            WorkerRunDisclosureRow(
-                title: "Inspect execution trace",
-                detail: isReady
-                    ? "Expand work steps and open each distinct agent transcript in context."
-                    : "Preparing the bounded execution trace…",
-                symbol: "point.3.connected.trianglepath.dotted",
-                accent: .tronCyan,
-                isEnabled: isReady,
-                action: openDetails
-            )
-        }
+        WorkerConsoleActionCard(
+            title: "Inspect execution trace",
+            detail: isReady
+                ? "Review ordered worker, attempt, model, and durable activity evidence."
+                : "Preparing the bounded execution trace…",
+            symbol: "point.3.connected.trianglepath.dotted",
+            accent: .tronCyan,
+            isEnabled: isReady,
+            action: openDetails
+        )
         .accessibilityIdentifier("worker-run-execution-overview")
     }
 }
@@ -417,6 +404,16 @@ struct WorkerRunGraphSummaryView: View {
 
     private var color: Color {
         WorkerRunGraphPresentation.color(status: graph.status)
+    }
+
+    private var outcomeSummary: String? {
+        if let failure = graph.errorPreview?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !failure.isEmpty {
+            return failure
+        }
+        guard let preview = graph.resultPreview?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !preview.isEmpty else { return nil }
+        return WorkerRunGraphPresentation.resultPresentation(preview).summary
     }
 
     var body: some View {
@@ -434,36 +431,44 @@ struct WorkerRunGraphSummaryView: View {
 
             WorkerMetadataDivider()
 
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: WorkerRunGraphPresentation.symbol(status: graph.status))
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(color)
-                    .frame(width: 22)
-                    .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(outcomeSummary == nil ? "STATUS" : "RESULT")
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
+                HStack(alignment: .center, spacing: 9) {
+                    Image(systemName: WorkerRunGraphPresentation.symbol(status: graph.status))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(color)
+                        .frame(width: 22)
                     Text(graph.stageLabel)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(color)
-                    Text(
-                        "\(WorkerConsolePresentation.displayLabel(graph.mode)) run · "
-                            + WorkerRunGraphPresentation.elapsed(graph.elapsedMs)
-                    )
+                }
+                if let outcomeSummary {
+                    Text(outcomeSummary)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(graph.errorPreview == nil ? .tronTextPrimary : .tronError)
+                        .lineLimit(10)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text(
+                    "\(WorkerConsolePresentation.displayLabel(graph.mode)) run · "
+                        + WorkerRunGraphPresentation.elapsed(graph.elapsedMs)
+                )
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                Text(WorkerRunGraphPresentation.childSummary(graph.counts))
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
-                    Text(WorkerRunGraphPresentation.childSummary(graph.counts))
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                    if let effectiveModel = graph.effectiveModel {
-                        Text(
-                            [effectiveModel, graph.effectiveReasoningLevel]
-                                .compactMap { $0 }
-                                .joined(separator: " · ")
-                        )
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
-                    }
+                if let effectiveModel = graph.effectiveModel {
+                    Text(
+                        [effectiveModel, graph.effectiveReasoningLevel]
+                            .compactMap { $0 }
+                            .joined(separator: " · ")
+                    )
+                    .font(TronTypography.code(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextMuted)
                 }
-                Spacer(minLength: 0)
             }
 
             if let expected = graph.expectedNextTransition, !expected.isEmpty {
@@ -524,28 +529,19 @@ struct WorkerRunExecutionOverviewView: View {
     }
 
     var body: some View {
-        WorkerConsoleSection(
-            title: "Execution trace",
-            detail: WorkerRunGraphPresentation.workBreakdown(graph),
-            accent: .tronCyan
-        ) {
-            WorkerRunDisclosureRow(
-                title: "Inspect execution trace",
-                detail: executionDetail,
-                symbol: "point.3.connected.trianglepath.dotted",
-                accent: .tronCyan,
-                action: openDetails
-            )
-        }
+        WorkerConsoleActionCard(
+            title: "Inspect execution trace",
+            detail: executionDetail,
+            symbol: "point.3.connected.trianglepath.dotted",
+            accent: .tronCyan,
+            action: openDetails
+        )
         .accessibilityIdentifier("worker-run-execution-overview")
     }
 
     private var executionDetail: String {
-        let transcripts = WorkerRunGraphPresentation.transcriptCount(graph)
-        if transcripts > 0 {
-            return "\(transcripts) distinct agent transcript\(transcripts == 1 ? "" : "s") · \(WorkerRunGraphPresentation.activitySummary(visibleTimeline))"
-        }
-        return WorkerRunGraphPresentation.activitySummary(visibleTimeline)
+        "\(WorkerRunGraphPresentation.workBreakdown(graph)) · "
+            + WorkerRunGraphPresentation.activitySummary(visibleTimeline)
     }
 }
 
@@ -553,45 +549,23 @@ struct WorkerRunTerminalResultView: View {
     let graph: WorkerRunGraphDTO
     let inspectResult: () -> Void
 
-    var body: some View {
-        if let failure = graph.errorPreview, !failure.isEmpty {
-            WorkerConsoleSection(
-                title: "Action needed",
-                detail: "The durable invocation reported this terminal failure.",
-                accent: .tronError
-            ) {
-                Text(failure)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronError)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        } else if graph.resultPreview?.isEmpty == false
-                    || WorkerRunGraphPresentation.canInspectResult(status: graph.status) {
-            let preview = graph.resultPreview ?? "Validated worker result"
-            WorkerConsoleSection(
-                title: "Result",
-                detail: "Validated durable output from this worker run.",
-                accent: .tronSuccess
-            ) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(WorkerRunGraphPresentation.resultPresentation(preview).summary)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(10)
-                        .fixedSize(horizontal: false, vertical: true)
+    private var hasError: Bool {
+        guard let error = graph.errorPreview?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return false
+        }
+        return !error.isEmpty
+    }
 
-                    if WorkerRunGraphPresentation.canInspectResult(status: graph.status) {
-                        WorkerMetadataDivider()
-                        WorkerRunDisclosureRow(
-                            title: "View complete result",
-                            detail: "Browse every field and nested value on demand.",
-                            symbol: "doc.text.magnifyingglass",
-                            accent: .tronSuccess,
-                            action: inspectResult
-                        )
-                    }
-                }
-            }
+    var body: some View {
+        if !hasError,
+           WorkerRunGraphPresentation.canInspectResult(status: graph.status) {
+            WorkerConsoleActionCard(
+                title: "View complete result",
+                detail: "Browse every field and nested value on demand.",
+                symbol: "doc.text.magnifyingglass",
+                accent: .tronSuccess,
+                action: inspectResult
+            )
             .accessibilityIdentifier("worker-run-result-summary")
         }
     }
@@ -599,8 +573,6 @@ struct WorkerRunTerminalResultView: View {
 
 struct WorkerRunExecutionSheet: View {
     let graph: WorkerRunGraphDTO
-
-    @State private var selectedSession: WorkerToolSessionSelection?
 
     var body: some View {
         NavigationStack {
@@ -610,12 +582,7 @@ struct WorkerRunExecutionSheet: View {
                         title: "Execution trace",
                         detail: traceDetail(graph)
                     )
-                    WorkerRunExecutionTraceView(graph: graph) { node, sessionId in
-                        selectedSession = WorkerToolSessionSelection(
-                            sessionId: sessionId,
-                            title: "\(WorkerRunGraphPresentation.nodeTitle(node)) Transcript"
-                        )
-                    }
+                    WorkerRunExecutionTraceView(graph: graph)
                     if graph.truncated {
                         WorkerConsoleInlineEmptyState(
                             symbol: "ellipsis.circle",
@@ -635,12 +602,6 @@ struct WorkerRunExecutionSheet: View {
                     SheetDismissButton(color: .tronCyan)
                 }
             }
-            .sheet(item: $selectedSession) { selection in
-                WorkerAuditSessionSheet(
-                    sessionId: selection.sessionId,
-                    title: selection.title
-                )
-            }
         }
         .workerConsoleSheetPresentation()
         .tint(.tronCyan)
@@ -648,24 +609,17 @@ struct WorkerRunExecutionSheet: View {
 
     private func traceDetail(_ graph: WorkerRunGraphDTO) -> String {
         let entries = WorkerRunGraphPresentation.visibleTimeline(graph)
-        let transcripts = WorkerRunGraphPresentation.transcriptCount(graph)
         return [
             WorkerRunGraphPresentation.workBreakdown(graph),
             "\(entries.count) durable update\(entries.count == 1 ? "" : "s")",
-            "\(transcripts) agent transcript\(transcripts == 1 ? "" : "s")",
         ].joined(separator: " · ")
     }
 }
 
 struct WorkerRunExecutionTraceView: View {
     let graph: WorkerRunGraphDTO
-    let openSession: (WorkerRunNodeDTO, String) -> Void
 
     @State private var expandedNodeIds = Set<String>()
-
-    private var transcriptOwnerNodeIds: Set<String> {
-        WorkerRunGraphPresentation.transcriptOwnerNodeIds(graph.nodes)
-    }
 
     private var entriesByNode: [String: [WorkerRunTimelineEntryDTO]] {
         Dictionary(
@@ -687,10 +641,8 @@ struct WorkerRunExecutionTraceView: View {
                 WorkerRunTraceNodeView(
                     node: node,
                     entries: entriesByNode[node.id] ?? [],
-                    ownsTranscript: transcriptOwnerNodeIds.contains(node.id),
                     isExpanded: expandedNodeIds.contains(node.id),
-                    toggle: { toggle(node.id) },
-                    openSession: { sessionId in openSession(node, sessionId) }
+                    toggle: { toggle(node.id) }
                 )
                     .padding(.leading, CGFloat(WorkerRunGraphPresentation.depth(
                         of: node,
@@ -728,10 +680,8 @@ struct WorkerRunExecutionTraceView: View {
 private struct WorkerRunTraceNodeView: View {
     let node: WorkerRunNodeDTO
     let entries: [WorkerRunTimelineEntryDTO]
-    let ownsTranscript: Bool
     let isExpanded: Bool
     let toggle: () -> Void
-    let openSession: (String) -> Void
 
     private var color: Color {
         WorkerRunGraphPresentation.color(status: node.status)
@@ -789,19 +739,6 @@ private struct WorkerRunTraceNodeView: View {
                         Text("No additional durable updates were recorded for this step.")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextMuted)
-                    }
-                    if ownsTranscript,
-                       let sessionId = node.sessionId,
-                       !sessionId.isEmpty {
-                        WorkerMetadataDivider()
-                        WorkerRunDisclosureRow(
-                            title: "Open agent transcript",
-                            detail: "View this worker's prompts, responses, reasoning, and tool calls.",
-                            symbol: "text.bubble",
-                            accent: .tronPurple
-                        ) {
-                            openSession(sessionId)
-                        }
                     }
                 }
             }
@@ -864,15 +801,3 @@ struct WorkerRunTimelineView: View {
         .accessibilityIdentifier("worker-run-structured-timeline")
     }
 }
-
-private struct WorkerToolSessionSelection: Identifiable {
-    let sessionId: String
-    let title: String
-    var id: String { sessionId }
-}
-
-/*
- The execution trace intentionally owns the only transcript affordance for a
- session. Invocation, agent, and model nodes can share one session identifier;
- presenting each as a separate chat link would duplicate the same transcript.
- */

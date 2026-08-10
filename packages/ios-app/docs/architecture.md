@@ -546,10 +546,11 @@ provides:
   separation while keeping each icon visually attached to its text;
 - bounded provenance tags with full accessible source labels;
 - one generic worker workflow split into Overview, Manage, Activity, and
-  Results. Manage combines natural-language use, retained versions, lifecycle
-  controls, and a collapsed lifecycle-history disclosure; Activity is only
-  execution history, while Results is the independently classified durable
-  result ledger;
+  Results. Manage begins with one `Invoke with Agent` action card, then compact
+  retained versions and lifecycle controls; lifecycle history opens in its own
+  bounded child sheet rather than expanding the worker sheet in place. Activity
+  is only execution history, while Results is the independently classified
+  durable result ledger;
 - native-experience technical detail limited to Contract and Manage so domain
   tasks, reports, runs, and inbox results have one presentation owner;
 - readable schema fields and raw-schema detail sheets for inspection, while
@@ -588,22 +589,20 @@ provides:
   inspection. The action is a standalone primary control rather than a nested
   section container, and every entry point uses the same exact-result handoff
   request;
-- one transcript action per distinct agent session, owned by that session's
-  worker-invocation node in the execution trace; run detail has no competing
-  toolbar transcript action or duplicate Model Context section. The read-only worker-session transcript
+- one canonical emerald `Open Chat` action in the run-detail leading toolbar
+  when the run owns an agent session. The execution trace remains focused on
+  ordered evidence and never repeats transcript buttons on worker, agent, or
+  model-turn nodes. The read-only worker-session transcript
   initially reconstructs only the latest 120 events, pages older activity
   explicitly, and uses a small vertical `LazyVStack` without interactive
   chat's viewport probes, geometry-driven autoload, speech monitoring, composer,
   or keyboard-aware scroll loop. A native bottom anchor plus two bounded layout
   passes makes the newest evidence visible. Execution Trace combines causal
-  work structure and durable activity in one expandable sequence. Expanding a
-  worker invocation reveals its updates and its one transcript action; agent
-  and model-turn nodes that share the same session never duplicate that link.
-  Each link lazily reconstructs
-  the actual prompt, assistant response, provider-visible reasoning summary or
-  thinking block, and tool calls from the canonical child session rather than
-  copying unbounded text into the run graph. Command-only nodes retain their
-  server-authored stage and activity evidence;
+  work structure and durable activity in one expandable sequence. The toolbar
+  action lazily reconstructs the actual prompt, assistant response,
+  provider-visible reasoning summary or thinking block, and tool calls from the
+  canonical run session rather than copying unbounded text into the run graph.
+  Command-only nodes retain their server-authored stage and activity evidence;
   the transcript content stays transparent so the canonical sheet presentation
   is Liquid Glass at medium height and an opaque app surface at large height, while
   reserved worker child sessions remain excluded from ordinary Home navigation
@@ -617,6 +616,13 @@ declarative renderer for presentation contract version 1. The run sheet names
 the canonical worker prominently and keeps the bounded request preview
 separately labeled, so an internal semantic query containing another worker's
 text cannot be mistaken for the identity of the run being inspected. The
+first paint retains one request-and-outcome card while richer graph data loads;
+recognized status prefixes such as `repaired` and `inspected` become status
+labels rather than leaking into the human summary. `View complete result`
+opens a focused bounded field browser without repeating the outcome or agent
+handoff, and every selected field opens a child sheet instead of replacing the
+parent's navigation state. Execution-trace and technical-detail destinations
+are compact first-level action cards without redundant section wrappers. The
 renderer supports only
 native text, status, progress, bounded table/list, public HTTPS link, durable-result
 artifact, native confirmation, and fixed same-worker action sections. Bound
@@ -872,13 +878,14 @@ model-tool/invocation association through `worker_kernel::runs(detail:
 "graph")`, then renders the server's status, mode, meaningful stage, elapsed
 time, child counts, result or actionable failure, and links to execution
 detail. The primary sheet never embeds an unbounded causal tree or lifecycle
-history. Instead, one compact `Execution trace` disclosure opens a full sheet
-that nests each node's durable updates and distinct child-session transcript
-  under its server-ordered causal work item. The trace disclosure remains in
+history. Instead, one compact `Execution trace` action opens a full sheet that
+nests each node's durable updates under its server-ordered causal work item.
+The trace action remains in
   place but cannot present a provisional sheet until that bounded graph is
   available. Work structure, activity history,
 and transcript navigation are never rendered as parallel or duplicative
-destinations. Live invalidations refresh
+destinations; a run-owned agent session is available only from the canonical
+emerald toolbar action. Live invalidations refresh
 only an absent or active graph; a terminal chip remains stable instead of
 restarting its durable result read when unrelated workers run. Disclosure
 containers remain fully tappable without repeating right-aligned open-link
@@ -1106,9 +1113,14 @@ the media sheet owns floating chrome over one full-sheet native zoom viewport;
 it does not reserve a navigation-bar rectangle above the photo. Equal fitted-
 scale chrome protection at the top and bottom centers the complete image in the
 actual sheet, while zoom expands into both regions without resizing or resetting
-the scroll view mid-gesture. The near-edge viewport is continuously rounded and
-clips zoomed content, while native pinch, pan, and double-tap gestures stay
-inside that boundary. Images attached together form one ordered gallery: the
+the scroll view mid-gesture. One shared geometry contract owns the explicit
+sheet curve, an inset-derived concentric viewport curve, and a compact close
+button whose center aligns with the outer corner center. At fitted scale the
+photo may keep a smaller inner radius; as soon as it zooms that image-layer
+radius becomes square and the single viewport mask owns every visible edge.
+This prevents transformed corner radii from diverging from the sheet or
+clipping the bottom edge. Native pinch, pan, and double-tap gestures stay inside
+that boundary. Images attached together form one ordered gallery: the
 tapped image opens first, a fitted image yields its horizontal pan gesture to
 page swipes, and a zoomed image owns panning until it returns to fitted scale.
 The gallery position in the floating sheet title fades as soon as zoom begins
