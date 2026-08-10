@@ -23,6 +23,9 @@ const SNAPSHOT_FORMAT: &str = "tron.profile_snapshot.v1";
 const MANIFEST_NAME: &str = "manifest.json";
 const PURGE_MANIFEST_NAME: &str = "purge-manifest.json";
 const PAYLOAD_DIR: &str = "payload";
+// INVARIANT: advance only when a migration rewrites or removes durable data.
+// Additive transactional DDL must not archive the full profile during startup.
+const LATEST_WORKER_SCHEMA_REQUIRING_PROFILE_SNAPSHOT: u32 = 17;
 
 /// Verified metadata returned to CLI and migration callers.
 #[derive(Clone, Debug, Serialize)]
@@ -245,8 +248,15 @@ pub(crate) fn create_worker_purge_archive(
     })
 }
 
-/// Ensure exactly one verified snapshot exists before a worker-schema target
-/// first opens this profile. Tests use `WorkerStore::open_without_snapshot`.
+/// Apply the current recovery policy before the worker store opens.
+pub(super) fn ensure_required_worker_schema_snapshot(
+    home: &Path,
+) -> Result<Option<ProfileSnapshot>, String> {
+    ensure_worker_schema_snapshot(home, LATEST_WORKER_SCHEMA_REQUIRING_PROFILE_SNAPSHOT)
+}
+
+/// Ensure exactly one verified snapshot exists before a destructive
+/// worker-schema target first opens this profile.
 pub(crate) fn ensure_worker_schema_snapshot(
     home: &Path,
     target_worker_schema: u32,

@@ -1359,3 +1359,39 @@ fn schema_v15_upgrades_through_inbox_disposition_v18() {
         .unwrap();
     assert!(dispositions_exist);
 }
+
+#[test]
+fn additive_schema_v18_does_not_snapshot_the_full_profile_at_startup() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let connection = store.connection().unwrap();
+    connection
+        .execute_batch(
+            "DROP TABLE worker_inbox_dispositions;
+             DELETE FROM worker_schema WHERE version = 18;",
+        )
+        .unwrap();
+    drop(connection);
+    drop(store);
+
+    let immutable_payload = temp
+        .path()
+        .join("workspace/workers/example/versions/version/dependencies");
+    std::fs::create_dir_all(&immutable_payload).unwrap();
+    std::fs::write(immutable_payload.join("large-runtime.bin"), [7_u8; 1024]).unwrap();
+
+    let reopened = WorkerStore::open(temp.path().to_path_buf()).unwrap();
+    let connection = reopened.connection().unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT MAX(version) FROM worker_schema", [], |row| {
+                row.get::<_, u32>(0)
+            })
+            .unwrap(),
+        18
+    );
+    assert!(
+        !temp.path().join("internal/backups").exists(),
+        "additive schema changes must not traverse or archive the profile"
+    );
+}
