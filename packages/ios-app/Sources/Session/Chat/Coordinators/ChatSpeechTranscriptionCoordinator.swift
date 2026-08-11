@@ -11,7 +11,7 @@ protocol ChatSpeechTranscriptionContext: AnyObject {
     func startRecording() async throws
     func cancelRecording()
     @discardableResult
-    func stopRecording() -> (url: URL?, success: Bool)
+    func stopRecording() async -> (url: URL?, success: Bool)
     func transcribeCapturedAudio(data: Data, mimeType: String, fileName: String) async throws -> String
     func loadCapturedAudio(from url: URL) async throws -> Data
     func appendSpeechTranscriptionError(_ message: String)
@@ -25,7 +25,10 @@ protocol ChatSpeechTranscriptionContext: AnyObject {
 final class ChatSpeechTranscriptionCoordinator {
     func toggleRecording(context: ChatSpeechTranscriptionContext) async {
         if context.isRecording {
-            let (url, success) = context.stopRecording()
+            // Show deterministic progress immediately; WAV consolidation and
+            // downsampling now complete asynchronously before invocation.
+            context.isTranscribing = true
+            let (url, success) = await context.stopRecording()
             await handleRecordingFinished(url: url, success: success, context: context)
         } else {
             await startRecording(context: context)
@@ -56,6 +59,9 @@ final class ChatSpeechTranscriptionCoordinator {
         success: Bool,
         context: ChatSpeechTranscriptionContext
     ) async {
+        context.isTranscribing = true
+        defer { context.isTranscribing = false }
+
         guard success, let url else {
             if !Task.isCancelled {
                 context.appendSpeechTranscriptionError("Recording failed.")
@@ -67,9 +73,6 @@ final class ChatSpeechTranscriptionCoordinator {
             _ = try? await context.loadCapturedAudio(from: url)
             return
         }
-
-        context.isTranscribing = true
-        defer { context.isTranscribing = false }
 
         do {
             let audioData = try await context.loadCapturedAudio(from: url)

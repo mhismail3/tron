@@ -379,6 +379,12 @@ protocol WorkerKernelRepository: AnyObject {
         originSessionId: String,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerInvocationDTO
+    func invokeWorkerCompactFromSession(
+        workerId: String,
+        input: AnyCodable,
+        originSessionId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO
     func enqueueWorker(
         workerId: String,
         input: AnyCodable,
@@ -438,6 +444,20 @@ protocol WorkerKernelRepository: AnyObject {
 }
 
 extension WorkerKernelRepository {
+    func invokeWorkerCompactFromSession(
+        workerId: String,
+        input: AnyCodable,
+        originSessionId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        try await invokeWorkerFromSession(
+            workerId: workerId,
+            input: input,
+            originSessionId: originSessionId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func createWorkerResultHandoff(
         invocationId _: String,
         workingDirectory _: String,

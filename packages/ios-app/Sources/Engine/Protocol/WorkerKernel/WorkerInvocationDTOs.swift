@@ -56,7 +56,9 @@ struct WorkerInvocationDTO: Codable, Equatable, Identifiable, Sendable {
     let workerId: String
     let workerVersion: String
     let status: String
-    let input: AnyCodable
+    /// Present in durable run/history responses. A native client may request a
+    /// compact immediate receipt that omits its already-durable large input.
+    let input: AnyCodable?
     let output: WorkerInvocationOutputDTO?
     let error: String?
     let idempotencyKey: String
@@ -86,7 +88,7 @@ struct WorkerInvocationDTO: Codable, Equatable, Identifiable, Sendable {
         workerId: String,
         workerVersion: String,
         status: String,
-        input: AnyCodable,
+        input: AnyCodable?,
         output: AnyCodable?,
         error: String?,
         idempotencyKey: String,

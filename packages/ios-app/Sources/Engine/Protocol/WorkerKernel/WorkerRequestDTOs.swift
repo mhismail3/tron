@@ -75,6 +75,9 @@ struct WorkerInvokeRequestDTO: Codable, Equatable, Sendable {
     let mode: WorkerInvocationMode
     let model: String?
     let reasoningLevel: String?
+    /// Large native payloads (for example captured audio) are already durable
+    /// on the server and do not need to be echoed in the immediate receipt.
+    let compactResponse: Bool?
 }
 
 struct WorkerRetryRequestDTO: Codable, Equatable, Sendable {

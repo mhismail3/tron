@@ -92,11 +92,11 @@ enum DelegationContract {
     }
 
     static func task(from run: WorkerInvocationDTO) -> String {
-        run.input.dictionaryValue?["task"] as? String ?? "Delegated task"
+        run.input?.dictionaryValue?["task"] as? String ?? "Delegated task"
     }
 
     static func deliverableDescription(from run: WorkerInvocationDTO) -> String? {
-        guard let deliverable = AnyCodable(run.input.dictionaryValue?["deliverable"]).dictionaryValue else {
+        guard let deliverable = AnyCodable(run.input?.dictionaryValue?["deliverable"]).dictionaryValue else {
             return nil
         }
         return deliverable["description"] as? String
@@ -379,7 +379,7 @@ final class DelegationViewModel {
         do {
             let retried = try await repository.enqueueWorker(
                 workerId: run.workerId,
-                input: run.input,
+                input: run.input ?? AnyCodable([:]),
                 idempotencyKey: .userAction("delegation.retry")
             )
             lastSubmittedInvocationId = retried.invocationId

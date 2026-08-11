@@ -161,7 +161,7 @@ enum ResearchSuiteContract {
     }
 
     static func query(from run: WorkerInvocationDTO) -> String? {
-        guard let input = run.input.dictionaryValue else { return nil }
+        guard let input = run.input?.dictionaryValue else { return nil }
         for key in ["question", "query"] {
             if let value = input[key] as? String, !value.isEmpty { return value }
         }

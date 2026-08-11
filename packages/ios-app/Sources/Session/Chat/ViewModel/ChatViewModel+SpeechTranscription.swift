@@ -2,7 +2,12 @@ import Foundation
 
 extension ChatViewModel: ChatSpeechTranscriptionContext {
     func requireSpeechTranscriptionReady() async throws {
-        await refreshSpeechTranscriptionOwner()
+        // The connection-scoped lifecycle subscription keeps this owner
+        // current. Re-query only after a cache miss so every microphone tap
+        // does not block on a full engine-surface snapshot.
+        if speechTranscriptionOwner == nil {
+            await refreshSpeechTranscriptionOwner()
+        }
         guard speechTranscriptionOwner != nil else {
             throw SpeechTranscriptionAvailabilityError.noActiveWorker
         }
@@ -13,8 +18,8 @@ extension ChatViewModel: ChatSpeechTranscriptionContext {
     }
 
     @discardableResult
-    func stopRecording() -> (url: URL?, success: Bool) {
-        micRecorder.stopRecording()
+    func stopRecording() async -> (url: URL?, success: Bool) {
+        await micRecorder.stopRecording()
     }
 
     func cancelRecording() {
@@ -33,13 +38,15 @@ extension ChatViewModel: ChatSpeechTranscriptionContext {
         guard let owner = speechTranscriptionOwner else {
             throw SpeechTranscriptionAvailabilityError.noActiveWorker
         }
-        let result = try await services.workerKernel.invokeWorkerFromSession(
+        let input = await SpeechTranscriptionPayloadEncoder.shared.workerInput(
+            data: data,
+            mimeType: mimeType,
+            fileName: fileName
+        )
+        try Task.checkCancellation()
+        let result = try await services.workerKernel.invokeWorkerCompactFromSession(
             workerId: owner.workerId,
-            input: AnyCodable([
-                "audioBase64": data.base64EncodedString(),
-                "mimeType": mimeType,
-                "fileName": fileName,
-            ]),
+            input: input,
             originSessionId: sessionId,
             idempotencyKey: .userAction("speech.transcription")
         )
@@ -177,5 +184,20 @@ private actor CapturedAudioFileLoader {
             throw CapturedAudioTooSmallError(size: fileSize)
         }
         return try Data(contentsOf: url)
+    }
+}
+
+/// Keeps multi-megabyte base64 projection off the UI actor. The transport still
+/// receives the worker's exact typed JSON contract; only its preparation moves
+/// out of the prompt composer's rendering path.
+private actor SpeechTranscriptionPayloadEncoder {
+    static let shared = SpeechTranscriptionPayloadEncoder()
+
+    func workerInput(data: Data, mimeType: String, fileName: String) -> AnyCodable {
+        AnyCodable([
+            "audioBase64": data.base64EncodedString(),
+            "mimeType": mimeType,
+            "fileName": fileName,
+        ])
     }
 }

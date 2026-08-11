@@ -124,6 +124,157 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever(
 }
 
 #[tokio::test]
+async fn ready_resident_reuses_its_verified_snapshot_but_restart_reverifies_canonical_state() {
+    let (runtime, home) = test_runtime(None);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let script = r#"import http.server,json,sys
+class H(http.server.BaseHTTPRequestHandler):
+ def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
+ def do_POST(self):
+  n=int(self.headers.get('Content-Length','0')); value=json.loads(self.rfile.read(n))
+  self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(json.dumps(value).encode())
+ def log_message(self,*args): pass
+http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()"#;
+    let mut bundle = command_bundle(Vec::new());
+    bundle.worker_id = Some("resident-verified-snapshot".to_owned());
+    bundle.name = "Resident Verified Snapshot".to_owned();
+    bundle.tool_name = Some("worker_resident_verified_snapshot".to_owned());
+    bundle.runner = WorkerRunner::Service {
+        command: vec![
+            "python3".to_owned(),
+            "-u".to_owned(),
+            "-c".to_owned(),
+            script.to_owned(),
+            port.to_string(),
+        ],
+        invoke_url: format!("http://127.0.0.1:{port}/invoke"),
+        health_url: Some(format!("http://127.0.0.1:{port}/health")),
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+    let first = runtime
+        .invoke(request(
+            &outcome.worker.worker_id,
+            json!({"value":1}),
+            "resident-snapshot-first",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(first.output.unwrap()["value"], 1);
+
+    let manifest = home
+        .path()
+        .join("workspace/workers")
+        .join(&outcome.worker.worker_id)
+        .join("versions")
+        .join(&outcome.version)
+        .join("manifest.json");
+    let mut bytes = std::fs::read(&manifest).unwrap();
+    bytes.push(b'\n');
+    std::fs::write(&manifest, bytes).unwrap();
+
+    let second = runtime
+        .invoke(request(
+            &outcome.worker.worker_id,
+            json!({"value":2}),
+            "resident-snapshot-second",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(second.output.unwrap()["value"], 2);
+    runtime.supervise_residents().await;
+    assert!(
+        runtime
+            .store()
+            .summary(&outcome.worker.worker_id)
+            .unwrap()
+            .unwrap()
+            .enabled,
+        "supervision must use metadata pinned to the verified live process"
+    );
+
+    runtime
+        .stop_residents(Some(&outcome.worker.worker_id))
+        .await;
+    let after_restart = runtime
+        .invoke(request(
+            &outcome.worker.worker_id,
+            json!({"value":3}),
+            "resident-snapshot-after-restart",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(after_restart.status, "failed");
+    assert!(
+        after_restart
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("integrity check failed"))
+    );
+}
+
+#[tokio::test]
+async fn native_client_action_service_allows_model_cold_start_during_activation() {
+    let (runtime, _home) = test_runtime(None);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let script = r#"import http.server,json,sys,time
+time.sleep(5.25)
+class H(http.server.BaseHTTPRequestHandler):
+ def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
+ def do_POST(self):
+  n=int(self.headers.get('Content-Length','0')); self.rfile.read(n)
+  self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(b'{\"text\":\"ready\"}')
+ def log_message(self,*args): pass
+http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()"#;
+    let mut bundle = command_bundle(Vec::new());
+    bundle.worker_id = Some("resident-native-action".to_owned());
+    bundle.name = "Resident Native Action".to_owned();
+    bundle.description = "Resident service backing a latency-sensitive native action".to_owned();
+    bundle.tool_name = Some("worker_resident_native_action".to_owned());
+    bundle.input_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["audioBase64","mimeType","fileName"],
+        "properties":{
+            "audioBase64":{"type":"string","minLength":1},
+            "mimeType":{"type":"string","minLength":1},
+            "fileName":{"type":"string","minLength":1}
+        }
+    });
+    bundle.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["text"],
+        "properties":{"text":{"type":"string"}}
+    });
+    bundle.client_actions = vec![WorkerClientAction::SpeechTranscription];
+    bundle.runner = WorkerRunner::Service {
+        command: vec![
+            "python3".to_owned(),
+            "-u".to_owned(),
+            "-c".to_owned(),
+            script.to_owned(),
+            port.to_string(),
+        ],
+        invoke_url: format!("http://127.0.0.1:{port}/invoke"),
+        health_url: Some(format!("http://127.0.0.1:{port}/health")),
+    };
+
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+
+    assert_eq!(runtime.residents.len(), 1);
+    assert!(
+        runtime
+            .running_resident_worker(&outcome.worker.worker_id, &outcome.version)
+            .await
+            .is_some()
+    );
+}
+
+#[tokio::test]
 async fn cancelling_one_resident_invocation_keeps_the_service_available() {
     let (runtime, _home) = test_runtime(None);
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

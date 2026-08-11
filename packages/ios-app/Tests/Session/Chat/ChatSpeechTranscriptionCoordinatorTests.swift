@@ -185,6 +185,37 @@ final class ChatSpeechTranscriptionCoordinatorTests: XCTestCase {
         XCTAssertEqual(data.count, 44 + pcm.count)
     }
 
+    func testMicrophonePCMIsDownsampledToWhisperRateWithoutChangingDuration() throws {
+        let inputFrames = 48_000
+        var pcm = Data(count: inputFrames * MemoryLayout<Int16>.size)
+        pcm.withUnsafeMutableBytes { raw in
+            let samples = raw.bindMemory(to: Int16.self)
+            for index in 0..<samples.count {
+                samples[index] = Int16((index % 2_000) - 1_000)
+            }
+        }
+
+        let normalized = ComposerMicCaptureEngine.resampleMonoPCM16(
+            pcm,
+            from: 48_000,
+            to: ComposerMicCaptureEngine.transcriptionSampleRate
+        )
+
+        XCTAssertEqual(normalized.count, 16_000 * MemoryLayout<Int16>.size)
+        let url = try XCTUnwrap(
+            ComposerMicCaptureEngine.writeWAVFile(
+                pcmData: normalized,
+                sampleRate: ComposerMicCaptureEngine.transcriptionSampleRate
+            )
+        )
+        defer { try? FileManager.default.removeItem(at: url) }
+        let wav = try Data(contentsOf: url)
+        let encodedRate = wav.dropFirst(24).prefix(4).withUnsafeBytes {
+            $0.loadUnaligned(as: UInt32.self).littleEndian
+        }
+        XCTAssertEqual(encodedRate, 16_000)
+    }
+
     func testAudioMeterAndSmoothingStayBounded() {
         XCTAssertEqual(ComposerMicCaptureEngine.normalizedMeterLevel(forRMS: 0), 0, accuracy: 0.001)
         XCTAssertGreaterThan(ComposerMicCaptureEngine.normalizedMeterLevel(forRMS: 0.02), 0.2)
@@ -244,7 +275,7 @@ private final class MockSpeechTranscriptionContext: ChatSpeechTranscriptionConte
     }
 
     @discardableResult
-    func stopRecording() -> (url: URL?, success: Bool) {
+    func stopRecording() async -> (url: URL?, success: Bool) {
         stopRecordingCallCount += 1
         isRecording = false
         return stopResult

@@ -383,6 +383,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                 "input":{},
                 "model":{"type":"string","minLength":1,"description":"Optional model override for this invocation of an agent runner."},
                 "reasoningLevel":{"type":"string","minLength":1,"description":"Optional reasoning override validated against the resolved model."},
+                "compactResponse":{"type":"boolean","default":false,"description":"Omit the already-durable typed input from this immediate control response. Intended for native clients sending large payloads; later run inspection remains complete."},
                 "idempotencyKey":{"type":"string"},
                 "retryOfInvocationId":{"type":"string","description":"Retry one terminal invocation using its immutable worker version and original typed input."},
                 "mode":{"type":"string","enum":["wait","enqueue"],"description":"wait uses the interaction budget and may return a detached running record; enqueue returns immediately after durable admission."}

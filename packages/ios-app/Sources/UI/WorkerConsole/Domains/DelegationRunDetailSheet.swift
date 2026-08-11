@@ -52,7 +52,7 @@ struct DelegationRunDetailSheet: View {
             .sheet(isPresented: $showTaskContract) {
                 WorkerJSONDetailSheet(
                     title: "Task Contract",
-                    value: run.input,
+                    value: run.input ?? AnyCodable([:]),
                     accent: .tronPurple
                 )
             }

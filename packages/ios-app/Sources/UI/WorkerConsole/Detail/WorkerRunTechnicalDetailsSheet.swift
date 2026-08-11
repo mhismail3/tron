@@ -171,7 +171,7 @@ struct WorkerRunTechnicalDetailsSheet: View {
             .sheet(isPresented: $showInput) {
                 WorkerJSONDetailSheet(
                     title: "Worker Input",
-                    value: run.input,
+                    value: run.input ?? AnyCodable([:]),
                     accent: .tronInfo
                 )
             }

@@ -41,6 +41,9 @@
 //! labels; raw child content remains in its canonical audit session.
 //! `client_actions` selects the current healthy worker for narrow native
 //! capture/presentation seams without creating a second execution path.
+//! A resident service that owns a native client action is made ready during
+//! activation, keeping process/model startup off the post-input interaction;
+//! ordinary resident services remain lazy.
 //! `hooks` selects one immutable healthy owner and joins the ordinary durable
 //! invocation. Pure relevance derives short-lived exact-input idempotency from
 //! canonical JSON; session- and trace-bound hooks preserve their causal key. It
@@ -71,7 +74,11 @@
 //! completion, delivery, or wait state.
 //! `notifications` drains the durable worker-to-client outbox through APNs;
 //! provider acceptance is evidence, never a human-delivery receipt.
-//! Closed self-wakeup output queues only the same immutable worker version at
+//! A ready resident reuses the exact verified private artifact snapshot that
+//! launched its live process. Invocation and supervision therefore avoid
+//! repeatedly hashing a large canonical bundle, while every process restart
+//! still reloads and fully verifies the immutable canonical version before
+//! execution. Closed self-wakeup output queues only the same immutable worker version at
 //! its worker-selected future time, reusing this dispatcher and invocation
 //! ledger instead of introducing another timer or job subsystem.
 
@@ -141,6 +148,13 @@ struct ResidentProcess {
     ready: bool,
     consecutive_health_failures: u8,
     runtime_root: Option<PathBuf>,
+    /// Verified bundle metadata pinned to the private runtime snapshot used by
+    /// this exact live process. Reuse is valid only while `child` is alive;
+    /// every restart returns to canonical loading and full-tree verification.
+    worker: Option<ActiveWorker>,
+    /// Immutable health metadata cached beside the live process so periodic
+    /// supervision never re-hashes a potentially very large worker bundle.
+    health_url: Option<String>,
 }
 
 /// Transient bridge from one durable worker invocation to the exact
@@ -180,6 +194,8 @@ impl Drop for RemoveModelToolProgressOnDrop {
 
 const RESIDENT_HEALTH_FAILURE_LIMIT: u8 = 3;
 const RESIDENT_HEALTH_TIMEOUT: Duration = Duration::from_secs(5);
+const RESIDENT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
+const RESIDENT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_DEPENDENCY_DOWNLOAD_BYTES: usize = 128 * 1_048_576;
 
 struct RemoveDirectoryOnDrop(PathBuf);

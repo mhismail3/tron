@@ -1088,16 +1088,24 @@ The composer owns:
 The microphone stack is a narrow native actuator, not a transcription
 subsystem. The engine publishes at most one current healthy owner for the
 kernel-validated `speech_transcription` client action. Only then does the
-composer show its mic. Tapping it records a temporary WAV, invokes that worker
-through the ordinary durable worker API with the originating session, hydrates
-any referenced result with that same session identity, deletes the temporary
-file after loading, and inserts the worker's typed `text` result into the draft.
+composer show its mic. Tapping it records mono PCM, stops the hardware
+immediately, then consolidates, area-downsamples to Whisper's 16 kHz speech
+rate, writes the temporary WAV, and projects the base64 worker input away from
+the main actor. It invokes that
+worker through the ordinary durable worker API with the originating session,
+asks the server not to echo the already-durable base64 input in the immediate
+receipt, hydrates any referenced result with that same session identity,
+deletes the temporary file after loading, and inserts the worker's typed
+`text` result into the draft. A connected older server may reject that optional
+compact-receipt field before admission; the repository retries once with the
+same idempotency key and legacy projection.
 The shared live-tail worker subscription refreshes ownership only for worker
 lifecycle changes, not for ordinary scheduled or manual invocations. Each
 mounted chat owns at most one cancellation-aware monitor;
 navigation teardown stops it, and its weak event loop cannot retain a
-previously opened chat. Ownership therefore changes without historical replay,
-per-run engine reads, or reopening the chat. Model choice, recognition
+previously opened chat. A microphone tap reuses that connection-scoped owner
+and performs a surface read only on a cache miss, so ownership changes without
+historical replay, per-run engine reads, or reopening the chat. Model choice, recognition
 dependencies, language policy, cleanup, and quality remain worker-owned; the
 app has no fixed recognizer, transcription setting, or private transcription
 endpoint.

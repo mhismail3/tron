@@ -17,6 +17,11 @@ pub(super) async fn invoke_worker(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, ToolError> {
+    let compact_response = invocation
+        .payload
+        .get("compactResponse")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let retry_of_invocation_id = invocation
         .payload
         .get("retryOfInvocationId")
@@ -125,7 +130,7 @@ pub(super) async fn invoke_worker(
     };
     let record = record.map_err(worker_invocation_error)?;
     deps.runtime
-        .provider_invocation_record(record)
+        .provider_invocation_record(record, compact_response)
         .map_err(|message| ToolError::Internal { message })
 }
 
@@ -181,7 +186,7 @@ pub(super) async fn await_worker(invocation: &Invocation, deps: &Deps) -> Result
         )
         .await?;
     Ok(json!({
-        "invocation":deps.runtime.provider_invocation_record(record)?,
+        "invocation":deps.runtime.provider_invocation_record(record, false)?,
         "timedOut":timed_out
     }))
 }
@@ -281,6 +286,7 @@ pub(super) async fn detach_worker_invocation(
         deps.runtime
             .detach_invocation(&required_string(&invocation.payload, "invocationId")?)
             .await?,
+        false,
     )
 }
 
@@ -292,7 +298,7 @@ pub(super) async fn cancel_worker_invocation(
         .runtime
         .cancel_invocation(&required_string(&invocation.payload, "invocationId")?)
         .await?;
-    deps.runtime.provider_invocation_record(record)
+    deps.runtime.provider_invocation_record(record, false)
 }
 
 pub(super) async fn set_enabled(

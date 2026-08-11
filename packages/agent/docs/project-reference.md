@@ -2536,10 +2536,16 @@ these bullets as one tool apiece.
   must be real workers.
 - **Transcription and speech:** transcribe, status, model preload, language
   detection, diarization, and audio preprocessing. The native client owns
-  bounded microphone capture and WAV encoding. A healthy worker may declare
-  the kernel-validated `speech_transcription` client action; the authenticated
-  client sends that recording through the ordinary durable dispatcher and
-  inserts its typed `text` result into the draft. Model choice, dependencies,
+  bounded microphone capture, off-main-thread 16 kHz WAV normalization, and
+  base64 projection. A healthy worker may declare the kernel-validated
+  `speech_transcription` client action; when that owner is a resident service,
+  activation waits for service/model readiness and reuses its verified private
+  snapshot across calls. Initial readiness has a bounded 60-second window for
+  one-time local model initialization; steady-state health probes remain
+  short. The authenticated client sends the recording through
+  the ordinary durable dispatcher, may request an immediate receipt without
+  the already-durable input echo, and inserts its typed `text` result into the
+  draft. Later run inspection remains complete. Model choice, dependencies,
   recognition, and cleanup remain entirely worker-owned.
 - **Devices and notifications:** the reminder use case now owns the narrow
   `notification_delivery` path described above: authenticated registration,
@@ -3169,8 +3175,9 @@ Deterministic tests cover:
   suppression, terminal-event cursor advancement, causal depth, concurrency
   queueing, timeout, stop/disable, failure disablement, system-inbox attachment,
   and all-vault secret rejection/redaction;
-- lazy resident reuse plus shutdown, stop-all, disable, process-exit, and
-  repeated-health-failure supervision;
+- lazy ordinary resident reuse, bounded eager cold-start readiness for
+  native-client-action services, verified live-snapshot reuse, plus shutdown,
+  stop-all, disable, process-exit, and repeated-health-failure supervision;
 - a natural-language model loop that proactively upserts a complete worker,
   sees its direct typed tool immediately, invokes it, and reports the persistent
   adaptation; plus relevance selection, discovery promotion, complete tool
