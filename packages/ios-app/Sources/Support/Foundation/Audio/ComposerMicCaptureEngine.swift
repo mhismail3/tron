@@ -17,13 +17,13 @@ final class ComposerMicCaptureBuffer: @unchecked Sendable {
         lock.withLock { normalizedLevel }
     }
 
-    func drain() -> Data {
+    func drainChunks() -> [Data] {
         lock.withLock {
             defer {
                 chunks = []
                 normalizedLevel = 0
             }
-            return chunks.reduce(into: Data()) { $0.append($1) }
+            return chunks
         }
     }
 
@@ -41,8 +41,9 @@ final class ComposerMicCaptureBuffer: @unchecked Sendable {
 /// It deliberately owns no model, transcription, cleanup, or routing policy.
 @MainActor
 final class ComposerMicCaptureEngine {
+    nonisolated static let transcriptionSampleRate: Double = 16_000
     private(set) var isRunning = false
-    private(set) var sampleRate: Double = 44_100
+    private(set) var sampleRate: Double = transcriptionSampleRate
 
     nonisolated static let sessionOptions: AVAudioSession.CategoryOptions = [
         .defaultToSpeaker,
@@ -90,7 +91,7 @@ final class ComposerMicCaptureEngine {
         guard !isRunning else { return }
 
         if Self.usesSimulatorSafeCaptureBackend {
-            sampleRate = 44_100
+            sampleRate = Self.transcriptionSampleRate
             captureBuffer.discard()
             isRunning = true
             simulatorRecordingStartedAt = Date()
@@ -100,7 +101,7 @@ final class ComposerMicCaptureEngine {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playAndRecord, mode: .default, options: Self.sessionOptions)
-            try session.setPreferredSampleRate(44_100)
+            try session.setPreferredSampleRate(Self.transcriptionSampleRate)
             try session.setActive(true, options: [])
             ownsActiveAudioSession = true
         } catch {
@@ -109,14 +110,18 @@ final class ComposerMicCaptureEngine {
             )
         }
 
-        sampleRate = session.sampleRate
         let audioEngine = AVAudioEngine()
         let inputNode = audioEngine.inputNode
         let hardwareFormat = inputNode.outputFormat(forBus: 0)
         guard hardwareFormat.channelCount > 0, hardwareFormat.sampleRate > 0 else {
             try? session.setActive(false, options: [.notifyOthersOnDeactivation])
+            ownsActiveAudioSession = false
             throw ComposerMicCaptureError.startFailed("No audio input available")
         }
+        // The preferred session rate is advisory. The nil-format input tap
+        // receives the node's actual hardware format, so the WAV header and
+        // post-capture resampler must use that exact rate.
+        sampleRate = hardwareFormat.sampleRate
 
         Self.installInputTap(on: inputNode, buffer: captureBuffer)
         do {
@@ -124,6 +129,7 @@ final class ComposerMicCaptureEngine {
         } catch {
             inputNode.removeTap(onBus: 0)
             try? session.setActive(false, options: [.notifyOthersOnDeactivation])
+            ownsActiveAudioSession = false
             throw ComposerMicCaptureError.startFailed(
                 "Failed to start audio engine: \(error.localizedDescription)"
             )
@@ -134,7 +140,7 @@ final class ComposerMicCaptureEngine {
     }
 
     @discardableResult
-    func stop() -> URL? {
+    func stop() async -> URL? {
         if Self.usesSimulatorSafeCaptureBackend {
             guard isRunning else { return nil }
             isRunning = false
@@ -144,7 +150,10 @@ final class ComposerMicCaptureEngine {
                 sampleRate: sampleRate,
                 elapsed: startedAt.map { Date().timeIntervalSince($0) } ?? 0.25
             )
-            return Self.writeWAVFile(pcmData: pcmData, sampleRate: sampleRate)
+            return await Self.finalizeWAVFile(
+                chunks: [pcmData],
+                inputSampleRate: sampleRate
+            )
         }
 
         guard isRunning, let audioEngine = engine else { return nil }
@@ -153,10 +162,13 @@ final class ComposerMicCaptureEngine {
         audioEngine.stop()
         engine = nil
 
-        let pcmData = captureBuffer.drain()
-        let url = Self.writeWAVFile(pcmData: pcmData, sampleRate: sampleRate)
+        let chunks = captureBuffer.drainChunks()
+        let inputSampleRate = sampleRate
         deactivateSession()
-        return url
+        return await Self.finalizeWAVFile(
+            chunks: chunks,
+            inputSampleRate: inputSampleRate
+        )
     }
 
     func cancel() {
@@ -208,7 +220,78 @@ final class ComposerMicCaptureEngine {
         return Double(pow(linear, 1.35))
     }
 
-    static func writeWAVFile(pcmData: Data, sampleRate: Double) -> URL? {
+    /// Consolidate, downsample, and encode away from the UI actor. The capture
+    /// callback remains allocation-bounded while stop no longer performs a
+    /// multi-megabyte reduce/write on the main thread.
+    private nonisolated static func finalizeWAVFile(
+        chunks: [Data],
+        inputSampleRate: Double
+    ) async -> URL? {
+        await Task.detached(priority: .userInitiated) {
+            let pcmData = chunks.reduce(into: Data()) { $0.append($1) }
+            let normalized = resampleMonoPCM16(
+                pcmData,
+                from: inputSampleRate,
+                to: transcriptionSampleRate
+            )
+            return writeWAVFile(
+                pcmData: normalized,
+                sampleRate: min(inputSampleRate, transcriptionSampleRate)
+            )
+        }.value
+    }
+
+    /// Area-average resampling for mono signed 16-bit PCM. Microphone hardware
+    /// commonly captures at 44.1/48 kHz; Whisper consumes 16 kHz speech. The
+    /// weighted interval average provides an anti-aliasing low-pass while
+    /// reducing upload/base64 work by roughly two thirds.
+    nonisolated static func resampleMonoPCM16(
+        _ pcmData: Data,
+        from inputSampleRate: Double,
+        to outputSampleRate: Double
+    ) -> Data {
+        guard !pcmData.isEmpty,
+              pcmData.count.isMultiple(of: MemoryLayout<Int16>.size),
+              inputSampleRate.isFinite,
+              outputSampleRate.isFinite,
+              inputSampleRate > outputSampleRate,
+              outputSampleRate > 0 else {
+            return pcmData
+        }
+
+        let inputCount = pcmData.count / MemoryLayout<Int16>.size
+        let ratio = inputSampleRate / outputSampleRate
+        let outputCount = max(1, Int((Double(inputCount) / ratio).rounded(.down)))
+        var output = Data(count: outputCount * MemoryLayout<Int16>.size)
+        pcmData.withUnsafeBytes { inputRaw in
+            output.withUnsafeMutableBytes { outputRaw in
+                let input = inputRaw.bindMemory(to: Int16.self)
+                let samples = outputRaw.bindMemory(to: Int16.self)
+                for outputIndex in 0..<outputCount {
+                    let start = Double(outputIndex) * ratio
+                    let end = min(Double(inputCount), start + ratio)
+                    let firstInput = Int(start.rounded(.down))
+                    let lastInput = min(inputCount, Int(end.rounded(.up)))
+                    var weightedTotal = 0.0
+                    var totalWeight = 0.0
+                    for inputIndex in firstInput..<lastInput {
+                        let lower = max(start, Double(inputIndex))
+                        let upper = min(end, Double(inputIndex + 1))
+                        let weight = max(0, upper - lower)
+                        weightedTotal += Double(input[inputIndex]) * weight
+                        totalWeight += weight
+                    }
+                    let averaged = totalWeight > 0 ? weightedTotal / totalWeight : 0
+                    samples[outputIndex] = Int16(
+                        max(Double(Int16.min), min(Double(Int16.max), averaged.rounded()))
+                    )
+                }
+            }
+        }
+        return output
+    }
+
+    nonisolated static func writeWAVFile(pcmData: Data, sampleRate: Double) -> URL? {
         guard !pcmData.isEmpty else { return nil }
 
         let url = FileManager.default.temporaryDirectory

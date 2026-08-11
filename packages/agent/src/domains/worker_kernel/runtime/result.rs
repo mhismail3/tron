@@ -125,6 +125,7 @@ you need evidence. Do not ask the user to copy raw JSON. Result preview: {}",
     pub(crate) fn provider_invocation_record(
         &self,
         record: InvocationRecord,
+        compact_response: bool,
     ) -> Result<Value, String> {
         let reference = record
             .output
@@ -134,6 +135,12 @@ you need evidence. Do not ask the user to copy raw JSON. Result preview: {}",
         let mut projected = serde_json::to_value(record).map_err(|error| error.to_string())?;
         if let Some(reference) = reference {
             projected["output"] = reference;
+        }
+        if compact_response {
+            projected
+                .as_object_mut()
+                .ok_or_else(|| "worker invocation projection must be an object".to_owned())?
+                .remove("input");
         }
         Ok(projected)
     }

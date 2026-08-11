@@ -8,6 +8,30 @@
 use super::*;
 
 impl WorkerRuntime {
+    /// Native client actions are latency-sensitive interactive capabilities.
+    /// When their owner is a resident service, activation owns readiness so a
+    /// client never pays model/process cold-start cost after completing input.
+    /// Ordinary service workers remain lazy.
+    pub(super) async fn ensure_native_client_service(
+        &self,
+        worker: &ActiveWorker,
+    ) -> Result<(), String> {
+        if worker.bundle.client_actions.is_empty() {
+            return Ok(());
+        }
+        let WorkerRunner::Service {
+            command,
+            health_url,
+            ..
+        } = &worker.bundle.runner
+        else {
+            return Ok(());
+        };
+        let secrets = self.load_secrets(&worker.bundle)?;
+        self.ensure_resident(worker, command, health_url.as_deref(), &secrets)
+            .await
+    }
+
     pub(super) fn client_action_inventory(&self) -> Result<Vec<Value>, String> {
         WorkerClientAction::all()
             .iter()

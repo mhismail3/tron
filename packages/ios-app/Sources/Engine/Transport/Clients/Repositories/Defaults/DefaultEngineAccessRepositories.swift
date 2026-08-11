@@ -487,6 +487,36 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
+    func invokeWorkerCompactFromSession(
+        workerId: String,
+        input: AnyCodable,
+        originSessionId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        do {
+            return try await client.invokeWorker(
+                workerId: workerId,
+                input: input,
+                idempotencyKey: idempotencyKey,
+                originSessionId: originSessionId,
+                mode: .wait,
+                compactResponse: true
+            )
+        } catch let error as EngineProtocolError where error.errorCode == .invalidParams {
+            // Mixed-version servers reject the new closed-schema field before
+            // durable admission. Reusing the same key without that optional
+            // projection hint preserves compatibility and cannot duplicate a
+            // run; new servers take the compact fast path on the first call.
+            return try await client.invokeWorker(
+                workerId: workerId,
+                input: input,
+                idempotencyKey: idempotencyKey,
+                originSessionId: originSessionId,
+                mode: .wait
+            )
+        }
+    }
+
     func enqueueWorker(
         workerId: String,
         input: AnyCodable,

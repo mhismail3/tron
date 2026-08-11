@@ -63,13 +63,11 @@ final class ComposerMicRecorder {
         startMetering()
 
         autoStopTask?.cancel()
-        autoStopTask = Task { [weak self] in
+        autoStopTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(Self.maxRecordingDuration))
             guard !Task.isCancelled, let self else { return }
-            await MainActor.run {
-                let (url, success) = self.stopRecording()
-                self.onFinish?(url, success)
-            }
+            let (url, success) = await self.stopRecording()
+            self.onFinish?(url, success)
         }
 
         if Task.isCancelled {
@@ -79,13 +77,13 @@ final class ComposerMicRecorder {
     }
 
     @discardableResult
-    func stopRecording() -> (url: URL?, success: Bool) {
+    func stopRecording() async -> (url: URL?, success: Bool) {
         autoStopTask?.cancel()
         autoStopTask = nil
         guard isRecording else { return (nil, false) }
         isRecording = false
         stopMetering()
-        let url = engine.stop()
+        let url = await engine.stop()
         return (url, url != nil)
     }
 

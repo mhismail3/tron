@@ -1,6 +1,39 @@
 use super::*;
 
 #[tokio::test]
+async fn compact_invocation_projection_omits_only_the_echoed_input() {
+    let (runtime, _home) = test_runtime(None);
+    let outcome = runtime
+        .upsert(
+            command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]),
+            None,
+        )
+        .await
+        .unwrap();
+    let record = runtime
+        .invoke(request(
+            &outcome.worker.worker_id,
+            json!({"largePayload":"x".repeat(32_768)}),
+            "compact-invocation-projection",
+        ))
+        .await
+        .unwrap();
+
+    let full = runtime
+        .provider_invocation_record(record.clone(), false)
+        .unwrap();
+    let compact = runtime.provider_invocation_record(record, true).unwrap();
+
+    assert_eq!(
+        full["input"]["largePayload"].as_str().unwrap().len(),
+        32_768
+    );
+    assert!(compact.get("input").is_none());
+    assert_eq!(compact["status"], "completed");
+    assert_eq!(compact["output"]["kind"], "worker_result_reference");
+}
+
+#[tokio::test]
 async fn large_results_stay_exact_and_cross_provider_turns_by_reference() {
     let home = tempfile::tempdir().unwrap();
     let workspace = tempfile::tempdir().unwrap();

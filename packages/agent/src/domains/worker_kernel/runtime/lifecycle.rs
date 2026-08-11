@@ -360,6 +360,10 @@ impl WorkerRuntime {
     ) -> Result<(), String> {
         let active = self.store.load_active(worker_id)?;
         self.refresh_worker_surface_evidence(worker_id).await?;
+        // Native-action service owners are ready at activation. This keeps
+        // cold process/model initialization off the user's post-input path;
+        // non-client service workers retain ordinary lazy startup.
+        self.ensure_native_client_service(&active).await?;
         let (visibility, request_schema) = if active.bundle.exposes_model_tool() {
             (
                 FunctionVisibility::Public,

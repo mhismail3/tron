@@ -158,10 +158,22 @@ fn worker_invoke_admits_normal_model_overrides_but_not_retry_overrides() {
             "idempotencyKey":"override-once",
             "mode":"wait",
             "model":"claude-sonnet-4-6",
-            "reasoningLevel":"high"
+            "reasoningLevel":"high",
+            "compactResponse":true
         }),
     )
     .expect("normal invocation override");
+    assert_eq!(schema["properties"]["compactResponse"]["type"], "boolean");
+    let response = invoke.response_schema.as_ref().expect("response schema");
+    assert!(response["properties"].get("input").is_some());
+    assert!(
+        !response["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "input"),
+        "compact responses may omit only the already-durable input"
+    );
     let retry = json!({
         "retryOfInvocationId":"worker_run_previous",
         "mode":"wait",

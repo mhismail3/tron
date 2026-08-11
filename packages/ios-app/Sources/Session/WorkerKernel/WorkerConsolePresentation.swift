@@ -136,7 +136,7 @@ enum WorkerConsolePresentation {
 
     static func runSummary(_ run: WorkerInvocationDTO) -> String? {
         summaryValue(
-            from: run.input,
+            from: run.input ?? AnyCodable([:]),
             preferredKeys: ["task", "question", "query", "request", "prompt", "topic", "action", "title"]
         )
     }

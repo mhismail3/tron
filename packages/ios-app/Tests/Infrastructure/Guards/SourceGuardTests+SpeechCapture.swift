@@ -24,7 +24,7 @@ extension SourceGuardTests {
             "requestRecordPermission",
             "writeWAVFile",
             "RecordingLevelWaveform",
-            "invokeWorkerFromSession",
+            "invokeWorkerCompactFromSession",
             "\"audioBase64\"",
             "\"mimeType\"",
             "\"fileName\"",

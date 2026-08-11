@@ -386,13 +386,22 @@
 //! effective policy, and pins the effective pair across retries. Command and
 //! service runners reject model overrides. Execution still uses the existing
 //! authenticated model path and adds no secondary credential owner.
-//! Lazy resident processes remain supervised between invocations: an exit or three
-//! consecutive health-check failures disables routing and creates a durable
-//! high-visibility inbox result. System inbox failures without invocation rows
-//! remain eligible for one-time attachment to the next relevant session.
+//! Resident processes remain supervised between invocations: ordinary service
+//! workers start lazily, while a service that owns a native client action is
+//! readied during activation so an interactive client never pays its process or
+//! model cold start after providing input. A ready process executes from the
+//! exact verified disposable snapshot that launched it; repeated invocations
+//! and health checks do not re-hash its potentially large canonical bundle.
+//! Every restart still reloads and verifies the canonical immutable version.
+//! An exit or three consecutive health-check failures disables routing and
+//! creates a durable high-visibility inbox result. System inbox failures
+//! without invocation rows remain eligible for one-time attachment to the next
+//! relevant session.
 //! Resident readiness is distinct from process existence. If cancellation
 //! interrupts lazy startup, the next invocation resumes the health handshake
-//! before sending work rather than racing a merely spawned service.
+//! before sending work rather than racing a merely spawned service. Readiness
+//! has a bounded cold-start window long enough for a local model service to
+//! initialize once; steady-state health probes retain their shorter timeout.
 //! Trusted-local host operations are unrestricted by policy but bounded for
 //! reliability. File reads, directory listings, searches, writes, and edits run
 //! off the async executor. Writes and exact occurrence-checked edits stage,

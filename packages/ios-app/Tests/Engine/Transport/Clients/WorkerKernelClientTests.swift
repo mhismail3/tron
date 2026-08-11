@@ -690,6 +690,7 @@ struct WorkerKernelClientTests {
         transport.writeHandler = { functionId, payload, receivedKey, options in
             #expect(functionId.rawValue == "worker_kernel::invoke")
             #expect((payload as? WorkerInvokeRequestDTO)?.workerId == "speech-worker")
+            #expect((payload as? WorkerInvokeRequestDTO)?.compactResponse == true)
             #expect(receivedKey == key)
             #expect(options.context?.sessionId == "session-voice")
             return WorkerInvocationDTO(
@@ -717,9 +718,73 @@ struct WorkerKernelClientTests {
             workerId: "speech-worker",
             input: AnyCodable(["audioBase64": "AA==", "mimeType": "audio/wav", "fileName": "voice.wav"]),
             idempotencyKey: key,
-            originSessionId: "session-voice"
+            originSessionId: "session-voice",
+            compactResponse: true
         )
 
         #expect(invocation.output?.legacyInline?.dictionaryValue?["text"] as? String == "hello")
+    }
+
+    @Test("Compact native invocation falls back once for an older closed request schema")
+    func compactInvocationFallsBackForOlderServer() async throws {
+        let transport = connectedTransport()
+        let repository = DefaultWorkerKernelRepository(
+            client: WorkerKernelClient(transport: transport)
+        )
+        let key = EngineIdempotencyKey.userAction("speech-transcription-compatibility")
+        var compactValues: [Bool?] = []
+
+        transport.writeHandler = { functionId, payload, receivedKey, options in
+            #expect(functionId.rawValue == "worker_kernel::invoke")
+            let request = try #require(payload as? WorkerInvokeRequestDTO)
+            compactValues.append(request.compactResponse)
+            #expect(receivedKey == key)
+            #expect(options.context?.sessionId == "session-voice")
+            if request.compactResponse == true {
+                throw EngineProtocolError(
+                    code: EngineErrorCode.invalidParams.rawValue,
+                    category: "validation",
+                    message: "request contains unsupported property compactResponse",
+                    retryable: false,
+                    recoverable: true,
+                    origin: "engine"
+                )
+            }
+            return WorkerInvocationDTO(
+                invocationId: "run-legacy-voice",
+                workerId: "speech-worker",
+                workerVersion: "v1",
+                status: "completed",
+                input: request.input,
+                output: AnyCodable(["text": "legacy hello"]),
+                error: nil,
+                idempotencyKey: key.rawValue,
+                traceId: "trace-legacy-voice",
+                causalDepth: 0,
+                triggerKind: "manual",
+                originSessionId: "session-voice",
+                agentSessionId: nil,
+                attemptCount: 1,
+                createdAt: "2026-08-10T12:00:00Z",
+                startedAt: "2026-08-10T12:00:00Z",
+                completedAt: "2026-08-10T12:00:01Z"
+            )
+        }
+
+        let invocation = try await repository.invokeWorkerCompactFromSession(
+            workerId: "speech-worker",
+            input: AnyCodable([
+                "audioBase64": "AA==",
+                "mimeType": "audio/wav",
+                "fileName": "voice.wav",
+            ]),
+            originSessionId: "session-voice",
+            idempotencyKey: key
+        )
+
+        #expect(compactValues.count == 2)
+        #expect(compactValues[0] == true)
+        #expect(compactValues[1] == nil)
+        #expect(invocation.output?.legacyInline?.dictionaryValue?["text"] as? String == "legacy hello")
     }
 }

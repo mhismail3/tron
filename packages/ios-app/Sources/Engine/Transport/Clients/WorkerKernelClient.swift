@@ -210,7 +210,8 @@ final class WorkerKernelClient: EngineDomainClient {
         originSessionId: String? = nil,
         mode: WorkerInvocationMode = .wait,
         model: String? = nil,
-        reasoningLevel: String? = nil
+        reasoningLevel: String? = nil,
+        compactResponse: Bool = false
     ) async throws -> WorkerInvocationDTO {
         try await invokeWrite(
             "worker_kernel::invoke",
@@ -220,7 +221,8 @@ final class WorkerKernelClient: EngineDomainClient {
                 idempotencyKey: idempotencyKey.rawValue,
                 mode: mode,
                 model: model,
-                reasoningLevel: reasoningLevel
+                reasoningLevel: reasoningLevel,
+                compactResponse: compactResponse ? true : nil
             ),
             idempotencyKey: idempotencyKey,
             context: optionalSessionInvocationContext(originSessionId)

@@ -1,8 +1,166 @@
-//! Lazy resident-service supervision and deterministic teardown.
+//! Resident-service readiness, supervision, verified-snapshot reuse, and
+//! deterministic teardown.
 
 use super::*;
 
 impl WorkerRuntime {
+    pub(super) async fn ensure_resident(
+        &self,
+        worker: &ActiveWorker,
+        command: &[String],
+        health_url: Option<&str>,
+        secrets: &HashMap<String, String>,
+    ) -> Result<(), String> {
+        let process = self
+            .residents
+            .entry(resident_key(worker))
+            .or_insert_with(|| {
+                Arc::new(Mutex::new(ResidentProcess {
+                    child: None,
+                    ready: false,
+                    consecutive_health_failures: 0,
+                    runtime_root: None,
+                    worker: None,
+                    health_url: None,
+                }))
+            })
+            .clone();
+        let mut process = process.lock().await;
+        let still_running = match process.child.as_mut() {
+            Some(child) => child
+                .try_wait()
+                .map_err(|error| error.to_string())?
+                .is_none(),
+            None => false,
+        };
+        if !still_running {
+            if let Some(child) = process.child.as_mut() {
+                child.terminate().await;
+            }
+            if let Some(runtime_root) = process.runtime_root.take() {
+                let _ = std::fs::remove_dir_all(runtime_root);
+            }
+            process.worker = None;
+            process.health_url = None;
+            let (runtime_root, workdir) = self.materialize_runtime_artifact(
+                worker,
+                "worker-services",
+                &format!("{}-{}", worker.summary.worker_id, uuid::Uuid::now_v7()),
+            )?;
+            let child = spawn_process(
+                command,
+                &workdir,
+                Some(&self.store.state_dir(&worker.summary.worker_id)?),
+                secrets,
+                Stdio::null(),
+                // Resident output is not part of an invocation result. Leaving
+                // stderr piped without a reader eventually blocks a normally
+                // logging service once the OS pipe fills.
+                Stdio::null(),
+                None,
+            );
+            let child = match child {
+                Ok(child) => child,
+                Err(error) => {
+                    let _ = std::fs::remove_dir_all(&runtime_root);
+                    return Err(error);
+                }
+            };
+            process.child = Some(child);
+            let mut resident_worker = worker.clone();
+            resident_worker.version_dir = runtime_root.join("artifact");
+            process.worker = Some(resident_worker);
+            process.health_url = match &worker.bundle.runner {
+                WorkerRunner::Service { health_url, .. } => health_url.clone(),
+                _ => None,
+            };
+            process.runtime_root = Some(runtime_root);
+            process.ready = health_url.is_none();
+            process.consecutive_health_failures = 0;
+        }
+        if !process.ready
+            && let Some(url) = health_url
+        {
+            let mut healthy = false;
+            let deadline = tokio::time::Instant::now() + RESIDENT_STARTUP_TIMEOUT;
+            loop {
+                let now = tokio::time::Instant::now();
+                if now >= deadline {
+                    break;
+                }
+                let probe_timeout = RESIDENT_HEALTH_TIMEOUT.min(deadline - now);
+                if self
+                    .http
+                    .get(url)
+                    .timeout(probe_timeout)
+                    .send()
+                    .await
+                    .is_ok_and(|response| response.status().is_success())
+                {
+                    healthy = true;
+                    break;
+                }
+                if process
+                    .child
+                    .as_mut()
+                    .expect("resident startup requires a child")
+                    .try_wait()
+                    .map_err(|error| error.to_string())?
+                    .is_some()
+                {
+                    break;
+                }
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                tokio::time::sleep(RESIDENT_STARTUP_POLL_INTERVAL.min(remaining)).await;
+            }
+            if !healthy {
+                if let Some(child) = process.child.as_mut() {
+                    child.terminate().await;
+                }
+                process.child = None;
+                process.ready = false;
+                process.worker = None;
+                process.health_url = None;
+                if let Some(runtime_root) = process.runtime_root.take() {
+                    let _ = std::fs::remove_dir_all(runtime_root);
+                }
+                return Err(format!(
+                    "resident worker failed its startup health check within {} seconds",
+                    RESIDENT_STARTUP_TIMEOUT.as_secs()
+                ));
+            }
+            process.ready = true;
+        }
+        Ok(())
+    }
+
+    /// Return the exact verified snapshot owned by a currently ready resident
+    /// process. Missing, unready, and exited processes deliberately return
+    /// `None`, forcing canonical full-tree verification before any restart.
+    pub(super) async fn running_resident_worker(
+        &self,
+        worker_id: &str,
+        version: &str,
+    ) -> Option<ActiveWorker> {
+        let key = format!("{worker_id}@{version}");
+        let process = self
+            .residents
+            .get(&key)
+            .map(|entry| Arc::clone(entry.value()))?;
+        let mut process = process.lock().await;
+        if !process.ready {
+            return None;
+        }
+        let running = process
+            .child
+            .as_mut()
+            .is_some_and(|child| child.try_wait().is_ok_and(|status| status.is_none()));
+        running.then(|| process.worker.clone()).flatten()
+    }
+
     pub(super) fn dispatch_resident_supervision(self: &Arc<Self>, runs: &mut JoinSet<()>) {
         let residents = self
             .residents
@@ -70,26 +228,9 @@ impl WorkerRuntime {
             return;
         }
 
-        let worker = match self.store.load_version(worker_id, version) {
-            Ok(worker) => worker,
-            Err(error) => {
-                if self.resident_is_current(worker_id, version)
-                    && self.resident_process_is_registered(key, &process)
-                {
-                    let _ = self
-                        .handle_worker_runtime_failure(
-                            worker_id,
-                            version,
-                            "resident_supervision",
-                            &format!("load resident worker version for supervision: {error}"),
-                        )
-                        .await;
-                }
-                return;
-            }
-        };
-        let WorkerRunner::Service { health_url, .. } = worker.bundle.runner else {
-            return;
+        let health_url = {
+            let process = process.lock().await;
+            process.health_url.clone()
         };
         let Some(health_url) = health_url else {
             return;
@@ -186,6 +327,8 @@ impl WorkerRuntime {
             if let Some(runtime_root) = process.runtime_root.take() {
                 let _ = std::fs::remove_dir_all(runtime_root);
             }
+            process.worker = None;
+            process.health_url = None;
         }
         let _ = self.resident_users.remove(key);
     }
