@@ -124,6 +124,35 @@ fn cli_parses_profile_snapshot_and_restore_commands() {
             action: StateAction::Restore { snapshot }
         }) if snapshot == std::path::Path::new("/tmp/profile.tar.zst")
     ));
+
+    let archive = Cli::parse_from(["tron", "state", "archive-legacy"]);
+    assert!(matches!(
+        archive.command,
+        Some(Command::State {
+            action: StateAction::ArchiveLegacy
+        })
+    ));
+
+    let cutover = Cli::parse_from([
+        "tron",
+        "state",
+        "cutover-minimal-core",
+        "/tmp/legacy.tar.zst",
+        "--archive-sha256",
+        &"a".repeat(64),
+        "--confirm-reset",
+    ]);
+    assert!(matches!(
+        cutover.command,
+        Some(Command::State {
+            action: StateAction::CutoverMinimalCore {
+                archive,
+                archive_sha256,
+                confirm_reset: true,
+            }
+        }) if archive == std::path::Path::new("/tmp/legacy.tar.zst")
+            && archive_sha256 == "a".repeat(64)
+    ));
 }
 
 #[test]

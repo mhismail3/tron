@@ -386,7 +386,11 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         engine_causality
             .as_ref()
             .and_then(|causality| causality.context.agent_limits())
-            .and_then(|limits| limits.get("maxAssignmentTurns"))
+            .and_then(|limits| {
+                limits
+                    .get("maxTurns")
+                    .or_else(|| limits.get("maxAssignmentTurns"))
+            })
             .and_then(serde_json::Value::as_u64)
             .and_then(|value| u32::try_from(value).ok()),
     )

@@ -26,7 +26,7 @@ shift
 exec "$@"
 "#;
 
-pub(in crate::domains::worker_kernel) async fn process_run(
+pub(crate) async fn process_run(
     invocation: &Invocation,
     runtime: &WorkerRuntime,
 ) -> Result<Value, String> {

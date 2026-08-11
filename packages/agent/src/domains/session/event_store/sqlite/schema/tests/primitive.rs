@@ -22,13 +22,24 @@ fn fresh_schema_contains_only_primitive_tables() {
     assert_eq!(
         tables,
         vec![
+            "agent_assignment_attempts",
             "agent_assignment_delivery_holds",
+            "agent_assignments",
+            "agent_coordination_traces",
             "agent_deliveries",
+            "agent_management_receipts",
             "agent_message_metadata",
+            "agent_results",
             "agent_session_promotions",
             "agent_wait_members",
             "agent_waits",
+            "agent_wake_intents",
+            "agents",
             "blobs",
+            "code_calls",
+            "code_cells",
+            "code_runtime_events",
+            "code_runtimes",
             "coordination_dependency_edges",
             "coordination_wait_dependency_nodes",
             "coordination_wait_dependency_topologies",
@@ -37,12 +48,43 @@ fn fresh_schema_contains_only_primitive_tables() {
             "coordination_waits",
             "events",
             "logs",
+            "schedule_occurrences",
+            "schedules",
             "sessions",
             "storage_payload_refs",
             "terminals",
             "workspaces",
         ]
     );
+}
+
+#[test]
+fn core_agent_tables_use_assignments_as_the_only_causal_work_identity() {
+    let conn = open_memory();
+    ensure_schema(&conn).unwrap();
+
+    for table in ["agents", "agent_assignments", "agent_assignment_attempts"] {
+        let mut statement = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap();
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        for removed in [
+            "execution_id",
+            "worker_invocation_id",
+            "role_id",
+            "role_version",
+            "skill_ids_json",
+        ] {
+            assert!(
+                !columns.iter().any(|column| column == removed),
+                "{table} retained removed coordination dependency {removed}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -75,6 +117,40 @@ fn schema_installation_is_idempotent() {
     let conn = open_memory();
     ensure_schema(&conn).unwrap();
     ensure_schema(&conn).unwrap();
+}
+
+#[test]
+fn code_runtime_journal_is_owned_by_the_current_event_store_schema() {
+    let conn = open_memory();
+    ensure_schema(&conn).unwrap();
+
+    for object in [
+        "code_runtimes",
+        "code_cells",
+        "code_calls",
+        "code_runtime_events",
+        "idx_code_runtime_current",
+        "idx_code_cells_runtime_status",
+        "idx_code_runtime_events_runtime",
+    ] {
+        let present: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=?1)",
+                [object],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(present, "missing canonical code journal object {object}");
+    }
+
+    let cell_sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE type='table' AND name='code_cells'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(cell_sql.contains("status='running')=(completed_at IS NULL)"));
 }
 
 #[test]

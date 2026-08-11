@@ -21,7 +21,10 @@
 //! Worker-owned agent sessions use the same durable event model and are marked
 //! with one reserved system tag. Default session-list projections exclude that
 //! tag so user conversation lists remain clean; exact-ID reads remain the audit
-//! path and do not depend on a second session store. The event schema indexes
+//! path and do not depend on a second session store. Core schedules share this
+//! database so cursor advancement and occurrence admission remain one
+//! transaction across restart; RFC expansion stays schedule-domain-owned. The
+//! event schema indexes
 //! `(session_id, type, sequence)` so latest typed projections remain bounded as
 //! sessions grow.
 

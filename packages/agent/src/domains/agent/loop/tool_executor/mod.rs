@@ -544,7 +544,10 @@ async fn execute_tool_via_engine(
                 assignment_id.to_owned(),
                 execution_id.to_owned(),
             ),
-            _ => causal_context.with_agent_identity(agent_id.to_owned()),
+            (Some(assignment_id), None) => {
+                causal_context.with_agent_assignment(agent_id.to_owned(), assignment_id.to_owned())
+            }
+            (None, _) => causal_context.with_agent_identity(agent_id.to_owned()),
         };
     }
     if let Some(limits) = agent_limits {

@@ -35,7 +35,7 @@ tokio-tungstenite = "0.26"
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "http2"], default-features = false }
 
 # Database
-rusqlite = { version = "0.32", features = ["bundled", "serde_json", "functions"] }
+rusqlite = { version = "0.32", features = ["bundled", "serde_json", "functions", "hooks"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 zstd = "0.13"
@@ -60,6 +60,12 @@ anyhow = "1"
 # IDs and time
 uuid = { version = "1", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+rrule = "0.14"
+
+# Sandboxed persistent TypeScript cells. `AsyncContext::base` deliberately
+# omits ambient host APIs; Oxc strips TypeScript before QuickJS evaluation.
+rquickjs = { version = "=0.12.1", default-features = false, features = ["std", "futures"] }
+oxc = { version = "=0.116.0", default-features = false, features = ["full"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }

@@ -6,5 +6,6 @@
 
 pub mod blob;
 pub mod event;
+pub(crate) mod schedule;
 pub mod session;
 pub mod workspace;

@@ -735,7 +735,8 @@ fn trusted_agent_internal_child_context(
             (Some(assignment_id), Some(execution_id)) => {
                 context.with_agent_execution(agent_id, assignment_id, execution_id)
             }
-            _ => context.with_agent_identity(agent_id),
+            (Some(assignment_id), None) => context.with_agent_assignment(agent_id, assignment_id),
+            (None, _) => context.with_agent_identity(agent_id),
         };
     }
     if let Some(grant) = parent.delegated_function_grant() {

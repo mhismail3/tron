@@ -19,7 +19,7 @@ const MAX_DIRECTORY_RESULTS: usize = 5_000;
 const DEFAULT_DIRECTORY_WALK_ENTRIES: usize = 10_000;
 const MAX_DIRECTORY_WALK_ENTRIES: usize = 50_000;
 
-pub(in crate::domains::worker_kernel) async fn filesystem_read(
+pub(crate) async fn filesystem_read(
     invocation: &Invocation,
     _runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
@@ -52,7 +52,7 @@ pub(in crate::domains::worker_kernel) async fn filesystem_read(
     })
     .await
 }
-pub(in crate::domains::worker_kernel) async fn filesystem_list(
+pub(crate) async fn filesystem_list(
     invocation: &Invocation,
     _runtime: &WorkerRuntime,
 ) -> Result<Value, String> {

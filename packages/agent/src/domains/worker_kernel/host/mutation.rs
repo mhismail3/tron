@@ -17,7 +17,7 @@ const DEFAULT_FILE_READ_BYTES: usize = 262_144;
 const MAX_HASH_INPUT_BYTES: u64 = 64 * 1_048_576;
 const MAX_EDIT_REPLACEMENTS: usize = 128;
 
-pub(in crate::domains::worker_kernel) async fn filesystem_write(
+pub(crate) async fn filesystem_write(
     invocation: &Invocation,
     runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
@@ -60,7 +60,7 @@ pub(in crate::domains::worker_kernel) async fn filesystem_write(
     })
     .await
 }
-pub(in crate::domains::worker_kernel) async fn filesystem_edit(
+pub(crate) async fn filesystem_edit(
     invocation: &Invocation,
     runtime: &WorkerRuntime,
 ) -> Result<Value, String> {

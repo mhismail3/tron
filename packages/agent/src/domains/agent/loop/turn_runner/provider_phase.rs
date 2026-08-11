@@ -58,6 +58,7 @@ pub(super) struct PreparedProviderResponse {
     pub response: ModelResponse,
     pub leased_delivery_ids: Vec<String>,
     pub leased_delivery_provenance: Vec<Value>,
+    pub core_message_ids: Vec<String>,
 }
 
 fn worker_identity_from_delivery_content(content: &str) -> (Option<String>, Option<String>) {
@@ -410,6 +411,72 @@ fn materialize_agent_coordination(
     Ok(materialized_delivery_ids)
 }
 
+/// Materialize core coordination directly from same-database message custody.
+///
+/// Unlike the compatibility path this needs no transport delivery row. The
+/// query admits only unlinked messages or messages linked to this exact active
+/// assignment, so queued work cannot bleed into an unrelated provider turn.
+fn materialize_core_agent_coordination(
+    event_store: Option<&Arc<crate::domains::session::event_store::EventStore>>,
+    context_manager: &mut ContextManager,
+    session_id: &str,
+    active_assignment_id: Option<&str>,
+    emitter: &crate::domains::agent::r#loop::event_emitter::EventEmitter,
+) -> Result<Vec<String>, String> {
+    let Some(event_store) = event_store else {
+        return Ok(Vec::new());
+    };
+    let messages = event_store
+        .core_messages_for_boundary(session_id, active_assignment_id, 32)
+        .map_err(|error| format!("list core agent messages at provider boundary: {error}"))?;
+    let mut message_ids = Vec::with_capacity(messages.len());
+    for message in messages {
+        let materialized = event_store
+            .materialize_agent_message(&message.message_id)
+            .map_err(|error| {
+                format!(
+                    "materialize core agent message '{}': {error}",
+                    message.message_id
+                )
+            })?;
+        if materialized.created {
+            let _ = emitter.emit(
+                crate::shared::protocol::events::TronEvent::AgentCoordinationMessage {
+                    base: crate::shared::protocol::events::BaseEvent {
+                        session_id: materialized.event.session_id.clone(),
+                        timestamp: materialized.event.timestamp.clone(),
+                        sequence: Some(materialized.event.sequence),
+                        trace_id: Some(materialized.metadata.trace_id.clone()),
+                        parent_invocation_id: None,
+                    },
+                    event_id: materialized.event.id.clone(),
+                    content: materialized.content.clone(),
+                },
+            );
+        }
+        let already_loaded = context_manager.messages_slice().iter().any(|candidate| {
+            matches!(
+                candidate,
+                Message::Agent { content, .. }
+                    if content.message_id == materialized.metadata.message_id
+            )
+        });
+        if !already_loaded {
+            context_manager.add_message_with_source(
+                Message::Agent {
+                    content: materialized.content,
+                    timestamp: None,
+                },
+                crate::domains::agent::context::message_store::MessageAuditSource::events(vec![
+                    materialized.event.id,
+                ]),
+            );
+        }
+        message_ids.push(materialized.metadata.message_id);
+    }
+    Ok(message_ids)
+}
+
 pub(super) async fn open_provider_response(
     params: ProviderPhaseParams<'_>,
 ) -> Result<PreparedProviderResponse, TurnResult> {
@@ -559,6 +626,41 @@ pub(super) async fn open_provider_response(
         params.emitter,
     ) {
         Ok(deliveries) => deliveries,
+        Err(error_msg) => {
+            let failure = FailureEnvelope::new(
+                RUNTIME_PERSISTENCE_ERROR,
+                FailureCategory::Persistence,
+                error_msg.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            );
+            emit_turn_failure(
+                params.emitter,
+                params.persister,
+                params.session_id,
+                params.turn,
+                params.run_context,
+                params.sequence_counter,
+                &failure,
+                None,
+            );
+            return Err(TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(crate::domains::agent::r#loop::errors::StopReason::Error),
+                ..Default::default()
+            });
+        }
+    };
+    let core_message_ids = match materialize_core_agent_coordination(
+        event_store.as_ref(),
+        params.context_manager,
+        params.session_id,
+        params.run_context.agent_assignment_id.as_deref(),
+        params.emitter,
+    ) {
+        Ok(message_ids) => message_ids,
         Err(error_msg) => {
             let failure = FailureEnvelope::new(
                 RUNTIME_PERSISTENCE_ERROR,
@@ -955,6 +1057,7 @@ pub(super) async fn open_provider_response(
         response,
         leased_delivery_ids,
         leased_delivery_provenance,
+        core_message_ids,
     })
 }
 

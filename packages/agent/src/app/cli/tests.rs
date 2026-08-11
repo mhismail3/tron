@@ -54,6 +54,17 @@ fn hidden_oauth_actions_are_wired() {
 }
 
 #[test]
+fn code_runtime_helper_is_exact_and_hidden_from_operator_help() {
+    let cli = Cli::parse_from(["tron", "code-runtime-helper"]);
+    assert!(matches!(cli.command, Some(Command::CodeRuntimeHelper)));
+
+    let help = Cli::try_parse_from(["tron", "--help"])
+        .expect_err("help exits through clap")
+        .to_string();
+    assert!(!help.contains("code-runtime-helper"));
+}
+
+#[test]
 fn apns_auth_actions_are_wired() {
     let cli = Cli::parse_from([
         "tron",

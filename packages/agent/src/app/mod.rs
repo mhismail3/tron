@@ -12,6 +12,7 @@
 //! | [`browser_operator`] | Closed Chrome Native Messaging actuator with separate protocol and lifecycle owners |
 //! | [`bootstrap`] | Runtime assembly, service initialization, database open, and server bind |
 //! | [`health`] | Health/metrics endpoints and disk checks |
+//! | `legacy_archive` | Verified meaningful-data archive and receipt-backed offline minimal-core reset |
 //! | [`lifecycle`] | Onboarding, bearer-token state, and shutdown coordination |
 //!
 //! ## Entry Points
@@ -40,6 +41,9 @@
 //!   modules never create a second command registry.
 //! - The browser host has one socket owner. Protocol validation does not start
 //!   lifecycle tasks, and lifecycle helpers do not interpret browser actions.
+//! - Authority-empty code evaluation re-enters the exact installed Tron binary
+//!   through one hidden helper mode. There is no separately packaged helper
+//!   binary whose signature or protocol version can drift from the server.
 //!
 //! ## Test Ownership
 //!
@@ -52,4 +56,5 @@ pub mod bootstrap;
 pub(crate) mod browser_operator;
 pub mod cli;
 pub mod health;
+pub(crate) mod legacy_archive;
 pub mod lifecycle;

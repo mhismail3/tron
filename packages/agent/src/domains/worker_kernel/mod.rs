@@ -596,7 +596,7 @@ mod contract;
 pub(crate) use contract::function_definitions as test_function_definitions;
 mod dispatches;
 mod handlers;
-mod host;
+pub(crate) mod host;
 mod notifications;
 mod persistence;
 mod process;

@@ -11,6 +11,29 @@ pub fn spawn_prompt_run(
     run_id: String,
     request: PromptRequest,
 ) {
+    spawn_prompt_run_with_model(
+        runtime_deps,
+        responder_factory,
+        session,
+        started_run,
+        run_id,
+        None,
+        request,
+    );
+}
+
+/// Spawn the ordinary persistent-session loop with an immutable execution-time
+/// model snapshot. Reusable assignments use this seam so a per-assignment
+/// override does not rewrite the stable transcript's default model.
+pub(crate) fn spawn_prompt_run_with_model(
+    runtime_deps: &PromptRuntimeDeps,
+    responder_factory: Arc<dyn ModelResponderFactory>,
+    session: &crate::domains::session::event_store::SessionRow,
+    started_run: StartedRun,
+    run_id: String,
+    model_override: Option<String>,
+    request: PromptRequest,
+) {
     let plan = PromptRunPlan {
         started_run,
         orchestrator: runtime_deps.orchestrator.clone(),
@@ -25,7 +48,7 @@ pub fn spawn_prompt_run(
         engine_host: runtime_deps.engine_host.clone(),
         server_origin: runtime_deps.origin.clone(),
         run_id,
-        model: session.latest_model.clone(),
+        model: model_override.unwrap_or_else(|| session.latest_model.clone()),
         working_dir: session.working_directory.clone(),
         request,
     };

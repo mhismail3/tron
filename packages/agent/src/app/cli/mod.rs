@@ -4,8 +4,9 @@
 //! terminal surface that can short-circuit before database, logging, or network
 //! startup.
 //! `notifications` owns relay/direct APNs configuration, `oauth` owns bearer
-//! rotation and contributor OAuth completion, and `snapshots` owns offline
-//! profile snapshot operations. All three route through this single parser and
+//! rotation and contributor OAuth completion, `snapshots` owns restorable
+//! profile snapshots, and `legacy_archive` preserves the meaningful Worker-era
+//! evidence before the minimal-core clean break. All route through this parser and
 //! dispatcher; none starts the server or maintains another command registry.
 
 use std::io::Read;
@@ -69,6 +70,9 @@ pub(crate) enum Command {
         #[arg(long)]
         socket: PathBuf,
     },
+    /// Authority-empty QuickJS child used only by the parent code runtime.
+    #[command(name = "code-runtime-helper", hide = true)]
+    CodeRuntimeHelper,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -85,6 +89,19 @@ pub(crate) enum StateAction {
     Verify { snapshot: PathBuf },
     /// Restore one verified snapshot. Tron must be stopped.
     Restore { snapshot: PathBuf },
+    /// Create a verified, non-restorable archive of meaningful Worker-era data.
+    ArchiveLegacy,
+    /// Reset legacy runtime custody after verifying an exact archive. Tron must be stopped.
+    CutoverMinimalCore {
+        /// Verified archive produced by `state archive-legacy`.
+        archive: PathBuf,
+        /// Exact SHA-256 printed by `state archive-legacy`.
+        #[arg(long)]
+        archive_sha256: String,
+        /// Acknowledge that sessions, runtime databases, workers, and worker state are removed.
+        #[arg(long)]
+        confirm_reset: bool,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -187,9 +204,18 @@ pub(crate) async fn run_subcommand(cmd: &Command) -> Result<()> {
             StateAction::Snapshots => list_profile_snapshots_cli(),
             StateAction::Verify { snapshot } => verify_profile_snapshot_cli(snapshot),
             StateAction::Restore { snapshot } => restore_profile_snapshot_cli(snapshot),
+            StateAction::ArchiveLegacy => create_legacy_archive_cli(),
+            StateAction::CutoverMinimalCore {
+                archive,
+                archive_sha256,
+                confirm_reset,
+            } => cutover_minimal_core_cli(archive, archive_sha256, *confirm_reset),
         },
         Command::BrowserNativeHost { socket } => {
             crate::app::browser_operator::run_native_host(socket).await
+        }
+        Command::CodeRuntimeHelper => {
+            crate::domains::code_runtime::helper::run_stdio().map_err(anyhow::Error::new)
         }
     }
 }
@@ -204,6 +230,56 @@ use snapshots::{
     create_profile_snapshot_cli, list_profile_snapshots_cli, restore_profile_snapshot_cli,
     verify_profile_snapshot_cli,
 };
+
+fn create_legacy_archive_cli() -> Result<()> {
+    let database = crate::shared::foundation::paths::db_dir().join("tron.sqlite");
+    let _offline_lock = crate::domains::session::event_store::acquire_database_lock(&database)
+        .map_err(|error| anyhow::anyhow!("Tron must be stopped before legacy archive: {error}"))?;
+    let report = crate::app::legacy_archive::create_legacy_archive(
+        &crate::shared::foundation::paths::tron_home(),
+    )
+    .map_err(anyhow::Error::msg)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).context("Failed to encode legacy archive report")?
+    );
+    eprintln!(
+        "Meaningful Worker-era data archived and verified at {}.",
+        report.path.display()
+    );
+    Ok(())
+}
+
+fn cutover_minimal_core_cli(
+    archive: &Path,
+    archive_sha256: &str,
+    confirm_reset: bool,
+) -> Result<()> {
+    ensure!(
+        confirm_reset,
+        "Refusing to reset runtime state without --confirm-reset"
+    );
+    let database = crate::shared::foundation::paths::db_dir().join("tron.sqlite");
+    let _offline_lock = crate::domains::session::event_store::acquire_database_lock(&database)
+        .map_err(|error| {
+            anyhow::anyhow!("Tron must be stopped before minimal-core cutover: {error}")
+        })?;
+    let receipt = crate::app::legacy_archive::reset_to_minimal_core(
+        &crate::shared::foundation::paths::tron_home(),
+        archive,
+        archive_sha256,
+    )
+    .map_err(anyhow::Error::msg)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&receipt).context("Failed to encode reset receipt")?
+    );
+    eprintln!(
+        "Legacy runtime custody reset after verifying {}.",
+        receipt.archive_path.display()
+    );
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests;

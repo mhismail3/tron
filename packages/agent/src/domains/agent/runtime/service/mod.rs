@@ -72,3 +72,4 @@ pub(super) use plan::PromptRunPlan;
 pub use request::PromptRequest;
 use semantic::{OptionalContextPreparation, spawn_optional_context_preparation};
 pub use spawn::spawn_prompt_run;
+pub(crate) use spawn::spawn_prompt_run_with_model;

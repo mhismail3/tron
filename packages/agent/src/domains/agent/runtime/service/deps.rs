@@ -37,4 +37,18 @@ impl PromptEngineCausality {
             idempotency_key: invocation.causal_context.idempotency_key.clone(),
         }
     }
+
+    /// Build engine-owned causality for one core reusable-agent run without a
+    /// synthetic model/client invocation or legacy execution-node identity.
+    #[must_use]
+    pub(crate) fn core_agent(context: CausalContext, run_id: &str) -> Self {
+        Self {
+            context,
+            parent_invocation_id: None,
+            invocation_id: InvocationId::new(format!("core-agent-run:{run_id}"))
+                .expect("non-empty core agent invocation id"),
+            function_id: FunctionId::new("agent::core_run").expect("static core agent function id"),
+            idempotency_key: Some(format!("core-agent-run:{run_id}")),
+        }
+    }
 }

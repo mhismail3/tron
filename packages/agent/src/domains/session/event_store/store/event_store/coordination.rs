@@ -310,6 +310,10 @@ pub(crate) struct CoordinationWaitAdmission {
 
 #[derive(Clone, Debug)]
 enum ImportedCoordinationTerminal {
+    CoreResult {
+        evidence: CoordinationTerminalEvidence,
+        created_at: String,
+    },
     AgentMessage {
         evidence: CoordinationTerminalEvidence,
         message_id: String,
@@ -325,15 +329,17 @@ enum ImportedCoordinationTerminal {
 impl ImportedCoordinationTerminal {
     fn evidence(&self) -> &CoordinationTerminalEvidence {
         match self {
-            Self::AgentMessage { evidence, .. } | Self::WorkerDelivery { evidence, .. } => evidence,
+            Self::CoreResult { evidence, .. }
+            | Self::AgentMessage { evidence, .. }
+            | Self::WorkerDelivery { evidence, .. } => evidence,
         }
     }
 
     fn created_at(&self) -> &str {
         match self {
-            Self::AgentMessage { created_at, .. } | Self::WorkerDelivery { created_at, .. } => {
-                created_at
-            }
+            Self::CoreResult { created_at, .. }
+            | Self::AgentMessage { created_at, .. }
+            | Self::WorkerDelivery { created_at, .. } => created_at,
         }
     }
 }
@@ -366,60 +372,7 @@ impl EventStore {
             let mut connection = self.conn()?;
             let transaction =
                 connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            let _ = SessionRepo::get_by_id(&transaction, &request.target_session_id)?.ok_or_else(
-                || EventStoreError::SessionNotFound(request.target_session_id.clone()),
-            )?;
-            if let Some(source_session_id) = request.source_session_id.as_deref()
-                && SessionRepo::get_by_id(&transaction, source_session_id)?.is_none()
-            {
-                return Err(EventStoreError::SessionNotFound(
-                    source_session_id.to_owned(),
-                ));
-            }
-            if request.content.kind == AgentMessageKind::Answer {
-                validate_answer_correlation(&transaction, request)?;
-            }
-            let now = chrono::Utc::now().to_rfc3339();
-            let channel_sequence = match request.channel_sequence {
-                Some(sequence) => sequence,
-                None => transaction.query_row(
-                    "SELECT COALESCE(MAX(channel_sequence),-1)+1
-                     FROM agent_message_metadata WHERE channel_id=?1",
-                    [&request.channel_id],
-                    |row| row.get::<_, u64>(0),
-                )?,
-            };
-            transaction.execute(
-                "INSERT OR IGNORE INTO agent_message_metadata(
-                    message_id,idempotency_key,channel_id,channel_sequence,source_agent_id,
-                    source_session_id,target_agent_id,target_session_id,kind,authority,
-                    trace_id,autonomous_hop,assignment_id,reply_to_message_id,
-                    content_json,created_at
-                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
-                params![
-                    request.content.message_id,
-                    request.idempotency_key,
-                    request.channel_id,
-                    channel_sequence,
-                    request.content.source_agent_id,
-                    request.source_session_id,
-                    request.target_agent_id,
-                    request.target_session_id,
-                    enum_string(&request.content.kind)?,
-                    enum_string(&request.content.authority)?,
-                    request.trace_id,
-                    request.autonomous_hop,
-                    request.content.assignment_id,
-                    request.content.reply_to,
-                    serde_json::to_string(&request.content)?,
-                    now,
-                ],
-            )?;
-            let metadata = query_message_by_key(&transaction, &request.idempotency_key)?
-                .ok_or_else(|| {
-                    EventStoreError::Internal("agent message metadata disappeared".to_owned())
-                })?;
-            validate_message_replay(&metadata, request)?;
+            let metadata = record_agent_message_in_tx(&transaction, request)?;
             transaction.commit()?;
             Ok(metadata)
         })
@@ -504,7 +457,6 @@ impl EventStore {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn observe_agent_messages(
         &self,
         target_session_id: &str,
@@ -595,7 +547,6 @@ impl EventStore {
     /// Pending safe-boundary work in deterministic delivery order. The
     /// materializer rechecks each row under the target session write lock, so
     /// concurrent callers may safely receive overlapping read pages.
-    #[cfg(test)]
     pub(crate) fn list_pending_agent_messages_for_session(
         &self,
         target_session_id: &str,
@@ -882,206 +833,14 @@ impl EventStore {
         request: &NewCoordinationWait,
         initial_terminals: &[CoordinationTerminalEvidence],
     ) -> Result<CoordinationWaitAdmission> {
-        validate_wait(request)?;
-        validate_coordination_terminals(initial_terminals)?;
-        let requested_targets = request.targets.iter().collect::<BTreeSet<_>>();
-        let mut initial_targets = BTreeSet::new();
-        for terminal in initial_terminals {
-            if !requested_targets.contains(&terminal.target) {
-                return Err(EventStoreError::InvalidOperation(format!(
-                    "initial coordination terminal is not a requested target: {}:{}",
-                    terminal.target.kind.as_str(),
-                    terminal.target.id
-                )));
-            }
-            if !initial_targets.insert(&terminal.target) {
-                return Err(EventStoreError::InvalidOperation(format!(
-                    "duplicate initial coordination terminal: {}:{}",
-                    terminal.target.kind.as_str(),
-                    terminal.target.id
-                )));
-            }
-        }
         self.with_session_write_lock(&request.session_id, || {
             let mut connection = self.conn()?;
             let transaction =
                 connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            let _ = SessionRepo::get_by_id(&transaction, &request.session_id)?
-                .ok_or_else(|| EventStoreError::SessionNotFound(request.session_id.clone()))?;
-            let wait_id = format!("coordination_wait_{}", uuid::Uuid::now_v7());
-            let now = chrono::Utc::now().to_rfc3339();
-            transaction.execute(
-                "INSERT OR IGNORE INTO coordination_waits(
-                    wait_id,idempotency_key,session_id,owner_agent_id,
-                    owner_assignment_id,trace_id,autonomous_hop,mode,created_at
-                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-                params![
-                    wait_id,
-                    request.idempotency_key,
-                    request.session_id,
-                    request.owner_agent_id,
-                    request.owner_assignment_id,
-                    request.trace_id,
-                    request.autonomous_hop,
-                    request.mode.as_str(),
-                    now,
-                ],
-            )?;
-            let record =
-                query_wait_by_key(&transaction, &request.idempotency_key)?.ok_or_else(|| {
-                    EventStoreError::Internal("coordination wait disappeared".to_owned())
-                })?;
-            validate_wait_replay(&record, request)?;
-            let member_count = transaction.query_row(
-                "SELECT COUNT(*) FROM coordination_wait_members WHERE wait_id=?1",
-                [&record.wait_id],
-                |row| row.get::<_, usize>(0),
-            )?;
-            if member_count == 0 && record.disposition == "pending" {
-                for (ordinal, target) in request.targets.iter().enumerate() {
-                    transaction.execute(
-                        "INSERT INTO coordination_wait_members(
-                            wait_id,target_kind,target_id,ordinal
-                         ) VALUES (?1,?2,?3,?4)",
-                        params![record.wait_id, target.kind.as_str(), target.id, ordinal],
-                    )?;
-                }
-            } else {
-                let existing_targets = query_wait_members_in_tx(&transaction, &record.wait_id)?
-                    .into_iter()
-                    .map(|member| member.target)
-                    .collect::<Vec<_>>();
-                if existing_targets != request.targets {
-                    return Err(EventStoreError::InvalidOperation(
-                        "coordination wait idempotency conflict".to_owned(),
-                    ));
-                }
-            }
-            persist_coordination_wait_topology_in_tx(&transaction, &record.wait_id, request)?;
-
-            // Completion can cross the workers/EventStore boundary between
-            // the caller's terminal snapshot and this writer transaction. An
-            // already-imported, still-unobserved completion is stronger local
-            // evidence and carries the exact representation its importer will
-            // replay later. Process imported evidence by arrival time first so
-            // `any` has deterministic first-completion semantics; remaining
-            // initial evidence follows caller target order.
-            let mut imported = request
-                .targets
-                .iter()
-                .map(|target| {
-                    imported_coordination_terminal_in_tx(&transaction, &request.session_id, target)
-                })
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-            validate_coordination_terminals(
-                &imported
-                    .iter()
-                    .map(|terminal| terminal.evidence().clone())
-                    .collect::<Vec<_>>(),
-            )?;
-            imported.sort_by(|left, right| {
-                left.created_at()
-                    .cmp(right.created_at())
-                    .then_with(|| {
-                        left.evidence()
-                            .target
-                            .kind
-                            .as_str()
-                            .cmp(right.evidence().target.kind.as_str())
-                    })
-                    .then_with(|| left.evidence().target.id.cmp(&right.evidence().target.id))
-            });
-            let imported_targets = imported
-                .iter()
-                .map(|terminal| terminal.evidence().target.clone())
-                .collect::<BTreeSet<_>>();
-            let mut ordered_evidence = imported
-                .iter()
-                .map(|terminal| terminal.evidence().clone())
-                .collect::<Vec<_>>();
-            for target in &request.targets {
-                if imported_targets.contains(target) {
-                    continue;
-                }
-                if let Some(terminal) = initial_terminals
-                    .iter()
-                    .find(|terminal| terminal.target == *target)
-                {
-                    ordered_evidence.push(terminal.clone());
-                }
-            }
-            let now = chrono::Utc::now().to_rfc3339();
-            for terminal in &ordered_evidence {
-                apply_coordination_terminal_to_wait_in_tx(
-                    &transaction,
-                    &record.wait_id,
-                    terminal,
-                    &now,
-                )?;
-                resolve_coordination_wait_in_tx(&transaction, &record.wait_id, &now)?;
-            }
-            for terminal in &imported {
-                if wait_member_is_satisfied_in_tx(
-                    &transaction,
-                    &record.wait_id,
-                    &terminal.evidence().target,
-                )? {
-                    absorb_imported_coordination_terminal_in_tx(
-                        &transaction,
-                        &request.session_id,
-                        terminal,
-                        &now,
-                    )?;
-                }
-            }
-            // Cycle membership is exactly the still-pending dependency set.
-            // A terminal handle consumed by this registration cannot deadlock
-            // its caller, so immediate reconciliation intentionally precedes
-            // this check. The write transaction still commits neither the wait
-            // nor its imported evidence if any remaining edge is cyclic.
-            if query_wait_by_id(&transaction, &record.wait_id)?
-                .is_some_and(|wait| wait.disposition == "pending")
-            {
-                ensure_pending_wait_topology_complete_in_tx(&transaction)?;
-                if coordination_wait_has_cycle_in_tx(&transaction, &record.wait_id)? {
-                    return Err(EventStoreError::InvalidOperation(
-                        "AGENT_WAIT_CYCLE: coordination wait would create a durable cycle"
-                            .to_owned(),
-                    ));
-                }
-            }
-            let wait = query_wait_by_id(&transaction, &record.wait_id)?.ok_or_else(|| {
-                EventStoreError::Internal("coordination wait disappeared".to_owned())
-            })?;
-            let resolution = query_unbound_wait_resolution_in_tx(&transaction, &wait.wait_id)?;
-            if resolution.is_some() {
-                // INVARIANT: registration and immediate resolution consumption
-                // are one transaction. A completion that is returned in the
-                // current `agent_wait` tool result can therefore never be
-                // rediscovered later as an aggregate autonomous wake.
-                transaction.execute(
-                    "INSERT OR IGNORE INTO coordination_wait_inline_results(
-                        wait_id,consumer_key,consumed_at
-                     ) VALUES (?1,?2,?3)",
-                    params![wait.wait_id, request.idempotency_key, now],
-                )?;
-                let consumer_key = transaction.query_row(
-                    "SELECT consumer_key FROM coordination_wait_inline_results WHERE wait_id=?1",
-                    [&wait.wait_id],
-                    |row| row.get::<_, String>(0),
-                )?;
-                if consumer_key != request.idempotency_key {
-                    return Err(EventStoreError::InvalidOperation(
-                        "coordination wait resolution already belongs to another consumer"
-                            .to_owned(),
-                    ));
-                }
-            }
+            let admission =
+                create_coordination_wait_in_tx(&transaction, request, initial_terminals)?;
             transaction.commit()?;
-            Ok(CoordinationWaitAdmission { wait, resolution })
+            Ok(admission)
         })
     }
 
@@ -1315,6 +1074,265 @@ impl EventStore {
     }
 }
 
+/// Same-transaction wait primitive used by core Agent coordination to make
+/// registration, terminal reconciliation, wake absorption, and assignment
+/// parking one commit. The public compatibility wrapper above deliberately
+/// keeps its existing session lock while the core owner uses the global writer
+/// lock shared by agent assignments and wake intents.
+pub(super) fn create_coordination_wait_in_tx(
+    transaction: &rusqlite::Transaction<'_>,
+    request: &NewCoordinationWait,
+    initial_terminals: &[CoordinationTerminalEvidence],
+) -> Result<CoordinationWaitAdmission> {
+    validate_wait(request)?;
+    validate_coordination_terminals(initial_terminals)?;
+    let requested_targets = request.targets.iter().collect::<BTreeSet<_>>();
+    let mut initial_targets = BTreeSet::new();
+    for terminal in initial_terminals {
+        if !requested_targets.contains(&terminal.target) {
+            return Err(EventStoreError::InvalidOperation(format!(
+                "initial coordination terminal is not a requested target: {}:{}",
+                terminal.target.kind.as_str(),
+                terminal.target.id
+            )));
+        }
+        if !initial_targets.insert(&terminal.target) {
+            return Err(EventStoreError::InvalidOperation(format!(
+                "duplicate initial coordination terminal: {}:{}",
+                terminal.target.kind.as_str(),
+                terminal.target.id
+            )));
+        }
+    }
+    let _ = SessionRepo::get_by_id(transaction, &request.session_id)?
+        .ok_or_else(|| EventStoreError::SessionNotFound(request.session_id.clone()))?;
+    let wait_id = format!("coordination_wait_{}", uuid::Uuid::now_v7());
+    let now = chrono::Utc::now().to_rfc3339();
+    transaction.execute(
+        "INSERT OR IGNORE INTO coordination_waits(
+            wait_id,idempotency_key,session_id,owner_agent_id,
+            owner_assignment_id,trace_id,autonomous_hop,mode,created_at
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        params![
+            wait_id,
+            request.idempotency_key,
+            request.session_id,
+            request.owner_agent_id,
+            request.owner_assignment_id,
+            request.trace_id,
+            request.autonomous_hop,
+            request.mode.as_str(),
+            now,
+        ],
+    )?;
+    let record = query_wait_by_key(transaction, &request.idempotency_key)?
+        .ok_or_else(|| EventStoreError::Internal("coordination wait disappeared".to_owned()))?;
+    validate_wait_replay(&record, request)?;
+    let member_count = transaction.query_row(
+        "SELECT COUNT(*) FROM coordination_wait_members WHERE wait_id=?1",
+        [&record.wait_id],
+        |row| row.get::<_, usize>(0),
+    )?;
+    if member_count == 0 && record.disposition == "pending" {
+        for (ordinal, target) in request.targets.iter().enumerate() {
+            transaction.execute(
+                "INSERT INTO coordination_wait_members(
+                    wait_id,target_kind,target_id,ordinal
+                 ) VALUES (?1,?2,?3,?4)",
+                params![record.wait_id, target.kind.as_str(), target.id, ordinal],
+            )?;
+        }
+    } else {
+        let existing_targets = query_wait_members_in_tx(transaction, &record.wait_id)?
+            .into_iter()
+            .map(|member| member.target)
+            .collect::<Vec<_>>();
+        if existing_targets != request.targets {
+            return Err(EventStoreError::InvalidOperation(
+                "coordination wait idempotency conflict".to_owned(),
+            ));
+        }
+    }
+    persist_coordination_wait_topology_in_tx(transaction, &record.wait_id, request)?;
+
+    // Completion may precede registration. Locally imported evidence is
+    // ordered by durable arrival so `any` deterministically selects the first
+    // result and registration never depends on a stale caller snapshot.
+    let mut imported = request
+        .targets
+        .iter()
+        .map(|target| {
+            imported_coordination_terminal_in_tx(transaction, &request.session_id, target)
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    validate_coordination_terminals(
+        &imported
+            .iter()
+            .map(|terminal| terminal.evidence().clone())
+            .collect::<Vec<_>>(),
+    )?;
+    imported.sort_by(|left, right| {
+        left.created_at()
+            .cmp(right.created_at())
+            .then_with(|| {
+                left.evidence()
+                    .target
+                    .kind
+                    .as_str()
+                    .cmp(right.evidence().target.kind.as_str())
+            })
+            .then_with(|| left.evidence().target.id.cmp(&right.evidence().target.id))
+    });
+    let imported_targets = imported
+        .iter()
+        .map(|terminal| terminal.evidence().target.clone())
+        .collect::<BTreeSet<_>>();
+    let mut ordered_evidence = imported
+        .iter()
+        .map(|terminal| terminal.evidence().clone())
+        .collect::<Vec<_>>();
+    for target in &request.targets {
+        if imported_targets.contains(target) {
+            continue;
+        }
+        if let Some(terminal) = initial_terminals
+            .iter()
+            .find(|terminal| terminal.target == *target)
+        {
+            ordered_evidence.push(terminal.clone());
+        }
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    for terminal in &ordered_evidence {
+        apply_coordination_terminal_to_wait_in_tx(transaction, &record.wait_id, terminal, &now)?;
+        resolve_coordination_wait_in_tx(transaction, &record.wait_id, &now)?;
+    }
+    for terminal in &imported {
+        if wait_member_is_satisfied_in_tx(
+            transaction,
+            &record.wait_id,
+            &terminal.evidence().target,
+        )? {
+            absorb_imported_coordination_terminal_in_tx(
+                transaction,
+                &request.session_id,
+                terminal,
+                &now,
+            )?;
+        }
+    }
+    // Terminal handles cannot deadlock their caller. Reconcile them before
+    // checking the immutable dependency topology of the remaining members.
+    if query_wait_by_id(transaction, &record.wait_id)?
+        .is_some_and(|wait| wait.disposition == "pending")
+    {
+        ensure_pending_wait_topology_complete_in_tx(transaction)?;
+        if coordination_wait_has_cycle_in_tx(transaction, &record.wait_id)? {
+            return Err(EventStoreError::InvalidOperation(
+                "AGENT_WAIT_CYCLE: coordination wait would create a durable cycle".to_owned(),
+            ));
+        }
+    }
+    let wait = query_wait_by_id(transaction, &record.wait_id)?
+        .ok_or_else(|| EventStoreError::Internal("coordination wait disappeared".to_owned()))?;
+    let resolution = query_unbound_wait_resolution_in_tx(transaction, &wait.wait_id)?;
+    if resolution.is_some() {
+        // INVARIANT: a resolution returned by the registering tool call is
+        // bound to that invocation in the same transaction and can never also
+        // become an aggregate autonomous wake.
+        transaction.execute(
+            "INSERT OR IGNORE INTO coordination_wait_inline_results(
+                wait_id,consumer_key,consumed_at
+             ) VALUES (?1,?2,?3)",
+            params![wait.wait_id, request.idempotency_key, now],
+        )?;
+    }
+    if wait.disposition == "satisfied" {
+        let consumer_key = transaction
+            .query_row(
+                "SELECT consumer_key FROM coordination_wait_inline_results WHERE wait_id=?1",
+                [&wait.wait_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if consumer_key
+            .as_deref()
+            .is_some_and(|key| key != request.idempotency_key)
+        {
+            return Err(EventStoreError::InvalidOperation(
+                "coordination wait resolution already belongs to another consumer".to_owned(),
+            ));
+        }
+    }
+    Ok(CoordinationWaitAdmission { wait, resolution })
+}
+
+/// Same-transaction message primitive used by the core Agent coordination
+/// owner to pair semantic evidence with its engine-derived wake intent.
+pub(super) fn record_agent_message_in_tx(
+    transaction: &rusqlite::Transaction<'_>,
+    request: &NewAgentMessageMetadata,
+) -> Result<AgentMessageMetadataRecord> {
+    validate_message(request)?;
+    let _ = SessionRepo::get_by_id(transaction, &request.target_session_id)?
+        .ok_or_else(|| EventStoreError::SessionNotFound(request.target_session_id.clone()))?;
+    if let Some(source_session_id) = request.source_session_id.as_deref()
+        && SessionRepo::get_by_id(transaction, source_session_id)?.is_none()
+    {
+        return Err(EventStoreError::SessionNotFound(
+            source_session_id.to_owned(),
+        ));
+    }
+    if request.content.kind == AgentMessageKind::Answer {
+        validate_answer_correlation(transaction, request)?;
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let channel_sequence = match request.channel_sequence {
+        Some(sequence) => sequence,
+        None => transaction.query_row(
+            "SELECT COALESCE(MAX(channel_sequence),-1)+1
+             FROM agent_message_metadata WHERE channel_id=?1",
+            [&request.channel_id],
+            |row| row.get::<_, u64>(0),
+        )?,
+    };
+    transaction.execute(
+        "INSERT OR IGNORE INTO agent_message_metadata(
+            message_id,idempotency_key,channel_id,channel_sequence,source_agent_id,
+            source_session_id,target_agent_id,target_session_id,kind,authority,
+            trace_id,autonomous_hop,assignment_id,reply_to_message_id,
+            content_json,created_at
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+        params![
+            request.content.message_id,
+            request.idempotency_key,
+            request.channel_id,
+            channel_sequence,
+            request.content.source_agent_id,
+            request.source_session_id,
+            request.target_agent_id,
+            request.target_session_id,
+            enum_string(&request.content.kind)?,
+            enum_string(&request.content.authority)?,
+            request.trace_id,
+            request.autonomous_hop,
+            request.content.assignment_id,
+            request.content.reply_to,
+            serde_json::to_string(&request.content)?,
+            now,
+        ],
+    )?;
+    let metadata =
+        query_message_by_key(transaction, &request.idempotency_key)?.ok_or_else(|| {
+            EventStoreError::Internal("agent message metadata disappeared".to_owned())
+        })?;
+    validate_message_replay(&metadata, request)?;
+    Ok(metadata)
+}
+
 fn validate_message(request: &NewAgentMessageMetadata) -> Result<()> {
     for (field, value, max) in [
         (
@@ -1373,7 +1391,7 @@ fn validate_message(request: &NewAgentMessageMetadata) -> Result<()> {
     Ok(())
 }
 
-fn canonical_agent_channel_id(first: &str, second: &str) -> String {
+pub(super) fn canonical_agent_channel_id(first: &str, second: &str) -> String {
     if first <= second {
         format!("agent_channel:{first}:{second}")
     } else {
@@ -1759,6 +1777,42 @@ fn imported_coordination_terminal_in_tx(
 ) -> Result<Option<ImportedCoordinationTerminal>> {
     match target.kind {
         CoordinationTargetKind::AgentAssignment => {
+            // The core coordination owner keeps assignment terminal truth and
+            // result custody in this database, so registration observes it in
+            // the same writer transaction. The message fallback below keeps
+            // the currently advertised Worker-backed runtime compatible until
+            // cutover.
+            let core_result = transaction
+                .query_row(
+                    "SELECT assignment.status,result.result_id,result.error,result.created_at
+                     FROM agent_assignments assignment
+                     JOIN agent_results result USING(assignment_id)
+                     WHERE assignment.assignment_id=?1",
+                    [&target.id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            if let Some((status, result_id, error, created_at)) = core_result {
+                return Ok(Some(ImportedCoordinationTerminal::CoreResult {
+                    evidence: CoordinationTerminalEvidence {
+                        target: target.clone(),
+                        status,
+                        evidence_reference: serde_json::json!({
+                            "assignmentId":target.id,
+                            "resultId":result_id,
+                            "error":error,
+                        }),
+                    },
+                    created_at,
+                }));
+            }
             let mut statement = transaction.prepare(&format!(
                 "SELECT {MESSAGE_COLUMNS} FROM agent_message_metadata
                  WHERE target_session_id=?1 AND kind='result' AND assignment_id=?2
@@ -2054,6 +2108,51 @@ fn resolve_all_pending_coordination_waits_in_tx(
     Ok(())
 }
 
+/// Reconcile one canonical core assignment result without crossing a database
+/// boundary. The assignment terminal row, immutable result, member evidence,
+/// fan-in disposition, and caller-created wake intents can therefore share one
+/// transaction. Returns only waits that this terminal newly made ready and
+/// which require an aggregate continuation.
+pub(super) fn reconcile_core_assignment_terminal_in_tx(
+    transaction: &rusqlite::Transaction<'_>,
+    assignment_id: &str,
+    terminal_status: &str,
+    evidence_reference: Value,
+    now: &str,
+) -> Result<Vec<CoordinationWaitResolution>> {
+    let candidate_wait_ids = {
+        let mut statement = transaction.prepare(
+            "SELECT member.wait_id
+             FROM coordination_wait_members member
+             JOIN coordination_waits wait USING(wait_id)
+             WHERE member.target_kind='agent_assignment' AND member.target_id=?1
+               AND member.disposition='pending' AND wait.disposition='pending'
+             ORDER BY wait.created_at,member.wait_id",
+        )?;
+        statement
+            .query_map([assignment_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let terminal = CoordinationTerminalEvidence {
+        target: CoordinationWaitTarget {
+            kind: CoordinationTargetKind::AgentAssignment,
+            id: assignment_id.to_owned(),
+        },
+        status: terminal_status.to_owned(),
+        evidence_reference,
+    };
+    apply_coordination_terminal_globally_in_tx(transaction, &terminal, now)?;
+    for wait_id in &candidate_wait_ids {
+        resolve_coordination_wait_in_tx(transaction, wait_id, now)?;
+    }
+    candidate_wait_ids
+        .into_iter()
+        .filter_map(|wait_id| {
+            query_unbound_wait_resolution_in_tx(transaction, &wait_id).transpose()
+        })
+        .collect()
+}
+
 fn query_unbound_wait_resolution_in_tx(
     transaction: &rusqlite::Transaction<'_>,
     wait_id: &str,
@@ -2106,6 +2205,11 @@ fn absorb_imported_coordination_terminal_in_tx(
     now: &str,
 ) -> Result<()> {
     match terminal {
+        ImportedCoordinationTerminal::CoreResult { .. } => {
+            // The result row is canonical evidence, not a per-recipient
+            // delivery. Core completion suppresses or emits wake intents in
+            // the same transaction after wait reconciliation.
+        }
         ImportedCoordinationTerminal::AgentMessage { message_id, .. } => {
             transaction.execute(
                 "UPDATE agent_message_metadata

@@ -1,4 +1,4 @@
-//! agent domain worker.
+//! Persistent model-agent domain.
 //!
 //! This module owns the server-side prompt harness. Public agent functions are
 //! limited to accepting prompts, reporting runtime status, and aborting active
@@ -60,6 +60,13 @@
 //!
 //! ## Submodules
 //!
+//! - `coordination`: unadvertised, same-database stable-agent, assignment,
+//!   semantic-message, wait, result, and safe-boundary wake custody. This is
+//!   the core replacement seam for Worker-owned coordination; current tools
+//!   remain on the compatibility runtime until the complete cutover.
+//! - `execution`: unadvertised, Worker-independent FIFO assignment and wake
+//!   supervisor. It reuses the ordinary persistent-session agent loop and
+//!   treats provider/tool calls as restartable attempts over durable truth.
 //! - `contract`: public and hidden `agent::*` tool contracts.
 //! - `handlers` / `prompt`: worker entrypoints and prompt command flow.
 //! - `loop`: turn execution, primitive tool invocation, and recovery.
@@ -75,7 +82,9 @@
 
 pub(crate) mod context;
 pub(crate) mod contract;
+pub(crate) mod coordination;
 pub(crate) mod deps;
+pub(crate) mod execution;
 pub(crate) mod handlers;
 pub(crate) mod r#loop;
 pub(crate) mod prompt;

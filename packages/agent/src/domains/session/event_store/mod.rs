@@ -13,12 +13,15 @@
 //!   manifests plus redacted request evidence persisted before model streams
 //!   without duplicating bulk media or message bodies
 //! - **Agent coordination**: semantic message provenance/materialization,
-//!   generalized assignment/worker/reply waits, plus legacy delivery/mailbox
-//!   compatibility and crash recovery
+//!   generalized waits, and an unadvertised same-database stable-agent,
+//!   assignment, result, and wake-intent successor beside legacy
+//!   delivery/Worker compatibility
 //! - **Foreground user input**: pending/answered state derived from indexed
 //!   tool lifecycle and structured user-message events
 //! - **Native terminals**: bounded PTY launch metadata and 24-hour exited
 //!   history indexes; terminal byte journals remain private filesystem state
+//! - **Schedules**: revision-safe agent-task definitions, deterministic
+//!   occurrence audit, restart cursors, and execution leases
 //! - **Logs**: bounded operational log queries
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
 //!   history, preserving separate client display text and model-facing tool result text
@@ -78,6 +81,13 @@
 //!   registering wait's recipient session and, when known, stable agent; a
 //!   manager or other authorized observer waiting on the same handle cannot
 //!   suppress the delegator's independent automatic result.
+//! - Core reusable-agent custody is additive and unadvertised during the
+//!   compatibility window. `agents` binds one stable identity to one transcript;
+//!   `agent_assignments` is both the scheduling unit and sole causal work node;
+//!   attempts never replace assignment identity. Terminal state, blob-backed
+//!   result custody, wait reconciliation, and automatic/aggregate wake decisions
+//!   share `tron.sqlite`. The core schema and domain API contain no execution
+//!   ID, worker/direct-worker kind, role version, or skill assignment.
 //!   Opaque assignment, worker, and reply handles are normalized by the Engine
 //!   into stable agent/execution dependencies plus immutable causal topology.
 //!   Additive EventStore side tables retain that graph across restart, and the
@@ -125,6 +135,11 @@
 //! - At most one `running` terminal row exists per session. A restart marks
 //!   running rows interrupted before serving clients; output bytes are never
 //!   stored in SQLite and expired metadata/journals are purged together.
+//! - Schedule cursor advancement and occurrence admission commit atomically.
+//!   Timezone/recurrence policy remains schedule-domain-owned; this store keeps
+//!   canonical snapshots, deterministic keys, compare-and-set revisions, and
+//!   renewable execution leases. Deleted schedules remain as tombstones so
+//!   occurrence audit never loses its parent.
 //! - Asynchronous worker-owned session naming uses a storage-level
 //!   compare-and-set that updates only a null or blank title, so a delayed
 //!   policy result cannot overwrite an explicit concurrent user/model title.

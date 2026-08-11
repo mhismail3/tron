@@ -37,7 +37,7 @@ use crate::domains::registration::composition::{
     DomainFunctionRegistration, DomainRegistrationContext,
 };
 use crate::domains::{
-    agent, auth, filesystem, model, product, session, settings, terminal, worker_kernel,
+    agent, auth, filesystem, host, model, product, session, settings, terminal, worker_kernel,
 };
 
 #[must_use = "activate after transport-trigger registration"]
@@ -130,6 +130,10 @@ fn compose_domains(ctx: &ServerRuntimeContext) -> EngineResult<DomainComposition
     let mut functions = Vec::new();
     functions.extend(product::system::function_registrations(&deps)?);
     functions.extend(worker_kernel_registration.functions);
+    functions.extend(host::function_registrations(
+        &deps,
+        std::sync::Arc::clone(&worker_kernel_runtime),
+    )?);
     functions.extend(filesystem::function_registrations(&deps)?);
     functions.extend(product::blob::function_registrations(&deps)?);
     functions.extend(product::message::function_registrations(&deps)?);
@@ -392,7 +396,7 @@ mod tests {
         let fixed_tools = value["fixedTools"]
             .as_array()
             .expect("fixed tool inventory");
-        assert_eq!(fixed_tools.len(), 27);
+        assert_eq!(fixed_tools.len(), 24);
         let fixed_names = fixed_tools
             .iter()
             .filter_map(|tool| tool["modelName"].as_str())
@@ -405,16 +409,13 @@ mod tests {
                 "agent_send",
                 "agent_spawn",
                 "agent_wait",
-                "filesystem_edit",
-                "filesystem_list",
-                "filesystem_read",
-                "filesystem_search_text",
-                "filesystem_write",
-                "process_run",
+                "bash",
+                "edit",
+                "read",
                 "request_user_input",
                 "result_read",
                 "session_set_title",
-                "web_fetch",
+                "write",
                 "worker_disable",
                 "worker_discover",
                 "worker_enable",
@@ -439,7 +440,7 @@ mod tests {
                 .iter()
                 .filter(|tool| tool["audience"] == "ordinary")
                 .count(),
-            16
+            13
         );
         assert_eq!(
             fixed_tools
@@ -486,7 +487,7 @@ mod tests {
                 && tool["exposed"] == true
         }));
         assert!(value["surface"]["catalogRevision"].is_u64());
-        assert_eq!(value["surface"]["fixedToolCount"], 16);
+        assert_eq!(value["surface"]["fixedToolCount"], 13);
         assert!(value["surface"]["surfaceHash"].is_string());
         assert!(value["surface"]["availableWorkers"].is_array());
         assert!(value["surface"].get("tools").is_none());
@@ -501,7 +502,7 @@ mod tests {
             .await
             .value
             .expect("rename surface snapshot");
-        assert_eq!(renamed["surface"]["fixedToolCount"], 17);
+        assert_eq!(renamed["surface"]["fixedToolCount"], 14);
         assert!(renamed["fixedTools"].as_array().is_some_and(|tools| {
             tools.iter().any(|tool| {
                 tool["modelName"] == "session_set_title"

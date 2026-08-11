@@ -30,7 +30,7 @@ fn model_facing_contracts_own_unique_names_and_order() {
             .iter()
             .filter(|tool| matches!(tool.audience, ModelToolAudience::Ordinary))
             .count(),
-        15
+        8
     );
     assert_eq!(
         tools
@@ -53,14 +53,7 @@ fn model_facing_contracts_own_unique_names_and_order() {
             "agent_send",
             "agent_spawn",
             "agent_wait",
-            "filesystem_edit",
-            "filesystem_list",
-            "filesystem_read",
-            "filesystem_search_text",
-            "filesystem_write",
-            "process_run",
             "result_read",
-            "web_fetch",
             "worker_discover",
             "worker_invoke",
         ])

@@ -11,7 +11,10 @@
 //! |--------|----------------------|
 //! | `agent`, `model` | Model turns and provider protocol |
 //! | `session` | Durable conversation and event truth |
+//! | `schedule` | Durable time-triggered agent assignments and recurrence audit |
+//! | `code_runtime` | Unadvertised broker-only TypeScript journals and skill state |
 //! | `auth`, `settings` | Authenticated product configuration |
+//! | `host` | Minimal trusted-local read, write, edit, and Bash primitives |
 //! | `product` | Fixed client-only blob, logs, message, and system operations |
 //! | `filesystem` | Native workspace browsing and bounded repository inspection used by clients |
 //! | `terminal` | Authenticated native PTY custody and reconnect replay |
@@ -28,10 +31,16 @@
 
 pub mod agent;
 pub mod auth;
+/// Unadvertised persistent TypeScript journal and agent-authored skill substrate.
+pub mod code_runtime;
 pub mod filesystem;
+pub mod host;
 pub mod model;
 pub(crate) mod product;
 pub mod registration;
+/// Durable time-triggered agent work; initially unadvertised while the minimal
+/// core dispatcher and model contract are integrated.
+pub(crate) mod schedule;
 /// Session domain: lifecycle, reads, reconstruction, and context artifact services.
 pub mod session;
 pub mod settings;

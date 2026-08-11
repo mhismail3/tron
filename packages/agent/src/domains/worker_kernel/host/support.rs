@@ -10,10 +10,7 @@ use crate::shared::server::errors::ToolError;
 
 pub(super) const MAX_FILE_BYTES: usize = 4 * 1_048_576;
 
-pub(in crate::domains::worker_kernel) fn resolve_path(
-    invocation: &Invocation,
-    value: &str,
-) -> Result<PathBuf, String> {
+pub(crate) fn resolve_path(invocation: &Invocation, value: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(value);
     if path.is_absolute() {
         return Ok(path);

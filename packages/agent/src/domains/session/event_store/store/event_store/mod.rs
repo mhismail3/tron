@@ -14,7 +14,11 @@
 //! Coordination message history uses stable keyset pages, while unread-message
 //! and correspondent projections expose count-backed offset pages. Team and
 //! native clients can therefore remain bounded without making old durable
-//! communication evidence unreachable.
+//! communication evidence unreachable. The dormant `core_coordination` seam
+//! additionally commits stable agents, assignment-only causal topology,
+//! attempts, blob-backed results, and Engine-derived safe-boundary wakes in
+//! this database. It has no provider/client registration yet; the advertised
+//! Worker-backed runtime remains unchanged until the complete cutover.
 
 use serde_json::Value;
 
@@ -27,11 +31,14 @@ use crate::domains::session::event_store::{EventRow, SessionRow};
 
 mod auxiliary;
 mod coordination;
+mod core_coordination;
+mod core_execution;
 mod deliveries;
 mod event_log;
 mod locking;
 mod logs;
 mod organization;
+mod schedules;
 mod session_lifecycle;
 mod state;
 mod terminal;
@@ -57,6 +64,7 @@ pub use organization::{
     SESSION_ORGANIZATION_GROUP_TAG_PREFIX, SessionOrganizationArchiveAction,
     SessionOrganizationMutation, SessionOrganizationSnapshot, session_organization_from_tags,
 };
+pub(crate) use schedules::StoredScheduleReconciliation;
 pub(crate) use terminal::TerminalRecord;
 pub(crate) use user_input::UserInputRequestState;
 

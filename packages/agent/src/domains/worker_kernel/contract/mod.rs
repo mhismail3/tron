@@ -95,29 +95,21 @@ fn role_review_proposal_id_schema(confirmed: bool) -> serde_json::Value {
 
 pub(crate) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefinition>> {
     let mut specs = Vec::new();
-    specs.push(model_spec(
+    specs.push(spec(
         "worker_kernel::filesystem_read",
         EffectClass::PureRead,
         RiskLevel::Low,
         json!({"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":4194304}}}),
-        "Read a local UTF-8 file directly with the trusted local user's access.",
-        "filesystem_read",
-        ModelToolAudience::Ordinary,
-        10,
-        "host",
+        "Compatibility endpoint for bounded local UTF-8 reads. Models use the core read primitive.",
     )?.with_workspace_effect(crate::engine::WorkspaceEffect::Read));
-    specs.push(model_spec(
+    specs.push(spec(
         "worker_kernel::filesystem_list",
         EffectClass::PureRead,
         RiskLevel::Low,
         json!({"type":"object","additionalProperties":false,"properties":{"path":{"type":"string"},"maxResults":{"type":"integer","minimum":1,"maximum":5000},"maxWalkEntries":{"type":"integer","minimum":1,"maximum":50000}}}),
-        "List a local directory with deterministic ordering and explicit result and traversal ceilings.",
-        "filesystem_list",
-        ModelToolAudience::Ordinary,
-        20,
-        "host",
+        "Compatibility endpoint for bounded directory listings. Models use the core read primitive.",
     )?.with_workspace_effect(crate::engine::WorkspaceEffect::Read));
-    specs.push(model_spec(
+    specs.push(spec(
         "worker_kernel::filesystem_search_text",
         EffectClass::PureRead,
         RiskLevel::Low,
@@ -135,75 +127,58 @@ pub(crate) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                 "includeIgnoredDirectories":{"type":"boolean","description":"Traverse common dependency, build, cache, and macOS Library directories."}
             }
         }),
-        "Bounded literal search of local UTF-8 files. Choose the smallest path; the default five-second and 20,000-entry ceilings keep agent cancellation and server shutdown responsive.",
-        "filesystem_search_text",
-        ModelToolAudience::Ordinary,
-        30,
-        "host",
+        "Compatibility endpoint for bounded literal search. Models compose search through Bash.",
     )?.with_workspace_effect(crate::engine::WorkspaceEffect::Read));
-    specs.push(model_spec(
+    specs.push(spec(
         "worker_kernel::filesystem_write",
         EffectClass::IdempotentWrite,
         RiskLevel::High,
         json!({"type":"object","additionalProperties":false,"required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"},"createParents":{"type":"boolean"},"expectedSha256":expected_sha256_schema(true)}}),
-        "Atomically publish a complete local text file. Supply expectedSha256 after reading when overwriting concurrent work would be unsafe.",
-        "filesystem_write",
-        ModelToolAudience::Ordinary,
-        40,
-        "host",
+        "Compatibility endpoint for atomic writes. Models use the core write primitive.",
     )?.with_workspace_effect(crate::engine::WorkspaceEffect::ScopedWrite));
-    specs.push(model_spec(
-        "worker_kernel::filesystem_edit",
-        EffectClass::IdempotentWrite,
-        RiskLevel::High,
-        json!({
-            "type":"object",
-            "additionalProperties":false,
-            "required":["path","replacements"],
-            "properties":{
-                "path":{"type":"string"},
-                "expectedSha256":expected_sha256_schema(false),
-                "replacements":{
-                    "type":"array","minItems":1,"maxItems":128,
-                    "items":{
-                        "type":"object","additionalProperties":false,
-                        "required":["oldText","newText"],
-                        "properties":{
-                            "oldText":{"type":"string","minLength":1},
-                            "newText":{"type":"string"},
-                            "expectedOccurrences":{"type":"integer","minimum":1,"maximum":10000}
+    specs.push(
+        spec(
+            "worker_kernel::filesystem_edit",
+            EffectClass::IdempotentWrite,
+            RiskLevel::High,
+            json!({
+                "type":"object",
+                "additionalProperties":false,
+                "required":["path","replacements"],
+                "properties":{
+                    "path":{"type":"string"},
+                    "expectedSha256":expected_sha256_schema(false),
+                    "replacements":{
+                        "type":"array","minItems":1,"maxItems":128,
+                        "items":{
+                            "type":"object","additionalProperties":false,
+                            "required":["oldText","newText"],
+                            "properties":{
+                                "oldText":{"type":"string","minLength":1},
+                                "newText":{"type":"string"},
+                                "expectedOccurrences":{"type":"integer","minimum":1,"maximum":10000}
+                            }
                         }
                     }
                 }
-            }
-        }),
-        "Apply bounded exact-text replacements to one UTF-8 file and atomically publish only when every expected occurrence and optional checksum still match.",
-        "filesystem_edit",
-        ModelToolAudience::Ordinary,
-        45,
-        "host",
-    )?.with_workspace_effect(crate::engine::WorkspaceEffect::ScopedWrite));
-    specs.push(model_spec(
+            }),
+            "Compatibility endpoint for exact atomic edits. Models use the core edit primitive.",
+        )?
+        .with_workspace_effect(crate::engine::WorkspaceEffect::ScopedWrite),
+    );
+    specs.push(spec(
         "worker_kernel::process_run",
         EffectClass::ExternalSideEffect,
         RiskLevel::High,
         json!({"type":"object","additionalProperties":false,"required":["command"],"properties":{"command":{"type":"array","minItems":1,"maxItems":256,"items":{"type":"string"}},"cwd":{"type":"string"},"stdin":{},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":7200}}}),
-        "Run a local command directly with normal user permissions and bounded output. Pass structured JSON directly as stdin and the engine serializes it once; string stdin is written verbatim, so never pre-encode a JSON object into a string.",
-        "process_run",
-        ModelToolAudience::Ordinary,
-        50,
-        "host",
+        "Compatibility endpoint for exact-argv process execution. Models use the core Bash primitive.",
     )?.with_workspace_effect(crate::engine::WorkspaceEffect::ArbitraryProcess));
-    specs.push(model_spec(
+    specs.push(spec(
         "worker_kernel::web_fetch",
         EffectClass::ExternalSideEffect,
         RiskLevel::Medium,
         json!({"type":"object","additionalProperties":false,"required":["url"],"properties":{"url":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":4194304,"default":131072},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":120,"default":30}}}),
-        "Fetch one explicit HTTP or HTTPS URL directly and return bounded raw UTF-8 source content, redirect/status metadata, and a retained-content checksum. The context-safe default retains 128 KiB; request a larger ceiling only when needed.",
-        "web_fetch",
-        ModelToolAudience::Ordinary,
-        60,
-        "host",
+        "Compatibility endpoint for bounded HTTP retrieval. Models compose retrieval through code or Bash.",
     )?);
     specs.push(native_client_spec(
         "worker_kernel::notification_device_upsert",

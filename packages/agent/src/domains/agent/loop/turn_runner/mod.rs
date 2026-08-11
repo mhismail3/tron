@@ -472,6 +472,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     };
     let primitive_surface = prepared_provider.primitive_surface;
     let response = prepared_provider.response;
+    let core_message_ids = prepared_provider.core_message_ids;
     let mut delivery_lease_guard =
         DeliveryLeaseGuard::new(persister, run_id, &prepared_provider.leased_delivery_ids);
     let processed_stream = match process_provider_stream(StreamPhaseParams {
@@ -779,6 +780,21 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             token_usage: stream_result.token_usage,
             ..Default::default()
         };
+    }
+    if !core_message_ids.is_empty()
+        && let Some(event_store) = persister.map(|persister| persister.event_store())
+    {
+        if let Err(error) =
+            event_store.observe_core_agent_messages_at_boundary(session_id, &core_message_ids)
+        {
+            return TurnResult {
+                success: false,
+                error: Some(format!("failed to observe core agent messages: {error}")),
+                stop_reason: Some(StopReason::Error),
+                token_usage: stream_result.token_usage,
+                ..Default::default()
+            };
+        }
     }
 
     // The journal remains authoritative until the complete turn lifecycle,

@@ -42,9 +42,9 @@ mod search;
 mod support;
 mod web;
 
-pub(super) use mutation::{filesystem_edit, filesystem_write};
-pub(super) use process::process_run;
-pub(super) use read::{filesystem_list, filesystem_read};
+pub(crate) use mutation::{filesystem_edit, filesystem_write};
+pub(crate) use process::process_run;
+pub(crate) use read::{filesystem_list, filesystem_read};
 pub(super) use search::filesystem_search_text;
-pub(super) use support::resolve_path;
+pub(crate) use support::resolve_path;
 pub(super) use web::web_fetch;

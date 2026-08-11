@@ -249,6 +249,24 @@ impl CausalContext {
         self
     }
 
+    /// Attach stable reusable-agent and assignment identities without a
+    /// second execution-node identifier.
+    ///
+    /// Core coordination treats the assignment itself as its causal work
+    /// node. The legacy three-identity helper remains during its compatibility
+    /// window, but new execution paths use this assignment-only form.
+    #[must_use]
+    pub fn with_agent_assignment(
+        mut self,
+        agent_id: impl Into<String>,
+        assignment_id: impl Into<String>,
+    ) -> Self {
+        self.agent_id = Some(agent_id.into());
+        self.agent_assignment_id = Some(assignment_id.into());
+        self.agent_execution_id = None;
+        self
+    }
+
     /// Attach stable reusable-agent and assignment topology identities.
     #[must_use]
     pub fn with_agent_execution(

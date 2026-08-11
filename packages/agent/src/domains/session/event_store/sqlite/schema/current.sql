@@ -14,6 +14,113 @@ CREATE TABLE IF NOT EXISTS workspaces (
 
 CREATE INDEX IF NOT EXISTS idx_workspaces_path ON workspaces(path);
 
+-- Core schedules are durable agent tasks, never arbitrary function/worker
+-- callbacks. Canonical target/timing/policy JSON is validated by the schedule
+-- domain before admission; scalar columns retain lifecycle, CAS, and due-query
+-- invariants at the storage boundary.
+CREATE TABLE IF NOT EXISTS schedules (
+  schedule_id        TEXT PRIMARY KEY,
+  idempotency_key    TEXT NOT NULL UNIQUE,
+  request_digest     TEXT NOT NULL,
+  owner_agent_id     TEXT NOT NULL,
+  name               TEXT NOT NULL,
+  target_kind        TEXT NOT NULL CHECK(target_kind IN (
+    'reusable_agent','fresh_agent','capability'
+  )),
+  target_principal_agent_id TEXT,
+  target_json        TEXT NOT NULL,
+  authority_json     TEXT NOT NULL,
+  timing_kind        TEXT NOT NULL CHECK(timing_kind IN ('once','recurring')),
+  timing_json        TEXT NOT NULL,
+  policy_json        TEXT NOT NULL,
+  state              TEXT NOT NULL CHECK(state IN ('active','paused','deleted')),
+  revision           INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 9223372036854775807),
+  cursor_at          TEXT NOT NULL,
+  next_due_at        TEXT,
+  last_error         TEXT,
+  created_at         TEXT NOT NULL,
+  updated_at         TEXT NOT NULL,
+  deleted_at         TEXT,
+  CHECK(length(CAST(name AS BLOB)) BETWEEN 1 AND 200),
+  CHECK(length(CAST(target_json AS BLOB)) BETWEEN 2 AND 65536),
+  CHECK(length(CAST(authority_json AS BLOB)) BETWEEN 2 AND 65536),
+  CHECK(length(CAST(timing_json AS BLOB)) BETWEEN 2 AND 65536),
+  CHECK(length(CAST(policy_json AS BLOB)) BETWEEN 2 AND 4096),
+  CHECK(
+    (target_kind IN ('reusable_agent','fresh_agent')
+      AND target_principal_agent_id IS NOT NULL) OR
+    (target_kind='capability' AND target_principal_agent_id IS NULL)
+  ),
+  CHECK((state='deleted')=(deleted_at IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedules_due
+  ON schedules(state,next_due_at,schedule_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_owner_page
+  ON schedules(owner_agent_id,created_at,schedule_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_page
+  ON schedules(created_at,schedule_id);
+
+-- Occurrences snapshot the task and target at admission. Scheduled keys derive
+-- from `(schedule_id, scheduled_for)`; manual keys derive from the caller's
+-- idempotency key. Compact summary rows audit bounded misfire suppression
+-- without manufacturing agent work for every skipped instant.
+CREATE TABLE IF NOT EXISTS schedule_occurrences (
+  occurrence_id      TEXT PRIMARY KEY,
+  occurrence_key     TEXT NOT NULL UNIQUE,
+  schedule_id        TEXT NOT NULL REFERENCES schedules(schedule_id),
+  schedule_revision  INTEGER NOT NULL CHECK(schedule_revision>=1),
+  kind                TEXT NOT NULL CHECK(kind IN ('scheduled','manual','misfire_summary')),
+  scheduled_for       TEXT NOT NULL,
+  state               TEXT NOT NULL CHECK(state IN (
+    'queued','running','completed','failed','skipped','cancelled'
+  )),
+  target_json         TEXT NOT NULL,
+  authority_json      TEXT NOT NULL,
+  missed_count        INTEGER NOT NULL DEFAULT 0 CHECK(missed_count>=0),
+  window_start        TEXT,
+  window_end          TEXT,
+  skip_reason         TEXT,
+  agent_id            TEXT,
+  assignment_id       TEXT,
+  invocation_id       TEXT,
+  output_ref          TEXT,
+  failure             TEXT,
+  claim_owner         TEXT,
+  lease_expires_at    TEXT,
+  attempt             INTEGER NOT NULL DEFAULT 0 CHECK(attempt>=0),
+  created_at          TEXT NOT NULL,
+  started_at          TEXT,
+  finished_at         TEXT,
+  CHECK(length(CAST(target_json AS BLOB)) BETWEEN 2 AND 65536),
+  CHECK(length(CAST(authority_json AS BLOB)) BETWEEN 2 AND 65536),
+  CHECK(
+    (kind='misfire_summary' AND state='skipped' AND missed_count>0
+      AND window_start IS NOT NULL AND window_end IS NOT NULL) OR
+    (kind!='misfire_summary' AND missed_count=0
+      AND window_start IS NULL AND window_end IS NULL)
+  ),
+  CHECK(
+    (state='running' AND claim_owner IS NOT NULL AND lease_expires_at IS NOT NULL
+      AND started_at IS NOT NULL AND finished_at IS NULL) OR
+    (state!='running' AND claim_owner IS NULL AND lease_expires_at IS NULL)
+  ),
+  CHECK(
+    (state IN ('completed','failed','skipped','cancelled'))=(finished_at IS NOT NULL)
+  ),
+  CHECK(NOT (assignment_id IS NOT NULL AND invocation_id IS NOT NULL)),
+  CHECK(agent_id IS NULL OR assignment_id IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_occurrences_schedule
+  ON schedule_occurrences(schedule_id,created_at DESC,occurrence_id DESC);
+CREATE INDEX IF NOT EXISTS idx_schedule_occurrences_dispatch
+  ON schedule_occurrences(state,scheduled_for,created_at,occurrence_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_occurrences_lease
+  ON schedule_occurrences(state,lease_expires_at,occurrence_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_occurrences_active
+  ON schedule_occurrences(schedule_id,state,created_at,occurrence_id);
+
 CREATE TABLE IF NOT EXISTS sessions (
   id                          TEXT PRIMARY KEY,
   workspace_id                TEXT NOT NULL REFERENCES workspaces(id),
@@ -51,6 +158,315 @@ CREATE INDEX IF NOT EXISTS idx_sessions_created   ON sessions(created_at DESC);
 CREATE TABLE IF NOT EXISTS agent_session_promotions (
   session_id   TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
   promoted_at  TEXT NOT NULL
+);
+
+-- Core reusable-agent identity and work custody. These tables are the dormant
+-- same-database successor to Worker Kernel coordination state: a stable agent
+-- owns one transcript while assignments are the only causal work nodes. There
+-- is intentionally no worker kind, role version, or separate execution ID.
+CREATE TABLE IF NOT EXISTS agents (
+  agent_id                    TEXT PRIMARY KEY,
+  transcript_session_id       TEXT NOT NULL UNIQUE
+    REFERENCES sessions(id) ON DELETE RESTRICT,
+  root_agent_id               TEXT NOT NULL REFERENCES agents(agent_id),
+  workspace_id                TEXT NOT NULL REFERENCES workspaces(id),
+  parent_agent_id             TEXT REFERENCES agents(agent_id),
+  management_owner_agent_id   TEXT REFERENCES agents(agent_id),
+  name                        TEXT NOT NULL,
+  visibility                  TEXT NOT NULL CHECK(visibility IN ('nested','visible')),
+  lifecycle                   TEXT NOT NULL CHECK(lifecycle IN ('open','closing','closed')),
+  default_model               TEXT,
+  default_reasoning_level     TEXT,
+  default_capability_grant_json TEXT NOT NULL DEFAULT '{}',
+  default_write_scopes_json   TEXT NOT NULL DEFAULT '[]',
+  default_limits_json         TEXT NOT NULL,
+  created_at                  TEXT NOT NULL,
+  updated_at                  TEXT NOT NULL,
+  closed_at                   TEXT,
+  CHECK(length(CAST(name AS BLOB)) BETWEEN 1 AND 160),
+  CHECK((lifecycle='closed')=(closed_at IS NOT NULL)),
+  CHECK(
+    (parent_agent_id IS NULL AND root_agent_id=agent_id
+      AND management_owner_agent_id IS NULL AND visibility='visible')
+    OR
+    (parent_agent_id IS NOT NULL AND root_agent_id!=agent_id AND (
+      (visibility='nested' AND management_owner_agent_id IS NOT NULL) OR
+      (visibility='visible' AND management_owner_agent_id IS NULL)
+    ))
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_agents_root
+  ON agents(root_agent_id,lifecycle,created_at,agent_id);
+CREATE INDEX IF NOT EXISTS idx_agents_parent
+  ON agents(parent_agent_id,lifecycle,created_at,agent_id);
+CREATE INDEX IF NOT EXISTS idx_agents_owner
+  ON agents(management_owner_agent_id,lifecycle,created_at,agent_id);
+
+-- Persistent code is one logical journal per stable agent. QuickJS execution
+-- occurs in a disposable helper process; these rows are the parent-owned
+-- recovery truth for accepted cells and nested broker effects. A helper crash
+-- therefore cannot erase admission or cause a completed effect to run twice.
+CREATE TABLE IF NOT EXISTS code_runtimes (
+  runtime_id          TEXT PRIMARY KEY NOT NULL,
+  agent_id            TEXT NOT NULL,
+  epoch               INTEGER NOT NULL CHECK(epoch>=0),
+  is_current          INTEGER NOT NULL CHECK(is_current IN (0,1)),
+  state               TEXT NOT NULL CHECK(state IN ('ready','retired')),
+  next_cell_sequence  INTEGER NOT NULL DEFAULT 0 CHECK(next_cell_sequence>=0),
+  active_cell_id      TEXT,
+  runtime_abi         TEXT NOT NULL,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL,
+  UNIQUE(agent_id,epoch)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_code_runtime_current
+  ON code_runtimes(agent_id) WHERE is_current=1;
+
+CREATE TABLE IF NOT EXISTS code_cells (
+  cell_id             TEXT PRIMARY KEY NOT NULL,
+  runtime_id          TEXT NOT NULL REFERENCES code_runtimes(runtime_id),
+  sequence            INTEGER NOT NULL CHECK(sequence>=0),
+  invocation_key      TEXT NOT NULL,
+  assignment_id       TEXT,
+  source_text         TEXT NOT NULL,
+  source_digest       TEXT NOT NULL,
+  compiled_text       TEXT NOT NULL,
+  compiled_digest     TEXT NOT NULL,
+  status              TEXT NOT NULL CHECK(status IN (
+    'running','committed','failed','cancelled','timed_out'
+  )),
+  result_json         TEXT,
+  output_json         TEXT NOT NULL DEFAULT '[]',
+  error_text          TEXT,
+  created_at          TEXT NOT NULL,
+  started_at          TEXT NOT NULL,
+  completed_at        TEXT,
+  UNIQUE(runtime_id,sequence),
+  UNIQUE(runtime_id,invocation_key),
+  CHECK((status='running')=(completed_at IS NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_cells_runtime_status
+  ON code_cells(runtime_id,status,sequence);
+
+CREATE TABLE IF NOT EXISTS code_calls (
+  call_id             TEXT PRIMARY KEY NOT NULL,
+  cell_id             TEXT NOT NULL REFERENCES code_cells(cell_id),
+  call_ordinal        INTEGER NOT NULL CHECK(call_ordinal>=0),
+  operation           TEXT NOT NULL,
+  request_json        TEXT NOT NULL,
+  request_digest      TEXT NOT NULL,
+  status              TEXT NOT NULL CHECK(status IN ('admitted','completed','failed')),
+  result_json         TEXT,
+  error_text          TEXT,
+  created_at          TEXT NOT NULL,
+  completed_at        TEXT,
+  UNIQUE(cell_id,call_ordinal),
+  CHECK((status='admitted')=(completed_at IS NULL)),
+  CHECK((status='completed')=(result_json IS NOT NULL)),
+  CHECK((status='failed')=(error_text IS NOT NULL))
+);
+
+CREATE TABLE IF NOT EXISTS code_runtime_events (
+  event_id            TEXT PRIMARY KEY NOT NULL,
+  runtime_id          TEXT NOT NULL REFERENCES code_runtimes(runtime_id),
+  cell_id             TEXT REFERENCES code_cells(cell_id),
+  kind                TEXT NOT NULL,
+  payload_json        TEXT NOT NULL,
+  created_at          TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_runtime_events_runtime
+  ON code_runtime_events(runtime_id,created_at,event_id);
+
+CREATE TABLE IF NOT EXISTS agent_assignments (
+  assignment_id                 TEXT PRIMARY KEY,
+  admission_key                 TEXT NOT NULL UNIQUE,
+  agent_id                      TEXT NOT NULL REFERENCES agents(agent_id),
+  requested_by_agent_id         TEXT REFERENCES agents(agent_id),
+  parent_assignment_id          TEXT REFERENCES agent_assignments(assignment_id),
+  retry_of_assignment_id        TEXT REFERENCES agent_assignments(assignment_id),
+  kind                          TEXT NOT NULL CHECK(kind IN (
+    'instruction','request','operator','schedule'
+  )),
+  status                        TEXT NOT NULL CHECK(status IN (
+    'offered','queued','running','waiting','completed','declined','failed',
+    'cancelled','timed_out','expired'
+  )),
+  queue_ordinal                 INTEGER NOT NULL CHECK(queue_ordinal>=0),
+  trace_id                      TEXT NOT NULL,
+  autonomous_hop               INTEGER NOT NULL DEFAULT 0
+    CHECK(autonomous_hop BETWEEN 0 AND 4294967295),
+  causal_depth                  INTEGER NOT NULL CHECK(causal_depth BETWEEN 0 AND 16),
+  causal_ordinal                INTEGER CHECK(causal_ordinal IS NULL OR causal_ordinal>=0),
+  task                          TEXT NOT NULL,
+  context_json                  TEXT NOT NULL,
+  model                         TEXT,
+  reasoning_level               TEXT,
+  capability_snapshot_json      TEXT NOT NULL,
+  write_scopes_snapshot_json    TEXT NOT NULL DEFAULT '[]',
+  limits_snapshot_json          TEXT NOT NULL,
+  deadline_at                   TEXT,
+  created_at                    TEXT NOT NULL,
+  accepted_at                   TEXT,
+  started_at                    TEXT,
+  completed_at                  TEXT,
+  updated_at                    TEXT NOT NULL,
+  CHECK(length(CAST(task AS BLOB)) BETWEEN 1 AND 40000),
+  CHECK((parent_assignment_id IS NULL)=(causal_ordinal IS NULL)),
+  CHECK(
+    (status IN ('completed','declined','failed','cancelled','timed_out','expired'))
+    =(completed_at IS NOT NULL)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_assignments_queue
+  ON agent_assignments(agent_id,status,queue_ordinal,created_at,assignment_id);
+CREATE INDEX IF NOT EXISTS idx_agent_assignments_requester
+  ON agent_assignments(requested_by_agent_id,created_at DESC,assignment_id);
+CREATE INDEX IF NOT EXISTS idx_agent_assignments_parent
+  ON agent_assignments(parent_assignment_id,created_at,assignment_id);
+CREATE INDEX IF NOT EXISTS idx_agent_assignments_trace
+  ON agent_assignments(trace_id,causal_depth,created_at,assignment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_assignments_causal_order
+  ON agent_assignments(parent_assignment_id,causal_ordinal)
+  WHERE parent_assignment_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_assignments_one_active
+  ON agent_assignments(agent_id) WHERE status IN ('running','waiting');
+
+CREATE TABLE IF NOT EXISTS agent_assignment_attempts (
+  attempt_id              TEXT PRIMARY KEY,
+  assignment_id           TEXT NOT NULL
+    REFERENCES agent_assignments(assignment_id) ON DELETE CASCADE,
+  attempt_number          INTEGER NOT NULL CHECK(attempt_number>0),
+  status                  TEXT NOT NULL CHECK(status IN (
+    'running','waiting','completed','failed','interrupted'
+  )),
+  run_id                  TEXT,
+  baseline_event_sequence INTEGER NOT NULL DEFAULT 0 CHECK(baseline_event_sequence>=0),
+  started_at              TEXT NOT NULL,
+  completed_at            TEXT,
+  error                   TEXT,
+  UNIQUE(assignment_id,attempt_number),
+  CHECK((status IN ('running','waiting'))=(completed_at IS NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_assignment_attempts_assignment
+  ON agent_assignment_attempts(assignment_id,attempt_number);
+
+-- Every terminal assignment has one immutable result envelope. Small JSON is
+-- inline; large JSON uses the EventStore's existing content-addressed blob
+-- custody. Failure-only results may intentionally have no payload.
+CREATE TABLE IF NOT EXISTS agent_results (
+  result_id          TEXT PRIMARY KEY,
+  assignment_id      TEXT NOT NULL UNIQUE
+    REFERENCES agent_assignments(assignment_id) ON DELETE RESTRICT,
+  terminal_status    TEXT NOT NULL CHECK(terminal_status IN (
+    'completed','declined','failed','cancelled','timed_out','expired'
+  )),
+  inline_json        TEXT,
+  payload_blob_id    TEXT REFERENCES blobs(id) ON DELETE RESTRICT,
+  payload_sha256     TEXT,
+  payload_byte_count INTEGER NOT NULL CHECK(payload_byte_count>=0),
+  error              TEXT,
+  created_at         TEXT NOT NULL,
+  CHECK(NOT (inline_json IS NOT NULL AND payload_blob_id IS NOT NULL)),
+  CHECK(
+    (payload_byte_count=0 AND inline_json IS NULL AND payload_blob_id IS NULL
+      AND payload_sha256 IS NULL)
+    OR
+    (payload_byte_count>0 AND (inline_json IS NOT NULL OR payload_blob_id IS NOT NULL)
+      AND payload_sha256 IS NOT NULL)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_results_created
+  ON agent_results(created_at,result_id);
+
+-- One durable autonomy gate per causal graph. Evidence is admitted before a
+-- ceiling crossing pauses dispatch; only authenticated operator/user handling
+-- may resume the graph, with a recovery wake whose hop resets to zero.
+CREATE TABLE IF NOT EXISTS agent_coordination_traces (
+  trace_id                 TEXT PRIMARY KEY,
+  root_agent_id            TEXT NOT NULL REFERENCES agents(agent_id),
+  root_session_id          TEXT NOT NULL REFERENCES sessions(id) ON DELETE RESTRICT,
+  state                    TEXT NOT NULL DEFAULT 'active'
+    CHECK(state IN ('active','paused')),
+  reason                   TEXT,
+  message_count            INTEGER NOT NULL DEFAULT 0 CHECK(message_count>=0),
+  message_baseline         INTEGER NOT NULL DEFAULT 0
+    CHECK(message_baseline>=0 AND message_baseline<=message_count),
+  max_autonomous_hop       INTEGER NOT NULL DEFAULT 0 CHECK(max_autonomous_hop>=0),
+  paused_agent_id          TEXT REFERENCES agents(agent_id),
+  paused_assignment_id     TEXT REFERENCES agent_assignments(assignment_id),
+  created_at               TEXT NOT NULL,
+  updated_at               TEXT NOT NULL,
+  paused_at                TEXT,
+  resumed_at               TEXT,
+  CHECK((state='paused')=(paused_at IS NOT NULL)),
+  CHECK((state='paused')=(reason IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_coordination_traces_state
+  ON agent_coordination_traces(state,updated_at,trace_id);
+
+-- Engine-derived wake intent. Model calls never choose active/passive delivery:
+-- the coordination owner emits these only for actionable messages, unabsorbed
+-- assignment results, aggregate waits, operator instructions, or schedules.
+-- Leasing is safe-boundary work and never interrupts a provider stream/tool.
+CREATE TABLE IF NOT EXISTS agent_wake_intents (
+  wake_id               TEXT PRIMARY KEY,
+  idempotency_key       TEXT NOT NULL UNIQUE,
+  target_agent_id       TEXT NOT NULL REFERENCES agents(agent_id),
+  target_session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE RESTRICT,
+  target_assignment_id  TEXT REFERENCES agent_assignments(assignment_id),
+  cause_kind            TEXT NOT NULL CHECK(cause_kind IN (
+    'message','assignment_result','wait_result','operator','schedule','recovery'
+  )),
+  cause_id              TEXT NOT NULL,
+  trace_id              TEXT NOT NULL REFERENCES agent_coordination_traces(trace_id),
+  autonomous_hop        INTEGER NOT NULL DEFAULT 0
+    CHECK(autonomous_hop BETWEEN 0 AND 4294967295),
+  materialized_message_id TEXT UNIQUE
+    REFERENCES agent_message_metadata(message_id) ON DELETE SET NULL,
+  priority              INTEGER NOT NULL CHECK(priority BETWEEN 0 AND 100),
+  disposition           TEXT NOT NULL DEFAULT 'pending'
+    CHECK(disposition IN ('pending','leased','delivered','cancelled')),
+  not_before            TEXT,
+  lease_id              TEXT,
+  delivered_by_lease_id TEXT,
+  lease_count           INTEGER NOT NULL DEFAULT 0 CHECK(lease_count>=0),
+  last_error            TEXT,
+  created_at            TEXT NOT NULL,
+  leased_at             TEXT,
+  delivered_at          TEXT,
+  cancelled_at          TEXT,
+  UNIQUE(target_agent_id,cause_kind,cause_id),
+  CHECK((disposition='leased')=(lease_id IS NOT NULL)),
+  CHECK((disposition='delivered')=(delivered_at IS NOT NULL)),
+  CHECK((disposition='delivered')=(delivered_by_lease_id IS NOT NULL)),
+  CHECK((disposition='cancelled')=(cancelled_at IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_wake_intents_pending
+  ON agent_wake_intents(disposition,priority,not_before,created_at,wake_id);
+CREATE INDEX IF NOT EXISTS idx_agent_wake_intents_target
+  ON agent_wake_intents(target_agent_id,disposition,created_at,wake_id);
+CREATE INDEX IF NOT EXISTS idx_agent_wake_intents_trace
+  ON agent_wake_intents(trace_id,disposition,created_at,wake_id);
+
+-- Exact mutation replay custody. Management transitions are idempotent even
+-- when a client reconnects after commit but before receiving the response.
+CREATE TABLE IF NOT EXISTS agent_management_receipts (
+  idempotency_key  TEXT PRIMARY KEY,
+  action           TEXT NOT NULL CHECK(action IN ('cancel','configure','close','promote')),
+  request_json     TEXT NOT NULL,
+  outcome_json     TEXT NOT NULL,
+  created_at       TEXT NOT NULL,
+  CHECK(length(CAST(request_json AS BLOB)) BETWEEN 2 AND 1048576),
+  CHECK(length(CAST(outcome_json AS BLOB)) BETWEEN 2 AND 4194304)
 );
 
 -- Agent deliveries are durable reference context addressed to either one

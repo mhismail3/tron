@@ -1,6 +1,11 @@
 # Tron Worker-First Technical Reference
 
 > Last verified: 2026-08-11 on the worker-first implementation.
+>
+> The paused `codex/minimal-core-rewrite` feature branch contains an unadvertised
+> replacement in progress. Its exact frozen state, known compile failures, and
+> restart sequence are documented in
+> [Minimal Core Rewrite — Paused Feature Handoff](minimal-core-rewrite-handoff.md).
 
 This document describes the active worker-first implementation.
 
@@ -74,9 +79,9 @@ interrupted-turn recovery, session summaries, and operator diagnostics. It is
 execution evidence for an actual model tool call. It neither grants authority
 nor participates in worker discovery, activation, or permission decisions.
 
-The model-facing fixed surface has 27 direct primitives: 16 fixed operations
+The model-facing fixed surface has 24 direct primitives: 13 fixed operations
 on an ordinary request, ten specialist administration operations, and the
-conditional title operation. The ordinary set includes eight host/interaction
+conditional title operation. The ordinary set includes five host/interaction
 operations, three typed-worker operations, and five first-class reusable-agent
 coordination operations. Each source definition owns one complete typed
 contract containing its canonical function ID, provider name, group, and
@@ -92,13 +97,10 @@ material reliability over an arbitrary process:
 
 | Audience | Primitive | Fixed-kernel reason |
 |---|---|---|
-| Ordinary | `filesystem_read` | Bounded UTF-8 reads, checksums, and truncation evidence without shell quoting. |
-| Ordinary | `filesystem_list` | Deterministic bounded traversal rather than unbounded command output. |
-| Ordinary | `filesystem_search_text` | Cancellable literal search with traversal, result, and time ceilings. |
-| Ordinary | `filesystem_write` | Atomic publication, stale-write detection, and reusable-assignment write claims. |
-| Ordinary | `filesystem_edit` | Exact bounded replacements with stale/ambiguous edit rejection and the same claim discipline. |
-| Ordinary | `process_run` | Exact-argv process-tree custody, bounded I/O/deadlines, cancellation, and workspace collision leasing. |
-| Ordinary | `web_fetch` | URL validation, bounded retrieval, content digest, and provenance; semantic research remains worker-owned. |
+| Ordinary | `read` | One bounded UTF-8 file or deterministic directory listing; search and multi-file composition belong in code or Bash. |
+| Ordinary | `write` | Atomic publication, stale-write detection, and reusable-assignment write claims. |
+| Ordinary | `edit` | Exact bounded replacements with stale/ambiguous edit rejection and the same claim discipline. |
+| Ordinary | `bash` | General local composition with bounded I/O/deadlines, process-tree cancellation, and workspace collision leasing. |
 | Ordinary | `request_user_input` | The foreground session alone owns authenticated human interaction and durable reply validation. |
 | Ordinary | `worker_discover` | Reads the live immutable worker catalog and promotes an exact version for the current session. |
 | Ordinary | `worker_invoke` | Admits typed durable work with idempotency, causal topology, version pinning, and recovery. |
@@ -123,12 +125,11 @@ material reliability over an arbitrary process:
 This is the deliberate simplification boundary. The five agent operations
 replace the old mailbox/list/claim, worker-only wait, and separate worker
 cancellation vocabulary with handles that work across one coordination graph.
-The filesystem and process operations remain separate because reads, atomic
-writes, exact edits, searches, and process-tree custody have different schemas,
-effects, grants, collision rules, and recovery evidence. Collapsing them into a
-single opaque “code mode” would move those distinctions into prompt convention
-and make authority, idempotency, and audit behavior less inspectable rather
-than reducing Engine complexity.
+The host vocabulary keeps separate read, write, edit, and Bash effects because
+their idempotency and collision behavior differs materially. Directory listing
+is a read mode; literal search, Git, HTTP clients, pipelines, and transforms no
+longer receive one schema each. They are composed through Bash or the sandboxed
+code runtime, which is the actual reduction in model vocabulary.
 
 The compatibility bindings `worker_cancel`, `agent_wait_for_workers`,
 `agent_mailbox_list`, and `agent_mailbox_claim` remain executable but
@@ -141,6 +142,54 @@ generic result-read function. The aliases are never registered or discoverable.
 `worker_detach` and `worker_purge` remain native-client-only authenticated
 operator operations;
 neither is ordinary agent vocabulary.
+
+### Unadvertised persistent code substrate
+
+The source tree contains the first unadvertised `code_runtime` substrate; it is
+not registered in the function catalog and therefore does not change the exact
+provider primitive inventory. It exists so the eventual small code surface can
+ship only after process custody, coordination, recovery, and client evidence
+are integrated together.
+
+A logical runtime belongs to a stable `agentId`. It is an immutable ordered
+journal of successful TypeScript/JavaScript cells in `tron.sqlite`, not a
+long-lived JavaScript heap. For every candidate or interrupted-cell recovery,
+the runtime uses Oxc to strip TypeScript, assembles every committed fragment
+plus the candidate into one fresh ES module, and evaluates that module in a
+new QuickJS context. That single-module assembly preserves top-level lexical
+variables, functions, and top-level `await` across cells and server restarts.
+Only the candidate's success commits it; syntax/runtime failure, cancellation,
+and timeout remain durable audit rows and are excluded from later replay.
+Journal cell/byte ceilings require an explicit reset or future reviewed
+consolidation. Tron never silently snapshots or compacts an opaque heap.
+
+QuickJS receives language intrinsics but no module loader, filesystem,
+environment, network, process, credential, or Bash binding. A frozen
+`tron.code.v1` SDK is its only authority. It provides the generic broker plus
+versioned agent, schedule, service, skill, and state conveniences; Bash remains
+the explicit host escape hatch. Every broker call is durably admitted with a
+stable idempotency key before execution. Rehydration must match the original
+operation and canonical input at every call ordinal and returns the stored
+result/failure. Time and randomness cross the same journal. A disposable child
+started through the installed binary's hidden `code-runtime-helper` mode
+implements a versioned line-delimited protocol, so the server can journal
+nested broker results and terminate the physical process without changing
+logical runtime identity or depending on a second packaged executable.
+
+Skill discovery starts empty after the clean cutover; no worker bundle or
+legacy state is converted. Future agent-authored packages live under explicit
+profile or trusted-project skill roots, use a bounded `SKILL.md`, and may expose
+single-file `.ts`/`.js` modules with exactly one default export and no imports.
+Resolution canonicalizes beneath the package root, strips types, and pins exact
+source/emitted digests for the call. Callable modules receive
+`default({tron, state}, input)`. Their state handle is forcibly bound to the
+engine-derived profile/project skill namespace, including calls attempted via
+the generic broker, so a module cannot select another skill's namespace.
+Profile and project capability state use separate engine-owned roots and one
+SQLite database per namespace. The SQLite authorizer denies attachment, temp
+schema, extension/file functions, and internal receipt access while allowing
+ordinary schema, transactions, and FTS5. Mutations and their idempotency
+receipt commit atomically.
 
 Callable function definitions have no generic metadata map. A closed typed
 model-tool contract owns the model name, callability, fixed group/order,
@@ -306,6 +355,36 @@ and claim remain hidden compatibility operations; semantic agent messages use
 the first-class coordination protocol below.
 
 ### Durable Agent Delivery and resumable sessions
+
+An unadvertised core-coordination successor now exists in `tron.sqlite` behind
+no provider or client registration. It is the migration boundary for the
+minimal Engine architecture, not a second advertised protocol. A stable
+`agentId` owns one persistent transcript and reusable defaults; an
+`assignmentId` owns queueing, one-at-a-time execution, attempts, causal
+parentage, waits, terminal state, and result custody. There is deliberately no
+third execution identity and no worker kind, direct-worker adapter, role
+version, or skill assignment in the new model.
+
+Root identities are lazy and deterministic. Child admission creates the hidden
+`tron.system.agent-session` transcript, stable child row, and first assignment
+in one EventStore transaction. Reassignment reuses that transcript and orders
+offered/queued work FIFO. Small results remain inline, large results use the
+existing content-addressed blob store, and terminal assignment state commits
+with wait reconciliation plus Engine-derived safe-boundary wake intents. Models
+never select active/passive delivery: information is passive; actionable
+message kinds, unabsorbed results, resolved fan-in, authenticated operator
+instructions, schedules, and recovery create durable wake causes. Wake leasing
+is at-least-once and restart requeues every unacknowledged lease.
+
+The core message API resolves transcript addresses from opaque agent handles,
+derives owner/peer authority from immutable lineage, creates queued work for an
+instruction and an offered assignment for a request, and preserves exact
+question/answer linkage. Its wait input is structurally limited to assignment
+and reply handles. Dependency edges are derived from canonical assignment
+parentage and assignment-to-agent execution, so cycle detection no longer needs
+Worker execution nodes. This seam remains dormant until the Agent Execution
+service, model tools, scheduler delivery, recovery loop, and native projections
+can cut over together; current behavior below remains the compatibility truth.
 
 Reusable-agent coordination uses a newer semantic path beside the legacy
 worker-delivery compatibility tables. `workers.sqlite` admits stable agents,
@@ -1096,6 +1175,33 @@ instructions. Operators can use `tron state snapshot`, `tron state snapshots`,
 restore <path>`. Restore first moves replaced state into a dated recovery
 directory and rolls back if publication fails.
 
+The minimal-core clean break has a separate, deliberately non-restorable
+evidence command: `tron state archive-legacy`. It requires the server to be
+stopped and publishes a verified owner-only archive containing the session and
+Worker databases, worker-authored text source, and mutable worker-owned state.
+It excludes `auth.json`, vaults, settings, pairing/platform permission state,
+downloaded dependencies and model weights, caches, logs, sockets, and prior
+backup chains. Incomplete turn journals and terminal evidence are retained
+because they can contain user-visible work that never reached canonical
+session history. Credentials and settings remain in their live owned stores
+through cutover; the archive is historical evidence, not a mechanism for
+reviving the removed Worker runtime. Every retained payload has a declared
+byte count and SHA-256 digest, and the command reopens and verifies the
+published archive before reporting success. Verification rejects duplicate or
+undeclared entries and enforces the same aggregate byte and entry ceilings
+before extraction, so a nominal manifest cannot hide additional payloads.
+
+The destructive half is a separate explicit offline operation:
+`tron state cutover-minimal-core <archive> --archive-sha256 <digest>
+--confirm-reset`. It verifies the exact archive again, persists a pending
+receipt, and removes only five closed profile-relative roots: the runtime
+database directory, terminal evidence, ephemeral run directory, Worker
+bundles, and Worker-owned state. Authentication, settings, vaults, backups,
+ordinary workspace files, session Git worktrees, and future capability roots
+are not deletion targets. A completed owner-only receipt makes replay
+idempotent; a crash after the pending receipt simply resumes the same exact
+whitelist with the same archive identity.
+
 Permanent worker purge is similarly recoverable. Before deletion, Tron creates
 and verifies an owner-only archive containing the worker's immutable bundles,
 mutable state, and operational history. Purge aborts if known credential
@@ -1570,23 +1676,20 @@ client payload.
 
 | Model tool | Engine owner | Purpose |
 |---|---|---|
-| `filesystem_read` | `worker_kernel::filesystem_read` | Bounded UTF-8 read |
-| `filesystem_list` | `worker_kernel::filesystem_list` | Deterministically ordered directory listing with result and traversal ceilings |
-| `filesystem_search_text` | `worker_kernel::filesystem_search_text` | Recursive literal search with time, walk, result, hidden-tree, and heavy-directory controls |
-| `filesystem_write` | `worker_kernel::filesystem_write` | Same-directory atomic full write with optional checksum/absence precondition |
-| `filesystem_edit` | `worker_kernel::filesystem_edit` | Exact occurrence-checked UTF-8 replacements with optional checksum and atomic publication |
-| `process_run` | `worker_kernel::process_run` | Local process with bounded output/timeout |
-| `web_fetch` | `worker_kernel::web_fetch` | Explicit raw UTF-8 HTTP(S) fetch with a 128 KiB/30-second default, explicit larger ceilings, redirect/status metadata, truncation evidence, and retained-content SHA-256 |
+| `read` | `host::read` | Bounded UTF-8 file read or deterministic bounded directory listing |
+| `write` | `host::write` | Same-directory atomic full write with optional checksum/absence precondition |
+| `edit` | `host::edit` | Exact occurrence-checked UTF-8 replacements with optional checksum and atomic publication |
+| `bash` | `host::bash` | Trusted local Bash composition with bounded output/deadline and process-tree custody |
 | `request_user_input` | `agent::request_user_input` | One to three necessary native questions; a successful request ends the current run until a structured answer starts the next run |
 | `session_set_title` | `session::set_title` | Explicit user-requested title update for the current causal session; absent from unrelated provider turns |
 
-`process_run.stdin` accepts either a string for exact bytes or a structured JSON
+`bash.stdin` accepts either a string for exact bytes or a structured JSON
 value that the engine serializes exactly once. Agent workers that call JSON
 helpers pass the object directly; manually embedding encoded JSON in a string
 adds an avoidable syntax and escaping failure boundary.
 
 The function catalog owns a closed workspace-effect class for each primitive.
-For reusable-agent assignments, `filesystem_write` and `filesystem_edit`
+For reusable-agent assignments, `write` and `edit`
 resolve only canonical workspace-relative targets covered by the assignment's
 immutable write prefixes. They reject `..`, symbolic-link escapes, and
 case-ambiguous paths, then acquire a durable exact-path reservation. Disjoint
@@ -1594,7 +1697,7 @@ paths may publish concurrently; overlapping paths queue in conflicting FIFO
 order. An earlier whole-workspace process waiter blocks later writers so it
 cannot be starved.
 
-Every `process_run` associated with a durable workspace acquires that
+Every `bash` call associated with a durable workspace acquires that
 whole-workspace process lease before spawn and releases it only after the
 captured process tree exits or cancellation synchronously signals its group. A
 private pre-exec gate prevents user code from running until the direct-child
@@ -1605,14 +1708,14 @@ not invent a child assignment or tool grant for them. Startup cancels orphaned
 mutation claims, closes any unbound process gates, and compares a captured
 process's durable OS birth identity with the live process before signalling its
 recorded group, avoiding unsafe PID-reuse matches. This is collision
-coordination, not a sandbox: `process_run` retains the local user's normal
+coordination, not a sandbox: `bash` retains the local user's normal
 authority and may write outside the declared workspace.
 
-Filesystem reads, listings, searches, writes, and edits execute off the async
+File reads, directory listings, writes, and edits execute off the async
 runtime thread. Reads never load the remainder of a truncated file; listing
 never accumulates an unbounded directory; writes stage, sync, recheck the
 observed prior state immediately before publication, rename within the target
-directory, and sync that directory. `filesystem_edit` rejects stale or
+directory, and sync that directory. `edit` rejects stale or
 ambiguous replacements before touching the target, so agents can edit a small
 region without echoing an entire file through tool JSON. Mutation contracts
 reject empty checksum strings before execution: callers omit the optional
@@ -3001,20 +3104,26 @@ behaviors should still be restored one proven worker at a time.
 ## Storage
 
 The primary `tron.sqlite` remains the source for sessions, messages, provider
-audits, streams, scoped engine state, terminal metadata, and approval-message
-evidence. Worker bundles remain filesystem-canonical; the worker database owns
-their derived indexes and durable operational history.
+audits, streams, scoped engine state, terminal metadata, approval-message
+evidence, and the dormant core stable-agent/assignment/result/wake successor.
+Worker bundles remain filesystem-canonical; the worker database owns their
+derived indexes and durable operational history until compatibility removal.
 
 ### Tables
 
 | Table | Ownership |
 |---|---|
+| `agent_assignment_attempts` | restart evidence for one stable core assignment; an attempt never becomes a second work identity |
 | `agent_assignment_delivery_holds` | one-way FIFO admission latch that keeps accepted assignment instructions out of every provider lease until their exact Running state and attempt baseline commit |
+| `agent_assignments` | unadvertised core FIFO work, immutable authority/resource snapshot, assignment-only causal topology, lifecycle, retry linkage, and terminal timestamps |
 | `agent_deliveries` | durable session/mailbox updates, safe-boundary leases, wake policy, result grants, and observation state |
 | `agent_message_metadata` | canonical bounded agent-message content, semantic provenance, reply linkage, channel order, and safe-boundary materialization/observation state |
+| `agent_results` | one immutable inline or content-addressed result envelope per terminal core assignment |
 | `agent_session_promotions` | idempotent cross-store receipt for making one promoted nested-agent transcript visible in Sessions |
 | `agent_wait_members` | exact top-level worker members and terminal evidence for durable waits |
 | `agent_waits` | durable current-session all/any wait state |
+| `agent_wake_intents` | Engine-derived actionable delivery causes, safe-boundary leases, acknowledgement, and restart recovery |
+| `agents` | stable core identity, persistent transcript, immutable lineage/owner, visibility, lifecycle, and reusable defaults |
 | `coordination_dependency_edges` | immutable normalized mixed-execution parentage and assignment/direct-agent executor dependencies used by wait-cycle admission |
 | `coordination_wait_dependency_nodes` | additive owner/member mapping from opaque coordination handles to exact internal dependency identities |
 | `coordination_wait_dependency_topologies` | canonical per-wait edge-set seal that makes dependency replay immutable, including for an originally empty topology |
@@ -3645,6 +3754,10 @@ Deterministic tests cover:
   concurrent process I/O, process-group termination of background descendants,
   bounded resident responses, and symlink-preserving dependency/runtime copies;
 - iOS protocol, repository, view-model, settings, and build parity.
+- persistent TypeScript lexical/top-level-await replay across restart, failed
+  cell exclusion, exact broker replay/idempotency, ambient-authority absence,
+  skill digest/root validation, cross-skill state isolation, and restricted
+  transactional capability state.
 
 The motivating replay lives at
 `packages/agent/tests/fixtures/last30days_worker_gap.json`. Its deterministic
@@ -3706,6 +3819,7 @@ real ownership split rather than a budget increase.
 - Provider projection and compact guidance: `packages/agent/src/domains/agent/loop/surface/`
 - Trusted-local execution: `packages/agent/src/domains/agent/loop/tool_executor/`
 - Engine settings: `packages/agent/src/domains/settings/config/types/`
+- Persistent code and agent-authored capability substrate: `packages/agent/src/domains/code_runtime/`
 - Transport/auth: `packages/agent/src/transport/` and `packages/agent/src/app/bootstrap/server.rs`
 - iOS engine/worker protocol: `packages/ios-app/Sources/Engine/Protocol/EngineProtocolTypes+Catalog.swift` and `packages/ios-app/Sources/Engine/Protocol/WorkerKernel/`
 - iOS Engine Dashboard: `packages/ios-app/Sources/Session/WorkerKernel/` and `Sources/UI/WorkerConsole/`
