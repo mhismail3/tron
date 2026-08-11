@@ -2,20 +2,26 @@
 //!
 //! Each executable contract owns its optional model name, audience, group, and
 //! ordering. Provider projection and introspection derive from those
-//! definitions; no parallel primitive manifest is retained. `response` owns
-//! output schemas, `bundle` owns the complete atomic worker-authoring schema,
-//! `introspection` owns the closed authenticated architecture projection, and
-//! `support` owns shared builders and bounded validation. Contract tests live
-//! beside those owners.
+//! definitions; no parallel primitive manifest is retained.
+//!
+//! | Module | Purpose |
+//! |--------|---------|
+//! | `agent_coordination` | Reusable-agent model tools, native management reads/mutations, and retained compatibility aliases |
+//! | `bundle` | Complete atomic worker-authoring schema |
+//! | `introspection` | Closed authenticated architecture projection |
+//! | `response` | Function output schemas |
+//! | `support` | Shared builders and bounded validation |
+//! | `tests` | Catalog-wide contract and projection regression tests |
 
 use serde_json::json;
 
 use crate::domains::registration::contract::FunctionContract;
 use crate::engine::{
-    EffectClass, FunctionDefinition, FunctionVisibility, IdempotencyContract, ModelToolAudience,
-    RiskLevel,
+    DelegationPolicy, EffectClass, FunctionDefinition, FunctionVisibility, IdempotencyContract,
+    ModelToolAudience, RiskLevel,
 };
 
+mod agent_coordination;
 mod bundle;
 mod introspection;
 mod response;
@@ -25,7 +31,11 @@ use introspection::worker_architecture_response_schema;
 pub(crate) use response::worker_result_reference_schema;
 use response::{open_response, worker_id_schema};
 pub(crate) use support::{estimate_context_summary_tokens, validate_context_summary_narrative};
-use support::{expected_sha256_schema, model_spec, spec};
+use support::{expected_sha256_schema, model_spec, native_client_spec, spec};
+
+pub(crate) fn agent_role_authoring_schema() -> serde_json::Value {
+    bundle::agent_role_schema()
+}
 
 const WORKER: &str = "worker_kernel";
 const WORKER_UPSERT_DESCRIPTION: &str = "\
@@ -36,6 +46,7 @@ Canonical authoring protocol: (1) use worker_discover, worker_list, or worker_in
 (4) call worker_upsert once to import, validate, dependency-lock, smoke-test, atomically publish, activate, and, when modelExposure is direct, project the direct tool; \
 (5) use the returned worker id/version and public worker tools to verify behavior. \
 Use modelExposure=direct only for an intuitive ordinary agent-facing capability and always declare a narrow, outcome-oriented toolInputSchema without internal coordination fields. Use modelExposure=internal for hook, trigger, client-action, worker-dispatch, or exact agentTools specialist owners that should not advertise an ordinary model tool. inputSchema always remains the complete runtime contract. \
+Every agent runner must make a deliberate reusable-role decision in agentRole: disabled records an intentional non-role; enabled declares the discoverable name, collaboration instructions, delegable tool ceiling, limits, and result mode. Omission remains load-compatible but is reported as needs_role_review and is never discoverable through agent_discover. \
 For sparse background work, a worker may explicitly declare and emit one closed workerWakeup object to durably invoke the same immutable version at its next useful time; do not add a short periodic trigger merely to poll for work. \
 This operation description and request schema are the complete authoritative authoring contract. Never inspect or modify Tron databases, auth stores, binaries, runtime files, lock files, or private server endpoints to infer schemas, activate a worker, or discover hidden steps. \
 If a required behavior is absent from the public contract, report a concrete engine-contract gap instead of guessing or probing internals. Inspect external sources and user workspace data only when they are inputs to the worker's useful behavior. \
@@ -57,14 +68,32 @@ pub(super) const MAX_TEXT_SEARCH_WALK_ENTRIES: usize = 100_000;
 pub(crate) fn background_worker_receipt_message(invocation_id: &str) -> String {
     format!(
         "The durable worker run is continuing in the background. \
-Do not poll it or call worker_await. If this task should resume automatically \
-when the worker finishes, call agent_wait_for_workers now with \
-{{\"invocationIds\":[\"{invocation_id}\"],\"mode\":\"all\"}}. Otherwise report \
-that it is running; its passive result will appear in Delivery & Wait Status."
+Do not poll it. Completion returns automatically. If this \
+assignment must park until the worker finishes, call agent_wait now with \
+{{\"targets\":[{{\"kind\":\"worker_invocation\",\"id\":\"{invocation_id}\"}}],\"mode\":\"all\"}}. \
+Otherwise continue useful work; the durable result will be delivered when ready."
     )
 }
 
-pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefinition>> {
+fn role_review_proposal_id_schema(confirmed: bool) -> serde_json::Value {
+    if confirmed {
+        json!({
+            "type":"object","additionalProperties":false,
+            "required":["proposalId","confirmed"],
+            "properties":{
+                "proposalId":{"type":"string","minLength":1,"maxLength":256},
+                "confirmed":{"const":true}
+            }
+        })
+    } else {
+        json!({
+            "type":"object","additionalProperties":false,"required":["proposalId"],
+            "properties":{"proposalId":{"type":"string","minLength":1,"maxLength":256}}
+        })
+    }
+}
+
+pub(crate) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefinition>> {
     let mut specs = Vec::new();
     specs.push(model_spec(
         "worker_kernel::filesystem_read",
@@ -76,7 +105,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         ModelToolAudience::Ordinary,
         10,
         "host",
-    )?);
+    )?.with_workspace_effect(crate::engine::WorkspaceEffect::Read));
     specs.push(model_spec(
         "worker_kernel::filesystem_list",
         EffectClass::PureRead,
@@ -87,7 +116,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         ModelToolAudience::Ordinary,
         20,
         "host",
-    )?);
+    )?.with_workspace_effect(crate::engine::WorkspaceEffect::Read));
     specs.push(model_spec(
         "worker_kernel::filesystem_search_text",
         EffectClass::PureRead,
@@ -111,7 +140,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         ModelToolAudience::Ordinary,
         30,
         "host",
-    )?);
+    )?.with_workspace_effect(crate::engine::WorkspaceEffect::Read));
     specs.push(model_spec(
         "worker_kernel::filesystem_write",
         EffectClass::IdempotentWrite,
@@ -122,7 +151,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         ModelToolAudience::Ordinary,
         40,
         "host",
-    )?);
+    )?.with_workspace_effect(crate::engine::WorkspaceEffect::ScopedWrite));
     specs.push(model_spec(
         "worker_kernel::filesystem_edit",
         EffectClass::IdempotentWrite,
@@ -153,7 +182,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         ModelToolAudience::Ordinary,
         45,
         "host",
-    )?);
+    )?.with_workspace_effect(crate::engine::WorkspaceEffect::ScopedWrite));
     specs.push(model_spec(
         "worker_kernel::process_run",
         EffectClass::ExternalSideEffect,
@@ -164,7 +193,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         ModelToolAudience::Ordinary,
         50,
         "host",
-    )?);
+    )?.with_workspace_effect(crate::engine::WorkspaceEffect::ArbitraryProcess));
     specs.push(model_spec(
         "worker_kernel::web_fetch",
         EffectClass::ExternalSideEffect,
@@ -176,7 +205,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         60,
         "host",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::notification_device_upsert",
         EffectClass::IdempotentWrite,
         RiskLevel::Medium,
@@ -199,7 +228,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Register this authenticated iOS installation's current APNs readiness. Device tokens are accepted only for delivery and are never returned or logged.",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::notification_device_disable",
         EffectClass::IdempotentWrite,
         RiskLevel::Medium,
@@ -210,7 +239,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Disable notification delivery to one authenticated iOS installation.",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::notification_deliveries",
         EffectClass::PureRead,
         RiskLevel::Low,
@@ -224,7 +253,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Synchronize a bounded page of logical notification inbox state and the authoritative unread count.",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::notification_delivery_acknowledge",
         EffectClass::IdempotentWrite,
         RiskLevel::Medium,
@@ -245,7 +274,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Record one idempotent native notification response. The first terminal response wins; clear_unread never completes worker-owned work.",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::notification_delivery_status",
         EffectClass::PureRead,
         RiskLevel::Low,
@@ -256,7 +285,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Read one logical notification and its sanitized per-installation APNs evidence. APNs acceptance is not represented as human delivery.",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::artifact_deliveries",
         EffectClass::PureRead,
         RiskLevel::Low,
@@ -269,7 +298,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Read a bounded page of content-addressed native artifacts and immutable source trace metadata.",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::artifact_content",
         EffectClass::PureRead,
         RiskLevel::Low,
@@ -283,7 +312,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Read exact integrity-verified base64 content for one native artifact.",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::artifact_delete",
         EffectClass::IdempotentWrite,
         RiskLevel::Medium,
@@ -297,7 +326,59 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Explicitly delete one native artifact and its content custody. Artifacts are never removed by normal diagnostic retention.",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
+        "worker_kernel::role_reviews",
+        EffectClass::PureRead,
+        RiskLevel::Low,
+        json!({
+            "type":"object","additionalProperties":false,
+            "properties":{
+                "limit":{"type":"integer","minimum":1,"maximum":100,"default":50},
+                "offset":{"type":"integer","minimum":0,"maximum":1000000,"default":0},
+                "queueLimit":{"type":"integer","minimum":1,"maximum":100,"default":100},
+                "queueOffset":{"type":"integer","minimum":0,"maximum":1000000,"default":0}
+            }
+        }),
+        "Read deterministic pages of active agent runners needing an explicit role declaration and durable review proposal history.",
+    )?);
+    specs.push(native_client_spec(
+        "worker_kernel::role_review_start",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Medium,
+        json!({
+            "type":"object","additionalProperties":false,"required":["workerId"],
+            "properties":{"workerId":{"type":"string","minLength":1,"maxLength":128}}
+        }),
+        "Ask the current healthy declared reviewer to propose only an explicit agentRole declaration and rationale for one unchanged active worker version.",
+    )?);
+    specs.push(native_client_spec(
+        "worker_kernel::role_review_inspect",
+        EffectClass::PureRead,
+        RiskLevel::Low,
+        role_review_proposal_id_schema(false),
+        "Inspect one durable role-review proposal, its immutable provenance, diff, state, and server-authored allowed actions.",
+    )?);
+    specs.push(native_client_spec(
+        "worker_kernel::role_review_apply",
+        EffectClass::IdempotentWrite,
+        RiskLevel::High,
+        role_review_proposal_id_schema(true),
+        "After explicit authenticated confirmation, revalidate all pinned evidence and publish a new immutable target version changing only agentRole.",
+    )?);
+    specs.push(native_client_spec(
+        "worker_kernel::role_review_reject",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Medium,
+        json!({
+            "type":"object","additionalProperties":false,"required":["proposalId"],
+            "properties":{
+                "proposalId":{"type":"string","minLength":1,"maxLength":256},
+                "reason":{"type":"string","maxLength":512}
+            }
+        }),
+        "Reject one pending role-review proposal while retaining its immutable audit evidence.",
+    )?);
+    specs.push(native_client_spec(
         "worker_kernel::scheduled_work",
         EffectClass::PureRead,
         RiskLevel::Low,
@@ -310,7 +391,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Read a bounded chronological projection of enabled recurring worker schedules and already-admitted deferred worker runs.",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::inbox_dismiss",
         EffectClass::IdempotentWrite,
         RiskLevel::Low,
@@ -340,7 +421,10 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
     )?);
     specs.push(model_spec(
         "worker_kernel::discover",
-        EffectClass::PureRead,
+        // Discovery also records bounded, session-scoped promotions so the
+        // selected dynamic tools are available on the next provider turn.
+        // That durable projection is replay-safe, but it is still a write.
+        EffectClass::IdempotentWrite,
         RiskLevel::Low,
         json!({"type":"object","additionalProperties":false,"required":["query"],"properties":{"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":50}}}),
         "Find persistent workers relevant to a task and make their typed tools discoverable.",
@@ -393,116 +477,23 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                 {"required":["retryOfInvocationId"],"not":{"anyOf":[{"required":["workerId"]},{"required":["input"]},{"required":["idempotencyKey"]},{"required":["model"]},{"required":["reasoningLevel"]}]}}
             ]
         }),
-        "Invoke an enabled persistent worker by id with typed JSON input, or retry one terminal invocation from its immutable contract. Predicted or unexpectedly slow top-level waits return the same durable invocation in background mode; nested worker calls remain synchronous.",
+        "Invoke an enabled persistent worker by id with typed JSON input, or retry one terminal invocation from its immutable contract. mode=enqueue returns immediately for top-level or nested work. A top-level mode=wait uses the interaction budget and may return the same durable invocation still running; a nested mode=wait synchronously joins its typed child up to the worker reliability ceiling. Reusable parent assignments structurally join admitted descendants before terminalizing.",
         "worker_invoke",
         ModelToolAudience::Ordinary,
         140,
         "worker_interaction",
     )?);
-    specs.push(model_spec(
-        "worker_kernel::await",
-        EffectClass::PureRead,
-        RiskLevel::Low,
-        json!({"type":"object","additionalProperties":false,"required":["invocationId"],"properties":{"invocationId":{"type":"string"},"timeoutSeconds":{"type":"integer","minimum":0,"maximum":10}}}),
-        "Observe one durable worker invocation for at most the ten-second interaction budget. A wait timeout returns current state and never cancels the worker.",
-        "worker_await",
-        ModelToolAudience::Ordinary,
-        145,
-        "worker_interaction",
-    )?);
-    specs.push(model_spec(
-        "worker_kernel::agent_send",
-        EffectClass::IdempotentWrite,
-        RiskLevel::Medium,
-        json!({
-            "type":"object",
-            "additionalProperties":false,
-            "required":["target","content"],
-            "properties":{
-                "target":{
-                    "type":"object",
-                    "additionalProperties":false,
-                    "required":["kind"],
-                    "properties":{
-                        "kind":{"type":"string","enum":["session","new_task","mailbox"]},
-                        "sessionId":{"type":"string"},
-                        "title":{"type":"string","maxLength":120},
-                        "model":{"type":"string","minLength":1},
-                        "workingDirectory":{"type":"string","minLength":1},
-                        "scope":{"type":"string","enum":["workspace","profile"]},
-                        "name":{"type":"string","maxLength":64}
-                    }
-                },
-                "content":{"type":"string","minLength":1,"maxLength":40000},
-                "intent":{"type":"string","enum":["information","request"],"default":"information"},
-                "wakePolicy":{"type":"string","enum":["passive","wake"],"default":"passive"},
-                "boundary":{"type":"string","enum":["next_turn","next_run"],"default":"next_turn"},
-                "expiresAt":{"type":"string"}
-            }
-        }),
-        "Send bounded untrusted reference context to a same-workspace task, atomically create and seed a visible task, or place it in a workspace/profile mailbox. Mailboxes are passive; wake requests start only at safe run boundaries.",
-        "agent_send",
-        ModelToolAudience::Ordinary,
-        130,
-        "agent_coordination",
-    )?);
-    specs.push(model_spec(
-        "worker_kernel::agent_wait_for_workers",
-        EffectClass::IdempotentWrite,
-        RiskLevel::Low,
-        json!({
-            "type":"object",
-            "additionalProperties":false,
-            "required":["invocationIds"],
-            "properties":{
-                "invocationIds":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"string"}},
-                "mode":{"type":"string","enum":["all","any"],"default":"all"}
-            }
-        }),
-        "Register a durable non-blocking wait for top-level worker invocations owned by this session and causal trace. Completion, failure, or cancellation resumes through an agent delivery.",
-        "agent_wait_for_workers",
-        ModelToolAudience::Ordinary,
-        131,
-        "agent_coordination",
-    )?);
-    specs.push(model_spec(
-        "worker_kernel::agent_mailbox_list",
-        EffectClass::PureRead,
-        RiskLevel::Low,
-        json!({
-            "type":"object",
-            "additionalProperties":false,
-            "required":["scope","name"],
-            "properties":{
-                "scope":{"type":"string","enum":["workspace","profile"]},
-                "name":{"type":"string","maxLength":64},
-                "limit":{"type":"integer","minimum":1,"maximum":100,"default":20}
-            }
-        }),
-        "List bounded redacted summaries and opaque IDs from a workspace or profile mailbox without claiming or semantically interpreting them.",
-        "agent_mailbox_list",
-        ModelToolAudience::Ordinary,
-        132,
-        "agent_coordination",
-    )?);
-    specs.push(model_spec(
-        "worker_kernel::agent_mailbox_claim",
-        EffectClass::IdempotentWrite,
-        RiskLevel::Low,
-        json!({
-            "type":"object",
-            "additionalProperties":false,
-            "required":["deliveryIds"],
-            "properties":{
-                "deliveryIds":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"string"}}
-            }
-        }),
-        "Atomically claim explicitly listed mailbox deliveries into this session as passive next-turn reference context. Concurrent claims have exactly one winner.",
-        "agent_mailbox_claim",
-        ModelToolAudience::Ordinary,
-        133,
-        "agent_coordination",
-    )?);
+    specs.push(
+        spec(
+            "worker_kernel::await",
+            EffectClass::PureRead,
+            RiskLevel::Low,
+            json!({"type":"object","additionalProperties":false,"required":["invocationId"],"properties":{"invocationId":{"type":"string"},"timeoutSeconds":{"type":"integer","minimum":0,"maximum":10}}}),
+            "One-release compatibility read for authenticated clients and retained dynamic-worker allowlists. Current agents use agent_wait, which durably parks and resumes without polling.",
+        )?
+        .with_delegation_policy(DelegationPolicy::Explicit),
+    );
+    agent_coordination::push_contracts(&mut specs)?;
     specs.push(model_spec(
         "worker_kernel::result_read",
         EffectClass::PureRead,
@@ -510,21 +501,25 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         json!({
             "type":"object",
             "additionalProperties":false,
-            "required":["invocationId"],
             "properties":{
-                "invocationId":{"type":"string"},
+                "reference":{
+                    "type":"object","additionalProperties":false,"required":["kind","id"],
+                    "properties":{"kind":{"type":"string","enum":["assignment","worker_invocation"]},"id":{"type":"string","minLength":1,"maxLength":160}}
+                },
+                "invocationId":{"type":"string","description":"One-release compatibility alias for reference kind worker_invocation."},
                 "pointer":{"type":"string","maxLength":2048,"description":"RFC 6901 JSON pointer. Omit or use an empty string for the result root."},
                 "offset":{"type":"integer","minimum":0},
                 "limit":{"type":"integer","minimum":1,"maximum":20}
-            }
+            },
+            "oneOf":[{"required":["reference"],"not":{"required":["invocationId"]}},{"required":["invocationId"],"not":{"required":["reference"]}}]
         }),
-        "Read one bounded JSON path/page from an exact validated durable worker result. Prefer passing a worker_result_reference directly to a downstream worker that accepts it; otherwise read only the path needed and follow nextOffset when present.",
-        "worker_result_read",
+        "Read one bounded JSON path/page from an exact durable agent-assignment or worker-invocation result. Prefer passing integrity-bound references directly; otherwise read only the path needed and follow nextOffset when present.",
+        "result_read",
         ModelToolAudience::Ordinary,
         148,
         "worker_interaction",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::result_handoff",
         EffectClass::IdempotentWrite,
         RiskLevel::Medium,
@@ -541,27 +536,19 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         }),
         "Create one visible chat with a passive, exact-result grant for an authenticated client's completed worker result. The session and grant commit atomically; result bytes remain in durable worker custody.",
     )?);
-    specs.push(model_spec(
+    specs.push(native_client_spec(
         "worker_kernel::detach",
         EffectClass::ReversibleSideEffect,
         RiskLevel::Low,
         json!({"type":"object","additionalProperties":false,"required":["invocationId"],"properties":{"invocationId":{"type":"string"}}}),
-        "Release foreground ownership of one queued or running durable invocation without cancelling or recreating it.",
-        "worker_detach",
-        ModelToolAudience::Specialist,
-        146,
-        "worker_administration",
+        "Authenticated-client compatibility operation that releases foreground ownership without cancelling work.",
     )?);
-    specs.push(model_spec(
+    specs.push(native_client_spec(
         "worker_kernel::cancel",
         EffectClass::ReversibleSideEffect,
         RiskLevel::High,
         json!({"type":"object","additionalProperties":false,"required":["invocationId"],"properties":{"invocationId":{"type":"string"}}}),
-        "Cancel one queued or running worker invocation without stopping unrelated work or disabling its worker.",
-        "worker_cancel",
-        ModelToolAudience::Ordinary,
-        147,
-        "worker_interaction",
+        "Authenticated-client compatibility operation. Agents cancel worker executions through agent_manage so ownership and descendants are checked uniformly.",
     )?);
     for (method, model_name, order, description) in [
         (
@@ -601,16 +588,12 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
             "worker_administration",
         )?);
     }
-    specs.push(model_spec(
+    specs.push(native_client_spec(
         "worker_kernel::purge",
         EffectClass::IrreversibleSideEffect,
         RiskLevel::Critical,
         worker_id_schema(false),
-        "Create a verified recovery archive, then purge a previously retired worker's live bundle, state, runs, and inbox history.",
-        "worker_purge",
-        ModelToolAudience::Specialist,
-        200,
-        "worker_administration",
+        "Authenticated-client operation that creates a verified recovery archive, then purges a previously retired worker's live state.",
     )?);
     specs.push(model_spec(
         "worker_kernel::rollback",
@@ -645,14 +628,14 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         220,
         "worker_administration",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::webhook_rotate",
         EffectClass::ReversibleSideEffect,
         RiskLevel::High,
         json!({"type":"object","additionalProperties":false,"required":["workerId","triggerId"],"properties":{"workerId":{"type":"string"},"triggerId":{"type":"string"}}}),
         "Rotate one worker webhook token and return its new one-time credential.",
     )?);
-    specs.push(spec(
+    specs.push(native_client_spec(
         "worker_kernel::stop_all",
         EffectClass::ReversibleSideEffect,
         RiskLevel::Critical,

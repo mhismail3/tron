@@ -31,13 +31,20 @@
 //! - Agent Delivery boundary capture executes under the same active-run mutex
 //!   as admission and release, so persisted next-run exclusions cannot race a
 //!   run transition.
+//! - Hidden reusable-agent wakes reserve that same admission boundary before
+//!   reading lifecycle/authority state. Quiescent lifecycle mutations reserve
+//!   every affected transcript or reject immediately; successful close keeps
+//!   run admission blocked for the process lifetime.
+//! - Agent-subtree cancellation reserves its exact transcript set in one
+//!   registry transaction, revokes pending wake reservations, cancels active
+//!   tokens, and blocks fresh admission until durable cancellation finishes.
 //!
 //! ## Test Ownership
 //!
 //! Coordinator tests live in `tests`. Cross-module behavior is covered by
 //! prompt runtime, session reconstruction, and integration tests.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -72,14 +79,142 @@ struct ActiveRun {
 
 struct RunRegistry {
     run_semaphore: Arc<Semaphore>,
-    active_runs: Mutex<HashMap<String, ActiveRun>>,
+    state: Mutex<RunRegistryState>,
+}
+
+#[derive(Default)]
+struct RunRegistryState {
+    active_runs: HashMap<String, ActiveRun>,
+    /// Engine-owned delivery wakes reserve their safe-boundary admission before
+    /// reading reusable-agent lifecycle/configuration state. `begin_run`
+    /// consumes the exact reservation in the same critical section that
+    /// installs the active run.
+    auxiliary_run_reservations: HashMap<String, String>,
+    /// A cancellation which wins after wake reservation but before run
+    /// admission keeps the exact reservation blocked until its owning guard
+    /// leaves the engine invocation. This prevents a cancelled wake from
+    /// falling through as an ordinary unreserved run.
+    cancelled_auxiliary_run_reservations: HashMap<String, String>,
+    /// Short-lived lifecycle mutations block exactly their target sessions.
+    /// Closed reusable-agent transcripts remain blocked for the rest of this
+    /// process; durable closed state re-establishes that decision after restart.
+    lifecycle_run_reservations: HashMap<String, String>,
+    /// Exact subtree cancellation blocks new wake/run/lifecycle admission while
+    /// active tokens, durable executions, and retained wakes are reconciled.
+    cancellation_run_reservations: HashMap<String, String>,
+    closed_run_admissions: HashSet<String>,
 }
 
 impl RunRegistry {
     fn new() -> Self {
         Self {
             run_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_SESSIONS)),
-            active_runs: Mutex::new(HashMap::new()),
+            state: Mutex::new(RunRegistryState::default()),
+        }
+    }
+}
+
+/// Reservation spanning reusable-agent delivery selection through atomic run
+/// admission. Dropping before `begin_run` removes only the matching reservation.
+pub(crate) struct AuxiliaryRunAdmissionReservation {
+    session_id: String,
+    reservation_id: String,
+    registry: Arc<RunRegistry>,
+}
+
+impl Drop for AuxiliaryRunAdmissionReservation {
+    fn drop(&mut self) {
+        let mut state = self.registry.state.lock();
+        if state
+            .auxiliary_run_reservations
+            .get(&self.session_id)
+            .is_some_and(|reservation| reservation == &self.reservation_id)
+        {
+            let _ = state.auxiliary_run_reservations.remove(&self.session_id);
+        }
+        if state
+            .cancelled_auxiliary_run_reservations
+            .get(&self.session_id)
+            .is_some_and(|reservation| reservation == &self.reservation_id)
+        {
+            let _ = state
+                .cancelled_auxiliary_run_reservations
+                .remove(&self.session_id);
+        }
+    }
+}
+
+/// Exact multi-session barrier for one reusable-agent lifecycle mutation.
+///
+/// The barrier is non-waiting: callers reject a mutation while an auxiliary
+/// run is reserved/active instead of deadlocking two agents which manage one
+/// another. A successful close converts the temporary reservations into
+/// process-lifetime admission blocks.
+pub(crate) struct LifecycleRunAdmissionReservation {
+    session_ids: Vec<String>,
+    reservation_id: String,
+    registry: Arc<RunRegistry>,
+    committed_closed: bool,
+}
+
+impl LifecycleRunAdmissionReservation {
+    pub(crate) fn commit_closed(mut self) {
+        let mut state = self.registry.state.lock();
+        for session_id in &self.session_ids {
+            if state
+                .lifecycle_run_reservations
+                .get(session_id)
+                .is_some_and(|reservation| reservation == &self.reservation_id)
+            {
+                let _ = state.lifecycle_run_reservations.remove(session_id);
+                let _ = state.closed_run_admissions.insert(session_id.clone());
+            }
+        }
+        self.committed_closed = true;
+    }
+}
+
+impl Drop for LifecycleRunAdmissionReservation {
+    fn drop(&mut self) {
+        if self.committed_closed {
+            return;
+        }
+        let mut state = self.registry.state.lock();
+        for session_id in &self.session_ids {
+            if state
+                .lifecycle_run_reservations
+                .get(session_id)
+                .is_some_and(|reservation| reservation == &self.reservation_id)
+            {
+                let _ = state.lifecycle_run_reservations.remove(session_id);
+            }
+        }
+    }
+}
+
+/// Exact multi-session barrier for one agent-subtree cancellation.
+///
+/// Admission atomically revokes existing auxiliary reservations and cancels
+/// active run tokens before installing the barrier. Holding the guard across
+/// durable execution cancellation and wake demotion closes both sides of the
+/// pending-before-cancel and active-at-cancel races.
+pub(crate) struct AgentRunCancellationReservation {
+    session_ids: Vec<String>,
+    reservation_id: String,
+    registry: Arc<RunRegistry>,
+}
+
+impl Drop for AgentRunCancellationReservation {
+    fn drop(&mut self) {
+        let mut state = self.registry.state.lock();
+        for session_id in &self.session_ids {
+            if state
+                .cancellation_run_reservations
+                .get(session_id)
+                .is_some_and(|reservation| reservation == &self.reservation_id)
+            {
+                let _ = state.cancellation_run_reservations.remove(session_id);
+            }
         }
     }
 }
@@ -112,19 +247,20 @@ impl StartedRun {
     /// to remove the old run and release its concurrency permit first.
     pub(in crate::domains::agent) fn finish_with(&mut self, before_release: impl FnOnce()) -> bool {
         let removed = {
-            let mut runs = self.registry.active_runs.lock();
-            let matches = runs
+            let mut state = self.registry.state.lock();
+            let matches = state
+                .active_runs
                 .get(&self.session_id)
                 .is_some_and(|run| run.run_id == self.run_id);
             if matches {
                 before_release();
-                let _ = runs.remove(&self.session_id);
+                let _ = state.active_runs.remove(&self.session_id);
                 // Release the global capacity slot before another same-session
                 // admission can acquire the registry lock.
                 let _ = self.permit.take();
             }
             #[allow(clippy::cast_precision_loss)]
-            gauge!("agent_runs_active").set(runs.len() as f64);
+            gauge!("agent_runs_active").set(state.active_runs.len() as f64);
             matches
         };
 
@@ -416,19 +552,49 @@ impl Orchestrator {
     /// - The server is at max concurrent runs (`ServerBusy`)
     #[instrument(skip(self), fields(session_id, run_id))]
     pub fn begin_run(&self, session_id: &str, run_id: &str) -> Result<StartedRun, RuntimeError> {
-        let mut runs = self.run_registry.active_runs.lock();
-        if runs.contains_key(session_id) {
+        self.begin_run_with_admission_key(session_id, run_id, None)
+    }
+
+    /// Start one run while atomically consuming an optional engine-owned
+    /// auxiliary admission reservation.
+    ///
+    /// A delivery wake carries its invocation idempotency key through this
+    /// seam. If another internal caller reaches the same hidden transcript, it
+    /// cannot steal or bypass the reserved run boundary.
+    pub(crate) fn begin_run_with_admission_key(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        admission_key: Option<&str>,
+    ) -> Result<StartedRun, RuntimeError> {
+        let mut state = self.run_registry.state.lock();
+        if state.active_runs.contains_key(session_id)
+            || state.lifecycle_run_reservations.contains_key(session_id)
+            || state.cancellation_run_reservations.contains_key(session_id)
+            || state.closed_run_admissions.contains(session_id)
+            || state
+                .cancelled_auxiliary_run_reservations
+                .contains_key(session_id)
+        {
+            return Err(RuntimeError::SessionBusy(session_id.to_string()));
+        }
+        if let Some(reservation) = state.auxiliary_run_reservations.get(session_id)
+            && admission_key != Some(reservation.as_str())
+        {
             return Err(RuntimeError::SessionBusy(session_id.to_string()));
         }
         // Acquire a concurrency permit (non-blocking).
         let permit = Arc::clone(&self.run_registry.run_semaphore)
             .try_acquire_owned()
             .map_err(|_| RuntimeError::ServerBusy {
-                current: runs.len(),
+                current: state.active_runs.len(),
                 max: MAX_CONCURRENT_SESSIONS,
             })?;
+        if admission_key.is_some() {
+            let _ = state.auxiliary_run_reservations.remove(session_id);
+        }
         let cancel = CancellationToken::new();
-        let _ = runs.insert(
+        let _ = state.active_runs.insert(
             session_id.to_string(),
             ActiveRun {
                 run_id: run_id.to_string(),
@@ -437,7 +603,7 @@ impl Orchestrator {
         );
         self.turn_accumulators.begin_run(session_id, run_id);
         #[allow(clippy::cast_precision_loss)]
-        gauge!("agent_runs_active").set(runs.len() as f64);
+        gauge!("agent_runs_active").set(state.active_runs.len() as f64);
         debug!(session_id, run_id, "run started");
         Ok(StartedRun {
             session_id: session_id.to_string(),
@@ -449,11 +615,131 @@ impl Orchestrator {
         })
     }
 
+    /// Reserve one hidden reusable-agent delivery wake before its authority and
+    /// lifecycle snapshot are read. Admission is non-waiting so duplicate wake
+    /// dispatchers simply defer to the reservation which won the boundary.
+    pub(crate) fn try_reserve_auxiliary_run(
+        &self,
+        session_id: &str,
+        reservation_id: &str,
+    ) -> Option<AuxiliaryRunAdmissionReservation> {
+        let mut state = self.run_registry.state.lock();
+        if state.active_runs.contains_key(session_id)
+            || state.auxiliary_run_reservations.contains_key(session_id)
+            || state
+                .cancelled_auxiliary_run_reservations
+                .contains_key(session_id)
+            || state.lifecycle_run_reservations.contains_key(session_id)
+            || state.cancellation_run_reservations.contains_key(session_id)
+            || state.closed_run_admissions.contains(session_id)
+        {
+            return None;
+        }
+        let _ = state
+            .auxiliary_run_reservations
+            .insert(session_id.to_owned(), reservation_id.to_owned());
+        Some(AuxiliaryRunAdmissionReservation {
+            session_id: session_id.to_owned(),
+            reservation_id: reservation_id.to_owned(),
+            registry: Arc::clone(&self.run_registry),
+        })
+    }
+
+    /// Atomically cancel and reserve an exact set of reusable-agent transcripts.
+    ///
+    /// Existing delivery reservations are tombstoned until their owning guards
+    /// exit; active tokens observe cancellation; and no new wake, run, or
+    /// lifecycle mutation can enter until the returned guard is dropped.
+    pub(crate) fn reserve_agent_run_cancellation(
+        &self,
+        session_ids: &[String],
+    ) -> Result<AgentRunCancellationReservation, String> {
+        let session_ids = session_ids
+            .iter()
+            .filter(|session_id| !session_id.trim().is_empty())
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let reservation_id = format!("agent-cancellation:{}", uuid::Uuid::now_v7());
+        let mut state = self.run_registry.state.lock();
+        if session_ids.iter().any(|session_id| {
+            state.lifecycle_run_reservations.contains_key(session_id)
+                || state.cancellation_run_reservations.contains_key(session_id)
+                || state.closed_run_admissions.contains(session_id)
+        }) {
+            return Err(
+                "agent lifecycle work is already pending for the target transcript".to_owned(),
+            );
+        }
+        for session_id in &session_ids {
+            if let Some(auxiliary_reservation_id) =
+                state.auxiliary_run_reservations.remove(session_id)
+            {
+                let _ = state
+                    .cancelled_auxiliary_run_reservations
+                    .insert(session_id.clone(), auxiliary_reservation_id);
+            }
+            if let Some(run) = state.active_runs.get(session_id) {
+                run.cancel.cancel();
+            }
+            let _ = state
+                .cancellation_run_reservations
+                .insert(session_id.clone(), reservation_id.clone());
+        }
+        Ok(AgentRunCancellationReservation {
+            session_ids,
+            reservation_id,
+            registry: Arc::clone(&self.run_registry),
+        })
+    }
+
+    /// Atomically reserve every target transcript for a quiescent lifecycle
+    /// mutation. Active or already-reserved work rejects immediately.
+    pub(crate) fn try_reserve_lifecycle_runs(
+        &self,
+        session_ids: &[String],
+    ) -> Result<LifecycleRunAdmissionReservation, String> {
+        let session_ids = session_ids
+            .iter()
+            .filter(|session_id| !session_id.trim().is_empty())
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let reservation_id = format!("agent-lifecycle:{}", uuid::Uuid::now_v7());
+        let mut state = self.run_registry.state.lock();
+        if session_ids.iter().any(|session_id| {
+            state.active_runs.contains_key(session_id)
+                || state.auxiliary_run_reservations.contains_key(session_id)
+                || state
+                    .cancelled_auxiliary_run_reservations
+                    .contains_key(session_id)
+                || state.lifecycle_run_reservations.contains_key(session_id)
+                || state.cancellation_run_reservations.contains_key(session_id)
+                || state.closed_run_admissions.contains(session_id)
+        }) {
+            return Err("agent transcript work is pending or active".to_owned());
+        }
+        for session_id in &session_ids {
+            let _ = state
+                .lifecycle_run_reservations
+                .insert(session_id.clone(), reservation_id.clone());
+        }
+        Ok(LifecycleRunAdmissionReservation {
+            session_ids,
+            reservation_id,
+            registry: Arc::clone(&self.run_registry),
+            committed_closed: false,
+        })
+    }
+
     /// Get the run ID for an active session (if any).
     pub fn get_run_id(&self, session_id: &str) -> Option<String> {
         self.run_registry
-            .active_runs
+            .state
             .lock()
+            .active_runs
             .get(session_id)
             .map(|r| r.run_id.clone())
     }
@@ -464,8 +750,8 @@ impl Orchestrator {
         &self,
         session_id: &str,
     ) -> Option<(String, Option<TurnReconstructionSnapshot>)> {
-        let runs = self.run_registry.active_runs.lock();
-        let run_id = runs.get(session_id)?.run_id.clone();
+        let state = self.run_registry.state.lock();
+        let run_id = state.active_runs.get(session_id)?.run_id.clone();
         let snapshot = self
             .turn_accumulators
             .reconstruction_snapshot(session_id, &run_id);
@@ -480,8 +766,12 @@ impl Orchestrator {
         Option<String>,
         Option<crate::domains::agent::r#loop::orchestrator::turn_accumulator::CurrentToolSnapshot>,
     ) {
-        let runs = self.run_registry.active_runs.lock();
-        let Some(run_id) = runs.get(session_id).map(|run| run.run_id.clone()) else {
+        let state = self.run_registry.state.lock();
+        let Some(run_id) = state
+            .active_runs
+            .get(session_id)
+            .map(|run| run.run_id.clone())
+        else {
             return (None, None);
         };
         let tool = self
@@ -515,16 +805,32 @@ impl Orchestrator {
     /// Check if a session has an active run.
     pub fn has_active_run(&self, session_id: &str) -> bool {
         self.run_registry
-            .active_runs
+            .state
             .lock()
+            .active_runs
             .contains_key(session_id)
+    }
+
+    /// Whether a transcript has provider work already active or reserved at
+    /// the delivery/lifecycle boundary. Native allowed-action projections use
+    /// this as a hint; mutation admission still rechecks atomically.
+    pub(crate) fn has_pending_or_active_run(&self, session_id: &str) -> bool {
+        let state = self.run_registry.state.lock();
+        state.active_runs.contains_key(session_id)
+            || state.auxiliary_run_reservations.contains_key(session_id)
+            || state
+                .cancelled_auxiliary_run_reservations
+                .contains_key(session_id)
+            || state.lifecycle_run_reservations.contains_key(session_id)
+            || state.cancellation_run_reservations.contains_key(session_id)
     }
 
     /// Return the active run identity for safe delivery-boundary projection.
     pub(crate) fn active_run_id(&self, session_id: &str) -> Option<String> {
         self.run_registry
-            .active_runs
+            .state
             .lock()
+            .active_runs
             .get(session_id)
             .map(|run| run.run_id.clone())
     }
@@ -541,21 +847,26 @@ impl Orchestrator {
         session_id: &str,
         callback: impl FnOnce(Option<&str>) -> R,
     ) -> R {
-        let runs = self.run_registry.active_runs.lock();
-        callback(runs.get(session_id).map(|run| run.run_id.as_str()))
+        let state = self.run_registry.state.lock();
+        callback(
+            state
+                .active_runs
+                .get(session_id)
+                .map(|run| run.run_id.as_str()),
+        )
     }
 
     /// Number of active runs.
     pub fn active_run_count(&self) -> usize {
-        self.run_registry.active_runs.lock().len()
+        self.run_registry.state.lock().active_runs.len()
     }
 
     /// Abort a running session by cancelling its `CancellationToken`.
     /// Returns true if the session had an active run that was cancelled.
     #[instrument(skip(self), fields(session_id))]
     pub fn abort(&self, session_id: &str) -> Result<bool, RuntimeError> {
-        let runs = self.run_registry.active_runs.lock();
-        if let Some(run) = runs.get(session_id) {
+        let state = self.run_registry.state.lock();
+        if let Some(run) = state.active_runs.get(session_id) {
             warn!(session_id, "abort requested");
             run.cancel.cancel();
             Ok(true)
@@ -601,19 +912,24 @@ impl Orchestrator {
         info!("orchestrator shutdown initiated");
         // Cancel and clear all active runs
         {
-            let mut runs = self.run_registry.active_runs.lock();
-            if !runs.is_empty() {
+            let mut state = self.run_registry.state.lock();
+            if !state.active_runs.is_empty() {
                 warn!(
-                    count = runs.len(),
+                    count = state.active_runs.len(),
                     "clearing orphaned active runs during shutdown"
                 );
-                for run in runs.values() {
+                for run in state.active_runs.values() {
                     run.cancel.cancel();
                 }
-                runs.clear();
+                state.active_runs.clear();
                 #[allow(clippy::cast_precision_loss)]
                 gauge!("agent_runs_active").set(0.0);
             }
+            state.auxiliary_run_reservations.clear();
+            state.cancelled_auxiliary_run_reservations.clear();
+            state.lifecycle_run_reservations.clear();
+            state.cancellation_run_reservations.clear();
+            state.closed_run_admissions.clear();
             // Keep the established registry -> projection lock order. Late run
             // events cannot recreate entries because `begin_run` is the
             // projection's sole creator.

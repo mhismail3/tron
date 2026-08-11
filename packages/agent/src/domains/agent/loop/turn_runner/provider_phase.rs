@@ -6,6 +6,7 @@
 //! the model stream. It performs no optional worker execution and owns no
 //! stream processing or turn completion.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -21,7 +22,7 @@ use crate::domains::agent::r#loop::types::{RunContext, TurnResult};
 use crate::domains::model::responder::{ModelResponder, ModelResponse, ModelResponseRequest};
 use crate::domains::session::event_store::{AgentDeliveryRecord, AgentDeliverySourceKind};
 use crate::shared::foundation::retry::RetryConfig;
-use crate::shared::protocol::messages::Context;
+use crate::shared::protocol::messages::{Context, Message};
 use crate::shared::protocol::messages::{RequestContextBlock, RequestContextKind};
 use crate::shared::protocol::model_audit::{
     AgentDeliveryManifest, AutomaticContextEvaluation, ContextManifest, SystemContextContribution,
@@ -251,6 +252,7 @@ impl ProviderContextAssembly {
     fn add_agent_delivery(
         &mut self,
         delivery: &crate::domains::session::event_store::AgentDeliveryRecord,
+        project_as_reference: bool,
     ) -> Result<(), String> {
         let source_kind = serde_json::to_value(delivery.source_kind)
             .ok()
@@ -277,10 +279,12 @@ impl ProviderContextAssembly {
             "content":delivery.content,
         }))
         .map_err(|error| error.to_string())?;
-        self.context.request_context.push(RequestContextBlock {
-            kind: RequestContextKind::AgentDelivery,
-            content,
-        });
+        if project_as_reference {
+            self.context.request_context.push(RequestContextBlock {
+                kind: RequestContextKind::AgentDelivery,
+                content,
+            });
+        }
         self.agent_deliveries.push(AgentDeliveryManifest {
             delivery_id: delivery.delivery_id.clone(),
             source_kind,
@@ -319,6 +323,93 @@ impl ProviderContextAssembly {
     }
 }
 
+/// Materialize authenticated coordination messages before context projection.
+///
+/// The delivery lease remains the at-least-once transport truth, while the
+/// `message.agent` event is the durable conversation truth. A marked v1
+/// envelope may never fall back to reference context: doing so would erase its
+/// actionable semantics and reintroduce the one-turn delivery bug. Historical
+/// unmarked AgentMessage deliveries retain their legacy reference behavior.
+fn materialize_agent_coordination(
+    event_store: Option<&Arc<crate::domains::session::event_store::EventStore>>,
+    context_manager: &mut ContextManager,
+    deliveries: &[AgentDeliveryRecord],
+    emitter: &crate::domains::agent::r#loop::event_emitter::EventEmitter,
+) -> Result<BTreeSet<String>, String> {
+    let Some(event_store) = event_store else {
+        return Ok(BTreeSet::new());
+    };
+    let mut materialized_delivery_ids = BTreeSet::new();
+    for delivery in deliveries
+        .iter()
+        .filter(|delivery| delivery.source_kind == AgentDeliverySourceKind::AgentMessage)
+    {
+        let Ok(envelope) = serde_json::from_str::<Value>(&delivery.content) else {
+            continue;
+        };
+        if envelope.get("protocol").and_then(Value::as_str)
+            != Some(crate::domains::worker_kernel::AGENT_COORDINATION_CAPABILITY)
+        {
+            continue;
+        }
+        let message_id = envelope
+            .get("messageId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                format!(
+                    "agent coordination delivery '{}' has no messageId",
+                    delivery.delivery_id
+                )
+            })?;
+        let materialized = event_store
+            .materialize_agent_message(message_id)
+            .map_err(|error| {
+                format!(
+                    "materialize agent coordination message '{message_id}' for delivery '{}': {error}",
+                    delivery.delivery_id
+                )
+            })?;
+        if materialized.created {
+            // The EventStore row is canonical. Publish that exact sequence to
+            // read-only audit subscribers without sending it back through the
+            // persister or allocating a second event identity.
+            let _ = emitter.emit(
+                crate::shared::protocol::events::TronEvent::AgentCoordinationMessage {
+                    base: crate::shared::protocol::events::BaseEvent {
+                        session_id: materialized.event.session_id.clone(),
+                        timestamp: materialized.event.timestamp.clone(),
+                        sequence: Some(materialized.event.sequence),
+                        trace_id: Some(materialized.metadata.trace_id.clone()),
+                        parent_invocation_id: None,
+                    },
+                    event_id: materialized.event.id.clone(),
+                    content: materialized.content.clone(),
+                },
+            );
+        }
+        let already_loaded = context_manager.messages_slice().iter().any(|message| {
+            matches!(
+                message,
+                Message::Agent { content, .. } if content.message_id == message_id
+            )
+        });
+        if !already_loaded {
+            context_manager.add_message_with_source(
+                Message::Agent {
+                    content: materialized.content,
+                    timestamp: None,
+                },
+                crate::domains::agent::context::message_store::MessageAuditSource::events(vec![
+                    materialized.event.id,
+                ]),
+            );
+        }
+        materialized_delivery_ids.insert(delivery.delivery_id.clone());
+    }
+    Ok(materialized_delivery_ids)
+}
+
 pub(super) async fn open_provider_response(
     params: ProviderPhaseParams<'_>,
 ) -> Result<PreparedProviderResponse, TurnResult> {
@@ -336,6 +427,7 @@ pub(super) async fn open_provider_response(
         relevance_query.as_deref(),
         params.run_context.origin_worker_id.as_deref(),
         params.run_context.worker_agent_tools.as_deref(),
+        params.run_context.delegated_function_grant.as_deref(),
         params.run_context.run_id.as_deref(),
     )
     .await
@@ -430,7 +522,7 @@ pub(super) async fn open_provider_response(
     } else {
         Vec::new()
     };
-    let mut lease_rollback = ProviderLeaseRollback::new(event_store, run_id);
+    let mut lease_rollback = ProviderLeaseRollback::new(event_store.clone(), run_id);
     if trigger_delivery_ids.is_some_and(|ids| !ids.is_empty()) && leased_deliveries.is_empty() {
         let error_msg =
             "delivery-only run could not lease any of its durable trigger deliveries".to_owned();
@@ -459,6 +551,41 @@ pub(super) async fn open_provider_response(
             ..Default::default()
         });
     }
+
+    let materialized_coordination_deliveries = match materialize_agent_coordination(
+        event_store.as_ref(),
+        params.context_manager,
+        &leased_deliveries,
+        params.emitter,
+    ) {
+        Ok(deliveries) => deliveries,
+        Err(error_msg) => {
+            let failure = FailureEnvelope::new(
+                RUNTIME_PERSISTENCE_ERROR,
+                FailureCategory::Persistence,
+                error_msg.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            );
+            emit_turn_failure(
+                params.emitter,
+                params.persister,
+                params.session_id,
+                params.turn,
+                params.run_context,
+                params.sequence_counter,
+                &failure,
+                None,
+            );
+            return Err(TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(crate::domains::agent::r#loop::errors::StopReason::Error),
+                ..Default::default()
+            });
+        }
+    };
 
     let projection = match build_turn_context(
         params.context_manager,
@@ -508,6 +635,55 @@ pub(super) async fn open_provider_response(
         projected_context,
         params.context_manager.message_audit_sources().to_vec(),
     );
+    match surface::agent_team_context(
+        params.engine_host,
+        params.session_id,
+        params.turn,
+        params.run_context.engine_trace_id.as_ref(),
+        params.run_context.parent_invocation_id.as_ref(),
+    )
+    .await
+    {
+        Ok(Some(team)) => {
+            let content = serde_json::to_string(&team).map_err(|error| TurnResult {
+                success: false,
+                error: Some(format!("failed to serialize agent team context: {error}")),
+                stop_reason: Some(crate::domains::agent::r#loop::errors::StopReason::Error),
+                ..Default::default()
+            })?;
+            assembly.context.request_context.push(RequestContextBlock {
+                kind: RequestContextKind::AgentTeam,
+                content,
+            });
+        }
+        Ok(None) => {}
+        Err(error) => {
+            let failure = FailureEnvelope::new(
+                RUNTIME_PERSISTENCE_ERROR,
+                FailureCategory::Persistence,
+                error.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            );
+            emit_turn_failure(
+                params.emitter,
+                params.persister,
+                params.session_id,
+                params.turn,
+                params.run_context,
+                params.sequence_counter,
+                &failure,
+                None,
+            );
+            return Err(TurnResult {
+                success: false,
+                error: Some(error),
+                stop_reason: Some(crate::domains::agent::r#loop::errors::StopReason::Error),
+                ..Default::default()
+            });
+        }
+    }
     let surface_context = surface::surface_context_primer(&primitive_surface.snapshot);
     assembly.append_system(
         "engine_surface_primer",
@@ -519,7 +695,10 @@ pub(super) async fn open_provider_response(
         }),
     );
     for delivery in &leased_deliveries {
-        if let Err(error) = assembly.add_agent_delivery(delivery) {
+        if let Err(error) = assembly.add_agent_delivery(
+            delivery,
+            !materialized_coordination_deliveries.contains(&delivery.delivery_id),
+        ) {
             let error_msg = format!("failed to project agent delivery: {error}");
             let failure = FailureEnvelope::new(
                 RUNTIME_PERSISTENCE_ERROR,

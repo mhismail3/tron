@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 const ENGINE_HOOK_AUTHORING_CONTRACT: &str = "\
 Optional semantic engine roles activated atomically with this version. No separate binding or grant is required. \
 The bundle inputSchema and outputSchema are the complete worker-facing contracts below; toolInputSchema affects only direct model calls and never changes an engine hook contract. These schemas are authoritative, so do not inspect Tron databases, auth stores, binaries, runtime files, or private server endpoints to discover hook schemas. \
+agent_role_review input is a closed object requiring action:agent_role_review, one target object containing the exact active worker/version and bounded agent-runner contract, agentRoleSchema containing the complete source-owned declaration schema, and delegableTools containing the generated source-owned authoring catalog. Output is a closed object requiring only agentRole and rationale:string(1..2000). agentRole must be an explicit enabled or disabled declaration; the engine owns proposal persistence, revalidation, confirmation, publication, and activation, and never accepts arbitrary bundle rewrites from the reviewer. \
 continuity_context input is a closed object requiring action:continuity_context and query:string(1..12000), and permitting project:string(max 2048) and limit:integer(1..8); output must accept a closed object requiring narrative:string(max 6000), where an empty narrative means no continuity should be injected. It may also return sources:array(max 6) of closed {memoryId:string(max 96),revision:integer(min 1),scope:global|project,project?:string(max 2048)} records for request-specific audit provenance; older bundles may omit sources and are reported as provenance unavailable. The engine supplies the current working-directory identity as project when available, redacts sensitive credential shapes, and bounds the provider-context projection. \
 session_organization input is a closed object requiring action:session_organization, one closed canonical session projection, and the completed userPrompt/assistantResponse strings(max 4096 each). Output requires one bounded proposal and may include the explicitly declared reserved sessionOrganizationMutations array(max 16). Each closed mutation names sessionId and only preserve, archive, or restore; replacement labels(max 12 strings of max 64 characters) and one nullable group(max 80) are optional. Omitted labels or group preserve canonical state, while explicit null clears the group. The engine preserves system tags and applies the exact batch durably after successful completion; delete and arbitrary tags are not expressible. \
 session_title input is a closed object requiring userPrompt:string(max 4096) and assistantResponse:string(max 4096); output is a closed object requiring title:string(1..160). It runs after the first successful exchange of an untitled ordinary session. \
@@ -112,7 +113,7 @@ pub(super) fn presentation_schema() -> Value {
         "type":"object",
         "additionalProperties":false,
         "required":["experienceId","contractVersion"],
-        "description":"Optional immutable worker experience plus a closed declarative native presentation. Clients hydrate only bounded RFC 6901 result paths through worker_result_read and otherwise fall back to the generic Worker Console. HTML, JavaScript, custom native code, arbitrary client commands, and arbitrary URL schemes are not expressible.",
+        "description":"Optional immutable worker experience plus a closed declarative native presentation. Consumers hydrate only bounded RFC 6901 result paths through result_read and otherwise fall back to the generic Worker Console. HTML, JavaScript, custom native code, arbitrary client commands, and arbitrary URL schemes are not expressible.",
         "properties":{
             "experienceId":{"type":"string","minLength":1,"maxLength":96},
             "contractVersion":{"type":"integer","minimum":1},
@@ -191,6 +192,50 @@ fn agent_tools_schema() -> Value {
             "pattern":"^[A-Za-z0-9_-]+$"
         },
         "description":"Optional exact allowlist of model-tool names projected inside an agent-runner worker session. It is invalid for command and service runners. Omission preserves the migration surface; an empty array exposes no tools. Names must resolve to current fixed primitives or enabled direct/internal worker functions when the bundle activates. Internal names remain absent from ordinary agent discovery."
+    })
+}
+
+pub(super) fn agent_role_schema() -> Value {
+    let limits = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "properties":{
+            "maxAssignmentSeconds":{"type":"integer","minimum":1,"maximum":7200},
+            "maxAssignmentTurns":{"type":"integer","minimum":1,"maximum":250},
+            "maxChildExecutions":{"type":"integer","minimum":0,"maximum":256},
+            "maxQueuedAssignments":{"type":"integer","minimum":0,"maximum":8}
+        }
+    });
+    json!({
+        "description":"Explicit reusable-agent role declaration for an agent runner. Omission means needs_role_review: the worker remains directly invokable but is never advertised by agent_discover. Use disabled to record an intentional review decision without exposing a role.",
+        "oneOf":[
+            {
+                "type":"object",
+                "additionalProperties":false,
+                "required":["status"],
+                "properties":{"status":{"const":"disabled"}}
+            },
+            {
+                "type":"object",
+                "additionalProperties":false,
+                "required":[
+                    "status","displayName","summary",
+                    "collaborationInstructions","resultMode"
+                ],
+                "properties":{
+                    "status":{"const":"enabled"},
+                    "displayName":{"type":"string","minLength":1,"maxLength":80},
+                    "summary":{"type":"string","minLength":1,"maxLength":512},
+                    "discoverable":{"type":"boolean","default":false},
+                    "collaborationInstructions":{"type":"string","minLength":1,"maxLength":12000},
+                    "defaultModel":{"type":"string","minLength":1,"maxLength":160},
+                    "defaultReasoningLevel":{"type":"string","enum":["none","low","medium","high","x_high","max"]},
+                    "toolCeiling":agent_tools_schema(),
+                    "limits":limits,
+                    "resultMode":{"type":"string","enum":["natural","schema"]}
+                }
+            }
+        ]
     })
 }
 
@@ -382,7 +427,7 @@ pub(super) fn worker_bundle_schema() -> Value {
                 "type":"array",
                 "uniqueItems":true,
                 "description":ENGINE_HOOK_AUTHORING_CONTRACT,
-                "items":{"type":"string","enum":["continuity_context","context_summary","mailbox_curation","session_organization","session_title"]}
+                "items":{"type":"string","enum":["agent_role_review","continuity_context","context_summary","mailbox_curation","session_organization","session_title"]}
             },
             "clientActions":{
                 "type":"array",
@@ -444,6 +489,7 @@ pub(super) fn worker_bundle_schema() -> Value {
         }
     });
     schema["properties"]["agentTools"] = agent_tools_schema();
+    schema["properties"]["agentRole"] = agent_role_schema();
     schema["properties"]["engineDeliveries"] = json!({
         "type":"array",
         "uniqueItems":true,

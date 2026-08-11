@@ -10,7 +10,8 @@ use sha2::{Digest, Sha256};
 use crate::engine::Invocation;
 
 use super::super::runtime::WorkerRuntime;
-use super::support::{MAX_FILE_BYTES, required_string, resolve_path, run_blocking};
+use super::claims::claim_mutation;
+use super::support::{MAX_FILE_BYTES, required_string, run_blocking};
 
 const DEFAULT_FILE_READ_BYTES: usize = 262_144;
 const MAX_HASH_INPUT_BYTES: u64 = 64 * 1_048_576;
@@ -18,9 +19,16 @@ const MAX_EDIT_REPLACEMENTS: usize = 128;
 
 pub(in crate::domains::worker_kernel) async fn filesystem_write(
     invocation: &Invocation,
-    _runtime: &WorkerRuntime,
+    runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
-    let path = resolve_path(invocation, &required_string(&invocation.payload, "path")?)?;
+    let claimed = claim_mutation(
+        invocation,
+        runtime,
+        &required_string(&invocation.payload, "path")?,
+    )
+    .await?;
+    let path = claimed.path;
+    let claim = claimed.claim;
     let content = invocation
         .payload
         .get("content")
@@ -44,15 +52,26 @@ pub(in crate::domains::worker_kernel) async fn filesystem_write(
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
     run_blocking("worker_kernel::filesystem_write", move || {
-        atomic_publish(&path, &content, create_parents, expected_sha256.as_deref())
+        let result = atomic_publish(&path, &content, create_parents, expected_sha256.as_deref());
+        match claim {
+            Some(claim) => claim.finish(result),
+            None => result,
+        }
     })
     .await
 }
 pub(in crate::domains::worker_kernel) async fn filesystem_edit(
     invocation: &Invocation,
-    _runtime: &WorkerRuntime,
+    runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
-    let path = resolve_path(invocation, &required_string(&invocation.payload, "path")?)?;
+    let claimed = claim_mutation(
+        invocation,
+        runtime,
+        &required_string(&invocation.payload, "path")?,
+    )
+    .await?;
+    let path = claimed.path;
+    let claim = claimed.claim;
     let replacements = invocation
         .payload
         .get("replacements")
@@ -89,31 +108,37 @@ pub(in crate::domains::worker_kernel) async fn filesystem_edit(
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
     run_blocking("worker_kernel::filesystem_edit", move || {
-        let bytes = read_file_bounded(&path, MAX_FILE_BYTES)?;
-        let previous_sha256 = sha256(&bytes);
-        verify_expected_hash(&path, Some(&previous_sha256), expected_sha256.as_deref())?;
-        let content = String::from_utf8(bytes)
-            .map_err(|_| format!("edit {}: file is not UTF-8", path.display()))?;
-        let (content, applied) = apply_exact_replacements(&path, content, &replacements)?;
-        if sha256(content.as_bytes()) == previous_sha256 {
-            return Ok(json!({
+        let result = (|| {
+            let bytes = read_file_bounded(&path, MAX_FILE_BYTES)?;
+            let previous_sha256 = sha256(&bytes);
+            verify_expected_hash(&path, Some(&previous_sha256), expected_sha256.as_deref())?;
+            let content = String::from_utf8(bytes)
+                .map_err(|_| format!("edit {}: file is not UTF-8", path.display()))?;
+            let (content, applied) = apply_exact_replacements(&path, content, &replacements)?;
+            if sha256(content.as_bytes()) == previous_sha256 {
+                return Ok(json!({
+                    "path": path,
+                    "changed": false,
+                    "replacementsApplied": applied,
+                    "previousSha256": previous_sha256,
+                    "sha256": previous_sha256,
+                    "bytes": content.len(),
+                }));
+            }
+            atomic_publish_bytes(&path, content.as_bytes(), Some(&previous_sha256))?;
+            Ok(json!({
                 "path": path,
-                "changed": false,
+                "changed": true,
                 "replacementsApplied": applied,
                 "previousSha256": previous_sha256,
-                "sha256": previous_sha256,
+                "sha256": sha256(content.as_bytes()),
                 "bytes": content.len(),
-            }));
+            }))
+        })();
+        match claim {
+            Some(claim) => claim.finish(result),
+            None => result,
         }
-        atomic_publish_bytes(&path, content.as_bytes(), Some(&previous_sha256))?;
-        Ok(json!({
-            "path": path,
-            "changed": true,
-            "replacementsApplied": applied,
-            "previousSha256": previous_sha256,
-            "sha256": sha256(content.as_bytes()),
-            "bytes": content.len(),
-        }))
     })
     .await
 }
@@ -333,6 +358,117 @@ fn normalize_sha256(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::worker_kernel::persistence::{
+        AgentAssignmentKind, AgentInstanceKind, NewAgentAdmission, NewRootAgent, WorkerStore,
+    };
+    use crate::domains::worker_kernel::runtime::WorkerRuntime;
+    use crate::engine::{ActorId, ActorKind, CausalContext, FunctionId, TraceId, WorkspaceEffect};
+
+    fn scoped_assignment_runtime() -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        std::sync::Arc<WorkerRuntime>,
+        crate::domains::worker_kernel::persistence::AgentAdmission,
+        String,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let checkout = directory.path().join("checkout");
+        std::fs::create_dir_all(checkout.join("Sources")).unwrap();
+        let context = crate::shared::server::test_support::make_test_context();
+        let session_id = context
+            .session_manager
+            .create_session("test-model", checkout.to_str().unwrap(), Some("claims"))
+            .unwrap();
+        let session = context
+            .event_store
+            .get_session(&session_id)
+            .unwrap()
+            .unwrap();
+        let store = WorkerStore::open_without_snapshot(directory.path().join("tron-home")).unwrap();
+        let root = store
+            .ensure_root_agent(&NewRootAgent {
+                session_id: session_id.clone(),
+                workspace_id: session.workspace_id.clone(),
+                name: "Root agent".to_owned(),
+                model: Some("test-model".to_owned()),
+                reasoning_level: None,
+                tool_grant: json!([]),
+                limits: json!({}),
+            })
+            .unwrap();
+        let admission = store
+            .admit_agent(&NewAgentAdmission {
+                admission_key: "scoped-mutation-agent".to_owned(),
+                root_session_id: session_id.clone(),
+                workspace_id: session.workspace_id.clone(),
+                spawned_by_agent_id: root.agent_id.clone(),
+                management_owner_agent_id: root.agent_id,
+                kind: AgentInstanceKind::General,
+                role_id: None,
+                role_version: None,
+                name: "Scoped child".to_owned(),
+                task: "Edit the admitted source tree".to_owned(),
+                context: json!({}),
+                assignment_kind: AgentAssignmentKind::Instruction,
+                requester_agent_id: None,
+                delegator_agent_id: None,
+                parent_execution_id: None,
+                trace_id: "trace-scoped-mutation".to_owned(),
+                causal_depth: 1,
+                child_slot: Some(0),
+                max_active_children: 8,
+                max_child_executions: 64,
+                max_execution_nodes: 64,
+                max_causal_depth: 16,
+                autonomous_hop: 0,
+                model: None,
+                reasoning_level: None,
+                tool_grant: json!(["filesystem_write"]),
+                resource_snapshot: json!({"workspaceId":session.workspace_id}),
+                write_scopes: json!(["Sources"]),
+                limits: json!({}),
+                retry_of_assignment_id: None,
+                deadline_at: None,
+            })
+            .unwrap();
+        let runtime = WorkerRuntime::new(
+            store,
+            context.engine_host,
+            context.orchestrator,
+            context.session_manager,
+            context.event_store,
+            context.settings_runtime,
+        )
+        .unwrap();
+        (directory, checkout, runtime, admission, session_id)
+    }
+
+    fn scoped_write_invocation(
+        checkout: &Path,
+        admission: &crate::domains::worker_kernel::persistence::AgentAdmission,
+        session_id: &str,
+        path: &str,
+    ) -> Invocation {
+        Invocation::new_sync(
+            FunctionId::new("worker_kernel::filesystem_write").unwrap(),
+            json!({"path":path,"content":"owned","createParents":true}),
+            CausalContext::new(
+                ActorId::new(format!("agent:{}", admission.agent.agent_id)).unwrap(),
+                ActorKind::Agent,
+                TraceId::generate(),
+            )
+            .with_session_id(session_id)
+            .with_workspace_id(admission.agent.workspace_id.clone())
+            .with_working_directory(checkout.display().to_string())
+            .with_agent_execution(
+                admission.agent.agent_id.clone(),
+                admission.assignment.assignment_id.clone(),
+                admission.execution.execution_id.clone(),
+            )
+            .with_agent_write_scopes(vec!["Sources".to_owned()])
+            .with_declared_workspace_effect(WorkspaceEffect::ScopedWrite),
+        )
+    }
 
     #[test]
     fn atomic_publish_is_compare_and_swap_and_preserves_the_old_file_on_mismatch() {
@@ -370,5 +506,47 @@ mod tests {
         .unwrap();
         assert_eq!(edited, "new new");
         assert_eq!(applied, 2);
+    }
+
+    #[tokio::test]
+    async fn assignment_write_scopes_are_enforced_and_claims_release_after_publication() {
+        let (_directory, checkout, runtime, admission, session_id) = scoped_assignment_runtime();
+        let allowed =
+            scoped_write_invocation(&checkout, &admission, &session_id, "Sources/allowed.txt");
+        let result = filesystem_write(&allowed, &runtime).await.unwrap();
+        assert_eq!(result["changed"], true);
+        assert_eq!(
+            std::fs::read_to_string(checkout.join("Sources/allowed.txt")).unwrap(),
+            "owned"
+        );
+        assert!(
+            runtime
+                .store()
+                .list_workspace_claims(
+                    Some(&admission.agent.agent_id),
+                    Some(&admission.agent.workspace_id),
+                    false,
+                    20,
+                )
+                .unwrap()
+                .is_empty()
+        );
+
+        let outside =
+            scoped_write_invocation(&checkout, &admission, &session_id, "Other/denied.txt");
+        assert!(
+            filesystem_write(&outside, &runtime)
+                .await
+                .unwrap_err()
+                .contains("outside the assignment write scopes")
+        );
+        let parent =
+            scoped_write_invocation(&checkout, &admission, &session_id, "Sources/../escape.txt");
+        assert!(
+            filesystem_write(&parent, &runtime)
+                .await
+                .unwrap_err()
+                .contains("must not contain '..'")
+        );
     }
 }

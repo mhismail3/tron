@@ -67,6 +67,21 @@ struct WorkerTechnicalDetailsSheet: View {
                         label: "Execution",
                         value: executionLabel(for: architecture)
                     )
+                    if let roleReview = architecture.roleReview {
+                        WorkerMetadataDivider()
+                        WorkerMetadataRow(
+                            label: "Reusable role review",
+                            value: WorkerConsolePresentation.displayLabel(roleReview)
+                        )
+                    }
+                    if let agentRole = architecture.agentRole {
+                        WorkerMetadataDivider()
+                        WorkerMetadataRow(
+                            label: "Agent role declaration",
+                            value: WorkerConsoleViewModel.prettyJSON(agentRole),
+                            isCode: true
+                        )
+                    }
                 } else {
                     WorkerMetadataRow(
                         label: "Runner",

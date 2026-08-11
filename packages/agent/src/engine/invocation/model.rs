@@ -9,7 +9,9 @@ use tokio_util::sync::CancellationToken;
 use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, WorkerId};
-use crate::engine::kernel::types::{CatalogRevision, FunctionRevision, IdempotencyScope};
+use crate::engine::kernel::types::{
+    CatalogRevision, FunctionRevision, IdempotencyScope, WorkspaceEffect,
+};
 
 /// Causal context carried by every invocation.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,6 +55,30 @@ pub struct CausalContext {
     /// Absence preserves the migration surface; an explicit empty vector
     /// projects no callable model tools.
     worker_agent_tools: Option<Vec<String>>,
+    /// Stable reusable-agent identity, when this invocation belongs to one.
+    agent_id: Option<String>,
+    /// Stable assignment identity for the current unit of work.
+    agent_assignment_id: Option<String>,
+    /// Internal mixed-topology execution identity for that assignment.
+    agent_execution_id: Option<String>,
+    /// Exact immutable function-id grant admitted for this agent execution.
+    delegated_function_grant: Option<Vec<String>>,
+    /// Immutable assignment limits carried across internal runtime hops.
+    agent_limits: Option<Value>,
+    /// Canonical workspace-relative mutation prefixes admitted for the active
+    /// reusable-agent assignment.
+    ///
+    /// This is an immutable authority/resource snapshot. An absent value means
+    /// the invocation is not executing a reusable assignment; it does not mean
+    /// an assignment received whole-workspace write authority.
+    agent_write_scopes: Option<Vec<String>>,
+    /// Workspace interaction class copied from the registered source contract
+    /// during invocation preparation.
+    ///
+    /// Callers may construct causal context before routing, so the catalog
+    /// always overwrites this value with the selected function definition. It
+    /// is reliability coordination metadata, not an operating-system sandbox.
+    declared_workspace_effect: WorkspaceEffect,
     /// Provider/model tool-call id that originated this engine invocation.
     ///
     /// This is transient observation metadata used to correlate live progress
@@ -65,6 +91,11 @@ pub struct CausalContext {
     advertised_worker_version: Option<String>,
     /// Current worker-trigger cascade depth.
     trigger_depth: u32,
+    /// Consecutive engine-driven coordination wake hops since the last
+    /// authenticated user/operator instruction. This is distinct from causal
+    /// topology depth: messages do not create execution nodes, while every
+    /// autonomous wake must advance this guard.
+    autonomous_wake_hop: u32,
 }
 
 impl CausalContext {
@@ -85,10 +116,18 @@ impl CausalContext {
             origin_worker_tool_ordinal: None,
             worker_max_agent_turns: None,
             worker_agent_tools: None,
+            agent_id: None,
+            agent_assignment_id: None,
+            agent_execution_id: None,
+            delegated_function_grant: None,
+            agent_limits: None,
+            agent_write_scopes: None,
+            declared_workspace_effect: WorkspaceEffect::None,
             model_tool_invocation_id: None,
             advertised_function_revision: None,
             advertised_worker_version: None,
             trigger_depth: 0,
+            autonomous_wake_hop: 0,
         }
     }
 
@@ -202,6 +241,101 @@ impl CausalContext {
         self.worker_agent_tools.as_deref()
     }
 
+    /// Attach stable reusable-agent identity for an auxiliary coordination
+    /// turn that is not owned by an assignment execution.
+    #[must_use]
+    pub fn with_agent_identity(mut self, agent_id: impl Into<String>) -> Self {
+        self.agent_id = Some(agent_id.into());
+        self
+    }
+
+    /// Attach stable reusable-agent and assignment topology identities.
+    #[must_use]
+    pub fn with_agent_execution(
+        mut self,
+        agent_id: impl Into<String>,
+        assignment_id: impl Into<String>,
+        execution_id: impl Into<String>,
+    ) -> Self {
+        self.agent_id = Some(agent_id.into());
+        self.agent_assignment_id = Some(assignment_id.into());
+        self.agent_execution_id = Some(execution_id.into());
+        self
+    }
+
+    /// Stable reusable-agent identity.
+    #[must_use]
+    pub fn agent_id(&self) -> Option<&str> {
+        self.agent_id.as_deref()
+    }
+
+    /// Stable current assignment identity.
+    #[must_use]
+    pub fn agent_assignment_id(&self) -> Option<&str> {
+        self.agent_assignment_id.as_deref()
+    }
+
+    /// Stable mixed-topology execution identity.
+    #[must_use]
+    pub fn agent_execution_id(&self) -> Option<&str> {
+        self.agent_execution_id.as_deref()
+    }
+
+    /// Attach the exact engine-derived function grant for this agent run.
+    #[must_use]
+    pub fn with_delegated_function_grant(mut self, grant: Vec<String>) -> Self {
+        self.delegated_function_grant = Some(grant);
+        self
+    }
+
+    /// Read the exact delegated function grant.
+    #[must_use]
+    pub fn delegated_function_grant(&self) -> Option<&[String]> {
+        self.delegated_function_grant.as_deref()
+    }
+
+    /// Attach immutable assignment limits.
+    #[must_use]
+    pub fn with_agent_limits(mut self, limits: Value) -> Self {
+        self.agent_limits = Some(limits);
+        self
+    }
+
+    /// Read immutable assignment limits.
+    #[must_use]
+    pub fn agent_limits(&self) -> Option<&Value> {
+        self.agent_limits.as_ref()
+    }
+
+    /// Attach the immutable assignment write-scope snapshot.
+    #[must_use]
+    pub fn with_agent_write_scopes(mut self, scopes: Vec<String>) -> Self {
+        self.agent_write_scopes = Some(scopes);
+        self
+    }
+
+    /// Read the immutable assignment write-scope snapshot.
+    #[must_use]
+    pub fn agent_write_scopes(&self) -> Option<&[String]> {
+        self.agent_write_scopes.as_deref()
+    }
+
+    /// Stamp the source-owned workspace effect selected by the live catalog.
+    ///
+    /// This is crate-visible for focused handler tests. Production dispatch
+    /// overwrites it after resolving the registered function contract.
+    #[must_use]
+    pub(crate) fn with_declared_workspace_effect(mut self, effect: WorkspaceEffect) -> Self {
+        self.declared_workspace_effect = effect;
+        self
+    }
+
+    /// Read the source-owned workspace interaction class.
+    #[must_use]
+    pub fn declared_workspace_effect(&self) -> WorkspaceEffect {
+        self.declared_workspace_effect
+    }
+
     /// Preserve the originating provider/model tool-call id for live
     /// presentation correlation.
     #[must_use]
@@ -252,6 +386,19 @@ impl CausalContext {
     #[must_use]
     pub fn trigger_depth(&self) -> u32 {
         self.trigger_depth
+    }
+
+    /// Set the consecutive autonomous coordination wake count.
+    #[must_use]
+    pub fn with_autonomous_wake_hop(mut self, autonomous_wake_hop: u32) -> Self {
+        self.autonomous_wake_hop = autonomous_wake_hop;
+        self
+    }
+
+    /// Read the consecutive autonomous coordination wake count.
+    #[must_use]
+    pub const fn autonomous_wake_hop(&self) -> u32 {
+        self.autonomous_wake_hop
     }
 }
 

@@ -15,7 +15,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::domains::session::event_store::SessionRow;
 use crate::domains::session::event_store::errors::Result;
 use crate::domains::session::event_store::identity::SessionIdentity;
-use crate::domains::session::event_store::sqlite::row_types::WORKER_SESSION_TAG;
+use crate::domains::session::event_store::sqlite::row_types::{
+    AGENT_SESSION_TAG, WORKER_SESSION_TAG,
+};
 
 mod projections;
 #[cfg(test)]
@@ -191,12 +193,14 @@ impl SessionRepo {
             }
         }
         if !opts.include_worker_sessions {
-            let parameter = param_values.len() + 1;
+            let worker_parameter = param_values.len() + 1;
+            let agent_parameter = worker_parameter + 1;
             let _ = write!(
                 sql,
-                " AND NOT EXISTS (SELECT 1 FROM json_each(sessions.tags) WHERE json_each.value = ?{parameter})"
+                " AND NOT EXISTS (SELECT 1 FROM json_each(sessions.tags) WHERE json_each.value IN (?{worker_parameter}, ?{agent_parameter}))"
             );
             param_values.push(Box::new(WORKER_SESSION_TAG.to_owned()));
+            param_values.push(Box::new(AGENT_SESSION_TAG.to_owned()));
         }
         if let Some(snapshot_created_at) = opts.snapshot_created_at {
             let _ = write!(

@@ -16,6 +16,7 @@ fn bundle() -> WorkerBundle {
             "properties":{"topic":{"type":"string"}}
         })),
         agent_tools: None,
+        agent_role: None,
         input_schema: json!({"type":"object","properties":{"topic":{"type":"string"}}}),
         output_schema: json!({"type":"object"}),
         runner: WorkerRunner::Command {
@@ -46,8 +47,10 @@ fn bundle() -> WorkerBundle {
     }
 }
 
+mod agent_coordination;
 mod artifacts_presentation;
 mod durability;
 mod notifications;
 mod publication;
 mod results;
+mod role_review;

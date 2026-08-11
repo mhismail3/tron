@@ -93,6 +93,7 @@ impl TronSettings {
         clamp_option_ratio(&mut cs.trigger_token_threshold, "trigger_token_threshold");
 
         clamp_ratio(&mut self.retry.jitter_factor, "jitter_factor");
+        self.agent.coordination.normalize();
     }
 }
 

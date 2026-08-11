@@ -506,6 +506,7 @@ fn message_preview(message: &Message) -> Option<String> {
                 .collect::<Vec<_>>()
                 .join("\n"),
         },
+        Message::Agent { content, .. } => content.text.clone(),
         Message::Assistant { content, .. } => content
             .iter()
             .filter_map(super::content::AssistantContent::as_text)

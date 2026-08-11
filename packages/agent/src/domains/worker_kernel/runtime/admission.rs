@@ -16,6 +16,7 @@ struct InvocationAdmission<'a> {
     interaction_mode: WorkerInteractionMode,
     model_tool_invocation_id: Option<&'a str>,
     parent_worker_invocation_id: Option<&'a str>,
+    parent_agent_execution_id: Option<&'a str>,
     parent_worker_tool_ordinal: Option<u32>,
     retry_of_invocation_id: Option<&'a str>,
     worker_version: Option<&'a str>,
@@ -29,6 +30,7 @@ impl Default for InvocationAdmission<'_> {
             interaction_mode: WorkerInteractionMode::Foreground,
             model_tool_invocation_id: None,
             parent_worker_invocation_id: None,
+            parent_agent_execution_id: None,
             parent_worker_tool_ordinal: None,
             retry_of_invocation_id: None,
             worker_version: None,
@@ -115,19 +117,25 @@ impl WorkerRuntime {
 
     /// Provider-facing fixed `worker_invoke(mode=wait)` execution.
     ///
-    /// This shares the direct-tool interaction budget but returns the existing
-    /// invocation record envelope. Nested worker calls remain synchronous.
+    /// Top-level calls share the direct-tool interaction budget and return the
+    /// existing invocation record envelope. A nested wait synchronously joins
+    /// its typed child up to the worker reliability ceiling. `mode=enqueue`
+    /// uses the separate admission path and returns a durable background child
+    /// for both root and nested callers; reusable parent assignments join that
+    /// child structurally.
     pub(crate) async fn invoke_from_provider_tool(
         self: &Arc<Self>,
         request: InvokeRequest,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_agent_execution_id: Option<&str>,
         parent_worker_tool_ordinal: Option<u32>,
     ) -> Result<InvocationRecord, String> {
         self.invoke_from_provider_tool_with_admission(
             request,
             model_tool_invocation_id,
             parent_worker_invocation_id,
+            parent_agent_execution_id,
             parent_worker_tool_ordinal,
             None,
             None,
@@ -149,6 +157,7 @@ impl WorkerRuntime {
         origin_session_id: Option<String>,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_agent_execution_id: Option<&str>,
         parent_worker_tool_ordinal: Option<u32>,
     ) -> Result<InvocationRecord, String> {
         let original = self
@@ -177,6 +186,7 @@ impl WorkerRuntime {
             },
             model_tool_invocation_id,
             parent_worker_invocation_id,
+            parent_agent_execution_id,
             parent_worker_tool_ordinal,
             Some(&original.worker_version),
             Some(retry_of_invocation_id),
@@ -196,6 +206,7 @@ impl WorkerRuntime {
         origin_session_id: Option<String>,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_agent_execution_id: Option<&str>,
         parent_worker_tool_ordinal: Option<u32>,
     ) -> Result<InvocationRecord, String> {
         let original = self
@@ -227,6 +238,7 @@ impl WorkerRuntime {
                 interaction_mode: WorkerInteractionMode::Background,
                 model_tool_invocation_id,
                 parent_worker_invocation_id,
+                parent_agent_execution_id,
                 parent_worker_tool_ordinal,
                 retry_of_invocation_id: Some(retry_of_invocation_id),
                 worker_version: Some(&original.worker_version),
@@ -255,6 +267,7 @@ impl WorkerRuntime {
         request: InvokeRequest,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_agent_execution_id: Option<&str>,
         parent_worker_tool_ordinal: Option<u32>,
         worker_version: Option<&str>,
         retry_of_invocation_id: Option<&str>,
@@ -267,6 +280,7 @@ impl WorkerRuntime {
                 InvocationAdmission {
                     model_tool_invocation_id,
                     parent_worker_invocation_id,
+                    parent_agent_execution_id,
                     parent_worker_tool_ordinal,
                     retry_of_invocation_id,
                     worker_version,
@@ -288,6 +302,7 @@ impl WorkerRuntime {
             InvocationAdmission {
                 interaction_mode,
                 model_tool_invocation_id,
+                parent_agent_execution_id,
                 retry_of_invocation_id,
                 worker_version,
                 pinned_effective_model,
@@ -327,6 +342,7 @@ impl WorkerRuntime {
         request: InvokeRequest,
         target: ModelToolProgressTarget,
         parent_worker_invocation_id: Option<&str>,
+        parent_agent_execution_id: Option<&str>,
         parent_worker_tool_ordinal: Option<u32>,
     ) -> Result<InvocationRecord, String> {
         let (queued, _) = self.enqueue_request_with_admission(
@@ -334,6 +350,7 @@ impl WorkerRuntime {
             InvocationAdmission {
                 model_tool_invocation_id: Some(&target.invocation_id),
                 parent_worker_invocation_id,
+                parent_agent_execution_id,
                 parent_worker_tool_ordinal,
                 ..Default::default()
             },
@@ -392,9 +409,16 @@ impl WorkerRuntime {
         self: &Arc<Self>,
         request: InvokeRequest,
         target: ModelToolProgressTarget,
+        parent_agent_execution_id: Option<&str>,
     ) -> Result<ModelToolInvocationOutcome, String> {
-        self.invoke_from_model_tool_with_budget(request, target, INTERACTION_BUDGET, false)
-            .await
+        self.invoke_from_model_tool_with_budget(
+            request,
+            target,
+            parent_agent_execution_id,
+            INTERACTION_BUDGET,
+            false,
+        )
+        .await
     }
 
     #[cfg(test)]
@@ -404,7 +428,7 @@ impl WorkerRuntime {
         target: ModelToolProgressTarget,
         foreground_grace: Duration,
     ) -> Result<ModelToolInvocationOutcome, String> {
-        self.invoke_from_model_tool_with_budget(request, target, foreground_grace, true)
+        self.invoke_from_model_tool_with_budget(request, target, None, foreground_grace, true)
             .await
     }
 
@@ -412,6 +436,7 @@ impl WorkerRuntime {
         self: &Arc<Self>,
         request: InvokeRequest,
         target: ModelToolProgressTarget,
+        parent_agent_execution_id: Option<&str>,
         interaction_budget: Duration,
         force_foreground_grace: bool,
     ) -> Result<ModelToolInvocationOutcome, String> {
@@ -429,6 +454,7 @@ impl WorkerRuntime {
             InvocationAdmission {
                 interaction_mode: mode,
                 model_tool_invocation_id: Some(&target.invocation_id),
+                parent_agent_execution_id,
                 ..Default::default()
             },
         )?;
@@ -541,6 +567,7 @@ impl WorkerRuntime {
         request: InvokeRequest,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_agent_execution_id: Option<&str>,
         parent_worker_tool_ordinal: Option<u32>,
     ) -> Result<InvocationRecord, String> {
         let (queued, replayed) = self.enqueue_request_with_admission(
@@ -549,6 +576,7 @@ impl WorkerRuntime {
                 interaction_mode: WorkerInteractionMode::Background,
                 model_tool_invocation_id,
                 parent_worker_invocation_id,
+                parent_agent_execution_id,
                 parent_worker_tool_ordinal,
                 ..Default::default()
             },
@@ -705,6 +733,40 @@ impl WorkerRuntime {
             } else {
                 None
             };
+        let profile_execution_ceiling = self
+            .settings_runtime
+            .current()
+            .settings
+            .agent
+            .coordination
+            .max_execution_nodes;
+        let max_child_executions =
+            if let Some(parent_execution_id) = admission.parent_agent_execution_id {
+                let parent = self
+                    .store
+                    .execution_node(parent_execution_id)?
+                    .ok_or_else(|| {
+                        format!("parent agent execution '{parent_execution_id}' was not found")
+                    })?;
+                let assignment_id = parent.assignment_id.as_deref().ok_or_else(|| {
+                    format!("parent agent execution '{parent_execution_id}' has no assignment")
+                })?;
+                self.store
+                    .agent_assignment(assignment_id)?
+                    .and_then(|assignment| {
+                        assignment
+                            .limits_snapshot
+                            .get("maxChildExecutions")
+                            .and_then(Value::as_u64)
+                    })
+                    .and_then(|limit| u32::try_from(limit).ok())
+                    .unwrap_or(profile_execution_ceiling)
+                    .min(profile_execution_ceiling)
+            } else {
+                max_sibling_invocations
+                    .unwrap_or(profile_execution_ceiling)
+                    .min(profile_execution_ceiling)
+            };
         let (queued, replayed) = self.store.begin_invocation_with_model_context(
             &request.worker_id,
             &worker.summary.active_version,
@@ -717,6 +779,7 @@ impl WorkerRuntime {
             admission.interaction_mode,
             admission.model_tool_invocation_id,
             admission.parent_worker_invocation_id,
+            admission.parent_agent_execution_id,
             admission.parent_worker_tool_ordinal,
             admission.retry_of_invocation_id,
             requested_model,
@@ -724,6 +787,8 @@ impl WorkerRuntime {
             effective_model.as_deref(),
             effective_reasoning_level.as_deref(),
             max_sibling_invocations,
+            max_child_executions,
+            profile_execution_ceiling,
         )?;
         Ok((queued, replayed))
     }

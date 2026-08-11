@@ -133,6 +133,7 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
             EventType::CompactBoundary => handle_compact_boundary(event, &mut st),
             EventType::ToolInvocationCompleted => handle_tool_result(event, &mut st),
             EventType::MessageUser => handle_message_user(event, &mut st),
+            EventType::MessageAgent => handle_message_agent(event, &mut st),
             EventType::MessageAssistant => handle_message_assistant(event, metadata, &mut st),
             _ => {}
         }
@@ -242,6 +243,26 @@ fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
         });
     }
     accumulate_tokens(&event.payload, &mut st.tokens);
+}
+
+/// Handle `message.agent` without merging away per-message provenance.
+///
+/// Delivery admission guarantees this event is inserted only at a provider
+/// safe boundary. Clearing pending results remains defensive and prevents an
+/// imported coordination event from creating an invalid provider tool pair if
+/// historical state was interrupted before that boundary.
+fn handle_message_agent(event: &SessionEvent, st: &mut BuildState) {
+    st.pending_tool_results.clear();
+    let content = event.payload.get("content").cloned().unwrap_or(Value::Null);
+    st.combined.push(MessageWithEventId {
+        message: Message {
+            role: "agent".to_string(),
+            content,
+            invocation_id: None,
+            is_error: None,
+        },
+        event_ids: vec![Some(event.id.clone())],
+    });
 }
 
 /// Handle `message.assistant`: restore truncated inputs, flush tool results,

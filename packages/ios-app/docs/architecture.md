@@ -310,7 +310,17 @@ every published worker's promoted/projected state, selection evidence, and
 canonical worker inventory. The compact `workerArchitecture` projection is
 derived by the server from active immutable bundles and includes exposure,
 runner, hooks, client boundaries, triggers, dispatch routes, `agentTools`,
-suite, health, version, and provenance. The Engine dashboard merges that
+explicit `agentRole`, deterministic role-review status, suite, health, version,
+and provenance. Active legacy agent runners classified `needs_role_review`
+appear once in a leading Review agent roles group and carry a matching warning
+tag; they are excluded from the General and Integrated groups to avoid a
+duplicate inventory. Selecting one opens the ordinary immutable worker detail.
+Its on-demand Worker Details sheet shows the server classification and exact
+role declaration. The app does not infer a role from runner kind or mutate a
+bundle declaration. This is a truthful inspection queue, not a simulated Forge
+workflow: until the Engine owns a durable proposal/confirmation contract, the
+app does not fabricate a propose or publish action from `roleReview` metadata.
+The Engine dashboard merges that
 architecture into each canonical worker row and detail: rows identify health,
 direct/delegated agent exposure, declared engine-hook ownership, and runner
 kind together in one left-aligned bottom tag row,
@@ -426,6 +436,9 @@ invalidation/change-feed contract only.
   upcoming scheduled work;
 - idempotent operator dismissal of one actionable inbox failure without
   deleting its result or execution evidence;
+- capability-gated `agent_role_review.v1` reads and mutations: independently
+  paged review candidates and proposal history, exact proposal inspection,
+  idempotent review start, confirmed publication/activation, and rejection;
 - bounded RFC 6901 result reads for a completed invocation;
 - typed invocation with an explicit `wait` mode for request/response actions and
   an explicit `enqueue` mode for durable background work;
@@ -436,8 +449,8 @@ invalidation/change-feed contract only.
 - retire and purge;
 - stop/resume all;
 - webhook token rotation;
-- cached connection-local live-tail subscriptions for `worker.lifecycle` and
-  `worker.invocations`.
+- cached connection-local live-tail subscriptions for `worker.lifecycle`,
+  `worker.invocations`, and `worker.role_review`.
 
 `WorkerKernelRepository` is the feature-facing contract. The default
 repository delegates without manufacturing substitute rows or local lifecycle
@@ -454,6 +467,9 @@ state.
 - selected inspection, runs, and inbox;
 - editable JSON invocation input and rendered result;
 - one-time returned webhook credential;
+- the last authoritative agent-role reviewer, independently paged current
+  review queue and durable proposal history, selected version-pinned proposal,
+  and role-review loading/mutation/error state;
 - refresh/mutation flags, stop-all status, and the last transport error.
 
 The lightweight summary lane loads one authoritative profile-level engine
@@ -525,8 +541,8 @@ provides:
   published worker-tool counts;
 - every fixed model-addressable function shown immediately under server-owned
   group headings, including host, user interaction, session metadata, worker
-  interaction, worker administration, and any future group the client has not
-  named yet; grouping preserves server tool order and cannot discard an
+  interaction, agent coordination, worker administration, and any future group
+  the client has not named yet; grouping preserves server tool order and cannot discard an
   unfamiliar group. Each row exposes its ordinary/specialist/conditional
   audience and request-specific availability, then
   opens a dedicated detail sheet for its description, identifiers, exact
@@ -667,6 +683,28 @@ first-level surfaces directly; their headings are plain layout groups rather
 than decorative outer containers. Container sections remain reserved for
 cohesive forms, tables, and multi-row metadata whose rows are not independently
 actionable cards.
+
+Manage Workers keeps one **Review agent roles** group mounted whenever the
+server advertises `agent_role_review.v1`, and also for older servers whose
+architecture snapshot still identifies legacy agent runners that need review.
+An older server gets a calm repair/update explanation rather than a button that
+cannot work. A missing reviewer shows the server-authored repair requirement;
+the client never invents a start, inspect, apply, or reject permission from
+proposal status. Candidate and proposal pages remain nonduplicating, expose
+truthful totals and continuation controls, and retain the last authoritative
+snapshot read-only while offline. `worker.role_review` is only a coalesced
+invalidation hint; the view model rereads the canonical list.
+
+The proposal sheet follows the normal Worker Console hierarchy. It keeps
+ordinary worker-detail navigation available, then presents the pinned target
+worker/version/content, reviewer worker/version/invocation, proposal hashes,
+explicit current-missing versus proposed-enabled/disabled `agentRole` diff,
+and reviewer rationale. Apply and Reject appear only when their exact
+server-authored allowed action is true; disabled reasons render as static
+explanations rather than fake disabled controls. Apply requires confirmation
+because it publishes and activates a new immutable worker version. Stale,
+applying, applied, rejected, offline, retry, and rejection-rationale states
+remain visible from durable proposal evidence.
 
 Only the frontmost worker sheet observes live worker state. Lazy run and result
 rows emit selection intents only; the stable containing sheet owns the selected
@@ -1189,7 +1227,7 @@ Exact provider audit bodies never enter the device transcript cache.
 
 Manage Session is deliberately a high-level operation surface. Below its
 compact token summary, it renders stable container rows for Agent Context,
-Background Activity, Session Workers, Terminal, Fork, and Technical Details.
+Agents, Background Activity, Session Workers, Terminal, Fork, and Technical Details.
 It does not inline unbounded instructions, deliveries, or worker runs. Every
 row remains mounted through disconnects and capability negotiation: an action
 that cannot currently run is disabled with a specific reason, then becomes
@@ -1235,6 +1273,77 @@ Workers pages bounded `detail: "graph"` roots and their causal descendants;
 opening a run reuses the canonical worker detail rather than creating another
 activity store.
 
+Agents is a third independent progressive-disclosure lane. It reads
+`agent::relations` with the selected session explicitly in both payload and
+invocation context; it never follows a later sidebar selection or joins client
+session/worker caches to invent relationships. The row remains mounted on old
+or disconnected servers, retains its last successful snapshot, and activates
+network management only after the complete `agent_coordination.v1` capability
+is negotiated. Unsupported servers open a calm read-only explanation rather
+than removing or disabling the destination. The row summarizes
+server totals as `N active · M related`. Its sheet presents nested Child agents
+parent-first and separates parent, promoted, managed, and durable-message
+contacts under Other agents without duplication. Relationship pages are
+bounded and explicitly page older evidence.
+
+Opening an agent creates an independent `AgentDetailViewModel`. Its overview,
+assignment history, and communication history refresh from canonical
+`agent::inspect`, `agent::assignments`, and `agent::messages` reads. Refresh is
+single-flight with a dirty follow-up; successful projections survive partial
+read and transport failures. Canonical head-page refreshes replace matching
+records but merge over explicitly loaded assignment and communication history;
+per-lane cursor generations prevent a late poll from rewinding or discarding a
+page loaded beneath a covering sheet. Active agents poll at a bounded two-second
+cadence and stop when quiescent. The `agent.lifecycle`, `agent.assignment`, and
+`agent.message` stream markers are only coalesced invalidations: after 200 ms,
+the mounted sheet rereads server truth. No message content or lifecycle state
+is projected directly from those hints.
+
+Agent detail reuses the Worker Console's first-level cards, typography, sheet
+detents, durable result inspector, and the generalized read-only Audit Session
+sheet. It exposes current and historical assignments, exact message direction/
+kind/provenance/reply/delivery evidence, role/version, effective capabilities,
+limits, write scopes, own/subtree usage, lineage, contacts, results, transcript,
+and technical evidence without storing a second device transcript. An
+authorized `transcriptSessionId` is a client-only audit capability; it never
+appears in model-facing agent discovery.
+
+The generalized Audit Session is live as well as reconstructable without ever
+resuming or rebinding the audited session as the user's interactive chat. It
+retains a session-scoped event subscription before taking the bounded durable
+snapshot, buffers the suffix behind the server sequence cut, and drains only
+after the snapshot commits. Persisted and live `message.agent` records project
+to a dedicated `.agent` row carrying exact source, kind, authority,
+assignment, and reply provenance. The bubble uses the existing compact card,
+pill, typography, and semantic accent language while rendering sender text as
+plain selectable audit evidence. Coordination rows are never classified as a
+user prompt, never reset user-turn bookkeeping, and never expose edit, delete,
+retry, or user-fork affordances.
+Assignment results with a `resultId` hydrate through bounded
+`agent::result_read` pages addressed by JSON pointer and offset. The inspector
+shows server-owned size and SHA-256 evidence and pages large collections rather
+than clipping them or falling back to an informational placeholder. Historical
+worker-linked results continue through the same established worker result
+reader during compatibility.
+
+All mutations are driven by each projection's `allowedActions`. The app never
+infers management authority from relationship labels or status. Disabled
+actions retain the Engine's exact reason. Operator instructions,
+cancel/close, future-default configuration, bounded non-transitive management
+grants, role upgrades, assignment retry, and promotion use explicit
+owner-session-scoped writes and one idempotency/client-mutation identity.
+Destructive and ownership-changing actions require confirmation. Promotion
+keeps the agent and transcript identity while transferring lifecycle ownership;
+retry creates a linked new assignment rather than rewriting history. The app
+does not expose a global Agents destination, graph canvas, or manual spawn form.
+Cancellation confirmation uses the Engine's exact current `affectedCount` of
+mixed agent assignments and worker executions; an older projection without the
+field keeps a conservative uncounted warning instead of inferring impact from
+paged relationship rows. Operator, configuration, management-access, and
+assignment-retry sheets own their in-flight presentation and render the exact
+mutation failure locally; a covered parent sheet is never the only error
+surface for a rejected action.
+
 `UI/SessionContext/` keeps this ownership visible in source: the main sheet
 owns navigation and shared snapshots; loading owns cancellable tasks and exact-
 detail caching; presentation owns pure availability and labeling policy; and
@@ -1246,8 +1355,10 @@ state rather than manufacturing parallel view models or context stores.
 Delivery-only assistant continuations render without a fabricated user bubble.
 Wake provenance is persisted before thinking, tools, or assistant text and is
 deduplicated by delivery identity during live/reconstructed chat. The
-`agent_wait_for_workers` chip says `Auto-resume registered` while pending and
-does not imply completion. Session mutations remain disabled while disconnected,
+first-class `agent_wait` chip says `Auto-resume registered` while pending,
+counts mixed assignment/worker/reply targets, and does not imply completion.
+Retained historical `agent_wait_for_workers` evidence keeps its worker-specific
+label. Session mutations remain disabled while disconnected,
 compacting, or running a turn. Fork confirmation remains a native animated
 liquid-glass sheet. There is no parallel context-control repository, resource/
 action audit, memory editor, or fabricated manual compact/clear API.

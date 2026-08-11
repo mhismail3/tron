@@ -63,7 +63,7 @@ impl LiveCatalog {
         self.prepare_invocation(invocation)
     }
 
-    fn prepare_invocation(&mut self, invocation: Invocation) -> PreparedSyncInvocationDecision {
+    fn prepare_invocation(&mut self, mut invocation: Invocation) -> PreparedSyncInvocationDecision {
         let Some(entry) = self.functions.get(&invocation.function_id) else {
             let worker_id = WorkerId::new("missing").expect("valid static id");
             let result = InvocationResult::error(
@@ -84,6 +84,13 @@ impl LiveCatalog {
         };
         let function = entry.definition.clone();
         let handler = Arc::clone(&entry.handler);
+        // INVARIANT: workspace coordination consumes only the selected source
+        // contract. Any value carried by a caller is overwritten after routing
+        // and before policy, idempotency, or handler execution.
+        invocation.causal_context = invocation
+            .causal_context
+            .clone()
+            .with_declared_workspace_effect(function.workspace_effect);
 
         if let Err(err) = validate_advertised_surface(&function, &invocation)
             .and_then(|_| policy::validate_invocation(&function, &invocation))

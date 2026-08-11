@@ -29,6 +29,7 @@ pub(super) async fn build_prompt_agent(
     initial_turn_offset: u32,
     resolved_workspace_id: Option<String>,
     worker_max_agent_turns: Option<u32>,
+    assignment_max_turns: Option<u32>,
 ) -> Result<BuiltPromptAgent, FailureEnvelope> {
     let responder = match responder_factory
         .create_for_model(model, &settings.api)
@@ -58,7 +59,11 @@ pub(super) async fn build_prompt_agent(
         server_origin: Some(server_origin),
         system_prompt: Some(AGENT_SEED.to_owned()),
         enable_thinking: true,
-        max_turns: resolved_max_turns(settings.agent.max_turns, worker_max_agent_turns),
+        max_turns: resolved_max_turns(
+            settings.agent.max_turns,
+            worker_max_agent_turns,
+            assignment_max_turns,
+        ),
         compaction: crate::domains::agent::context::types::CompactionConfig {
             threshold: compactor_settings.compaction_threshold,
             preserve_recent_turns: compactor_settings.preserve_recent_count,
@@ -95,8 +100,15 @@ pub(super) async fn build_prompt_agent(
     })
 }
 
-fn resolved_max_turns(global_limit: u32, worker_limit: Option<u32>) -> u32 {
-    worker_limit.map_or(global_limit, |limit| global_limit.min(limit))
+fn resolved_max_turns(
+    global_limit: u32,
+    worker_limit: Option<u32>,
+    assignment_limit: Option<u32>,
+) -> u32 {
+    [worker_limit, assignment_limit]
+        .into_iter()
+        .flatten()
+        .fold(global_limit, u32::min)
 }
 
 #[cfg(test)]
@@ -105,8 +117,9 @@ mod tests {
 
     #[test]
     fn worker_turn_limit_can_only_tighten_the_global_ceiling() {
-        assert_eq!(resolved_max_turns(250, Some(7)), 7);
-        assert_eq!(resolved_max_turns(10, Some(20)), 10);
-        assert_eq!(resolved_max_turns(250, None), 250);
+        assert_eq!(resolved_max_turns(250, Some(7), None), 7);
+        assert_eq!(resolved_max_turns(10, Some(20), Some(8)), 8);
+        assert_eq!(resolved_max_turns(250, None, Some(32)), 32);
+        assert_eq!(resolved_max_turns(250, None, None), 250);
     }
 }

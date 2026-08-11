@@ -1,4 +1,5 @@
 use super::*;
+use crate::domains::worker_kernel::persistence::{AgentInstanceKind, AgentInstanceState};
 
 struct JsonResponder;
 
@@ -156,7 +157,10 @@ async fn agent_runner_returns_typed_json() {
         .agent_session_id
         .as_deref()
         .expect("agent invocation should expose its child session");
-    assert!(agent_session_id.starts_with("sess_"), "{agent_session_id}");
+    assert!(
+        agent_session_id.starts_with("agent_session_direct_"),
+        "{agent_session_id}"
+    );
     assert_eq!(
         runtime
             .store()
@@ -166,6 +170,104 @@ async fn agent_runner_returns_typed_json() {
             .agent_session_id
             .as_deref(),
         Some(agent_session_id)
+    );
+    let transcript = runtime
+        .event_store
+        .get_session(agent_session_id)
+        .unwrap()
+        .unwrap();
+    assert!(transcript.is_agent_session());
+    assert!(
+        transcript.working_directory.contains(&result.invocation_id),
+        "{}",
+        transcript.working_directory
+    );
+    let agent = runtime
+        .store()
+        .agent_instance_for_session(agent_session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(agent.kind, AgentInstanceKind::DirectWorker);
+    assert_eq!(agent.state, AgentInstanceState::Closed);
+    assert_eq!(agent.workspace_id, transcript.workspace_id);
+    assert_eq!(agent.root_session_id, agent.session_id);
+    let assignments = runtime
+        .store()
+        .list_agent_assignments(&agent.agent_id, 10)
+        .unwrap();
+    assert_eq!(assignments.len(), 1);
+    assert_eq!(assignments[0].status, AgentAssignmentStatus::Completed);
+    assert_eq!(
+        runtime
+            .store()
+            .execution_node(&assignments[0].execution_id)
+            .unwrap()
+            .unwrap()
+            .worker_invocation_id
+            .as_deref(),
+        Some(result.invocation_id.as_str())
+    );
+}
+
+#[tokio::test]
+async fn top_level_agent_runner_is_owned_by_its_lazy_origin_agent() {
+    let (runtime, _home) = test_runtime(Some(Arc::new(JsonResponderFactory)));
+    let origin = runtime
+        .event_store
+        .create_session(
+            "worker-test-model",
+            "/tmp/direct-worker-origin",
+            Some("Direct worker origin"),
+            None,
+        )
+        .unwrap();
+    let mut bundle = command_bundle(Vec::new());
+    bundle.name = "Owned Agent Worker".to_owned();
+    bundle.description = "Proves direct runner management lineage".to_owned();
+    bundle.tool_name = Some("worker_owned_agent_test".to_owned());
+    bundle.output_schema = json!({
+        "type":"object",
+        "required":["answer"],
+        "properties":{"answer":{"type":"string"}}
+    });
+    bundle.runner = WorkerRunner::Agent {
+        instructions: "Return the requested typed JSON answer.".to_owned(),
+        model: None,
+        reasoning_level: Some("low".to_owned()),
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+    let mut invocation = request(&outcome.worker.worker_id, json!({}), "agent-owned");
+    invocation.origin_session_id = Some(origin.session.id.clone());
+    let result = runtime.invoke(invocation).await.unwrap();
+    assert_eq!(result.status, "completed", "{result:?}");
+
+    let owner = runtime
+        .store()
+        .agent_instance_for_session(&origin.session.id)
+        .unwrap()
+        .expect("origin root identity");
+    assert_eq!(owner.kind, AgentInstanceKind::Root);
+    let direct = runtime
+        .store()
+        .agent_instance_for_session(result.agent_session_id.as_deref().unwrap())
+        .unwrap()
+        .expect("direct worker identity");
+    assert_eq!(direct.kind, AgentInstanceKind::DirectWorker);
+    assert_eq!(
+        direct.management_owner_agent_id.as_deref(),
+        Some(owner.agent_id.as_str())
+    );
+    assert_eq!(
+        direct.spawned_by_agent_id.as_deref(),
+        Some(owner.agent_id.as_str())
+    );
+    assert_eq!(direct.root_session_id, origin.session.id);
+    assert!(
+        runtime
+            .store()
+            .agent_owned_subtree_ids(&owner.agent_id)
+            .unwrap()
+            .contains(&direct.agent_id)
     );
 }
 
@@ -495,7 +597,10 @@ impl ModelResponder for NestedDepthResponder {
                     }),
                 ]))
             }
-            call => panic!("unexpected nested-depth responder call {call}"),
+            call => panic!(
+                "unexpected nested-depth responder call {call}: {}",
+                serde_json::to_string(&request.context.messages).unwrap()
+            ),
         }
     }
 }
@@ -515,6 +620,96 @@ impl ModelResponderFactory for NestedDepthResponderFactory {
             calls: Arc::clone(&self.calls),
         }))
     }
+}
+
+struct RetainedAgentToolsAliasResponder;
+
+#[async_trait]
+impl ModelResponder for RetainedAgentToolsAliasResponder {
+    fn info(&self) -> ModelResponderInfo {
+        worker_test_responder_info()
+    }
+
+    async fn respond(
+        &self,
+        request: ModelResponseRequest,
+    ) -> Result<ModelResponse, ModelResponseError> {
+        let tools = request
+            .context
+            .tools
+            .as_ref()
+            .expect("retained alias surface")
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(tools, vec!["worker_await", "worker_result_read"]);
+        let result = "{\"answer\":\"retained-aliases\"}";
+        Ok(NestedDepthResponder::response(vec![
+            Ok(StreamEvent::Start),
+            Ok(StreamEvent::TextDelta {
+                delta: result.to_owned(),
+            }),
+            Ok(StreamEvent::Done {
+                message: AssistantMessage {
+                    content: vec![AssistantContent::text(result)],
+                    token_usage: None,
+                },
+                stop_reason: "end_turn".to_owned(),
+            }),
+        ]))
+    }
+}
+
+struct RetainedAgentToolsAliasResponderFactory;
+
+#[async_trait]
+impl ModelResponderFactory for RetainedAgentToolsAliasResponderFactory {
+    async fn create_for_model(
+        &self,
+        _model: &str,
+        _settings: &crate::domains::settings::ApiSettings,
+    ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
+        Ok(Arc::new(RetainedAgentToolsAliasResponder))
+    }
+}
+
+#[tokio::test]
+async fn direct_agent_runner_retains_exact_legacy_agent_tools_aliases() {
+    let (runtime, _home) = test_runtime(Some(Arc::new(RetainedAgentToolsAliasResponderFactory)));
+    let mut agent = command_bundle(Vec::new());
+    agent.worker_id = Some("retained-agent-tools-runner".to_owned());
+    agent.name = "Retained agent tools runner".to_owned();
+    agent.description = "Exercises one-release exact agentTools aliases".to_owned();
+    agent.tool_name = Some("worker_retained_agent_tools_runner".to_owned());
+    agent.output_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["answer"],
+        "properties":{"answer":{"const":"retained-aliases"}}
+    });
+    agent.runner = WorkerRunner::Agent {
+        instructions: "Return the exact typed result.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    agent.agent_tools = Some(vec![
+        "worker_await".to_owned(),
+        "worker_result_read".to_owned(),
+    ]);
+    agent.agent_role = Some(crate::domains::worker_kernel::types::WorkerAgentRole::Disabled);
+    let published = runtime.upsert(agent, None).await.unwrap();
+
+    let completed = runtime
+        .invoke(request(
+            &published.worker.worker_id,
+            json!({}),
+            "retained-agent-tools-run",
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(completed.status, "completed", "{completed:?}");
+    assert_eq!(completed.output, Some(json!({"answer":"retained-aliases"})));
 }
 
 #[tokio::test]
@@ -637,7 +832,10 @@ impl ModelResponder for InternalWorkerToolResponder {
                     }),
                 ]))
             }
-            call => panic!("unexpected internal worker responder call {call}"),
+            call => panic!(
+                "unexpected internal worker responder call {call}: {}",
+                serde_json::to_string(&request.context.messages).unwrap()
+            ),
         }
     }
 }
@@ -808,7 +1006,8 @@ async fn top_level_agent_worker_returns_a_tagged_background_receipt_immediately(
     ));
     let invocation_id = receipt["invocationId"].as_str().unwrap();
     let message = receipt["message"].as_str().unwrap();
-    assert!(message.contains("agent_wait_for_workers"));
+    assert!(message.contains("agent_wait"));
+    assert!(message.contains("worker_invocation"));
     assert!(message.contains(invocation_id));
     assert!(message.contains("Do not poll"));
     let durable = runtime.store().invocation(invocation_id).unwrap().unwrap();
@@ -844,8 +1043,18 @@ async fn disabling_agent_worker_aborts_its_spawned_child_session() {
             .unwrap()
     });
 
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while runtime.orchestrator.active_run_count() == 0 {
+    let child_session_id = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(session_id) = runtime
+                .store()
+                .runs_filtered(Some(&worker_id), Some("running"), 1)
+                .unwrap()
+                .into_iter()
+                .next()
+                .and_then(|run| run.agent_session_id)
+            {
+                break session_id;
+            }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -866,7 +1075,7 @@ async fn disabling_agent_worker_aborts_its_spawned_child_session() {
         "{record:?}"
     );
     tokio::time::timeout(Duration::from_secs(5), async {
-        while runtime.orchestrator.active_run_count() != 0 {
+        while runtime.orchestrator.has_active_run(&child_session_id) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -926,7 +1135,7 @@ async fn cancelling_one_agent_invocation_aborts_only_its_child_session() {
         .get_session(child_session_id)
         .unwrap()
         .unwrap();
-    assert!(child_session.is_worker_session());
+    assert!(child_session.is_agent_session());
     assert!(
         runtime
             .event_store
@@ -934,7 +1143,7 @@ async fn cancelling_one_agent_invocation_aborts_only_its_child_session() {
             .unwrap()
             .iter()
             .all(|session| session.id != child_session_id),
-        "ordinary conversation listings must hide worker-owned child sessions"
+        "ordinary conversation listings must hide direct-worker agent transcripts"
     );
 
     let cancelled = runtime.cancel_invocation(&run.invocation_id).await.unwrap();
@@ -953,10 +1162,25 @@ async fn cancelling_one_agent_invocation_aborts_only_its_child_session() {
             .unwrap()
             .ended_at
             .is_none(),
-        "worker child sessions remain reconstructable audit evidence"
+        "direct-worker agent transcripts remain reconstructable audit evidence"
+    );
+    let agent = runtime
+        .store()
+        .agent_instance_for_session(child_session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(agent.kind, AgentInstanceKind::DirectWorker);
+    assert_eq!(agent.state, AgentInstanceState::Closed);
+    assert_eq!(
+        runtime
+            .store()
+            .list_agent_assignments(&agent.agent_id, 1)
+            .unwrap()[0]
+            .status,
+        AgentAssignmentStatus::Cancelled
     );
     tokio::time::timeout(Duration::from_secs(5), async {
-        while runtime.orchestrator.active_run_count() != 0 {
+        while runtime.orchestrator.has_active_run(child_session_id) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })

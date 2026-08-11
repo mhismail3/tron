@@ -291,7 +291,7 @@ fn worker_result_history(text: &str) -> Option<String> {
         "pointer":pointer,
         "offset":offset,
         "message":format!(
-            "This bounded result page was delivered on the immediately following model turn and is omitted from later context. Call worker_result_read with invocationId '{invocation_id}', pointer '{pointer}', and offset {offset} to read it again."
+            "This bounded result page was delivered on the immediately following model turn and is omitted from later context. Call result_read with reference {{\"kind\":\"worker_invocation\",\"id\":\"{invocation_id}\"}}, pointer '{pointer}', and offset {offset} to read it again."
         ),
     }))
     .ok()
@@ -566,7 +566,7 @@ mod tests {
             history["message"]
                 .as_str()
                 .unwrap()
-                .contains("worker_result_read")
+                .contains("Call result_read")
         );
         assert!(!text.contains(&evidence));
 

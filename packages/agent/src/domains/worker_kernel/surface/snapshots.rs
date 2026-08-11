@@ -22,6 +22,8 @@ pub(crate) struct SurfaceToolSnapshot {
     pub(crate) output_schema_sha256: Option<String>,
     pub(crate) effect_class: String,
     pub(crate) risk: String,
+    pub(crate) delegation_policy: String,
+    pub(crate) workspace_effect: String,
     pub(crate) exposed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) worker_id: Option<String>,

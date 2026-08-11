@@ -175,4 +175,241 @@ struct AgentClientTests {
             "write:agent::answer_user_input",
         ])
     }
+
+    @Test("Coordination reads remain explicitly scoped and paged")
+    func coordinationReadsUseOwnerSessionAndOpaqueAgentId() async throws {
+        let transport = makeConnectedTransport()
+        let client = AgentClient(transport: transport)
+        var functions: [String] = []
+        transport.readHandler = { functionId, payload, options in
+            functions.append(functionId.rawValue)
+            #expect(options.context?.sessionId == "owner-session")
+            switch functionId.rawValue {
+            case "agent::relations":
+                let params = try #require(payload as? AgentRelationsParams)
+                #expect(params.ownerSessionId == "owner-session")
+                #expect(params.cursor == "relations-cursor")
+                #expect(params.limit == 100)
+                return AgentRelationsResultDTO(
+                    totals: AgentRelationTotalsDTO(active: 0, related: 0),
+                    items: [],
+                    nextCursor: nil
+                )
+            case "agent::inspect":
+                let params = try #require(payload as? AgentInspectParams)
+                #expect(params.agentId == "agent-opaque")
+                return try Self.inspectFixture()
+            case "agent::assignments":
+                let params = try #require(payload as? AgentAssignmentsParams)
+                #expect(params.agentId == "agent-opaque")
+                #expect(params.cursor == "assignment-cursor")
+                #expect(params.limit == 1)
+                return AgentAssignmentsResultDTO(items: [], nextCursor: nil)
+            case "agent::messages":
+                let params = try #require(payload as? AgentMessagesParams)
+                #expect(params.agentId == "agent-opaque")
+                #expect(params.cursor == "message-cursor")
+                #expect(params.limit == 100)
+                return AgentMessagesResultDTO(items: [], nextCursor: nil)
+            case "agent::message_detail":
+                let params = try #require(payload as? AgentMessageDetailParams)
+                #expect(params.agentId == "agent-opaque")
+                #expect(params.messageId == "message-opaque")
+                return try Self.messageDetailFixture()
+            case "agent::result_read":
+                let params = try #require(payload as? AgentResultReadParams)
+                #expect(params.agentId == "agent-opaque")
+                #expect(params.resultId == "result-opaque")
+                #expect(params.pointer == "/summary")
+                #expect(params.offset == 20)
+                #expect(params.limit == 20)
+                return AgentResultChunkDTO(
+                    kind: "agent_result",
+                    reference: AgentResultReferenceDTO(
+                        kind: "agent_assignment",
+                        resultId: "result-opaque",
+                        assignmentId: "assignment-1",
+                        contentSha256: "abc123",
+                        sizeBytes: 24,
+                        preview: "Complete"
+                    ),
+                    pointer: "/summary",
+                    value: AnyCodable("Complete"),
+                    children: [],
+                    offset: 20,
+                    returned: 1,
+                    total: 21,
+                    nextOffset: nil,
+                    truncated: false
+                )
+            default:
+                throw EngineConnectionError.invalidResponse
+            }
+        }
+
+        _ = try await client.agentRelations(
+            ownerSessionId: "owner-session",
+            cursor: "relations-cursor",
+            limit: 500
+        )
+        _ = try await client.inspectAgent(
+            ownerSessionId: "owner-session",
+            agentId: "agent-opaque"
+        )
+        _ = try await client.agentAssignments(
+            ownerSessionId: "owner-session",
+            agentId: "agent-opaque",
+            cursor: "assignment-cursor",
+            limit: 0
+        )
+        _ = try await client.agentMessages(
+            ownerSessionId: "owner-session",
+            agentId: "agent-opaque",
+            cursor: "message-cursor",
+            limit: 500
+        )
+        _ = try await client.agentMessageDetail(
+            ownerSessionId: "owner-session",
+            agentId: "agent-opaque",
+            messageId: "message-opaque"
+        )
+        _ = try await client.agentResult(
+            ownerSessionId: "owner-session",
+            agentId: "agent-opaque",
+            resultId: "result-opaque",
+            pointer: "/summary",
+            offset: 20,
+            limit: 255
+        )
+
+        #expect(functions == [
+            "agent::relations",
+            "agent::inspect",
+            "agent::assignments",
+            "agent::messages",
+            "agent::message_detail",
+            "agent::result_read",
+        ])
+    }
+
+    @Test("Coordination mutations carry one client mutation id and canonical owner context")
+    func coordinationWritesCarryIdempotencyAndOwnerContext() async throws {
+        let transport = makeConnectedTransport()
+        let client = AgentClient(transport: transport)
+        var functions: [String] = []
+        transport.writeHandler = { functionId, payload, idempotencyKey, options in
+            functions.append(functionId.rawValue)
+            #expect(options.context?.sessionId == "owner-session")
+            #expect(idempotencyKey.rawValue.hasPrefix("coordination-test-"))
+            let mutationId: String
+            switch functionId.rawValue {
+            case "agent::operator_message":
+                let params = try #require(payload as? AgentOperatorMessageParams)
+                #expect(params.content == "Please summarize progress")
+                mutationId = params.clientMutationId
+            case "agent::manage":
+                let params = try #require(payload as? AgentManageParams)
+                #expect(params.action == "cancel")
+                #expect(params.assignmentId == "assignment-1")
+                #expect(params.cascade == true)
+                mutationId = params.clientMutationId
+            case "agent::retry":
+                let params = try #require(payload as? AgentRetryParams)
+                #expect(params.assignmentId == "assignment-1")
+                mutationId = params.clientMutationId
+            case "agent::promote":
+                let params = try #require(payload as? AgentPromoteParams)
+                mutationId = params.clientMutationId
+            default:
+                throw EngineConnectionError.invalidResponse
+            }
+            #expect(mutationId == idempotencyKey.rawValue)
+            return try Self.mutationFixture()
+        }
+
+        _ = try await client.sendOperatorMessage(
+            ownerSessionId: "owner-session",
+            agentId: "agent-opaque",
+            content: "Please summarize progress",
+            idempotencyKey: "coordination-test-message"
+        )
+        _ = try await client.manageAgent(
+            ownerSessionId: "owner-session",
+            agentId: "agent-opaque",
+            action: "cancel",
+            assignmentId: "assignment-1",
+            cascade: true,
+            configuration: nil,
+            idempotencyKey: "coordination-test-manage"
+        )
+        _ = try await client.retryAgentAssignment(
+            ownerSessionId: "owner-session",
+            agentId: "agent-opaque",
+            assignmentId: "assignment-1",
+            idempotencyKey: "coordination-test-retry"
+        )
+        _ = try await client.promoteAgent(
+            ownerSessionId: "owner-session",
+            agentId: "agent-opaque",
+            idempotencyKey: "coordination-test-promote"
+        )
+
+        #expect(functions == [
+            "agent::operator_message",
+            "agent::manage",
+            "agent::retry",
+            "agent::promote",
+        ])
+    }
+
+    private static func inspectFixture() throws -> AgentInspectDTO {
+        try JSONDecoder().decode(AgentInspectDTO.self, from: Data(#"""
+        {
+          "agentId":"agent-opaque",
+          "name":"Research agent",
+          "relationship":"child",
+          "status":"idle",
+          "grants":[],
+          "limits":[],
+          "writeScopes":[],
+          "lineage":[],
+          "contacts":[],
+          "allowedActions":[]
+        }
+        """#.utf8))
+    }
+
+    private static func mutationFixture() throws -> AgentMutationResultDTO {
+        try JSONDecoder().decode(AgentMutationResultDTO.self, from: Data(#"""
+        {
+          "agent": {
+            "agentId":"agent-opaque",
+            "name":"Research agent",
+            "relationship":"child",
+            "status":"idle",
+            "grants":[],
+            "limits":[],
+            "writeScopes":[],
+            "lineage":[],
+            "contacts":[],
+            "allowedActions":[]
+          },
+          "affectedAgentIds":["agent-opaque"]
+        }
+        """#.utf8))
+    }
+
+    private static func messageDetailFixture() throws -> AgentMessageDetailDTO {
+        try JSONDecoder().decode(AgentMessageDetailDTO.self, from: Data(#"""
+        {
+          "messageId":"message-opaque",
+          "direction":"incoming",
+          "kind":"question",
+          "provenance":"peer",
+          "deliveryState":"observed",
+          "content":"What did you find?",
+          "createdAt":"2026-08-11T00:00:00Z"
+        }
+        """#.utf8))
+    }
 }

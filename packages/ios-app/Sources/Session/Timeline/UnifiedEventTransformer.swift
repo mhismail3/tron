@@ -171,6 +171,12 @@ struct UnifiedEventTransformer {
         switch eventType {
         case .messageUser:
             return MessageEventProjection.transformUserMessage(payload, timestamp: ts)
+        case .messageAgent:
+            return MessageEventProjection.transformAgentMessage(
+                payload,
+                timestamp: ts,
+                eventId: eventId
+            )
         case .messageAssistant:
             return MessageEventProjection.transformAssistantMessage(payload, timestamp: ts)
         case .toolInvocationStarted:
@@ -324,9 +330,9 @@ extension UnifiedEventTransformer {
                     state.lastTurnInputTokens = record.computed.contextWindowTokens
                 }
 
-            case .messageUser, .turnFailed:
+            case .messageUser, .messageAgent, .turnFailed:
                 if var message = transformPersistedEvent(event) {
-                    if eventType == .messageUser {
+                    if eventType == .messageUser || eventType == .messageAgent {
                         message.eventId = event.id
                     }
                     state.messages.append(message)

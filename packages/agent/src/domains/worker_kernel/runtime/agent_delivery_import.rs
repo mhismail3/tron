@@ -10,7 +10,8 @@ use super::agent_deliveries::ImportFailure;
 use super::*;
 use crate::domains::session::event_store::{
     AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliverySourceKind, AgentDeliveryTarget,
-    AgentDeliveryWakePolicy, AgentMailboxScope, EventStoreError, NewAgentDelivery,
+    AgentDeliveryWakePolicy, AgentMailboxScope, CoordinationTargetKind,
+    CoordinationTerminalEvidence, CoordinationWaitTarget, EventStoreError, NewAgentDelivery,
     WorkerTerminalEvidence,
 };
 
@@ -95,11 +96,56 @@ impl WorkerRuntime {
             }])
             .map_err(classify_event_store_error)?;
 
+        let generalized_target = CoordinationWaitTarget {
+            kind: CoordinationTargetKind::WorkerInvocation,
+            id: signal.invocation_id.clone(),
+        };
+        let automatic_recipient_agent_id = if signal.automatic_delivery_eligible {
+            signal
+                .origin_session_id
+                .as_deref()
+                .map(|session_id| self.store.agent_instance_for_session(session_id))
+                .transpose()
+                .map_err(|error| ImportFailure::Transient(error.to_string()))?
+                .flatten()
+                .map(|agent| agent.agent_id)
+        } else {
+            None
+        };
+        let recipient_wait_owns_delivery = signal
+            .origin_session_id
+            .as_deref()
+            .map(|session_id| {
+                self.event_store.coordination_wait_owns_automatic_delivery(
+                    &generalized_target,
+                    session_id,
+                    automatic_recipient_agent_id.as_deref(),
+                )
+            })
+            .transpose()
+            .map_err(classify_event_store_error)?
+            .unwrap_or(false);
+        let resolutions = self
+            .event_store
+            .reconcile_coordination_waits(&[CoordinationTerminalEvidence {
+                target: generalized_target,
+                status: signal.status.clone(),
+                evidence_reference: json!({
+                    "invocationId":signal.invocation_id,
+                    "status":signal.status,
+                    "evidence":signal.evidence,
+                }),
+            }])
+            .map_err(classify_event_store_error)?;
+        self.deliver_coordination_wait_resolutions(resolutions, None)
+            .await
+            .map_err(ImportFailure::Transient)?;
+
         let is_wait_member = self
             .event_store
             .has_agent_wait_member(&signal.invocation_id)
             .map_err(classify_event_store_error)?;
-        if !signal.automatic_delivery_eligible || is_wait_member {
+        if !signal.automatic_delivery_eligible || is_wait_member || recipient_wait_owns_delivery {
             return Ok(());
         }
         let origin_session_id = signal.origin_session_id.ok_or_else(|| {

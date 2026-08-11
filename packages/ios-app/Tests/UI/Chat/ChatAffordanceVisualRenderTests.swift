@@ -22,6 +22,7 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             ("chat-image-thumbnail.png", AnyView(Self.imageAttachmentView), CGSize(width: 430, height: 220)),
             ("chat-image-preview.png", AnyView(Self.imagePreviewSheet), CGSize(width: 430, height: 420)),
             ("chat-response-presentation.png", AnyView(Self.responsePresentationView), CGSize(width: 430, height: 620)),
+            ("chat-agent-coordination-message.png", AnyView(Self.agentCoordinationMessageView), CGSize(width: 430, height: 230)),
             ("chat-local-error-pill.png", AnyView(Self.localErrorView), CGSize(width: 430, height: 180)),
             ("chat-thinking-neural-spark.png", AnyView(Self.thinkingView), CGSize(width: 430, height: 180)),
             ("chat-tool-chip.png", AnyView(Self.toolChipView), CGSize(width: 430, height: 180)),
@@ -50,6 +51,25 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             MessageBubble(message: ChatMessage(role: .user, content: .text("Can you check the workspace status?")))
             MessageBubble(message: ChatMessage(role: .assistant, content: .text("The workspace is clean.")))
         }
+        .padding(20)
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private static var agentCoordinationMessageView: some View {
+        MessageBubble(message: ChatMessage(
+            role: .agent,
+            content: .text("The parser is owned by the session reconstruction module."),
+            agentMessage: AgentMessageContent(
+                messageId: "message-visual",
+                sourceAgentId: "agent-researcher",
+                sourceName: "Researcher",
+                kind: "answer",
+                authority: "peer",
+                text: "The parser is owned by the session reconstruction module.",
+                assignmentId: "assignment-visual",
+                replyTo: "message-question"
+            )
+        ))
         .padding(20)
         .background(Color(uiColor: .systemBackground))
     }

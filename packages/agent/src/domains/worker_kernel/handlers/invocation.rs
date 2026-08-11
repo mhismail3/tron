@@ -58,6 +58,7 @@ pub(super) async fn invoke_worker(
         .unwrap_or("wait");
     let model_tool_invocation_id = invocation.causal_context.model_tool_invocation_id();
     let parent_worker_invocation_id = invocation.causal_context.origin_worker_invocation_id();
+    let parent_agent_execution_id = invocation.causal_context.agent_execution_id();
     let parent_worker_tool_ordinal = invocation.causal_context.origin_worker_tool_ordinal();
     let record = match (mode, retry_of_invocation_id, normal_request) {
         ("enqueue", Some(retry_of), None) => deps.runtime.retry_enqueue_from_provider_tool(
@@ -68,6 +69,7 @@ pub(super) async fn invoke_worker(
             invocation.causal_context.session_id.clone(),
             model_tool_invocation_id,
             parent_worker_invocation_id,
+            parent_agent_execution_id,
             parent_worker_tool_ordinal,
         ),
         ("wait", Some(retry_of), None) => {
@@ -80,6 +82,7 @@ pub(super) async fn invoke_worker(
                     invocation.causal_context.session_id.clone(),
                     model_tool_invocation_id,
                     parent_worker_invocation_id,
+                    parent_agent_execution_id,
                     parent_worker_tool_ordinal,
                 )
                 .await
@@ -99,6 +102,7 @@ pub(super) async fn invoke_worker(
                 },
                 model_tool_invocation_id,
                 parent_worker_invocation_id,
+                parent_agent_execution_id,
                 parent_worker_tool_ordinal,
             )
         }
@@ -118,6 +122,7 @@ pub(super) async fn invoke_worker(
                     },
                     model_tool_invocation_id,
                     parent_worker_invocation_id,
+                    parent_agent_execution_id,
                     parent_worker_tool_ordinal,
                 )
                 .await
@@ -214,13 +219,38 @@ pub(super) async fn read_worker_result(
         .unwrap_or(10)
         .try_into()
         .map_err(|_| "worker result limit is too large".to_owned())?;
-    deps.runtime.read_worker_result(
-        invocation,
-        &required_string(&invocation.payload, "invocationId")?,
-        pointer,
-        offset,
-        limit,
-    )
+    let (kind, id) = if let Some(reference) = invocation.payload.get("reference") {
+        let reference = reference
+            .as_object()
+            .ok_or_else(|| "result_read reference must be an object".to_owned())?;
+        let kind = reference
+            .get("kind")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "result_read reference.kind is required".to_owned())?;
+        let id = reference
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "result_read reference.id is required".to_owned())?;
+        (kind.to_owned(), id.to_owned())
+    } else {
+        (
+            "worker_invocation".to_owned(),
+            required_string(&invocation.payload, "invocationId")?,
+        )
+    };
+    match kind.as_str() {
+        "worker_invocation" => deps
+            .runtime
+            .read_worker_result(invocation, &id, pointer, offset, limit),
+        "assignment" => {
+            deps.runtime
+                .read_agent_assignment_result(invocation, &id, pointer, offset, limit)
+                .await
+        }
+        other => Err(format!("unsupported result reference kind '{other}'")),
+    }
 }
 
 pub(super) async fn handoff_worker_result(

@@ -4,6 +4,8 @@
 //! server tool context, neutral event payloads, and test construction
 //! utilities used by multiple domain workers. Executable behavior belongs in
 //! `domains`; protocol parsing stays in the client protocol layer.
+//! Agent-loop test hosts install the canonical internal Team Context contract,
+//! so isolated turns retain the same mandatory provider boundary as production.
 
 pub mod context;
 pub(crate) mod error_mapping;

@@ -280,6 +280,7 @@ mod tests {
             model_exposure: WorkerModelExposure::Internal,
             tool_input_schema: None,
             agent_tools: None,
+            agent_role: None,
             input_schema: json!({"type":"object"}),
             output_schema: json!({
                 "type":"object",

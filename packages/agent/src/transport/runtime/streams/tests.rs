@@ -18,6 +18,32 @@ fn tron_events_project_to_neutral_server_payloads() {
 }
 
 #[test]
+fn materialized_agent_message_projects_with_persisted_identity_and_provenance() {
+    let event = TronEvent::AgentCoordinationMessage {
+        base: BaseEvent::now("session-agent").with_sequence(41),
+        event_id: "event-agent-message".to_owned(),
+        content: crate::shared::protocol::messages::AgentMessageContent {
+            message_id: "message-agent".to_owned(),
+            source_agent_id: "agent-reviewer".to_owned(),
+            source_name: Some("Reviewer".to_owned()),
+            kind: crate::shared::protocol::messages::AgentMessageKind::Question,
+            authority: crate::shared::protocol::messages::AgentMessageAuthority::Peer,
+            text: "Can you verify this?".to_owned(),
+            assignment_id: Some("assignment-review".to_owned()),
+            reply_to: None,
+        },
+    };
+
+    let projected = tron_event_to_projected(&event);
+    assert_eq!(projected.server_event.event_type, "message.agent");
+    assert_eq!(projected.server_event.sequence, Some(41));
+    let data = projected.server_event.data.expect("agent message data");
+    assert_eq!(data["eventId"], "event-agent-message");
+    assert_eq!(data["content"]["messageId"], "message-agent");
+    assert_eq!(data["content"]["authority"], "peer");
+}
+
+#[test]
 fn tron_event_projection_preserves_engine_trace_context() {
     let event = TronEvent::MessageUpdate {
         base: BaseEvent::now("s1")

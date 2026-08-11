@@ -18,6 +18,8 @@
 //! - `notifications` owns authenticated installation, inbox, and fixed-response
 //!   operations. Its SQLite reads and writes run on the shared bounded blocking
 //!   supervisor so device reconciliation cannot occupy an async runtime thread.
+//! - `role_review` owns authenticated proposal listing, inspection, explicit
+//!   confirmation, rejection, and canonical publication bindings.
 //! - `webhook` owns credential rotation and authenticated ingress materialization.
 //! - `support` owns shared payload admission and response translation.
 
@@ -31,11 +33,13 @@ use super::runtime::WorkerRuntime;
 mod agent_deliveries;
 mod artifacts;
 mod authoring;
+mod client_agents;
 mod core;
 mod discovery;
 mod inbox;
 mod invocation;
 mod notifications;
+mod role_review;
 mod support;
 mod webhook;
 
@@ -63,18 +67,38 @@ operation_bindings! {
         "artifact_deliveries" => |invocation, deps| { support::response(invocation, artifacts::deliveries(invocation, deps).await) },
         "artifact_content" => |invocation, deps| { support::response(invocation, artifacts::content(invocation, deps).await) },
         "artifact_delete" => |invocation, deps| { support::response(invocation, artifacts::delete(invocation, deps).await) },
+        "role_reviews" => |invocation, deps| { support::response(invocation, role_review::list(invocation, deps).await) },
+        "role_review_start" => |invocation, deps| { support::response(invocation, role_review::start(invocation, deps).await) },
+        "role_review_inspect" => |invocation, deps| { support::response(invocation, role_review::inspect(invocation, deps).await) },
+        "role_review_apply" => |invocation, deps| { support::response(invocation, role_review::apply(invocation, deps).await) },
+        "role_review_reject" => |invocation, deps| { support::response(invocation, role_review::reject(invocation, deps).await) },
         "upsert" => |invocation, deps| { support::response(invocation, authoring::upsert(invocation, deps).await) },
         "discover" => |invocation, deps| { support::response(invocation, discovery::discover(invocation, deps).await) },
         "list" => |invocation, deps| { support::response(invocation, discovery::list(invocation, deps).await) },
-        "inspect" => |invocation, deps| { support::response(invocation, discovery::inspect(invocation, deps).await) },
+        "worker_kernel::inspect" => |invocation, deps| { support::response(invocation, discovery::inspect(invocation, deps).await) },
         "invoke" => |invocation, deps| { invocation::invoke_worker(invocation, deps).await },
         "await" => |invocation, deps| { support::response(invocation, invocation::await_worker(invocation, deps).await) },
-        "result_read" => |invocation, deps| { support::response(invocation, invocation::read_worker_result(invocation, deps).await) },
+        "worker_kernel::result_read" => |invocation, deps| { support::response(invocation, invocation::read_worker_result(invocation, deps).await) },
         "result_handoff" => |invocation, deps| { support::response(invocation, invocation::handoff_worker_result(invocation, deps).await) },
+        "agent_discover" => |invocation, deps| { support::response(invocation, agent_deliveries::discover(invocation, deps).await) },
+        "agent_spawn" => |invocation, deps| { support::response(invocation, agent_deliveries::spawn(invocation, deps).await) },
         "agent_send" => |invocation, deps| { support::response(invocation, agent_deliveries::send(invocation, deps).await) },
+        "agent_wait" => |invocation, deps| { support::response(invocation, agent_deliveries::wait(invocation, deps).await) },
+        "agent_manage" => |invocation, deps| { support::response(invocation, agent_deliveries::manage(invocation, deps).await) },
         "agent_wait_for_workers" => |invocation, deps| { support::response(invocation, agent_deliveries::wait_for_workers(invocation, deps).await) },
         "agent_mailbox_list" => |invocation, deps| { support::response(invocation, agent_deliveries::mailbox_list(invocation, deps).await) },
         "agent_mailbox_claim" => |invocation, deps| { support::response(invocation, agent_deliveries::mailbox_claim(invocation, deps).await) },
+        "agent_team_context" => |invocation, deps| { support::response(invocation, agent_deliveries::team_context(invocation, deps).await) },
+        "agent::relations" => |invocation, deps| { support::response(invocation, client_agents::relations(invocation, deps).await) },
+        "agent::inspect" => |invocation, deps| { support::response(invocation, client_agents::inspect(invocation, deps).await) },
+        "agent::assignments" => |invocation, deps| { support::response(invocation, client_agents::assignments(invocation, deps).await) },
+        "agent::messages" => |invocation, deps| { support::response(invocation, client_agents::messages(invocation, deps).await) },
+        "agent::message_detail" => |invocation, deps| { support::response(invocation, client_agents::message_detail(invocation, deps).await) },
+        "agent::result_read" => |invocation, deps| { support::response(invocation, client_agents::result_read(invocation, deps).await) },
+        "agent::operator_message" => |invocation, deps| { support::response(invocation, client_agents::operator_message(invocation, deps).await) },
+        "agent::manage" => |invocation, deps| { support::response(invocation, client_agents::manage(invocation, deps).await) },
+        "agent::retry" => |invocation, deps| { support::response(invocation, client_agents::retry(invocation, deps).await) },
+        "agent::promote" => |invocation, deps| { support::response(invocation, client_agents::promote(invocation, deps).await) },
         "mailbox_curate" => |invocation, deps| { support::response(invocation, agent_deliveries::mailbox_curate(invocation, deps).await) },
         "result_projection" => |invocation, deps| { support::response(invocation, invocation::project_worker_results(invocation, deps).await) },
         "detach" => |invocation, deps| { support::response(invocation, invocation::detach_worker_invocation(invocation, deps).await) },

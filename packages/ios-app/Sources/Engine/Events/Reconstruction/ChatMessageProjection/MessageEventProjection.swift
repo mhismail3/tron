@@ -2,11 +2,31 @@ import Foundation
 
 /// Event projections for transforming message events into ChatMessages.
 ///
-/// Projects: message.user and message.assistant
+/// Projects: message.user, message.agent, and message.assistant
 ///
 /// Note: The interleaved message.assistant transformation (preserving text/tool order)
 /// is handled separately in InterleavedContentProcessor.
 enum MessageEventProjection {
+
+    /// Transform one durable inter-agent message without reclassifying it as
+    /// user intent. Every coordination row stays distinct so sender, kind,
+    /// authority, assignment, and reply provenance remain auditable.
+    static func transformAgentMessage(
+        _ payload: [String: AnyCodable],
+        timestamp: Date,
+        eventId: String? = nil
+    ) -> ChatMessage? {
+        guard let parsed = AgentMessageContent(eventPayload: payload) else {
+            return nil
+        }
+        return ChatMessage(
+            role: .agent,
+            content: .text(parsed.text),
+            timestamp: timestamp,
+            agentMessage: parsed,
+            eventId: eventId
+        )
+    }
 
     /// Transform message.user event into a ChatMessage.
     ///

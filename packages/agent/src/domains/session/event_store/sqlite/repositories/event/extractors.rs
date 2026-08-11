@@ -5,6 +5,7 @@ use crate::domains::session::event_store::types::{EventType, SessionEvent};
 pub(crate) fn extract_role(event: &SessionEvent) -> Option<String> {
     match event.event_type {
         EventType::MessageUser => Some("user".to_string()),
+        EventType::MessageAgent => Some("agent".to_string()),
         EventType::MessageAssistant => Some("assistant".to_string()),
         EventType::ToolInvocationCompleted => Some("tool".to_string()),
         _ => None,

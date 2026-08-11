@@ -52,35 +52,81 @@ impl WorkerRuntime {
         Ok(outcome)
     }
 
-    async fn validate_agent_tool_allowlist_at_activation(
+    pub(super) async fn validate_agent_tool_allowlist_at_activation(
         &self,
         bundle: &WorkerBundle,
     ) -> Result<(), String> {
-        let Some(agent_tools) = &bundle.agent_tools else {
-            return Ok(());
+        if let Some(WorkerAgentRole::Enabled {
+            default_model,
+            default_reasoning_level,
+            ..
+        }) = &bundle.agent_role
+        {
+            super::coordination::validate_agent_model_reasoning(
+                default_model.as_deref(),
+                default_reasoning_level.as_deref(),
+                &crate::shared::foundation::paths::auth_path_for_home(self.store.home()),
+            )?;
+        }
+        let requested_agent_tools = bundle
+            .agent_tools
+            .iter()
+            .flat_map(|tools| tools.iter())
+            .collect::<std::collections::BTreeSet<_>>();
+        let requested_role_tools = match &bundle.agent_role {
+            Some(WorkerAgentRole::Enabled { tool_ceiling, .. }) => tool_ceiling
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>(
+            ),
+            Some(WorkerAgentRole::Disabled) | None => std::collections::BTreeSet::new(),
         };
+        if requested_agent_tools.is_empty() && requested_role_tools.is_empty() {
+            return Ok(());
+        }
         let actor = crate::engine::ActorContext::new(
             ActorId::new("system:worker-activation").map_err(|error| error.to_string())?,
             ActorKind::System,
         );
         let (_, functions) = self.host.visible_functions_with_revision(&actor).await;
         let mut available = functions
-            .into_iter()
-            .filter_map(|function| function.model_tool.map(|tool| tool.name))
+            .iter()
+            .filter(|function| function.delegation_policy != crate::engine::DelegationPolicy::Never)
+            .filter_map(|function| function.model_tool.as_ref().map(|tool| tool.name.clone()))
             .collect::<std::collections::BTreeSet<_>>();
         if let Some(tool_name) = &bundle.tool_name {
             let _ = available.insert(tool_name.clone());
         }
-        let unavailable = agent_tools
-            .iter()
-            .filter(|tool_name| !available.contains(tool_name.as_str()))
+        let mut unavailable = requested_agent_tools
+            .into_iter()
+            .filter(|tool_name| {
+                let retained_target =
+                    crate::domains::worker_kernel::surface::retained_worker_agent_tool_alias_target(
+                        tool_name,
+                    );
+                !available.contains(tool_name.as_str())
+                    && retained_target.is_none_or(|target| {
+                        !functions.iter().any(|function| {
+                            function.id.as_str() == target
+                                && function.delegation_policy
+                                    != crate::engine::DelegationPolicy::Never
+                        })
+                    })
+            })
             .cloned()
             .collect::<Vec<_>>();
+        unavailable.extend(
+            requested_role_tools
+                .into_iter()
+                .filter(|tool_name| !available.contains(tool_name.as_str()))
+                .cloned(),
+        );
+        unavailable.sort();
+        unavailable.dedup();
         if unavailable.is_empty() {
             Ok(())
         } else {
             Err(format!(
-                "agentTools contains model tools unavailable at activation: {}",
+                "agentTools or agentRole.toolCeiling contains nondelegable or unavailable model tools at activation: {}",
                 unavailable.join(", ")
             ))
         }

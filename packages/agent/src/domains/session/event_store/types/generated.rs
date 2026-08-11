@@ -27,6 +27,9 @@ pub enum EventType {
     /// User message record.
     #[serde(rename = "message.user")]
     MessageUser,
+    /// Engine-authenticated inter-agent coordination record.
+    #[serde(rename = "message.agent")]
+    MessageAgent,
     /// Assistant message record.
     #[serde(rename = "message.assistant")]
     MessageAssistant,
@@ -67,6 +70,7 @@ impl EventType {
             Self::SessionModelChanged => "session.model_changed",
             Self::SessionReasoningChanged => "session.reasoning_changed",
             Self::MessageUser => "message.user",
+            Self::MessageAgent => "message.agent",
             Self::MessageAssistant => "message.assistant",
             Self::ModelProviderRequest => "model.provider_request",
             Self::MessageDeleted => "message.deleted",
@@ -97,6 +101,7 @@ impl std::str::FromStr for EventType {
             "session.model_changed" => Ok(Self::SessionModelChanged),
             "session.reasoning_changed" => Ok(Self::SessionReasoningChanged),
             "message.user" => Ok(Self::MessageUser),
+            "message.agent" => Ok(Self::MessageAgent),
             "message.assistant" => Ok(Self::MessageAssistant),
             "model.provider_request" => Ok(Self::ModelProviderRequest),
             "message.deleted" => Ok(Self::MessageDeleted),
@@ -115,13 +120,14 @@ impl std::str::FromStr for EventType {
 mod tests {
     use super::*;
 
-    const ALL: [EventType; 15] = [
+    const ALL: [EventType; 16] = [
         EventType::SessionStart,
         EventType::SessionEnd,
         EventType::SessionFork,
         EventType::SessionModelChanged,
         EventType::SessionReasoningChanged,
         EventType::MessageUser,
+        EventType::MessageAgent,
         EventType::MessageAssistant,
         EventType::ModelProviderRequest,
         EventType::MessageDeleted,

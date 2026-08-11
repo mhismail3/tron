@@ -91,6 +91,8 @@ fn surface_hash_is_stable_and_contract_sensitive() {
         ),
         effect_class: "PureRead".to_owned(),
         risk: "low".to_owned(),
+        delegation_policy: "explicit".to_owned(),
+        workspace_effect: "none".to_owned(),
         exposed: true,
         worker_id: Some("demo".to_owned()),
         worker_version: Some("abc".to_owned()),
@@ -172,7 +174,7 @@ async fn user_input_is_foreground_only_and_workers_return_questions_to_parent() 
     let host = EngineHostHandle::new_in_memory().expect("host");
     register_user_input_primitive(&host);
 
-    let foreground = resolve_tool_surface(&host, "session", None, None, None)
+    let foreground = resolve_tool_surface(&host, "session", None, None, None, None)
         .await
         .expect("foreground surface");
     assert!(
@@ -188,6 +190,7 @@ async fn user_input_is_foreground_only_and_workers_return_questions_to_parent() 
         None,
         Some("delegated-worker"),
         Some(&["request_user_input".to_owned()]),
+        None,
     )
     .await
     .expect("worker surface");

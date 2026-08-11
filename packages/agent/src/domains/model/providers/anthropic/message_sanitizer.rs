@@ -50,6 +50,13 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
                 }
                 valid.push(msg);
             }
+            Message::Agent { content, .. } => {
+                if content.text.trim().is_empty() {
+                    debug!(message_id = %content.message_id, "Removed empty agent message");
+                    continue;
+                }
+                valid.push(msg);
+            }
             Message::Assistant { content, .. } => {
                 // Filter duplicate tool_invocation blocks + convert signed thinking to text.
                 // Thinking signatures are model-specific cryptographic tokens — a signature
@@ -169,7 +176,7 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
     }
 
     // PHASE 4: Ensure first message is user role
-    if !valid.is_empty() && !valid[0].is_user() {
+    if !valid.is_empty() && !valid[0].is_user() && !valid[0].is_agent() {
         debug!("Injected placeholder user message at start");
         valid.insert(0, Message::user(CONTINUED_CONTENT));
     }

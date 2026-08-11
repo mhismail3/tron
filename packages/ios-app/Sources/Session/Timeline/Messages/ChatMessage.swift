@@ -139,6 +139,11 @@ struct ChatMessage: Identifiable, Equatable {
     /// enough identity to explain why the assistant resumed without a user row.
     var agentDeliveryProvenance: [AgentDeliveryMessageProvenance]
 
+    /// Exact Engine-authored provenance for a first-class inter-agent message.
+    /// This is presentation/audit evidence and never changes the user-turn
+    /// boundary used by retry or delivery-continuation logic.
+    var agentMessage: AgentMessageContent?
+
     /// A zero-content row whose only visual purpose is to place durable
     /// delivery provenance before thinking, tools, and response text.
     var isDeliveryProvenanceOnly: Bool
@@ -165,6 +170,7 @@ struct ChatMessage: Identifiable, Equatable {
         turnNumber: Int? = nil,
         hasThinking: Bool? = nil,
         agentDeliveryProvenance: [AgentDeliveryMessageProvenance] = [],
+        agentMessage: AgentMessageContent? = nil,
         isDeliveryProvenanceOnly: Bool = false,
         isFinalAssistantResponse: Bool = false,
         eventId: String? = nil
@@ -182,6 +188,7 @@ struct ChatMessage: Identifiable, Equatable {
         self.turnNumber = turnNumber
         self.hasThinking = hasThinking
         self.agentDeliveryProvenance = agentDeliveryProvenance
+        self.agentMessage = agentMessage
         self.isDeliveryProvenanceOnly = isDeliveryProvenanceOnly
         self.isFinalAssistantResponse = isFinalAssistantResponse
         self.eventId = eventId

@@ -28,6 +28,56 @@ fn create_session_basic() {
 }
 
 #[test]
+fn nested_agent_session_is_hidden_until_same_transcript_is_promoted() {
+    let store = setup();
+    let visible = store
+        .create_session("claude-opus-4-6", "/tmp/project", Some("Visible"), None)
+        .unwrap();
+    let nested = store
+        .create_agent_session(
+            "claude-opus-4-6",
+            "/tmp/project",
+            Some("Nested agent"),
+            None,
+        )
+        .unwrap();
+    assert!(nested.session.is_agent_session());
+    assert!(nested.session.is_internal_session());
+    assert!(!nested.session.is_worker_session());
+
+    let ordinary = store
+        .list_sessions(&ListSessionsOptions::default())
+        .unwrap();
+    assert_eq!(ordinary.len(), 1);
+    assert_eq!(ordinary[0].id, visible.session.id);
+
+    let promoted = store.promote_agent_session(&nested.session.id).unwrap();
+    assert_eq!(promoted.id, nested.session.id);
+    assert!(!promoted.is_agent_session());
+    assert!(!promoted.is_internal_session());
+    let replay = store.promote_agent_session(&nested.session.id).unwrap();
+    assert_eq!(replay.id, promoted.id);
+    assert_eq!(replay.tags, promoted.tags);
+    assert!(
+        store
+            .promote_agent_session(&visible.session.id)
+            .unwrap_err()
+            .to_string()
+            .contains("not a nested agent transcript"),
+        "an ordinary session without a promotion receipt must not be accepted as replay"
+    );
+    let ordinary = store
+        .list_sessions(&ListSessionsOptions::default())
+        .unwrap();
+    assert_eq!(ordinary.len(), 2);
+    assert!(
+        ordinary
+            .iter()
+            .any(|session| session.id == nested.session.id)
+    );
+}
+
+#[test]
 fn create_session_with_identity_persists_explicit_replay_fields() {
     let store = setup();
     let result = store

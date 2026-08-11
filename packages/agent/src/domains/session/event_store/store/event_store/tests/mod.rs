@@ -20,6 +20,7 @@ fn setup() -> EventStore {
 mod activity_summary;
 mod append_counters;
 mod auto_sequence;
+mod coordination;
 mod deliveries;
 mod queries_state;
 mod session_creation;

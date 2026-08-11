@@ -1,4 +1,19 @@
 use super::*;
+use crate::engine::DelegationPolicy;
+
+struct WorkspaceEffectHandler;
+
+#[async_trait]
+impl InProcessFunctionHandler for WorkspaceEffectHandler {
+    async fn invoke(&self, invocation: Invocation) -> Result<Value> {
+        Ok(json!({
+            "workspaceEffect": invocation
+                .causal_context
+                .declared_workspace_effect()
+                .as_str()
+        }))
+    }
+}
 
 #[tokio::test]
 async fn sync_invocation_succeeds_and_records_revisions() {
@@ -13,6 +28,75 @@ async fn sync_invocation_succeeds_and_records_revisions() {
     assert_eq!(result.function_revision, FunctionRevision(1));
     assert_eq!(result.catalog_revision, catalog.revision());
     assert_eq!(result.value.unwrap()["echo"]["x"], 1);
+}
+
+#[tokio::test]
+async fn host_admission_distinguishes_visible_roots_from_exactly_granted_children() {
+    let handle = super::host::EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_function(
+            read_function("alpha::delegable", "w1")
+                .with_delegation_policy(DelegationPolicy::Inherit),
+            handler(),
+        )
+        .await
+        .unwrap();
+
+    let root = handle
+        .invoke(Invocation::new_sync(
+            fid("alpha::delegable"),
+            json!({"caller":"root"}),
+            causal(),
+        ))
+        .await;
+    assert!(root.error.is_none(), "visible root: {:?}", root.error);
+
+    let child_context = CausalContext::new(actor("child"), ActorKind::Agent, trace("child-trace"))
+        .with_agent_execution("agent-child", "assignment-child", "execution-child");
+    let missing = handle
+        .invoke(Invocation::new_sync(
+            fid("alpha::delegable"),
+            json!({"caller":"child"}),
+            child_context.clone(),
+        ))
+        .await;
+    assert!(matches!(
+        missing.error,
+        Some(EngineError::PolicyViolation(_))
+    ));
+
+    let granted = handle
+        .invoke(Invocation::new_sync(
+            fid("alpha::delegable"),
+            json!({"caller":"child"}),
+            child_context.with_delegated_function_grant(vec!["alpha::delegable".to_owned()]),
+        ))
+        .await;
+    assert!(
+        granted.error.is_none(),
+        "granted child: {:?}",
+        granted.error
+    );
+}
+
+#[tokio::test]
+async fn catalog_overwrites_workspace_effect_with_the_source_contract() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_function(
+            read_function("alpha::workspace", "w1")
+                .with_workspace_effect(crate::engine::WorkspaceEffect::ScopedWrite),
+            Arc::new(WorkspaceEffectHandler),
+        )
+        .unwrap();
+    let invocation = Invocation::new_sync(
+        fid("alpha::workspace"),
+        json!({}),
+        causal().with_declared_workspace_effect(crate::engine::WorkspaceEffect::ArbitraryProcess),
+    );
+
+    let result = catalog.invoke_sync(invocation).await;
+    assert_eq!(result.value.unwrap()["workspaceEffect"], "scoped_write");
 }
 
 #[tokio::test]

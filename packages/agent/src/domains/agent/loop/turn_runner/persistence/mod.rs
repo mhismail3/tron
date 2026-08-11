@@ -509,6 +509,7 @@ pub(super) fn emit_turn_end(
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
+    agent_assignment_id: Option<&str>,
 ) -> Result<(), RuntimeError> {
     let turn_token_usage = stream_result.token_usage.as_ref().map(|u| TokenUsage {
         input_tokens: u.input_tokens,
@@ -530,7 +531,11 @@ pub(super) fn emit_turn_end(
             "turn": turn,
             "stopReason": &stream_result.stop_reason,
             "contextLimit": context_limit,
+            "latency": duration_ms,
         });
+        if let Some(assignment_id) = agent_assignment_id {
+            payload["agentAssignmentId"] = Value::String(assignment_id.to_owned());
+        }
         if let Some(token_usage) = stream_result.token_usage.as_ref() {
             payload["tokenUsage"] = persistence::build_token_usage_json(token_usage);
         }

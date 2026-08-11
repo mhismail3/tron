@@ -928,6 +928,7 @@ impl TurnAccumulatorMap {
             | TronEvent::SessionForked { .. }
             | TronEvent::SessionUpdated { .. }
             | TronEvent::ContextCleared { .. }
+            | TronEvent::AgentCoordinationMessage { .. }
             | TronEvent::MessageDeleted { .. } => {
                 self.handle_covered_event(session_id, sequence);
             }

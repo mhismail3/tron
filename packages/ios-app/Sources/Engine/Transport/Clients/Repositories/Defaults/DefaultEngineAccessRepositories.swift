@@ -403,6 +403,56 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         try await client.scheduledWork(limit: limit, offset: offset)
     }
 
+    func roleReviews(
+        limit: UInt64,
+        offset: UInt64?,
+        queueLimit: UInt64,
+        queueOffset: UInt64?
+    ) async throws -> WorkerRoleReviewListDTO {
+        try await client.roleReviews(
+            limit: limit,
+            offset: offset,
+            queueLimit: queueLimit,
+            queueOffset: queueOffset
+        )
+    }
+
+    func startRoleReview(
+        workerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewProposalDTO {
+        try await client.startRoleReview(
+            workerId: workerId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func inspectRoleReview(_ proposalId: String) async throws -> WorkerRoleReviewProposalDTO {
+        try await client.inspectRoleReview(proposalId)
+    }
+
+    func applyRoleReview(
+        proposalId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewApplyResultDTO {
+        try await client.applyRoleReview(
+            proposalId: proposalId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func rejectRoleReview(
+        proposalId: String,
+        reason: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewProposalDTO {
+        try await client.rejectRoleReview(
+            proposalId: proposalId,
+            reason: reason,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func dismissWorkerInboxItem(
         inboxId: String,
         idempotencyKey: EngineIdempotencyKey

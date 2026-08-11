@@ -13,6 +13,9 @@ use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
 
 mod activation;
 mod agent;
+mod agent_information;
+mod agent_lifecycle;
+mod agents;
 mod client_actions;
 mod command;
 mod coordination;
@@ -20,6 +23,7 @@ mod deliveries;
 mod hooks;
 mod projection;
 mod resident;
+mod role_review;
 mod session;
 
 fn system_actor() -> crate::engine::ActorContext {
@@ -39,6 +43,7 @@ fn command_bundle(command: Vec<String>) -> WorkerBundle {
         model_exposure: Default::default(),
         tool_input_schema: Some(json!({"type":"object"})),
         agent_tools: None,
+        agent_role: None,
         input_schema: json!({"type":"object"}),
         output_schema: json!({"type":"object"}),
         runner: WorkerRunner::Command { command },
@@ -119,6 +124,7 @@ print(json.dumps({
                 }
             })),
             agent_tools: None,
+            agent_role: None,
             input_schema: json!({
                 "type":"object",
                 "additionalProperties":false,

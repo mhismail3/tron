@@ -21,6 +21,10 @@ impl WorkerRuntime {
                 // worker execution. Notify provides the fast path; the ticker
                 // remains the crash/lost-signal reconciliation fallback.
                 self.import_agent_delivery_outbox().await;
+                let _ = self.import_agent_coordination_outbox().await;
+                if let Err(error) = self.expire_due_agent_assignments().await {
+                    tracing::warn!(error = %error, "reusable-agent deadline maintenance will retry");
+                }
                 if !self.stopped.load(Ordering::SeqCst) {
                     if self.execution_stop.lock().await.is_cancelled() {
                         *self.execution_stop.lock().await = CancellationToken::new();
@@ -28,6 +32,7 @@ impl WorkerRuntime {
                     self.reconcile_orphaned_invocations(true).await;
                     self.dispatch_resident_supervision(&mut runs);
                     self.dispatch_queued(&mut runs).await;
+                    self.dispatch_agent_assignments(&mut runs).await;
                     self.dispatch_schedules(&mut runs).await;
                     self.dispatch_events(&mut runs).await;
                     self.dispatch_notifications(&mut runs).await;
@@ -39,6 +44,7 @@ impl WorkerRuntime {
         runs.abort_all();
         while runs.join_next().await.is_some() {}
         self.inflight.clear();
+        self.agent_assignment_inflight.clear();
         self.reconcile_orphaned_invocations(false).await;
     }
 
@@ -59,6 +65,25 @@ impl WorkerRuntime {
             else {
                 continue;
             };
+            metrics::counter!(
+                "worker_orphan_recoveries_total",
+                "outcome" => "requeued"
+            )
+            .increment(1);
+            if self
+                .store
+                .execution_node_for_worker_invocation(&invocation.invocation_id)
+                .ok()
+                .flatten()
+                .is_some_and(|execution| execution.owner_agent_id.is_some())
+            {
+                metrics::counter!(
+                    "agent_coordination_orphan_recoveries_total",
+                    "execution_kind" => "worker",
+                    "outcome" => "requeued"
+                )
+                .increment(1);
+            }
             if record_attention
                 && let Ok(count) = self
                     .store

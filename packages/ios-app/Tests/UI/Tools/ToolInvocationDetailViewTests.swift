@@ -154,7 +154,7 @@ final class ToolInvocationDetailViewTests: XCTestCase {
             "Sources", "UI", "WorkerConsole", "Detail", "WorkerConsoleDetailSheets.swift",
         ])
         let auditSheet = try XCTUnwrap(
-            workerDetails.components(separatedBy: "struct WorkerAuditSessionSheet").last
+            workerDetails.components(separatedBy: "struct AuditSessionSheet").last
         )
         XCTAssertEqual(
             occurrences(of: ".workerConsoleSheetPresentation()", in: auditSheet),

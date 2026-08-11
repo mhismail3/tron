@@ -87,6 +87,12 @@ pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<Chat
             Message::User { content, .. } => {
                 result.push(convert_user_message(content, supports_images));
             }
+            Message::Agent { content, .. } => {
+                result.push(convert_user_message(
+                    &UserMessageContent::Text(content.render_for_provider()),
+                    supports_images,
+                ));
+            }
             Message::Assistant { content, .. } => {
                 if let Some(msg) = convert_assistant_message(content, &id_mapping) {
                     result.push(msg);
@@ -139,7 +145,7 @@ fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
             Message::ToolResult { invocation_id, .. } => {
                 ids.push(invocation_id.as_str());
             }
-            Message::User { .. } => {}
+            Message::User { .. } | Message::Agent { .. } => {}
         }
     }
 

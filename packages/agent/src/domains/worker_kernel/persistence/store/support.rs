@@ -1,9 +1,36 @@
 //! Stateless validation, atomic JSON publication, SQL codecs, row mappings,
 //! hashing, and token generation shared by store concerns.
 
+use std::path::Path;
+
 use super::*;
 
 pub(super) use super::super::filesystem::{tree_version, write_json_atomic};
+
+/// Removes a staged immutable worker tree unless publication disarms it.
+pub(super) struct RemoveDirectoryOnDrop(pub(super) Option<PathBuf>);
+
+impl RemoveDirectoryOnDrop {
+    pub(super) fn disarm(&mut self) {
+        self.0 = None;
+    }
+
+    pub(super) fn cleanup_now(&mut self) -> Result<(), String> {
+        let Some(path) = self.0.take() else {
+            return Ok(());
+        };
+        fs::remove_dir_all(&path)
+            .map_err(|error| format!("remove unpublished worker tree {}: {error}", path.display()))
+    }
+}
+
+impl Drop for RemoveDirectoryOnDrop {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+}
 
 const INVOCATION_OPTIONAL_COLUMNS: &[(&str, &str)] = &[
     (

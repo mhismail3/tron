@@ -52,6 +52,7 @@ struct TextContentView: View {
     @Environment(\.textSelectionDisabled) private var textSelectionDisabled
 
     private var isUser: Bool { role == .user }
+    private var isAgent: Bool { role == .agent }
 
     /// Inline-only markdown with bold fix. Used by other views (ThinkingContentView, etc.)
     @MainActor
@@ -78,6 +79,16 @@ struct TextContentView: View {
                     .foregroundStyle(.userMessageText)
                     .selectableText(!textSelectionDisabled)
                     .lineSpacing(4)
+            } else if isAgent {
+                // Coordination messages are exact audit evidence. Render
+                // them as plain selectable text rather than interpreting
+                // sender-authored Markdown as presentation instructions.
+                Text(text)
+                    .font(TronTypography.messageBody)
+                    .foregroundStyle(.tronTextPrimary)
+                    .selectableText(!textSelectionDisabled)
+                    .lineSpacing(4)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(blocks) { block in

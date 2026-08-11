@@ -4,18 +4,24 @@
   <img src="packages/ios-app/docs/assets/tron-logo.png" width="112" alt="Tron logo">
 </p>
 
-**A persistent, local-first agent for Mac and iPhone that can teach itself new workers.**
+**A persistent, local-first agent for Mac and iPhone that can create workers
+and coordinate reusable agents.**
 
 Tron runs an AI agent as a background service on your Mac and provides a native
-iOS interface for conversations, durable sessions, and worker operations. The
-current worker-first POC deliberately favors useful proactive adaptation over
-permission ceremony: a model can research, author, test, activate, and reuse an
-engine-global worker through one atomic operation.
+iOS interface for conversations, durable sessions, agent coordination, and
+worker operations. A model can research, author, test, activate, and reuse an
+engine-global worker through one atomic operation. It can also spawn durable
+child agents, exchange typed messages, reuse them across assignments, wait for
+mixed agent/worker results, and manage the resulting hierarchy through stable
+opaque handles.
 
 ## Why Tron
 
 - Natural-language work can become an immediately active, persistent typed tool.
 - Agent, command, and lazy resident-service workers share one durable runtime.
+- Reusable agents retain one identity and transcript across FIFO assignments;
+  messages, waits, results, cancellation, recovery, and authority are Engine
+  contracts rather than behavior supplied by an optional delegation worker.
 - Manual calls, schedules, engine events, and authenticated local webhooks share
   one at-least-once dispatcher.
 - Worker completions, peer-agent messages, and explicit waits share
@@ -39,7 +45,8 @@ engine-global worker through one atomic operation.
  iPhone / iPad                         Mac
 ┌──────────────────┐         ┌──────────────────────────┐
 │ SwiftUI client   │─/engine▶│ Rust agent + worker core │
-│ chat + workers   │         │ model, runners, dispatch │
+│ chat + agents +  │         │ turns, coordination,     │
+│ workers          │         │ runners, dispatch        │
 └──────────────────┘         └────────────┬─────────────┘
                                          │
                  schedules → reminders → notification policy
@@ -48,11 +55,17 @@ engine-global worker through one atomic operation.
 ```
 
 The Rust server owns model execution, authenticated transport, durable session
-truth, atomic worker handoffs, Agent Delivery admission and recovery, worker
-storage, and provider-acceptance evidence.
-The iOS app is a thin client with a Worker Console for health, versions,
-triggers, typed invocation, runs, inbox, rollback, retirement, cancellation,
-and stop controls, plus synchronized native notification and Artifact Inboxes.
+truth, reusable-agent identities and assignments, typed coordination messages,
+atomic worker handoffs, Agent Delivery admission and recovery, worker storage,
+and provider-acceptance evidence. Spawned agents keep hidden durable transcript
+sessions until an authenticated user promotes one into the ordinary Sessions
+list.
+The iOS app is a thin client. Manage Session has an Agents surface for child
+hierarchies, correspondents, assignments, chats, results, usage, authority,
+resource claims, recovery evidence, and server-authorized management actions.
+Its Worker Console covers health, versions, triggers, typed invocation, runs,
+inbox, rollback, retirement, cancellation, and stop controls, alongside
+synchronized native notification and Artifact Inboxes.
 Artifact content stays in engine-owned content-addressed custody until explicit
 deletion; preview, share, export, and Attach to Draft use the existing native
 attachment pipeline.

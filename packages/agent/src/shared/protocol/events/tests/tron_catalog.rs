@@ -65,6 +65,20 @@ fn tron_event_all_event_types() {
             base: base.clone(),
             content: "c".into(),
         },
+        TronEvent::AgentCoordinationMessage {
+            base: base.clone(),
+            event_id: "agent-message-event".into(),
+            content: crate::shared::protocol::messages::AgentMessageContent {
+                message_id: "agent-message".into(),
+                source_agent_id: "agent-source".into(),
+                source_name: Some("Reviewer".into()),
+                kind: crate::shared::protocol::messages::AgentMessageKind::Question,
+                authority: crate::shared::protocol::messages::AgentMessageAuthority::Peer,
+                text: "Can you verify this?".into(),
+                assignment_id: Some("assignment-1".into()),
+                reply_to: None,
+            },
+        },
         TronEvent::ToolInvocationBatch {
             base: base.clone(),
             tool_invocations: vec![],

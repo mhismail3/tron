@@ -242,6 +242,10 @@ final class EventPluginTests: XCTestCase {
         XCTAssertTrue(registry.hasPlugin(for: "agent.thinking_start"))
         XCTAssertTrue(registry.hasPlugin(for: "agent.response_complete"))
         XCTAssertTrue(registry.hasPlugin(for: "agent.thinking_end"))
+        XCTAssertTrue(registry.hasPlugin(for: "agent.lifecycle"))
+        XCTAssertTrue(registry.hasPlugin(for: "agent.assignment"))
+        XCTAssertTrue(registry.hasPlugin(for: "agent.message"))
+        XCTAssertTrue(registry.hasPlugin(for: "message.agent"))
         XCTAssertTrue(registry.hasPlugin(for: "tool.invocation.batch"))
         XCTAssertTrue(registry.hasPlugin(for: "tool.invocation.arguments_delta"))
     }
@@ -253,6 +257,9 @@ final class EventPluginTests: XCTestCase {
             "agent.start",
             "agent.interrupted",
             "agent.retry",
+            "agent.lifecycle",
+            "agent.assignment",
+            "agent.message",
             "context.warning",
             "session.forked",
             "agent.thinking_start",
@@ -275,6 +282,45 @@ final class EventPluginTests: XCTestCase {
             XCTAssertEqual(result?.sequence, 42)
             XCTAssertNil(result?.getResult())
         }
+    }
+
+    func testAgentMessagePluginPreservesTypedLiveProvenance() {
+        registry.registerAll()
+        let json = """
+        {
+            "type": "message.agent",
+            "sessionId": "agent-session",
+            "sequence": 43,
+            "timestamp": "2026-08-11T10:00:00Z",
+            "data": {
+                "eventId": "event-agent-message",
+                "content": {
+                    "messageId": "message-question",
+                    "sourceAgentId": "agent-researcher",
+                    "sourceName": "Researcher",
+                    "kind": "future_question_kind",
+                    "authority": "peer",
+                    "text": "Which module owns this?",
+                    "assignmentId": "assignment-1",
+                    "replyTo": "message-request",
+                    "futureField": true
+                }
+            }
+        }
+        """.data(using: .utf8)!
+
+        let parsed = registry.parse(type: "message.agent", data: json)
+        let result = parsed?.getResult() as? AgentMessagePlugin.Result
+
+        XCTAssertEqual(parsed?.sessionId, "agent-session")
+        XCTAssertEqual(parsed?.sequence, 43)
+        XCTAssertEqual(result?.eventId, "event-agent-message")
+        XCTAssertEqual(result?.content.kind, "future_question_kind")
+        XCTAssertEqual(result?.content.authority, "peer")
+        XCTAssertEqual(result?.content.assignmentId, "assignment-1")
+        XCTAssertEqual(result?.content.replyTo, "message-request")
+        XCTAssertEqual(result?.message.role, .agent)
+        XCTAssertFalse(result?.message.canBeDeleted ?? true)
     }
 
     func testThinkingEndPluginParsesAuthoritativeSnapshot() {

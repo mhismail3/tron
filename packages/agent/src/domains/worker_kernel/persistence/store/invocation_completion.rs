@@ -182,6 +182,36 @@ impl WorkerStore {
             ),
         };
         let completed_at = chrono::Utc::now().to_rfc3339();
+        if status == "failed" {
+            super::agent_coordination::terminalize_direct_worker_assignment_in_tx(
+                &tx,
+                invocation_id,
+                AgentAssignmentStatus::Failed,
+                error.as_deref().unwrap_or("direct worker execution failed"),
+                &completed_at,
+            )?;
+        } else {
+            let direct_assignment_status = tx
+                .query_row(
+                    "SELECT assignment.status
+                     FROM direct_worker_agent_runs direct
+                     JOIN agent_assignments assignment USING(assignment_id)
+                     WHERE direct.worker_invocation_id=?1",
+                    [invocation_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| format!("verify completed direct worker assignment: {error}"))?;
+            if direct_assignment_status
+                .as_deref()
+                .is_some_and(|status| status != AgentAssignmentStatus::Completed.as_str())
+            {
+                return Err(
+                    "direct worker invocation cannot complete before its shared assignment"
+                        .to_owned(),
+                );
+            }
+        }
         let changed = tx
             .execute(
                 "UPDATE worker_invocations SET status=?2,output_json=?3,error=?4,completed_at=?5

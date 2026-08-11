@@ -257,12 +257,19 @@ struct WorkerConsolePresentationTests {
                 == "Worker interaction"
         )
         #expect(
+            EngineDashboardPresentation.groupTitle("agent_coordination")
+                == "Agent coordination"
+        )
+        #expect(
             EngineDashboardPresentation.groupTitle("worker_administration")
                 == "Worker administration"
         )
         #expect(EngineDashboardPresentation.toolTitle("filesystem_read") == "Read File")
         #expect(EngineDashboardPresentation.toolTitle("request_user_input") == "Ask User")
         #expect(EngineDashboardPresentation.toolTitle("worker_upsert") == "Create or Update Worker")
+        #expect(EngineDashboardPresentation.toolTitle("agent_spawn") == "Spawn Agent")
+        #expect(EngineDashboardPresentation.toolTitle("agent_wait") == "Wait for Work")
+        #expect(EngineDashboardPresentation.toolTitle("result_read") == "Read Result")
         #expect(EngineDashboardPresentation.toolTitle("future_operation") == "Future Operation")
         #expect(
             EngineDashboardPresentation.groupDetail("host", count: 6)
@@ -301,9 +308,23 @@ struct WorkerConsolePresentationTests {
             tool("future_operation", group: "future_group"),
             tool("filesystem_read", group: "host"),
             tool("ungrouped_operation", group: nil),
+            tool("worker_discover", group: "worker_interaction"),
+            tool("agent_discover", group: "agent_coordination"),
+            tool("worker_upsert", group: "worker_administration", audience: "specialist"),
         ])
-        #expect(groups.map(\.id) == ["host", "user_interaction", "session", "future_group", "other"])
-        #expect(groups.flatMap(\.tools).count == 5)
+        #expect(
+            groups.map(\.id) == [
+                "host",
+                "user_interaction",
+                "session",
+                "worker_interaction",
+                "agent_coordination",
+                "worker_administration",
+                "future_group",
+                "other",
+            ]
+        )
+        #expect(groups.flatMap(\.tools).count == 8)
         #expect(
             EngineDashboardPresentation.toolAvailability(groups[2].tools[0])
                 == "Conditional · Available only when requested"

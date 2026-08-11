@@ -11,6 +11,9 @@
 //! published through engine streams and may be recorded as session events.
 //! Failed `AgentEnd` events retain the terminal failure's recoverability so
 //! downstream runtimes do not have to infer policy from display text.
+//! Durable `message.agent` records are emitted only after their canonical
+//! EventStore materialization succeeds; the live projection reuses that exact
+//! event identity, sequence, timestamp, and typed coordination provenance.
 //!
 //! Shared event DTOs, stream DTOs, event factories, tool summaries, and
 //! the generated `TronEvent` catalog live here. The exhaustive `TronEvent`

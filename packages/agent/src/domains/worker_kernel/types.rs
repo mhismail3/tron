@@ -51,6 +51,14 @@ pub struct WorkerBundle {
     /// projection only; it does not interpret why the worker needs a tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_tools: Option<Vec<String>>,
+    /// Optional explicit declaration that this immutable agent-runner version
+    /// is (or is not) available as a reusable collaboration role.
+    ///
+    /// Absence is intentionally distinct from `disabled`: existing bundles
+    /// remain runnable but require role review before `agent_discover` can
+    /// advertise them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_role: Option<WorkerAgentRole>,
     #[serde(default = "object_schema")]
     pub input_schema: Value,
     #[serde(default = "object_schema")]
@@ -153,6 +161,72 @@ pub struct WorkerExecutionLimits {
     pub max_agent_turns: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_child_invocations: Option<u32>,
+}
+
+/// Explicit reusable-agent role declaration owned by one immutable worker
+/// version.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "status",
+    deny_unknown_fields
+)]
+pub enum WorkerAgentRole {
+    /// This agent runner is intentionally not a reusable discoverable role.
+    Disabled,
+    /// This version may be selected by `agent_spawn` after health and grant
+    /// validation.
+    Enabled {
+        display_name: String,
+        summary: String,
+        #[serde(default)]
+        discoverable: bool,
+        collaboration_instructions: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        default_model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        default_reasoning_level: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tool_ceiling: Vec<String>,
+        #[serde(default, skip_serializing_if = "WorkerAgentRoleLimits::is_default")]
+        limits: WorkerAgentRoleLimits,
+        #[serde(default)]
+        result_mode: WorkerAgentResultMode,
+    },
+}
+
+/// Role-selected defaults which may only tighten the engine's global agent
+/// ceilings.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerAgentRoleLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_assignment_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_assignment_turns: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_child_executions: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_queued_assignments: Option<u32>,
+}
+
+impl WorkerAgentRoleLimits {
+    fn is_default(&self) -> bool {
+        self.max_assignment_seconds.is_none()
+            && self.max_assignment_turns.is_none()
+            && self.max_child_executions.is_none()
+            && self.max_queued_assignments.is_none()
+    }
+}
+
+/// Result contract exposed by a reusable named role.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerAgentResultMode {
+    #[default]
+    Natural,
+    Schema,
 }
 
 impl WorkerExecutionLimits {
@@ -301,6 +375,10 @@ pub struct WorkerPresentationSection {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerEngineHook {
+    /// Proposes one explicit reusable-role declaration for an active legacy
+    /// agent runner. The engine persists and applies the bounded proposal;
+    /// the worker never publishes or rewrites a bundle directly.
+    AgentRoleReview,
     ContinuityContext,
     ContextSummary,
     InboxContext,
@@ -314,6 +392,7 @@ pub enum WorkerEngineHook {
 impl WorkerEngineHook {
     pub const fn all() -> &'static [Self] {
         &[
+            Self::AgentRoleReview,
             Self::ContinuityContext,
             Self::ContextSummary,
             Self::MailboxCuration,
@@ -324,6 +403,7 @@ impl WorkerEngineHook {
 
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::AgentRoleReview => "agent_role_review",
             Self::ContinuityContext => "continuity_context",
             Self::ContextSummary => "context_summary",
             Self::InboxContext => "inbox_context",

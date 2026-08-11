@@ -30,6 +30,30 @@ struct WorkerKernelClientTests {
         )
     }
 
+    private func roleProposal(status: String = "proposed") -> WorkerRoleReviewProposalDTO {
+        WorkerRoleReviewProposalDTO(
+            proposalId: "role-proposal-1",
+            schemaVersion: 1,
+            proposalHash: "sha256:proposal",
+            targetWorkerId: "research",
+            targetWorkerVersion: "v1",
+            targetContentHash: "sha256:target",
+            reviewerWorkerId: "role-reviewer",
+            reviewerWorkerVersion: "v3",
+            reviewerInvocationId: "worker-run-reviewer-1",
+            status: status,
+            agentRole: AnyCodable(["status": "disabled"]),
+            rationale: "This worker should remain a direct typed capability.",
+            createdAt: "2026-08-11T08:00:00Z",
+            updatedAt: "2026-08-11T08:01:00Z",
+            allowedActions: [
+                WorkerRoleReviewActionDTO(action: "inspect", allowed: true, disabledReason: nil),
+                WorkerRoleReviewActionDTO(action: "apply", allowed: true, disabledReason: nil),
+                WorkerRoleReviewActionDTO(action: "reject", allowed: true, disabledReason: nil),
+            ]
+        )
+    }
+
     @Test("Worker reads use only worker-kernel functions")
     func readsUseWorkerKernelFunctions() async throws {
         let transport = connectedTransport()
@@ -141,6 +165,93 @@ struct WorkerKernelClientTests {
 
         #expect(scheduled.items.map(\.scheduledId) == ["schedule:research:nightly"])
         #expect(dismissed.disposition == "dismissed")
+    }
+
+    @Test("Agent-role review uses the closed capability operations and paging contract")
+    func roleReviewUsesNativeKernelOperations() async throws {
+        let transport = connectedTransport()
+        let client = WorkerKernelClient(transport: transport)
+        let key = EngineIdempotencyKey(rawValue: "role-review-one")
+        var functions: [String] = []
+
+        transport.readHandler = { functionId, payload, _ in
+            functions.append(functionId.rawValue)
+            switch functionId.rawValue {
+            case "worker_kernel::role_reviews":
+                let request = try #require(payload as? WorkerRoleReviewsRequestDTO)
+                #expect(request.limit == 100)
+                #expect(request.offset == 50)
+                #expect(request.queueLimit == 1)
+                #expect(request.queueOffset == 100)
+                return WorkerRoleReviewListDTO(
+                    capability: "agent_role_review.v1",
+                    reviewer: WorkerRoleReviewerDTO(
+                        available: true,
+                        workerId: "role-reviewer",
+                        workerVersion: "v3",
+                        repairRequirement: nil
+                    ),
+                    items: [],
+                    queueReturned: 0,
+                    queueTotal: 0,
+                    proposals: [roleProposal()],
+                    returned: 1,
+                    total: 1
+                )
+            case "worker_kernel::role_review_inspect":
+                #expect((payload as? WorkerRoleReviewInspectRequestDTO)?.proposalId == "role-proposal-1")
+                return roleProposal()
+            default:
+                throw EngineConnectionError.invalidResponse
+            }
+        }
+        transport.writeHandler = { functionId, payload, receivedKey, _ in
+            functions.append(functionId.rawValue)
+            #expect(receivedKey == key)
+            switch functionId.rawValue {
+            case "worker_kernel::role_review_start":
+                #expect((payload as? WorkerRoleReviewStartRequestDTO)?.workerId == "research")
+                return roleProposal()
+            case "worker_kernel::role_review_apply":
+                let request = try #require(payload as? WorkerRoleReviewApplyRequestDTO)
+                #expect(request.proposalId == "role-proposal-1")
+                #expect(request.confirmed)
+                return WorkerRoleReviewApplyResultDTO(
+                    proposal: roleProposal(status: "applied"),
+                    worker: worker()
+                )
+            case "worker_kernel::role_review_reject":
+                let request = try #require(payload as? WorkerRoleReviewRejectRequestDTO)
+                #expect(request.proposalId == "role-proposal-1")
+                #expect(request.reason?.count == 512)
+                return roleProposal(status: "rejected")
+            default:
+                throw EngineConnectionError.invalidResponse
+            }
+        }
+
+        _ = try await client.roleReviews(
+            limit: 500,
+            offset: 50,
+            queueLimit: 0,
+            queueOffset: 100
+        )
+        _ = try await client.inspectRoleReview("role-proposal-1")
+        _ = try await client.startRoleReview(workerId: "research", idempotencyKey: key)
+        _ = try await client.applyRoleReview(proposalId: "role-proposal-1", idempotencyKey: key)
+        _ = try await client.rejectRoleReview(
+            proposalId: "role-proposal-1",
+            reason: String(repeating: "r", count: 600),
+            idempotencyKey: key
+        )
+
+        #expect(functions == [
+            "worker_kernel::role_reviews",
+            "worker_kernel::role_review_inspect",
+            "worker_kernel::role_review_start",
+            "worker_kernel::role_review_apply",
+            "worker_kernel::role_review_reject",
+        ])
     }
 
     @Test("Worker graph lookup preserves exact durable association filters")
@@ -547,7 +658,7 @@ struct WorkerKernelClientTests {
                 surface: AgentToolSurfaceDTO(
                     catalogRevision: 42,
                     surfaceHash: "abc123",
-                    fixedToolCount: 29,
+                    fixedToolCount: 27,
                     projectedWorkerCount: 1,
                     availableWorkerCount: 3,
                     availableWorkers: [

@@ -379,6 +379,22 @@ pub(crate) async fn delivery_wake_value(
     deps: &Deps,
 ) -> Result<Value, ToolError> {
     let session_id = require_string_param(params, "sessionId")?;
+    let selected_delivery_ids = opt_array(params, "deliveryIds")
+        .map(|values| {
+            values
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|value| !value.trim().is_empty())
+                        .map(ToOwned::to_owned)
+                        .ok_or_else(|| ToolError::InvalidParams {
+                            message: "deliveryIds must contain non-empty strings".to_owned(),
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
     if deps.orchestrator.has_active_run(&session_id) {
         return Ok(json!({
             "acknowledged":false,
@@ -387,18 +403,26 @@ pub(crate) async fn delivery_wake_value(
     }
     let event_store = deps.event_store.clone();
     let wake_session_id = session_id.clone();
-    let delivery_ids = crate::shared::server::context::run_blocking_task(
+    let requested_delivery_ids = selected_delivery_ids.clone();
+    let deliveries = crate::shared::server::context::run_blocking_task(
         "agent.delivery_wake.pending",
         move || {
-            event_store
-                .pending_agent_wakes_for_session(
+            let records = if let Some(delivery_ids) = requested_delivery_ids {
+                event_store.selected_agent_wake_batch_for_session(&wake_session_id, &delivery_ids)
+            } else {
+                event_store.pending_agent_wake_batch_for_session(
                     &wake_session_id,
                     crate::domains::session::event_store::MAX_DELIVERIES_PER_TURN,
                 )
-                .map_err(crate::shared::server::error_mapping::map_event_store_error)
+            };
+            records.map_err(crate::shared::server::error_mapping::map_event_store_error)
         },
     )
     .await?;
+    let delivery_ids = deliveries
+        .iter()
+        .map(|delivery| delivery.delivery_id.clone())
+        .collect::<Vec<_>>();
     if delivery_ids.is_empty() {
         return Ok(json!({
             "acknowledged":false,
@@ -412,6 +436,23 @@ pub(crate) async fn delivery_wake_value(
             "reason":"session_archived",
         }));
     }
+    // A hidden reusable-agent transcript may never fall back to the ordinary
+    // root surface. Generic completion/unarchive reconsideration carries no
+    // WorkerStore authority snapshot, so it deliberately leaves the delivery
+    // pending for the coordination dispatcher to re-admit with either the
+    // active assignment grant or the bounded idle auxiliary grant.
+    if session.is_agent_session()
+        && (invocation.causal_context.agent_id().is_none()
+            || invocation
+                .causal_context
+                .delegated_function_grant()
+                .is_none())
+    {
+        return Ok(json!({
+            "acknowledged":false,
+            "reason":"coordination_context_required",
+        }));
+    }
     let responder_factory =
         deps.responder_factory
             .clone()
@@ -419,7 +460,11 @@ pub(crate) async fn delivery_wake_value(
                 message: "Agent execution dependencies are not configured".into(),
             })?;
     let run_id = uuid::Uuid::now_v7().to_string();
-    let started_run = match deps.orchestrator.begin_run(&session_id, &run_id) {
+    let started_run = match deps.orchestrator.begin_run_with_admission_key(
+        &session_id,
+        &run_id,
+        invocation.causal_context.idempotency_key.as_deref(),
+    ) {
         Ok(started) => started,
         Err(crate::domains::agent::r#loop::errors::RuntimeError::SessionBusy(_)) => {
             return Ok(json!({
@@ -435,6 +480,34 @@ pub(crate) async fn delivery_wake_value(
             });
         }
     };
+    let engine_causality = if selected_delivery_ids.is_some() {
+        PromptEngineCausality::from_invocation(invocation)
+    } else {
+        let mut context = invocation.causal_context.clone();
+        if let Some(first) = deliveries.first() {
+            if let Some(trace_id) = first
+                .source_trace_id
+                .as_deref()
+                .and_then(|value| crate::engine::TraceId::new(value.to_owned()).ok())
+            {
+                context.trace_id = trace_id;
+            }
+            context = context.with_trigger_depth(first.causal_depth);
+            if let Some(parent) = first
+                .source_invocation_id
+                .as_deref()
+                .and_then(|value| crate::engine::InvocationId::new(value.to_owned()).ok())
+            {
+                context = context.with_parent_invocation(parent);
+            }
+        }
+        let autonomous_wake_hop = deps
+            .event_store
+            .agent_wake_batch_autonomous_hop(&deliveries)
+            .map_err(crate::shared::server::error_mapping::map_event_store_error)?;
+        context = context.with_autonomous_wake_hop(autonomous_wake_hop);
+        PromptEngineCausality::from_invocation_with_context(invocation, context)
+    };
     spawn_prompt_run(
         &deps.prompt_runtime(),
         responder_factory,
@@ -446,10 +519,10 @@ pub(crate) async fn delivery_wake_value(
             trigger: crate::domains::agent::r#loop::types::AgentRunTrigger::DeliveryWake {
                 delivery_ids,
             },
-            reasoning_level: None,
+            reasoning_level: opt_string(params, "reasoningLevel"),
             attachments: None,
             user_event_metadata: None,
-            engine_causality: Some(PromptEngineCausality::from_invocation(invocation)),
+            engine_causality: Some(engine_causality),
         },
     );
     Ok(json!({
@@ -634,7 +707,8 @@ fn trusted_agent_internal_child_context(
     )
     .with_parent_invocation(invocation.id.clone())
     .with_idempotency_key(format!("{idempotency_prefix}:{}", invocation.id))
-    .with_trigger_depth(parent.trigger_depth());
+    .with_trigger_depth(parent.trigger_depth())
+    .with_autonomous_wake_hop(parent.autonomous_wake_hop());
     if let Some(session_id) = &parent.session_id {
         context = context.with_session_id(session_id.clone());
     }
@@ -655,6 +729,23 @@ fn trusted_agent_internal_child_context(
     }
     if let Some(agent_tools) = parent.worker_agent_tools() {
         context = context.with_worker_agent_tools(agent_tools.to_vec());
+    }
+    if let Some(agent_id) = parent.agent_id() {
+        context = match (parent.agent_assignment_id(), parent.agent_execution_id()) {
+            (Some(assignment_id), Some(execution_id)) => {
+                context.with_agent_execution(agent_id, assignment_id, execution_id)
+            }
+            _ => context.with_agent_identity(agent_id),
+        };
+    }
+    if let Some(grant) = parent.delegated_function_grant() {
+        context = context.with_delegated_function_grant(grant.to_vec());
+    }
+    if let Some(limits) = parent.agent_limits() {
+        context = context.with_agent_limits(limits.clone());
+    }
+    if let Some(scopes) = parent.agent_write_scopes() {
+        context = context.with_agent_write_scopes(scopes.to_vec());
     }
     context
 }

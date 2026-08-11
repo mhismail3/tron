@@ -34,6 +34,14 @@ import Foundation
     func handleMessageDeleted(_ result: MessageDeletedPlugin.Result)
 }
 
+@MainActor protocol AgentMessageEventHandler: AnyObject {
+    func handleAgentMessage(_ result: AgentMessagePlugin.Result)
+}
+
+extension AgentMessageEventHandler {
+    func handleAgentMessage(_ result: AgentMessagePlugin.Result) {}
+}
+
 @MainActor protocol ServerEventHandler: AnyObject {
     func handleServerRestarting(_ result: ServerRestartingPlugin.Result)
     func handleStreamRecoveryRequired(_ result: StreamRecoveryRequiredPlugin.Result)
@@ -50,6 +58,6 @@ import Foundation
 /// Composes all domain protocols into a single conformance point.
 @MainActor protocol EventDispatchTarget:
     StreamingEventHandler, ToolInvocationEventHandler, TurnLifecycleEventHandler,
-    ContextEventHandler,
+    ContextEventHandler, AgentMessageEventHandler,
     ServerEventHandler,
     EventDispatchLogger {}

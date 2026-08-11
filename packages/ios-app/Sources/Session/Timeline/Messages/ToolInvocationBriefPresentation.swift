@@ -11,24 +11,32 @@ struct ToolInvocationBriefPresentation: Equatable {
     struct DurableWait: Equatable {
         let status: String
         let mode: String
-        let workerCount: Int
+        let targetCount: Int
+        let isLegacyWorkerWait: Bool
 
         var isPending: Bool { status == "pending" }
         var title: String {
-            isPending ? "Auto-resume registered" : "Worker wait satisfied"
+            if isPending { return "Auto-resume registered" }
+            return isLegacyWorkerWait ? "Worker wait satisfied" : "Coordination wait satisfied"
         }
         var subtitle: String {
             let scope = mode == "any" ? "any" : "all"
-            let workers = workerCount == 1 ? "worker" : "workers"
-            return "\(scope) of \(workerCount) \(workers)"
+            let subject: String
+            if isLegacyWorkerWait {
+                subject = targetCount == 1 ? "worker" : "workers"
+            } else {
+                subject = targetCount == 1 ? "target" : "targets"
+            }
+            return "\(scope) of \(targetCount) \(subject)"
         }
         var narrative: String {
+            let subject = isLegacyWorkerWait ? "worker" : "coordination target"
             if isPending {
                 return mode == "any"
-                    ? "This task will resume automatically when any selected worker finishes."
-                    : "This task will resume automatically when all selected workers finish."
+                    ? "This task will resume automatically when any selected \(subject) finishes."
+                    : "This task will resume automatically when all selected \(subject)s finish."
             }
-            return "The selected worker completion condition was already satisfied."
+            return "The selected \(subject) completion condition was already satisfied."
         }
     }
 
@@ -89,11 +97,13 @@ struct ToolInvocationBriefPresentation: Equatable {
         if let durableWait {
             factRows.append(ToolDisplayRow(
                 label: "Completion",
-                value: durableWait.mode == "any" ? "Any worker" : "All workers"
+                value: durableWait.mode == "any"
+                    ? (durableWait.isLegacyWorkerWait ? "Any worker" : "Any target")
+                    : (durableWait.isLegacyWorkerWait ? "All workers" : "All targets")
             ))
             factRows.append(ToolDisplayRow(
-                label: "Workers",
-                value: "\(durableWait.workerCount)"
+                label: durableWait.isLegacyWorkerWait ? "Workers" : "Targets",
+                value: "\(durableWait.targetCount)"
             ))
         }
         self.factRows = factRows
@@ -264,9 +274,10 @@ struct ToolInvocationBriefPresentation: Equatable {
     }
 
     private static func durableWait(from data: ToolInvocationData) -> DurableWait? {
-        guard data.identity.toolName?
-            .lowercased()
-            .hasSuffix("agent_wait_for_workers") == true,
+        let toolName = data.identity.toolName?.lowercased() ?? ""
+        let isLegacyWorkerWait = toolName.hasSuffix("agent_wait_for_workers")
+        let isCoordinationWait = toolName.hasSuffix("agent_wait")
+        guard isLegacyWorkerWait || isCoordinationWait,
             let result = data.result,
             let bytes = result.data(using: .utf8),
             let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
@@ -276,8 +287,15 @@ struct ToolInvocationBriefPresentation: Equatable {
             return nil
         }
         let mode = (object["mode"] as? String) == "any" ? "any" : "all"
-        let count = (object["invocationIds"] as? [Any])?.count ?? 0
-        return DurableWait(status: status, mode: mode, workerCount: count)
+        let count = isLegacyWorkerWait
+            ? (object["invocationIds"] as? [Any])?.count ?? 0
+            : (object["targets"] as? [Any])?.count ?? 0
+        return DurableWait(
+            status: status,
+            mode: mode,
+            targetCount: count,
+            isLegacyWorkerWait: isLegacyWorkerWait
+        )
     }
 
     private static func abbreviatedIdentifier(_ value: String) -> String {

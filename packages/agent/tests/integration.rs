@@ -320,7 +320,10 @@ async fn engine_hello_and_ping_use_current_minimal_transport() {
     let hello = read_json(&mut ws).await;
     assert_eq!(hello["type"], "hello.ok");
     assert_eq!(hello["serverId"], "tron-engine");
-    assert_eq!(hello["capabilities"], json!(["terminal.v1"]));
+    assert_eq!(
+        hello["capabilities"],
+        json!(["terminal.v1", "agent_coordination.v1"])
+    );
 
     let ping = unwrap_invoke_value(
         invoke(

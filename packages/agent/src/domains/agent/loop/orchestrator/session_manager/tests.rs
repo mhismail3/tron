@@ -70,6 +70,23 @@ fn create_worker_session_is_durably_classified() {
     assert!(row.ended_at.is_none());
 }
 
+#[test]
+fn create_agent_session_is_hidden_and_promotes_in_place() {
+    let mgr = make_manager();
+    let sid = mgr
+        .create_agent_session("test-model", "/tmp", Some("agent"))
+        .unwrap();
+
+    let row = mgr.event_store.get_session(&sid).unwrap().unwrap();
+    assert!(row.is_agent_session());
+    assert!(!row.is_worker_session());
+
+    mgr.promote_agent_session(&sid).unwrap();
+    let promoted = mgr.event_store.get_session(&sid).unwrap().unwrap();
+    assert_eq!(promoted.id, sid);
+    assert!(!promoted.is_internal_session());
+}
+
 #[tokio::test]
 async fn archive_invalidates_cache() {
     let mgr = make_manager();

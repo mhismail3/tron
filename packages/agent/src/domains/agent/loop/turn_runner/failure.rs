@@ -26,6 +26,7 @@ fn run_base(session_id: &str, run_context: &RunContext) -> BaseEvent {
 
 fn turn_failure_payload(
     turn: u32,
+    run_context: &RunContext,
     failure: &FailureEnvelope,
     partial_content: Option<&str>,
 ) -> Value {
@@ -39,6 +40,9 @@ fn turn_failure_payload(
         "origin": failure.origin.as_str(),
         "details": failure.details_with_failure(),
         "partialContent": partial_content,
+        "agentId":run_context.agent_id,
+        "agentAssignmentId":run_context.agent_assignment_id,
+        "agentExecutionId":run_context.agent_execution_id,
     })
 }
 
@@ -98,7 +102,7 @@ pub(super) fn terminalize_interrupted_turn(
     }
     events.push((
         EventType::TurnFailed,
-        turn_failure_payload(turn, failure, partial_content.as_deref()),
+        turn_failure_payload(turn, run_context, failure, partial_content.as_deref()),
     ));
     let rows =
         persister.append_batch_with_runtime_sequence(session_id, &events, sequence_counter)?;
@@ -127,7 +131,7 @@ pub(super) fn emit_turn_failure(
     partial_content: Option<String>,
 ) -> bool {
     if let Some(persister) = persister {
-        let payload = turn_failure_payload(turn, failure, partial_content.as_deref());
+        let payload = turn_failure_payload(turn, run_context, failure, partial_content.as_deref());
         let row = match persister.append_with_runtime_sequence(
             session_id,
             EventType::TurnFailed,

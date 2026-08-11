@@ -10,18 +10,25 @@
 //! unbounded local, web, worker, or binary-derived payloads. Every
 //! provider turn resolves its tool surface from the same bounded latest-user
 //! intent. Assistant plans and tool results cannot manufacture worker relevance
-//! on later internal turns. A bounded `worker_result_read` page is fully
+//! on later internal turns. A bounded generic `result_read` page is fully
 //! available to the immediately following model turn; later turns retain only
 //! its durable worker-result reference and exact pointer/page coordinates.
 //! This one-turn evidence lease is derived from transcript order, requires no
 //! shadow execution state, and lets a worker re-read evidence when genuinely
 //! needed without paying to replay it on every growing-context turn.
+//! Before each stream, `provider_phase` also reads the bounded Engine-authored
+//! Team Context for the exact session/assignment. Canonical `message.agent`
+//! events remain ordinary durable transcript evidence but render through their
+//! authenticated coordination wrapper, separate from untrusted reference
+//! context and from latest-user intent selection. Reusable-agent turn-end rows
+//! carry the exact durable assignment identity, so usage remains attributable
+//! even when offers, questions, and operator messages interleave in one chat.
 //!
 //! ## Concern ownership
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `provider_phase` | Resolve the deterministic live surface, lease bounded durable deliveries, finalize the typed context manifest, persist the v4 request audit, and only then open the provider stream |
+//! | `provider_phase` | Resolve the deterministic live surface and trusted Team Context, lease bounded durable deliveries, finalize the typed context manifest, persist the v4 request audit, and only then open the provider stream |
 //! | `stream_phase` | Journal and consume the provider stream, including durable failure and cancellation terminalization |
 //! | `tool_phase` | Execute a provider-requested tool batch and persist its lifecycle |
 //! | `persistence` | Build and commit assistant/turn protocol rows |
@@ -60,6 +67,7 @@ use crate::shared::server::failure::{
 };
 
 use metrics::{counter, histogram};
+use serde_json::Value;
 use tracing::{error, info, instrument, trace, warn};
 
 use self::failure::{emit_turn_failure, terminalize_interrupted_turn};
@@ -140,9 +148,9 @@ fn cancellation_failure(session_id: &str) -> FailureEnvelope {
 fn determine_turn_stop_reason(
     tool_invocation_count: usize,
     llm_stop_reason: &str,
-    awaiting_user_input: bool,
+    awaiting_external_input: bool,
 ) -> Option<StopReason> {
-    if awaiting_user_input {
+    if awaiting_external_input {
         Some(StopReason::EndTurn)
     } else if tool_invocation_count == 0 {
         if llm_stop_reason == "end_turn" {
@@ -522,6 +530,15 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         token_record_json.as_ref(),
         cost,
     );
+    if let Some(agent_id) = run_context.agent_id.as_deref() {
+        assistant_payload["agentId"] = Value::String(agent_id.to_owned());
+    }
+    if let Some(assignment_id) = run_context.agent_assignment_id.as_deref() {
+        assistant_payload["agentAssignmentId"] = Value::String(assignment_id.to_owned());
+    }
+    if let Some(execution_id) = run_context.agent_execution_id.as_deref() {
+        assistant_payload["agentExecutionId"] = Value::String(execution_id.to_owned());
+    }
     let agent_delivery_continuation = {
         let mut pending = run_context.pending_delivery_provenance.lock();
         for delivery in &prepared_provider.leased_delivery_provenance {
@@ -634,8 +651,15 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         trace_id: run_context.engine_trace_id.as_ref(),
         parent_invocation_id: run_context.parent_invocation_id.as_ref(),
         worker_causal_depth: run_context.worker_causal_depth,
+        autonomous_wake_hop: run_context.autonomous_wake_hop,
         origin_worker_id: run_context.origin_worker_id.as_deref(),
         origin_worker_invocation_id: run_context.origin_worker_invocation_id.as_deref(),
+        agent_id: run_context.agent_id.as_deref(),
+        agent_assignment_id: run_context.agent_assignment_id.as_deref(),
+        agent_execution_id: run_context.agent_execution_id.as_deref(),
+        delegated_function_grant: run_context.delegated_function_grant.as_deref(),
+        agent_limits: run_context.agent_limits.as_ref(),
+        agent_write_scopes: run_context.agent_write_scopes.as_deref(),
         nested_tool_ordinals: &run_context.nested_tool_ordinals,
     })
     .await;
@@ -708,6 +732,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),
+        run_context.agent_assignment_id.as_deref(),
     ) {
         let error_msg = format!("failed to persist turn end: {error}");
         let failure = FailureEnvelope::new(
@@ -789,7 +814,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     let stop_reason = determine_turn_stop_reason(
         stream_result.tool_invocations.len(),
         &stream_result.stop_reason,
-        invocation_phase.awaiting_user_input,
+        invocation_phase.awaiting_user_input || invocation_phase.awaiting_coordination,
     );
 
     let context_window_tokens = token_record_json

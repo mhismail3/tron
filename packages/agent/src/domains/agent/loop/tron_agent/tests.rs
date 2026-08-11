@@ -103,10 +103,23 @@ impl ModelResponder for OrdinarySurfaceResponder {
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>();
         assert_eq!(self.calls.fetch_add(1, Ordering::SeqCst), 0);
-        assert_eq!(names.len(), 17, "{names:?}");
-        assert!(names.contains(&"worker_discover"), "{names:?}");
-        assert!(names.contains(&"worker_invoke"), "{names:?}");
-        assert!(names.contains(&"request_user_input"), "{names:?}");
+        assert_eq!(names.len(), 16, "{names:?}");
+        for required in [
+            "worker_discover",
+            "worker_invoke",
+            "result_read",
+            "request_user_input",
+            "agent_discover",
+            "agent_spawn",
+            "agent_send",
+            "agent_wait",
+            "agent_manage",
+        ] {
+            assert!(
+                names.contains(&required),
+                "{required} missing from {names:?}"
+            );
+        }
         for hidden in [
             "worker_upsert",
             "worker_list",
@@ -118,8 +131,12 @@ impl ModelResponder for OrdinarySurfaceResponder {
             assert!(!names.contains(&hidden), "{hidden} leaked into {names:?}");
         }
         let system_prompt = request.context.system_prompt.as_deref().unwrap_or_default();
-        assert!(system_prompt.contains("Worker Forge"), "{system_prompt}");
-        assert!(system_prompt.contains("Engine Steward"), "{system_prompt}");
+        assert!(
+            system_prompt.contains("discover a current healthy diagnostic or authoring capability"),
+            "{system_prompt}"
+        );
+        assert!(!system_prompt.contains("Worker Forge"), "{system_prompt}");
+        assert!(!system_prompt.contains("Engine Steward"), "{system_prompt}");
         Ok(model_response(vec![
             Ok(StreamEvent::Start),
             Ok(StreamEvent::TextDelta {
@@ -281,7 +298,7 @@ fn make_deps_with_host(
 fn make_deps(responder: impl ModelResponder + 'static) -> AgentDeps {
     make_deps_with_host(
         responder,
-        crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
+        crate::shared::server::test_support::new_agent_test_engine_host(),
     )
 }
 
@@ -290,6 +307,17 @@ fn make_primitive_loop_deps(
     engine_host: crate::engine::EngineHostHandle,
 ) -> AgentDeps {
     make_deps_with_host(responder, engine_host)
+}
+
+fn create_primitive_test_session(
+    ctx: &crate::shared::server::context::ServerRuntimeContext,
+    title: &str,
+) -> String {
+    ctx.event_store
+        .create_session("mock-model", "/tmp", Some(title), None)
+        .expect("primitive loop session")
+        .session
+        .id
 }
 
 #[tokio::test]
@@ -320,6 +348,7 @@ async fn primitive_loop_calls_direct_worker_tool_observes_result_and_continues()
     let calls = Arc::new(AtomicUsize::new(0));
     let observed_result = Arc::new(Mutex::new(None));
     let ctx = crate::shared::server::test_support::make_test_context();
+    let session_id = create_primitive_test_session(&ctx, "Primitive loop");
     let mut agent = TronAgent::new(
         AgentConfig {
             max_turns: 2,
@@ -332,7 +361,7 @@ async fn primitive_loop_calls_direct_worker_tool_observes_result_and_continues()
             },
             ctx.engine_host.clone(),
         ),
-        "primitive-loop-session".into(),
+        session_id,
     );
     let result = agent
         .run(
@@ -367,6 +396,7 @@ async fn primitive_loop_calls_direct_worker_tool_observes_result_and_continues()
 async fn max_turn_exhaustion_reports_execution_error_before_result_validation() {
     let calls = Arc::new(AtomicUsize::new(0));
     let ctx = crate::shared::server::test_support::make_test_context();
+    let session_id = create_primitive_test_session(&ctx, "Maximum turn exhaustion");
     let mut agent = TronAgent::new(
         AgentConfig {
             max_turns: 1,
@@ -379,7 +409,7 @@ async fn max_turn_exhaustion_reports_execution_error_before_result_validation() 
             },
             ctx.engine_host.clone(),
         ),
-        "max-turn-exhaustion-session".into(),
+        session_id,
     );
 
     let result = agent
@@ -405,6 +435,7 @@ async fn max_turn_exhaustion_reports_execution_error_before_result_validation() 
 async fn ordinary_chat_keeps_admin_tools_hidden_and_routes_to_worker_owners() {
     let calls = Arc::new(AtomicUsize::new(0));
     let ctx = crate::shared::server::test_support::make_test_context();
+    let session_id = create_primitive_test_session(&ctx, "Proactive adaptation");
     let mut agent = TronAgent::new(
         AgentConfig {
             max_turns: 1,
@@ -416,7 +447,7 @@ async fn ordinary_chat_keeps_admin_tools_hidden_and_routes_to_worker_owners() {
             },
             ctx.engine_host.clone(),
         ),
-        "proactive-adaptation-session".into(),
+        session_id,
     );
 
     let result = agent

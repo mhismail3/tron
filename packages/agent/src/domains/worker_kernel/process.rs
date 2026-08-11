@@ -120,10 +120,20 @@ impl ProcessTree {
         self.child.try_wait()
     }
 
+    /// Positive direct-child id. On Unix this is also the isolated process
+    /// group id captured by durable workspace-process claims.
+    pub(super) fn id(&self) -> Option<u32> {
+        self.child.id()
+    }
+
     pub(super) async fn terminate(&mut self) {
         self.kill_process_group();
         let _ = self.child.kill().await;
         let _ = self.child.wait().await;
+        self.armed = false;
+    }
+
+    fn disarm_after_reap(&mut self) {
         self.armed = false;
     }
 
@@ -196,6 +206,10 @@ pub(super) async fn wait_with_bounded_output(
         let input_error = input_result
             .err()
             .map(|error| (error.kind(), error.to_string()));
+        // `Child::wait` reaped the direct child, so its former process-group id
+        // is no longer ours to signal. Disarm before this value drops; an
+        // immediate PID/PGID reuse must never receive a stale kill.
+        process.disarm_after_reap();
         Ok(BoundedProcessOutput {
             status,
             stdout,

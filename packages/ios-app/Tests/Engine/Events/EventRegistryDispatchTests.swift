@@ -21,6 +21,30 @@ final class EventRegistryDispatchTests: XCTestCase {
 
     // MARK: - Text/Thinking Event Tests
 
+    func testDispatchAgentMessageAppendsTypedAuditResult() {
+        let content = AgentMessageContent(
+            messageId: "message-live",
+            sourceAgentId: "agent-peer",
+            sourceName: "Peer",
+            kind: "information",
+            authority: "peer",
+            text: "The parser lives in Session."
+        )
+        let result = AgentMessagePlugin.Result(
+            eventId: "event-live",
+            content: content,
+            timestamp: Date(timeIntervalSince1970: 1)
+        )
+
+        registry.dispatch(
+            type: AgentMessagePlugin.eventType,
+            transform: { result },
+            context: mockContext
+        )
+
+        XCTAssertEqual(mockContext.handleAgentMessageCalledWith, result)
+    }
+
     func testDispatch_textDelta_callsHandleTextDelta() {
         // Given: A text delta result
         let result = TextDeltaPlugin.Result(delta: "Hello world", messageIndex: nil)
@@ -463,6 +487,7 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleThinkingDeltaKindCalledWith: ThinkingDisplayKind?
     var handleThinkingEndCalledWith: String?
     var handleThinkingEndKindCalledWith: ThinkingDisplayKind?
+    var handleAgentMessageCalledWith: AgentMessagePlugin.Result?
 
     // MARK: - Tools
     var handleToolInvocationGeneratingCalledWith: ToolInvocationGeneratingPlugin.Result?
@@ -503,6 +528,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
     func handleThinkingEnd(_ thinking: String, kind: ThinkingDisplayKind) {
         handleThinkingEndCalledWith = thinking
         handleThinkingEndKindCalledWith = kind
+    }
+
+    func handleAgentMessage(_ result: AgentMessagePlugin.Result) {
+        handleAgentMessageCalledWith = result
     }
 
     func handleToolInvocationGenerating(_ result: ToolInvocationGeneratingPlugin.Result) {

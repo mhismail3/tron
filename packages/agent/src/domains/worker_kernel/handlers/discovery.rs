@@ -153,6 +153,7 @@ fn project_inspection(mut inspection: Value, detail: &str) -> Result<Value, Stri
                         | "modelExposure"
                         | "toolInputSchema"
                         | "agentTools"
+                        | "agentRole"
                         | "inputSchema"
                         | "outputSchema"
                         | "runner"

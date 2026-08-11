@@ -1,4 +1,4 @@
-//! Cross-database agent-delivery outbox import.
+//! Agent-delivery mailbox curation, wait maintenance, wake admission, and outbox import.
 //!
 //! No worker transaction is held while EventStore state changes. A terminal
 //! signal is acknowledged only after wait reconciliation and any automatic
@@ -9,9 +9,8 @@ use std::collections::BTreeSet;
 
 use super::*;
 use crate::domains::session::event_store::{
-    AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliverySourceKind, AgentDeliveryTarget,
-    AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode, MAX_DELIVERIES_PER_TURN,
-    NewAgentDelivery, NewAgentTaskDelivery, NewAgentWait, WorkerTerminalEvidence,
+    AgentDeliveryIntent, AgentDeliverySourceKind, AgentMailboxScope, AgentWaitMode,
+    MAX_DELIVERIES_PER_TURN, NewAgentWait, WorkerTerminalEvidence,
 };
 
 fn mailbox_candidate_projection(
@@ -151,279 +150,6 @@ impl WorkerRuntime {
             "workerVersion":execution.worker_version,
             "invocationId":execution.invocation_id,
             "claimedDeliveryIds":selected_ids,
-        }))
-    }
-
-    pub(crate) async fn agent_send(&self, invocation: &Invocation) -> Result<Value, String> {
-        let source_session_id = invocation
-            .causal_context
-            .session_id
-            .as_deref()
-            .ok_or_else(|| "agent_send requires an engine-derived source session".to_owned())?;
-        let source = self
-            .event_store
-            .get_session(source_session_id)
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("source session '{source_session_id}' was not found"))?;
-        if source.is_worker_session() || source.ended_at.is_some() {
-            return Err("agent_send requires an active visible source task".to_owned());
-        }
-        if invocation
-            .causal_context
-            .workspace_id
-            .as_deref()
-            .is_some_and(|workspace_id| workspace_id != source.workspace_id)
-        {
-            return Err("engine workspace provenance does not match the source task".to_owned());
-        }
-        let target = invocation
-            .payload
-            .get("target")
-            .and_then(Value::as_object)
-            .ok_or_else(|| "agent_send target is required".to_owned())?;
-        let target_kind = target
-            .get("kind")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "agent_send target.kind is required".to_owned())?;
-        let content = invocation
-            .payload
-            .get("content")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "agent_send content is required".to_owned())?
-            .to_owned();
-        let intent = match invocation
-            .payload
-            .get("intent")
-            .and_then(Value::as_str)
-            .unwrap_or("information")
-        {
-            "information" => AgentDeliveryIntent::Information,
-            "request" => AgentDeliveryIntent::Request,
-            other => return Err(format!("unsupported agent_send intent '{other}'")),
-        };
-        let requested_wake = match invocation
-            .payload
-            .get("wakePolicy")
-            .and_then(Value::as_str)
-            .unwrap_or("passive")
-        {
-            "passive" => AgentDeliveryWakePolicy::Passive,
-            "wake" => AgentDeliveryWakePolicy::Wake,
-            other => return Err(format!("unsupported agent_send wakePolicy '{other}'")),
-        };
-        let boundary = match invocation
-            .payload
-            .get("boundary")
-            .and_then(Value::as_str)
-            .unwrap_or("next_turn")
-        {
-            "next_turn" => AgentDeliveryBoundary::NextTurn,
-            "next_run" => AgentDeliveryBoundary::NextRun,
-            other => return Err(format!("unsupported agent_send boundary '{other}'")),
-        };
-        let expires_at = invocation
-            .payload
-            .get("expiresAt")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned);
-        let causal_depth = invocation
-            .causal_context
-            .trigger_depth()
-            .saturating_add(u32::from(requested_wake == AgentDeliveryWakePolicy::Wake));
-        let wake_policy = if causal_depth > MAX_CAUSAL_DEPTH {
-            AgentDeliveryWakePolicy::Passive
-        } else {
-            requested_wake
-        };
-        let source_invocation_id = Some(invocation.id.as_str().to_owned());
-        let source_trace_id = Some(invocation.causal_context.trace_id.as_str().to_owned());
-        let source_root_invocation_id = invocation
-            .causal_context
-            .origin_worker_invocation_id()
-            .map(ToOwned::to_owned);
-        let idempotency_key = format!("agent-send:{}", invocation.id.as_str());
-
-        let (delivery, target_session_id, created_session) = match target_kind {
-            "new_task" => {
-                let requested_title = target
-                    .get("title")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToOwned::to_owned)
-                    .unwrap_or_else(|| {
-                        let source_label = source
-                            .title
-                            .as_deref()
-                            .filter(|title| !title.trim().is_empty())
-                            .unwrap_or("current task");
-                        format!("Task from {source_label}")
-                    });
-                let title =
-                    crate::shared::foundation::text::truncate_str(requested_title.trim(), 120)
-                        .to_owned();
-                let model = target
-                    .get("model")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToOwned::to_owned);
-                if let Some(model) = model.as_deref() {
-                    if !crate::domains::model::routing::catalog::is_model_supported(model) {
-                        return Err(format!("agent_send new task model '{model}' is unknown"));
-                    }
-                    if crate::domains::model::routing::catalog::is_model_retired(model) {
-                        return Err(format!("agent_send new task model '{model}' is retired"));
-                    }
-                }
-                let working_directory = target
-                    .get("workingDirectory")
-                    .and_then(Value::as_str)
-                    .map(crate::shared::foundation::paths::normalize_working_directory)
-                    .transpose()?
-                    .map(|path| path.display().to_string());
-                let result = self
-                    .event_store
-                    .create_agent_task_with_delivery(&NewAgentTaskDelivery {
-                        idempotency_key,
-                        source_session_id: source_session_id.to_owned(),
-                        title,
-                        model,
-                        working_directory,
-                        intent,
-                        wake_policy,
-                        boundary,
-                        content,
-                        expires_at,
-                        source_invocation_id,
-                        source_trace_id,
-                        source_root_invocation_id,
-                        causal_depth,
-                    })
-                    .map_err(|error| error.to_string())?;
-                let session_id = result.session.session.id.clone();
-                if result.created {
-                    crate::domains::session::lifecycle::project_created_session(
-                        &self.orchestrator,
-                        self.host.clone(),
-                        &session_id,
-                        &result.session.session.latest_model,
-                        &result.session.session.working_directory,
-                        result.session.session.title.clone(),
-                    );
-                }
-                (result.delivery, Some(session_id), result.created)
-            }
-            "session" => {
-                let session_id = target
-                    .get("sessionId")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| "agent_send session target requires sessionId".to_owned())?
-                    .to_owned();
-                let originating_run_id = self.orchestrator.active_run_id(source_session_id);
-                let delivery = self
-                    .orchestrator
-                    .with_stable_active_run(&session_id, |active_run_id| {
-                        let active_run_id = active_run_id.map(ToOwned::to_owned);
-                        self.event_store.create_agent_delivery(&NewAgentDelivery {
-                            idempotency_key,
-                            source_kind: AgentDeliverySourceKind::AgentMessage,
-                            intent: Some(intent),
-                            source_session_id: Some(source_session_id.to_owned()),
-                            source_workspace_id: source.workspace_id.clone(),
-                            source_invocation_id,
-                            source_trace_id,
-                            source_root_invocation_id,
-                            causal_depth,
-                            target: AgentDeliveryTarget::Session {
-                                session_id: session_id.clone(),
-                            },
-                            wake_policy,
-                            boundary,
-                            originating_run_id,
-                            arrived_during_run_id: active_run_id.clone(),
-                            defer_until_run_id: (boundary == AgentDeliveryBoundary::NextRun)
-                                .then_some(active_run_id)
-                                .flatten(),
-                            result_invocation_id: None,
-                            content,
-                            not_before: None,
-                            expires_at,
-                        })
-                    })
-                    .map_err(|error| error.to_string())?;
-                (delivery, Some(session_id), false)
-            }
-            "mailbox" => {
-                if requested_wake == AgentDeliveryWakePolicy::Wake {
-                    return Err("mailbox deliveries cannot wake an agent session".to_owned());
-                }
-                let scope = match target
-                    .get("scope")
-                    .and_then(Value::as_str)
-                    .unwrap_or("workspace")
-                {
-                    "workspace" => AgentMailboxScope::Workspace,
-                    "profile" => AgentMailboxScope::Profile,
-                    other => return Err(format!("unsupported mailbox scope '{other}'")),
-                };
-                let name = target
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| "agent_send mailbox target requires name".to_owned())?
-                    .to_owned();
-                let delivery = self
-                    .event_store
-                    .create_agent_delivery(&NewAgentDelivery {
-                        idempotency_key,
-                        source_kind: AgentDeliverySourceKind::AgentMessage,
-                        intent: Some(intent),
-                        source_session_id: Some(source_session_id.to_owned()),
-                        source_workspace_id: source.workspace_id.clone(),
-                        source_invocation_id,
-                        source_trace_id,
-                        source_root_invocation_id,
-                        causal_depth,
-                        target: AgentDeliveryTarget::Mailbox {
-                            scope,
-                            workspace_id: (scope == AgentMailboxScope::Workspace)
-                                .then(|| source.workspace_id.clone()),
-                            name,
-                        },
-                        wake_policy: AgentDeliveryWakePolicy::Passive,
-                        boundary: AgentDeliveryBoundary::NextTurn,
-                        originating_run_id: self.orchestrator.active_run_id(source_session_id),
-                        arrived_during_run_id: None,
-                        defer_until_run_id: None,
-                        result_invocation_id: None,
-                        content,
-                        not_before: None,
-                        expires_at,
-                    })
-                    .map_err(|error| error.to_string())?;
-                (delivery, None, false)
-            }
-            other => return Err(format!("unsupported agent_send target kind '{other}'")),
-        };
-
-        if wake_policy == AgentDeliveryWakePolicy::Wake
-            && let Some(session_id) = target_session_id.as_deref()
-        {
-            self.request_agent_delivery_wake(session_id, causal_depth)
-                .await;
-        }
-        Ok(json!({
-            "deliveryId":delivery.delivery_id,
-            "targetSessionId":target_session_id,
-            "createdSession":created_session,
-            "wakePolicy":if wake_policy == AgentDeliveryWakePolicy::Wake {"wake"} else {"passive"},
-            "boundary":if boundary == AgentDeliveryBoundary::NextRun {"next_run"} else {"next_turn"},
-            "wakeSuppressedByCausalDepth":requested_wake == AgentDeliveryWakePolicy::Wake
-                && wake_policy == AgentDeliveryWakePolicy::Passive,
         }))
     }
 
@@ -621,50 +347,303 @@ impl WorkerRuntime {
             .map_err(|error| error.to_string())
     }
 
-    pub(super) async fn request_agent_delivery_wake(&self, session_id: &str, causal_depth: u32) {
+    async fn exact_agent_function_grant(
+        &self,
+        agent_id: &str,
+        allowed_tools: &BTreeSet<String>,
+        allow_workspace_mutations: bool,
+    ) -> Result<Vec<String>, String> {
+        let actor_id = ActorId::new(format!("agent:{agent_id}"))
+            .map_err(|error| format!("invalid durable agent identity: {error}"))?;
+        // Use the engine-authored System catalog view only to resolve hidden
+        // delegable contracts into exact function IDs. The provider turn and
+        // every eventual tool invocation remain Agent-scoped and are checked
+        // against this immutable list.
+        let actor = crate::engine::ActorContext::new(actor_id, ActorKind::System);
+        let (_, functions) = self.host.visible_functions_with_revision(&actor).await;
+        Ok(functions
+            .into_iter()
+            .filter(|function| function.delegation_policy != crate::engine::DelegationPolicy::Never)
+            .filter(|function| {
+                allow_workspace_mutations
+                    || matches!(
+                        function.workspace_effect,
+                        crate::engine::WorkspaceEffect::None | crate::engine::WorkspaceEffect::Read
+                    )
+            })
+            .filter(|function| {
+                let canonical_name_allowed = function
+                    .model_tool
+                    .as_ref()
+                    .is_some_and(|tool| allowed_tools.contains(tool.name.as_str()));
+                let retained_alias_allowed = allowed_tools.iter().any(|tool_name| {
+                    crate::domains::worker_kernel::surface::retained_worker_agent_tool_alias_target(
+                        tool_name,
+                    )
+                    .is_some_and(|target| target == function.id.as_str())
+                });
+                canonical_name_allowed || retained_alias_allowed
+            })
+            .map(|function| function.id.as_str().to_owned())
+            .collect())
+    }
+
+    pub(super) async fn request_agent_delivery_wake(&self, session_id: &str, _causal_depth: u32) {
         if self.orchestrator.has_active_run(session_id) {
             return;
         }
-        let Ok(delivery_ids) = self
+        let Ok(records) = self
             .event_store
-            .pending_agent_wakes_for_session(session_id, MAX_DELIVERIES_PER_TURN)
+            .pending_agent_wake_batch_for_session(session_id, MAX_DELIVERIES_PER_TURN)
         else {
             return;
         };
-        if delivery_ids.is_empty() {
+        let Some(first_delivery) = records.first() else {
             return;
-        }
-        let provenance = self
-            .event_store
-            .agent_deliveries_by_ids(&delivery_ids)
-            .ok()
-            .and_then(|records| {
-                let first = records.first()?;
-                let trace_id = first
-                    .source_trace_id
-                    .as_deref()
-                    .and_then(|value| TraceId::new(value.to_owned()).ok());
-                Some((trace_id, first.source_invocation_id.clone()))
-            });
+        };
+        let delivery_ids = records
+            .iter()
+            .map(|record| record.delivery_id.clone())
+            .collect::<Vec<_>>();
+        let provenance = {
+            let trace_id = first_delivery
+                .source_trace_id
+                .as_deref()
+                .and_then(|value| TraceId::new(value.to_owned()).ok());
+            let autonomous_wake_hop =
+                match self.event_store.agent_wake_batch_autonomous_hop(&records) {
+                    Ok(hop) => hop,
+                    Err(error) => {
+                        tracing::warn!(
+                            session_id,
+                            error = %error,
+                            "could not recover persisted autonomy provenance for agent wake"
+                        );
+                        return;
+                    }
+                };
+            Some((
+                trace_id,
+                first_delivery.source_invocation_id.clone(),
+                autonomous_wake_hop,
+            ))
+        };
         let Ok(function_id) = FunctionId::new("agent::delivery_wake") else {
             return;
         };
         let Ok(actor_id) = ActorId::new("system:agent-delivery") else {
             return;
         };
+        let wake_admission_key =
+            format!("agent-delivery-wake:{session_id}:{}", uuid::Uuid::now_v7());
         let trace_id = provenance
             .as_ref()
-            .and_then(|(trace_id, _)| trace_id.clone())
+            .and_then(|(trace_id, _, _)| trace_id.clone())
             .unwrap_or_else(TraceId::generate);
+        let autonomous_wake_hop = provenance
+            .as_ref()
+            .map_or(0, |(_, _, autonomous_wake_hop)| *autonomous_wake_hop);
         let mut causal = CausalContext::new(actor_id, ActorKind::System, trace_id)
             .with_session_id(session_id.to_owned())
-            .with_trigger_depth(causal_depth)
-            .with_idempotency_key(format!(
-                "agent-delivery-wake:{session_id}:{}",
-                uuid::Uuid::now_v7()
-            ));
+            .with_trigger_depth(first_delivery.causal_depth)
+            .with_autonomous_wake_hop(autonomous_wake_hop)
+            .with_idempotency_key(wake_admission_key.clone());
+        let mut wake_reasoning_level = None;
+        if let Ok(Some(session)) = self.event_store.get_session(session_id) {
+            causal = causal
+                .with_workspace_id(session.workspace_id)
+                .with_working_directory(session.working_directory);
+        }
+        let mut session_agent = match self.store.agent_instance_for_session(session_id) {
+            Ok(agent) => agent,
+            Err(error) => {
+                tracing::warn!(
+                    session_id,
+                    error,
+                    "could not resolve durable agent identity for delivery wake"
+                );
+                return;
+            }
+        };
+        // Reserve a hidden agent's run boundary before reading its mutable
+        // lifecycle/configuration projection. Lifecycle mutations consult the
+        // same orchestrator registry, so either this exact wake runs with one
+        // coherent snapshot or the mutation wins and the wake is reconsidered.
+        let mut _auxiliary_run_reservation = None;
+        if session_agent.as_ref().is_some_and(|agent| {
+            agent.visibility == crate::domains::worker_kernel::persistence::AgentVisibility::Nested
+        }) {
+            let Some(reservation) = self
+                .orchestrator
+                .try_reserve_auxiliary_run(session_id, &wake_admission_key)
+            else {
+                if self
+                    .store
+                    .agent_instance_for_session(session_id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|agent| {
+                        agent.state
+                            == crate::domains::worker_kernel::persistence::AgentInstanceState::Closed
+                    })
+                {
+                    let _ = self
+                        .event_store
+                        .demote_agent_wakes(session_id, &delivery_ids);
+                }
+                return;
+            };
+            _auxiliary_run_reservation = Some(reservation);
+            session_agent = match self.store.agent_instance_for_session(session_id) {
+                Ok(agent) => agent,
+                Err(error) => {
+                    tracing::warn!(
+                        session_id,
+                        error,
+                        "could not revalidate durable agent identity after wake reservation"
+                    );
+                    return;
+                }
+            };
+        }
+        if session_agent.as_ref().is_some_and(|agent| {
+            agent.state == crate::domains::worker_kernel::persistence::AgentInstanceState::Closed
+        }) {
+            if let Err(error) = self
+                .event_store
+                .demote_agent_wakes(session_id, &delivery_ids)
+            {
+                tracing::warn!(
+                    session_id,
+                    error = %error,
+                    "could not make a closed agent's pending wakes passive"
+                );
+            }
+            return;
+        }
+        if let Some(agent) = session_agent {
+            let assignment = self
+                .store
+                .list_agent_assignments(&agent.agent_id, 32)
+                .ok()
+                .and_then(|assignments| {
+                    assignments
+                        .into_iter()
+                        .filter(|assignment| {
+                            matches!(
+                                assignment.status,
+                                crate::domains::worker_kernel::persistence::AgentAssignmentStatus::Running
+                                    | crate::domains::worker_kernel::persistence::AgentAssignmentStatus::Waiting
+                            )
+                        })
+                        .min_by_key(|assignment| assignment.queue_ordinal)
+                });
+            if let Some(assignment) = assignment {
+                wake_reasoning_level = assignment.reasoning_level.clone();
+                let mut assignment_limits = assignment.limits_snapshot.clone();
+                if let Some(max_turns) = assignment_limits
+                    .get("maxAssignmentTurns")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+                    && let Ok(used_turns) = self.assignment_turn_count(&agent, &assignment)
+                    && let Some(object) = assignment_limits.as_object_mut()
+                {
+                    object.insert(
+                        "maxAssignmentTurns".to_owned(),
+                        Value::from(max_turns.saturating_sub(used_turns).max(1)),
+                    );
+                }
+                if let Ok(Some(execution)) = self.store.execution_node(&assignment.execution_id) {
+                    causal = causal.with_trigger_depth(execution.causal_depth.saturating_add(1));
+                }
+                let allowed_tools = assignment
+                    .authority_snapshot
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .collect::<BTreeSet<_>>();
+                let exact_grant = match self
+                    .exact_agent_function_grant(&agent.agent_id, &allowed_tools, true)
+                    .await
+                {
+                    Ok(grant) => grant,
+                    Err(error) => {
+                        tracing::warn!(
+                            session_id,
+                            error,
+                            "could not resolve assignment agent grant for delivery wake"
+                        );
+                        return;
+                    }
+                };
+                let direct_worker_id = (agent.kind.as_str() == "direct_worker")
+                    .then(|| {
+                        assignment
+                            .resource_snapshot
+                            .get("workerId")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned)
+                    })
+                    .flatten();
+                causal = causal
+                    .with_agent_execution(
+                        agent.agent_id,
+                        assignment.assignment_id,
+                        assignment.execution_id,
+                    )
+                    .with_delegated_function_grant(exact_grant)
+                    .with_agent_limits(assignment_limits)
+                    .with_agent_write_scopes(
+                        assignment
+                            .write_scopes_snapshot
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(Value::as_str)
+                            .map(ToOwned::to_owned)
+                            .collect(),
+                    );
+                if let Some(worker_id) = direct_worker_id {
+                    causal = causal
+                        .with_origin_worker_id(worker_id)
+                        .with_worker_agent_tools(allowed_tools.into_iter().collect());
+                }
+            } else if agent.visibility
+                == crate::domains::worker_kernel::persistence::AgentVisibility::Nested
+            {
+                let allowed_tools = agent
+                    .tool_grant
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .collect::<BTreeSet<_>>();
+                let exact_grant = match self
+                    .exact_agent_function_grant(&agent.agent_id, &allowed_tools, false)
+                    .await
+                {
+                    Ok(grant) => grant,
+                    Err(error) => {
+                        tracing::warn!(
+                            session_id,
+                            error,
+                            "could not resolve auxiliary agent grant for delivery wake"
+                        );
+                        return;
+                    }
+                };
+                wake_reasoning_level = agent.default_reasoning_level.clone();
+                causal = causal
+                    .with_agent_identity(agent.agent_id)
+                    .with_delegated_function_grant(exact_grant)
+                    .with_agent_limits(agent.limits);
+            }
+        }
         if let Some(parent_id) = provenance
-            .and_then(|(_, parent_id)| parent_id)
+            .and_then(|(_, parent_id, _)| parent_id)
             .and_then(|value| crate::engine::InvocationId::new(value).ok())
         {
             causal = causal.with_parent_invocation(parent_id);
@@ -673,7 +652,17 @@ impl WorkerRuntime {
             .host
             .invoke(Invocation::new_sync(
                 function_id,
-                json!({"sessionId":session_id}),
+                match wake_reasoning_level {
+                    Some(reasoning_level) => json!({
+                        "sessionId":session_id,
+                        "reasoningLevel":reasoning_level,
+                        "deliveryIds":delivery_ids,
+                    }),
+                    None => json!({
+                        "sessionId":session_id,
+                        "deliveryIds":delivery_ids,
+                    }),
+                },
                 causal,
             ))
             .await;

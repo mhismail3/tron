@@ -48,6 +48,9 @@ extension SessionContextSheet {
         if agentUpdatesLaneActivated {
             requestAgentUpdatesRefresh()
         }
+        if agentRelationsLaneActivated {
+            requestAgentRelationsRefresh()
+        }
     }
 
     func activateAgentUpdatesLane() {
@@ -60,6 +63,32 @@ extension SessionContextSheet {
         guard !workerLaneActivated else { return }
         workerLaneActivated = true
         requestWorkerRefresh()
+    }
+
+    func activateAgentRelationsLane() {
+        guard !agentRelationsLaneActivated else { return }
+        agentRelationsLaneActivated = true
+        requestAgentRelationsRefresh()
+    }
+
+    func requestAgentRelationsRefresh(loadOlder: Bool = false) {
+        guard isConnected else { return }
+        guard supportsAgentCoordination else {
+            hasLoadedAgentRelationsSnapshot = true
+            agentRelationsLoadError = nil
+            return
+        }
+        if loadOlder {
+            loadOlderAgentRelationsPending = true
+        }
+        refreshCoordinator.request(.agents) { generation in
+            let shouldLoadOlder = loadOlderAgentRelationsPending
+            loadOlderAgentRelationsPending = false
+            await loadAgentRelations(
+                reset: !shouldLoadOlder,
+                generation: generation
+            )
+        }
     }
 
     func requestAgentUpdatesRefresh() {
@@ -119,6 +148,49 @@ extension SessionContextSheet {
             agentUpdatesLoadError = !hasLoadedAgentUpdatesSnapshot
                 ? "Delivery and wait status could not load: \(error.localizedDescription)"
                 : "Couldn’t refresh delivery and wait status; showing the last update."
+        }
+    }
+
+    func loadAgentRelations(reset: Bool, generation: UInt64) async {
+        guard refreshCoordinator.isCurrent(generation), isConnected else { return }
+        agentRelationsLoadingGeneration = generation
+        isLoadingAgentRelations = true
+        defer {
+            if agentRelationsLoadingGeneration == generation {
+                agentRelationsLoadingGeneration = nil
+                isLoadingAgentRelations = false
+            }
+        }
+        do {
+            let page = try await agentRepository.agentRelations(
+                ownerSessionId: sessionId,
+                cursor: reset ? nil : agentRelationsNextCursor,
+                limit: 50
+            )
+            guard refreshCoordinator.isCurrent(generation) else { return }
+            if reset {
+                var identifiers: Set<String> = []
+                relatedAgents = page.items.filter {
+                    identifiers.insert($0.agentId).inserted
+                }
+            } else {
+                var identifiers = Set(relatedAgents.map(\.agentId))
+                relatedAgents.append(contentsOf: page.items.filter {
+                    identifiers.insert($0.agentId).inserted
+                })
+            }
+            agentRelationTotals = page.totals
+            agentRelationsNextCursor = page.nextCursor
+            agentRelationsLoadError = nil
+            hasLoadedAgentRelationsSnapshot = true
+        } catch is CancellationError {
+            return
+        } catch {
+            guard refreshCoordinator.isCurrent(generation) else { return }
+            guard !ConnectionErrorClassifier.isTransientTransport(error) else { return }
+            agentRelationsLoadError = hasLoadedAgentRelationsSnapshot
+                ? "Couldn’t refresh agent relationships; showing the last update."
+                : "This server did not provide agent relationship management: \(error.localizedDescription)"
         }
     }
 
@@ -336,6 +408,10 @@ extension SessionContextSheet {
 
     func loadOlderSessionWorkerRuns() {
         requestWorkerRefresh(loadOlder: true)
+    }
+
+    func loadOlderAgentRelations() {
+        requestAgentRelationsRefresh(loadOlder: true)
     }
 
     func forkSession() async {

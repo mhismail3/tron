@@ -47,6 +47,27 @@ struct DeliveryWaitResponderFactory {
     contexts: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
+fn coordination_tool_invocation(
+    function: &str,
+    payload: Value,
+    session_id: &str,
+    workspace_id: &str,
+    suffix: &str,
+) -> Invocation {
+    Invocation::new_sync(
+        FunctionId::new(function).unwrap(),
+        payload,
+        CausalContext::new(
+            ActorId::new(format!("agent:wait-ownership-{suffix}")).unwrap(),
+            ActorKind::Agent,
+            TraceId::new(format!("trace-wait-ownership-{suffix}")).unwrap(),
+        )
+        .with_session_id(session_id)
+        .with_workspace_id(workspace_id)
+        .with_working_directory("/tmp/project"),
+    )
+}
+
 #[async_trait]
 impl ModelResponderFactory for DeliveryWaitResponderFactory {
     async fn create_for_model(
@@ -204,6 +225,212 @@ async fn registered_wait_resumes_once_from_terminal_outbox_without_a_user_messag
     assert_eq!(contexts.len(), 1);
     assert!(contexts[0].contains("worker_wait"));
     assert!(contexts[0].contains("Background worker finished successfully."));
+}
+
+#[tokio::test]
+async fn worker_waits_absorb_results_only_for_the_registering_recipient() {
+    let (runtime, _home) = test_runtime(None);
+    let published = runtime
+        .upsert(
+            command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]),
+            None,
+        )
+        .await
+        .unwrap();
+    let root = runtime
+        .event_store
+        .create_session(
+            "gpt-5.6-sol",
+            "/tmp/project",
+            Some("Worker wait ownership"),
+            None,
+        )
+        .unwrap()
+        .session;
+    let delegator_spawn = runtime
+        .agent_spawn(&coordination_tool_invocation(
+            "worker_kernel::agent_spawn",
+            json!({"task":"Delegate typed worker work.","name":"Worker delegator"}),
+            &root.id,
+            &root.workspace_id,
+            "delegator-spawn",
+        ))
+        .await
+        .unwrap();
+    let delegator = runtime
+        .store
+        .agent_instance(delegator_spawn["agentId"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    let manager_spawn = runtime
+        .agent_spawn(&coordination_tool_invocation(
+            "worker_kernel::agent_spawn",
+            json!({"task":"Observe delegated worker work.","name":"Worker manager"}),
+            &root.id,
+            &root.workspace_id,
+            "manager-spawn",
+        ))
+        .await
+        .unwrap();
+    let manager = runtime
+        .store
+        .agent_instance(manager_spawn["agentId"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    runtime
+        .agent_manage(&coordination_tool_invocation(
+            "worker_kernel::agent_manage",
+            json!({
+                "action":"grant_management",
+                "agentId":delegator.agent_id,
+                "toAgentId":manager.agent_id,
+                "capabilities":["assign"]
+            }),
+            &root.id,
+            &root.workspace_id,
+            "manager-grant",
+        ))
+        .await
+        .unwrap();
+
+    let begin_worker = |key: &str| {
+        runtime
+            .store
+            .begin_invocation_with_context(
+                &published.worker.worker_id,
+                &published.version,
+                &json!({"key":key}),
+                key,
+                &format!("trace-{key}"),
+                0,
+                "manual",
+                Some(&delegator.session_id),
+                WorkerInteractionMode::Background,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+            .0
+    };
+    let complete_worker = |invocation_id: &str| {
+        assert!(runtime.store.claim_running(invocation_id).unwrap());
+        runtime
+            .store
+            .complete_invocation(
+                invocation_id,
+                &published.worker.worker_id,
+                Ok(&json!({"completed":true,"invocationId":invocation_id})),
+            )
+            .unwrap();
+    };
+
+    let manager_observed = begin_worker("manager-observed-worker");
+    let manager_wait = runtime
+        .agent_wait(&coordination_tool_invocation(
+            "worker_kernel::agent_wait",
+            json!({
+                "targets":[{
+                    "kind":"worker_invocation",
+                    "id":manager_observed.invocation_id
+                }],
+                "mode":"all"
+            }),
+            &manager.session_id,
+            &manager.workspace_id,
+            "manager-worker-wait",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(manager_wait["status"], "pending");
+    complete_worker(&manager_observed.invocation_id);
+    runtime.import_agent_delivery_outbox().await;
+
+    assert_eq!(
+        runtime
+            .event_store
+            .list_agent_deliveries_for_session(&delegator.session_id, 100)
+            .unwrap()
+            .iter()
+            .filter(|delivery| {
+                delivery.result_invocation_id.as_deref()
+                    == Some(manager_observed.invocation_id.as_str())
+            })
+            .count(),
+        1,
+        "a manager's worker wait must not steal the origin agent's automatic result"
+    );
+    assert_eq!(
+        runtime
+            .event_store
+            .list_agent_messages_for_participant(&manager.agent_id, None, 100)
+            .unwrap()
+            .iter()
+            .filter(|message| {
+                message
+                    .content
+                    .text
+                    .contains(manager_wait["waitId"].as_str().unwrap())
+            })
+            .count(),
+        1,
+        "the manager must receive its own aggregate worker continuation"
+    );
+
+    let owner_observed = begin_worker("owner-observed-worker");
+    let owner_wait = runtime
+        .agent_wait(&coordination_tool_invocation(
+            "worker_kernel::agent_wait",
+            json!({
+                "targets":[{
+                    "kind":"worker_invocation",
+                    "id":owner_observed.invocation_id
+                }],
+                "mode":"all"
+            }),
+            &delegator.session_id,
+            &delegator.workspace_id,
+            "owner-worker-wait",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(owner_wait["status"], "pending");
+    complete_worker(&owner_observed.invocation_id);
+    runtime.import_agent_delivery_outbox().await;
+    runtime.import_agent_delivery_outbox().await;
+
+    assert_eq!(
+        runtime
+            .event_store
+            .list_agent_deliveries_for_session(&delegator.session_id, 200)
+            .unwrap()
+            .iter()
+            .filter(|delivery| {
+                delivery.result_invocation_id.as_deref()
+                    == Some(owner_observed.invocation_id.as_str())
+            })
+            .count(),
+        0,
+        "the origin agent's explicit wait must replace its own worker delivery"
+    );
+    assert_eq!(
+        runtime
+            .event_store
+            .list_agent_messages_for_participant(&delegator.agent_id, None, 200)
+            .unwrap()
+            .iter()
+            .filter(|message| {
+                message
+                    .content
+                    .text
+                    .contains(owner_wait["waitId"].as_str().unwrap())
+            })
+            .count(),
+        1,
+        "worker terminal replay must retain exactly one owner aggregate"
+    );
 }
 
 #[tokio::test]

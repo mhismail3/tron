@@ -2,7 +2,7 @@ import XCTest
 @testable import TronMobile
 
 final class SessionEventTypeTests: XCTestCase {
-    func testServerDurableCatalogMatchesTheFifteenEventContract() {
+    func testServerDurableCatalogIncludesTypedAgentMessages() {
         XCTAssertEqual(
             SessionEventType.serverDurableCases.map(\.rawValue),
             [
@@ -12,6 +12,7 @@ final class SessionEventTypeTests: XCTestCase {
                 "session.model_changed",
                 "session.reasoning_changed",
                 "message.user",
+                "message.agent",
                 "message.assistant",
                 "model.provider_request",
                 "message.deleted",
@@ -27,5 +28,19 @@ final class SessionEventTypeTests: XCTestCase {
 
     func testCompletedThinkingIsClientLocal() {
         XCTAssertFalse(SessionEventType.serverDurableCases.contains(.streamThinkingComplete))
+    }
+
+    func testAgentMessagesAreAuditRowsRatherThanUserForkPoints() {
+        let event = SessionEvent(
+            id: "event-agent",
+            parentId: nil,
+            sessionId: "session-agent",
+            workspaceId: "/workspace",
+            type: SessionEventType.messageAgent.rawValue,
+            timestamp: "2026-08-11T00:00:00Z",
+            sequence: 1,
+            payload: [:]
+        )
+        XCTAssertFalse(event.isForkable)
     }
 }

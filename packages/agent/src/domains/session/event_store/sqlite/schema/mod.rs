@@ -1,8 +1,10 @@
 //! Current event-store schema installation.
 //!
 //! Tron supports one consolidated schema. Installation is idempotent and runs
-//! in one transaction, followed by a foreign-key integrity check. There is no
-//! version ledger or alternate row-shape decoder.
+//! in one transaction, followed by a foreign-key integrity check. Additive
+//! coordination side tables are therefore repairable on profiles opened by an
+//! earlier build without rewriting the existing wait/member audit tables.
+//! There is no version ledger or alternate row-shape decoder.
 
 use rusqlite::Connection;
 

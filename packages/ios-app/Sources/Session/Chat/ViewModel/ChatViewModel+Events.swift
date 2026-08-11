@@ -10,6 +10,17 @@ extension ChatViewModel: CompactionContext, EventDispatchTarget {}
 
 extension ChatViewModel {
 
+    /// Append a server-durable coordination message to the mounted timeline.
+    /// Its `.agent` role deliberately does not participate in user prompt
+    /// retry, edit/delete actions, or turn-boundary bookkeeping.
+    func handleAgentMessage(_ result: AgentMessagePlugin.Result) {
+        if let eventId = result.eventId,
+           MessageFinder.indexByEventId(eventId, in: messages) != nil {
+            return
+        }
+        appendToMessages(result.message)
+    }
+
     func handleTextDelta(_ delta: String) {
         // Once text starts streaming, thinking is no longer active
         markThinkingMessageCompleteIfNeeded()

@@ -46,6 +46,7 @@ enum EngineClientStreamSubscriptionPolicy {
     static let workerProjectionTopics = [
         "worker.lifecycle",
         "worker.invocations",
+        "worker.role_review",
     ]
 
     static func shouldClearSubscriptions(
@@ -74,7 +75,7 @@ enum EngineClientStreamSubscriptionPolicy {
     }
 
     static func isWorkerLifecycleTopic(_ topic: String?) -> Bool {
-        topic == "worker.lifecycle"
+        topic == "worker.lifecycle" || topic == "worker.role_review"
     }
 }
 
@@ -131,6 +132,54 @@ struct WorkerProjectionInvalidationAccumulator: Equatable, Sendable {
         self = WorkerProjectionInvalidationAccumulator()
         return invalidation
     }
+}
+
+/// App-local hint that a canonical agent relationship/detail projection may
+/// have changed. The event payload is never treated as UI state.
+struct AgentCoordinationProjectionInvalidation: Equatable, Sendable {
+    let affectedSessionIds: Set<String>
+    let includesUnscopedChanges: Bool
+
+    func affectsSession(_ sessionId: String) -> Bool {
+        includesUnscopedChanges || affectedSessionIds.contains(sessionId)
+    }
+
+    static func affectsSession(notificationObject: Any?, sessionId: String) -> Bool {
+        guard let invalidation = notificationObject as? AgentCoordinationProjectionInvalidation else {
+            return true
+        }
+        return invalidation.affectsSession(sessionId)
+    }
+}
+
+struct AgentCoordinationInvalidationAccumulator: Equatable, Sendable {
+    private(set) var affectedSessionIds: Set<String> = []
+    private(set) var includesUnscopedChanges = false
+
+    mutating func record(sessionId: String?) {
+        if let sessionId, !sessionId.isEmpty {
+            affectedSessionIds.insert(sessionId)
+        } else {
+            includesUnscopedChanges = true
+        }
+    }
+
+    mutating func take() -> AgentCoordinationProjectionInvalidation {
+        let result = AgentCoordinationProjectionInvalidation(
+            affectedSessionIds: affectedSessionIds,
+            includesUnscopedChanges: includesUnscopedChanges
+        )
+        self = AgentCoordinationInvalidationAccumulator()
+        return result
+    }
+}
+
+extension Notification.Name {
+    /// Coalesced invalidation for agent relationships, assignments, messages,
+    /// results, and management-action availability.
+    static let agentCoordinationProjectionInvalidated = Notification.Name(
+        "tron.agent-coordination-projection-invalidated"
+    )
 }
 
 struct EngineStreamSubscriptionKey: Hashable {

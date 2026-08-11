@@ -11,10 +11,20 @@ use super::super::process::{
     MAX_PROCESS_CAPTURE_BYTES, ProcessTree, trusted_local_command_path, wait_with_bounded_output,
 };
 use super::super::runtime::WorkerRuntime;
+use super::claims::claim_process;
 use super::support::resolve_path;
 
 const MAX_PROCESS_ARGUMENTS: usize = 256;
 const MAX_PROCESS_INPUT_BYTES: usize = 4 * 1_048_576;
+#[cfg(unix)]
+const PROCESS_ADMISSION_SCRIPT: &str = r#"
+while [ -d "$1" ] && [ ! -f "$1/go" ]; do
+  sleep 0.01
+done
+[ -f "$1/go" ] || exit 125
+shift
+exec "$@"
+"#;
 
 pub(in crate::domains::worker_kernel) async fn process_run(
     invocation: &Invocation,
@@ -67,9 +77,35 @@ pub(in crate::domains::worker_kernel) async fn process_run(
             "process stdin exceeds the {MAX_PROCESS_INPUT_BYTES}-byte reliability ceiling"
         ));
     }
-    let mut process = tokio::process::Command::new(program);
+    let mut claim = claim_process(invocation, runtime).await?;
+    #[cfg(unix)]
+    let process_gate = match claim.as_mut() {
+        Some(claim) => Some(claim.prepare_process_gate()?),
+        None => None,
+    };
+    #[cfg(unix)]
+    let mut process = if let Some(process_gate) = process_gate.as_ref() {
+        let mut process = tokio::process::Command::new("/bin/sh");
+        process
+            .arg("-c")
+            .arg(PROCESS_ADMISSION_SCRIPT)
+            .arg("tron-process-admission")
+            .arg(process_gate)
+            .arg(program)
+            .args(arguments);
+        process
+    } else {
+        let mut process = tokio::process::Command::new(program);
+        process.args(arguments);
+        process
+    };
+    #[cfg(not(unix))]
+    let mut process = {
+        let mut process = tokio::process::Command::new(program);
+        process.args(arguments);
+        process
+    };
     process
-        .args(arguments)
         .current_dir(&cwd)
         .env("PATH", trusted_local_command_path(None)?)
         .stdin(Stdio::piped())
@@ -83,6 +119,15 @@ pub(in crate::domains::worker_kernel) async fn process_run(
     }
     let child =
         ProcessTree::spawn(&mut process).map_err(|error| format!("start process: {error}"))?;
+    if let Some(claim) = &claim {
+        claim.bind_process(
+            child
+                .id()
+                .ok_or_else(|| "spawned process did not expose a durable process id".to_owned())?,
+        )?;
+        #[cfg(unix)]
+        claim.allow_process()?;
+    }
     let output = wait_with_bounded_output(
         child,
         input,
@@ -97,7 +142,7 @@ pub(in crate::domains::worker_kernel) async fn process_run(
     {
         return Err(format!("write process input: {error}"));
     }
-    Ok(json!({
+    let result = Ok(json!({
         "command": command,
         "cwd": cwd,
         "status": output.status.code(),
@@ -106,7 +151,11 @@ pub(in crate::domains::worker_kernel) async fn process_run(
         "stderr": String::from_utf8_lossy(&output.stderr),
         "stdoutTruncated": output.stdout_truncated,
         "stderrTruncated": output.stderr_truncated,
-    }))
+    }));
+    match claim {
+        Some(claim) => claim.finish(result),
+        None => result,
+    }
 }
 
 #[cfg(test)]
@@ -128,6 +177,61 @@ mod tests {
         .unwrap()
     }
 
+    fn test_runtime_with_session(
+        home: &std::path::Path,
+        checkout: &std::path::Path,
+    ) -> (std::sync::Arc<WorkerRuntime>, String, String) {
+        let context = crate::shared::server::test_support::make_test_context();
+        let session_id = context
+            .session_manager
+            .create_session(
+                "test-model",
+                checkout.to_str().unwrap(),
+                Some("process claims"),
+            )
+            .unwrap();
+        let workspace_id = context
+            .event_store
+            .get_session(&session_id)
+            .unwrap()
+            .unwrap()
+            .workspace_id;
+        let runtime = WorkerRuntime::new(
+            WorkerStore::open_without_snapshot(home.to_path_buf()).unwrap(),
+            context.engine_host,
+            context.orchestrator,
+            context.session_manager,
+            context.event_store,
+            context.settings_runtime,
+        )
+        .unwrap();
+        (runtime, session_id, workspace_id)
+    }
+
+    fn workspace_process(
+        checkout: &std::path::Path,
+        session_id: &str,
+        workspace_id: &str,
+        seconds: f64,
+    ) -> Invocation {
+        Invocation::new_sync(
+            FunctionId::new("worker_kernel::process_run").unwrap(),
+            json!({
+                "command":["python3","-c",format!("import time; time.sleep({seconds})")],
+                "timeoutSeconds":5
+            }),
+            CausalContext::new(
+                ActorId::new(format!("agent:{session_id}")).unwrap(),
+                crate::engine::ActorKind::Agent,
+                TraceId::generate(),
+            )
+            .with_session_id(session_id)
+            .with_workspace_id(workspace_id)
+            .with_working_directory(checkout.display().to_string())
+            .with_declared_workspace_effect(crate::engine::WorkspaceEffect::ArbitraryProcess),
+        )
+    }
+
     fn environment_probe(
         home: &std::path::Path,
         actor_id: &str,
@@ -143,7 +247,8 @@ mod tests {
                 ]
             }),
             CausalContext::new(ActorId::new(actor_id).unwrap(), kind, TraceId::generate())
-                .with_working_directory(home.display().to_string()),
+                .with_working_directory(home.display().to_string())
+                .with_declared_workspace_effect(crate::engine::WorkspaceEffect::ArbitraryProcess),
         )
     }
 
@@ -236,7 +341,8 @@ mod tests {
                     crate::engine::ActorKind::Agent,
                     TraceId::generate(),
                 )
-                .with_working_directory(home.path().display().to_string()),
+                .with_working_directory(home.path().display().to_string())
+                .with_declared_workspace_effect(crate::engine::WorkspaceEffect::ArbitraryProcess),
             ),
             &runtime,
         )
@@ -245,5 +351,53 @@ mod tests {
 
         assert_eq!(result["status"], 0);
         assert_eq!(result["stdout"], "record_case 0\n");
+    }
+
+    #[tokio::test]
+    async fn whole_workspace_process_claim_serializes_root_session_processes() {
+        let home = tempfile::tempdir().unwrap();
+        let checkout = home.path().join("checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        let (runtime, session_id, workspace_id) =
+            test_runtime_with_session(&home.path().join("tron-home"), &checkout);
+        let first = workspace_process(&checkout, &session_id, &workspace_id, 0.3);
+        let second = workspace_process(&checkout, &session_id, &workspace_id, 0.0);
+        let first_runtime = std::sync::Arc::clone(&runtime);
+        let first_task = tokio::spawn(async move { process_run(&first, &first_runtime).await });
+        let mut first_claim_ready = false;
+        for _ in 0..100 {
+            first_claim_ready = runtime
+                .store()
+                .list_workspace_claims(None, Some(&workspace_id), false, 20)
+                .unwrap()
+                .iter()
+                .any(|claim| claim.process_id.is_some());
+            if first_claim_ready {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(
+            first_claim_ready,
+            "first process never bound its workspace claim"
+        );
+
+        let second_started = std::time::Instant::now();
+        let second_result = process_run(&second, &runtime).await.unwrap();
+        let second_elapsed = second_started.elapsed();
+        first_task.await.unwrap().unwrap();
+
+        assert_eq!(second_result["success"], true);
+        assert!(
+            second_elapsed >= Duration::from_millis(180),
+            "later process did not wait for the workspace lease: {second_elapsed:?}"
+        );
+        assert!(
+            runtime
+                .store()
+                .list_workspace_claims(None, Some(&workspace_id), false, 20)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

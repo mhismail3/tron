@@ -524,10 +524,13 @@ struct EngineClientObservationTests {
         #expect(EngineClientStreamSubscriptionPolicy.workerProjectionTopics == [
             "worker.lifecycle",
             "worker.invocations",
+            "worker.role_review",
         ])
         #expect(EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic("worker.lifecycle"))
         #expect(EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic("worker.invocations"))
+        #expect(EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic("worker.role_review"))
         #expect(EngineClientStreamSubscriptionPolicy.isWorkerLifecycleTopic("worker.lifecycle"))
+        #expect(EngineClientStreamSubscriptionPolicy.isWorkerLifecycleTopic("worker.role_review"))
         #expect(!EngineClientStreamSubscriptionPolicy.isWorkerLifecycleTopic("worker.invocations"))
         #expect(!EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic("events.session"))
         #expect(!EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic(nil))
@@ -541,6 +544,7 @@ struct EngineClientObservationTests {
         accumulator.record(topic: "worker.invocations", sessionId: "session-a")
         accumulator.record(topic: "worker.invocations", sessionId: nil)
         accumulator.record(topic: "worker.lifecycle", sessionId: nil)
+        accumulator.record(topic: "worker.role_review", sessionId: nil)
 
         let invalidation = accumulator.take()
         #expect(invalidation.affectedSessionIds == ["session-a", "session-b"])
@@ -569,6 +573,29 @@ struct EngineClientObservationTests {
         #expect(WorkerProjectionInvalidation.affectsSession(
             notificationObject: nil,
             sessionId: "legacy-session"
+        ))
+    }
+
+    @Test("Agent invalidation coalescing preserves session scope and global hints")
+    func testAgentCoordinationInvalidationCoalescing() {
+        var accumulator = AgentCoordinationInvalidationAccumulator()
+        accumulator.record(sessionId: "session-a")
+        accumulator.record(sessionId: "session-b")
+        accumulator.record(sessionId: "session-a")
+
+        let scoped = accumulator.take()
+        #expect(scoped.affectedSessionIds == ["session-a", "session-b"])
+        #expect(!scoped.includesUnscopedChanges)
+        #expect(scoped.affectsSession("session-a"))
+        #expect(!scoped.affectsSession("session-c"))
+
+        accumulator.record(sessionId: nil)
+        let global = accumulator.take()
+        #expect(global.includesUnscopedChanges)
+        #expect(global.affectsSession("any-session"))
+        #expect(AgentCoordinationProjectionInvalidation.affectsSession(
+            notificationObject: nil,
+            sessionId: "legacy-notification"
         ))
     }
 

@@ -8,6 +8,13 @@ use serde::{Deserialize, Serialize};
 /// user-session listings exclude them.
 pub const WORKER_SESSION_TAG: &str = "tron.system.worker-session";
 
+/// Reserved durable tag for reusable nested agent transcripts.
+///
+/// These sessions remain fully reconstructable by exact authorized reads but
+/// do not appear in the ordinary top-level task index until promotion removes
+/// the tag.
+pub const AGENT_SESSION_TAG: &str = "tron.system.agent-session";
+
 /// Raw session row from the `sessions` table.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionRow {
@@ -62,6 +69,17 @@ impl SessionRow {
     pub fn is_worker_session(&self) -> bool {
         serde_json::from_str::<Vec<String>>(&self.tags)
             .is_ok_and(|tags| tags.iter().any(|tag| tag == WORKER_SESSION_TAG))
+    }
+
+    /// Whether this durable session is a nested reusable agent transcript.
+    pub fn is_agent_session(&self) -> bool {
+        serde_json::from_str::<Vec<String>>(&self.tags)
+            .is_ok_and(|tags| tags.iter().any(|tag| tag == AGENT_SESSION_TAG))
+    }
+
+    /// Whether ordinary session listings must hide this engine-owned session.
+    pub fn is_internal_session(&self) -> bool {
+        self.is_worker_session() || self.is_agent_session()
     }
 }
 

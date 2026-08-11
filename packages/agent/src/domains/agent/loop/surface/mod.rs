@@ -23,6 +23,47 @@ mod guidance;
 
 pub(crate) use guidance::surface_context_primer;
 
+const AGENT_TEAM_CONTEXT_FUNCTION: &str = "worker_kernel::agent_team_context";
+
+/// Read the bounded engine-authored roster for one provider turn.
+///
+/// This internal operation is deliberately separate from model-facing
+/// `agent_discover`: the stable current team and remaining limits should be
+/// available without asking the model to discover identities it already owns.
+pub(crate) async fn agent_team_context(
+    host: &EngineHostHandle,
+    session_id: &str,
+    turn: u32,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
+) -> Result<Option<Value>, String> {
+    let mut context = CausalContext::new(
+        ActorId::new("system:agent-team-context").map_err(|error| error.to_string())?,
+        ActorKind::System,
+        trace_id.cloned().unwrap_or_else(TraceId::generate),
+    )
+    .with_session_id(session_id.to_owned())
+    .with_idempotency_key(format!("agent-team-context:{session_id}:{turn}"));
+    if let Some(parent) = parent_invocation_id {
+        context = context.with_parent_invocation(parent.clone());
+    }
+    let outcome = host
+        .invoke(Invocation::new_sync(
+            FunctionId::new(AGENT_TEAM_CONTEXT_FUNCTION).map_err(|error| error.to_string())?,
+            serde_json::json!({"sessionId":session_id,"limit":32}),
+            context,
+        ))
+        .await;
+    if let Some(error) = outcome.error {
+        return Err(format!("read agent team context: {error}"));
+    }
+    // A successful canonical Team Context response is itself the presence
+    // signal. Unlike optional semantic hooks, this contract has no `handled`
+    // field (and rejects undeclared response properties), so filtering on one
+    // would silently discard every nested-agent roster.
+    Ok(outcome.value)
+}
+
 #[cfg(test)]
 pub(crate) async fn promote_worker_for_session(
     host: &EngineHostHandle,
@@ -322,6 +363,7 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
         origin_worker_id,
         worker_agent_tools,
         None,
+        None,
     )
     .await
 }
@@ -332,6 +374,7 @@ pub(crate) async fn resolve_provider_primitive_surface_for_run(
     relevance_query: Option<&str>,
     origin_worker_id: Option<&str>,
     worker_agent_tools: Option<&[String]>,
+    delegated_function_grant: Option<&[String]>,
     _run_id: Option<&str>,
 ) -> Result<ResolvedPrimitiveSurface, String> {
     let resolved = crate::domains::worker_kernel::resolve_tool_surface(
@@ -340,6 +383,7 @@ pub(crate) async fn resolve_provider_primitive_surface_for_run(
         relevance_query,
         origin_worker_id,
         worker_agent_tools,
+        delegated_function_grant,
     )
     .await?;
     adapt_resolved_surface(resolved)

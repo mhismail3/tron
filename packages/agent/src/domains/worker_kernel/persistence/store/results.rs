@@ -659,7 +659,7 @@ pub(super) fn result_reference_from_connection(
         "contentSha256":format!("sha256:{}",payload.payload_hash),
         "sizeBytes":payload.payload_size_bytes,
         "preview":payload.payload_preview,
-        "message":"The exact validated result is stored durably. Pass this reference to workers that accept it, or call worker_result_read for only the JSON path/page needed.",
+        "message":"The exact validated result is stored durably. Pass this reference to workers that accept it, or call result_read for only the JSON path/page needed.",
     }))
 }
 

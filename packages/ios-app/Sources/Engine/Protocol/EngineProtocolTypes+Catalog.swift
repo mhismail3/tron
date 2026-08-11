@@ -186,6 +186,12 @@ struct WorkerArchitectureNodeDTO: Codable, Equatable, Identifiable, Sendable {
     let modelExposure: String
     let runnerKind: String
     let runnerModel: String?
+    /// Deterministic server classification for the immutable active bundle:
+    /// declared, needs_role_review, or ineligible.
+    let roleReview: String?
+    /// Exact immutable role declaration. Kept opaque and rendered as bounded
+    /// inspection evidence; the server remains its schema validator.
+    let agentRole: AnyCodable?
     let engineHooks: [String]
     let clientActions: [String]
     let clientDeliveries: [String]
@@ -196,12 +202,52 @@ struct WorkerArchitectureNodeDTO: Codable, Equatable, Identifiable, Sendable {
 
     var id: String { workerId }
 
+    init(
+        workerId: String,
+        name: String,
+        description: String,
+        activeVersion: String,
+        health: String,
+        modelExposure: String,
+        runnerKind: String,
+        runnerModel: String?,
+        roleReview: String? = nil,
+        agentRole: AnyCodable? = nil,
+        engineHooks: [String],
+        clientActions: [String],
+        clientDeliveries: [String],
+        triggerKinds: [String],
+        calls: [WorkerArchitectureEdgeDTO],
+        presentation: WorkerArchitecturePresentationDTO,
+        provenance: [AnyCodable]
+    ) {
+        self.workerId = workerId
+        self.name = name
+        self.description = description
+        self.activeVersion = activeVersion
+        self.health = health
+        self.modelExposure = modelExposure
+        self.runnerKind = runnerKind
+        self.runnerModel = runnerModel
+        self.roleReview = roleReview
+        self.agentRole = agentRole
+        self.engineHooks = engineHooks
+        self.clientActions = clientActions
+        self.clientDeliveries = clientDeliveries
+        self.triggerKinds = triggerKinds
+        self.calls = calls
+        self.presentation = presentation
+        self.provenance = provenance
+    }
+
     /// Compatibility-sensitive workers own a declared seam with the engine or
     /// a native client. Model exposure is a separate concern: an integrated
     /// worker may still be directly callable from an ordinary chat.
     var hasIntegrationBoundary: Bool {
         !engineHooks.isEmpty || !clientActions.isEmpty || !clientDeliveries.isEmpty
     }
+
+    var needsAgentRoleReview: Bool { roleReview == "needs_role_review" }
 }
 
 struct EngineIntrospectionSnapshotDTO: Codable, Equatable, Sendable {

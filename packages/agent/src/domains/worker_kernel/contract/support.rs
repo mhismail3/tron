@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 use super::{CONTEXT_SUMMARY_MAX_ESTIMATED_TOKENS, CONTEXT_SUMMARY_MAX_NARRATIVE_BYTES, WORKER};
 use crate::domains::registration::contract::FunctionContract;
 use crate::engine::{
-    EffectClass, FunctionDefinition, IdempotencyContract, ModelToolAudience, ModelToolContract,
-    RiskLevel,
+    DelegationPolicy, EffectClass, FunctionDefinition, FunctionVisibility, IdempotencyContract,
+    ModelToolAudience, RiskLevel,
 };
 
 /// Estimate semantic-summary tokens with the same cheap pre-call heuristic
@@ -15,6 +15,29 @@ use crate::engine::{
 #[must_use]
 pub(crate) fn estimate_context_summary_tokens(narrative: &str) -> usize {
     narrative.len().div_ceil(4)
+}
+
+/// Authenticated native-client contract that is never projected to a model.
+pub(super) fn native_client_spec(
+    function: &'static str,
+    effect: EffectClass,
+    risk: RiskLevel,
+    request: Value,
+    description: &'static str,
+) -> crate::engine::Result<FunctionDefinition> {
+    let mut contract = FunctionContract::new(function, WORKER, effect, risk)
+        .visibility(FunctionVisibility::NativeClient)
+        .request_schema(request)
+        .response_schema(super::response::response_schema(function))
+        .description(description);
+    if effect.requires_idempotency() {
+        contract = contract.idempotency(if profile_owned_worker_operation(function) {
+            IdempotencyContract::profile()
+        } else {
+            IdempotencyContract::session()
+        });
+    }
+    contract.build()
 }
 
 pub(crate) fn validate_context_summary_narrative(narrative: &str) -> Result<(), String> {
@@ -85,15 +108,25 @@ pub(super) fn model_spec(
     order: u16,
     group: &'static str,
 ) -> crate::engine::Result<FunctionDefinition> {
-    spec(function, effect, risk, request, description).map(|definition| {
-        definition.with_model_tool(ModelToolContract {
-            name: model_name.to_owned(),
-            audience,
-            order: Some(order),
-            group: Some(group.to_owned()),
-            worker: None,
-        })
-    })
+    let delegation_policy = match &audience {
+        ModelToolAudience::Ordinary => DelegationPolicy::Inherit,
+        ModelToolAudience::Specialist => DelegationPolicy::Explicit,
+        ModelToolAudience::Conditional { .. } => DelegationPolicy::Never,
+    };
+    let mut contract = FunctionContract::new(function, WORKER, effect, risk)
+        .request_schema(request)
+        .response_schema(super::response::response_schema(function))
+        .description(description)
+        .delegation_policy(delegation_policy)
+        .model_tool(model_name, audience, order, group);
+    if effect.requires_idempotency() {
+        contract = contract.idempotency(if profile_owned_worker_operation(function) {
+            IdempotencyContract::profile()
+        } else {
+            IdempotencyContract::session()
+        });
+    }
+    contract.build()
 }
 
 fn profile_owned_worker_operation(function: &str) -> bool {
@@ -104,6 +137,9 @@ fn profile_owned_worker_operation(function: &str) -> bool {
             | "worker_kernel::notification_device_disable"
             | "worker_kernel::notification_delivery_acknowledge"
             | "worker_kernel::inbox_dismiss"
+            | "worker_kernel::role_review_start"
+            | "worker_kernel::role_review_apply"
+            | "worker_kernel::role_review_reject"
             | "worker_kernel::result_handoff"
             | "worker_kernel::invoke"
             | "worker_kernel::detach"

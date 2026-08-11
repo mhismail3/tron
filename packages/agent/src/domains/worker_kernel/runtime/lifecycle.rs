@@ -40,6 +40,28 @@ impl WorkerRuntime {
         }
         for descendant_id in &subtree {
             self.invocation_stop(descendant_id).cancel();
+            if let Some(execution) = self
+                .store
+                .execution_node_for_worker_invocation(descendant_id)?
+                && let Some(assignment_id) = execution.assignment_id.as_deref()
+                && let Some(assignment) = self.store.agent_assignment(assignment_id)?
+                && !assignment.status.is_terminal()
+            {
+                if let Some(agent) = self.store.agent_instance(&assignment.agent_id)? {
+                    let _ = self.orchestrator.abort(&agent.session_id);
+                }
+                self.event_store
+                    .cancel_coordination_waits_for_assignment(assignment_id)
+                    .map_err(|error| error.to_string())?;
+                self.store
+                    .transition_agent_assignment(&AgentAssignmentTransition {
+                        assignment_id: assignment.assignment_id,
+                        expected_status: assignment.status,
+                        target_status: AgentAssignmentStatus::Cancelled,
+                        result: None,
+                        error: Some(reason.to_owned()),
+                    })?;
+            }
         }
         let mut root = None;
         for descendant_id in subtree {
@@ -388,7 +410,7 @@ impl WorkerRuntime {
             })
             .collect::<Vec<_>>();
         let model_description = format!(
-            "{}\nPersistent worker: activeVersion={}; provenance={}. Agent-runner work begins durably in the background. Command/service work uses exact-version latency evidence and a bounded 10-second interaction budget; crossing the budget detaches the same invocation. Do not poll a background receipt or call worker_await; register agent_wait_for_workers when the current task must resume on completion. Nested worker calls still await their typed result.",
+            "{}\nPersistent worker: activeVersion={}; provenance={}. Agent-runner work begins durably in the background. Command/service work uses exact-version latency evidence and a bounded 10-second interaction budget; crossing the budget detaches the same invocation. Do not poll a background receipt; call agent_wait with the worker_invocation handle when the current assignment must resume on completion. Nested worker calls still await their typed result.",
             active.summary.description,
             active.summary.active_version,
             provenance.join(", "),
@@ -403,6 +425,7 @@ impl WorkerRuntime {
             EffectClass::ExternalSideEffect,
         )
         .with_risk(RiskLevel::High)
+        .with_delegation_policy(crate::engine::DelegationPolicy::Explicit)
         .with_idempotency(IdempotencyContract::session())
         .with_request_schema(request_schema)
         .with_response_schema(json!({

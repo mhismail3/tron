@@ -10,6 +10,23 @@ struct MessageBubble: View {
         message.role == .user
     }
 
+    private var isAgentMessage: Bool {
+        message.role == .agent && message.agentMessage != nil
+    }
+
+    private var agentMessageAccent: Color {
+        guard let authority = message.agentMessage?.authority else {
+            return .tronTextMuted
+        }
+        switch AgentMessagePresentation.accent(authority: authority) {
+        case .operatorInstruction: return Color.tronAmber
+        case .ownerInstruction: return Color.tronCyan
+        case .peerMessage: return Color.tronPurple
+        case .engineEvidence: return Color.tronEmerald
+        case .unknown: return Color.tronTextMuted
+        }
+    }
+
     private var hasPreviewableImage: Bool {
         if message.attachments?.contains(where: \.isImage) == true {
             return true
@@ -37,6 +54,10 @@ struct MessageBubble: View {
                 agentDeliveryProvenance
             }
 
+            if let agentMessage = message.agentMessage {
+                agentMessageProvenance(agentMessage)
+            }
+
             if !message.isDeliveryProvenanceOnly {
                 contentView
             }
@@ -45,14 +66,23 @@ struct MessageBubble: View {
                 MessageMetadataBadge(metadata: metadata)
             }
         }
+        .padding(.horizontal, isAgentMessage ? 12 : 0)
+        .padding(.vertical, isAgentMessage ? 10 : 0)
+        .background {
+            if isAgentMessage {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(agentMessageAccent.opacity(0.08))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(agentMessageAccent.opacity(0.2), lineWidth: 1)
+                    }
+            }
+        }
         .frame(maxWidth: .infinity, alignment: isUserMessage ? .trailing : .leading)
         .accessibilityElement(
             children: isUserMessage && !hasPreviewableImage ? .ignore : .contain
         )
-        .accessibilityLabel(isUserMessage
-            ? "You: \(String(message.content.textContent.prefix(200)))"
-            : "Assistant message"
-        )
+        .accessibilityLabel(accessibilityLabel)
     }
 
     // MARK: - Content
@@ -71,6 +101,60 @@ struct MessageBubble: View {
                     ? "The task resumed automatically from a durable update."
                     : "A durable update was included in this model turn."
             )
+    }
+
+    private func agentMessageProvenance(_ content: AgentMessageContent) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Image(systemName: AgentMessagePresentation.symbol(kind: content.kind))
+                    .foregroundStyle(agentMessageAccent)
+                Text(AgentMessagePresentation.sender(content))
+                    .font(TronTypography.sans(
+                        size: TronTypography.sizeCaption,
+                        weight: .semibold
+                    ))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1)
+                Text(AgentMessagePresentation.label(content.kind))
+                    .font(TronTypography.pillValue)
+                    .foregroundStyle(agentMessageAccent)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(agentMessageAccent.opacity(0.12), in: Capsule())
+                Spacer(minLength: 4)
+                Text(AgentMessagePresentation.label(content.authority))
+                    .font(TronTypography.pillValue)
+                    .foregroundStyle(.tronTextMuted)
+            }
+            if content.assignmentId != nil || content.replyTo != nil {
+                HStack(spacing: 10) {
+                    if let assignmentId = content.assignmentId {
+                        Label(
+                            String(assignmentId.prefix(18)),
+                            systemImage: "checklist"
+                        )
+                    }
+                    if content.replyTo != nil {
+                        Label("Reply", systemImage: "arrowshape.turn.up.left.fill")
+                    }
+                }
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(AgentMessagePresentation.sender(content)), \(AgentMessagePresentation.label(content.kind)), \(AgentMessagePresentation.label(content.authority)) authority"
+        )
+    }
+
+    private var accessibilityLabel: String {
+        if let content = message.agentMessage {
+            return "Agent message from \(AgentMessagePresentation.sender(content)), \(AgentMessagePresentation.label(content.kind)), \(AgentMessagePresentation.label(content.authority)): \(String(content.text.prefix(200)))"
+        }
+        return isUserMessage
+            ? "You: \(String(message.content.textContent.prefix(200)))"
+            : "Assistant message"
     }
 
     @ViewBuilder

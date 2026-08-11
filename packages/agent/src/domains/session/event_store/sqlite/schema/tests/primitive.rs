@@ -22,10 +22,19 @@ fn fresh_schema_contains_only_primitive_tables() {
     assert_eq!(
         tables,
         vec![
+            "agent_assignment_delivery_holds",
             "agent_deliveries",
+            "agent_message_metadata",
+            "agent_session_promotions",
             "agent_wait_members",
             "agent_waits",
             "blobs",
+            "coordination_dependency_edges",
+            "coordination_wait_dependency_nodes",
+            "coordination_wait_dependency_topologies",
+            "coordination_wait_inline_results",
+            "coordination_wait_members",
+            "coordination_waits",
             "events",
             "logs",
             "sessions",
@@ -66,6 +75,37 @@ fn schema_installation_is_idempotent() {
     let conn = open_memory();
     ensure_schema(&conn).unwrap();
     ensure_schema(&conn).unwrap();
+}
+
+#[test]
+fn schema_repairs_dependency_side_tables_without_rewriting_existing_wait_tables() {
+    let conn = open_memory();
+    ensure_schema(&conn).unwrap();
+    conn.execute_batch(
+        "DROP TABLE coordination_wait_dependency_topologies;
+         DROP TABLE coordination_wait_dependency_nodes;
+         DROP TABLE coordination_dependency_edges;",
+    )
+    .unwrap();
+
+    ensure_schema(&conn).unwrap();
+
+    for table in [
+        "coordination_waits",
+        "coordination_wait_members",
+        "coordination_wait_dependency_nodes",
+        "coordination_wait_dependency_topologies",
+        "coordination_dependency_edges",
+    ] {
+        let exists = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1)",
+                [table],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        assert!(exists, "missing repaired table {table}");
+    }
 }
 
 #[test]

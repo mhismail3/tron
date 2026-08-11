@@ -1,6 +1,6 @@
 # Tron Worker-First Technical Reference
 
-> Last verified: 2026-08-09 on the worker-first implementation.
+> Last verified: 2026-08-11 on the worker-first implementation.
 
 This document describes the active worker-first implementation.
 
@@ -74,13 +74,73 @@ interrupted-turn recovery, session summaries, and operator diagnostics. It is
 execution evidence for an actual model tool call. It neither grants authority
 nor participates in worker discovery, activation, or permission decisions.
 
-The model-facing fixed surface currently has 30 direct primitives grouped as
-eight host operations, eighteen worker-control operations, and four core-change
-operations. A single typed manifest owns their canonical function IDs, provider
-names, groups, and stable order; registration, provider projection,
-introspection, and exact-set tests do not reconstruct partial identities. Every fixed primitive rejects
+The model-facing fixed surface has 27 direct primitives: 16 fixed operations
+on an ordinary request, ten specialist administration operations, and the
+conditional title operation. The ordinary set includes eight host/interaction
+operations, three typed-worker operations, and five first-class reusable-agent
+coordination operations. Each source definition owns one complete typed
+contract containing its canonical function ID, provider name, group, and
+stable order; registration, provider projection, introspection, and exact-set
+tests consume those definitions without a parallel manifest or reconstructed
+partial identity. Every fixed primitive rejects
 undeclared top-level input and output fields; closed response contracts keep
 provider observations small and mechanically dependable.
+
+The inventory is deliberately explicit. Each operation stays fixed only because
+the Engine owns its state transition or because its closed direct form adds
+material reliability over an arbitrary process:
+
+| Audience | Primitive | Fixed-kernel reason |
+|---|---|---|
+| Ordinary | `filesystem_read` | Bounded UTF-8 reads, checksums, and truncation evidence without shell quoting. |
+| Ordinary | `filesystem_list` | Deterministic bounded traversal rather than unbounded command output. |
+| Ordinary | `filesystem_search_text` | Cancellable literal search with traversal, result, and time ceilings. |
+| Ordinary | `filesystem_write` | Atomic publication, stale-write detection, and reusable-assignment write claims. |
+| Ordinary | `filesystem_edit` | Exact bounded replacements with stale/ambiguous edit rejection and the same claim discipline. |
+| Ordinary | `process_run` | Exact-argv process-tree custody, bounded I/O/deadlines, cancellation, and workspace collision leasing. |
+| Ordinary | `web_fetch` | URL validation, bounded retrieval, content digest, and provenance; semantic research remains worker-owned. |
+| Ordinary | `request_user_input` | The foreground session alone owns authenticated human interaction and durable reply validation. |
+| Ordinary | `worker_discover` | Reads the live immutable worker catalog and promotes an exact version for the current session. |
+| Ordinary | `worker_invoke` | Admits typed durable work with idempotency, causal topology, version pinning, and recovery. |
+| Ordinary | `result_read` | Authorizes and pages integrity-bound assignment or worker results without copying bulk payloads into context. |
+| Ordinary | `agent_discover` | Resolves opaque profile agent addresses and reviewed role versions without leaking sessions or workspaces. |
+| Ordinary | `agent_spawn` | Atomically creates one stable agent, hidden transcript, first assignment, authority snapshot, and causal node. |
+| Ordinary | `agent_send` | Atomically persists typed communication plus any distinct assignment/offer/reply linkage. |
+| Ordinary | `agent_wait` | Parks the runtime on durable mixed-result fan-in and closes completion-registration races. |
+| Ordinary | `agent_manage` | Centralizes offer decisions and bounded ownership, cancellation, configuration, close, and role-upgrade authority. |
+| Specialist | `worker_upsert` | Validates, tests, seals, publishes, and activates one immutable worker version atomically. |
+| Specialist | `worker_list` | Reads the canonical profile catalog and health state needed for administration. |
+| Specialist | `worker_inspect` | Reads exact immutable contracts, versions, provenance, and bounded operational evidence. |
+| Specialist | `worker_stop` | Stops one worker's active workload while preserving future enablement and audit truth. |
+| Specialist | `worker_disable` | Changes future dispatch eligibility through the canonical lifecycle owner. |
+| Specialist | `worker_enable` | Re-admits a reviewed retained worker without inventing a new version. |
+| Specialist | `worker_retire` | Removes a worker from active use while retaining recoverable immutable evidence. |
+| Specialist | `worker_rollback` | Atomically selects a verified prior immutable version and records the transition. |
+| Specialist | `worker_inbox` | Reads bounded durable worker outcomes and Attention evidence without copying result bodies. |
+| Specialist | `worker_runs` | Reads authoritative invocation, topology, timing, usage, failure, and recovery evidence. |
+| Conditional | `session_set_title` | Performs the narrow durable session metadata mutation only for an explicit rename request. |
+
+This is the deliberate simplification boundary. The five agent operations
+replace the old mailbox/list/claim, worker-only wait, and separate worker
+cancellation vocabulary with handles that work across one coordination graph.
+The filesystem and process operations remain separate because reads, atomic
+writes, exact edits, searches, and process-tree custody have different schemas,
+effects, grants, collision rules, and recovery evidence. Collapsing them into a
+single opaque “code mode” would move those distinctions into prompt convention
+and make authority, idempotency, and audit behavior less inspectable rather
+than reducing Engine complexity.
+
+The compatibility bindings `worker_cancel`, `agent_wait_for_workers`,
+`agent_mailbox_list`, and `agent_mailbox_claim` remain executable but
+are restricted to authenticated native-client actors for one release.
+`worker_await` and `worker_result_read` are
+also absent from the fixed inventory and ordinary provider surface; only an
+immutable retained dynamic-worker `agentTools` allowlist naming either exact
+historical name receives a request-local alias to the canonical await or
+generic result-read function. The aliases are never registered or discoverable.
+`worker_detach` and `worker_purge` remain native-client-only authenticated
+operator operations;
+neither is ordinary agent vocabulary.
 
 Callable function definitions have no generic metadata map. A closed typed
 model-tool contract owns the model name, callability, fixed group/order,
@@ -137,8 +197,9 @@ A fixed function receives model exposure only when it passes one of two tests:
    policy.
 
 Each function contract owns one audience: `ordinary`, `specialist`, or
-`conditional`. Ordinary chat receives seven host functions plus four worker
-interaction functions. Exact specialist-worker allowlists may receive thirteen
+`conditional`. Ordinary chat receives seven worker-kernel host functions,
+`request_user_input`, three typed-worker functions, and five reusable-agent
+coordination functions. Exact specialist-worker allowlists may receive ten
 worker-administration functions. `session_set_title` is conditional on an
 explicit rename request. Webhook rotation and engine-wide stop are
 authenticated-client-only and have no model projection.
@@ -166,7 +227,8 @@ current owner. An update switches new hook work immediately while prior
 invocations retain their version.
 
 The `context_summary` hook accepts a bounded transcript of visible user text,
-assistant text, tool names, and textual tool results and returns
+durable agent-coordination text, assistant text, tool names, and textual tool
+results and returns
 `{narrative}`. Its public schema limits the narrative to 40,000 characters for
 early structural rejection. The runtime authoritatively admits at most 10,000
 estimated tokens using the same four-UTF-8-bytes-per-token pre-call heuristic
@@ -176,7 +238,10 @@ smallest brief that faithfully preserves the task. The runtime rejects rather
 than truncates an oversize result, disables the failing worker version through
 the ordinary failure path, and uses the deterministic recovery summary. Every
 accepted narrative is therefore the exact byte-for-byte value used in live
-context, compact-boundary proof, and restart reconstruction. Hidden thinking,
+context, compact-boundary proof, and restart reconstruction. Agent coordination
+keeps an explicit kind/source prefix while using the established `user`
+projection value, preserving compatibility with already-active immutable
+summary workers without treating it as end-user intent. Hidden thinking,
 tool arguments, binary content, usage, and cost never cross the seam. Calls use
 the normal durable worker
 dispatcher, causal trace, idempotency, validation, failure-disable, and inbox
@@ -222,29 +287,228 @@ only as later tie-breakers. Provider admission never waits for a router worker.
 The historical `worker_relevance` bundle tag remains decode-only so retained
 versions can be inspected, but publication, enable, and rollback reject it.
 
-Worker results, peer-agent messages, and explicit waits use
-the durable Agent Delivery primitive. Core code owns addressing, workspace and
-profile-mailbox scope, provenance, persistence, safe-turn leasing, observation,
-wake admission, retry, and crash recovery. Deliveries always enter the provider
-request as labeled untrusted reference context. Optional workers own semantic
-choices but never execute on the provider critical path.
+Worker results and legacy compatibility traffic use the durable Agent Delivery
+primitive. First-class peer-agent messages additionally have canonical semantic
+metadata and materialize as typed `message.agent` events. The engine renders
+those events through a trusted coordination wrapper with explicit kind,
+authority, assignment, and reply linkage; it does not place actionable agent
+instructions in untrusted reference context. Core code owns addressing,
+provenance, persistence, safe-turn leasing, observation, wake admission, retry,
+and crash recovery.
 
 At session creation, core code performs a cheap mailbox candidate check. When
 candidates exist, the `mailbox_curation` hook receives bounded IDs and redacted
 previews asynchronously and returns only selected IDs. Core code revalidates and
 atomically claims the complete subset. A ready result may join the first natural
 turn; a later result waits for another natural turn and never wakes or delays
-the initial response. After this one creation-time scan, mailbox list and claim
-are explicit model tools.
+the initial response. After this one creation-time scan, legacy mailbox list
+and claim remain hidden compatibility operations; semantic agent messages use
+the first-class coordination protocol below.
 
 ### Durable Agent Delivery and resumable sessions
+
+Reusable-agent coordination uses a newer semantic path beside the legacy
+worker-delivery compatibility tables. `workers.sqlite` admits stable agents,
+assignments, mixed execution nodes, exact results, and message effects first;
+an idempotent outbox then records canonical message metadata in `tron.sqlite`.
+Recipient transcript materialization happens only at a provider-safe boundary
+and atomically binds one typed `message.agent` event. Generalized waits park on
+assignment, worker-invocation, or reply handles and reconcile terminal evidence
+before scheduling one aggregate wake. A satisfied wait remains recoverably
+unbound until that message is recorded and attached, so a crash between
+resolution and wake creation replays the same aggregate effect. Neither
+database is mutated while a transaction in the other remains open.
+
+Fan-in ownership is recipient-scoped, not a global claim on the target handle.
+Only a wait registered by the intended recipient session and stable agent
+replaces that recipient's ordinary assignment, worker, or reply wake. An
+authorized manager or other participant may independently observe the same
+handle and receive its own aggregate result without suppressing the original
+delegator's automatic result. That ownership marker survives terminal-outbox
+replay; an `any` wait still releases its unfinished members back to ordinary
+delivery.
+
+The coordination importer selects only effects whose durable
+`next_attempt_at` is due, ordered by due time and admission order. A failed
+claim retains a bounded error, attempt count, and next due time, retries with capped
+exponential backoff, and becomes a terminal `rejected` row after ten failed
+claims. Rejection and kind-specific compensation are one `workers.sqlite`
+transaction. Every poison row creates one deterministic operator Attention
+item. Poisoned provisioning or assignment-admission effects additionally fail
+still offered/accepted/queued work, close an agent that never left
+provisioning, and retain the assignment's ordinary result outbox; terminal
+result, ordinary message, and projection failures retain exact failed-delivery
+evidence without rewriting their semantic truth. Replaying rejection after a
+restart returns the same terminal timestamp and does not duplicate Attention or
+results. A delayed or malformed row therefore cannot occupy the head of every
+batch or strand admitted work; restart preserves the same retry boundary.
+
+Fresh accepted/queued FIFO heads and already-running/waiting recovery are
+selected through independent bounded dispatcher lanes. Each fresh-work row is
+the oldest eligible head for a currently inactive agent. Thus even a full
+recovery page of parked or process-local in-flight assignments cannot hide a
+later queued assignment for another agent. The supervisor pages past
+process-local owners, unresolved joins, and auxiliary transcript runs before
+counting an assignment against its per-pass start budget. Content-free metrics
+cover
+assignment admissions/states, queue and run duration, message
+delivery/redelivery attempts, wait resolution, recovery,
+cancellation, coordinated orphan repair, outbox retry/import lag, and terminal
+poison rejection. Metric labels use only closed kinds, states, modes, and
+outcomes—never agent, assignment, message, trace, or session identifiers.
+The exported families are `agent_coordination_assignment_{admissions,states}_total`,
+`agent_coordination_assignment_{queue,duration}_seconds`,
+`agent_coordination_{messages,message_delivery_attempts,wait_resolutions,recoveries,cancellations,orphan_recoveries}_total`,
+`agent_coordination_wait_resolution_seconds`, and
+`agent_coordination_outbox_{imports,poison}_total` plus its
+`{import_lag,retry_delay}_seconds` histograms.
+
+An unwaited terminal assignment still returns automatically to its requester.
+The engine includes the exact JSON in that result message only when it fits the
+shared 8 KiB model-tool inline boundary. Every successful result message also
+contains the durable `resultReference`, including its content hash and size;
+larger results set the inline `result` to null and remain available through
+bounded `result_read`. Thus convenience never replaces integrity custody.
+
+Reaching a coordination autonomy ceiling persists one pause state for the
+causal trace. Queued agent assignments, queued worker invocations, and pending
+coordination effects remain intact but are excluded from scheduling and import;
+the pause, owning root session, reason, and timestamps survive restart. An
+authenticated operator action explicitly resumes that same trace. A new
+user-driven causal trace is independent and therefore starts unpaused.
+
+### First-class reusable agents
+
+Coordination separates three identities instead of treating a child model run
+as a disposable session. An opaque `agentId` is the stable address, transcript,
+role, lineage, and management subject until explicit close. An `assignmentId`
+owns one accepted or offered unit of work, its FIFO state, immutable authority
+and resource snapshot, attempts, result, usage, and failure. An internal
+`executionId` places that assignment in the same causal topology as worker
+invocations. Causal parentage and management ownership are distinct: a peer
+request can be caused by its requester while the recipient retains ownership.
+
+Every visible root session receives one deterministic root agent identity on
+demand. `agent_spawn` atomically admits a reusable child plus its first
+assignment and provisions a hidden `tron.system.agent-session` transcript. The
+default model for a child spawned by a visible root follows the model of that
+current source session/turn, even when the lazily created root identity still
+records an older model. Nested reusable agents instead keep their pinned,
+configurable default. The
+child becomes idle after terminal work and keeps the same address and chat for
+later FIFO assignments. Hidden transcripts are excluded from the ordinary
+Sessions index. Authenticated promotion requires the whole nested subtree to be
+quiescent, keeps the same agent/transcript/result/lineage identities, makes the
+session visible, transfers lifecycle ownership to the user, and revokes the old
+parent's inherited management.
+
+One agent runs at most one assignment at a time. Instructions from an owner,
+ancestor, operator, or explicit `assign` grantee create accepted assignments;
+peer requests create offers that the recipient explicitly accepts or declines.
+Questions create exact reply handles, answers bind the original question and
+sender/recipient pair, updates enter an existing assignment at the next safe
+provider boundary, and information remains passive evidence unless it names a
+valid nonterminal assignment owned by the recipient; linked information then
+enters at the next safe boundary without gaining instructional authority.
+Accepted work is never merged into the active objective. Its semantic message
+is immediately durable and inspectable but its delivery remains behind a
+durable supervisor latch, excluded from every provider lease. Only after that
+exact FIFO assignment enters `Running` and its attempt baseline commits does
+the supervisor release the delivery into the assignment-scoped turn. Peer
+offers remain ordinary auxiliary wakes until accepted. Queued/offered work is
+bounded by the target agent's effective role/configured
+`maxQueuedAssignments`, clamped by the live profile ceiling, and is FIFO. The
+same effective limit governs model instructions/offers, native retries, and
+Team Context's remaining-queue budget.
+A normal assignment cannot terminalize while it owns active mixed descendants
+or required reply waits; it enters a structured join and resumes when those
+dependencies settle.
+
+Each provider turn receives one engine-authored Team Context with the current
+agent, parent, active assignment, direct children, recent correspondents,
+unread messages/results, exact authority, write claims, and remaining budgets.
+Its authority block includes immutable write scopes and effective limits; an
+agent authorized to run Worker Forge also receives a bounded source-owned
+delegable-tool catalog with delegation and workspace-effect metadata. Team
+Context contains at most 32 entries and reports exact overflow from count-backed
+durable pages. `agent_discover`
+provides a bounded searchable directory of active/idle profile agents and
+explicit healthy role declarations. Model-facing results expose opaque agent
+and role handles, relationships, status, capability summaries, task previews,
+and `canMessage`/`canManage`; they never reveal raw session IDs, transcripts,
+result content, credentials, working directories, or another agent's file
+authority. Cross-workspace peers communicate through messages while continuing
+to execute in their own workspaces.
+
+Agent discovery, native relationship pages, reusable assignment history,
+communication history, unread evidence, and correspondent reads continue from
+store-owned cursors/counts rather than paginating a capped recent snapshot.
+Closed agents are never discoverable by a model; authorized relationship and
+audit projections retain them as historical evidence.
+
+Semantic messages are stored canonically in both directions, materialized once
+at a safe provider boundary, reconstructed through every later turn and
+compaction, and excluded from user-intent routing, title generation, and
+user-prompt summaries. Priority is system policy, authenticated user/operator
+instruction, owner/parent instruction, peer request, then informational
+evidence. A peer message cannot replace a higher-priority objective or enlarge
+authority. Provider streams and tool calls are never interrupted; actionable
+arrivals schedule the next safe boundary.
+
+Terminal assignment state and its result outbox commit atomically. Small
+results return inline and larger values use the same integrity-bound paged
+result store read by `result_read`. A result automatically resumes the
+delegator even when it did not register a wait. Explicit `all` waits coalesce
+unobserved individual completions into one aggregate wake and remain registered
+across an intervening question/operator turn; `any` resolves once and releases
+the remaining targets to ordinary automatic delivery. Wait admission performs
+registration plus terminal reconciliation in one durable operation. The
+runtime resolves opaque assignment and worker handles to exact mixed-execution
+identities and reply handles to their exact responder agent, then supplies
+immutable parent-to-descendant and assignment/direct-agent executor edges to
+the EventStore. Its same immediate transaction rejects self,
+descendant-to-ancestor, reciprocal-reply, and mixed dependency cycles with
+`AGENT_WAIT_CYCLE`; a parent waiting on a descendant remains legal. A terminal
+member reconciled during registration contributes no pending edge. Coalescing applies only to the registering
+recipient: a third-party manager's wait never steals the requester's or worker
+origin agent's automatic completion.
+
+Recovery never replaces a reusable agent or transcript. Startup repairs
+incomplete turns, records interrupted attempts without terminalizing their
+assignments, accepts an already durable final result without another provider
+call, otherwise resumes the same assignment/session, then reconciles waits,
+replies, queued work, result outboxes, and resource leases. Retry always creates
+a new assignment linked by `retryOf`; it never edits terminal evidence. Default
+per-assignment ceilings are 32 turns and 15 minutes, with hard ceilings of 250
+turns and two hours. Root graphs additionally bound active children, mixed
+nodes, depth, queued offers, messages, and consecutive autonomous wakes. A
+limit pause retains every message and result and surfaces
+`AGENT_AUTONOMY_PAUSED` to the owning visible task instead of dropping work.
+
+Function contracts declare delegation as `never`, `inherit`, or `explicit`
+and workspace effect as `none`, `read`, `scoped_write`, or
+`arbitrary_process`. Child authority is the intersection of the parent's exact
+grant, source-owned delegability, an optional immutable role ceiling, and the
+requested subset. `request_user_input`, client/admin operations, credential
+management, and undeclared internals are nondelegable; children return blockers
+through coordination messages. Management grants are bounded to exact
+`assign`, `cancel`, `configure`, or `close` rights over one owned subtree and
+are non-transitive unless independently granted. Quiescence checks for close,
+configure, role upgrade, and promotion traverse exact unpaged ownership IDs;
+bounded relationship or history pages never decide whether a descendant wait
+can be discarded.
 
 `tron.sqlite` owns `agent_deliveries`, `agent_waits`, and
 `agent_wait_members`. Delivery provenance and authority are engine-derived:
 model/worker payloads cannot select a sender identity, workspace, causal trace,
-root, depth, or result grant. Existing-session and newly created task sends stay
-inside the normalized source workspace; a profile mailbox is the sole
-intentional cross-workspace seam. A delivery referencing a worker result grants
+root, depth, or result grant. First-class agent messages may cross workspaces
+only after the Worker Kernel resolves an opaque profile agent handle; the peer
+keeps its own workspace and receives no filesystem or tool authority from the
+sender. Non-agent deliveries and legacy task creation stay inside the
+normalized source workspace; retained profile mailboxes remain the legacy
+cross-workspace evidence seam. Every imported communication invalidates both
+distinct visible roots, so outgoing and incoming message/contact projections
+converge from the same durable edge. A delivery referencing a worker result grants
 that full result only to its origin session or claimed target session.
 
 Worker terminal transitions and validated delivery effects enter an immutable
@@ -297,18 +561,55 @@ entry separately records whether it was included in that exact provider turn;
 the v4 request audit remains the sole source of truth for the selected request's
 `Updates included` count.
 
-The fixed model tools are:
+The fixed first-class coordination tools are:
 
-- `agent_send`: same-workspace existing task send, atomic visible
-  task-plus-initial-delivery creation, or passive workspace/profile mailbox
-  send;
-- `agent_wait_for_workers`: non-blocking all/any wait over 1–32 eligible
-  top-level invocations; success, failure, cancellation, and interruption all
-  satisfy with evidence;
-- `agent_mailbox_list`: bounded redacted workspace/profile summaries with
-  opaque delivery IDs and no relevance policy;
-- `agent_mailbox_claim`: atomic all-or-none claim of explicitly listed IDs,
-  with exactly one winner under concurrent claims.
+- `agent_discover`: bounded profile-wide discovery of addressable live agents
+  and reviewed immutable dynamic-worker roles;
+- `agent_spawn`: atomic admission of one reusable agent, its durable transcript
+  identity, first assignment, exact authority/resource snapshot, and
+  provisioning outbox;
+- `agent_send`: typed instruction, request, question, answer, information, or
+  assignment update to an opaque agent handle; work-bearing messages admit a
+  distinct queued/offered assignment in the same transaction as their outbox;
+- `agent_wait`: durable `all`/`any` parking over assignment, worker invocation,
+  and reply handles, including completion-before-registration reconciliation;
+- `agent_manage`: the closed offer, cancellation, close, configuration,
+  management-grant, and reviewed role-upgrade union.
+
+Named-role discovery, spawn, model/native upgrade, and the client's
+`updateAvailable` projection use the same executable-role check. A version is
+eligible only while its worker remains enabled, non-retired, healthy, an agent
+runner, and explicitly declared discoverable; inspection and role-review audit
+still retain unhealthy or retired evidence without advertising it as runnable.
+
+Idle-agent questions and offers use an engine-owned auxiliary provider run,
+not an assignment. Wake selection reserves the target transcript before its
+mutable agent state and exact grant are read; run admission atomically consumes
+that reservation. Close, configuration, role upgrade, and promotion use the
+same non-waiting admission registry across their exact target subtree, so they
+reject while an auxiliary run is reserved or active instead of racing its safe
+boundary. A successful close permanently blocks new runs for that transcript
+within the process and proactively demotes retained pending wakes to passive
+evidence; later and recovered dispatchers repeat that reconciliation, and a
+closed transcript cannot call coordination tools. Native allowed actions include
+this run state but remain hints: every
+mutation repeats the atomic admission check server-side.
+
+Cancelling an agent target applies to assignment-free auxiliary work as well as
+durable assignments and mixed worker descendants. The exact owned subtree's
+transcripts enter one cancellation admission barrier: active tokens are
+aborted, a wake reservation cancelled before run admission remains tombstoned
+until its engine invocation exits, and fresh wake/run/lifecycle admission stays
+blocked through durable execution cancellation and wake demotion. All pending
+wakes for those transcripts—including delayed and leased records—become passive
+without deleting their audit evidence. Native cancellation counts are
+derived from the same uncapped assignment/execution and wake records, with an
+uncovered live transcript counted once.
+
+`agent_wait_for_workers`, mailbox list/claim, and ordinary worker cancellation
+remain hidden compatibility bindings for one release. `worker_await` and
+`worker_result_read` are projected only into an exact trusted retained-worker
+allowlist, never an ordinary or reusable-role surface.
 
 New visible tasks inherit the source model and working directory unless a
 validated in-workspace override exists. Wait registration commits members
@@ -317,9 +618,9 @@ outbox import, and repeats pending reconciliation at startup. Resolution and
 its wake delivery share one Tron transaction, closing completion-before,
 during, and after registration races. Every background invocation and replay
 receipt gives the same contract: do not poll or call `worker_await`; call
-`agent_wait_for_workers` immediately with the returned invocation ID when the
-task should resume automatically. Otherwise the completion stays passive until
-a natural turn. If a wait is registered after the default passive result has
+`agent_wait` with a `worker_invocation` target when the assignment must park for
+fan-in. Without an explicit wait, terminal work still returns automatically to
+the delegator. If a wait is registered after the default passive result has
 already arrived, reconciliation cancels an unprepared duplicate and creates one
 wake; a result already leased into provider context is reused.
 
@@ -523,7 +824,7 @@ single direct authoring surface rather than reverse-engineering implementation
 state. The same `presentation` object may declare at most 24 generic native
 sections: text, status, progress, table, list, public HTTPS link, result artifact,
 confirmation, or fixed same-worker action. Result bindings are bounded RFC 6901
-pointers hydrated only through `worker_result_read`; fixed action inputs are
+pointers hydrated only through `result_read`; fixed action inputs are
 validated against the complete owning `inputSchema`. The contract cannot carry
 HTML, JavaScript, Swift, arbitrary client commands, arbitrary URL schemes, or
 an inline duplicate of the result. The runtime:
@@ -574,7 +875,11 @@ allowlist of at most 32 unique model-tool names, each at most 64 UTF-8 bytes.
 Omission preserves the migration surface; an explicit empty list exposes no
 tools. Activation accepts only names in the current fixed model catalog,
 enabled direct or internal worker functions, or the candidate's own declared
-tool.
+tool. For one release, only this immutable `agentTools` field may also retain
+the exact historical names `worker_await` and `worker_result_read`; request
+projection synthesizes them as aliases of `worker_kernel::await` and the
+canonical generic `result_read` implementation. They do not enter the 27-tool
+fixed inventory, ordinary requests, discovery, or `agentRole.toolCeiling`.
 Different agent-worker roles require different narrow actuator sets; those
 allowlists are justified by the worker's executable contract, not by a
 hard-coded role inventory. The immutable bundle remains the single owner. Its
@@ -583,11 +888,65 @@ into the existing agent run and filters both fixed and dynamic tools exactly at
 provider-surface resolution; it does not add routing, relevance, workflow, or
 retry semantics. If a named dynamic tool later disappears, projection simply
 omits it rather than broadening authority.
-Internal worker functions retain `FunctionVisibility::Internal`. Only the
-trusted origin-worker plus exact-allowlist resolver reads that catalog view as
-the System actor. Execution uses System identity solely for the already
-resolved internal target and preserves the source worker in causal evidence;
-ordinary Agent and Worker actors still cannot discover or invoke it.
+Agent runners also make an explicit reusable-role decision in `agentRole`.
+`disabled` records that the bundle is intentionally not a role. An enabled
+declaration pins a discoverable display name, collaboration instructions,
+model/reasoning defaults, delegable tool ceiling, assignment/child limits, and
+natural or schema-validated result mode to the immutable worker version.
+Omitted migration bundles are marked `needs_role_review`, never inferred from
+runner kind, and never returned by role discovery.
+
+The deterministic review scan classifies each active
+immutable bundle: agent runner plus explicit declaration is `declared`, agent
+runner plus omission is `needs_role_review`, and command/service runner is
+`ineligible`. `engine::surface_snapshot` returns that status and the exact
+declaration. Manage Workers groups active `needs_role_review` entries once
+under **Review agent roles**. Its queue and proposal history use independent
+bounded offset pages with exact totals, so more than 100 migration runners
+remain reachable.
+
+Starting a review dynamically selects the current healthy active worker that
+explicitly declares the `agent_role_review` engine hook; neither Worker Forge
+nor another profile-owned name is hard-coded. The reviewer receives the exact
+active target/version, the complete source-owned `agentRole` schema, and a
+generated catalog containing only source-delegable tools. Its strict result can
+contain only one explicit enabled/disabled `agentRole` plus a bounded rationale.
+The Engine persists a proposal that pins target id/version/content hash,
+reviewer id/version, the exact reviewer invocation, proposal schema/hash,
+rationale, status, and timestamps. Missing reviewer capacity returns a truthful
+repair requirement while direct worker invocation continues unchanged.
+SQLite writer admission permits only one open proposal for an exact target
+version; concurrent starts observe the same winner instead of publishing
+competing declarations.
+
+Authenticated native operations list/start/inspect/apply/reject proposals.
+Apply requires explicit confirmation, revalidates all pinned provenance and the
+unchanged active target, then clones the exact immutable bundle, changes only
+`agentRole`, and publishes through canonical worker upsert/activation. Reject,
+stale-target detection, and an interrupted apply retain evidence; startup
+returns an in-progress apply claim to `proposed` for safe user retry. The
+content-free `worker.role_review` event invalidates client projections, and
+unavailable/proposed/applied/rejected/stale counters expose workflow health
+without role or rationale content. Their exact names are
+`worker_agent_role_reviews_{unavailable,proposed,applied,rejected,stale}_total`.
+
+| Native function | Ownership |
+|---|---|
+| `worker_kernel::role_reviews` | Independently paged review queue, proposal history, current reviewer availability, and server-authored actions |
+| `worker_kernel::role_review_start` | Idempotent reviewer execution and durable proposal admission for one exact active worker version |
+| `worker_kernel::role_review_inspect` | Exact proposal, declaration diff, immutable provenance, state, and allowed actions |
+| `worker_kernel::role_review_apply` | Explicitly confirmed revalidation and canonical immutable publication |
+| `worker_kernel::role_review_reject` | Idempotent terminal rejection with retained audit evidence |
+
+Internal worker functions retain `FunctionVisibility::Internal`. Reusable-agent
+admission resolves its trusted authority snapshot to exact source-delegable
+function IDs; durable agent execution topology without that immutable grant
+fails closed before public visibility is considered. Visible root Agents have
+no reusable-child topology and retain the ordinary public surface. A retained
+direct agent-runner allowlist remains trusted causal input, and execution adds
+the exact grant when it selects an internal target. Discovery does not reveal
+internal functions, `delegation=never` remains absolute, and every reusable
+child call outside its exact grant fails closed.
 
 A sparse background worker may explicitly declare the reserved
 `workerWakeup` output and return one closed future wakeup containing an RFC
@@ -1226,6 +1585,29 @@ value that the engine serializes exactly once. Agent workers that call JSON
 helpers pass the object directly; manually embedding encoded JSON in a string
 adds an avoidable syntax and escaping failure boundary.
 
+The function catalog owns a closed workspace-effect class for each primitive.
+For reusable-agent assignments, `filesystem_write` and `filesystem_edit`
+resolve only canonical workspace-relative targets covered by the assignment's
+immutable write prefixes. They reject `..`, symbolic-link escapes, and
+case-ambiguous paths, then acquire a durable exact-path reservation. Disjoint
+paths may publish concurrently; overlapping paths queue in conflicting FIFO
+order. An earlier whole-workspace process waiter blocks later writers so it
+cannot be starved.
+
+Every `process_run` associated with a durable workspace acquires that
+whole-workspace process lease before spawn and releases it only after the
+captured process tree exits or cancellation synchronously signals its group. A
+private pre-exec gate prevents user code from running until the direct-child
+PID and OS birth identity are committed, so a crash between spawn and durable
+binding cannot leak an uncoordinated writer.
+Ordinary root tasks use their durable session ID as claim custody; Tron does
+not invent a child assignment or tool grant for them. Startup cancels orphaned
+mutation claims, closes any unbound process gates, and compares a captured
+process's durable OS birth identity with the live process before signalling its
+recorded group, avoiding unsafe PID-reuse matches. This is collision
+coordination, not a sandbox: `process_run` retains the local user's normal
+authority and may write outside the declared workspace.
+
 Filesystem reads, listings, searches, writes, and edits execute off the async
 runtime thread. Reads never load the remainder of a truncated file; listing
 never accumulates an unbounded directory; writes stage, sync, recheck the
@@ -1239,9 +1621,9 @@ new file is required, or provide raw/`sha256:`-prefixed 64-digit hex.
 
 ### Worker operations
 
-Ordinary chat always receives `worker_discover`, `worker_invoke`,
-`worker_await`, `worker_cancel`, `worker_result_read`, `agent_send`,
-`agent_wait_for_workers`, `agent_mailbox_list`, and `agent_mailbox_claim`.
+Ordinary chat always receives `worker_discover`, `worker_invoke`, generic
+`result_read`, `agent_discover`, `agent_spawn`, `agent_send`, `agent_wait`, and
+`agent_manage` alongside the host/interaction primitives.
 Broad worker creation, inspection, lifecycle, and global audit tools are
 specialist-only and appear only in an exact agent-worker allowlist.
 
@@ -1252,14 +1634,11 @@ specialist-only and appear only in an exact agent-worker allowlist.
 | `worker_list` | `worker_kernel::list` |
 | `worker_inspect` | `worker_kernel::inspect` |
 | `worker_invoke` | `worker_kernel::invoke` |
-| `worker_await` | `worker_kernel::await` |
-| `worker_result_read` | `worker_kernel::result_read` |
-| `worker_detach` | `worker_kernel::detach` |
-| `worker_cancel` | `worker_kernel::cancel` |
+| `result_read` | `worker_kernel::result_read` |
 | `worker_stop` | `worker_kernel::stop` |
 | `worker_disable` / `worker_enable` | `worker_kernel::disable` / `enable` |
 | `worker_rollback` | `worker_kernel::rollback` |
-| `worker_retire` / `worker_purge` | `worker_kernel::retire` / `purge` |
+| `worker_retire` | `worker_kernel::retire` |
 | `worker_inbox` / `worker_runs` | `worker_kernel::inbox` / `runs` |
 
 `worker_webhook_rotate` and `worker_stop_all` remain authenticated dashboard
@@ -1268,7 +1647,7 @@ operations and are intentionally not model tools.
 `worker_kernel::result_handoff` is a separate authenticated paired-client
 operation, not model vocabulary. It atomically creates one visible chat and a
 passive Agent Delivery grant for one completed invocation. Exact result bytes
-remain in the worker ledger; the new agent uses `worker_result_read` for only
+remain in the worker ledger; the new agent uses `result_read` for only
 the paths it needs. Retrying the same client action cannot create a second
 session or grant, and the result invocation is retained as provenance rather
 than being presented as the root of a new causal worker tree.
@@ -1279,14 +1658,15 @@ status, immutable version, resolved model/reasoning, wall timing, and
 descendant-inclusive usage/cost. Evaluators therefore do not have to retain a
 large causal graph merely to record one case's measurements.
 
-The ordinary main-agent surface always contains the narrow worker-coordination
-set: discovery, generic invocation, bounded observation, authorized result
-reads, invocation-scoped cancellation, durable waits, and scoped Agent
-Delivery/mailbox operations. Administrative creation, catalog inspection,
-lifecycle, rollback, retirement, purge, global run/inbox audit, and explicit
-detach remain specialist- or client-only. This lets an explicit known worker
-ID take the direct durable invocation path without requiring an intermediary
-delegate, while keeping broad worker administration out of unrelated requests.
+The ordinary main-agent surface always contains the narrow coordination set:
+`worker_discover`, `worker_invoke`, generic `result_read`, and the five
+first-class agent operations above. Cancellation is unified under
+`agent_manage`; durable fan-in is unified under `agent_wait`. Worker run audit,
+mailboxes, lifecycle, rollback, retirement, purge, explicit detach, and the old
+worker-specific await/cancel/read aliases remain specialist-, client-, or
+one-release compatibility operations. This lets an explicit known worker ID
+take the direct durable invocation path without requiring an intermediary
+delegate while keeping broad worker administration out of unrelated requests.
 
 `worker_invoke` defaults to `mode: wait`. Top-level agent runners are admitted
 in background mode immediately. Command/service versions with five completed
@@ -1296,8 +1676,15 @@ grace. Unknown command/service versions receive the same grace. Crossing that
 budget atomically detaches the already-admitted invocation—its idempotency key,
 attempt, version, and execution continue unchanged. Ten seconds is the model
 tool's conversational handoff budget, not a worker timeout; the independent
-two-hour reliability ceiling still bounds execution. Nested worker calls remain
-synchronous because their parent needs the typed result. Their idempotency
+two-hour reliability ceiling still bounds execution. `mode: enqueue` returns
+immediately after durable admission for top-level and nested callers. The child
+retains its mixed causal edge, and a reusable parent assignment enters its
+structured join rather than terminalizing while that descendant is active.
+Top-level `mode: wait` follows the ordinary interaction budget and may detach
+that same durable child. Nested `mode: wait` synchronously joins the typed child
+up to the worker reliability ceiling; it is distinct from enqueue rather than a
+rule that every nested call is synchronous.
+Nested idempotency
 identity retains the ordinary typed-argument fingerprint, while a separate
 durable parent/per-tool occurrence slot handles reconstruction. If a parent
 attempt is reconstructed after restart, occurrences restart at zero: an
@@ -1305,15 +1692,17 @@ already completed child is replayed and an active/recovered child is awaited
 even when the provider regenerated its call id or valid arguments. Neither
 state admits a replacement invocation.
 
-`mode: enqueue` returns immediately after durable admission and starts
-best-effort delivery; the ordinary dispatcher remains restart recovery.
-`worker_await` observes for at most the same ten-second interaction budget and
-never cancels work. `worker_detach` explicitly releases foreground ownership
-without cancellation. `worker_invoke(retryOfInvocationId=...)` accepts only a
-terminal run and derives its immutable version and original typed input
-server-side. `worker_cancel` targets the selected invocation's durable causal
-subtree while leaving unrelated work running; it remains distinct from
-per-worker `worker_stop` and profile-wide `worker_stop_all`.
+The ordinary dispatcher remains restart recovery for every background child.
+The retained compatibility `worker_await` observes for at most the same
+ten-second interaction budget and never cancels work. It remains callable by
+authenticated clients and is synthesized for an exact trusted legacy
+`agentTools` allowlist, but never enters the ordinary surface; `worker_detach`
+remains an authenticated client operation that explicitly releases foreground
+ownership without cancellation. `worker_invoke(retryOfInvocationId=...)`
+accepts only a terminal run and derives its immutable version and original
+typed input server-side. Agents cancel a selected worker execution and its
+owned mixed descendants through `agent_manage`; per-worker `worker_stop` and
+profile-wide `worker_stop_all` retain their separate operator meanings.
 
 Every successful worker result is schema-validated and has exactly one logical
 owner: its durable invocation. The generic payload tables live in the same
@@ -1351,7 +1740,8 @@ child. The kernel records that new association before returning the reused
 child, so both the pre-restart transcript and the reconstructed attempt resolve
 the same result without copying it or rewriting history.
 
-`worker_result_read` retrieves one RFC 6901 JSON pointer from that exact result.
+`result_read` retrieves one RFC 6901 JSON pointer/page from an exact durable
+worker-invocation or reusable-agent-assignment result.
 Array/object pages are limited to twenty entries and each response is bounded
 to 32 KiB; oversized objects return child pointers before content. An agent
 worker may read an exact direct child that its own durable invocation admitted.
@@ -1413,7 +1803,7 @@ without erasing the pinned fixed/worker identity.
 Exact non-worker tool output remains in durable session evidence. Exact worker
 output remains only in the invocation ledger for every size; session evidence
 retains its provider-call association, receipt, or reference. Consumed
-`worker_result_read` pages age to re-readable references after one model turn.
+`result_read` pages age to re-readable references after one model turn.
 Other textual tool results larger than 32 KiB are replaced in model context by
 a deterministic prefix/suffix projection carrying the original byte count and
 SHA-256 digest. The same projections are applied before token estimation,
@@ -1554,9 +1944,11 @@ break ties only after a semantic match. The resolver preserves that rank order
 in the provider surface and records the
 exact fixed functions, selected worker versions, selection reasons, and a stable
 surface hash. Those volatile values stay in the local audit. The model receives
-only stable guidance to use supplied typed tools, discover omitted workers, use
-Engine Steward for diagnosis, and use Worker Forge for changes, in addition to
-native direct tool schemas. A `worker_discover` result
+only stable guidance to use supplied typed tools, discover omitted workers, and
+discover a current healthy diagnostic or authoring capability when it needs to
+inspect or change workers. It never assumes that a profile contains workers
+with hardcoded names. Permanent deletion, secret rotation, and engine-wide stop
+remain authenticated dashboard actions. A `worker_discover` result
 returns the declared `toolInputSchema` and promotes
 matching workers into that session's next internal turn without a restart;
 promotions are session-scoped durable engine state and survive server restarts.
@@ -1597,7 +1989,7 @@ Authenticated clients may call `engine::surface_snapshot` with optional session
 invocation context. The typed response returns the same provider-neutral surface
 evidence plus operational inventories:
 
-- all 30 model-addressable fixed functions with their exact schemas,
+- all 27 model-addressable fixed functions with their exact schemas,
   revisions, effect/risk, audience, access path, primitive group, and
   request-specific projected/omitted reason;
 - every published direct worker tool, including its promoted/projected state,
@@ -1633,23 +2025,17 @@ The former Artifact Studio was replaced only after the fresh Document Export
 worker passed smoke validation, completed a public invocation, and delivered a
 real inbox artifact.
 
-Worker lifecycle access follows the same split. Engine Steward is a read-only
-diagnostic agent with only `worker_list`, `worker_inspect`, `worker_runs`,
-`worker_inbox`, and `worker_result_read`. Worker Forge accepts one natural
-`request` plus an optional worker name/ID; callers do not choose an operation
-enum. Its exact specialist allowlist permits inspection, bounded verification,
-creation/update activation, enable, disable, stop, rollback, and recoverable
-retirement. It cannot purge permanently, rotate secrets, change credentials,
-stop the whole engine, deploy, apply core changes, or access databases.
-
-The development profile accepted this contract through ordinary immutable
-upsert on 2026-07-27. Worker Forge version
-`aaa84f0feda68d7a088c3f6388cb42b088467bc5b0187024fcb460009e4cb6c5`
-passed its deterministic smoke/health checks. A live natural request to inspect
-Engine Steward completed with `no_change`, identified Steward version
-`5f106d9d221d9df58e97a8ddd43b14910a10e13bb41724a28cdd944fe1fa542a`
-as healthy and read-only, and produced completed durable run evidence for both
-workers without mutating either worker.
+Worker lifecycle access follows the same split without reserving profile worker
+names. A current healthy diagnostic agent may receive only `worker_list`,
+`worker_inspect`, `worker_runs`, `worker_inbox`, and `result_read`. A current
+healthy authoring agent may accept one natural request and an optional worker
+name/ID, with an exact specialist allowlist for inspection, bounded
+verification, creation/update activation, enable, disable, stop, rollback, and
+recoverable retirement. It cannot purge permanently, rotate secrets, change
+credentials, stop the whole engine, deploy, apply core changes, or access
+databases. Callers discover whichever immutable diagnostic or authoring
+capability is actually healthy in the current profile; Tron does not promise
+that a worker with a particular product name is installed.
 
 ### Evaluation without an evaluation engine
 
@@ -2351,16 +2737,19 @@ idempotent replay, malformed-input rejection, retained-version recovery, and
 generic-console operation.
 
 A later durable auto-resume smoke test exposed a capability mismatch rather
-than a delivery failure: General Delegate had been asked to enqueue a known
-worker while its immutable agent surface omitted `worker_invoke` and allowed no
-child invocation. It exhausted its model-turn budget probing private runtime
-routes, then the generic runner mislabeled the missing terminal response as a
-schema mismatch. The profile-owned worker was updated through ordinary
-`worker_upsert` to include exactly `worker_invoke`, a one-child budget, and
-instructions to use the public nested-call contract without polling or private
-API discovery. The agent loop now records max-turn exhaustion as the execution
-error before typed output validation. Durable wait reconciliation and the
-delivery-only resume had already completed correctly and remain unchanged.
+than a delivery failure: the delegate had been asked to enqueue a known worker
+while its immutable agent surface omitted `worker_invoke` and allowed no child
+invocation. It exhausted its model-turn budget probing private runtime routes,
+then the generic runner mislabeled the missing terminal response as a schema
+mismatch. The profile-owned worker was updated through ordinary `worker_upsert`
+to include exactly `worker_invoke`, a one-child budget, and instructions to use
+the public nested-call contract without polling or private API discovery. The
+agent loop now records max-turn exhaustion as the execution error before typed
+output validation. The corrected proof treats nested `mode: enqueue` as an
+immediate durable child receipt, not a synchronous tool join; its parent
+assignment remains in the mixed structured join until that child settles and
+automatic result delivery resumes it. Nested `mode: wait` remains the separate
+typed synchronous path bounded by the worker reliability ceiling.
 
 iOS now recognizes only the exact primary `general-delegate` presentation
 contract version 1 as the native Delegation experience. The sheet reads full
@@ -2620,9 +3009,18 @@ their derived indexes and durable operational history.
 
 | Table | Ownership |
 |---|---|
+| `agent_assignment_delivery_holds` | one-way FIFO admission latch that keeps accepted assignment instructions out of every provider lease until their exact Running state and attempt baseline commit |
 | `agent_deliveries` | durable session/mailbox updates, safe-boundary leases, wake policy, result grants, and observation state |
+| `agent_message_metadata` | canonical bounded agent-message content, semantic provenance, reply linkage, channel order, and safe-boundary materialization/observation state |
+| `agent_session_promotions` | idempotent cross-store receipt for making one promoted nested-agent transcript visible in Sessions |
 | `agent_wait_members` | exact top-level worker members and terminal evidence for durable waits |
 | `agent_waits` | durable current-session all/any wait state |
+| `coordination_dependency_edges` | immutable normalized mixed-execution parentage and assignment/direct-agent executor dependencies used by wait-cycle admission |
+| `coordination_wait_dependency_nodes` | additive owner/member mapping from opaque coordination handles to exact internal dependency identities |
+| `coordination_wait_dependency_topologies` | canonical per-wait edge-set seal that makes dependency replay immutable, including for an originally empty topology |
+| `coordination_wait_inline_results` | exact consumer binding for a wait resolved inside its registering tool call, preventing a duplicate aggregate continuation |
+| `coordination_wait_members` | opaque assignment, worker-invocation, and reply handles plus exact terminal evidence for generalized fan-in |
+| `coordination_waits` | reusable-agent all/any park state and its one aggregate result-message binding |
 | `blobs` | content-addressed durable payloads |
 | `engine_catalog_revision` | current typed-function surface revision |
 | `engine_idempotency_entries` | engine invocation idempotency ledger |
@@ -2645,7 +3043,8 @@ operational evidence:
 
 | Table | Ownership |
 |---|---|
-| `worker_schema` | worker index schema version; v12 adds atomic worker handoffs and split notification ownership; v13 adds self-only delayed invocation custody; v14 adds artifact custody and storage attention; v15 adds the exact session-organization mutation outbox; v16 adds the immutable worker-to-agent terminal/effect outbox; v17 adds requested/effective invocation model and reasoning policy; v18 adds operator inbox dispositions and the scheduled-trigger projection index |
+| `worker_schema` | worker index schema version; v12 adds atomic worker handoffs and split notification ownership; v13 adds self-only delayed invocation custody; v14 adds artifact custody and storage attention; v15 adds the exact session-organization mutation outbox; v16 adds the immutable worker-to-agent terminal/effect outbox; v17 adds requested/effective invocation model and reasoning policy; v18 adds operator inbox dispositions and the scheduled-trigger projection index; v19 adds reusable-agent coordination custody; v20 adds durable agent-role review proposals and interrupted-apply recovery; v21 adds durable due-time retry scheduling and poison terminalization for the coordination outbox |
+| `worker_agent_role_review_proposals` | Immutable target/reviewer/invocation provenance, proposal hash/schema, explicit declaration/rationale, user-confirmed apply/reject state, and retained recovery evidence |
 | `blobs` | generic content-addressed compressed result bodies larger than 8 KiB |
 | `storage_payload_refs` | one generic ownership/integrity row for every successful invocation output |
 | `workers` | rebuildable current catalog |
@@ -2661,6 +3060,17 @@ operational evidence:
 | `worker_inbox` | durable compact result-reference receipts, failure records, and agent-context attachment state |
 | `worker_inbox_dispositions` | immutable idempotent operator dismissals that remove retained failures from live Attention without editing result or execution evidence |
 | `agent_delivery_outbox` | immutable pending/imported/rejected terminal and worker-declared Agent Delivery effects |
+| `agent_instances` | stable agent identity, hidden transcript-session link, immutable spawn lineage, current management owner, role/version, visibility, default grant/limits, workspace, and lifecycle state |
+| `execution_nodes` | common causal topology for agent assignments and worker invocations, including trace, depth, owner, and deterministic child order evidence |
+| `coordination_trace_states` | restart-durable autonomy pause/resume state, owning root session, reason, and timestamps for one mixed causal graph |
+| `agent_assignments` | reusable-agent FIFO work, immutable admission snapshots, retry linkage, terminal failure, and exact integrity-bound result custody |
+| `agent_assignment_attempts` | numbered provider execution/recovery attempts without replacing the stable assignment or transcript |
+| `agent_execution_events` | append-only assignment/execution state evidence |
+| `agent_outbox` | idempotent provisioning, semantic message, terminal result, and client-projection effects with due-time retry, attempt count, bounded error evidence, and imported/rejected terminal state |
+| `agent_management_grant_batches` | atomic idempotency receipt for an exact validated set of non-transitive subtree management grants |
+| `agent_management_grants` | bounded, non-transitive assign/cancel/configure/close authority over one specific agent subtree |
+| `agent_write_claims` | durable FIFO scoped-write and whole-workspace process collision claims; coordination evidence, not an OS sandbox |
+| `direct_worker_agent_runs` | stable one-to-one bridge from a direct agent-runner worker invocation to its shared Agent Execution identity and assignment |
 | `worker_audit` | lifecycle and mutation evidence |
 | `worker_health` | versioned activation/lifecycle/execution health history |
 | `worker_runtime_settings` | durable engine stop-all state |
@@ -2776,6 +3186,11 @@ Worker live topics are:
   rollback, retirement, purge, engine stop/resume, failure, and related state;
 - `worker.invocations` — started/completed/failed/cancelled invocation summaries.
 
+Reusable-agent invalidation topics are `agent.lifecycle`, `agent.assignment`,
+and `agent.message`. They carry only enough owning-session/agent identity to
+coalesce a targeted reread; assignment state, message content, results, and
+allowed actions remain canonical read projections.
+
 Invocation stream envelopes carry the invocation ledger's durable
 `origin_session_id`. Descendants therefore invalidate the originating user
 session, while scheduled and otherwise sessionless work remains unscoped.
@@ -2784,14 +3199,14 @@ topics are lossy observation hints: clients coalesce them and reread durable
 worker/session projections; delivery, wait, and completion correctness never
 depends on receiving an event.
 
-The durable session log has **15 event variants**. Live-only deltas, progress,
+The durable session log has **16 event variants**. Live-only deltas, progress,
 context notices, and errors remain transport events and are not duplicated as
 unwritten storage contracts:
 
 | Concern | Event types |
 |---|---|
 | session | `session.start`, `session.end`, `session.fork`, `session.model_changed`, `session.reasoning_changed` |
-| messages | `message.user`, `message.assistant`, `message.deleted` |
+| messages | `message.user`, `message.agent`, `message.assistant`, `message.deleted` |
 | model | `model.provider_request` |
 | provider tools | `tool.invocation.started`, `tool.invocation.completed` |
 | turns | `stream.turn_start`, `stream.turn_end`, `turn.failed` |
@@ -3036,10 +3451,51 @@ narratives. Technical Details alone contains digests, identifiers, redacted
 environment provenance, exact selected/omitted tools, cache layout, and the
 redacted provider audit. Session-scoped Background Activity and Session Workers
 open as bounded sub-sheets rather than mounting their histories in the main
-sheet. Empty included-delivery evidence is distinct from ordinary conversation
-and user-input answers. Rows remain represented while disconnected and disable
-only the unavailable action so reconnect reconciliation restores interaction
-without reshaping the sheet.
+sheet. A stable Agents row appears between Agent Context and Background
+Activity; Session Workers remains a separate evidence surface. Empty
+included-delivery evidence is distinct from ordinary conversation and user-input
+answers. Rows remain represented while disconnected and disable only the
+unavailable action so reconnect reconciliation restores interaction without
+reshaping the sheet.
+
+The Agents lane activates network management only after the server advertises
+the complete `agent_coordination.v1` protocol. Older or disconnected servers
+retain the row and last authoritative snapshot, showing either
+`No child agents or agent conversations` or `N active · M related` rather than
+reshaping the sheet. `agent::relations` supplies paged, nonduplicating Child
+agents in parent-first hierarchy and Other agents for parents, ancestors,
+promoted/managed agents, and durable-message correspondents. The client does
+not join local session and worker caches to infer those relationships.
+
+Agent Detail reads canonical inspect, assignment-history, message-history,
+message-detail, result, and authorized transcript projections. It uses the
+Worker Console's cards, typography, detents, status treatment, bounded result
+inspector, and generalized read-only Audit Session sheet. The detail surface
+shows current work, assignment history, role/version, effective capabilities,
+management grants, limits, write claims, exact bidirectional communication and
+reply linkage, own/subtree usage, results/failures, lineage, children, contacts,
+and technical provenance. No device transcript cache or model-visible raw
+session ID is introduced.
+
+Every mutation is gated by server-authored `allowedActions` and an exact
+disabled reason; the app never infers authority from a relationship label.
+Authenticated operator instructions, owned cancellation/close, future-default
+configuration, bounded management grants, role upgrades, linked retries, and
+promotion carry one idempotent client mutation identity. Destructive or
+ownership-changing actions require confirmation. Cancellation authorization
+also carries the exact current count of cancellable mixed agent/worker
+executions so clients never derive destructive impact from paged history. There is no top-level Agents
+destination, graph canvas, manual Spawn form, or custom client-side lifecycle
+state machine in this version.
+
+Agent relationship and detail repositories use a lazy refresh lane with
+generation fences, single flight plus one dirty follow-up, paged
+deduplication, a bounded two-second cadence only while related work is active,
+and one foreground/reconnect reconciliation. Coalesced `agent.lifecycle`,
+`agent.assignment`, and `agent.message` events are invalidation hints only;
+the client always rereads canonical server projections and never trusts event
+payloads as state or message content.
+
 Global worker architecture is inspected in the Engine dashboard, where each
 canonical worker row and detail merges direct/internal and agent/command shape,
 hook/native boundaries, dispatches, and `agentTools` calls/called-by

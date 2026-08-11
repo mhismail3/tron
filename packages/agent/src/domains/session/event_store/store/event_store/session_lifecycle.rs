@@ -10,6 +10,8 @@ use crate::domains::session::event_store::sqlite::repositories::session::{
     CreateSessionOptions, IncrementCounters, ListSessionsOptions, MessagePreview, SessionRepo,
 };
 use crate::domains::session::event_store::sqlite::repositories::workspace::WorkspaceRepo;
+use crate::domains::session::event_store::sqlite::row_types::AGENT_SESSION_TAG;
+#[cfg(test)]
 use crate::domains::session::event_store::sqlite::row_types::WORKER_SESSION_TAG;
 use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::base::SessionEvent;
@@ -165,6 +167,7 @@ impl EventStore {
     ///
     /// Worker sessions share the normal event/reconstruction machinery, but a
     /// reserved durable tag keeps them out of ordinary user-session listings.
+    #[cfg(test)]
     pub(crate) fn create_worker_session(
         &self,
         model: &str,
@@ -189,6 +192,113 @@ impl EventStore {
             tx.commit()?;
             tracing::debug!(session_id = %result.session.id, "worker session created");
             Ok(result)
+        })
+    }
+
+    /// Create the hidden durable transcript for one reusable agent instance.
+    #[cfg(test)]
+    pub(crate) fn create_agent_session(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        provider: Option<&str>,
+    ) -> Result<CreateSessionResult> {
+        self.create_agent_session_with_identity(
+            model,
+            workspace_path,
+            title,
+            provider,
+            SessionCreationIdentity::generate_current(),
+        )
+    }
+
+    /// Create a hidden reusable-agent transcript with preallocated identities.
+    ///
+    /// Cross-store outbox import uses this operation so replay after a crash
+    /// observes the same session and root event instead of creating a second
+    /// child transcript.
+    pub(crate) fn create_agent_session_with_identity(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        provider: Option<&str>,
+        identity: SessionCreationIdentity,
+    ) -> Result<CreateSessionResult> {
+        let tags = vec![AGENT_SESSION_TAG.to_owned()];
+        self.with_global_write_lock(|| {
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let result = create_session_in_tx_with_identity(
+                &tx,
+                &CreateSessionInTxOptions {
+                    model,
+                    workspace_path,
+                    title,
+                    provider,
+                    tags: Some(&tags),
+                },
+                identity.clone(),
+            )?;
+            tx.commit()?;
+            tracing::debug!(session_id = %result.session.id, "agent session created");
+            Ok(result)
+        })
+    }
+
+    /// Reveal one quiescent nested-agent transcript as an ordinary user task.
+    ///
+    /// Agent lifecycle ownership and quiescence are validated by the Worker
+    /// Kernel before this EventStore-only visibility mutation. Immutable
+    /// lineage remains in agent coordination storage; session fork ancestry is
+    /// deliberately untouched. A same-database receipt makes replay after a
+    /// cross-store outbox crash return the already promoted transcript instead
+    /// of mistaking it for an arbitrary ordinary session.
+    pub(crate) fn promote_agent_session(&self, session_id: &str) -> Result<SessionRow> {
+        self.with_global_write_lock(|| {
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let session = SessionRepo::get_by_id(&tx, session_id)?
+                .ok_or_else(|| EventStoreError::SessionNotFound(session_id.to_owned()))?;
+            let mut tags = serde_json::from_str::<Vec<String>>(&session.tags).map_err(|error| {
+                EventStoreError::InvalidOperation(format!(
+                    "session '{session_id}' has invalid tags: {error}"
+                ))
+            })?;
+            let already_promoted = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_session_promotions WHERE session_id=?1)",
+                [session_id],
+                |row| row.get::<_, bool>(0),
+            )?;
+            let nested = tags.iter().any(|tag| tag == AGENT_SESSION_TAG);
+            if already_promoted && !nested {
+                tx.commit()?;
+                return SessionRepo::get_by_id(&conn, session_id)?
+                    .ok_or_else(|| EventStoreError::SessionNotFound(session_id.to_owned()));
+            }
+            if already_promoted || !nested {
+                return Err(EventStoreError::InvalidOperation(format!(
+                    "session '{session_id}' is not a nested agent transcript"
+                )));
+            }
+            tags.retain(|tag| tag != AGENT_SESSION_TAG);
+            let tags_json = serde_json::to_string(&tags).map_err(|error| {
+                EventStoreError::InvalidOperation(format!(
+                    "serialize promoted session tags: {error}"
+                ))
+            })?;
+            tx.execute(
+                "UPDATE sessions SET tags=?2,last_activity_at=?3 WHERE id=?1",
+                rusqlite::params![session_id, tags_json, chrono::Utc::now().to_rfc3339()],
+            )?;
+            tx.execute(
+                "INSERT INTO agent_session_promotions(session_id,promoted_at) VALUES (?1,?2)",
+                rusqlite::params![session_id, chrono::Utc::now().to_rfc3339()],
+            )?;
+            tx.commit()?;
+            SessionRepo::get_by_id(&conn, session_id)?
+                .ok_or_else(|| EventStoreError::SessionNotFound(session_id.to_owned()))
         })
     }
 

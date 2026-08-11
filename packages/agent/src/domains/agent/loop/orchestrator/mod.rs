@@ -96,6 +96,9 @@
 //!   and owns parent/head threading; persistence calls return after commit.
 //! - Active runs must hold a registry permit and remove their active session
 //!   entry on drop.
+//! - Reusable-agent delivery reservations, active runs, and lifecycle blocks
+//!   share one run-registry critical section. Close/configure/role-upgrade/
+//!   promotion therefore cannot cross an auxiliary provider-run boundary.
 //! - Streaming journal recovery runs before accepting new connections.
 //!
 //! ## Test Ownership

@@ -21,9 +21,10 @@ pub(crate) fn surface_context_primer(
         };
         format!(
             "Use only the typed tools supplied in this request. Use worker_discover when a dynamic \
-             capability is omitted.{direct_invocation} Use Engine Steward for worker diagnosis \
-             and Worker Forge for worker changes; permanent deletion, secret rotation, and \
-             engine-wide stop remain authenticated dashboard actions."
+             capability is omitted.{direct_invocation} For worker diagnosis or changes, discover \
+             a current healthy diagnostic or authoring capability instead of assuming that an \
+             optional worker is installed; permanent deletion, secret rotation, and engine-wide \
+             stop remain authenticated dashboard actions."
         )
     } else {
         "Use only the typed tools supplied in this request.".to_owned()

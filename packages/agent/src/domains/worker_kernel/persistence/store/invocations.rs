@@ -3,82 +3,12 @@
 use super::*;
 use rusqlite::TransactionBehavior;
 
+mod cancellation;
+pub(super) use cancellation::cancel_worker_invocations_in_tx;
+#[cfg(test)]
+mod test_support;
+
 impl WorkerStore {
-    #[cfg(test)]
-    pub fn begin_invocation(
-        &self,
-        worker_id: &str,
-        worker_version: &str,
-        input: &Value,
-        idempotency_key: &str,
-        trace_id: &str,
-        causal_depth: u32,
-        trigger_kind: &str,
-        origin_session_id: Option<&str>,
-    ) -> Result<(InvocationRecord, bool), String> {
-        self.begin_invocation_with_model_context(
-            worker_id,
-            worker_version,
-            input,
-            idempotency_key,
-            trace_id,
-            causal_depth,
-            trigger_kind,
-            origin_session_id,
-            WorkerInteractionMode::Foreground,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-    }
-
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub fn begin_invocation_with_context(
-        &self,
-        worker_id: &str,
-        worker_version: &str,
-        input: &Value,
-        idempotency_key: &str,
-        trace_id: &str,
-        causal_depth: u32,
-        trigger_kind: &str,
-        origin_session_id: Option<&str>,
-        interaction_mode: WorkerInteractionMode,
-        model_tool_invocation_id: Option<&str>,
-        parent_worker_invocation_id: Option<&str>,
-        parent_worker_tool_ordinal: Option<u32>,
-        retry_of_invocation_id: Option<&str>,
-        max_sibling_invocations: Option<u32>,
-    ) -> Result<(InvocationRecord, bool), String> {
-        self.begin_invocation_with_model_context(
-            worker_id,
-            worker_version,
-            input,
-            idempotency_key,
-            trace_id,
-            causal_depth,
-            trigger_kind,
-            origin_session_id,
-            interaction_mode,
-            model_tool_invocation_id,
-            parent_worker_invocation_id,
-            parent_worker_tool_ordinal,
-            retry_of_invocation_id,
-            None,
-            None,
-            None,
-            None,
-            max_sibling_invocations,
-        )
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn begin_invocation_with_model_context(
         &self,
@@ -93,6 +23,7 @@ impl WorkerStore {
         interaction_mode: WorkerInteractionMode,
         model_tool_invocation_id: Option<&str>,
         parent_worker_invocation_id: Option<&str>,
+        parent_agent_execution_id: Option<&str>,
         parent_worker_tool_ordinal: Option<u32>,
         retry_of_invocation_id: Option<&str>,
         requested_model: Option<&str>,
@@ -100,6 +31,8 @@ impl WorkerStore {
         effective_model: Option<&str>,
         effective_reasoning_level: Option<&str>,
         max_sibling_invocations: Option<u32>,
+        max_child_executions: u32,
+        max_execution_nodes: u32,
     ) -> Result<(InvocationRecord, bool), String> {
         validate_runtime_identifier(idempotency_key, "idempotency key", 256)?;
         validate_runtime_identifier(trace_id, "trace id", 256)?;
@@ -112,6 +45,15 @@ impl WorkerStore {
         }
         if let Some(invocation_id) = parent_worker_invocation_id {
             validate_runtime_identifier(invocation_id, "parent worker invocation id", 256)?;
+        }
+        if let Some(execution_id) = parent_agent_execution_id {
+            validate_runtime_identifier(execution_id, "parent agent execution id", 256)?;
+        }
+        if parent_worker_invocation_id.is_some() && parent_agent_execution_id.is_some() {
+            return Err(
+                "worker admission must have exactly one immediate worker or agent execution parent"
+                    .to_owned(),
+            );
         }
         if let Some(invocation_id) = retry_of_invocation_id {
             validate_runtime_identifier(invocation_id, "retry invocation id", 256)?;
@@ -280,6 +222,23 @@ impl WorkerStore {
             }
             return Err(format!("queue worker invocation: {error}"));
         }
+        // INVARIANT: every newly admitted worker run enters the same causal
+        // topology as agent assignments before the admission transaction can
+        // commit. Historical rows are backfilled only from exact parent edges.
+        super::agent_coordination::insert_worker_execution_node(
+            &transaction,
+            &invocation_id,
+            parent_worker_invocation_id,
+            parent_agent_execution_id,
+            None,
+            effective_origin.as_deref(),
+            trace_id,
+            causal_depth,
+            parent_worker_tool_ordinal,
+            &created_at,
+            max_child_executions,
+            max_execution_nodes,
+        )?;
         if let Some(model_tool_invocation_id) = model_tool_invocation_id {
             transaction
                 .execute(
@@ -348,7 +307,14 @@ impl WorkerStore {
         let changed = transaction
             .execute(
                 "UPDATE worker_invocations SET status='running',started_at=?2
-                 WHERE invocation_id=?1 AND status='queued'",
+                 WHERE invocation_id=?1 AND status='queued'
+                   AND NOT EXISTS(
+                    SELECT 1
+                    FROM execution_nodes node
+                    JOIN coordination_trace_states trace_state
+                      ON trace_state.trace_id=node.trace_id AND trace_state.state='paused'
+                    WHERE node.worker_invocation_id=worker_invocations.invocation_id
+                   )",
                 params![invocation_id, started_at],
             )
             .map_err(|error| format!("mark worker invocation running: {error}"))?;
@@ -471,11 +437,17 @@ impl WorkerStore {
         transaction
             .execute(
                 "UPDATE worker_invocations
-                 SET status='queued',started_at=NULL,agent_session_id=NULL
+                 SET status='queued',started_at=NULL
                  WHERE invocation_id=?1 AND status='running'",
                 [invocation_id],
             )
             .map_err(|error| format!("requeue interrupted worker invocation: {error}"))?;
+        super::agent_coordination::interrupt_direct_worker_assignment_in_tx(
+            &transaction,
+            invocation_id,
+            reason,
+            &interrupted_at,
+        )?;
         transaction
             .execute(
                 "UPDATE worker_dispatches SET state='queued'
@@ -531,6 +503,7 @@ impl WorkerStore {
             .map_err(|error| format!("count interrupted worker attempts: {error}"))
     }
 
+    #[cfg(test)]
     pub fn set_agent_session_id(
         &self,
         invocation_id: &str,
@@ -602,6 +575,13 @@ impl WorkerStore {
             )
             .map_err(|error| format!("cancel worker invocation: {error}"))?;
         if changed == 1 {
+            super::agent_coordination::terminalize_direct_worker_assignment_in_tx(
+                &transaction,
+                invocation_id,
+                AgentAssignmentStatus::Cancelled,
+                reason,
+                &completed_at,
+            )?;
             transaction
                 .execute(
                     "UPDATE worker_attempts SET status='cancelled',completed_at=?2,error=?3
@@ -735,6 +715,13 @@ impl WorkerStore {
             .prepare(&format!(
                 "{} JOIN workers w ON w.worker_id=worker_invocations.worker_id
                      WHERE worker_invocations.status='queued' AND w.enabled=1 AND w.retired=0
+                       AND NOT EXISTS(
+                         SELECT 1
+                         FROM execution_nodes node
+                         JOIN coordination_trace_states trace_state
+                           ON trace_state.trace_id=node.trace_id AND trace_state.state='paused'
+                         WHERE node.worker_invocation_id=worker_invocations.invocation_id
+                       )
                        AND (
                          worker_invocations.not_before IS NULL
                          OR worker_invocations.not_before<=?1
@@ -867,134 +854,4 @@ impl WorkerStore {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| error.to_string())
     }
-}
-
-pub(super) fn cancel_worker_invocations_in_tx(
-    transaction: &rusqlite::Transaction<'_>,
-    worker_id: &str,
-    reason: &str,
-) -> Result<Vec<String>, String> {
-    let invocations = {
-        let mut statement = transaction
-            .prepare(
-                "SELECT invocation_id,worker_version,origin_session_id,trace_id,
-                        causal_depth,interaction_mode,parent_worker_invocation_id,trigger_kind
-                 FROM worker_invocations
-                 WHERE worker_id=?1 AND status IN ('queued','running')
-                 ORDER BY causal_depth,created_at,invocation_id",
-            )
-            .map_err(|error| format!("prepare worker-wide invocation cancellation: {error}"))?;
-        statement
-            .query_map([worker_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, u32>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, String>(7)?,
-                ))
-            })
-            .map_err(|error| format!("query worker-wide invocation cancellation: {error}"))?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|error| format!("decode worker-wide invocation cancellation: {error}"))?
-    };
-    let completed_at = chrono::Utc::now().to_rfc3339();
-    let mut cancelled = Vec::with_capacity(invocations.len());
-    for (
-        invocation_id,
-        worker_version,
-        origin_session_id,
-        trace_id,
-        causal_depth,
-        interaction_mode,
-        parent_worker_invocation_id,
-        trigger_kind,
-    ) in invocations
-    {
-        let changed = transaction
-            .execute(
-                "UPDATE worker_invocations SET status='cancelled',error=?2,completed_at=?3
-                 WHERE invocation_id=?1 AND status IN ('queued','running')",
-                params![invocation_id, reason, completed_at],
-            )
-            .map_err(|error| {
-                format!("cancel worker invocation during lifecycle change: {error}")
-            })?;
-        if changed != 1 {
-            continue;
-        }
-        transaction
-            .execute(
-                "UPDATE worker_attempts SET status='cancelled',completed_at=?2,error=?3
-                 WHERE invocation_id=?1 AND status='running'",
-                params![invocation_id, completed_at, reason],
-            )
-            .map_err(|error| format!("cancel lifecycle worker attempt: {error}"))?;
-        transaction
-            .execute(
-                "UPDATE worker_dispatches SET state='cancelled',completed_at=?2
-                 WHERE target_invocation_id=?1 AND state IN ('queued','running')",
-                params![invocation_id, completed_at],
-            )
-            .map_err(|error| format!("cancel lifecycle worker dispatch: {error}"))?;
-        transaction
-            .execute(
-                "INSERT INTO worker_inbox(
-                    inbox_id,invocation_id,worker_id,severity,result_json,created_at
-                 ) VALUES (?1,?2,?3,'info',?4,?5)",
-                params![
-                    format!("worker_inbox_{}", uuid::Uuid::now_v7()),
-                    invocation_id,
-                    worker_id,
-                    serde_json::to_string(&json!({"status":"cancelled","reason":reason}))
-                        .map_err(|error| error.to_string())?,
-                    completed_at,
-                ],
-            )
-            .map_err(|error| format!("record lifecycle worker cancellation: {error}"))?;
-        insert_audit(
-            transaction,
-            worker_id,
-            "invocation_cancelled",
-            &json!({"invocationId":invocation_id,"reason":reason}),
-        )?;
-        insert_run_event(
-            transaction,
-            &invocation_id,
-            WorkerRunStage::Cancelled,
-            "Worker invocation cancelled",
-            &completed_at,
-        )?;
-        super::agent_delivery_outbox::insert_terminal_outbox(
-            transaction,
-            &invocation_id,
-            worker_id,
-            &json!({
-                "invocationId":invocation_id,
-                "workerId":worker_id,
-                "workerVersion":worker_version,
-                "status":"cancelled",
-                "evidence":{"status":"cancelled","reason":reason},
-                "originSessionId":origin_session_id,
-                "traceId":trace_id,
-                "causalDepth":causal_depth,
-                "interactionMode":interaction_mode,
-                "parentWorkerInvocationId":parent_worker_invocation_id,
-                "triggerKind":trigger_kind,
-                "automaticDeliveryEligible":
-                    super::agent_delivery_outbox::automatic_agent_delivery_eligible(
-                        origin_session_id.as_deref(),
-                        &interaction_mode,
-                        parent_worker_invocation_id.as_deref(),
-                        &trigger_kind,
-                    ),
-            }),
-            &completed_at,
-        )?;
-        cancelled.push(invocation_id);
-    }
-    Ok(cancelled)
 }

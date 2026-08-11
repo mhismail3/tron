@@ -69,6 +69,8 @@ extension SessionContextSheet {
     var managementRows: some View {
         VStack(spacing: 8) {
             agentContextSection
+            agentsSection
+                .onAppear { activateAgentRelationsLane() }
             backgroundActivitySection
                 .onAppear { activateAgentUpdatesLane() }
             workerActivitySection
@@ -77,6 +79,24 @@ extension SessionContextSheet {
             forkAction
             technicalDetailsSection
         }
+    }
+
+    var agentsSection: some View {
+        let active = agentRelationTotals?.active
+            ?? relatedAgents.filter { SessionAgentsPresentation.isActive(status: $0.status) }.count
+        let related = agentRelationTotals?.related ?? relatedAgents.count
+        return highLevelRow(
+            title: "Agents",
+            detail: agentsDescription,
+            symbol: "person.3.sequence.fill",
+            accent: active > 0 ? .tronPurple : .tronCyan,
+            trailingText: related > 0 ? "\(active) active · \(related) related" : nil,
+            isLoading: isLoadingAgentRelations && !hasLoadedAgentRelationsSnapshot,
+            isEnabled: true
+        ) {
+            showAgents = true
+        }
+        .accessibilityHint("Opens child agents, related agents, their work, conversations, results, and management controls")
     }
 
     var agentContextSection: some View {
@@ -206,6 +226,26 @@ extension SessionContextSheet {
         return agentUpdates.isEmpty && agentWaits.isEmpty
             ? "No background deliveries or waits"
             : "Review completed deliveries and waits"
+    }
+
+    private var agentsDescription: String {
+        if !supportsAgentCoordination {
+            return isConnected
+                ? "Requires a server with reusable agent management"
+                : "Available after reconnection to a supported server"
+        }
+        if let agentRelationsLoadError {
+            return hasLoadedAgentRelationsSnapshot
+                ? "Showing retained agents; refresh is currently unavailable. \(agentRelationsLoadError)"
+                : "Agent management is unavailable. Open for details or retry."
+        }
+        if isLoadingAgentRelations, !hasLoadedAgentRelationsSnapshot {
+            return "Loading child agents and agent conversations"
+        }
+        if relatedAgents.isEmpty {
+            return "No child agents or agent conversations"
+        }
+        return "Children, contacts, assignments, messages, results, and controls"
     }
 
     private var workerActivityDescription: String {

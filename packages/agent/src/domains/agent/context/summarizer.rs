@@ -159,6 +159,7 @@ impl Summarizer for KeywordSummarizer {
         _context: &SummaryContext,
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
         let mut user_messages = Vec::new();
+        let mut agent_messages = Vec::new();
         let mut files_modified = Vec::new();
         let mut model_tool_names = Vec::new();
 
@@ -168,6 +169,11 @@ impl Summarizer for KeywordSummarizer {
                     let text = user_content_text(content);
                     if !text.is_empty() {
                         user_messages.push(truncate(&text, 200));
+                    }
+                }
+                Message::Agent { content, .. } => {
+                    if !content.text.trim().is_empty() {
+                        agent_messages.push(truncate(&content.text, 200));
                     }
                 }
                 Message::Assistant { content, .. } => {
@@ -199,14 +205,19 @@ impl Summarizer for KeywordSummarizer {
             }
         }
 
-        let narrative = if user_messages.is_empty() {
+        let narrative = if user_messages.is_empty() && agent_messages.is_empty() {
             format!("({} messages summarized)", messages.len())
         } else {
             let mut parts = Vec::new();
-            parts.push(format!("The user made {} requests.", user_messages.len()));
-            parts.push(format!("Key requests: {}", user_messages.join("; ")));
+            if !user_messages.is_empty() {
+                parts.push(format!("The user made {} requests.", user_messages.len()));
+                parts.push(format!("Key requests: {}", user_messages.join("; ")));
+            }
             if !model_tool_names.is_empty() {
                 parts.push(format!("Tools used: {}", model_tool_names.join(", ")));
+            }
+            if !agent_messages.is_empty() {
+                parts.push(format!("Agent coordination: {}", agent_messages.join("; ")));
             }
             if !files_modified.is_empty() {
                 parts.push(format!("Files touched: {}", files_modified.join(", ")));
@@ -233,6 +244,28 @@ fn project_messages(messages: &[Message]) -> Vec<Value> {
         match message {
             Message::User { content, .. } => {
                 push_projection(&mut projected, "user", &user_content_text(content));
+            }
+            Message::Agent { content, .. } => {
+                // Context-summary hooks predate first-class agent messages.
+                // Preserve their already-published closed `user|assistant|tool`
+                // input contract while making provenance explicit in text;
+                // treating this as an ordinary user request would lose the
+                // priority boundary, while adding a new enum value would make
+                // every retained active summary worker reject compaction.
+                let source = content
+                    .source_name
+                    .as_deref()
+                    .unwrap_or(content.source_agent_id.as_str());
+                push_projection(
+                    &mut projected,
+                    "user",
+                    &format!(
+                        "[Agent coordination: {} from {}] {}",
+                        content.kind.as_str(),
+                        source,
+                        content.text
+                    ),
+                );
             }
             Message::Assistant { content, .. } => {
                 for block in content {
@@ -552,6 +585,31 @@ mod tests {
         assert!(!projection.contains("private chain"));
         assert!(!projection.contains("do-not-project"));
         assert!(!projection.contains("base64-binary"));
+    }
+
+    #[test]
+    fn agent_coordination_preserves_provenance_without_breaking_retained_summary_hooks() {
+        let messages = vec![Message::Agent {
+            content: crate::shared::protocol::messages::AgentMessageContent {
+                message_id: "message-summary-agent".to_owned(),
+                source_agent_id: "agent-reviewer".to_owned(),
+                source_name: Some("Reviewer".to_owned()),
+                kind: crate::shared::protocol::messages::AgentMessageKind::Request,
+                authority: crate::shared::protocol::messages::AgentMessageAuthority::Peer,
+                text: "Check the recovery invariant.".to_owned(),
+                assignment_id: None,
+                reply_to: None,
+            },
+            timestamp: None,
+        }];
+
+        let projection = project_messages(&messages);
+
+        assert_eq!(projection[0]["role"], "user");
+        assert_eq!(
+            projection[0]["text"],
+            "[Agent coordination: request from Reviewer] Check the recovery invariant."
+        );
     }
 
     // -- User content helpers --

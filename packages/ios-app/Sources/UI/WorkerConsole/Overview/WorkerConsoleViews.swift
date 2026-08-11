@@ -181,6 +181,12 @@ private struct WorkerConsolePage: View {
             .sheet(item: $selectedPrimitiveTool) { tool in
                 EnginePrimitiveToolDetailSheet(tool: tool)
             }
+            .sheet(isPresented: selectedRoleReviewPresented) {
+                WorkerRoleReviewProposalSheet(
+                    viewModel: viewModel,
+                    repository: repository
+                )
+            }
             .sheet(item: $selectedRun) { run in
                 WorkerRunDetailSheet(
                     run: run,
@@ -576,6 +582,15 @@ private struct WorkerConsolePage: View {
     @ViewBuilder
     private var workersContent: some View {
         VStack(alignment: .leading, spacing: 18) {
+            if shouldShowAgentRoleReviews {
+                WorkerConsoleGroup(
+                    title: "Review agent roles",
+                    detail: "Legacy agent runners remain callable, but reusable-role discovery requires a reviewed immutable version with an explicit enabled or disabled agentRole declaration."
+                ) {
+                    agentRoleReviewContent
+                }
+            }
+
             WorkerConsoleGroup(
                 title: "General workers",
                 detail: "Direct chat tools can be called from an ordinary session. Delegated workers run only through another worker, trigger, engine, or client integration."
@@ -629,6 +644,234 @@ private struct WorkerConsolePage: View {
         }
     }
 
+    private var shouldShowAgentRoleReviews: Bool {
+        viewModel.supportsAgentRoleReview
+            || !viewModel.workersNeedingAgentRoleReview.isEmpty
+            || !viewModel.roleReviewItems.isEmpty
+            || !viewModel.roleReviewProposals.isEmpty
+    }
+
+    private var agentRoleReviewHistory: [WorkerRoleReviewProposalDTO] {
+        let currentProposalIds = Set(viewModel.roleReviewItems.compactMap(\.proposal?.proposalId))
+        return viewModel.roleReviewProposals.filter {
+            !currentProposalIds.contains($0.proposalId)
+        }
+    }
+
+    @ViewBuilder
+    private var agentRoleReviewContent: some View {
+        if !viewModel.supportsAgentRoleReview {
+            WorkerConsoleInlineEmptyState(
+                symbol: "server.rack",
+                text: "This server identifies workers that need role review, but does not advertise the agent_role_review.v1 management capability. Update or repair the server to review them here."
+            )
+            workerRows(viewModel.workersNeedingAgentRoleReview)
+        } else {
+            if let snapshot = viewModel.roleReviewSnapshot {
+                roleReviewerCard(snapshot.reviewer)
+            } else if viewModel.isLoadingRoleReviews {
+                WorkerConsoleLoadingState(title: "Loading role reviews")
+            } else if viewModel.roleReviewError == nil {
+                WorkerConsoleInlineEmptyState(
+                    symbol: connectionState.isConnected ? "arrow.clockwise" : "network.slash",
+                    text: connectionState.isConnected
+                        ? "Role-review state will appear after the next server refresh."
+                        : "Showing no cached role-review state. Reconnect to load it."
+                )
+            }
+
+            if let error = viewModel.roleReviewError {
+                VStack(alignment: .leading, spacing: 9) {
+                    WorkerConsoleInlineEmptyState(
+                        symbol: "exclamationmark.triangle",
+                        text: error
+                    )
+                    if connectionState.isConnected {
+                        Button {
+                            Task {
+                                await viewModel.refreshRoleReviews(
+                                    repository: repository,
+                                    connectionState: connectionState
+                                )
+                            }
+                        } label: {
+                            Label("Retry role reviews", systemImage: "arrow.clockwise")
+                                .font(TronTypography.sans(
+                                    size: TronTypography.sizeBodySM,
+                                    weight: .semibold
+                                ))
+                                .foregroundStyle(.tronWarning)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .sectionFill(
+                                    .tronWarning,
+                                    cornerRadius: 10,
+                                    subtle: true,
+                                    interactive: true
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            if let snapshot = viewModel.roleReviewSnapshot {
+                if snapshot.items.isEmpty {
+                    WorkerConsoleInlineEmptyState(
+                        symbol: "checkmark.seal",
+                        text: "No active worker versions currently need an agent-role decision."
+                    )
+                } else {
+                    LazyVStack(spacing: 10) {
+                        ForEach(snapshot.items) { item in
+                            WorkerRoleReviewQueueCard(
+                                item: item,
+                                isBusy: viewModel.isMutatingRoleReview,
+                                onStart: {
+                                    Task {
+                                        await viewModel.startRoleReview(
+                                            for: item,
+                                            repository: repository,
+                                            connectionState: connectionState
+                                        )
+                                    }
+                                },
+                                onInspect: {
+                                    guard let proposal = item.proposal else { return }
+                                    Task {
+                                        await viewModel.inspectRoleReview(
+                                            proposal,
+                                            workerId: item.workerId,
+                                            repository: repository,
+                                            connectionState: connectionState
+                                        )
+                                    }
+                                },
+                                onWorkerDetails: {
+                                    Task {
+                                        await viewModel.select(
+                                            item.workerId,
+                                            repository: repository
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if snapshot.queueTruncated {
+                    WorkerConsoleInlineEmptyState(
+                        symbol: "ellipsis.circle",
+                        text: "Showing \(snapshot.items.count) of \(snapshot.queueTotal) workers that need review."
+                    )
+                }
+                if snapshot.queueNextOffset != nil {
+                    roleReviewLoadMoreButton(
+                        title: "Load more workers",
+                        isLoading: viewModel.isLoadingMoreRoleReviewQueue
+                    ) {
+                        await viewModel.loadMoreRoleReviewQueue(
+                            repository: repository,
+                            connectionState: connectionState
+                        )
+                    }
+                }
+
+                if !agentRoleReviewHistory.isEmpty {
+                    WorkerConsoleSectionHeader(
+                        title: "Recent proposals",
+                        detail: "Durable review outcomes, newest first. Current queue proposals are shown only once above."
+                    )
+                    LazyVStack(spacing: 9) {
+                        ForEach(agentRoleReviewHistory) { proposal in
+                            WorkerRoleReviewHistoryCard(
+                                proposal: proposal,
+                                targetName: viewModel.workerName(for: proposal.targetWorkerId),
+                                onInspect: {
+                                    Task {
+                                        await viewModel.inspectRoleReview(
+                                            proposal,
+                                            repository: repository,
+                                            connectionState: connectionState
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                if snapshot.nextOffset != nil {
+                    roleReviewLoadMoreButton(
+                        title: "Load older proposals",
+                        isLoading: viewModel.isLoadingMoreRoleReviews
+                    ) {
+                        await viewModel.loadOlderRoleReviews(
+                            repository: repository,
+                            connectionState: connectionState
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func roleReviewerCard(_ reviewer: WorkerRoleReviewerDTO) -> some View {
+        let color: Color = reviewer.available ? .tronSuccess : .tronWarning
+        let title = reviewer.available ? "Reviewer available" : "Reviewer unavailable"
+        let detail: String = if reviewer.available {
+            [reviewer.workerId, reviewer.workerVersion]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+        } else {
+            reviewer.repairRequirement
+                ?? "Repair or activate a healthy role-review worker before starting a proposal."
+        }
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: reviewer.available ? "checkmark.seal" : "wrench.and.screwdriver")
+                .foregroundStyle(color)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                Text(detail)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .sectionFill(color, cornerRadius: 10, subtle: true, interactive: false)
+    }
+
+    private func roleReviewLoadMoreButton(
+        title: String,
+        isLoading: Bool,
+        action: @escaping () async -> Void
+    ) -> some View {
+        Button {
+            Task { await action() }
+        } label: {
+            HStack(spacing: 7) {
+                if isLoading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                Text(title)
+            }
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+            .foregroundStyle(.tronWarning)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .sectionFill(.tronWarning, cornerRadius: 10, subtle: true, interactive: true)
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoading || !connectionState.isConnected)
+    }
+
     private func workerRows(_ workers: [WorkerSummaryDTO]) -> some View {
         LazyVStack(spacing: 10) {
             ForEach(workers) { worker in
@@ -657,8 +900,16 @@ private struct WorkerConsolePage: View {
         )
     }
 
+    private var selectedRoleReviewPresented: Binding<Bool> {
+        Binding(
+            get: { viewModel.selectedRoleReviewProposal != nil },
+            set: { if !$0 { viewModel.dismissRoleReview() } }
+        )
+    }
+
     private var isPresentingChildSheet: Bool {
         viewModel.selectedWorkerId != nil
+            || viewModel.selectedRoleReviewProposal != nil
             || selectedPrimitiveTool != nil
             || selectedRun != nil
             || selectedInboxItem != nil

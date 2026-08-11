@@ -331,6 +331,7 @@ async fn emit_turn_end_persists_before_broadcasting() {
         Some(&h.counter),
         None,
         None,
+        Some("assignment_usage_a"),
     )
     .unwrap();
 
@@ -348,6 +349,11 @@ async fn emit_turn_end_persists_before_broadcasting() {
         payloads[0].get("tokenUsage").is_none(),
         "turn_end without provider usage must not persist synthetic zero-token usage"
     );
+    assert_eq!(
+        payloads[0]["agentAssignmentId"], "assignment_usage_a",
+        "reusable-agent usage must carry its exact durable assignment identity"
+    );
+    assert_eq!(payloads[0]["latency"], 42);
     assert_eq!(
         persisted[0], broadcast_seq,
         "durable and live turn end must share one sequence"
@@ -371,6 +377,7 @@ async fn emit_turn_end_skips_broadcast_on_persist_failure() {
         25_000,
         "m",
         Some(&h.counter),
+        None,
         None,
         None,
     )

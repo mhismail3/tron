@@ -154,6 +154,12 @@ pub struct RunContext {
     /// direct tool invocation so an agent hop cannot reset the depth ceiling.
     #[serde(skip)]
     pub worker_causal_depth: u32,
+    /// Consecutive engine-driven coordination wakes since the latest
+    /// authenticated user/operator instruction. Provider tool calls preserve
+    /// this value so agent-to-agent sends can advance the autonomy guard
+    /// independently from mixed execution topology depth.
+    #[serde(skip)]
+    pub autonomous_wake_hop: u32,
     /// Worker that originated an agent-runner session. Semantic hook routing
     /// uses this only to avoid recursively invoking a worker as its own policy.
     #[serde(skip)]
@@ -162,6 +168,25 @@ pub struct RunContext {
     /// worker tools preserve it as their canonical parent.
     #[serde(skip)]
     pub origin_worker_invocation_id: Option<String>,
+    /// Stable reusable-agent identity for this run.
+    #[serde(skip)]
+    pub agent_id: Option<String>,
+    /// Current durable reusable-agent assignment.
+    #[serde(skip)]
+    pub agent_assignment_id: Option<String>,
+    /// Current mixed-topology execution node.
+    #[serde(skip)]
+    pub agent_execution_id: Option<String>,
+    /// Immutable exact function-id grant admitted for this assignment.
+    #[serde(skip)]
+    pub delegated_function_grant: Option<Vec<String>>,
+    /// Immutable effective assignment limits.
+    #[serde(skip)]
+    pub agent_limits: Option<serde_json::Value>,
+    /// Immutable canonical workspace-relative write scopes for this reusable
+    /// assignment. Absence means this is not a reusable assignment.
+    #[serde(skip)]
+    pub agent_write_scopes: Option<Vec<String>>,
     /// Exact model tools selected by the immutable agent-runner bundle.
     ///
     /// `None` preserves the migration surface; `Some([])` intentionally

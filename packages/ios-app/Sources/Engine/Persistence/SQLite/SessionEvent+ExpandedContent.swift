@@ -12,6 +12,24 @@ extension SessionEvent {
             guard content.count > 50 else { return nil }
             return String(content.prefix(500))
 
+        case .messageAgent:
+            guard let content = AgentMessageContent(eventPayload: payload) else { return nil }
+            var lines = [
+                String(content.text.prefix(500)),
+                "",
+                "Sender  \(AgentMessagePresentation.sender(content))",
+                "Kind  \(AgentMessagePresentation.label(content.kind))",
+                "Authority  \(AgentMessagePresentation.label(content.authority))",
+                "Message  \(content.messageId)",
+            ]
+            if let assignmentId = content.assignmentId {
+                lines.append("Assignment  \(assignmentId)")
+            }
+            if let replyTo = content.replyTo {
+                lines.append("Reply to  \(replyTo)")
+            }
+            return lines.joined(separator: "\n")
+
         case .messageAssistant:
             var lines: [String] = []
 

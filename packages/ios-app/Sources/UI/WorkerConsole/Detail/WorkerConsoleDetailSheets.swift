@@ -426,8 +426,10 @@ private struct WorkerRunDetailRefreshKey: Equatable {
     let continuity: EngineConnectionContinuity
 }
 
-/// Read-only presentation for a worker child session or the originating chat.
-struct WorkerAuditSessionSheet: View {
+/// Read-only presentation for any authorized session transcript. Worker and
+/// reusable-agent management share this exact audit surface so pagination,
+/// reconstruction, tool rendering, and read-only guarantees cannot drift.
+struct AuditSessionSheet: View {
     @Environment(\.dependencies) private var dependencies
     let sessionId: String
     var title: String = "Worker Session"
@@ -446,3 +448,6 @@ struct WorkerAuditSessionSheet: View {
         .tint(.tronEmerald)
     }
 }
+
+/// Compatibility name retained for worker-owned call sites.
+typealias WorkerAuditSessionSheet = AuditSessionSheet

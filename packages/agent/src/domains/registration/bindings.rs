@@ -58,8 +58,7 @@ where
     definitions
         .into_iter()
         .map(|definition| {
-            let handler =
-                handler_for_operation(operation_key(&definition), deps.clone(), bindings.clone())?;
+            let handler = handler_for_definition(&definition, deps.clone(), bindings.clone())?;
             Ok(DomainFunctionRegistration {
                 definition,
                 handler,
@@ -68,19 +67,30 @@ where
         .collect()
 }
 
-pub(crate) fn handler_for_operation<D>(
-    operation_key: &str,
+fn handler_for_definition<D>(
+    definition: &FunctionDefinition,
     deps: D,
     bindings: Vec<OperationBinding<D>>,
 ) -> crate::engine::Result<Arc<dyn InProcessFunctionHandler>>
 where
     D: Send + Sync + 'static,
 {
+    let full_id = definition.id.as_str();
+    let operation = operation_key(definition);
     let binding = bindings
-        .into_iter()
-        .find(|binding| binding.operation_key == operation_key)
+        .iter()
+        .find(|binding| binding.operation_key == full_id)
+        .or_else(|| {
+            bindings
+                .iter()
+                .find(|binding| binding.operation_key == operation)
+        })
+        .cloned()
         .ok_or_else(|| {
-            EngineError::PolicyViolation(format!("operation key '{operation_key}' is not bound"))
+            EngineError::PolicyViolation(format!(
+                "function '{}' has no handler binding",
+                definition.id
+            ))
         })?;
     Ok(Arc::new(LocalOperationHandler { binding, deps }))
 }
@@ -89,13 +99,12 @@ fn validate_bindings<D>(
     definitions: &[FunctionDefinition],
     bindings: &[OperationBinding<D>],
 ) -> crate::engine::Result<()> {
-    let mut spec_keys = BTreeSet::new();
+    let mut spec_ids = BTreeSet::new();
     for definition in definitions {
-        let operation_key = operation_key(definition);
-        if !spec_keys.insert(operation_key) {
+        if !spec_ids.insert(definition.id.as_str()) {
             return Err(EngineError::PolicyViolation(format!(
-                "duplicate contract operation key '{}'",
-                operation_key
+                "duplicate contract function id '{}'",
+                definition.id
             )));
         }
     }
@@ -108,20 +117,57 @@ fn validate_bindings<D>(
                 binding.operation_key
             )));
         }
-        if !spec_keys.contains(binding.operation_key) {
+        let matches = definitions
+            .iter()
+            .filter(|definition| {
+                if binding.operation_key.contains("::") {
+                    definition.id.as_str() == binding.operation_key
+                } else {
+                    operation_key(definition) == binding.operation_key
+                }
+            })
+            .count();
+        if matches == 0 {
             return Err(EngineError::PolicyViolation(format!(
                 "handler operation key '{}' has no domain contract",
+                binding.operation_key
+            )));
+        }
+        if matches > 1 {
+            return Err(EngineError::PolicyViolation(format!(
+                "handler operation key '{}' is ambiguous; use fully qualified function ids",
                 binding.operation_key
             )));
         }
     }
 
     for definition in definitions {
-        let operation_key = operation_key(definition);
-        if !binding_keys.contains(operation_key) {
+        let full_id = definition.id.as_str();
+        let operation = operation_key(definition);
+        let exact_matches = bindings
+            .iter()
+            .filter(|binding| binding.operation_key == full_id)
+            .count();
+        let matches = if exact_matches > 0 {
+            exact_matches
+        } else {
+            bindings
+                .iter()
+                .filter(|binding| {
+                    !binding.operation_key.contains("::") && binding.operation_key == operation
+                })
+                .count()
+        };
+        if matches == 0 {
             return Err(EngineError::PolicyViolation(format!(
-                "domain contract operation key '{}' has no handler binding",
-                operation_key
+                "domain contract function '{}' has no handler binding",
+                definition.id
+            )));
+        }
+        if matches > 1 {
+            return Err(EngineError::PolicyViolation(format!(
+                "domain contract function '{}' has multiple handler bindings",
+                definition.id
             )));
         }
     }
@@ -236,7 +282,7 @@ mod tests {
         };
         assert!(
             err.to_string()
-                .contains("domain contract operation key 'two' has no handler binding"),
+                .contains("domain contract function 'dummy::two' has no handler binding"),
             "unexpected error: {err}"
         );
     }
@@ -256,5 +302,34 @@ mod tests {
                 .contains("handler operation key 'two' has no domain contract"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn fully_qualified_bindings_disambiguate_shared_operation_names() {
+        let definitions = ["alpha::inspect", "beta::inspect"]
+            .into_iter()
+            .map(|function_id| {
+                FunctionContract::new(function_id, "dummy", EffectClass::PureRead, RiskLevel::Low)
+                    .build()
+                    .expect("valid test function")
+            })
+            .collect::<Vec<_>>();
+        let ambiguous = match function_registrations(
+            definitions.clone(),
+            DummyDeps,
+            vec![binding("inspect")],
+        ) {
+            Ok(_) => panic!("ambiguous short binding must be rejected"),
+            Err(error) => error,
+        };
+        assert!(ambiguous.to_string().contains("is ambiguous"));
+
+        let registrations = function_registrations(
+            definitions,
+            DummyDeps,
+            vec![binding("alpha::inspect"), binding("beta::inspect")],
+        )
+        .expect("fully qualified bindings are exact");
+        assert_eq!(registrations.len(), 2);
     }
 }

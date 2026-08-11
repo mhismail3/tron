@@ -21,12 +21,20 @@ final class WorkerConsoleViewModel {
     var attention: [WorkerInboxItemDTO] = []
     var selectedResults: [WorkerInboxItemDTO] = []
     var webhookCredential: WorkerWebhookCredentialDTO?
+    var roleReviewSnapshot: WorkerRoleReviewListDTO?
+    var selectedRoleReviewProposal: WorkerRoleReviewProposalDTO?
+    var selectedRoleReviewWorkerId: String?
     var isRefreshing = false
     var isLoadingSelection = false
     var isMutating = false
     var isLoadingMoreActivity = false
     var isLoadingMoreResults = false
     var isLoadingMoreScheduled = false
+    var isLoadingRoleReviews = false
+    var isLoadingMoreRoleReviews = false
+    var isLoadingMoreRoleReviewQueue = false
+    var isLoadingRoleReviewProposal = false
+    var isMutatingRoleReview = false
     var hasLoaded = false
     private(set) var hasLoadedActivity = false
     private(set) var hasLoadedResults = false
@@ -34,6 +42,7 @@ final class WorkerConsoleViewModel {
     var stopAll = false
     var lastError: String?
     var monitoringError: String?
+    var roleReviewError: String?
     private(set) var activityRunsNextOffset: UInt64?
     private(set) var activityResultsNextOffset: UInt64?
     private(set) var scheduledWorkNextOffset: UInt64?
@@ -59,6 +68,7 @@ final class WorkerConsoleViewModel {
     var generalWorkers: [WorkerSummaryDTO] {
         activeWorkers.filter {
             architecture(for: $0.workerId)?.hasIntegrationBoundary != true
+                && architecture(for: $0.workerId)?.needsAgentRoleReview != true
         }
     }
 
@@ -67,6 +77,17 @@ final class WorkerConsoleViewModel {
     var integratedWorkers: [WorkerSummaryDTO] {
         activeWorkers.filter {
             architecture(for: $0.workerId)?.hasIntegrationBoundary == true
+                && architecture(for: $0.workerId)?.needsAgentRoleReview != true
+        }
+    }
+
+    /// Legacy agent runners whose active immutable bundle omitted the explicit
+    /// enabled/disabled reusable-role decision. They remain directly runnable
+    /// but are isolated into one review queue instead of duplicated in the
+    /// general or integrated inventories.
+    var workersNeedingAgentRoleReview: [WorkerSummaryDTO] {
+        activeWorkers.filter {
+            architecture(for: $0.workerId)?.needsAgentRoleReview == true
         }
     }
 
@@ -127,6 +148,18 @@ final class WorkerConsoleViewModel {
 
     var nativeCapabilities: [String] {
         engineSnapshot?.nativeCapabilities ?? []
+    }
+
+    var supportsAgentRoleReview: Bool {
+        nativeCapabilities.contains("agent_role_review.v1")
+    }
+
+    var roleReviewItems: [WorkerRoleReviewItemDTO] {
+        roleReviewSnapshot?.items ?? []
+    }
+
+    var roleReviewProposals: [WorkerRoleReviewProposalDTO] {
+        roleReviewSnapshot?.proposals ?? []
     }
 
     var primitiveToolGroups: [EnginePrimitiveGroup] {
@@ -229,7 +262,7 @@ final class WorkerConsoleViewModel {
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState
     ) async {
-        guard !hasLoaded else { return }
+        guard !hasLoaded || (supportsAgentRoleReview && roleReviewSnapshot == nil) else { return }
         await refreshSummary(repository: repository, connectionState: connectionState)
     }
 
@@ -303,6 +336,11 @@ final class WorkerConsoleViewModel {
                       projectionTicket == projectionGeneration else { return }
                 apply(snapshot)
                 hasLoaded = true
+                await refreshRoleReviewsIfSupported(
+                    repository: repository,
+                    connectionState: connectionState,
+                    projectionTicket: projectionTicket
+                )
             case .scheduled:
                 let scheduledRequest = Task { @MainActor in
                     try await repository.scheduledWork(limit: 50, offset: nil)
@@ -418,6 +456,12 @@ final class WorkerConsoleViewModel {
         engineSnapshot = snapshot
         workers = snapshot.workers
         stopAll = snapshot.dispatchStopped
+        if !(snapshot.nativeCapabilities ?? []).contains("agent_role_review.v1") {
+            roleReviewSnapshot = nil
+            selectedRoleReviewProposal = nil
+            selectedRoleReviewWorkerId = nil
+            roleReviewError = nil
+        }
     }
 
     /// Retains cached projections while navigating between top-level pages,
@@ -448,6 +492,11 @@ final class WorkerConsoleViewModel {
         isLoadingMoreActivity = false
         isLoadingMoreResults = false
         isLoadingMoreScheduled = false
+        isLoadingRoleReviews = false
+        isLoadingMoreRoleReviews = false
+        isLoadingMoreRoleReviewQueue = false
+        isLoadingRoleReviewProposal = false
+        isMutatingRoleReview = false
         isMutating = false
         hasLoaded = false
         hasLoadedActivity = false
@@ -455,6 +504,7 @@ final class WorkerConsoleViewModel {
         hasLoadedScheduled = false
         lastError = nil
         monitoringError = nil
+        roleReviewError = nil
     }
 
     private func clearServerProjection() {
@@ -471,6 +521,9 @@ final class WorkerConsoleViewModel {
         runs = []
         attention = []
         selectedResults = []
+        roleReviewSnapshot = nil
+        selectedRoleReviewProposal = nil
+        selectedRoleReviewWorkerId = nil
         stopAll = false
     }
 
@@ -553,6 +606,294 @@ final class WorkerConsoleViewModel {
             if !ConnectionErrorClassifier.isTransientTransport(error) {
                 lastError = error.localizedDescription
             }
+        }
+    }
+
+    func refreshRoleReviews(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        await refreshRoleReviewsIfSupported(
+            repository: repository,
+            connectionState: connectionState,
+            projectionTicket: projectionGeneration
+        )
+    }
+
+    private func refreshRoleReviewsIfSupported(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState,
+        projectionTicket: Int
+    ) async {
+        guard supportsAgentRoleReview, connectionState.isConnected,
+              !isLoadingRoleReviews else { return }
+        isLoadingRoleReviews = true
+        defer {
+            if projectionTicket == projectionGeneration {
+                isLoadingRoleReviews = false
+            }
+        }
+        do {
+            let page = try await repository.roleReviews(
+                limit: 50,
+                offset: nil,
+                queueLimit: 100,
+                queueOffset: nil
+            )
+            guard !Task.isCancelled,
+                  projectionTicket == projectionGeneration,
+                  supportsAgentRoleReview else { return }
+            roleReviewSnapshot = page
+            synchronizeSelectedRoleReview(with: page)
+            roleReviewError = nil
+        } catch {
+            guard projectionTicket == projectionGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                roleReviewError = error.localizedDescription
+            }
+        }
+    }
+
+    func loadOlderRoleReviews(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard supportsAgentRoleReview, connectionState.isConnected,
+              let snapshot = roleReviewSnapshot,
+              let offset = snapshot.nextOffset,
+              !isLoadingMoreRoleReviews else { return }
+        let projectionTicket = projectionGeneration
+        isLoadingMoreRoleReviews = true
+        defer {
+            if projectionTicket == projectionGeneration {
+                isLoadingMoreRoleReviews = false
+            }
+        }
+        do {
+            let page = try await repository.roleReviews(
+                limit: 50,
+                offset: offset,
+                queueLimit: 100,
+                queueOffset: nil
+            )
+            guard !Task.isCancelled,
+                  projectionTicket == projectionGeneration,
+                  supportsAgentRoleReview else { return }
+            var proposals = snapshot.proposals
+            Self.appendUnique(page.proposals, to: &proposals, id: \.proposalId)
+            let merged = WorkerRoleReviewListDTO(
+                capability: page.capability,
+                reviewer: page.reviewer,
+                items: snapshot.items,
+                queueReturned: UInt64(snapshot.items.count),
+                queueTotal: page.queueTotal,
+                queueTruncated: snapshot.queueNextOffset != nil
+                    || UInt64(snapshot.items.count) < page.queueTotal,
+                queueNextOffset: snapshot.queueNextOffset,
+                proposals: proposals,
+                returned: UInt64(proposals.count),
+                total: page.total,
+                nextOffset: page.nextOffset
+            )
+            roleReviewSnapshot = merged
+            synchronizeSelectedRoleReview(with: merged)
+            roleReviewError = nil
+        } catch {
+            guard projectionTicket == projectionGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                roleReviewError = error.localizedDescription
+            }
+        }
+    }
+
+    func loadMoreRoleReviewQueue(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard supportsAgentRoleReview, connectionState.isConnected,
+              let snapshot = roleReviewSnapshot,
+              let offset = snapshot.queueNextOffset,
+              !isLoadingMoreRoleReviewQueue else { return }
+        let projectionTicket = projectionGeneration
+        isLoadingMoreRoleReviewQueue = true
+        defer {
+            if projectionTicket == projectionGeneration {
+                isLoadingMoreRoleReviewQueue = false
+            }
+        }
+        do {
+            let page = try await repository.roleReviews(
+                limit: 1,
+                offset: nil,
+                queueLimit: 100,
+                queueOffset: offset
+            )
+            guard !Task.isCancelled,
+                  projectionTicket == projectionGeneration,
+                  supportsAgentRoleReview else { return }
+            var items = snapshot.items
+            Self.appendUnique(page.items, to: &items, id: \.workerId)
+            let merged = WorkerRoleReviewListDTO(
+                capability: page.capability,
+                reviewer: page.reviewer,
+                items: items,
+                queueReturned: UInt64(items.count),
+                queueTotal: page.queueTotal,
+                queueTruncated: page.queueTruncated,
+                queueNextOffset: page.queueNextOffset,
+                proposals: snapshot.proposals,
+                returned: snapshot.returned,
+                total: snapshot.total,
+                nextOffset: snapshot.nextOffset
+            )
+            roleReviewSnapshot = merged
+            synchronizeSelectedRoleReview(with: merged)
+            roleReviewError = nil
+        } catch {
+            guard projectionTicket == projectionGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                roleReviewError = error.localizedDescription
+            }
+        }
+    }
+
+    func startRoleReview(
+        for item: WorkerRoleReviewItemDTO,
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard supportsAgentRoleReview, connectionState.isConnected,
+              item.action("start_review")?.allowed == true,
+              !isMutatingRoleReview else { return }
+        selectedRoleReviewWorkerId = item.workerId
+        isMutatingRoleReview = true
+        defer { isMutatingRoleReview = false }
+        do {
+            let proposal = try await repository.startRoleReview(
+                workerId: item.workerId,
+                idempotencyKey: .userAction("worker.role-review.start")
+            )
+            selectedRoleReviewProposal = proposal
+            roleReviewError = nil
+            await refreshRoleReviews(
+                repository: repository,
+                connectionState: connectionState
+            )
+        } catch {
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                roleReviewError = error.localizedDescription
+            }
+        }
+    }
+
+    func inspectRoleReview(
+        _ proposal: WorkerRoleReviewProposalDTO,
+        workerId: String? = nil,
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        selectedRoleReviewProposal = proposal
+        selectedRoleReviewWorkerId = workerId ?? proposal.targetWorkerId
+        guard supportsAgentRoleReview, connectionState.isConnected,
+              proposal.action("inspect")?.allowed == true,
+              !isLoadingRoleReviewProposal else { return }
+        let proposalId = proposal.proposalId
+        let projectionTicket = projectionGeneration
+        isLoadingRoleReviewProposal = true
+        defer {
+            if projectionTicket == projectionGeneration {
+                isLoadingRoleReviewProposal = false
+            }
+        }
+        do {
+            let inspected = try await repository.inspectRoleReview(proposalId)
+            guard !Task.isCancelled,
+                  projectionTicket == projectionGeneration,
+                  selectedRoleReviewProposal?.proposalId == proposalId else { return }
+            selectedRoleReviewProposal = inspected
+            roleReviewError = nil
+        } catch {
+            guard projectionTicket == projectionGeneration else { return }
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                roleReviewError = error.localizedDescription
+            }
+        }
+    }
+
+    func applySelectedRoleReview(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard supportsAgentRoleReview, connectionState.isConnected,
+              let proposal = selectedRoleReviewProposal,
+              proposal.action("apply")?.allowed == true,
+              !isMutatingRoleReview else { return }
+        isMutatingRoleReview = true
+        defer { isMutatingRoleReview = false }
+        do {
+            let result = try await repository.applyRoleReview(
+                proposalId: proposal.proposalId,
+                idempotencyKey: .userAction("worker.role-review.apply")
+            )
+            selectedRoleReviewProposal = result.proposal
+            if let index = workers.firstIndex(where: { $0.workerId == result.worker.workerId }) {
+                workers[index] = result.worker
+            }
+            roleReviewError = nil
+            await refreshSummary(
+                repository: repository,
+                connectionState: connectionState
+            )
+        } catch {
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                roleReviewError = error.localizedDescription
+            }
+        }
+    }
+
+    func rejectSelectedRoleReview(
+        reason: String?,
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard supportsAgentRoleReview, connectionState.isConnected,
+              let proposal = selectedRoleReviewProposal,
+              proposal.action("reject")?.allowed == true,
+              !isMutatingRoleReview else { return }
+        isMutatingRoleReview = true
+        defer { isMutatingRoleReview = false }
+        do {
+            selectedRoleReviewProposal = try await repository.rejectRoleReview(
+                proposalId: proposal.proposalId,
+                reason: reason,
+                idempotencyKey: .userAction("worker.role-review.reject")
+            )
+            roleReviewError = nil
+            await refreshRoleReviews(
+                repository: repository,
+                connectionState: connectionState
+            )
+        } catch {
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                roleReviewError = error.localizedDescription
+            }
+        }
+    }
+
+    func dismissRoleReview() {
+        selectedRoleReviewProposal = nil
+        selectedRoleReviewWorkerId = nil
+        isLoadingRoleReviewProposal = false
+    }
+
+    private func synchronizeSelectedRoleReview(with snapshot: WorkerRoleReviewListDTO) {
+        guard let selectedRoleReviewProposal else { return }
+        if let current = snapshot.items.compactMap(\.proposal).first(where: {
+            $0.proposalId == selectedRoleReviewProposal.proposalId
+        }) ?? snapshot.proposals.first(where: {
+            $0.proposalId == selectedRoleReviewProposal.proposalId
+        }) {
+            self.selectedRoleReviewProposal = current
         }
     }
 

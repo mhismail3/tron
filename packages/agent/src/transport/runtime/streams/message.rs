@@ -10,6 +10,16 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             "agent.text_delta",
             Some(json!({ "delta": content })),
         )),
+        TronEvent::AgentCoordinationMessage {
+            event_id, content, ..
+        } => Some(session_scoped(
+            event,
+            "message.agent",
+            Some(json!({
+                "eventId": event_id,
+                "content": content,
+            })),
+        )),
         TronEvent::MessageDeleted {
             target_event_id,
             target_type,

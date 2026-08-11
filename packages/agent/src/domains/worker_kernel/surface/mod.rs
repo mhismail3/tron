@@ -11,13 +11,23 @@
 //! module remains the single selection entry point; `tests` covers the combined
 //! contract. Foreground user input is deliberately omitted from delegated
 //! agent-worker surfaces; workers return missing information to their parent,
-//! and the parent owns the native user interaction.
+//! and the parent owns the native user interaction. One-release historical
+//! worker await/result names are synthesized only for an exact trusted
+//! dynamic-worker `agentTools` allowlist; they never enter the live catalog,
+//! fixed inventory, discovery, or an ordinary provider surface.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::engine::{ActorContext, ActorId, ActorKind, EngineHostHandle};
+use crate::engine::{
+    ActorContext, ActorId, ActorKind, DelegationPolicy, EngineHostHandle, FunctionDefinition,
+    ModelToolAudience, ModelToolContract,
+};
 
 const MAX_RELEVANT_WORKERS: usize = 12;
+const RETAINED_WORKER_AGENT_TOOL_ALIASES: [(&str, &str); 2] = [
+    ("worker_await", "worker_kernel::await"),
+    ("worker_result_read", "worker_kernel::result_read"),
+];
 
 mod filtering;
 mod promotions;
@@ -33,6 +43,52 @@ pub(crate) use snapshots::{
     SurfaceToolSnapshot,
 };
 
+/// Resolve the one-release model-name aliases accepted only from an immutable
+/// dynamic-worker `agentTools` allowlist. These aliases never enter the live
+/// catalog or fixed inventory.
+pub(super) fn retained_worker_agent_tool_alias_target(model_name: &str) -> Option<&'static str> {
+    RETAINED_WORKER_AGENT_TOOL_ALIASES
+        .iter()
+        .find_map(|(alias, function_id)| (*alias == model_name).then_some(*function_id))
+}
+
+fn retained_worker_agent_tool_aliases(
+    functions: &[FunctionDefinition],
+    worker_agent_tools: Option<&[String]>,
+    trusted_worker_allowlist: bool,
+) -> Vec<FunctionDefinition> {
+    if !trusted_worker_allowlist {
+        return Vec::new();
+    }
+    let Some(requested) = worker_agent_tools else {
+        return Vec::new();
+    };
+    requested
+        .iter()
+        .filter_map(|model_name| {
+            let function_id = retained_worker_agent_tool_alias_target(model_name)?;
+            let mut alias = functions
+                .iter()
+                .find(|function| function.id.as_str() == function_id)?
+                .clone();
+            let (order, group) = alias
+                .model_tool
+                .as_ref()
+                .map_or((Some(146), Some("worker_interaction".to_owned())), |tool| {
+                    (tool.order, tool.group.clone())
+                });
+            alias.model_tool = Some(ModelToolContract {
+                name: model_name.clone(),
+                audience: ModelToolAudience::Specialist,
+                order,
+                group,
+                worker: None,
+            });
+            Some(alias)
+        })
+        .collect()
+}
+
 /// Resolve the exact fixed and dynamic function contracts for one provider
 /// request.
 pub(crate) async fn resolve_tool_surface(
@@ -41,6 +97,7 @@ pub(crate) async fn resolve_tool_surface(
     relevance_query: Option<&str>,
     origin_worker_id: Option<&str>,
     worker_agent_tools: Option<&[String]>,
+    delegated_function_grant: Option<&[String]>,
 ) -> Result<ResolvedToolSurface, String> {
     resolve_tool_surface_inner(
         host,
@@ -48,6 +105,7 @@ pub(crate) async fn resolve_tool_surface(
         relevance_query,
         origin_worker_id,
         worker_agent_tools,
+        delegated_function_grant,
     )
     .await
 }
@@ -58,6 +116,7 @@ async fn resolve_tool_surface_inner(
     relevance_query: Option<&str>,
     origin_worker_id: Option<&str>,
     worker_agent_tools: Option<&[String]>,
+    delegated_function_grant: Option<&[String]>,
 ) -> Result<ResolvedToolSurface, String> {
     let trusted_worker_allowlist = origin_worker_id.is_some() && worker_agent_tools.is_some();
     let (actor_id, actor_kind) = if trusted_worker_allowlist {
@@ -73,6 +132,13 @@ async fn resolve_tool_surface_inner(
     };
     let actor = ActorContext::new(actor_id, actor_kind);
     let (catalog_revision, mut functions) = host.visible_functions_with_revision(&actor).await;
+    if let Some(grant) = delegated_function_grant {
+        let exact = grant.iter().map(String::as_str).collect::<BTreeSet<_>>();
+        functions.retain(|function| {
+            function.delegation_policy != crate::engine::DelegationPolicy::Never
+                && exact.contains(function.id.as_str())
+        });
+    }
     functions.sort_by_key(|function| {
         (
             function
@@ -83,6 +149,15 @@ async fn resolve_tool_surface_inner(
             function.id.as_str().to_owned(),
         )
     });
+
+    // INVARIANT: retained aliases are synthesized only after the live catalog
+    // and exact reusable-child grant have been resolved. They therefore cannot
+    // become discoverable fixed functions or widen an ordinary/root surface.
+    let retained_aliases = retained_worker_agent_tool_aliases(
+        &functions,
+        worker_agent_tools,
+        trusted_worker_allowlist,
+    );
 
     let explicit_agent_tools =
         worker_agent_tools.map(|tools| tools.iter().map(String::as_str).collect::<BTreeSet<_>>());
@@ -217,22 +292,26 @@ async fn resolve_tool_surface_inner(
     let mut seen_names = BTreeSet::new();
     let mut resolved = Vec::new();
     let mut snapshot_tools = Vec::new();
-    for function in &functions {
+    for function in functions.iter().chain(retained_aliases.iter()) {
         if !is_provider_primitive(&function) || function.request_schema.is_none() {
             continue;
         }
         let direct_worker = direct_worker_contract(&function).cloned();
         let is_dynamic = direct_worker.is_some();
-        let selection_reason = if is_dynamic {
+        let Some(model_name) = model_tool_name(&function) else {
+            continue;
+        };
+        let retained_alias = retained_worker_agent_tool_alias_target(&model_name)
+            .is_some_and(|target| target == function.id.as_str());
+        let selection_reason = if retained_alias {
+            "retained_worker_agent_tools_alias"
+        } else if is_dynamic {
             let Some(reason) = selected_dynamic.get(function.id.as_str()) else {
                 continue;
             };
             *reason
         } else {
             "fixed"
-        };
-        let Some(model_name) = model_tool_name(&function) else {
-            continue;
         };
         // Delegated agent workers cannot suspend their owning durable worker
         // invocation on a foreground-only iOS interaction. They return missing
@@ -244,6 +323,9 @@ async fn resolve_tool_surface_inner(
             .as_ref()
             .is_some_and(|allowed| !allowed.contains(model_name.as_str()))
         {
+            continue;
+        }
+        if trusted_worker_allowlist && function.delegation_policy == DelegationPolicy::Never {
             continue;
         }
         if !model_tool_exposure_allows(&function, relevance_query, trusted_worker_allowlist) {
@@ -271,6 +353,8 @@ async fn resolve_tool_surface_inner(
             output_schema,
             effect_class: function.effect_class.as_str().to_owned(),
             risk: function.risk_level.as_str().to_owned(),
+            delegation_policy: function.delegation_policy.as_str().to_owned(),
+            workspace_effect: function.workspace_effect.as_str().to_owned(),
             exposed: true,
             worker_id: direct_worker
                 .as_ref()
@@ -287,7 +371,11 @@ async fn resolve_tool_surface_inner(
                 .as_ref()
                 .map_or("unavailable", |tool| tool.audience.as_str())
                 .to_owned(),
-            access_path: model_tool_access_path(&function).to_owned(),
+            access_path: if retained_alias {
+                "retained_worker_agent_tools_alias".to_owned()
+            } else {
+                model_tool_access_path(&function).to_owned()
+            },
             selection_reason: selection_reason.to_owned(),
             omission_reason: None,
         });
@@ -343,9 +431,14 @@ async fn resolve_tool_surface_inner(
 
     let fixed_tool_count = snapshot_tools
         .iter()
-        .filter(|tool| tool.worker_id.is_none())
+        .filter(|tool| {
+            tool.worker_id.is_none() && tool.selection_reason != "retained_worker_agent_tools_alias"
+        })
         .count();
-    let projected_worker_count = snapshot_tools.len().saturating_sub(fixed_tool_count);
+    let projected_worker_count = snapshot_tools
+        .iter()
+        .filter(|tool| tool.worker_id.is_some())
+        .count();
     let fixed_tools = fixed_tool_snapshots(&functions, &snapshot_tools)?;
     let ordinary_fixed_tool_count = fixed_tools
         .iter()

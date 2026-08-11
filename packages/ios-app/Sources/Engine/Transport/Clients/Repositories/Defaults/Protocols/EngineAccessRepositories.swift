@@ -344,6 +344,26 @@ protocol WorkerKernelRepository: AnyObject {
         limit: UInt64,
         offset: UInt64?
     ) async throws -> WorkerScheduledWorkResultDTO
+    func roleReviews(
+        limit: UInt64,
+        offset: UInt64?,
+        queueLimit: UInt64,
+        queueOffset: UInt64?
+    ) async throws -> WorkerRoleReviewListDTO
+    func startRoleReview(
+        workerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewProposalDTO
+    func inspectRoleReview(_ proposalId: String) async throws -> WorkerRoleReviewProposalDTO
+    func applyRoleReview(
+        proposalId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewApplyResultDTO
+    func rejectRoleReview(
+        proposalId: String,
+        reason: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewProposalDTO
     func dismissWorkerInboxItem(
         inboxId: String,
         idempotencyKey: EngineIdempotencyKey
@@ -444,6 +464,42 @@ protocol WorkerKernelRepository: AnyObject {
 }
 
 extension WorkerKernelRepository {
+    func roleReviews(
+        limit _: UInt64,
+        offset _: UInt64?,
+        queueLimit _: UInt64,
+        queueOffset _: UInt64?
+    ) async throws -> WorkerRoleReviewListDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func startRoleReview(
+        workerId _: String,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewProposalDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func inspectRoleReview(_ proposalId: String) async throws -> WorkerRoleReviewProposalDTO {
+        _ = proposalId
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func applyRoleReview(
+        proposalId _: String,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewApplyResultDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func rejectRoleReview(
+        proposalId _: String,
+        reason _: String?,
+        idempotencyKey _: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewProposalDTO {
+        throw EngineConnectionError.invalidResponse
+    }
+
     func invokeWorkerCompactFromSession(
         workerId: String,
         input: AnyCodable,

@@ -132,6 +132,36 @@ pub(super) fn response_schema(function: &str) -> Value {
                 "deleted":{"type":"boolean"}
             }
         }),
+        "worker_kernel::role_reviews" => json!({
+            "type":"object","additionalProperties":false,
+            "required":[
+                "capability","reviewer","items","queueTotal","queueReturned",
+                "queueTruncated","queueNextOffset","proposals","returned","total","nextOffset"
+            ],
+            "properties":{
+                "capability":{"const":"agent_role_review.v1"},
+                "reviewer":role_review_reviewer_schema(),
+                "items":{"type":"array","maxItems":100,"items":role_review_queue_item_schema()},
+                "queueTotal":{"type":"integer","minimum":0},
+                "queueReturned":{"type":"integer","minimum":0,"maximum":100},
+                "queueTruncated":{"type":"boolean"},
+                "queueNextOffset":nullable_nonnegative_integer_schema(),
+                "proposals":{"type":"array","maxItems":100,"items":role_review_proposal_schema()},
+                "returned":{"type":"integer","minimum":0,"maximum":100},
+                "total":{"type":"integer","minimum":0},
+                "nextOffset":nullable_nonnegative_integer_schema()
+            }
+        }),
+        "worker_kernel::role_review_start"
+        | "worker_kernel::role_review_inspect"
+        | "worker_kernel::role_review_reject" => role_review_proposal_schema(),
+        "worker_kernel::role_review_apply" => json!({
+            "type":"object","additionalProperties":false,"required":["proposal","worker"],
+            "properties":{
+                "proposal":role_review_proposal_schema(),
+                "worker":worker_summary_response_schema()
+            }
+        }),
         "worker_kernel::scheduled_work" => json!({
             "type":"object","additionalProperties":false,
             "required":["items","returned","truncated","nextOffset"],
@@ -195,8 +225,8 @@ pub(super) fn response_schema(function: &str) -> Value {
                 "returned","total","nextOffset","truncated"
             ],
             "properties":{
-                "kind":{"const":"worker_result_chunk"},
-                "reference":worker_result_reference_schema(),
+                "kind":{"type":"string","enum":["worker_result_chunk","agent_assignment_result_chunk"]},
+                "reference":{"oneOf":[worker_result_reference_schema(),agent_assignment_result_reference_schema()]},
                 "pointer":{"type":"string"},
                 "value":{},
                 "children":{"type":"array","items":{
@@ -226,63 +256,103 @@ pub(super) fn response_schema(function: &str) -> Value {
             "type":"object","additionalProperties":false,"required":["invocation","timedOut"],
             "properties":{"invocation":invocation_response_schema(),"timedOut":{"type":"boolean"}}
         }),
+        "worker_kernel::agent_discover" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["scope","agents","roles","returned","nextCursor"],
+            "properties":{
+                "scope":{"type":"string","enum":["agents","roles","all"]},
+                "agents":{"type":"array","maxItems":50,"items":agent_summary_response_schema()},
+                "roles":{"type":"array","maxItems":50,"items":agent_role_summary_response_schema()},
+                "returned":{"type":"integer","minimum":0,"maximum":50},
+                "nextCursor":{}
+            }
+        }),
+        "worker_kernel::agent_spawn" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["agentId","assignmentId","executionId","status","effectiveRole","effectiveGrant","effectiveLimits"],
+            "properties":{
+                "agentId":{"type":"string"},"assignmentId":{"type":"string"},
+                "executionId":{"type":"string"},
+                "status":{"type":"string","enum":["accepted","queued","running"]},
+                "effectiveRole":{"type":"object"},"effectiveGrant":{"type":"object"},
+                "effectiveLimits":{"type":"object"}
+            }
+        }),
         "worker_kernel::agent_send" => json!({
             "type":"object","additionalProperties":false,
-            "required":[
-                "deliveryId","targetSessionId","createdSession","wakePolicy",
-                "boundary","wakeSuppressedByCausalDepth"
-            ],
+            "required":["messageId","assignmentId","disposition"],
             "properties":{
-                "deliveryId":{"type":"string"},
-                "targetSessionId":{"oneOf":[{"type":"string"},{"type":"null"}]},
-                "createdSession":{"type":"boolean"},
-                "wakePolicy":{"type":"string","enum":["passive","wake"]},
-                "boundary":{"type":"string","enum":["next_turn","next_run"]},
-                "wakeSuppressedByCausalDepth":{"type":"boolean"}
+                "messageId":{"type":"string"},
+                "assignmentId":{},
+                "disposition":{"type":"string","enum":["delivered","queued","offered","accepted","autonomy_paused"]}
             }
         }),
-        "worker_kernel::agent_wait_for_workers" => json!({
+        "worker_kernel::agent_wait" => json!({
             "type":"object","additionalProperties":false,
-            "required":["waitId","mode","invocationIds","status","deliveryIds"],
+            "required":["waitId","mode","targets","status","completedTargets"],
             "properties":{
-                "waitId":{"type":"string"},
-                "mode":{"type":"string","enum":["all","any"]},
-                "invocationIds":{"type":"array","items":{"type":"string"}},
+                "waitId":{"type":"string"},"mode":{"type":"string","enum":["all","any"]},
+                "targets":{"type":"array","maxItems":32},
                 "status":{"type":"string","enum":["pending","satisfied"]},
-                "deliveryIds":{"type":"array","items":{"type":"string"}}
+                "completedTargets":{"type":"array","maxItems":32}
             }
         }),
-        "worker_kernel::agent_mailbox_list" => json!({
+        "worker_kernel::agent_manage" => json!({
             "type":"object","additionalProperties":false,
-            "required":["items","returned"],
+            "required":["action","status"],
             "properties":{
-                "items":{"type":"array","items":{
-                    "type":"object","additionalProperties":false,
-                    "required":[
-                        "deliveryId","sourceKind","intent","createdAt",
-                        "expiresAt","preview"
-                    ],
-                    "properties":{
-                        "deliveryId":{"type":"string"},
-                        "sourceKind":{"type":"string"},
-                        "intent":{"oneOf":[{"type":"string"},{"type":"null"}]},
-                        "createdAt":{"type":"string"},
-                        "expiresAt":{"oneOf":[{"type":"string"},{"type":"null"}]},
-                        "preview":{"type":"string","maxLength":512}
-                    }
-                }},
-                "returned":{"type":"integer","minimum":0,"maximum":100}
+                "action":{"type":"string"},"status":{"type":"string"},
+                "agentId":{},"assignmentId":{},"executionId":{},"grantId":{},
+                "affected":{"type":"integer","minimum":0},"message":{}
             }
         }),
-        "worker_kernel::agent_mailbox_claim" => json!({
+        "worker_kernel::agent_team_context" => json!({
             "type":"object","additionalProperties":false,
-            "required":["claimed","deliveryIds","boundary","wakePolicy"],
+            "required":["self","parent","activeAssignment","children","correspondents","unread","authority","resourceClaims","budgets","overflowCount"],
             "properties":{
-                "claimed":{"type":"integer","minimum":1,"maximum":8},
-                "deliveryIds":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":8},
-                "boundary":{"const":"next_turn"},
-                "wakePolicy":{"const":"passive"}
+                "self":agent_summary_response_schema(),"parent":{},"activeAssignment":{},
+                "children":{"type":"array","maxItems":32},
+                "correspondents":{"type":"array","maxItems":32},
+                "unread":{"type":"array","maxItems":32},
+                "authority":{"type":"object"},"resourceClaims":{"type":"array","maxItems":32},
+                "budgets":{"type":"object"},"overflowCount":{"type":"integer","minimum":0}
             }
+        }),
+        "agent::relations" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["totals","items","nextCursor"],
+            "properties":{
+                "totals":{"type":"object","additionalProperties":false,"required":["active","related"],"properties":{"active":{"type":"integer","minimum":0},"related":{"type":"integer","minimum":0}}},
+                "items":{"type":"array","maxItems":100,"items":client_agent_relation_schema()},"nextCursor":{"type":["string","null"]}
+            }
+        }),
+        "agent::inspect" => client_agent_inspect_response_schema(),
+        "agent::assignments" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["items","nextCursor"],
+            "properties":{"items":{"type":"array","maxItems":100,"items":client_agent_assignment_schema()},"nextCursor":{"type":["string","null"]}}
+        }),
+        "agent::messages" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["items","nextCursor"],
+            "properties":{"items":{"type":"array","maxItems":100,"items":client_agent_message_summary_schema()},"nextCursor":{"type":["string","null"]}}
+        }),
+        "agent::message_detail" => client_agent_message_detail_schema(),
+        "agent::result_read" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["kind","reference","pointer","value","children","offset","returned","total","nextOffset","truncated"],
+            "properties":{
+                "kind":{"type":"string"},
+                "reference":agent_assignment_result_reference_schema(),
+                "pointer":{"type":"string"},"value":{},"children":{"type":"array","maxItems":20,"items":result_child_schema()},
+                "offset":{"type":"integer","minimum":0},"returned":{"type":"integer","minimum":0},
+                "total":{"type":"integer","minimum":0},"nextOffset":{},"truncated":{"type":"boolean"}
+            }
+        }),
+        "agent::operator_message" | "agent::manage" | "agent::retry" | "agent::promote" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["agent","affectedAgentIds"],
+            "properties":{"agent":client_agent_inspect_response_schema(),"affectedAgentIds":{"type":"array","items":{"type":"string"}}}
         }),
         "worker_kernel::stop"
         | "worker_kernel::disable"
@@ -311,6 +381,193 @@ pub(super) fn response_schema(function: &str) -> Value {
         }),
         _ => open_response(),
     }
+}
+
+fn client_agent_inspect_response_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["agentId","name","relationship","status","statusDetail","taskPreview","transcriptSessionId","currentAssignment","role","grants","limits","writeScopes","lineage","contacts","ownUsage","subtreeUsage","result","technical","allowedActions"],
+        "properties":{
+            "agentId":{"type":"string"},"name":{"type":"string"},
+            "relationship":{"type":"string"},"status":{"type":"string"},
+            "statusDetail":{"type":["string","null"]},"taskPreview":{"type":["string","null"]},
+            "transcriptSessionId":{"type":["string","null"]},
+            "currentAssignment":{"oneOf":[client_agent_assignment_schema(),{"type":"null"}]},
+            "role":client_agent_role_schema(),
+            "grants":{"type":"array","items":client_agent_grant_schema()},
+            "limits":{"type":"array","items":client_agent_limit_schema()},
+            "writeScopes":{"type":"array","items":client_agent_write_scope_schema()},
+            "lineage":{"type":"array","items":client_agent_lineage_schema()},
+            "contacts":{"type":"array","items":client_agent_lineage_schema()},
+            "ownUsage":{"oneOf":[client_agent_usage_schema(),{"type":"null"}]},
+            "subtreeUsage":{"oneOf":[client_agent_usage_schema(),{"type":"null"}]},
+            "result":{"oneOf":[client_agent_result_summary_schema(),{"type":"null"}]},
+            "technical":{"type":"object"},
+            "allowedActions":{"type":"array","items":client_agent_allowed_action_schema()}
+        }
+    })
+}
+
+fn client_agent_allowed_action_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["action","enabled","disabledReason","affectedCount"],
+        "properties":{
+            "action":{"type":"string"},"enabled":{"type":"boolean"},
+            "disabledReason":{"type":["string","null"]},
+            "affectedCount":{"type":["integer","null"],"minimum":0}
+        }
+    })
+}
+
+fn client_agent_usage_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["inputTokens","outputTokens","cacheReadTokens","cacheCreationTokens","cost","wallTimeMs"],
+        "properties":{
+            "inputTokens":{"type":"integer","minimum":0},"outputTokens":{"type":"integer","minimum":0},
+            "cacheReadTokens":{"type":"integer","minimum":0},"cacheCreationTokens":{"type":"integer","minimum":0},
+            "cost":{"type":"number","minimum":0},"wallTimeMs":{"type":"integer","minimum":0}
+        }
+    })
+}
+
+fn client_agent_result_summary_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["kind","status","preview","resultId","workerInvocationId","value"],
+        "properties":{
+            "kind":{"type":"string"},"status":{"type":"string"},
+            "preview":{"type":["string","null"]},"resultId":{"type":["string","null"]},
+            "workerInvocationId":{"type":["string","null"]},"value":{}
+        }
+    })
+}
+
+fn client_agent_assignment_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["assignmentId","executionId","kind","status","task","requesterName","requesterAgentId","queuePosition","createdAt","startedAt","completedAt","retryOf","failure","usage","result","allowedActions"],
+        "properties":{
+            "assignmentId":{"type":"string"},"executionId":{"type":["string","null"]},
+            "kind":{"type":"string"},"status":{"type":"string"},"task":{"type":"string"},
+            "requesterName":{"type":["string","null"]},"requesterAgentId":{"type":["string","null"]},
+            "queuePosition":{"type":["integer","null"],"minimum":0},"createdAt":{"type":"string"},
+            "startedAt":{"type":["string","null"]},"completedAt":{"type":["string","null"]},
+            "retryOf":{"type":["string","null"]},"failure":{"type":["string","null"]},
+            "usage":{"oneOf":[client_agent_usage_schema(),{"type":"null"}]},
+            "result":{"oneOf":[client_agent_result_summary_schema(),{"type":"null"}]},
+            "allowedActions":{"type":"array","items":client_agent_allowed_action_schema()}
+        }
+    })
+}
+
+fn client_agent_relation_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["agentId","relationship","parentAgentId","depth","status","statusDetail","name","role","taskPreview","lastActivityAt","lastMessagePreview","ownUsage","subtreeUsage","resultState","transcriptSessionId","allowedActions"],
+        "properties":{
+            "agentId":{"type":"string"},"relationship":{"type":"string"},
+            "parentAgentId":{"type":["string","null"]},"depth":{"type":"integer","minimum":0},
+            "status":{"type":"string"},"statusDetail":{"type":["string","null"]},
+            "name":{"type":"string"},"role":{"type":["string","null"]},
+            "taskPreview":{"type":["string","null"]},"lastActivityAt":{"type":"string"},
+            "lastMessagePreview":{"type":["string","null"]},
+            "ownUsage":{"oneOf":[client_agent_usage_schema(),{"type":"null"}]},
+            "subtreeUsage":{"oneOf":[client_agent_usage_schema(),{"type":"null"}]},
+            "resultState":{"type":["string","null"]},"transcriptSessionId":{"type":["string","null"]},
+            "allowedActions":{"type":"array","items":client_agent_allowed_action_schema()}
+        }
+    })
+}
+
+fn client_agent_role_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["roleId","name","summary","workerId","workerVersion","updateAvailable"],
+        "properties":{
+            "roleId":{"type":["string","null"]},"name":{"type":"string"},
+            "summary":{"type":["string","null"]},"workerId":{"type":["string","null"]},
+            "workerVersion":{"type":["string","null"]},"updateAvailable":{"type":"boolean"}
+        }
+    })
+}
+
+fn client_agent_grant_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,"required":["functionId","delegation","workspaceEffect"],
+        "properties":{"functionId":{"type":"string"},"delegation":{"type":["string","null"]},"workspaceEffect":{"type":["string","null"]}}
+    })
+}
+
+fn client_agent_limit_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,"required":["name","used","limit","unit"],
+        "properties":{"name":{"type":"string"},"used":{"type":["number","null"]},"limit":{"type":["number","null"]},"unit":{"type":["string","null"]}}
+    })
+}
+
+fn client_agent_write_scope_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,"required":["path","state","detail"],
+        "properties":{"path":{"type":"string"},"state":{"type":["string","null"]},"detail":{"type":["string","null"]}}
+    })
+}
+
+fn client_agent_lineage_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,"required":["agentId","name","relationship","status"],
+        "properties":{"agentId":{"type":"string"},"name":{"type":"string"},"relationship":{"type":"string"},"status":{"type":["string","null"]}}
+    })
+}
+
+fn client_agent_message_summary_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["messageId","direction","kind","provenance","otherAgentId","otherAgentName","assignmentId","replyTo","deliveryState","preview","createdAt"],
+        "properties":{
+            "messageId":{"type":"string"},"direction":{"type":"string"},"kind":{"type":"string"},"provenance":{"type":"string"},
+            "otherAgentId":{"type":["string","null"]},"otherAgentName":{"type":["string","null"]},
+            "assignmentId":{"type":["string","null"]},"replyTo":{"type":["string","null"]},
+            "deliveryState":{"type":"string"},"preview":{"type":"string"},"createdAt":{"type":"string"}
+        }
+    })
+}
+
+fn client_agent_message_detail_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["messageId","direction","kind","provenance","sourceAgentId","sourceAgentName","targetAgentId","targetAgentName","assignmentId","replyTo","deliveryState","content","createdAt","deliveredAt","observedAt","redeliveryCount"],
+        "properties":{
+            "messageId":{"type":"string"},"direction":{"type":"string"},"kind":{"type":"string"},"provenance":{"type":"string"},
+            "sourceAgentId":{"type":["string","null"]},"sourceAgentName":{"type":["string","null"]},
+            "targetAgentId":{"type":["string","null"]},"targetAgentName":{"type":["string","null"]},
+            "assignmentId":{"type":["string","null"]},"replyTo":{"type":["string","null"]},
+            "deliveryState":{"type":"string"},"content":{"type":"string"},"createdAt":{"type":"string"},
+            "deliveredAt":{"type":["string","null"]},"observedAt":{"type":["string","null"]},
+            "redeliveryCount":{"type":["integer","null"],"minimum":0}
+        }
+    })
+}
+
+fn result_child_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,"required":["pointer","type","sizeBytes","preview"],
+        "properties":{"pointer":{"type":"string"},"type":{"type":"string"},"sizeBytes":{"type":"integer","minimum":0},"preview":{"type":"string"}}
+    })
+}
+
+fn agent_assignment_result_reference_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["kind","resultId","contentSha256","sizeBytes","preview"],
+        "properties":{
+            "kind":{"const":"agent_assignment_result_reference"},
+            "resultId":{"type":"string"},"assignmentId":{"type":"string"},
+            "contentSha256":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+            "sizeBytes":{"type":"integer","minimum":0},"preview":{"type":"string"}
+        }
+    })
 }
 
 fn artifact_metadata_response_schema() -> Value {
@@ -344,6 +601,35 @@ fn artifact_metadata_response_schema() -> Value {
     })
 }
 
+fn agent_summary_response_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["agentId","name","role","owningSessionLabel","relationship","status","capabilities","taskPreview","canMessage","canManage"],
+        "properties":{
+            "agentId":{"type":"string"},"name":{"type":"string"},"role":{"type":"string"},
+            "owningSessionLabel":{"type":"string"},"relationship":{"type":"string"},
+            "status":{"type":"string","enum":["provisioning","idle","active","waiting","closing","closed","autonomy_paused"]},
+            "statusDetail":{},
+            "capabilities":{"type":"array","maxItems":32,"items":{"type":"string"}},
+            "taskPreview":{"type":"string","maxLength":512},
+            "canMessage":{"type":"boolean"},"canManage":{"type":"boolean"}
+        }
+    })
+}
+
+fn agent_role_summary_response_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["roleId","name","description","available","capabilities","limits","workerVersion"],
+        "properties":{
+            "roleId":{"type":"string"},"name":{"type":"string"},
+            "description":{"type":"string"},"available":{"type":"boolean"},
+            "capabilities":{"type":"array","maxItems":32,"items":{"type":"string"}},
+            "limits":{"type":"object"},"workerVersion":{"type":"string"}
+        }
+    })
+}
+
 fn mutation_file_response_schema(include_replacements: bool) -> Value {
     let mut properties = serde_json::Map::from_iter([
         ("path".to_owned(), json!({"type":"string"})),
@@ -361,6 +647,100 @@ fn mutation_file_response_schema(include_replacements: bool) -> Value {
         required.push("written");
     }
     json!({"type":"object","additionalProperties":false,"required":required,"properties":properties})
+}
+
+fn nullable_nonnegative_integer_schema() -> Value {
+    json!({"oneOf":[{"type":"integer","minimum":0},{"type":"null"}]})
+}
+
+fn role_review_action_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["action","allowed","disabledReason"],
+        "properties":{
+            "action":{"type":"string","enum":["start_review","inspect","apply","reject"]},
+            "allowed":{"type":"boolean"},
+            "disabledReason":{"oneOf":[{"type":"string"},{"type":"null"}]}
+        }
+    })
+}
+
+fn role_review_reviewer_schema() -> Value {
+    json!({
+        "oneOf":[
+            {
+                "type":"object","additionalProperties":false,
+                "required":["available","workerId","workerVersion"],
+                "properties":{
+                    "available":{"const":true},
+                    "workerId":{"type":"string"},
+                    "workerVersion":{"type":"string"}
+                }
+            },
+            {
+                "type":"object","additionalProperties":false,
+                "required":["available","repairRequirement"],
+                "properties":{
+                    "available":{"const":false},
+                    "repairRequirement":{"type":"string","minLength":1}
+                }
+            }
+        ]
+    })
+}
+
+fn role_review_proposal_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":[
+            "proposalId","schemaVersion","proposalHash","targetWorkerId",
+            "targetWorkerVersion","targetContentHash","reviewerWorkerId",
+            "reviewerWorkerVersion","reviewerInvocationId","status","agentRole",
+            "rationale","publishedVersion","lastError","rejectionReason",
+            "createdAt","updatedAt","appliedAt","rejectedAt","allowedActions"
+        ],
+        "properties":{
+            "proposalId":{"type":"string"},
+            "schemaVersion":{"const":"tron.agent_role_review.v1"},
+            "proposalHash":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+            "targetWorkerId":{"type":"string"},
+            "targetWorkerVersion":{"type":"string"},
+            "targetContentHash":{"type":"string"},
+            "reviewerWorkerId":{"type":"string"},
+            "reviewerWorkerVersion":{"type":"string"},
+            "reviewerInvocationId":{"type":"string"},
+            "status":{"type":"string","enum":["proposed","applying","applied","rejected","stale"]},
+            "agentRole":super::bundle::agent_role_schema(),
+            "rationale":{"type":"string","minLength":1,"maxLength":2000},
+            "publishedVersion":{"oneOf":[{"type":"string"},{"type":"null"}]},
+            "lastError":{"oneOf":[{"type":"string"},{"type":"null"}]},
+            "rejectionReason":{"oneOf":[{"type":"string"},{"type":"null"}]},
+            "createdAt":{"type":"string"},
+            "updatedAt":{"type":"string"},
+            "appliedAt":{"oneOf":[{"type":"string"},{"type":"null"}]},
+            "rejectedAt":{"oneOf":[{"type":"string"},{"type":"null"}]},
+            "allowedActions":{"type":"array","items":role_review_action_schema()}
+        }
+    })
+}
+
+fn role_review_queue_item_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":[
+            "workerId","name","description","targetVersion","classification",
+            "proposal","allowedActions"
+        ],
+        "properties":{
+            "workerId":{"type":"string"},
+            "name":{"type":"string"},
+            "description":{"type":"string"},
+            "targetVersion":{"type":"string"},
+            "classification":{"const":"needs_role_review"},
+            "proposal":{"oneOf":[role_review_proposal_schema(),{"type":"null"}]},
+            "allowedActions":{"type":"array","items":role_review_action_schema()}
+        }
+    })
 }
 
 fn worker_summary_response_schema() -> Value {

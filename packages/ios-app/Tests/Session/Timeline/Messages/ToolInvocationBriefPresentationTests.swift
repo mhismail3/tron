@@ -281,9 +281,38 @@ final class ToolInvocationBriefPresentationTests: XCTestCase {
 
         XCTAssertEqual(brief.title, "Auto-resume registered")
         XCTAssertEqual(brief.durableWait?.status, "pending")
-        XCTAssertEqual(brief.durableWait?.workerCount, 2)
+        XCTAssertEqual(brief.durableWait?.targetCount, 2)
         XCTAssertTrue(brief.narrative.contains("resume automatically"))
         XCTAssertFalse(brief.narrative.contains("workers completed"))
+    }
+
+    func testFirstClassCoordinationWaitPresentsMixedTargets() {
+        let invocation = testToolInvocation(
+            status: .success,
+            arguments: #"{"targets":[{"kind":"assignment","id":"assignment-one"},{"kind":"reply","id":"message-one"}],"mode":"all"}"#,
+            result: #"""
+            {
+              "waitId": "wait-one",
+              "mode": "all",
+              "targets": [
+                {"kind": "assignment", "id": "assignment-one"},
+                {"kind": "reply", "id": "message-one"}
+              ],
+              "status": "pending",
+              "completedTargets": []
+            }
+            """#,
+            identity: ToolIdentity(toolName: "agent_wait")
+        )
+
+        let brief = ToolInvocationBriefPresentation(data: invocation)
+
+        XCTAssertEqual(brief.title, "Auto-resume registered")
+        XCTAssertEqual(brief.subtitle, "all of 2 targets")
+        XCTAssertEqual(brief.durableWait?.targetCount, 2)
+        XCTAssertTrue(brief.factRows.contains { $0.label == "Completion" && $0.value == "All targets" })
+        XCTAssertTrue(brief.factRows.contains { $0.label == "Targets" && $0.value == "2" })
+        XCTAssertTrue(brief.narrative.contains("coordination targets"))
     }
 
     func testAlreadySatisfiedDurableWaitIsNotShownAsActivelyWaiting() {

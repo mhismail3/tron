@@ -77,9 +77,10 @@ final class ConnectionCoordinator {
 
     init() {}
 
-    /// Reconstruct a child-agent transcript for operator audit without
-    /// resuming it as the connection's interactive session. This path has no
-    /// live suffix buffer, so every terminal branch releases its local gate.
+    /// Reconstruct an authorized audit transcript without resuming it as the
+    /// connection's interactive session. The live lane is retained before the
+    /// snapshot so persisted worker and coordination events cannot fall into a
+    /// snapshot-to-subscription gap.
     func reconstructReadOnly(
         context: ConnectionContext,
         eventLimit: Int? = nil
@@ -87,11 +88,25 @@ final class ConnectionCoordinator {
         context.isReconstructing = true
         await context.connect()
         guard !Task.isCancelled else {
-            context.isReconstructing = false
             return .cancelled
         }
         guard context.isConnected else {
-            context.isReconstructing = false
+            return .retryableFailure
+        }
+
+        do {
+            try await context.ensureLiveEventSubscription()
+            guard !Task.isCancelled else { return .cancelled }
+        } catch {
+            guard !Task.isCancelled else { return .cancelled }
+            presentFailureIfActionable(
+                error,
+                dedupKey: "worker.session.reconstruct.failed",
+                title: "Could not synchronize audit session",
+                messagePrefix: "Live audit updates could not be synchronized",
+                suggestion: "Tron will retry while this sheet remains open.",
+                context: context
+            )
             return .retryableFailure
         }
 
@@ -102,7 +117,6 @@ final class ConnectionCoordinator {
                 beforeEventId: nil
             )
             guard !Task.isCancelled else {
-                context.isReconstructing = false
                 return .cancelled
             }
 
@@ -110,18 +124,17 @@ final class ConnectionCoordinator {
             context.cleanUpStreamingState()
             await context.processReconstructionResult(result)
             guard !Task.isCancelled else {
-                context.isReconstructing = false
                 return .cancelled
             }
 
             context.setSessionProcessing(result.isRunning)
             context.isReconstructing = false
+            context.drainEventBuffer()
             context.removeLocalNotification(
                 dedupKey: "worker.session.reconstruct.failed"
             )
             return .completed
         } catch {
-            context.isReconstructing = false
             presentFailureIfActionable(
                 error,
                 dedupKey: "worker.session.reconstruct.failed",

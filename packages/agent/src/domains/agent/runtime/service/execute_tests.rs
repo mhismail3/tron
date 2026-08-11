@@ -236,7 +236,7 @@ impl PromptFailureHarness {
             settings: crate::domains::settings::TronSettings::default(),
             event_store: self.event_store.clone(),
             shutdown_token: None,
-            engine_host: crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
+            engine_host: crate::shared::server::test_support::new_agent_test_engine_host(),
             server_origin: "localhost:9847".to_owned(),
             run_id: run_id.to_owned(),
             model: self.model.clone(),
@@ -492,7 +492,7 @@ async fn initial_provider_call_does_not_wait_for_optional_policy_workers() {
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
     let run_id = "run-optional-policy-latch";
     let started_run = orchestrator.begin_run(&session_id, run_id).unwrap();
-    let host = crate::engine::EngineHostHandle::new_in_memory().unwrap();
+    let host = crate::shared::server::test_support::new_agent_test_engine_host();
     let optional_started = Arc::new(tokio::sync::Semaphore::new(0));
     let optional_release = Arc::new(tokio::sync::Semaphore::new(0));
     register_blocking_optional_hook(

@@ -392,7 +392,43 @@ mod tests {
         let fixed_tools = value["fixedTools"]
             .as_array()
             .expect("fixed tool inventory");
-        assert_eq!(fixed_tools.len(), 30);
+        assert_eq!(fixed_tools.len(), 27);
+        let fixed_names = fixed_tools
+            .iter()
+            .filter_map(|tool| tool["modelName"].as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            fixed_names,
+            BTreeSet::from([
+                "agent_discover",
+                "agent_manage",
+                "agent_send",
+                "agent_spawn",
+                "agent_wait",
+                "filesystem_edit",
+                "filesystem_list",
+                "filesystem_read",
+                "filesystem_search_text",
+                "filesystem_write",
+                "process_run",
+                "request_user_input",
+                "result_read",
+                "session_set_title",
+                "web_fetch",
+                "worker_disable",
+                "worker_discover",
+                "worker_enable",
+                "worker_inbox",
+                "worker_inspect",
+                "worker_invoke",
+                "worker_list",
+                "worker_retire",
+                "worker_rollback",
+                "worker_runs",
+                "worker_stop",
+                "worker_upsert",
+            ])
+        );
         assert!(
             fixed_tools.iter().any(|tool| {
                 tool["modelName"] == "session_set_title" && tool["exposed"] == false
@@ -403,7 +439,21 @@ mod tests {
                 .iter()
                 .filter(|tool| tool["audience"] == "ordinary")
                 .count(),
-            17
+            16
+        );
+        assert_eq!(
+            fixed_tools
+                .iter()
+                .filter(|tool| tool["audience"] == "specialist")
+                .count(),
+            10
+        );
+        assert_eq!(
+            fixed_tools
+                .iter()
+                .filter(|tool| tool["audience"] == "conditional")
+                .count(),
+            1
         );
         assert!(
             fixed_tools.iter().any(|tool| {
@@ -413,15 +463,30 @@ mod tests {
         assert!(
             fixed_tools
                 .iter()
-                .any(|tool| tool["modelName"] == "worker_result_read")
+                .any(|tool| tool["modelName"] == "result_read")
         );
+        for compatibility_name in [
+            "worker_await",
+            "worker_cancel",
+            "worker_detach",
+            "worker_purge",
+            "worker_result_read",
+            "agent_wait_for_workers",
+            "agent_mailbox_list",
+            "agent_mailbox_claim",
+        ] {
+            assert!(
+                !fixed_names.contains(compatibility_name),
+                "{compatibility_name} must remain outside the model-addressable inventory"
+            );
+        }
         assert!(fixed_tools.iter().any(|tool| {
             tool["modelName"] == "worker_invoke"
                 && tool["audience"] == "ordinary"
                 && tool["exposed"] == true
         }));
         assert!(value["surface"]["catalogRevision"].is_u64());
-        assert_eq!(value["surface"]["fixedToolCount"], 17);
+        assert_eq!(value["surface"]["fixedToolCount"], 16);
         assert!(value["surface"]["surfaceHash"].is_string());
         assert!(value["surface"]["availableWorkers"].is_array());
         assert!(value["surface"].get("tools").is_none());
@@ -436,7 +501,7 @@ mod tests {
             .await
             .value
             .expect("rename surface snapshot");
-        assert_eq!(renamed["surface"]["fixedToolCount"], 18);
+        assert_eq!(renamed["surface"]["fixedToolCount"], 17);
         assert!(renamed["fixedTools"].as_array().is_some_and(|tools| {
             tools.iter().any(|tool| {
                 tool["modelName"] == "session_set_title"

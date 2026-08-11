@@ -70,6 +70,9 @@ struct WorkerConsoleRow: View {
                 if architecture?.hasIntegrationBoundary == true {
                     workerTag("Integrated worker", color: .tronPurple)
                 }
+                if architecture?.needsAgentRoleReview == true {
+                    workerTag("Role review needed", color: .tronWarning)
+                }
                 workerTag(
                     WorkerConsolePresentation.runnerLabel(worker.runnerKind),
                     color: .tronInfo

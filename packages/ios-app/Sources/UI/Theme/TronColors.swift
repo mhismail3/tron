@@ -237,6 +237,7 @@ extension View {
     private func bubbleColor(for role: MessageRole) -> Color {
         switch role {
         case .user: return .userBubble
+        case .agent: return .assistantBubble
         case .assistant: return .assistantBubble
         case .system: return .systemBubble
         case .tool: return .toolBubble

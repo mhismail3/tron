@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-07-21 (registry-owned live dispatch; 13-event durable server catalog; client-local completed-thinking row; source/client stream-loss recovery; response-complete finality; canonical-failure parity).
+> Last verified: 2026-08-11 (registry-owned live dispatch; 16-event durable server catalog including `message.agent`; client-local completed-thinking row; source/client stream-loss recovery; response-complete finality; canonical-failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -96,8 +96,8 @@ Current retained plugin groups:
 |-------|-----------|---------|
 | Streaming | `Sources/Engine/Events/Plugins/Streaming/` | Text, thinking, and turn lifecycle deltas. |
 | Tool invocation | `Sources/Engine/Events/Plugins/ToolInvocation/` | Generic `tool.invocation.*` lifecycle evidence for chat. |
-| Lifecycle | `Sources/Engine/Events/Plugins/Lifecycle/` | Agent readiness, completion, compaction, context clearing, message deletion, and turn failure labels that still reach the shell. |
-| Session | `Sources/Engine/Events/Plugins/Session/` | Connection and session list/update/archive/delete state. |
+| Lifecycle | `Sources/Engine/Events/Plugins/Lifecycle/` | Agent readiness, completion, compaction, context clearing, message deletion, turn failure labels, and coordination invalidations that still reach the shell. |
+| Session | `Sources/Engine/Events/Plugins/Session/` | Connection, session list/update/archive/delete state, and live typed `message.agent` audit rows. |
 | Server | `Sources/Engine/Events/Plugins/Server/` | Server/auth/restart status messages. |
 
 Deleted workflow-specific plugin roots, including prompt queue and hook
@@ -115,6 +115,36 @@ successful parse is a no-op, not a transform warning; malformed payload decode
 still logs at the parser boundary. `SourceGuardTests+EventSurface` compares the
 Rust stream labels with `EventRegistry.registerAll()` so new server events
 cannot silently become unknown in the app.
+
+`agent.lifecycle`, `agent.assignment`, and `agent.message` are registered
+session-scoped markers for reusable-agent management. They never mutate UI
+state from their payloads. `EngineClient` coalesces adjacent markers for 200 ms
+into one `agentCoordinationProjectionInvalidated` hint carrying only affected
+owning-session IDs; Manage Session then rereads `agent::relations` or the
+mounted agent-detail projections. An unscoped marker conservatively invalidates
+every mounted agent manager. Exact bidirectional communication history is read
+through authorized `agent::messages` and `agent::message_detail` operations and
+is not copied into the invalidation notification. The recipient's canonical
+transcript also contains each incoming `message.agent` row. That durable event
+has a separate dispatchable live plugin: it preserves message/source/
+assignment/reply IDs plus kind and Engine-authored authority, and renders a
+read-only `.agent` timeline row rather than user intent. Audit sheets retain
+the session subscription before fetching their reconstruction snapshot,
+buffer the live suffix behind the sequence cut, and drain it only after the
+snapshot commits. Agent rows do not reset user turn boundaries and cannot
+become delete, edit, retry, or user-fork targets. Reconnect, cached replay, and
+live presentation therefore converge without an audit gap or event-driven
+management-read storm.
+
+`worker.role_review` is a content-free Worker Console invalidation marker with
+only action, proposal, target-worker, and status identifiers. It joins the
+existing 200 ms worker-projection coalescer and lifecycle refresh lane; its
+payload never supplies proposal content, permissions, reviewer availability,
+or UI state. A mounted Manage Workers view rereads
+`worker_kernel::role_reviews`, while a selected proposal is refreshed through
+`worker_kernel::role_review_inspect`. Reconnect and foreground reconciliation
+perform the same reads, so duplicate or replayed markers cannot duplicate a
+proposal or authorize a mutation.
 
 The marker `agent.interrupted` remains diagnostics-only. A cancelled turn's
 authoritative UI evidence is the durable `agent.turn_failed` event classified

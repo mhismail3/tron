@@ -100,6 +100,11 @@ vt100 = "=0.16.2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Safe libproc wrapper for durable process-birth identity. Tron itself keeps
+# unsafe code denied while restart recovery remains protected from PID reuse.
+libproc = "0.14.11"
+
 [dev-dependencies]
 wiremock = "0.6"
 tokio = { version = "1", features = ["test-util"] }

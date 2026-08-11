@@ -204,6 +204,7 @@ fn estimate_tool_result_content_chars(content: &ToolResultContent) -> usize {
 pub fn estimate_message_tokens(message: &Message) -> u32 {
     let role_str = match message {
         Message::User { .. } => "user",
+        Message::Agent { .. } => "agent",
         Message::Assistant { .. } => "assistant",
         Message::ToolResult { .. } => "toolResult",
     };
@@ -218,6 +219,9 @@ pub fn estimate_message_tokens(message: &Message) -> u32 {
                 }
             }
         },
+        Message::Agent { content, .. } => {
+            chars += content.render_for_provider().len();
+        }
         Message::Assistant { content, .. } => {
             for block in content {
                 chars += estimate_assistant_content_chars(block);

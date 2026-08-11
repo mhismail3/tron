@@ -731,16 +731,6 @@ impl WorkerRuntime {
             .server
             .default_model
             .clone();
-        let session_id = self
-            .session_manager
-            .create_worker_session(
-                model.unwrap_or(&default_model),
-                &workdir.display().to_string(),
-                Some(&format!("Worker: {}", worker.summary.name)),
-            )
-            .map_err(|error| format!("create agent worker session: {error}"))?;
-        self.store
-            .set_agent_session_id(&invocation.invocation_id, &session_id)?;
         let state_dir = self.store.state_dir(&worker.summary.worker_id)?;
         let output_schema = serde_json::to_string_pretty(&worker.bundle.output_schema)
             .map_err(|error| format!("encode agent worker output schema: {error}"))?;
@@ -761,87 +751,125 @@ impl WorkerRuntime {
             state_dir.display(),
             secret_dir.display(),
         );
-        let mut context = CausalContext::new(
-            ActorId::new(format!("worker:{}", worker.summary.worker_id))
-                .map_err(|error| error.to_string())?,
-            ActorKind::Worker,
-            TraceId::new(invocation.trace_id.clone()).unwrap_or_else(|_| TraceId::generate()),
-        )
-        .with_session_id(session_id.clone())
-        .with_idempotency_key(format!(
-            "worker-agent:{}",
-            hex::encode(Sha256::digest(invocation.idempotency_key.as_bytes()))
-        ))
-        .with_origin_worker_invocation_id(invocation.invocation_id.clone())
-        .with_trigger_depth(invocation.causal_depth.saturating_add(1));
-        if let Some(max_turns) = worker.bundle.execution_limits.max_agent_turns {
-            context = context.with_worker_max_agent_turns(max_turns);
+        let effective_model = model.unwrap_or(&default_model).to_owned();
+        let profile = &self.settings_runtime.current().settings.agent.coordination;
+        let max_seconds = worker
+            .bundle
+            .execution_limits
+            .max_invocation_seconds
+            .unwrap_or(MAX_INVOCATION_SECONDS);
+        let max_turns = worker.bundle.execution_limits.max_agent_turns.unwrap_or(32);
+        let max_children = worker
+            .bundle
+            .execution_limits
+            .max_child_invocations
+            .unwrap_or(profile.max_execution_nodes)
+            .min(profile.max_execution_nodes);
+        let limits = json!({
+            "maxAssignmentSeconds":max_seconds,
+            "maxAssignmentTurns":max_turns,
+            "maxChildExecutions":max_children,
+            "maxQueuedAssignments":1,
+        });
+        let tools = match worker.bundle.agent_tools.as_ref() {
+            Some(tools) => tools.clone(),
+            None => self.delegable_tool_names().await?,
+        };
+        if let Some(origin_session_id) = invocation.origin_session_id.as_deref() {
+            self.ensure_agent_identity_for_session(origin_session_id)
+                .await
+                .map_err(WorkerExecutionError::from)?;
         }
-        if let Some(agent_tools) = &worker.bundle.agent_tools {
-            context = context.with_worker_agent_tools(agent_tools.clone());
-        }
-        let mut agent_run_guard =
-            AbortAgentRunOnDrop::new(Arc::clone(&self.orchestrator), session_id.clone());
-        // Subscribe before prompt admission. A provider construction failure can
-        // start and finish between the synchronous acknowledgement and the next
-        // scheduler poll; the terminal broadcast is the lossless join point.
-        let mut agent_events = self.orchestrator.subscribe();
-        let mut agent_payload = json!({"sessionId":session_id,"prompt":prompt});
-        if let Some(reasoning_level) = reasoning_level {
-            agent_payload["reasoningLevel"] = json!(reasoning_level);
-        }
-        let outcome = self
-            .host
-            .invoke(Invocation::new_sync(
-                FunctionId::new("agent::prompt").map_err(|error| error.to_string())?,
-                agent_payload,
-                context,
-            ))
-            .await;
-        if let Some(error) = outcome.error {
-            return Err(WorkerExecutionError::isolated_agent_failure(format!(
-                "start agent worker: {error}"
-            )));
-        }
-        let terminal = wait_for_agent_terminal(
-            self,
-            &mut agent_events,
-            &session_id,
-            &invocation.invocation_id,
-        )
-        .await
-        .map_err(WorkerExecutionError::isolated_agent_failure)?;
-        agent_run_guard.disarm();
-        if let Some(error) = terminal.error {
-            return Err(WorkerExecutionError::isolated_agent_failure(format!(
-                "agent worker failed: {error}"
-            )));
-        }
-        let rows = self
-            .event_store
-            .get_latest_events(&session_id, Some(100))
-            .map_err(|error| {
-                WorkerExecutionError::isolated_agent_failure(format!(
-                    "load agent worker result: {error}"
-                ))
+        let admission = self
+            .store
+            .admit_direct_worker_agent(&NewDirectWorkerAgentAdmission {
+                invocation_id: invocation.invocation_id.clone(),
+                workspace_path: workdir.display().to_string(),
+                max_active_children: profile.max_active_children,
+                name: format!("Worker: {}", worker.summary.name),
+                task: prompt,
+                context: json!({
+                    "workerInvocationId":invocation.invocation_id,
+                    "workerId":worker.summary.worker_id,
+                    "workerVersion":worker.summary.active_version,
+                    "roleResult":{
+                        "mode":"schema",
+                        "schema":worker.bundle.output_schema,
+                    },
+                }),
+                model: effective_model,
+                reasoning_level: reasoning_level.map(ToOwned::to_owned),
+                tool_grant: json!(tools),
+                limits,
+                deadline_at: chrono::Duration::try_seconds(
+                    i64::try_from(max_seconds).unwrap_or(i64::MAX),
+                )
+                .map(|duration| (chrono::Utc::now() + duration).to_rfc3339()),
             })?;
-        let payloads = self
-            .event_store
-            .resolve_event_payloads(&rows)
-            .map_err(|error| {
-                WorkerExecutionError::isolated_agent_failure(format!(
-                    "resolve agent worker result: {error}"
-                ))
-            })?;
-        Ok(rows
-            .iter()
-            .zip(payloads)
-            .rev()
-            .find(|(row, _)| row.event_type == "message.assistant")
-            .map(|(_, payload)| {
-                normalize_agent_output(payload.get("content").cloned().unwrap_or(payload))
-            })
-            .ok_or_else(|| "agent worker completed without an assistant result".to_owned())?)
+        // The agent run is spawned asynchronously by the delivery-wake path.
+        // Couple its process-local lifetime to this claimed worker future so
+        // timeout, disablement, stop-all, panic, or task abort cannot leave
+        // provider/tool work running after the worker terminalizes.
+        let agent_session_id = admission.agent.session_id.clone();
+        let mut abort_agent_run =
+            AbortAgentRunOnDrop::new(Arc::clone(&self.orchestrator), agent_session_id.clone());
+        self.import_agent_coordination_outbox()
+            .await
+            .map_err(WorkerExecutionError::isolated_agent_failure)?;
+        let assignment_id = admission.assignment.assignment_id;
+        loop {
+            let assignment = self
+                .store
+                .agent_assignment(&assignment_id)?
+                .ok_or_else(|| "direct worker assignment disappeared".to_owned())?;
+            if assignment.status.is_terminal() {
+                let terminal = match assignment.status {
+                    AgentAssignmentStatus::Completed => assignment
+                        .result_id
+                        .as_deref()
+                        .ok_or_else(|| {
+                            WorkerExecutionError::isolated_agent_failure(
+                                "direct worker completed without result custody",
+                            )
+                        })
+                        .and_then(|result_id| {
+                            self.store
+                                .resolve_agent_result(result_id)
+                                .map_err(WorkerExecutionError::from)?
+                                .ok_or_else(|| {
+                                    WorkerExecutionError::isolated_agent_failure(
+                                        "direct worker result custody disappeared",
+                                    )
+                                })
+                        }),
+                    _ => Err(WorkerExecutionError::isolated_agent_failure(
+                        assignment.error.unwrap_or_else(|| {
+                            format!(
+                                "direct worker assignment ended {}",
+                                assignment.status.as_str()
+                            )
+                        }),
+                    )),
+                };
+                // Completion normally means the provider run already ended;
+                // cancellation/failure may win the durable race first. Abort
+                // idempotently in both cases before disarming the drop guard.
+                let _ = self.orchestrator.abort(&agent_session_id);
+                abort_agent_run.disarm();
+                return terminal;
+            }
+            if self
+                .agent_assignment_inflight
+                .insert(assignment.assignment_id.clone())
+            {
+                let driven = self.drive_agent_assignment(assignment).await;
+                self.agent_assignment_inflight.remove(&assignment_id);
+                driven.map_err(WorkerExecutionError::isolated_agent_failure)?;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            } else {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
     }
 }
 

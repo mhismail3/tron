@@ -72,6 +72,16 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
                     });
                 }
             }
+            Message::Agent { content, .. } => {
+                contents.push(GeminiContent {
+                    role: "user".into(),
+                    parts: vec![GeminiPart::Text {
+                        text: content.render_for_provider(),
+                        thought: None,
+                        thought_signature: None,
+                    }],
+                });
+            }
             Message::Assistant { content, .. } => {
                 let mut parts = Vec::new();
 

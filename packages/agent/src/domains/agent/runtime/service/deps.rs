@@ -24,8 +24,13 @@ pub struct PromptEngineCausality {
 impl PromptEngineCausality {
     #[must_use]
     pub fn from_invocation(invocation: &Invocation) -> Self {
+        Self::from_invocation_with_context(invocation, invocation.causal_context.clone())
+    }
+
+    #[must_use]
+    pub fn from_invocation_with_context(invocation: &Invocation, context: CausalContext) -> Self {
         Self {
-            context: invocation.causal_context.clone(),
+            context,
             parent_invocation_id: Some(invocation.id.clone()),
             invocation_id: invocation.id.clone(),
             function_id: invocation.function_id.clone(),

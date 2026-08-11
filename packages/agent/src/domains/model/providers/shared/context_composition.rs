@@ -75,4 +75,28 @@ mod tests {
         assert!(render_request_context(&context).is_none());
         assert!(messages_with_request_context(&context).is_empty());
     }
+
+    #[test]
+    fn team_context_is_separate_and_precedes_untrusted_reference_data() {
+        let mut context = make_context();
+        context
+            .request_context
+            .push(crate::shared::protocol::messages::RequestContextBlock {
+                kind: crate::shared::protocol::messages::RequestContextKind::AgentTeam,
+                content: r#"{"self":{"agentId":"agent_1"},"remainingChildren":4}"#.into(),
+            });
+        context
+            .request_context
+            .push(crate::shared::protocol::messages::RequestContextBlock {
+                kind: crate::shared::protocol::messages::RequestContextKind::Continuity,
+                content: "untrusted memory".into(),
+            });
+
+        let projected = messages_with_request_context(&context);
+        assert_eq!(projected.len(), 2);
+        assert!(context.rendered_team_context().unwrap().contains("agent_1"));
+        let reference = render_request_context(&context).unwrap();
+        assert!(!reference.contains("agent_1"));
+        assert!(reference.contains("untrusted memory"));
+    }
 }

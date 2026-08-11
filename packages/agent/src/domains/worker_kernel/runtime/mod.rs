@@ -55,23 +55,102 @@
 //! immutable worker is broken;
 //! structural activation, integrity, and invalid-output failures still
 //! quarantine broken versions.
-//! `agent_deliveries`
-//! owns coordination tools, import ordering, waits, and safe delivery-only
-//! wakeups; `agent_delivery_import` projects closed terminal/effect envelopes
+//! `coordination` owns stable reusable-agent discovery, admission, semantic
+//! messages, generalized waits, management, and bounded Team Context;
+//! profile directories, relationships, assignment history, correspondents,
+//! and unread evidence are count-backed store pages rather than capped
+//! in-memory snapshots. Team Context still emits at most 32 entries and reports
+//! the exact overflow across those durable sets.
+//! Its concern modules keep discovery/spawn admission, semantic messaging and
+//! waits, management/topology/cancellation, Team Context/authority, and closed
+//! validators independently reviewable while extending this same runtime.
+//! `client_agents` is the authenticated native projection boundary: one module
+//! establishes the complete session relationship scope, one owns paged reads
+//! and canonical DTO projection, one owns mutations and destructive-impact
+//! counts, and one owns shared usage/relationship/validation helpers. Native
+//! clients therefore never infer authority or lifecycle state through joins.
+//! `agent_execution` imports its cross-database outbox and supervises reusable
+//! assignments. Agent-runner workers use the same supervisor as one-assignment
+//! `DirectWorker` agents: the worker node is not duplicated, its exact legacy
+//! tool aliases remain pinned authority, assignment reasoning follows every
+//! safe-boundary wake, and terminal state closes rather than reuses the agent.
+//! Its private importer, safe-boundary delivery, assignment-driver, and support
+//! modules extend this same runtime; the split introduces no second scheduler
+//! or cross-store owner.
+//! Fresh FIFO assignment heads and already-running/parked recovery use
+//! independent bounded dispatcher lanes. A large prefix of waiting work can
+//! therefore never hide later queued work for unrelated agents, while restart
+//! reconciliation retains a separate budget for active attempts. Page scans
+//! skip process-local owners, unresolved joins, and auxiliary transcript runs
+//! before consuming that budget, so blocked first pages cannot starve ready
+//! work behind them.
+//! Automatic assignment completion messages include an exact result only when
+//! its canonical JSON fits the shared model-tool inline boundary; every
+//! successful completion still carries the integrity-bound result reference,
+//! and larger values remain reference-only.
+//! Generalized wait admission resolves every opaque assignment/worker/reply
+//! handle into one stable agent/execution dependency namespace. Immutable
+//! parent-to-descendant edges and assignment/direct-agent executor edges cross
+//! into EventStore without a cross-database transaction; its immediate writer
+//! rejects self, ancestor, reciprocal reply, and mixed cycles while preserving
+//! legal parent waits on independently progressing descendants.
+//! Native assignment history aggregates only turn-end usage rows
+//! carrying that exact assignment ID; transcript chronology is never treated
+//! as an ownership boundary because queued offers may interleave with active
+//! work. `agent_deliveries` admits provider wakes one causal trace at a time
+//! and owns durable mailbox/wait maintenance. `agent_delivery_compatibility`
+//! isolates the one-release target-union send path retained for authenticated
+//! older clients. An idle nested agent keeps
+//! its stable identity for questions and offers but receives only the
+//! non-mutating subset of its immutable default grant; accepted/queued work is
+//! stored immediately behind an EventStore-owned durable delivery latch, so it
+//! cannot be leased into an unrelated auxiliary or user turn. It starts only
+//! after the FIFO assignment supervisor commits Running and opens the exact
+//! attempt baseline, then releases that one message into assignment context.
+//! Target role/configured queue limits are clamped by the live profile ceiling
+//! for model and native admission and for Team Context budget projection.
+//! Visible-root spawns inherit the source session's current model while nested
+//! agents retain their pinned default. Delivery selection reserves the
+//! orchestrator's shared run/lifecycle boundary before re-reading this grant;
+//! quiescent close/configure/role-upgrade/promotion either reserve the complete
+//! affected transcript set or reject. Subtree cancellation uses the same
+//! registry to atomically revoke selected wakes, cancel active tokens, and
+//! block new admission through execution/wake reconciliation. Closed pending
+//! wakes become passive and a closed transcript cannot issue further
+//! coordination calls. Coordination telemetry is
+//! content-free: labels are limited to closed
+//! assignment/message/outbox kinds, states, wait modes, and outcomes; stable
+//! agent, assignment, message, session, and trace handles are never labels.
+//! `agent_delivery_import` projects
+//! closed terminal/effect envelopes
 //! without holding both databases. Terminal completion
 //! notifies that same dispatcher for low-latency import while its one-second
 //! tick remains the lost-signal and restart reconciliation fallback. Every
 //! background invocation receipt uses one model-facing contract: the invocation
-//! stays nonblocking and passive unless the model immediately registers
-//! `agent_wait_for_workers`; polling and `worker_await` are explicitly
-//! prohibited. Wait reconciliation suppresses or supersedes an unprepared
-//! default passive result and creates one wake delivery, while a result already
-//! prepared for provider context is reused rather than duplicated.
+//! stays nonblocking and returns automatically, while `agent_wait` may park an
+//! assignment for durable fan-in; polling and `worker_await` are explicitly
+//! prohibited. Immediate fan-in is consumed by the registering tool result;
+//! later fan-in carries the registering trace/hop, not whichever target
+//! happened to finish last. Assignment-owned aggregate delivery remains
+//! passive and the assignment supervisor resumes it only after an auxiliary
+//! transcript run reaches a safe boundary. Wait reconciliation suppresses or
+//! supersedes an unprepared default passive result only for the exact
+//! registering recipient. An independently waiting manager receives its own
+//! aggregate without stealing the delegator's automatic assignment or worker
+//! result, while a result already prepared for provider context is reused
+//! rather than duplicated.
 //! `events` publishes invocation invalidations with the invocation ledger's
 //! durable `origin_session_id`; lifecycle changes remain global and scheduled
 //! or otherwise sessionless work remains unscoped. These lossy stream facts
 //! only accelerate client rereads of authoritative projections and never own
 //! completion, delivery, or wait state.
+//! `role_review` deterministically scans undeclared active agent runners,
+//! selects a healthy explicitly declared reviewer hook without naming a
+//! worker, and persists only its `agentRole` plus bounded rationale. Native
+//! apply revalidates the exact target, reviewer version, reviewer invocation,
+//! and proposal hash before cloning the target bundle, changing only
+//! `agentRole`, and using canonical atomic publication. Candidate and proposal
+//! histories page independently; no runner is hidden behind an in-memory cap.
 //! `notifications` drains the durable worker-to-client outbox through APNs;
 //! provider acceptance is evidence, never a human-delivery receipt.
 //! A ready resident reuses the exact verified private artifact snapshot that
@@ -97,25 +176,32 @@ use tokio::sync::{Mutex, Notify, Semaphore};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-use super::persistence::{AgentDeliveryOutboxRecord, WorkerStore};
+use super::persistence::{
+    AgentAssignmentStatus, AgentAssignmentTransition, AgentDeliveryOutboxRecord,
+    AgentOutboxRetryOutcome, NewDirectWorkerAgentAdmission, WorkerStore,
+};
 use super::process::{MAX_PROCESS_CAPTURE_BYTES, ProcessTree};
 use super::types::{
     ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_ENGINE_CONCURRENCY,
     MAX_INVOCATION_SECONDS, MAX_WORKER_CONCURRENCY, PreparedWorker, PurgeOutcome, UpsertOutcome,
-    WorkerBundle, WorkerClientAction, WorkerCommand, WorkerDependency, WorkerEngineHook,
-    WorkerInteractionMode, WorkerModelExposure, WorkerRunEvent, WorkerRunStage, WorkerRunner,
-    WorkerTrigger,
+    WorkerAgentRole, WorkerBundle, WorkerClientAction, WorkerCommand, WorkerDependency,
+    WorkerEngineHook, WorkerInteractionMode, WorkerModelExposure, WorkerRunEvent, WorkerRunStage,
+    WorkerRunner, WorkerTrigger,
 };
 use support::*;
 
 mod activation;
 mod admission;
 mod agent_deliveries;
+mod agent_delivery_compatibility;
 mod agent_delivery_import;
+mod agent_execution;
 mod artifacts;
 pub(super) use admission::ModelToolInvocationOutcome;
 pub(crate) use admission::WorkerInputContractError;
 mod client_actions;
+mod client_agents;
+mod coordination;
 mod dispatch;
 mod events;
 mod hooks;
@@ -124,6 +210,7 @@ mod lifecycle;
 mod notifications;
 mod resident;
 mod result;
+mod role_review;
 mod run_metrics;
 mod run_projection;
 mod run_projection_format;
@@ -248,6 +335,9 @@ pub struct WorkerRuntime {
     engine_limit: Arc<Semaphore>,
     worker_limits: DashMap<String, Arc<Semaphore>>,
     inflight: DashSet<String>,
+    /// Process-local ownership of durable reusable-agent assignment drivers.
+    /// The assignment ledger, not this set, owns recovery and terminal truth.
+    agent_assignment_inflight: DashSet<String>,
     invocation_stops: DashMap<String, CancellationToken>,
     model_tool_progress: DashMap<String, ModelToolProgressTarget>,
     worker_stops: DashMap<String, CancellationToken>,
@@ -260,6 +350,10 @@ pub struct WorkerRuntime {
     notification_maintenance_ticks: AtomicUsize,
     session_organization_maintenance_ticks: AtomicUsize,
     delivery_maintenance: Arc<Notify>,
+    /// Low-latency wake for durable workspace-claim promotion. Callers always
+    /// retain bounded state rechecks, so notifications are never correctness
+    /// custody and may be lost across restart.
+    workspace_claim_changes: Arc<Notify>,
     notification_configuration_revision: Mutex<Option<String>>,
     http: reqwest::Client,
     notification_transport: super::notifications::transport::NotificationTransport,
@@ -286,6 +380,14 @@ impl WorkerRuntime {
                 })?;
             }
         }
+        let recovered_coordination_outbox = store.reset_importing_agent_outbox()?;
+        if recovered_coordination_outbox > 0 {
+            metrics::counter!(
+                "agent_coordination_recoveries_total",
+                "kind" => "outbox_claim"
+            )
+            .increment(recovered_coordination_outbox as u64);
+        }
         let stopped = store.stop_all()?;
         let _ = event_store
             .expire_agent_deliveries()
@@ -309,6 +411,7 @@ impl WorkerRuntime {
             engine_limit: Arc::new(Semaphore::new(MAX_ENGINE_CONCURRENCY)),
             worker_limits: DashMap::new(),
             inflight: DashSet::new(),
+            agent_assignment_inflight: DashSet::new(),
             invocation_stops: DashMap::new(),
             model_tool_progress: DashMap::new(),
             worker_stops: DashMap::new(),
@@ -321,6 +424,7 @@ impl WorkerRuntime {
             notification_maintenance_ticks: AtomicUsize::new(0),
             session_organization_maintenance_ticks: AtomicUsize::new(0),
             delivery_maintenance: Arc::new(Notify::new()),
+            workspace_claim_changes: Arc::new(Notify::new()),
             notification_configuration_revision: Mutex::new(None),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(MAX_INVOCATION_SECONDS))
@@ -332,6 +436,26 @@ impl WorkerRuntime {
 
     pub fn store(&self) -> &WorkerStore {
         &self.store
+    }
+
+    pub(in crate::domains::worker_kernel) fn workspace_claim_changes(&self) -> Arc<Notify> {
+        Arc::clone(&self.workspace_claim_changes)
+    }
+
+    pub(in crate::domains::worker_kernel) fn validate_workspace_claim_session(
+        &self,
+        session_id: &str,
+        workspace_id: &str,
+    ) -> Result<(), String> {
+        let session = self
+            .event_store
+            .get_session(session_id)
+            .map_err(|error| format!("load workspace-claim session: {error}"))?
+            .ok_or_else(|| format!("workspace-claim session '{session_id}' was not found"))?;
+        if session.workspace_id != workspace_id {
+            return Err("workspace claim does not match the durable session workspace".to_owned());
+        }
+        Ok(())
     }
 
     pub(crate) fn host(&self) -> &EngineHostHandle {
@@ -350,6 +474,7 @@ impl WorkerRuntime {
             &self.host,
             session_id,
             relevance_query,
+            None,
             None,
             None,
         )
@@ -371,6 +496,7 @@ impl WorkerRuntime {
                     WorkerRunner::Agent { model, .. } => model.clone(),
                     WorkerRunner::Command { .. } | WorkerRunner::Service { .. } => None,
                 };
+                let role_review = role_review::role_review_classification(&bundle);
                 let calls = bundle
                     .worker_dispatch_routes
                     .iter()
@@ -407,6 +533,8 @@ impl WorkerRuntime {
                     },
                     "runnerKind":bundle.runner.kind(),
                     "runnerModel":runner_model,
+                    "roleReview":role_review,
+                    "agentRole":&bundle.agent_role,
                     "engineHooks":bundle.engine_hooks.iter().map(|hook| hook.as_str()).collect::<Vec<_>>(),
                     "clientActions":bundle.client_actions.iter().map(|action| action.as_str()).collect::<Vec<_>>(),
                     "clientDeliveries":bundle.client_deliveries.iter().map(|delivery| delivery.as_str()).collect::<Vec<_>>(),
@@ -427,7 +555,10 @@ impl WorkerRuntime {
             .collect::<Result<Vec<_>, String>>()?;
         Ok(json!({
             "dispatchStopped": self.store.stop_all()?,
-            "nativeCapabilities": [crate::domains::terminal::CAPABILITY],
+            "nativeCapabilities": [
+                crate::domains::terminal::CAPABILITY,
+                role_review::AGENT_ROLE_REVIEW_CAPABILITY,
+            ],
             "activeEngineHooks": self.engine_hook_inventory()?,
             "activeClientActions": self.client_action_inventory()?,
             "activeClientDeliveries": self.client_delivery_inventory()?,

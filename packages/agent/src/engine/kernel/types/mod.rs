@@ -22,6 +22,6 @@ mod function;
 pub use catalog::{CatalogRevision, FunctionRevision, FunctionVisibility, StreamVisibility};
 pub use function::FunctionDefinition;
 pub use function::{
-    DedupeScope, DirectWorkerToolContract, EffectClass, IdempotencyContract, IdempotencyScope,
-    ModelToolAudience, ModelToolContract, RiskLevel,
+    DedupeScope, DelegationPolicy, DirectWorkerToolContract, EffectClass, IdempotencyContract,
+    IdempotencyScope, ModelToolAudience, ModelToolContract, RiskLevel, WorkspaceEffect,
 };

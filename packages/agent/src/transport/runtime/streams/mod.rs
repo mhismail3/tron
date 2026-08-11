@@ -11,6 +11,10 @@
 //! the persisted engine stream row and the neutral payload so observability can
 //! follow an agent turn through streamed UI events, tool invocation, queues, and
 //! downstream tools.
+//! Canonical `message.agent` materializations project as session-scoped
+//! transcript events with their persisted event ID and typed coordination
+//! content. They are distinct from the content-free `agent.message`
+//! invalidation used by management projections.
 //! If the bounded runtime receiver ever lags, the missing records cannot be
 //! inferred from sequence gaps because durable-only events legitimately consume
 //! sequences. The pump therefore publishes a system-scoped

@@ -23,7 +23,7 @@ pub(super) fn fixed_tool_snapshots(
 ) -> Result<Vec<SurfaceToolSnapshot>, String> {
     let projected = projected_tools
         .iter()
-        .map(|tool| tool.function_id.as_str())
+        .map(|tool| (tool.function_id.as_str(), tool.model_name.as_str()))
         .collect::<BTreeSet<_>>();
     let mut fixed = functions
         .iter()
@@ -41,7 +41,7 @@ pub(super) fn fixed_tool_snapshots(
                 .clone()
                 .unwrap_or_else(|| serde_json::json!({"type":"object"}));
             let output_schema = function.response_schema.clone();
-            let exposed = projected.contains(function.id.as_str());
+            let exposed = projected.contains(&(function.id.as_str(), model_tool.name.as_str()));
             Ok(SurfaceToolSnapshot {
                 model_name: model_tool.name.clone(),
                 function_id: function.id.as_str().to_owned(),
@@ -54,6 +54,8 @@ pub(super) fn fixed_tool_snapshots(
                 output_schema,
                 effect_class: function.effect_class.as_str().to_owned(),
                 risk: function.risk_level.as_str().to_owned(),
+                delegation_policy: function.delegation_policy.as_str().to_owned(),
+                workspace_effect: function.workspace_effect.as_str().to_owned(),
                 exposed,
                 worker_id: None,
                 worker_version: None,

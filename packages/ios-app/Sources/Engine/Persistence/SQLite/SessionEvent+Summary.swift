@@ -31,6 +31,16 @@ extension SessionEvent {
             }
             return "User message"
 
+        case .messageAgent:
+            guard let content = AgentMessageContent(eventPayload: payload) else {
+                return "Agent message"
+            }
+            let sender = AgentMessagePresentation.sender(content)
+            let preview = String(content.text.prefix(50))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let prefix = "\(sender) · \(AgentMessagePresentation.label(content.kind))"
+            return preview.isEmpty ? prefix : "\(prefix): \(preview)"
+
         case .messageAssistant:
             // Extract text from content blocks or plain string
             var text = ""

@@ -46,6 +46,8 @@ final class EngineClient: EngineTransport {
     private(set) var workerEventSubscriptionsRequested = false
     private var workerProjectionInvalidationTask: Task<Void, Never>?
     private var workerProjectionInvalidations = WorkerProjectionInvalidationAccumulator()
+    private var agentCoordinationInvalidationTask: Task<Void, Never>?
+    private var agentCoordinationInvalidations = AgentCoordinationInvalidationAccumulator()
     private var connectionAttemptTask: Task<Void, Never>?
     private var connectionAttemptKind: ConnectionAttemptKind?
     private var connectionAttemptGeneration: UInt64 = 0
@@ -184,6 +186,7 @@ final class EngineClient: EngineTransport {
             connectionAttemptTask?.cancel()
             workerEventSubscriptionTask?.cancel()
             workerProjectionInvalidationTask?.cancel()
+            agentCoordinationInvalidationTask?.cancel()
             for task in sessionSubscriptionTasks.values {
                 task.cancel()
             }
@@ -559,6 +562,12 @@ final class EngineClient: EngineTransport {
         )
         defer { recordAndAck(delivery) }
 
+        if eventType == "agent.lifecycle"
+            || eventType == "agent.assignment"
+            || eventType == "agent.message" {
+            scheduleAgentCoordinationInvalidation(sessionId: delivery.event.sessionId)
+        }
+
         if EngineClientStreamSubscriptionPolicy.isWorkerProjectionTopic(delivery.topic) {
             scheduleWorkerProjectionInvalidation(
                 topic: delivery.topic,
@@ -645,6 +654,26 @@ final class EngineClient: EngineTransport {
                     object: invalidation
                 )
             }
+        }
+    }
+
+    /// Adjacent coordination events collapse into one durable projection read.
+    /// The event content is intentionally not projected directly into UI.
+    private func scheduleAgentCoordinationInvalidation(sessionId: String?) {
+        agentCoordinationInvalidations.record(sessionId: sessionId)
+        guard agentCoordinationInvalidationTask == nil else { return }
+        agentCoordinationInvalidationTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled else { return }
+            agentCoordinationInvalidationTask = nil
+            NotificationCenter.default.post(
+                name: .agentCoordinationProjectionInvalidated,
+                object: agentCoordinationInvalidations.take()
+            )
         }
     }
 
@@ -1188,6 +1217,9 @@ final class EngineClient: EngineTransport {
         workerProjectionInvalidationTask?.cancel()
         workerProjectionInvalidationTask = nil
         workerProjectionInvalidations = WorkerProjectionInvalidationAccumulator()
+        agentCoordinationInvalidationTask?.cancel()
+        agentCoordinationInvalidationTask = nil
+        agentCoordinationInvalidations = AgentCoordinationInvalidationAccumulator()
         for task in sessionSubscriptionTasks.values {
             task.cancel()
         }

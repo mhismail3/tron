@@ -1,6 +1,8 @@
 //! Filesystem-owned state lookup, semantic-overlap selection, and complete
-//! candidate bundle validation.
+//! candidate bundle validation. `state_client_actions` isolates native-action schema
+//! fixtures from the core bundle validator.
 
+use super::state_client_actions::validate_client_action_contract;
 use super::*;
 
 impl WorkerStore {
@@ -237,6 +239,79 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
             }
         }
     }
+    if let Some(agent_role) = &bundle.agent_role {
+        if !matches!(bundle.runner, WorkerRunner::Agent { .. }) {
+            return Err("agentRole is only valid for agent runners".to_owned());
+        }
+        if let WorkerAgentRole::Enabled {
+            display_name,
+            summary,
+            collaboration_instructions,
+            default_model,
+            default_reasoning_level,
+            tool_ceiling,
+            limits,
+            result_mode,
+            ..
+        } = agent_role
+        {
+            validate_bounded_role_text(display_name, "agentRole displayName", 80)?;
+            validate_bounded_role_text(summary, "agentRole summary", 512)?;
+            validate_bounded_role_text(
+                collaboration_instructions,
+                "agentRole collaborationInstructions",
+                12_000,
+            )?;
+            if default_model
+                .as_deref()
+                .is_some_and(|model| model.trim().is_empty() || model.len() > 160)
+            {
+                return Err(
+                    "agentRole defaultModel must contain 1..160 UTF-8 bytes when provided"
+                        .to_owned(),
+                );
+            }
+            if default_reasoning_level.as_deref().is_some_and(|level| {
+                crate::domains::agent::r#loop::types::ReasoningLevel::from_str_canonical(level)
+                    .is_none()
+            }) {
+                return Err(
+                    "agentRole defaultReasoningLevel must be one of none, low, medium, high, x_high, or max"
+                        .to_owned(),
+                );
+            }
+            validate_agent_role_tool_ceiling(tool_ceiling)?;
+            if limits
+                .max_assignment_seconds
+                .is_some_and(|limit| !(1..=MAX_INVOCATION_SECONDS).contains(&limit))
+            {
+                return Err(format!(
+                    "agentRole limits.maxAssignmentSeconds must be between 1 and {MAX_INVOCATION_SECONDS}"
+                ));
+            }
+            if limits
+                .max_assignment_turns
+                .is_some_and(|limit| !(1..=250).contains(&limit))
+            {
+                return Err(
+                    "agentRole limits.maxAssignmentTurns must be between 1 and 250".to_owned(),
+                );
+            }
+            if limits.max_child_executions.is_some_and(|limit| limit > 256) {
+                return Err("agentRole limits.maxChildExecutions must be at most 256".to_owned());
+            }
+            if limits.max_queued_assignments.is_some_and(|limit| limit > 8) {
+                return Err("agentRole limits.maxQueuedAssignments must be at most 8".to_owned());
+            }
+            if matches!(result_mode, WorkerAgentResultMode::Schema)
+                && bundle.output_schema == serde_json::json!({"type":"object"})
+            {
+                return Err(
+                    "agentRole resultMode schema requires a specific outputSchema".to_owned(),
+                );
+            }
+        }
+    }
     match &bundle.runner {
         WorkerRunner::Agent {
             instructions,
@@ -328,6 +403,30 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
     for provenance in &bundle.provenance {
         if provenance.source.trim().is_empty() {
             return Err("worker provenance source must not be empty".to_owned());
+        }
+    }
+    Ok(())
+}
+
+fn validate_bounded_role_text(value: &str, field: &str, max_bytes: usize) -> Result<(), String> {
+    if value.trim().is_empty() || value.len() > max_bytes {
+        return Err(format!("{field} must contain 1..{max_bytes} UTF-8 bytes"));
+    }
+    Ok(())
+}
+
+fn validate_agent_role_tool_ceiling(tools: &[String]) -> Result<(), String> {
+    if tools.len() > 32 {
+        return Err("agentRole toolCeiling must contain at most 32 model tool names".to_owned());
+    }
+    let mut unique = BTreeSet::new();
+    for tool in tools {
+        if tool.len() > 64 {
+            return Err("agentRole toolCeiling entries must be at most 64 UTF-8 bytes".to_owned());
+        }
+        validate_identifier(tool, "agentRole toolCeiling entry")?;
+        if !unique.insert(tool.as_str()) {
+            return Err(format!("duplicate agentRole toolCeiling entry '{tool}'"));
         }
     }
     Ok(())
@@ -594,6 +693,52 @@ fn validate_engine_hook_contract(
     bundle: &WorkerBundle,
 ) -> Result<(), String> {
     let (input, output, invalid_inputs, invalid_outputs) = match hook {
+        WorkerEngineHook::AgentRoleReview => (
+            json!({
+                "action":"agent_role_review",
+                "target":{
+                    "workerId":"legacy-agent-runner",
+                    "workerVersion":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "name":"Legacy agent runner",
+                    "description":"Performs bounded delegated work.",
+                    "modelExposure":"internal",
+                    "runner":{
+                        "kind":"agent",
+                        "instructions":"Perform the delegated task and return bounded evidence.",
+                        "model":"gpt-5.6-sol"
+                    },
+                    "agentTools":["filesystem_read"],
+                    "inputSchema":{"type":"object"},
+                    "outputSchema":{"type":"object"},
+                    "routing":{"intents":["delegated work"],"examples":[]},
+                    "provenance":[{"source":"test:fixture"}]
+                },
+                "agentRoleSchema":super::super::super::contract::agent_role_authoring_schema(),
+                "delegableTools":[{
+                    "name":"filesystem_read",
+                    "functionId":"worker_kernel::filesystem_read",
+                    "description":"Read a local UTF-8 file.",
+                    "delegation":"inherit",
+                    "workspaceEffect":"read"
+                }]
+            }),
+            json!({
+                "agentRole":{"status":"disabled"},
+                "rationale":"This runner is useful only through its direct typed invocation contract."
+            }),
+            vec![json!({}), json!({"action":"agent_role_review"})],
+            vec![
+                json!({}),
+                json!({"agentRole":{"status":"disabled"}}),
+                json!({"agentRole":{"status":"disabled"},"rationale":""}),
+                json!({"agentRole":null,"rationale":"invalid"}),
+                json!({
+                    "agentRole":{"status":"disabled"},
+                    "rationale":"valid",
+                    "bundle":{"name":"forbidden rewrite"}
+                }),
+            ],
+        ),
         WorkerEngineHook::ContinuityContext => (
             json!({
                 "action":"continuity_context",
@@ -832,86 +977,6 @@ fn validate_engine_hook_contract(
             return Err(format!(
                 "engine hook '{}' outputSchema accepts invalid hook payload {invalid}",
                 hook.as_str(),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn validate_client_action_contract(
-    action: WorkerClientAction,
-    bundle: &WorkerBundle,
-) -> Result<(), String> {
-    let (input, output, invalid_inputs, invalid_outputs) = match action {
-        WorkerClientAction::SpeechTranscription => (
-            json!({
-                "audioBase64":"UklGRg==",
-                "mimeType":"audio/wav",
-                "fileName":"voice.wav"
-            }),
-            json!({"text":"Hello Tron"}),
-            vec![
-                json!({}),
-                json!({"audioBase64":"UklGRg==","mimeType":"audio/wav"}),
-                json!({"audioBase64":7,"mimeType":"audio/wav","fileName":"voice.wav"}),
-            ],
-            vec![json!({}), json!({"text":7})],
-        ),
-    };
-    let function_id =
-        crate::engine::FunctionId::new(format!("worker_kernel::client_action_{}", action.as_str()))
-            .map_err(|error| error.to_string())?;
-    crate::engine::validate_engine_schema_payload(
-        &function_id,
-        "request",
-        &bundle.input_schema,
-        &input,
-    )
-    .map_err(|error| {
-        format!(
-            "client action '{}' input does not match inputSchema: {error}",
-            action.as_str()
-        )
-    })?;
-    crate::engine::validate_engine_schema_payload(
-        &function_id,
-        "response",
-        &bundle.output_schema,
-        &output,
-    )
-    .map_err(|error| {
-        format!(
-            "client action '{}' output does not match outputSchema: {error}",
-            action.as_str()
-        )
-    })?;
-    for invalid in invalid_inputs {
-        if crate::engine::validate_engine_schema_payload(
-            &function_id,
-            "request",
-            &bundle.input_schema,
-            &invalid,
-        )
-        .is_ok()
-        {
-            return Err(format!(
-                "client action '{}' inputSchema accepts invalid client payload {invalid}",
-                action.as_str(),
-            ));
-        }
-    }
-    for invalid in invalid_outputs {
-        if crate::engine::validate_engine_schema_payload(
-            &function_id,
-            "response",
-            &bundle.output_schema,
-            &invalid,
-        )
-        .is_ok()
-        {
-            return Err(format!(
-                "client action '{}' outputSchema accepts invalid client payload {invalid}",
-                action.as_str(),
             ));
         }
     }

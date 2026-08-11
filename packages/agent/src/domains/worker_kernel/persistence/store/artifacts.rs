@@ -1,5 +1,7 @@
 //! Durable content-addressed artifact custody and authenticated inbox reads.
 
+use std::path::Path;
+
 use base64::Engine;
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};

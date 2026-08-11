@@ -127,7 +127,7 @@ fn validated_reconstruction(events: &[SessionEvent]) -> Result<ReconstructionRes
     for event in events {
         if matches!(
             event.event_type,
-            EventType::MessageUser | EventType::MessageAssistant
+            EventType::MessageUser | EventType::MessageAgent | EventType::MessageAssistant
         ) && contributing_event_ids.contains(event.id.as_str())
         {
             validate_provider_history_payload(&event.id, event.event_type, &event.payload)?;
@@ -152,6 +152,9 @@ fn validate_provider_history_payload(
     match event_type {
         EventType::MessageUser => {
             return validate_message_payload(event_id, "user", payload);
+        }
+        EventType::MessageAgent => {
+            return validate_message_payload(event_id, "agent", payload);
         }
         EventType::MessageAssistant => {
             return validate_message_payload(event_id, "assistant", payload);

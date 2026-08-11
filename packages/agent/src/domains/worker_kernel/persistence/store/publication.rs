@@ -1,6 +1,8 @@
 //! Candidate preparation, immutable version publication, canonical loading,
 //! and engine inventory queries.
 
+use std::path::Path;
+
 use super::*;
 
 impl WorkerStore {

@@ -2,8 +2,13 @@ use super::*;
 use crate::domains::session::event_store::{
     AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliverySourceKind, AgentDeliveryTarget,
     AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode, NewAgentDelivery,
-    NewAgentTaskDelivery, NewAgentWait, NewWorkerResultTaskDelivery, WorkerTerminalEvidence,
+    NewAgentMessageMetadata, NewAgentTaskDelivery, NewAgentWait, NewWorkerResultTaskDelivery,
+    WorkerTerminalEvidence,
 };
+use crate::shared::protocol::messages::{
+    AgentMessageAuthority, AgentMessageContent, AgentMessageKind,
+};
+use serde_json::json;
 
 fn session_delivery(
     session: &SessionRow,
@@ -71,6 +76,99 @@ fn delivery_is_idempotent_and_observed_only_after_its_leased_turn() {
     assert_eq!(
         store
             .agent_delivery(&first.delivery_id)
+            .unwrap()
+            .unwrap()
+            .disposition,
+        super::super::deliveries::AgentDeliveryDisposition::Observed
+    );
+}
+
+#[test]
+fn observing_a_v1_coordination_delivery_observes_its_materialized_message() {
+    let store = setup();
+    let source = store
+        .create_session("gpt-5.6-sol", "/tmp/project", Some("Source"), None)
+        .unwrap()
+        .session;
+    let target = store
+        .create_agent_session("gpt-5.6-sol", "/tmp/project", Some("Child"), None)
+        .unwrap()
+        .session;
+    let message_id = "agent_message_observation".to_owned();
+    let message = store
+        .record_agent_message(&NewAgentMessageMetadata {
+            idempotency_key: "agent-message:observation".to_owned(),
+            channel_id: "agent_channel:agent_source:agent_target".to_owned(),
+            channel_sequence: None,
+            source_session_id: Some(source.id.clone()),
+            target_agent_id: "agent_target".to_owned(),
+            target_session_id: target.id.clone(),
+            trace_id: "trace_observation".to_owned(),
+            autonomous_hop: 1,
+            content: AgentMessageContent {
+                message_id: message_id.clone(),
+                source_agent_id: "agent_source".to_owned(),
+                source_name: Some("Source agent".to_owned()),
+                kind: AgentMessageKind::Instruction,
+                authority: AgentMessageAuthority::Owner,
+                text: "Inspect the durable assignment.".to_owned(),
+                assignment_id: Some("assignment_observation".to_owned()),
+                reply_to: None,
+            },
+        })
+        .unwrap();
+    assert_eq!(message.disposition, AgentMessageDisposition::Pending);
+    store.materialize_agent_message(&message_id).unwrap();
+
+    let delivery = store
+        .create_agent_delivery(&NewAgentDelivery {
+            idempotency_key: "agent-delivery:observation".to_owned(),
+            source_kind: AgentDeliverySourceKind::AgentMessage,
+            intent: Some(AgentDeliveryIntent::Request),
+            source_session_id: Some(source.id.clone()),
+            source_workspace_id: source.workspace_id,
+            source_invocation_id: None,
+            source_trace_id: Some("trace-observation".to_owned()),
+            source_root_invocation_id: None,
+            causal_depth: 1,
+            target: AgentDeliveryTarget::Session {
+                session_id: target.id.clone(),
+            },
+            wake_policy: AgentDeliveryWakePolicy::Wake,
+            boundary: AgentDeliveryBoundary::NextTurn,
+            originating_run_id: None,
+            arrived_during_run_id: None,
+            defer_until_run_id: None,
+            result_invocation_id: None,
+            content: serde_json::json!({
+                "protocol": crate::domains::worker_kernel::AGENT_COORDINATION_CAPABILITY,
+                "messageId": message_id,
+            })
+            .to_string(),
+            not_before: None,
+            expires_at: None,
+        })
+        .unwrap();
+    store
+        .lease_agent_deliveries(&target.id, "run-agent", 1, None)
+        .unwrap();
+    assert_eq!(
+        store
+            .observe_agent_deliveries(&target.id, "run-agent", 1)
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        store
+            .agent_message_metadata(&message_id)
+            .unwrap()
+            .unwrap()
+            .disposition,
+        AgentMessageDisposition::Observed
+    );
+    assert_eq!(
+        store
+            .agent_delivery(&delivery.delivery_id)
             .unwrap()
             .unwrap()
             .disposition,
@@ -360,7 +458,7 @@ fn wait_reconciliation_is_idempotent_and_any_ignores_remaining_members() {
 }
 
 #[test]
-fn delivery_scope_is_closed_except_for_profile_mailboxes() {
+fn profile_agent_messages_cross_workspaces_but_other_delivery_sources_do_not() {
     let store = setup();
     let source = store
         .create_session("gpt-5.6-sol", "/tmp/source-workspace", None, None)
@@ -381,16 +479,28 @@ fn delivery_scope_is_closed_except_for_profile_mailboxes() {
     };
     assert!(store.create_agent_delivery(&same_workspace).is_ok());
 
-    let mut cross_workspace = session_delivery(&source, "send:foreign", "forged target");
+    let mut cross_workspace = session_delivery(&source, "send:foreign", "profile peer message");
     cross_workspace.target = AgentDeliveryTarget::Session {
+        session_id: foreign.id.clone(),
+    };
+    assert!(store.create_agent_delivery(&cross_workspace).is_ok());
+
+    let mut forged_non_agent = session_delivery(
+        &source,
+        "send:foreign-continuity",
+        "forged continuity target",
+    );
+    forged_non_agent.source_kind = AgentDeliverySourceKind::Continuity;
+    forged_non_agent.intent = None;
+    forged_non_agent.target = AgentDeliveryTarget::Session {
         session_id: foreign.id.clone(),
     };
     assert!(
         store
-            .create_agent_delivery(&cross_workspace)
+            .create_agent_delivery(&forged_non_agent)
             .unwrap_err()
             .to_string()
-            .contains("source workspace")
+            .contains("non-agent deliveries")
     );
 
     let mut forged_source = session_delivery(&source, "send:forged-source", "forged source");
@@ -600,6 +710,162 @@ fn not_before_expiry_archiving_and_wake_retry_are_durable_policy() {
         store.retry_exhausted_agent_deliveries(8).unwrap(),
         vec![(wake.delivery_id, session.id, "three".to_owned(),)]
     );
+}
+
+#[test]
+fn wake_batches_never_combine_distinct_causal_traces() {
+    let store = setup();
+    let session = store
+        .create_session("gpt-5.6-sol", "/tmp/project", None, None)
+        .unwrap()
+        .session;
+    let create = |key: &str, trace: &str, depth: u32, autonomous_hop: u32, authority| {
+        let message_id = format!("message:{key}");
+        store
+            .record_agent_message(&NewAgentMessageMetadata {
+                idempotency_key: format!("agent-message:{key}"),
+                channel_id: "agent_channel:agent_source:agent_target".to_owned(),
+                channel_sequence: None,
+                source_session_id: Some(session.id.clone()),
+                target_agent_id: "agent_target".to_owned(),
+                target_session_id: session.id.clone(),
+                trace_id: trace.to_owned(),
+                autonomous_hop,
+                content: AgentMessageContent {
+                    message_id: message_id.clone(),
+                    source_agent_id: "agent_source".to_owned(),
+                    source_name: Some("Source".to_owned()),
+                    kind: AgentMessageKind::Information,
+                    authority,
+                    text: format!("Evidence for {key}"),
+                    assignment_id: None,
+                    reply_to: None,
+                },
+            })
+            .unwrap();
+        let content = json!({"messageId":message_id}).to_string();
+        let mut delivery = session_delivery(&session, key, &content);
+        delivery.wake_policy = AgentDeliveryWakePolicy::Wake;
+        delivery.source_trace_id = Some(trace.to_owned());
+        delivery.causal_depth = depth;
+        store.create_agent_delivery(&delivery).unwrap()
+    };
+    let first_a = create(
+        "wake:trace-a:first",
+        "trace-a",
+        2,
+        9,
+        AgentMessageAuthority::Peer,
+    );
+    let trace_b = create(
+        "wake:trace-b",
+        "trace-b",
+        7,
+        0,
+        AgentMessageAuthority::Operator,
+    );
+    let second_a = create(
+        "wake:trace-a:second",
+        "trace-a",
+        2,
+        8,
+        AgentMessageAuthority::Peer,
+    );
+
+    let batch_a = store
+        .pending_agent_wake_batch_for_session(&session.id, 8)
+        .unwrap();
+    assert_eq!(
+        batch_a
+            .iter()
+            .map(|delivery| delivery.delivery_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![first_a.delivery_id.as_str(), second_a.delivery_id.as_str()]
+    );
+    assert!(batch_a.iter().all(|delivery| {
+        delivery.source_trace_id.as_deref() == Some("trace-a") && delivery.causal_depth == 2
+    }));
+    assert_eq!(store.agent_wake_batch_autonomous_hop(&batch_a).unwrap(), 9);
+    assert!(
+        store
+            .selected_agent_wake_batch_for_session(
+                &session.id,
+                &[first_a.delivery_id.clone(), trace_b.delivery_id.clone()],
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("crosses causal traces")
+    );
+
+    let batch_a_ids = batch_a
+        .iter()
+        .map(|delivery| delivery.delivery_id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        store
+            .lease_agent_deliveries(&session.id, "run-trace-a", 1, Some(&batch_a_ids))
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        store
+            .observe_agent_deliveries(&session.id, "run-trace-a", 1)
+            .unwrap(),
+        2
+    );
+    let batch_b = store
+        .pending_agent_wake_batch_for_session(&session.id, 8)
+        .unwrap();
+    assert_eq!(batch_b.len(), 1);
+    assert_eq!(batch_b[0].delivery_id, trace_b.delivery_id);
+    assert_eq!(batch_b[0].source_trace_id.as_deref(), Some("trace-b"));
+    assert_eq!(batch_b[0].causal_depth, 7);
+    assert_eq!(store.agent_wake_batch_autonomous_hop(&batch_b).unwrap(), 0);
+}
+
+#[test]
+fn exact_session_wake_demotion_includes_delayed_and_leased_evidence() {
+    let store = setup();
+    let session = store
+        .create_session("gpt-5.6-sol", "/tmp/project", None, None)
+        .unwrap()
+        .session;
+    let mut leased = session_delivery(&session, "wake:leased-cancel", "leased");
+    leased.wake_policy = AgentDeliveryWakePolicy::Wake;
+    let leased = store.create_agent_delivery(&leased).unwrap();
+    let leased_ids = vec![leased.delivery_id.clone()];
+    assert_eq!(
+        store
+            .lease_agent_deliveries(&session.id, "run-before-cancel", 1, Some(&leased_ids))
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let mut delayed = session_delivery(&session, "wake:delayed-cancel", "delayed");
+    delayed.wake_policy = AgentDeliveryWakePolicy::Wake;
+    delayed.not_before = Some((chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339());
+    let delayed = store.create_agent_delivery(&delayed).unwrap();
+
+    assert_eq!(store.count_agent_wakes_for_session(&session.id).unwrap(), 2);
+    assert_eq!(
+        store
+            .demote_all_agent_wakes_for_session(&session.id)
+            .unwrap(),
+        2
+    );
+    for delivery_id in [leased.delivery_id, delayed.delivery_id] {
+        let delivery = store.agent_delivery(&delivery_id).unwrap().unwrap();
+        assert_eq!(delivery.wake_policy, AgentDeliveryWakePolicy::Passive);
+        assert!(delivery.leased_run_id.is_none());
+        assert!(delivery.leased_turn.is_none());
+        assert_eq!(
+            delivery.disposition,
+            super::super::deliveries::AgentDeliveryDisposition::Pending
+        );
+    }
+    assert_eq!(store.count_agent_wakes_for_session(&session.id).unwrap(), 0);
 }
 
 #[test]

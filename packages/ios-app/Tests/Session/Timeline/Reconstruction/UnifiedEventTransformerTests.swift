@@ -163,6 +163,17 @@ class UnifiedEventTransformerTestCase: XCTestCase {
                 // Production `session::reconstruct` payloads may omit `turn`.
                 "content": AnyCodable("Hello from the persisted event log")
             ],
+            .messageAgent: [
+                "content": AnyCodable([
+                    "messageId": "agent-message-fixture",
+                    "sourceAgentId": "agent-source",
+                    "sourceName": "Researcher",
+                    "kind": "question",
+                    "authority": "peer",
+                    "text": "Which module owns this?",
+                    "assignmentId": "assignment-fixture",
+                ])
+            ],
             .messageAssistant: [
                 "content": AnyCodable([["type": "text", "text": "Assistant response"] as [String: Any]]),
                 "turn": AnyCodable(1),

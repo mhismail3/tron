@@ -3,6 +3,14 @@
 //! Delivery content is reference context, never replay history or authority.
 //! The EventStore owns every state transition so session lifecycle, mailbox
 //! claims, wait resolution, and provider-turn leasing remain transactional.
+//! Accepted assignment messages use an atomically paired supervisor hold;
+//! leases exclude held rows even on ordinary turns, and release is one-way so
+//! importer replay cannot attach queued work to an earlier objective.
+//! Wake admission is trace-affine: one provider turn consumes only the oldest
+//! eligible causal trace, leaving unrelated traces pending for later turns.
+//! Exact agent-subtree cancellation makes every pending wake for each target
+//! transcript passive, including delayed and leased evidence; the records are
+//! retained and cannot later recreate cancelled provider work.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -324,6 +332,18 @@ impl AgentDeliveryRecord {
     }
 }
 
+fn single_trace_wake_batch(mut records: Vec<AgentDeliveryRecord>) -> Vec<AgentDeliveryRecord> {
+    let Some(first) = records.first() else {
+        return records;
+    };
+    let Some(trace_id) = first.source_trace_id.clone() else {
+        records.truncate(1);
+        return records;
+    };
+    records.retain(|record| record.source_trace_id.as_deref() == Some(trace_id.as_str()));
+    records
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AgentWaitMode {
@@ -496,9 +516,11 @@ pub(super) fn insert_delivery_in_tx(
                         .ok_or_else(|| EventStoreError::SessionNotFound(session_id.clone()))?,
                     "target",
                 )?;
-                if target.workspace_id != delivery.source_workspace_id {
+                if target.workspace_id != delivery.source_workspace_id
+                    && delivery.source_kind != AgentDeliverySourceKind::AgentMessage
+                {
                     return Err(EventStoreError::InvalidOperation(
-                        "agent deliveries may target only a session in the source workspace"
+                        "non-agent deliveries may target only a session in the source workspace"
                             .to_owned(),
                     ));
                 }
@@ -572,8 +594,130 @@ pub(super) fn insert_delivery_in_tx(
             created_at,
         ],
     )?;
+    // A coordination wait can commit after an importer checked for a pending
+    // member but before this delivery row is inserted. Reconcile that narrow
+    // race in the same transaction as admission: the durable delivery remains
+    // as audit/idempotency evidence, but it is born cancelled and can never
+    // schedule the individual wake superseded by fan-in.
+    suppress_coordination_owned_delivery_in_tx(
+        tx,
+        &delivery.idempotency_key,
+        delivery.source_kind,
+        target_session_id,
+        delivery.result_invocation_id.as_deref(),
+        &delivery.content,
+    )?;
     delivery_by_idempotency_key_in_tx(tx, &delivery.idempotency_key)?
         .ok_or_else(|| EventStoreError::Internal("inserted agent delivery disappeared".to_owned()))
+}
+
+fn suppress_coordination_owned_delivery_in_tx(
+    tx: &Transaction<'_>,
+    idempotency_key: &str,
+    source_kind: AgentDeliverySourceKind,
+    target_session_id: Option<&str>,
+    result_invocation_id: Option<&str>,
+    content: &str,
+) -> Result<()> {
+    let Some(target_session_id) = target_session_id else {
+        return Ok(());
+    };
+    let mut linked_message_id = None;
+    let target = match source_kind {
+        AgentDeliverySourceKind::WorkerResult => {
+            let invocation_id = result_invocation_id.map(ToOwned::to_owned).or_else(|| {
+                serde_json::from_str::<serde_json::Value>(content)
+                    .ok()?
+                    .get("invocationId")?
+                    .as_str()
+                    .map(ToOwned::to_owned)
+            });
+            invocation_id.map(|id| ("worker_invocation", id))
+        }
+        AgentDeliverySourceKind::AgentMessage => {
+            let envelope = match serde_json::from_str::<serde_json::Value>(content) {
+                Ok(envelope) => envelope,
+                Err(_) => return Ok(()),
+            };
+            if envelope.get("protocol").and_then(serde_json::Value::as_str)
+                != Some(crate::domains::worker_kernel::AGENT_COORDINATION_CAPABILITY)
+            {
+                return Ok(());
+            }
+            let Some(message_id) = envelope
+                .get("messageId")
+                .and_then(serde_json::Value::as_str)
+            else {
+                return Ok(());
+            };
+            linked_message_id = Some(message_id.to_owned());
+            let metadata = tx
+                .query_row(
+                    "SELECT kind,assignment_id,reply_to_message_id,disposition
+                     FROM agent_message_metadata WHERE message_id=?1",
+                    [message_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((kind, assignment_id, reply_to, disposition)) = metadata else {
+                return Ok(());
+            };
+            if disposition == "cancelled" {
+                Some(("cancelled_message", message_id.to_owned()))
+            } else if kind == "result" {
+                assignment_id.map(|id| ("agent_assignment", id))
+            } else if kind == "answer" {
+                reply_to.map(|id| ("reply", id))
+            } else {
+                None
+            }
+        }
+        AgentDeliverySourceKind::Continuity => None,
+    };
+    let Some((target_kind, target_id)) = target else {
+        return Ok(());
+    };
+    let absorbed = target_kind == "cancelled_message"
+        || tx.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM coordination_wait_members member
+                JOIN coordination_waits wait USING(wait_id)
+                WHERE wait.session_id=?1 AND member.target_kind=?2
+                  AND member.target_id=?3
+                  AND member.disposition IN ('pending','satisfied')
+                  AND wait.disposition IN ('pending','satisfied')
+             )",
+            params![target_session_id, target_kind, target_id],
+            |row| row.get::<_, bool>(0),
+        )?;
+    if !absorbed {
+        return Ok(());
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    if let Some(message_id) = linked_message_id {
+        tx.execute(
+            "UPDATE agent_message_metadata
+             SET disposition='cancelled',cancelled_at=?2
+             WHERE message_id=?1 AND disposition='pending'",
+            params![message_id, now],
+        )?;
+    }
+    tx.execute(
+        "UPDATE agent_deliveries
+         SET disposition='cancelled',cancelled_at=?2,
+             wake_policy='passive',next_wake_at=NULL,
+             leased_run_id=NULL,leased_turn=NULL
+         WHERE idempotency_key=?1 AND disposition='pending'",
+        params![idempotency_key, now],
+    )?;
+    Ok(())
 }
 
 fn delivery_by_idempotency_key_in_tx(
@@ -908,6 +1052,50 @@ impl EventStore {
         }
     }
 
+    /// Create an assignment-admission delivery behind a durable one-way
+    /// supervisor latch. The message metadata and delivery are immediately
+    /// inspectable, but every provider lease excludes it until the assignment
+    /// supervisor releases the latch after opening the exact attempt baseline.
+    pub(crate) fn create_held_agent_assignment_delivery(
+        &self,
+        delivery: &NewAgentDelivery,
+        assignment_id: &str,
+    ) -> Result<AgentDeliveryRecord> {
+        let target_session_id = match &delivery.target {
+            AgentDeliveryTarget::Session { session_id } => session_id,
+            AgentDeliveryTarget::Mailbox { .. } => {
+                return Err(EventStoreError::InvalidOperation(
+                    "held assignment deliveries require a session target".to_owned(),
+                ));
+            }
+        };
+        self.with_session_write_lock(target_session_id, || {
+            let mut connection = self.conn()?;
+            let transaction =
+                connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let record = insert_delivery_in_tx(&transaction, delivery)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                "INSERT OR IGNORE INTO agent_assignment_delivery_holds(
+                    delivery_id,assignment_id,state,created_at
+                 ) VALUES (?1,?2,'held',?3)",
+                params![record.delivery_id, assignment_id, now],
+            )?;
+            let durable_assignment_id = transaction.query_row(
+                "SELECT assignment_id FROM agent_assignment_delivery_holds WHERE delivery_id=?1",
+                [&record.delivery_id],
+                |row| row.get::<_, String>(0),
+            )?;
+            if durable_assignment_id != assignment_id {
+                return Err(EventStoreError::InvalidOperation(
+                    "assignment delivery hold idempotency conflict".to_owned(),
+                ));
+            }
+            transaction.commit()?;
+            Ok(record)
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn agent_delivery(&self, delivery_id: &str) -> Result<Option<AgentDeliveryRecord>> {
         let connection = self.conn()?;
@@ -999,6 +1187,10 @@ impl EventStore {
                 "SELECT delivery_id,length(CAST(content AS BLOB)) FROM agent_deliveries
                  WHERE target_session_id=?1 AND disposition='pending'
                    AND leased_run_id IS NULL
+                   AND NOT EXISTS (
+                     SELECT 1 FROM agent_assignment_delivery_holds hold
+                     WHERE hold.delivery_id=agent_deliveries.delivery_id AND hold.state='held'
+                   )
                    AND (not_before IS NULL OR rfc3339_sort_key(not_before)<=rfc3339_sort_key(?2))
                    AND (expires_at IS NULL OR rfc3339_sort_key(expires_at)>rfc3339_sort_key(?2))
                    AND (defer_until_run_id IS NULL OR defer_until_run_id<>?3)"
@@ -1084,18 +1276,55 @@ impl EventStore {
         turn: u32,
     ) -> Result<usize> {
         self.with_session_write_lock(session_id, || {
-            let connection = self.conn()?;
+            let mut connection = self.conn()?;
+            let transaction =
+                connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let now = chrono::Utc::now().to_rfc3339();
-            connection
-                .execute(
-                    "UPDATE agent_deliveries
-                     SET disposition='observed',observed_at=?4,
-                         leased_run_id=NULL,leased_turn=NULL
+            let coordination_message_ids = {
+                let mut statement = transaction.prepare(
+                    "SELECT content FROM agent_deliveries
                      WHERE target_session_id=?1 AND disposition='pending'
-                       AND leased_run_id=?2 AND leased_turn=?3",
-                    params![session_id, run_id, turn, now],
-                )
-                .map_err(EventStoreError::from)
+                       AND leased_run_id=?2 AND leased_turn=?3
+                       AND source_kind='agent_message'",
+                )?;
+                statement
+                    .query_map(params![session_id, run_id, turn], |row| {
+                        row.get::<_, String>(0)
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+                    .into_iter()
+                    .filter_map(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+                    .filter(|value| {
+                        value.get("protocol").and_then(serde_json::Value::as_str)
+                            == Some(crate::domains::worker_kernel::AGENT_COORDINATION_CAPABILITY)
+                    })
+                    .filter_map(|value| {
+                        value
+                            .get("messageId")
+                            .and_then(serde_json::Value::as_str)
+                            .map(ToOwned::to_owned)
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let changed = transaction.execute(
+                "UPDATE agent_deliveries
+                 SET disposition='observed',observed_at=?4,
+                     leased_run_id=NULL,leased_turn=NULL
+                 WHERE target_session_id=?1 AND disposition='pending'
+                   AND leased_run_id=?2 AND leased_turn=?3",
+                params![session_id, run_id, turn, now],
+            )?;
+            for message_id in coordination_message_ids {
+                transaction.execute(
+                    "UPDATE agent_message_metadata
+                     SET disposition='observed',observed_at=?3
+                     WHERE message_id=?1 AND target_session_id=?2
+                       AND disposition='materialized'",
+                    params![message_id, session_id, now],
+                )?;
+            }
+            transaction.commit()?;
+            Ok(changed)
         })
     }
 
@@ -1224,6 +1453,96 @@ impl EventStore {
             .map_err(EventStoreError::from)
     }
 
+    /// Select one provider wake batch from the oldest eligible delivery's
+    /// exact causal trace. Different traces remain pending for a later safe
+    /// run; unknown (`NULL`) trace provenance is deliberately isolated to one
+    /// delivery rather than treating unrelated legacy evidence as one graph.
+    pub(crate) fn pending_agent_wake_batch_for_session(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<AgentDeliveryRecord>> {
+        let delivery_ids = self.pending_agent_wakes_for_session(session_id, limit)?;
+        if delivery_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let records = self.agent_deliveries_by_ids(&delivery_ids)?;
+        Ok(single_trace_wake_batch(records))
+    }
+
+    /// Revalidate a preselected engine-owned wake batch immediately before
+    /// run admission. This closes the selection/admission gap without allowing
+    /// an internal caller to combine different traces or stale deliveries.
+    pub(crate) fn selected_agent_wake_batch_for_session(
+        &self,
+        session_id: &str,
+        delivery_ids: &[String],
+    ) -> Result<Vec<AgentDeliveryRecord>> {
+        if delivery_ids.is_empty() || delivery_ids.len() > MAX_DELIVERIES_PER_TURN {
+            return Err(EventStoreError::InvalidOperation(format!(
+                "agent wake selection requires 1..={MAX_DELIVERIES_PER_TURN} deliveries"
+            )));
+        }
+        if delivery_ids.iter().collect::<BTreeSet<_>>().len() != delivery_ids.len() {
+            return Err(EventStoreError::InvalidOperation(
+                "agent wake selection contains duplicate deliveries".to_owned(),
+            ));
+        }
+        let eligible = self.pending_agent_wakes_for_session(
+            session_id,
+            crate::domains::session::event_store::MAX_DELIVERIES_PER_TURN,
+        )?;
+        if delivery_ids
+            .iter()
+            .any(|delivery_id| !eligible.contains(delivery_id))
+        {
+            return Err(EventStoreError::InvalidOperation(
+                "agent wake selection is no longer pending and eligible".to_owned(),
+            ));
+        }
+        let records = self.agent_deliveries_by_ids(delivery_ids)?;
+        let grouped = single_trace_wake_batch(records.clone());
+        if grouped.len() != records.len() {
+            return Err(EventStoreError::InvalidOperation(
+                "agent wake selection crosses causal traces".to_owned(),
+            ));
+        }
+        Ok(records)
+    }
+
+    /// Recover the largest persisted autonomous hop for one already
+    /// trace-affine wake batch. Coordination message metadata is canonical;
+    /// arbitrary delivery JSON cannot manufacture autonomy provenance.
+    pub(crate) fn agent_wake_batch_autonomous_hop(
+        &self,
+        records: &[AgentDeliveryRecord],
+    ) -> Result<u32> {
+        let grouped = single_trace_wake_batch(records.to_vec());
+        if grouped.len() != records.len() {
+            return Err(EventStoreError::InvalidOperation(
+                "agent wake batch crosses causal traces".to_owned(),
+            ));
+        }
+        let mut autonomous_hop = 0_u32;
+        for record in records {
+            let Some(message_id) = serde_json::from_str::<serde_json::Value>(&record.content)
+                .ok()
+                .and_then(|envelope| {
+                    envelope
+                        .get("messageId")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToOwned::to_owned)
+                })
+            else {
+                continue;
+            };
+            if let Some(message) = self.agent_message_metadata(&message_id)? {
+                autonomous_hop = autonomous_hop.max(message.autonomous_hop);
+            }
+        }
+        Ok(autonomous_hop)
+    }
+
     pub(crate) fn record_agent_wake_failure(
         &self,
         session_id: &str,
@@ -1315,6 +1634,42 @@ impl EventStore {
             transaction.commit()?;
             Ok(changed)
         })
+    }
+
+    /// Make every retained wake for one session passive, including delayed and
+    /// currently leased deliveries. Agent-subtree cancellation and closed
+    /// reusable-agent recovery use this exact, uncapped mutation so no later
+    /// scheduler tick can resurrect cancelled transcript work.
+    pub(crate) fn demote_all_agent_wakes_for_session(&self, session_id: &str) -> Result<usize> {
+        self.with_session_write_lock(session_id, || {
+            let connection = self.conn()?;
+            connection
+                .execute(
+                    "UPDATE agent_deliveries
+                     SET wake_policy='passive',next_wake_at=NULL,
+                         leased_run_id=NULL,leased_turn=NULL
+                     WHERE target_session_id=?1
+                       AND disposition='pending' AND wake_policy='wake'",
+                    [session_id],
+                )
+                .map_err(EventStoreError::from)
+        })
+    }
+
+    /// Count the exact durable wake records which subtree cancellation would
+    /// make passive. Unlike scheduler selection this includes delayed and
+    /// leased evidence and has no presentation cap.
+    pub(crate) fn count_agent_wakes_for_session(&self, session_id: &str) -> Result<u64> {
+        let connection = self.conn()?;
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM agent_deliveries
+                 WHERE target_session_id=?1
+                   AND disposition='pending' AND wake_policy='wake'",
+                [session_id],
+                |row| row.get(0),
+            )
+            .map_err(EventStoreError::from)
     }
 
     pub(crate) fn demote_leased_agent_wakes(

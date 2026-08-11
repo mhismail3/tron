@@ -42,7 +42,7 @@ pub(super) fn worker_architecture_response_schema() -> Value {
         "items":{
             "type":"object",
             "additionalProperties":false,
-            "required":["workerId","name","description","activeVersion","health","modelExposure","runnerKind","engineHooks","clientActions","clientDeliveries","triggerKinds","calls","presentation","provenance"],
+            "required":["workerId","name","description","activeVersion","health","modelExposure","runnerKind","roleReview","agentRole","engineHooks","clientActions","clientDeliveries","triggerKinds","calls","presentation","provenance"],
             "properties":{
                 "workerId":{"type":"string"},
                 "name":{"type":"string"},
@@ -52,6 +52,8 @@ pub(super) fn worker_architecture_response_schema() -> Value {
                 "modelExposure":{"type":"string","enum":["direct","internal"]},
                 "runnerKind":{"type":"string","enum":["agent","command","service"]},
                 "runnerModel":{"type":["string","null"]},
+                "roleReview":{"type":"string","enum":["declared","needs_role_review","ineligible"]},
+                "agentRole":{"type":["object","null"]},
                 "engineHooks":{"type":"array","items":{"type":"string"}},
                 "clientActions":{"type":"array","items":{"type":"string"}},
                 "clientDeliveries":{"type":"array","items":{"type":"string"}},

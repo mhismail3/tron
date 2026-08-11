@@ -14,6 +14,7 @@ final class SessionContextRefreshCoordinator {
         case workers
         case agentUpdates
         case providerContext
+        case agents
     }
 
     typealias Operation = @MainActor (_ generation: UInt64) async -> Void

@@ -151,6 +151,73 @@ final class WorkerKernelClient: EngineDomainClient {
         )
     }
 
+    func roleReviews(
+        limit: UInt64 = 50,
+        offset: UInt64? = nil,
+        queueLimit: UInt64 = 100,
+        queueOffset: UInt64? = nil
+    ) async throws -> WorkerRoleReviewListDTO {
+        try await invokeRead(
+            "worker_kernel::role_reviews",
+            WorkerRoleReviewsRequestDTO(
+                limit: min(max(limit, 1), 100),
+                offset: offset,
+                queueLimit: min(max(queueLimit, 1), 100),
+                queueOffset: queueOffset
+            )
+        )
+    }
+
+    func startRoleReview(
+        workerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewProposalDTO {
+        try await invokeWrite(
+            "worker_kernel::role_review_start",
+            WorkerRoleReviewStartRequestDTO(workerId: workerId),
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func inspectRoleReview(_ proposalId: String) async throws -> WorkerRoleReviewProposalDTO {
+        try await invokeRead(
+            "worker_kernel::role_review_inspect",
+            WorkerRoleReviewInspectRequestDTO(proposalId: proposalId)
+        )
+    }
+
+    func applyRoleReview(
+        proposalId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewApplyResultDTO {
+        try await invokeWrite(
+            "worker_kernel::role_review_apply",
+            WorkerRoleReviewApplyRequestDTO(
+                proposalId: proposalId,
+                confirmed: true
+            ),
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func rejectRoleReview(
+        proposalId: String,
+        reason: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewProposalDTO {
+        let boundedReason = reason?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(512)
+        return try await invokeWrite(
+            "worker_kernel::role_review_reject",
+            WorkerRoleReviewRejectRequestDTO(
+                proposalId: proposalId,
+                reason: boundedReason.map(String.init).flatMap { $0.isEmpty ? nil : $0 }
+            ),
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func dismissWorkerInboxItem(
         inboxId: String,
         idempotencyKey: EngineIdempotencyKey

@@ -19,6 +19,7 @@ struct SessionContextSheet: View {
     let modelRepository: any ModelRepository
     let sessionRepository: any NetworkSessionRepository
     let workerRepository: any WorkerKernelRepository
+    let agentRepository: any AgentRepository
     let onSelectModel: (ModelInfo) -> Void
     let onSelectReasoningLevel: (String) -> Void
     let onFork: () async throws -> String
@@ -58,6 +59,16 @@ struct SessionContextSheet: View {
     @State var agentUpdatesLoadingGeneration: UInt64?
     @State var agentUpdatesLaneActivated = false
     @State var workerLaneActivated = false
+    @State var relatedAgents: [AgentRelationDTO] = []
+    @State var agentRelationTotals: AgentRelationTotalsDTO?
+    @State var agentRelationsNextCursor: String?
+    @State var isLoadingAgentRelations = false
+    @State var agentRelationsLoadingGeneration: UInt64?
+    @State var agentRelationsLoadError: String?
+    @State var hasLoadedAgentRelationsSnapshot = false
+    @State var agentRelationsLaneActivated = false
+    @State var loadOlderAgentRelationsPending = false
+    @State var showAgents = false
     @State var showBackgroundActivity = false
     @State var showSessionWorkers = false
     @State var selectedContextDetail: SessionContextDetailSelection?
@@ -67,6 +78,9 @@ struct SessionContextSheet: View {
     }
     var cachedSessionRepository: SessionRepository {
         dependencies.eventStoreManager.eventDB.sessions
+    }
+    var supportsAgentCoordination: Bool {
+        agentRepository.supportsCoordinationManagement
     }
 
     var resolvedModelInfo: ModelInfo? {
@@ -118,6 +132,9 @@ struct SessionContextSheet: View {
     var hasRunningSessionWorker: Bool {
         sessionWorkerRuns.contains { $0.status == "queued" || $0.status == "running" }
     }
+    var hasActiveRelatedAgent: Bool {
+        relatedAgents.contains { SessionAgentsPresentation.isActive(status: $0.status) }
+    }
     var shouldContinueObservingDeliveryState: Bool {
         SessionContextPresentation.shouldContinueObservingDeliveryState(
             isAgentActive: isAgentActive,
@@ -126,7 +143,7 @@ struct SessionContextSheet: View {
                 (status: $0.status, wakePolicy: $0.wakePolicy)
             },
             waitStatuses: agentWaits.map(\.status)
-        )
+        ) || hasActiveRelatedAgent
     }
 
     var body: some View {
@@ -207,6 +224,15 @@ struct SessionContextSheet: View {
                 requestWorkerRefresh()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .agentCoordinationProjectionInvalidated)) {
+            notification in
+            if AgentCoordinationProjectionInvalidation.affectsSession(
+                notificationObject: notification.object,
+                sessionId: sessionId
+            ), agentRelationsLaneActivated {
+                requestAgentRelationsRefresh()
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 requestActivatedSessionContextRefreshes()
@@ -242,6 +268,24 @@ struct SessionContextSheet: View {
                 hasLoadedSnapshot: hasLoadedAgentUpdatesSnapshot,
                 workerRepository: workerRepository,
                 onRetry: { requestAgentUpdatesRefresh() }
+            )
+        }
+        .sheet(isPresented: $showAgents) {
+            SessionAgentsSheet(
+                ownerSessionId: sessionId,
+                agents: relatedAgents,
+                totals: agentRelationTotals,
+                nextCursor: agentRelationsNextCursor,
+                isLoading: isLoadingAgentRelations,
+                hasLoadedSnapshot: hasLoadedAgentRelationsSnapshot,
+                loadError: agentRelationsLoadError,
+                isSupported: supportsAgentCoordination,
+                repository: agentRepository,
+                workerRepository: workerRepository,
+                isConnected: isConnected,
+                onRetry: { requestAgentRelationsRefresh() },
+                onLoadOlder: { loadOlderAgentRelations() },
+                onProjectionChanged: { requestAgentRelationsRefresh() }
             )
         }
         .sheet(isPresented: $showSessionWorkers) {

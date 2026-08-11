@@ -266,6 +266,7 @@ mod tests {
             model_exposure: WorkerModelExposure::Direct,
             tool_input_schema: Some(serde_json::json!({"type":"object"})),
             agent_tools: None,
+            agent_role: None,
             input_schema: serde_json::json!({"type":"object"}),
             output_schema: serde_json::json!({
                 "type":"object",

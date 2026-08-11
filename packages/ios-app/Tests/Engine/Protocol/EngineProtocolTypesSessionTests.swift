@@ -621,6 +621,10 @@ struct SessionContextAuditDecodingTests {
                 "modelExposure": index < 18 ? "direct" : "internal",
                 "runnerKind": index < 14 ? "agent" : "command",
                 "runnerModel": index < 14 ? "gpt-test" : NSNull(),
+                "roleReview": index == 0 ? "needs_role_review" : (index < 14 ? "declared" : "ineligible"),
+                "agentRole": index == 1
+                    ? ["kind": "disabled"]
+                    : NSNull(),
                 "engineHooks": index == 0 ? ["context_summary"] : [],
                 "clientActions": index == 1 ? ["speech_transcription"] : [],
                 "clientDeliveries": index == 2 ? ["notification_delivery"] : [],
@@ -649,5 +653,9 @@ struct SessionContextAuditDecodingTests {
         #expect(decoded.filter { $0.modelExposure == "direct" }.count == 18)
         #expect(decoded.filter { $0.runnerKind == "agent" }.count == 14)
         #expect(decoded[3].calls.first?.targetWorkerId == "worker-4")
+        #expect(decoded[0].needsAgentRoleReview)
+        #expect(decoded[1].roleReview == "declared")
+        #expect(decoded[1].agentRole != nil)
+        #expect(decoded[14].roleReview == "ineligible")
     }
 }

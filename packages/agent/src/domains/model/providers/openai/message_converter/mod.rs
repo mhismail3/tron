@@ -37,6 +37,12 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
             Message::User { content, .. } => {
                 convert_user_message(content, &mut input);
             }
+            Message::Agent { content, .. } => {
+                convert_user_message(
+                    &UserMessageContent::Text(content.render_for_provider()),
+                    &mut input,
+                );
+            }
             Message::Assistant { content, .. } => {
                 convert_assistant_message(content, &id_mapping, &mut input);
             }

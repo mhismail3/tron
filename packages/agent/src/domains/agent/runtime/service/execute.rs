@@ -383,6 +383,12 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         engine_causality
             .as_ref()
             .and_then(|causality| causality.context.worker_max_agent_turns()),
+        engine_causality
+            .as_ref()
+            .and_then(|causality| causality.context.agent_limits())
+            .and_then(|limits| limits.get("maxAssignmentTurns"))
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok()),
     )
     .await
     {
@@ -466,6 +472,10 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             .as_ref()
             .map(|causality| causality.context.trigger_depth())
             .unwrap_or(0),
+        autonomous_wake_hop: engine_causality
+            .as_ref()
+            .map(|causality| causality.context.autonomous_wake_hop())
+            .unwrap_or(0),
         origin_worker_id: engine_causality
             .as_ref()
             .and_then(|causality| causality.context.origin_worker_id().map(ToOwned::to_owned)),
@@ -475,6 +485,33 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
                 .origin_worker_invocation_id()
                 .map(ToOwned::to_owned)
         }),
+        agent_id: engine_causality
+            .as_ref()
+            .and_then(|causality| causality.context.agent_id().map(ToOwned::to_owned)),
+        agent_assignment_id: engine_causality.as_ref().and_then(|causality| {
+            causality
+                .context
+                .agent_assignment_id()
+                .map(ToOwned::to_owned)
+        }),
+        agent_execution_id: engine_causality.as_ref().and_then(|causality| {
+            causality
+                .context
+                .agent_execution_id()
+                .map(ToOwned::to_owned)
+        }),
+        delegated_function_grant: engine_causality.as_ref().and_then(|causality| {
+            causality
+                .context
+                .delegated_function_grant()
+                .map(<[_]>::to_vec)
+        }),
+        agent_limits: engine_causality
+            .as_ref()
+            .and_then(|causality| causality.context.agent_limits().cloned()),
+        agent_write_scopes: engine_causality
+            .as_ref()
+            .and_then(|causality| causality.context.agent_write_scopes().map(<[_]>::to_vec)),
         worker_agent_tools: engine_causality
             .as_ref()
             .and_then(|causality| causality.context.worker_agent_tools().map(<[_]>::to_vec)),

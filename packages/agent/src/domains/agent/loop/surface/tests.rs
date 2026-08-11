@@ -102,7 +102,8 @@ fn register_worker_primitive_with_visibility(
         "properties": {"query": {"type": "string"}},
         "required": ["query"],
         "additionalProperties": false
-    }));
+    }))
+    .with_delegation_policy(crate::engine::DelegationPolicy::Inherit);
     definition.model_tool = Some(crate::engine::ModelToolContract {
         name: tool_name.to_owned(),
         audience: crate::engine::ModelToolAudience::Ordinary,
@@ -155,6 +156,95 @@ async fn non_model_functions_are_not_projected() {
         .await
         .expect("surface");
     assert!(surface.tools.is_empty());
+}
+
+#[tokio::test]
+async fn retained_worker_aliases_exist_only_on_the_exact_trusted_agent_tools_surface() {
+    let host = EngineHostHandle::new_in_memory().expect("host");
+    let definitions =
+        crate::domains::worker_kernel::test_function_definitions().expect("worker contracts");
+    for function_id in ["worker_kernel::await", "worker_kernel::result_read"] {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.id.as_str() == function_id)
+            .unwrap_or_else(|| panic!("missing {function_id}"))
+            .clone();
+        host.register_function(definition, Arc::new(StubHandler))
+            .await
+            .expect("compatibility target");
+    }
+
+    let ordinary = resolve_provider_primitive_surface(&host, "ordinary-session")
+        .await
+        .expect("ordinary surface");
+    assert_eq!(
+        ordinary
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["result_read"]
+    );
+
+    let aliases = ["worker_await".to_owned(), "worker_result_read".to_owned()];
+    let grant = [
+        "worker_kernel::await".to_owned(),
+        "worker_kernel::result_read".to_owned(),
+    ];
+    let trusted = resolve_provider_primitive_surface_for_run(
+        &host,
+        "worker-session",
+        None,
+        Some("retained-worker"),
+        Some(&aliases),
+        Some(&grant),
+        Some("direct-worker-run"),
+    )
+    .await
+    .expect("trusted retained-worker surface");
+    assert_eq!(
+        trusted
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["worker_await", "worker_result_read"]
+    );
+    assert_eq!(
+        trusted.targets_by_name["worker_await"].function_id.as_str(),
+        "worker_kernel::await"
+    );
+    assert_eq!(
+        trusted.targets_by_name["worker_result_read"]
+            .function_id
+            .as_str(),
+        "worker_kernel::result_read"
+    );
+    assert_eq!(trusted.snapshot.fixed_tool_count, 0);
+    assert_eq!(trusted.snapshot.projected_worker_count, 0);
+    assert!(
+        trusted.snapshot.fixed_tools.iter().all(
+            |tool| tool.model_name != "worker_await" && tool.model_name != "worker_result_read"
+        )
+    );
+    let canonical_result = trusted
+        .snapshot
+        .fixed_tools
+        .iter()
+        .find(|tool| tool.model_name == "result_read")
+        .expect("canonical fixed inventory entry");
+    assert!(!canonical_result.exposed);
+
+    let untrusted_alias_request = resolve_provider_primitive_surface_for_query(
+        &host,
+        "ordinary-session",
+        None,
+        None,
+        Some(&aliases),
+    )
+    .await
+    .expect("untrusted allowlist cannot synthesize aliases");
+    assert!(untrusted_alias_request.tools.is_empty());
 }
 
 #[tokio::test]
@@ -365,12 +455,18 @@ async fn agent_runner_allowlist_filters_fixed_and_dynamic_tools_exactly() {
         serde_json::json!({"keywords":["format"]}),
     );
     let allowed = vec!["worker_upsert".to_owned(), "format_notes".to_owned()];
-    let surface = resolve_provider_primitive_surface_for_query(
+    let grant = vec![
+        "worker_kernel::worker_upsert".to_owned(),
+        "worker_kernel::dynamic_formatter".to_owned(),
+    ];
+    let surface = resolve_provider_primitive_surface_for_run(
         &host,
         "closed-agent-session",
         Some("research recent sources"),
         Some("closed-agent"),
         Some(&allowed),
+        Some(&grant),
+        None,
     )
     .await
     .expect("allowlisted surface");
@@ -396,12 +492,14 @@ async fn agent_runner_allowlist_filters_fixed_and_dynamic_tools_exactly() {
     );
 
     let empty = Vec::new();
-    let empty_surface = resolve_provider_primitive_surface_for_query(
+    let empty_surface = resolve_provider_primitive_surface_for_run(
         &host,
         "closed-agent-empty",
         Some("research recent sources"),
         Some("closed-agent"),
         Some(&empty),
+        Some(&empty),
+        None,
     )
     .await
     .expect("explicit empty allowlist");
@@ -448,12 +546,15 @@ async fn exact_worker_allowlist_can_select_one_internal_worker_without_publishin
     assert!(ordinary.tools.is_empty());
 
     let allowed = vec!["worker_internal_review".to_owned()];
-    let worker_surface = resolve_provider_primitive_surface_for_query(
+    let grant = vec!["worker_kernel::dynamic_internal_review".to_owned()];
+    let worker_surface = resolve_provider_primitive_surface_for_run(
         &host,
         "worker-session",
         Some("internal review and citation"),
         Some("research-coordinator"),
         Some(&allowed),
+        Some(&grant),
+        None,
     )
     .await
     .expect("trusted worker surface");
@@ -674,9 +775,9 @@ fn surface_primer_is_stable_and_omits_volatile_catalog_evidence() {
     let primer = surface_context_primer(&crate::domains::worker_kernel::EngineSurfaceSnapshot {
         catalog_revision: 42,
         surface_hash: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_owned(),
-        fixed_tool_count: 29,
-        ordinary_fixed_tool_count: 11,
-        specialist_fixed_tool_count: 13,
+        fixed_tool_count: 27,
+        ordinary_fixed_tool_count: 16,
+        specialist_fixed_tool_count: 10,
         conditional_fixed_tool_count: 1,
         projected_worker_count: 1,
         available_worker_count: 7,
@@ -694,6 +795,8 @@ fn surface_primer_is_stable_and_omits_volatile_catalog_evidence() {
                 output_schema_sha256: Some("output-digest".to_owned()),
                 effect_class: "ExternalSideEffect".to_owned(),
                 risk: "high".to_owned(),
+                delegation_policy: "explicit".to_owned(),
+                workspace_effect: "none".to_owned(),
                 exposed: true,
                 worker_id: Some("recent".to_owned()),
                 worker_version: Some("abcdef1234567890".to_owned()),
@@ -715,6 +818,8 @@ fn surface_primer_is_stable_and_omits_volatile_catalog_evidence() {
                 output_schema_sha256: Some("invoke-output-digest".to_owned()),
                 effect_class: "ExternalSideEffect".to_owned(),
                 risk: "high".to_owned(),
+                delegation_policy: "inherit".to_owned(),
+                workspace_effect: "none".to_owned(),
                 exposed: true,
                 worker_id: None,
                 worker_version: None,
@@ -745,9 +850,10 @@ fn surface_primer_is_stable_and_omits_volatile_catalog_evidence() {
         primer,
         "Use only the typed tools supplied in this request. Use worker_discover when a dynamic \
          capability is omitted. When the caller supplies an exact worker id, invoke it directly \
-         with worker_invoke rather than delegating merely to launch it. Use Engine Steward for \
-         worker diagnosis and Worker Forge for worker changes; permanent deletion, secret \
-         rotation, and engine-wide stop remain authenticated dashboard actions."
+         with worker_invoke rather than delegating merely to launch it. For worker diagnosis or \
+         changes, discover a current healthy diagnostic or authoring capability instead of \
+         assuming that an optional worker is installed; permanent deletion, secret rotation, \
+         and engine-wide stop remain authenticated dashboard actions."
     );
     for volatile in ["r42", "1/7 workers", "abcdef12", "runs=4"] {
         assert!(!primer.contains(volatile));

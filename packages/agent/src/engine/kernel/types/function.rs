@@ -24,6 +24,65 @@ pub enum EffectClass {
     IrreversibleSideEffect,
 }
 
+/// Whether an agent may include a function in an immutable delegated grant.
+///
+/// This is an authority boundary, not provider-surface policy. Ordinary model
+/// visibility does not imply that a function can be delegated to a child.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DelegationPolicy {
+    /// Never admit the function to a delegated agent grant.
+    #[default]
+    Never,
+    /// A child may inherit the function when the delegator already holds it.
+    Inherit,
+    /// The function may be named only by an exact, engine-validated grant.
+    Explicit,
+}
+
+impl DelegationPolicy {
+    /// Stable operator-facing name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::Inherit => "inherit",
+            Self::Explicit => "explicit",
+        }
+    }
+}
+
+/// Workspace interaction declared by a function contract.
+///
+/// Resource coordination uses this closed class before invocation. It is not
+/// a security sandbox and does not reduce the local user's operating-system
+/// authority.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WorkspaceEffect {
+    /// No workspace access.
+    #[default]
+    None,
+    /// Read-only workspace access.
+    Read,
+    /// Mutation constrained to engine-validated path claims.
+    ScopedWrite,
+    /// A process with normal local-user authority; requires the workspace-wide
+    /// process lease because the engine cannot infer its write set.
+    ArbitraryProcess,
+}
+
+impl WorkspaceEffect {
+    /// Stable operator-facing name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Read => "read",
+            Self::ScopedWrite => "scoped_write",
+            Self::ArbitraryProcess => "arbitrary_process",
+        }
+    }
+}
+
 impl EffectClass {
     /// Whether this effect mutates durable state or the outside world.
     #[must_use]
@@ -248,6 +307,10 @@ pub struct FunctionDefinition {
     pub idempotency: Option<IdempotencyContract>,
     /// Optional typed provider-tool projection.
     pub model_tool: Option<ModelToolContract>,
+    /// Source-owned delegated-agent admission policy.
+    pub delegation_policy: DelegationPolicy,
+    /// Source-owned workspace resource class.
+    pub workspace_effect: WorkspaceEffect,
 }
 
 impl FunctionDefinition {
@@ -272,6 +335,8 @@ impl FunctionDefinition {
             risk_level: RiskLevel::Low,
             idempotency: None,
             model_tool: None,
+            delegation_policy: DelegationPolicy::Never,
+            workspace_effect: WorkspaceEffect::None,
         }
     }
 
@@ -279,6 +344,13 @@ impl FunctionDefinition {
     #[must_use]
     pub fn with_idempotency(mut self, contract: IdempotencyContract) -> Self {
         self.idempotency = Some(contract);
+        self
+    }
+
+    /// Set the executable contract revision advertised with this function.
+    #[must_use]
+    pub fn with_revision(mut self, revision: u64) -> Self {
+        self.revision = FunctionRevision(revision);
         self
     }
 
@@ -307,6 +379,20 @@ impl FunctionDefinition {
     #[must_use]
     pub fn with_model_tool(mut self, model_tool: ModelToolContract) -> Self {
         self.model_tool = Some(model_tool);
+        self
+    }
+
+    /// Set delegated-agent admission policy.
+    #[must_use]
+    pub fn with_delegation_policy(mut self, policy: DelegationPolicy) -> Self {
+        self.delegation_policy = policy;
+        self
+    }
+
+    /// Set the workspace resource class.
+    #[must_use]
+    pub fn with_workspace_effect(mut self, effect: WorkspaceEffect) -> Self {
+        self.workspace_effect = effect;
         self
     }
 }

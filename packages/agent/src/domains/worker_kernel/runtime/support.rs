@@ -156,50 +156,6 @@ impl WorkerRuntime {
     }
 }
 
-pub(super) async fn wait_for_agent_terminal(
-    runtime: &WorkerRuntime,
-    events: &mut tokio::sync::broadcast::Receiver<TronEvent>,
-    session_id: &str,
-    worker_invocation_id: &str,
-) -> Result<AgentTerminalOutcome, String> {
-    loop {
-        match events.recv().await {
-            Ok(event) if event.session_id() == session_id => {
-                runtime.observe_agent_model_tool_progress(worker_invocation_id, &event);
-                if let TronEvent::AgentEnd { error, .. } = event {
-                    return Ok(AgentTerminalOutcome { error });
-                }
-            }
-            Ok(_) => {}
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                // A still-active run will publish another terminal event. Once
-                // the registry is empty, however, AgentEnd has already been
-                // emitted and cannot be recovered from this lossy channel.
-                // Fail explicitly instead of waiting until the two-hour worker
-                // ceiling with no producer left to wake this receiver.
-                if runtime.orchestrator.get_run_id(session_id).is_none() {
-                    return Err(format!(
-                        "agent event stream missed terminal status after lagging by {skipped} events"
-                    ));
-                }
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                return Err("agent event stream closed before the worker run terminated".to_owned());
-            }
-        }
-    }
-}
-
-/// Terminal status for an agent-backed worker run.
-///
-/// Agent runtime, provider, tool, and result-loading failures belong to the
-/// invocation that encountered them. The worker kernel separately validates
-/// the terminal typed output, so only that structural boundary can quarantine
-/// an otherwise valid agent-backed worker bundle.
-pub(super) struct AgentTerminalOutcome {
-    pub(super) error: Option<String>,
-}
-
 pub(super) struct DynamicWorkerHandler {
     pub(super) runtime: Arc<WorkerRuntime>,
     pub(super) worker_id: String,
@@ -254,7 +210,11 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
         let outcome = match (progress_target, top_level_model_call) {
             (Some(target), true) => self
                 .runtime
-                .invoke_from_model_tool_adaptive(request, target)
+                .invoke_from_model_tool_adaptive(
+                    request,
+                    target,
+                    invocation.causal_context.agent_execution_id(),
+                )
                 .await
                 .map_err(crate::engine::EngineError::HandlerFailed)?,
             (Some(target), false) => ModelToolInvocationOutcome::Terminal(
@@ -263,6 +223,7 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
                         request,
                         target,
                         invocation.causal_context.origin_worker_invocation_id(),
+                        invocation.causal_context.agent_execution_id(),
                         invocation.causal_context.origin_worker_tool_ordinal(),
                     )
                     .await

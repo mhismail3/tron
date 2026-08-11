@@ -128,6 +128,139 @@ struct WorkerConsoleViewModelTests {
         #expect(viewModel.generalWorkers.map(\.workerId) == ["research"])
     }
 
+    @Test("Legacy agent roles form one nonduplicating review queue")
+    func legacyAgentRolesAreSeparatedForReview() async {
+        let repository = MockWorkerKernelRepository()
+        repository.researchRoleReview = "needs_role_review"
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+
+        #expect(viewModel.workersNeedingAgentRoleReview.map(\.workerId) == ["research"])
+        #expect(viewModel.generalWorkers.isEmpty)
+        #expect(viewModel.integratedWorkers.isEmpty)
+
+        repository.researchRoleReview = "declared"
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+
+        #expect(viewModel.workersNeedingAgentRoleReview.isEmpty)
+        #expect(viewModel.integratedWorkers.map(\.workerId) == ["research"])
+    }
+
+    @Test("Role review loads capability-gated queue and history pages without duplication")
+    func roleReviewLoadsBoundedPages() async {
+        let repository = MockWorkerKernelRepository()
+        repository.supportsRoleReview = true
+        repository.researchRoleReview = "needs_role_review"
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+
+        #expect(viewModel.supportsAgentRoleReview)
+        #expect(viewModel.roleReviewSnapshot?.reviewer.available == true)
+        #expect(viewModel.roleReviewItems.map(\.workerId) == ["research"])
+        #expect(viewModel.roleReviewSnapshot?.queueTotal == 2)
+        #expect(viewModel.roleReviewSnapshot?.queueNextOffset == 1)
+        #expect(viewModel.roleReviewProposals.map(\.proposalId) == ["role-proposal-current"])
+
+        await viewModel.loadMoreRoleReviewQueue(
+            repository: repository,
+            connectionState: .connected
+        )
+        await viewModel.loadOlderRoleReviews(
+            repository: repository,
+            connectionState: .connected
+        )
+
+        #expect(viewModel.roleReviewItems.map(\.workerId) == ["research", "legacy-two"])
+        #expect(viewModel.roleReviewProposals.map(\.proposalId) == [
+            "role-proposal-current",
+            "role-proposal-older",
+        ])
+        #expect(repository.roleReviewRequests.map { $0.queueOffset } == [nil, 1, nil])
+        #expect(repository.roleReviewRequests.map { $0.offset } == [nil, nil, 1])
+    }
+
+    @Test("Role review starts and applies only server-authorized proposals")
+    func roleReviewMutationsFollowAllowedActions() async {
+        let repository = MockWorkerKernelRepository()
+        repository.supportsRoleReview = true
+        repository.researchRoleReview = "needs_role_review"
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+        let item = viewModel.roleReviewItems[0]
+        await viewModel.startRoleReview(
+            for: item,
+            repository: repository,
+            connectionState: .connected
+        )
+
+        #expect(repository.roleReviewStartedWorkerIds == ["research"])
+        #expect(viewModel.selectedRoleReviewProposal?.status == "proposed")
+        #expect(viewModel.selectedRoleReviewProposal?.reviewerInvocationId == "reviewer-run-1")
+
+        await viewModel.applySelectedRoleReview(
+            repository: repository,
+            connectionState: .connected
+        )
+
+        #expect(repository.roleReviewAppliedProposalIds == ["role-proposal-current"])
+        #expect(viewModel.selectedRoleReviewProposal?.status == "applied")
+        #expect(viewModel.workersNeedingAgentRoleReview.isEmpty)
+
+        let deniedRepository = MockWorkerKernelRepository()
+        deniedRepository.supportsRoleReview = true
+        deniedRepository.researchRoleReview = "needs_role_review"
+        deniedRepository.roleReviewActionsAllowed = false
+        let deniedViewModel = WorkerConsoleViewModel()
+        await deniedViewModel.refreshSummary(
+            repository: deniedRepository,
+            connectionState: .connected
+        )
+        await deniedViewModel.startRoleReview(
+            for: deniedViewModel.roleReviewItems[0],
+            repository: deniedRepository,
+            connectionState: .connected
+        )
+        #expect(deniedRepository.roleReviewStartedWorkerIds.isEmpty)
+    }
+
+    @Test("Role review retains authoritative state offline and records rejection rationale")
+    func roleReviewRetainsOfflineStateAndRejects() async throws {
+        let repository = MockWorkerKernelRepository()
+        repository.supportsRoleReview = true
+        repository.researchRoleReview = "needs_role_review"
+        repository.roleProposalExists = true
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.refreshSummary(repository: repository, connectionState: .connected)
+        let proposal = try #require(viewModel.roleReviewItems.first?.proposal)
+        await viewModel.inspectRoleReview(
+            proposal,
+            repository: repository,
+            connectionState: .connected
+        )
+        #expect(repository.roleReviewInspectedProposalIds == ["role-proposal-current"])
+
+        let readsBeforeOfflineRefresh = repository.roleReviewRequests.count
+        await viewModel.refreshRoleReviews(
+            repository: repository,
+            connectionState: .disconnected
+        )
+        #expect(repository.roleReviewRequests.count == readsBeforeOfflineRefresh)
+        #expect(viewModel.selectedRoleReviewProposal?.proposalId == "role-proposal-current")
+
+        await viewModel.rejectSelectedRoleReview(
+            reason: "Not a reusable responsibility.",
+            repository: repository,
+            connectionState: .connected
+        )
+        #expect(repository.roleReviewRejectedProposalIds == ["role-proposal-current"])
+        #expect(repository.roleReviewRejectionReasons == ["Not a reusable responsibility."])
+        #expect(viewModel.selectedRoleReviewProposal?.status == "rejected")
+    }
+
     @Test("A retired worker exposes every retained version as a restore action")
     func retiredWorkerCanRestoreItsCurrentVersion() async throws {
         let repository = MockWorkerKernelRepository()
@@ -309,6 +442,18 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var researchEngineHooks = ["research_context"]
     var researchClientActions: [String] = []
     var researchClientDeliveries: [String] = []
+    var researchRoleReview = "ineligible"
+    var supportsRoleReview = false
+    var roleReviewActionsAllowed = true
+    var roleProposalExists = false
+    var roleProposalApplied = false
+    var roleProposalRejected = false
+    var roleReviewRequests: [(offset: UInt64?, queueOffset: UInt64?)] = []
+    var roleReviewStartedWorkerIds: [String] = []
+    var roleReviewInspectedProposalIds: [String] = []
+    var roleReviewAppliedProposalIds: [String] = []
+    var roleReviewRejectedProposalIds: [String] = []
+    var roleReviewRejectionReasons: [String?] = []
     var snapshotError: Error?
 
     private var worker: WorkerSummaryDTO {
@@ -353,13 +498,14 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
         snapshotSessionIds.append(sessionId)
         return EngineIntrospectionSnapshotDTO(
             dispatchStopped: false,
+            nativeCapabilities: supportsRoleReview ? ["agent_role_review.v1"] : nil,
             activeEngineHooks: [],
             activeClientActions: [],
             fixedTools: [],
             surface: AgentToolSurfaceDTO(
                 catalogRevision: 42,
                 surfaceHash: "surface-test",
-                fixedToolCount: 29,
+                fixedToolCount: 27,
                 projectedWorkerCount: 1,
                 availableWorkerCount: 1,
                 availableWorkers: [
@@ -388,6 +534,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
                     modelExposure: "direct",
                     runnerKind: "command",
                     runnerModel: nil,
+                    roleReview: researchRoleReview,
                     engineHooks: researchEngineHooks,
                     clientActions: researchClientActions,
                     clientDeliveries: researchClientDeliveries,
@@ -529,6 +676,108 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
+    func roleReviews(
+        limit: UInt64,
+        offset: UInt64?,
+        queueLimit: UInt64,
+        queueOffset: UInt64?
+    ) async throws -> WorkerRoleReviewListDTO {
+        roleReviewRequests.append((offset, queueOffset))
+        let reviewer = WorkerRoleReviewerDTO(
+            available: true,
+            workerId: "role-reviewer",
+            workerVersion: "review-v3",
+            repairRequirement: nil
+        )
+        if queueOffset != nil {
+            return WorkerRoleReviewListDTO(
+                capability: "agent_role_review.v1",
+                reviewer: reviewer,
+                items: [roleReviewItem(workerId: "legacy-two", proposal: nil)],
+                queueReturned: 1,
+                queueTotal: 2,
+                queueTruncated: false,
+                queueNextOffset: nil,
+                proposals: [],
+                returned: 0,
+                total: 2,
+                nextOffset: nil
+            )
+        }
+        if offset != nil {
+            return WorkerRoleReviewListDTO(
+                capability: "agent_role_review.v1",
+                reviewer: reviewer,
+                items: [roleReviewItem(workerId: "research", proposal: currentRoleProposal)],
+                queueReturned: 1,
+                queueTotal: 2,
+                queueTruncated: true,
+                queueNextOffset: 1,
+                proposals: [roleProposal(id: "role-proposal-older", status: "rejected")],
+                returned: 1,
+                total: 2,
+                nextOffset: nil
+            )
+        }
+        let current = roleProposalExists || roleProposalApplied || roleProposalRejected
+            ? currentRoleProposal
+            : nil
+        let items = roleProposalApplied || roleProposalRejected
+            ? []
+            : [roleReviewItem(workerId: "research", proposal: current)]
+        return WorkerRoleReviewListDTO(
+            capability: "agent_role_review.v1",
+            reviewer: reviewer,
+            items: items,
+            queueReturned: UInt64(items.count),
+            queueTotal: roleProposalApplied || roleProposalRejected ? 0 : 2,
+            queueTruncated: !(roleProposalApplied || roleProposalRejected),
+            queueNextOffset: roleProposalApplied || roleProposalRejected ? nil : 1,
+            proposals: [currentRoleProposal],
+            returned: 1,
+            total: 2,
+            nextOffset: 1
+        )
+    }
+
+    func startRoleReview(
+        workerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewProposalDTO {
+        roleReviewStartedWorkerIds.append(workerId)
+        roleProposalExists = true
+        return currentRoleProposal
+    }
+
+    func inspectRoleReview(_ proposalId: String) async throws -> WorkerRoleReviewProposalDTO {
+        roleReviewInspectedProposalIds.append(proposalId)
+        return currentRoleProposal
+    }
+
+    func applyRoleReview(
+        proposalId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewApplyResultDTO {
+        roleReviewAppliedProposalIds.append(proposalId)
+        roleProposalApplied = true
+        researchRoleReview = "declared"
+        return WorkerRoleReviewApplyResultDTO(
+            proposal: currentRoleProposal,
+            worker: worker
+        )
+    }
+
+    func rejectRoleReview(
+        proposalId: String,
+        reason: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerRoleReviewProposalDTO {
+        roleReviewRejectedProposalIds.append(proposalId)
+        roleReviewRejectionReasons.append(reason)
+        roleProposalRejected = true
+        return currentRoleProposal
+    }
+
     func dismissWorkerInboxItem(
         inboxId: String,
         idempotencyKey: EngineIdempotencyKey
@@ -652,6 +901,76 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
             createdAt: "2026-07-19T12:00:00Z",
             startedAt: nil,
             completedAt: "2026-07-19T12:00:01Z"
+        )
+    }
+
+    private var currentRoleProposal: WorkerRoleReviewProposalDTO {
+        let status = roleProposalApplied ? "applied" : (roleProposalRejected ? "rejected" : "proposed")
+        return roleProposal(id: "role-proposal-current", status: status)
+    }
+
+    private func roleProposal(id: String, status: String) -> WorkerRoleReviewProposalDTO {
+        let mutable = status == "proposed"
+        return WorkerRoleReviewProposalDTO(
+            proposalId: id,
+            schemaVersion: 1,
+            proposalHash: "sha256:\(id)",
+            targetWorkerId: "research",
+            targetWorkerVersion: "v1",
+            targetContentHash: "sha256:target",
+            reviewerWorkerId: "role-reviewer",
+            reviewerWorkerVersion: "review-v3",
+            reviewerInvocationId: "reviewer-run-1",
+            status: status,
+            agentRole: AnyCodable([
+                "status": "enabled",
+                "displayName": "Research Specialist",
+                "summary": "Coordinates bounded research.",
+                "collaborationInstructions": "Return sourced research.",
+                "resultMode": "natural",
+            ]),
+            rationale: "The runner has a reusable bounded responsibility.",
+            rejectionReason: status == "rejected" ? "Not a reusable responsibility." : nil,
+            createdAt: "2026-08-11T08:00:00Z",
+            updatedAt: "2026-08-11T08:01:00Z",
+            appliedAt: status == "applied" ? "2026-08-11T08:02:00Z" : nil,
+            rejectedAt: status == "rejected" ? "2026-08-11T08:02:00Z" : nil,
+            allowedActions: [
+                WorkerRoleReviewActionDTO(action: "inspect", allowed: true, disabledReason: nil),
+                WorkerRoleReviewActionDTO(
+                    action: "apply",
+                    allowed: mutable && roleReviewActionsAllowed,
+                    disabledReason: roleReviewActionsAllowed ? nil : "Review authority is unavailable."
+                ),
+                WorkerRoleReviewActionDTO(
+                    action: "reject",
+                    allowed: mutable && roleReviewActionsAllowed,
+                    disabledReason: roleReviewActionsAllowed ? nil : "Review authority is unavailable."
+                ),
+            ]
+        )
+    }
+
+    private func roleReviewItem(
+        workerId: String,
+        proposal: WorkerRoleReviewProposalDTO?
+    ) -> WorkerRoleReviewItemDTO {
+        WorkerRoleReviewItemDTO(
+            workerId: workerId,
+            name: workerId == "research" ? "Research" : "Legacy Two",
+            description: "Agent runner awaiting an explicit role decision",
+            targetVersion: "v1",
+            classification: "needs_role_review",
+            proposal: proposal,
+            allowedActions: proposal == nil ? [
+                WorkerRoleReviewActionDTO(
+                    action: "start_review",
+                    allowed: roleReviewActionsAllowed,
+                    disabledReason: roleReviewActionsAllowed ? nil : "A healthy reviewer is required."
+                ),
+            ] : [
+                WorkerRoleReviewActionDTO(action: "inspect", allowed: true, disabledReason: nil),
+            ]
         )
     }
 }

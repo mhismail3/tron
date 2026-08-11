@@ -72,7 +72,14 @@ impl SessionManager {
         workspace_path: &str,
         title: Option<&str>,
     ) -> Result<String, RuntimeError> {
-        self.create_session_for_owner(model, workspace_path, title, false)
+        let result = self
+            .event_store
+            .create_session(model, workspace_path, title, None)
+            .map_err(|error| RuntimeError::Persistence(error.to_string()))?;
+        let session_id = result.session.id;
+        self.cache_created_session(&session_id, model, workspace_path);
+        debug!(session_id, "session created");
+        Ok(session_id)
     }
 
     /// Create an ordinary session with a preallocated durable identity.
@@ -98,36 +105,72 @@ impl SessionManager {
     }
 
     /// Create a durable model session owned by one worker invocation.
+    #[cfg(test)]
     pub(in crate::domains) fn create_worker_session(
         &self,
         model: &str,
         workspace_path: &str,
         title: Option<&str>,
     ) -> Result<String, RuntimeError> {
-        self.create_session_for_owner(model, workspace_path, title, true)
+        let result = self
+            .event_store
+            .create_worker_session(model, workspace_path, title, None)
+            .map_err(|error| RuntimeError::Persistence(error.to_string()))?;
+        let session_id = result.session.id;
+        self.cache_created_session(&session_id, model, workspace_path);
+        debug!(session_id, "worker session created");
+        Ok(session_id)
     }
 
-    fn create_session_for_owner(
+    /// Create the hidden durable transcript for one reusable agent.
+    #[cfg(test)]
+    pub(in crate::domains) fn create_agent_session(
         &self,
         model: &str,
         workspace_path: &str,
         title: Option<&str>,
-        worker_owned: bool,
     ) -> Result<String, RuntimeError> {
-        let result = if worker_owned {
-            self.event_store
-                .create_worker_session(model, workspace_path, title, None)
-        } else {
-            self.event_store
-                .create_session(model, workspace_path, title, None)
-        }
-        .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
-
-        let session_id = result.session.id.clone();
-
+        let result = self
+            .event_store
+            .create_agent_session(model, workspace_path, title, None)
+            .map_err(|error| RuntimeError::Persistence(error.to_string()))?;
+        let session_id = result.session.id;
         self.cache_created_session(&session_id, model, workspace_path);
-        debug!(session_id, "session created");
+        debug!(session_id, "nested agent session created");
         Ok(session_id)
+    }
+
+    /// Create a hidden reusable-agent transcript with preallocated identity.
+    pub(in crate::domains) fn create_agent_session_with_identity(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        identity: SessionCreationIdentity,
+    ) -> Result<String, RuntimeError> {
+        let result = self
+            .event_store
+            .create_agent_session_with_identity(model, workspace_path, title, None, identity)
+            .map_err(|error| RuntimeError::Persistence(error.to_string()))?;
+        let session_id = result.session.id;
+        self.cache_created_session(&session_id, model, workspace_path);
+        debug!(
+            session_id,
+            "nested agent session created with preallocated identity"
+        );
+        Ok(session_id)
+    }
+
+    /// Reveal the same nested-agent transcript in the ordinary task index.
+    pub(in crate::domains) fn promote_agent_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), RuntimeError> {
+        let _ = self
+            .event_store
+            .promote_agent_session(session_id)
+            .map_err(|error| RuntimeError::Persistence(error.to_string()))?;
+        Ok(())
     }
 
     fn cache_created_session(&self, session_id: &str, model: &str, workspace_path: &str) {

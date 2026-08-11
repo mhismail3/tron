@@ -12,8 +12,9 @@
 //! - **Provider request audits**: bounded `tron.model_provider_request.v4`
 //!   manifests plus redacted request evidence persisted before model streams
 //!   without duplicating bulk media or message bodies
-//! - **Agent deliveries and waits**: session/mailbox addressing, result grants,
-//!   safe-turn leasing, observation, wake retries, and crash recovery
+//! - **Agent coordination**: semantic message provenance/materialization,
+//!   generalized assignment/worker/reply waits, plus legacy delivery/mailbox
+//!   compatibility and crash recovery
 //! - **Foreground user input**: pending/answered state derived from indexed
 //!   tool lifecycle and structured user-message events
 //! - **Native terminals**: bounded PTY launch metadata and 24-hour exited
@@ -66,7 +67,32 @@
 //!   records ordered instructions, automatic-context provenance, message
 //!   source sidecars, Agent Deliveries, environment, and exact tool selection;
 //!   v2/v3 remain readable and no parallel context cache is installed.
-//! - `agent_deliveries`, waits, and wait members remain EventStore-owned state.
+//! - Semantic agent-message metadata and generalized coordination waits remain
+//!   EventStore-owned state. Outgoing content is durable before scheduling;
+//!   the typed transcript event is appended only at a provider-safe boundary,
+//!   atomically with materialization. Wait registration atomically binds an
+//!   already-satisfied fan-in to its current tool result; only a later
+//!   satisfaction may own the single aggregate continuation. Legacy
+//!   `agent_deliveries` and worker-only waits remain readable during their
+//!   compatibility window. Per-target delivery ownership is exact to the
+//!   registering wait's recipient session and, when known, stable agent; a
+//!   manager or other authorized observer waiting on the same handle cannot
+//!   suppress the delegator's independent automatic result.
+//!   Opaque assignment, worker, and reply handles are normalized by the Engine
+//!   into stable agent/execution dependencies plus immutable causal topology.
+//!   Additive EventStore side tables retain that graph across restart, and the
+//!   same immediate transaction rejects self, descendant-to-ancestor,
+//!   reciprocal-reply, and mixed wait cycles before admitting pending work.
+//!   Accepted assignment messages pair their passive delivery with a durable
+//!   one-way supervisor hold. All provider leases exclude held rows; only the
+//!   FIFO assignment supervisor releases the exact row after its Running state
+//!   and attempt baseline are durable. Import replay cannot re-hold a released
+//!   delivery.
+//!   Assignment cancellation uses an exact uncapped wait predicate, and nested
+//!   transcript promotion records an idempotent receipt so importer replay
+//!   preserves the same visible session across a cross-store crash boundary.
+//!   Agent-subtree cancellation retains delayed and leased deliveries while
+//!   atomically making every wake for each exact transcript passive.
 //!   A delivery lease is preparation, not observation; only durable assistant
 //!   completion observes it, while setup failure or restart clears the lease
 //!   for at-least-once redelivery.
@@ -142,11 +168,18 @@ pub use sqlite::{
     ConnectionConfig, ConnectionPool, DatabaseLock, LockError, PooledConnection,
     acquire_database_lock, check_integrity, ensure_schema, new_file, new_in_memory,
 };
+#[allow(unused_imports)]
 pub(crate) use store::{
-    AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliveryRecord, AgentDeliverySourceKind,
-    AgentDeliveryTarget, AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode,
-    AppendBatchItem, MAX_DELIVERIES_PER_TURN, NewAgentDelivery, NewAgentTaskDelivery, NewAgentWait,
-    NewWorkerResultTaskDelivery, TerminalRecord, UserInputRequestState, WorkerTerminalEvidence,
+    AgentCorrespondentRecord, AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliveryRecord,
+    AgentDeliverySourceKind, AgentDeliveryTarget, AgentDeliveryWakePolicy, AgentMailboxScope,
+    AgentMessageDisposition, AgentMessageMetadataRecord, AgentWaitMode, AppendBatchItem,
+    CoordinationDependencyEdge, CoordinationDependencyEdgeKind, CoordinationTargetKind,
+    CoordinationTerminalEvidence, CoordinationWaitAdmission, CoordinationWaitDependency,
+    CoordinationWaitMemberRecord, CoordinationWaitMode, CoordinationWaitRecord,
+    CoordinationWaitResolution, CoordinationWaitTarget, MAX_DELIVERIES_PER_TURN,
+    MaterializedAgentMessage, NewAgentDelivery, NewAgentMessageMetadata, NewAgentTaskDelivery,
+    NewAgentWait, NewCoordinationWait, NewWorkerResultTaskDelivery, TerminalRecord,
+    UserInputRequestState, WorkerTerminalEvidence,
 };
 pub use store::{
     AppendOptions, ClientLogEntry, ClientLogIngestResult, CreateSessionResult, EventStore,

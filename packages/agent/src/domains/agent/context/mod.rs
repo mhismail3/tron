@@ -35,7 +35,10 @@
 //! unaudited boundary.
 //! Summary generation first resolves the atomically active
 //! `context_summary` worker hook. The bounded hook projection excludes hidden
-//! thinking, tool arguments, binary results, usage, and cost; hook failure or
+//! thinking, tool arguments, binary results, usage, and cost. Durable agent
+//! coordination retains an explicit provenance prefix inside the established
+//! `user|assistant|tool` projection so already-active immutable summary workers
+//! stay schema-compatible without becoming end-user intent. Hook failure or
 //! absence falls back to deterministic keyword recovery. A hook worker never
 //! invokes itself while compacting its own agent-runner session. The strategy
 //! seam is limited to summary meaning. Every accepted narrative fits the

@@ -59,8 +59,15 @@ pub(super) struct ToolPhaseParams<'a> {
     pub trace_id: Option<&'a crate::engine::TraceId>,
     pub parent_invocation_id: Option<&'a crate::engine::InvocationId>,
     pub worker_causal_depth: u32,
+    pub autonomous_wake_hop: u32,
     pub origin_worker_id: Option<&'a str>,
     pub origin_worker_invocation_id: Option<&'a str>,
+    pub agent_id: Option<&'a str>,
+    pub agent_assignment_id: Option<&'a str>,
+    pub agent_execution_id: Option<&'a str>,
+    pub delegated_function_grant: Option<&'a [String]>,
+    pub agent_limits: Option<&'a Value>,
+    pub agent_write_scopes: Option<&'a [String]>,
     pub nested_tool_ordinals: &'a crate::domains::agent::r#loop::types::NestedToolOrdinalAllocator,
 }
 
@@ -70,6 +77,10 @@ pub(super) struct ToolPhaseOutcome {
     /// A successful foreground question ends this run after its durable tool
     /// completion. The answer starts a new run from canonical session events.
     pub awaiting_user_input: bool,
+    /// A pending durable coordination wait parks this run after the wait tool
+    /// result is committed. A terminal message later starts a fresh run from
+    /// canonical transcript and wait state; the provider loop never polls.
+    pub awaiting_coordination: bool,
     pub interrupted: bool,
     pub error: Option<RuntimeError>,
 }
@@ -309,8 +320,15 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     trace_id: params.trace_id,
                     parent_invocation_id: params.parent_invocation_id,
                     worker_causal_depth: params.worker_causal_depth,
+                    autonomous_wake_hop: params.autonomous_wake_hop,
                     origin_worker_id: params.origin_worker_id,
                     origin_worker_invocation_id: params.origin_worker_invocation_id,
+                    agent_id: params.agent_id,
+                    agent_assignment_id: params.agent_assignment_id,
+                    agent_execution_id: params.agent_execution_id,
+                    delegated_function_grant: params.delegated_function_grant,
+                    agent_limits: params.agent_limits,
+                    agent_write_scopes: params.agent_write_scopes,
                     origin_worker_tool_ordinal: nested_tool_ordinals[idx],
                 };
                 let working_dir = working_dir.as_str();
@@ -698,6 +716,18 @@ async fn process_tool_results(
         let is_error = exec_result.result.is_error.unwrap_or(false);
         if tool_invocation.name == "request_user_input" && !is_error {
             outcome.awaiting_user_input = true;
+        }
+        if tool_invocation.name == "agent_wait"
+            && !is_error
+            && exec_result
+                .result
+                .details
+                .as_ref()
+                .and_then(|details| details.get("status"))
+                .and_then(Value::as_str)
+                == Some("pending")
+        {
+            outcome.awaiting_coordination = true;
         }
 
         params.context_manager.add_message_with_source(

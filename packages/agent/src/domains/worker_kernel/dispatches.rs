@@ -140,6 +140,7 @@ mod tests {
             model_exposure: Default::default(),
             tool_input_schema: Some(json!({"type":"object"})),
             agent_tools: None,
+            agent_role: None,
             input_schema: json!({"type":"object"}),
             output_schema: json!({
                 "type":"object",

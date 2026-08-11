@@ -2,6 +2,71 @@ import Foundation
 
 // MARK: - Message Payloads
 
+/// Engine-authored content of a durable `message.agent` event.
+///
+/// Coordination semantics remain strings so a newer server can introduce a
+/// presentation label without making an older client discard the transcript.
+/// Identity, authority, and correlation fields are retained verbatim for the
+/// read-only audit surface; only the bounded display name is optional.
+struct AgentMessageContent: Codable, Equatable, Sendable {
+    let messageId: String
+    let sourceAgentId: String
+    let sourceName: String?
+    let kind: String
+    let authority: String
+    let text: String
+    let assignmentId: String?
+    let replyTo: String?
+
+    init(
+        messageId: String,
+        sourceAgentId: String,
+        sourceName: String? = nil,
+        kind: String,
+        authority: String,
+        text: String,
+        assignmentId: String? = nil,
+        replyTo: String? = nil
+    ) {
+        self.messageId = messageId
+        self.sourceAgentId = sourceAgentId
+        self.sourceName = sourceName
+        self.kind = kind
+        self.authority = authority
+        self.text = text
+        self.assignmentId = assignmentId
+        self.replyTo = replyTo
+    }
+
+    init?(from payload: [String: AnyCodable]) {
+        guard let messageId = payload.string("messageId"), !messageId.isEmpty,
+              let sourceAgentId = payload.string("sourceAgentId"), !sourceAgentId.isEmpty,
+              let kind = payload.string("kind"), !kind.isEmpty,
+              let authority = payload.string("authority"), !authority.isEmpty,
+              let text = payload.string("text") else {
+            return nil
+        }
+        self.init(
+            messageId: messageId,
+            sourceAgentId: sourceAgentId,
+            sourceName: payload.string("sourceName"),
+            kind: kind,
+            authority: authority,
+            text: text,
+            assignmentId: payload.string("assignmentId"),
+            replyTo: payload.string("replyTo")
+        )
+    }
+
+    /// Decode the canonical persisted envelope `{ "content": { ... } }`.
+    init?(eventPayload payload: [String: AnyCodable]) {
+        guard let rawContent = payload["content"]?.dictionaryValue else {
+            return nil
+        }
+        self.init(from: rawContent.mapValues(AnyCodable.init))
+    }
+}
+
 /// Payload for message.user event
 /// Server: UserMessageEvent.payload
 ///

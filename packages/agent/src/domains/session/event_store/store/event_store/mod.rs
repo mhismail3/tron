@@ -11,6 +11,10 @@
 //! Model and reasoning selection use the same session write lock and transaction
 //! as their timeline events, so metadata, reconstruction, and audit history
 //! cannot diverge.
+//! Coordination message history uses stable keyset pages, while unread-message
+//! and correspondent projections expose count-backed offset pages. Team and
+//! native clients can therefore remain bounded without making old durable
+//! communication evidence unreachable.
 
 use serde_json::Value;
 
@@ -22,6 +26,7 @@ use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::{EventRow, SessionRow};
 
 mod auxiliary;
+mod coordination;
 mod deliveries;
 mod event_log;
 mod locking;
@@ -32,6 +37,15 @@ mod state;
 mod terminal;
 mod user_input;
 
+#[allow(unused_imports)]
+pub(crate) use coordination::{
+    AgentCorrespondentPage, AgentCorrespondentRecord, AgentMessageDisposition,
+    AgentMessageMetadataPage, AgentMessageMetadataRecord, CoordinationDependencyEdge,
+    CoordinationDependencyEdgeKind, CoordinationTargetKind, CoordinationTerminalEvidence,
+    CoordinationWaitAdmission, CoordinationWaitDependency, CoordinationWaitMemberRecord,
+    CoordinationWaitMode, CoordinationWaitRecord, CoordinationWaitResolution,
+    CoordinationWaitTarget, MaterializedAgentMessage, NewAgentMessageMetadata, NewCoordinationWait,
+};
 pub(crate) use deliveries::{
     AgentDeliveryBoundary, AgentDeliveryIntent, AgentDeliveryRecord, AgentDeliverySourceKind,
     AgentDeliveryTarget, AgentDeliveryWakePolicy, AgentMailboxScope, AgentWaitMode,

@@ -59,6 +59,27 @@ final class RetryTurnTests: XCTestCase {
         XCTAssertEqual(found?.id, userId, "Should skip .assistant and .system and pick the .user message")
     }
 
+    func testSkipsAgentCoordinationMessages() {
+        let userId = UUID()
+        viewModel.messages = [
+            ChatMessage(id: userId, role: .user, content: .text("real user prompt")),
+            ChatMessage(
+                role: .agent,
+                content: .text("peer request"),
+                agentMessage: AgentMessageContent(
+                    messageId: "message-peer",
+                    sourceAgentId: "agent-peer",
+                    kind: "request",
+                    authority: "peer",
+                    text: "peer request"
+                )
+            ),
+        ]
+
+        XCTAssertEqual(viewModel.findLastUserTextMessage()?.id, userId)
+        XCTAssertFalse(viewModel.messages[1].canBeDeleted)
+    }
+
     func testSkipsUserMessageWithoutTextContent() {
         // User message with tool result (not text) should be skipped so that
         // retry doesn't silently grab something the user never typed.

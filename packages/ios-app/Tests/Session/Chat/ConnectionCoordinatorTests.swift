@@ -28,8 +28,11 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(outcome, .completed)
         XCTAssertTrue(mockContext.connectCalled)
         XCTAssertFalse(mockContext.resumeSessionCalled)
+        XCTAssertTrue(mockContext.ensureLiveEventSubscriptionCalled)
         XCTAssertTrue(mockContext.reconstructSessionCalled)
         XCTAssertTrue(mockContext.processReconstructionResultCalled)
+        XCTAssertTrue(mockContext.drainEventBufferCalled)
+        XCTAssertEqual(mockContext.connectionCallOrder, ["connect", "subscribe", "reconstruct"])
         XCTAssertFalse(mockContext.isReconstructing)
     }
 
@@ -46,7 +49,7 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.lastReconstructLimit, 120)
     }
 
-    func testReadOnlyReconstructionFailureReleasesGateAndUsesWorkerError() async {
+    func testReadOnlyReconstructionFailureRetainsLiveSuffixAndUsesWorkerError() async {
         mockContext.isConnected = true
         mockContext.reconstructShouldFail = true
 
@@ -54,7 +57,7 @@ final class ConnectionCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(outcome, .retryableFailure)
         XCTAssertFalse(mockContext.resumeSessionCalled)
-        XCTAssertFalse(mockContext.isReconstructing)
+        XCTAssertTrue(mockContext.isReconstructing)
         XCTAssertEqual(mockContext.lastLocalErrorDedupKey, "worker.session.reconstruct.failed")
         XCTAssertEqual(mockContext.lastLocalErrorTitle, "Could not load worker session")
     }
@@ -296,7 +299,7 @@ final class ConnectionCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(outcome, .retryableFailure)
         XCTAssertFalse(mockContext.appendLocalErrorCalled)
-        XCTAssertFalse(mockContext.isReconstructing)
+        XCTAssertTrue(mockContext.isReconstructing)
     }
 
     func testCancellationDuringProjectionRetainsCommittedCutAndBufferedSuffix() async {

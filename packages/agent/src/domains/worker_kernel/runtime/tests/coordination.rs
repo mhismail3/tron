@@ -68,6 +68,7 @@ async fn model_tool_worker_invocation_streams_correlated_live_progress() {
             },
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -174,6 +175,7 @@ async fn reconstructed_parent_awaits_the_same_running_child_invocation() {
                     root_invocation_id: Some("provider-parent-before-restart".to_owned()),
                 },
                 Some(&parent_id),
+                None,
                 Some(0),
             )
             .await
@@ -199,6 +201,7 @@ async fn reconstructed_parent_awaits_the_same_running_child_invocation() {
                 root_invocation_id: Some("provider-parent-after-restart".to_owned()),
             },
             Some(&parent.invocation_id),
+            None,
             Some(0),
         )
         .await
@@ -361,6 +364,7 @@ async fn worker_declared_child_ceiling_is_transactional_and_causally_linked() {
                     root_invocation_id: Some("provider-parent".to_owned()),
                 },
                 Some(&parent.invocation_id),
+                None,
                 Some(ordinal),
             )
             .await
@@ -393,6 +397,7 @@ async fn worker_declared_child_ceiling_is_transactional_and_causally_linked() {
                 root_invocation_id: Some("provider-parent".to_owned()),
             },
             Some(&parent.invocation_id),
+            None,
             Some(2),
         )
         .await
@@ -430,6 +435,7 @@ async fn terminal_retry_reuses_immutable_contract_and_is_idempotently_linked() {
             Some("provider-retry"),
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -454,6 +460,7 @@ async fn terminal_retry_reuses_immutable_contract_and_is_idempotently_linked() {
             0,
             Some("session-retry".to_owned()),
             Some("provider-retry"),
+            None,
             None,
             None,
         )
@@ -508,6 +515,7 @@ async fn cancelling_an_invocation_cancels_only_its_durable_causal_subtree() {
                     },
                     Some(&format!("provider-cancel-tree-{ordinal}")),
                     Some(&parent.invocation_id),
+                    None,
                     Some(ordinal),
                 )
                 .unwrap(),
@@ -527,6 +535,7 @@ async fn cancelling_an_invocation_cancels_only_its_durable_causal_subtree() {
                 reasoning_level: None,
             },
             Some("provider-cancel-tree-unrelated"),
+            None,
             None,
             None,
         )
@@ -596,6 +605,7 @@ async fn cancelled_model_tool_wait_drops_its_transient_progress_bridge() {
                         trace_id: "trace-live-progress".to_owned(),
                         root_invocation_id: None,
                     },
+                    None,
                     None,
                     None,
                 )

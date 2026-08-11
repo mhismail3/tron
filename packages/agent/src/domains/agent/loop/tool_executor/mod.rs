@@ -254,12 +254,25 @@ pub struct ToolExecutionContext<'a> {
     /// engine-owned value prevents an agent-runner hop from restarting a
     /// worker causal trace at zero.
     pub worker_causal_depth: u32,
+    /// Consecutive automatic coordination wakes inherited by this provider
+    /// turn. Agent coordination calls advance it; ordinary tool execution
+    /// preserves it.
+    pub autonomous_wake_hop: u32,
     /// Worker that owns an agent-runner child session. Tool calls retain that
     /// worker actor identity so semantic hooks can avoid self-recursion.
     pub origin_worker_id: Option<&'a str>,
     /// Durable parent worker invocation for child-run admission and run-tree
     /// reconstruction.
     pub origin_worker_invocation_id: Option<&'a str>,
+    /// Stable reusable-agent execution identities, when this run is nested.
+    pub agent_id: Option<&'a str>,
+    pub agent_assignment_id: Option<&'a str>,
+    pub agent_execution_id: Option<&'a str>,
+    /// Exact immutable function-id grant and limits for the assignment.
+    pub delegated_function_grant: Option<&'a [String]>,
+    pub agent_limits: Option<&'a Value>,
+    /// Immutable canonical workspace-relative assignment write prefixes.
+    pub agent_write_scopes: Option<&'a [String]>,
     /// Zero-based occurrence of this tool inside the owning worker run.
     pub origin_worker_tool_ordinal: Option<u32>,
 }
@@ -358,8 +371,15 @@ pub async fn execute_tool(
             ctx.trace_id,
             ctx.parent_invocation_id,
             ctx.worker_causal_depth,
+            ctx.autonomous_wake_hop,
             ctx.origin_worker_id,
             ctx.origin_worker_invocation_id,
+            ctx.agent_id,
+            ctx.agent_assignment_id,
+            ctx.agent_execution_id,
+            ctx.delegated_function_grant,
+            ctx.agent_limits,
+            ctx.agent_write_scopes,
             ctx.origin_worker_tool_ordinal,
             effective_args,
             &per_invocation_cancel,
@@ -422,8 +442,15 @@ async fn execute_tool_via_engine(
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
     worker_causal_depth: u32,
+    autonomous_wake_hop: u32,
     origin_worker_id: Option<&str>,
     origin_worker_invocation_id: Option<&str>,
+    agent_id: Option<&str>,
+    agent_assignment_id: Option<&str>,
+    agent_execution_id: Option<&str>,
+    delegated_function_grant: Option<&[String]>,
+    agent_limits: Option<&Value>,
+    agent_write_scopes: Option<&[String]>,
     origin_worker_tool_ordinal: Option<u32>,
     effective_args: Value,
     cancellation: &CancellationToken,
@@ -461,21 +488,14 @@ async fn execute_tool_via_engine(
         origin_worker_invocation_id,
         &effective_args,
     );
-    // INVARIANT: an internal function can enter this executor only through the
-    // exact trusted agentTools surface resolved for an origin worker. Use the
-    // System actor solely for that already-admitted catalog target, then retain
-    // the worker as causal ownership. Ordinary agents never discover internal
-    // functions and cannot manufacture a PrimitiveExecutionTarget.
+    // INVARIANT: every model-backed execution invokes tools as an Agent. An
+    // internal function can enter only through the exact trusted agentTools
+    // surface; the function id is carried as an engine-authored grant instead
+    // of borrowing System visibility. Ordinary agents cannot manufacture a
+    // PrimitiveExecutionTarget or causal grant.
     let trusted_internal_worker_call =
         target.function.visibility == FunctionVisibility::Internal && origin_worker_id.is_some();
-    let (actor_identity, actor_kind) = if trusted_internal_worker_call {
-        ("system:worker-agent-tool".to_owned(), ActorKind::System)
-    } else {
-        origin_worker_id.map_or_else(
-            || (format!("agent:{session_id}"), ActorKind::Agent),
-            |worker_id| (format!("worker:{worker_id}"), ActorKind::Worker),
-        )
-    };
+    let (actor_identity, actor_kind) = (format!("agent:{session_id}"), ActorKind::Agent);
     let actor_id = match ActorId::new(actor_identity) {
         Ok(id) => id,
         Err(error) => {
@@ -505,11 +525,33 @@ async fn execute_tool_via_engine(
         .with_advertised_function(target.function.revision, worker_version)
         .with_model_tool_invocation_id(invocation_id.to_owned())
         .with_trigger_depth(worker_causal_depth)
+        .with_autonomous_wake_hop(autonomous_wake_hop)
         .with_session_id(session_id.to_owned())
         .with_idempotency_key(idempotency_key);
-    if trusted_internal_worker_call {
+    if let Some(worker_id) = origin_worker_id {
+        causal_context = causal_context.with_origin_worker_id(worker_id.to_owned());
+    }
+    if let Some(grant) = delegated_function_grant {
+        causal_context = causal_context.with_delegated_function_grant(grant.to_vec());
+    } else if trusted_internal_worker_call {
         causal_context =
-            causal_context.with_origin_worker_id(origin_worker_id.expect("checked worker origin"));
+            causal_context.with_delegated_function_grant(vec![function_id.as_str().to_owned()]);
+    }
+    if let Some(agent_id) = agent_id {
+        causal_context = match (agent_assignment_id, agent_execution_id) {
+            (Some(assignment_id), Some(execution_id)) => causal_context.with_agent_execution(
+                agent_id.to_owned(),
+                assignment_id.to_owned(),
+                execution_id.to_owned(),
+            ),
+            _ => causal_context.with_agent_identity(agent_id.to_owned()),
+        };
+    }
+    if let Some(limits) = agent_limits {
+        causal_context = causal_context.with_agent_limits(limits.clone());
+    }
+    if let Some(scopes) = agent_write_scopes {
+        causal_context = causal_context.with_agent_write_scopes(scopes.to_vec());
     }
     if let Some(workspace_id) = workspace_id {
         causal_context = causal_context.with_workspace_id(workspace_id.to_owned());

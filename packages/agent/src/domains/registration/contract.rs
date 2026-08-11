@@ -8,8 +8,9 @@
 use serde_json::Value;
 
 use crate::engine::{
-    EffectClass, FunctionDefinition, FunctionId, FunctionVisibility, IdempotencyContract,
-    ModelToolAudience, ModelToolContract, Result as EngineResult, RiskLevel, WorkerId,
+    DelegationPolicy, EffectClass, FunctionDefinition, FunctionId, FunctionVisibility,
+    IdempotencyContract, ModelToolAudience, ModelToolContract, Result as EngineResult, RiskLevel,
+    WorkerId,
 };
 
 /// Fluent source-domain builder for one executable engine function.
@@ -24,6 +25,7 @@ pub(crate) struct FunctionContract {
     idempotency: Option<IdempotencyContract>,
     description: Option<&'static str>,
     model_tool: Option<ModelToolContract>,
+    delegation_policy: DelegationPolicy,
 }
 
 impl FunctionContract {
@@ -45,6 +47,7 @@ impl FunctionContract {
             idempotency: None,
             description: None,
             model_tool: None,
+            delegation_policy: DelegationPolicy::Never,
         }
     }
 
@@ -96,6 +99,12 @@ impl FunctionContract {
         self
     }
 
+    /// Declare how this function can enter a child agent's exact grant.
+    pub(crate) fn delegation_policy(mut self, policy: DelegationPolicy) -> Self {
+        self.delegation_policy = policy;
+        self
+    }
+
     /// Validate identities and build the exact engine definition.
     pub(crate) fn build(self) -> EngineResult<FunctionDefinition> {
         let function_id = FunctionId::new(self.function_id)?;
@@ -110,7 +119,8 @@ impl FunctionContract {
             self.visibility,
             self.effect_class,
         )
-        .with_risk(self.risk_level);
+        .with_risk(self.risk_level)
+        .with_delegation_policy(self.delegation_policy);
         if let Some(contract) = self.idempotency {
             definition = definition.with_idempotency(contract);
         }

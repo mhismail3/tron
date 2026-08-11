@@ -13,6 +13,7 @@ enum EngineDashboardPresentation {
         "user_interaction",
         "session",
         "worker_interaction",
+        "agent_coordination",
         "worker_administration",
     ]
 
@@ -49,18 +50,19 @@ enum EngineDashboardPresentation {
         case "worker_list": "List Workers"
         case "worker_inspect": "Inspect Worker"
         case "worker_invoke": "Run Worker"
-        case "worker_await": "Wait for Worker"
-        case "worker_cancel": "Cancel Worker Run"
+        case "result_read": "Read Result"
+        case "agent_discover": "Discover Agents"
+        case "agent_spawn": "Spawn Agent"
+        case "agent_send": "Message Agent"
+        case "agent_wait": "Wait for Work"
+        case "agent_manage": "Manage Agent"
         case "worker_enable": "Enable Worker"
         case "worker_disable": "Disable Worker"
         case "worker_stop": "Stop Worker"
         case "worker_rollback": "Roll Back Worker"
         case "worker_retire": "Retire Worker"
-        case "worker_purge": "Delete Worker"
         case "worker_inbox": "View Worker Results"
         case "worker_runs": "View Worker Runs"
-        case "worker_webhook_rotate": "Rotate Webhook Token"
-        case "worker_stop_all": "Stop All Workers"
         default: WorkerConsolePresentation.displayLabel(modelName)
         }
     }
@@ -71,6 +73,7 @@ enum EngineDashboardPresentation {
         case "user_interaction": "User interaction"
         case "session": "Session metadata"
         case "worker_interaction": "Worker interaction"
+        case "agent_coordination": "Agent coordination"
         case "worker_administration": "Worker administration"
         case "other": "Other primitives"
         default: "\(WorkerConsolePresentation.displayLabel(group)) primitives"
@@ -83,6 +86,7 @@ enum EngineDashboardPresentation {
         case "user_interaction": "Foreground questions with a durable answer handoff."
         case "session": "Request-gated mutation of canonical conversation metadata."
         case "worker_interaction": "Stable discovery and control of work already in progress."
+        case "agent_coordination": "Reusable agent discovery, delegation, messaging, waiting, and management."
         case "worker_administration": "Exact specialist or authenticated-dashboard worker lifecycle operations."
         default: "Fixed engine primitives reported by the server."
         }

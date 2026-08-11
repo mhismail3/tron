@@ -239,6 +239,13 @@ async fn configured_budget_accepts_frames_within_its_limit() {
         response.get("type").and_then(Value::as_str),
         Some("hello.ok")
     );
+    assert_eq!(
+        response
+            .get("capabilities")
+            .and_then(Value::as_array)
+            .expect("negotiated capabilities"),
+        &vec![json!("terminal.v1"), json!("agent_coordination.v1")]
+    );
 }
 
 #[test]

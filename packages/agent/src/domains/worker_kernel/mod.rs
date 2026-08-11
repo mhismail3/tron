@@ -74,11 +74,35 @@
 //! stop-all mutations therefore deduplicate at profile scope and remain usable
 //! from the profile-level Engine console without fabricating a chat session.
 //! The ordinary main-agent surface always includes the bounded coordination
-//! primitives for discovery, invocation, authorized result reads,
-//! invocation-scoped cancellation, durable waits, and Agent Delivery/mailbox
-//! operations. Worker administration (`upsert`, inspection/list management,
+//! primitives for worker discovery/invocation, generic authorized result
+//! reads, and reusable-agent discover/spawn/send/wait/manage coordination.
+//! Cancellation of owned agent assignments and worker executions is unified
+//! under `agent_manage`; an agent target resolves its exact, uncapped
+//! management-owned subtree, interrupts every durable running attempt, aborts
+//! live transcript runs, and revokes pre-admission auxiliary reservations in
+//! one exact transcript-set admission barrier. Fresh wake/run/lifecycle
+//! admission stays blocked until retained wakes are passive and each mixed
+//! execution descendant follows its canonical cancellation path. Durable mixed
+//! fan-in is unified under `agent_wait`: registration owns immutable
+//! continuation provenance, immediate satisfaction is consumed by the current
+//! tool result, and later assignment-owned satisfaction resumes through the
+//! assignment dispatcher only after any auxiliary transcript run reaches a
+//! safe boundary. A wait absorbs ordinary per-target delivery only for its
+//! exact owner session and stable agent; an authorized manager waiting on
+//! another agent's handle does not consume that agent's automatic result.
+//! Wait targets are normalized to stable agent/execution dependencies before
+//! their EventStore transaction. Immutable mixed parentage participates beside
+//! pending assignment, worker, and reply edges, so self, ancestor, reciprocal,
+//! and mixed cycles fail with `AGENT_WAIT_CYCLE` while parent-to-descendant
+//! waits remain valid.
+//! Worker administration (`upsert`, inspection/list management,
 //! lifecycle mutations, rollback, retirement, purge, global run audit, and
-//! detach) remains specialist- or client-only. An agent worker receives only
+//! detach) remains specialist- or client-only. Legacy worker cancel and Agent
+//! Delivery mailbox bindings remain non-model-visible compatibility operations
+//! for one release. `worker_await` and `worker_result_read` are absent from the
+//! fixed inventory and every ordinary surface; the provider resolver synthesizes
+//! them only when an immutable retained dynamic-worker `agentTools` allowlist
+//! names them exactly. An agent worker receives only
 //! its immutable `agentTools` allowlist and must declare `worker_invoke` plus a
 //! positive child budget when its production role launches another worker.
 //! Session actuators, host mutations, and dynamically projected worker tools
@@ -108,8 +132,10 @@
 //! private-endpoint inspection.
 //! Creation-time mailbox policy sees only bounded redacted previews and runs
 //! asynchronously. Its selected IDs are validated against the candidate set
-//! and claimed all-or-none. It cannot delay or wake the initial prompt;
-//! subsequent mailbox consumption is explicit through list/claim tools.
+//! and claimed all-or-none. It cannot delay or wake the initial prompt. Legacy
+//! mailbox list/claim remains compatibility custody and is not ordinary model
+//! vocabulary; first-class coordination instead reconstructs semantic messages
+//! from durable metadata at provider-safe boundaries.
 //! Model-facing run and inbox reads are compact and bounded by default. An
 //! explicit operator detail request expands at most twenty records and still
 //! caps each retained input, output, or result, preventing durable history from
@@ -195,8 +221,19 @@
 //! relationship graph derived from active immutable bundle declarations.
 //! Architecture nodes include exposure, runner, hooks, triggers, client
 //! boundaries, dispatch routes, exact `agentTools` dependencies, presentation
-//! suite, version, health, and provenance. This is introspection only: it adds
-//! no compiled hierarchy, routing policy, or second registry. Exact provider
+//! suite, version, health, provenance, the exact `agentRole` declaration, and
+//! one deterministic review classification: an agent runner with a declaration
+//! is `declared`, one without it is `needs_role_review`, and other runners are
+//! `ineligible`. The scan itself is read-only. Authenticated role review
+//! dynamically selects a healthy worker that explicitly declares the
+//! `agent_role_review` hook; its strict output can contain only an explicit
+//! enabled/disabled declaration and rationale. The Engine durably pins the
+//! target, reviewer version, and exact reviewer invocation, and publishes only
+//! after user confirmation by cloning the exact target and changing
+//! `agentRole`. Missing reviewers produce a repair requirement rather than a
+//! guessed rewrite.
+//! This is introspection only: it adds no compiled hierarchy, routing policy,
+//! or second registry. Exact provider
 //! contracts are not duplicated into the client response. It is not itself
 //! model vocabulary and reports executable runtime facts rather than a
 //! separately maintained description of the source tree.
@@ -221,12 +258,16 @@
 //! command and service versions use completed exact-version p95 evidence after
 //! five samples. Unknown or predicted-fast work gets at most ten seconds in the
 //! foreground, after which the same invocation is atomically detached rather
-//! than cancelled or recreated. Nested worker calls remain synchronous because
-//! their parent requires the typed result. Each nested worker call also owns a
-//! durable parent/per-tool occurrence slot. A reconstructed agent attempt
+//! than cancelled or recreated. `worker_invoke(mode=enqueue)` instead returns
+//! immediately after durable admission for root and nested callers; a reusable
+//! parent assignment joins that active mixed descendant before terminalizing.
+//! A top-level `mode=wait` follows the normal interaction budget and may detach
+//! the same durable child; a nested `mode=wait` synchronously joins its typed
+//! result up to the worker reliability ceiling.
+//! Each nested worker call also owns a durable parent/per-tool occurrence slot. A reconstructed agent attempt
 //! starts those occurrences from zero, so changed provider call ids or
 //! regenerated valid arguments observe the original completed/running child
-//! instead of admitting duplicate specialist work. `worker_await` is bounded
+//! instead of admitting duplicate specialist work. The compatibility `worker_await` is bounded
 //! by the same interaction budget, and `worker_detach` only changes
 //! interaction ownership.
 //! Exact terminal worker output is validated and owned once by the durable
@@ -237,7 +278,7 @@
 //! and run graphs carry compact `worker_result_reference` receipts rather than
 //! copying the typed value. Exact hydration is limited to synchronous/nested
 //! delivery, engine-hook application, explicit bounded result reads, recovery,
-//! and purge export. `worker_result_read` returns only one bounded RFC 6901
+//! and purge export. Generic `result_read` returns only one bounded RFC 6901
 //! path/page (at most 32 KiB and twenty items). An agent worker may read an
 //! exact direct child that its durable invocation admitted. Other agent and
 //! worker callers require the originating session or an explicit Agent
@@ -262,7 +303,7 @@
 //! The same immutable `presentation` envelope may declare a closed generic
 //! native descriptor. Its bounded text, status, progress, table, list, HTTPS
 //! link, artifact, confirmation, and same-worker action sections bind only to
-//! RFC 6901 result paths read through `worker_result_read`. Fixed action inputs
+//! RFC 6901 result paths read through `result_read`. Fixed action inputs
 //! pass the owning worker's complete input schema at bundle activation and use
 //! ordinary invocation at runtime. HTML, JavaScript, custom client code,
 //! arbitrary client commands, unsafe URL schemes, copied result bodies, and a
@@ -331,10 +372,10 @@
 //! provider tool. The two-value contract carries no relevance or routing
 //! policy, and the active immutable bundle remains its single owner.
 //! Agent runners may additionally declare `agentTools`, an exact bounded list
-//! of model-tool names for their child provider sessions. This fixed seam has
-//! independent production callers in Engine Steward, Software Workspace,
-//! Browser Operator, Mac Operator, Research Coordinator, General Delegate,
-//! Worker Evaluator, and Worker Forge. A worker process cannot safely edit the
+//! of model-tool names for their child provider sessions. Diagnostic,
+//! repository, operator, research, delegation, evaluation, and authoring
+//! agent-runner bundles are independent production callers. Their profile-owned
+//! names are never fixed-kernel vocabulary. A worker process cannot safely edit the
 //! authenticated provider function catalog, so activation validates at most 32
 //! unique 64-byte names against current fixed primitives, enabled direct or
 //! internal worker functions, and the candidate's own declared tool. The immutable
@@ -344,11 +385,23 @@
 //! list exposes no tools. Restart reloads the same immutable bundle, missing
 //! tools fail closed at projection, and neither the field nor the filter
 //! carries relevance, workflow, retry, or other semantic policy.
-//! Internal targets remain `FunctionVisibility::Internal`. The exact trusted
-//! surface is resolved under the System actor, and execution uses that actor
-//! only for the already-resolved target while retaining the originating worker
-//! as causal ownership. Ordinary Agent and Worker actors still cannot discover
-//! or invoke an internal function directly.
+//! For one compatibility release, activation also admits the exact historical
+//! `worker_await` and `worker_result_read` names in `agentTools` and maps them to
+//! the canonical await and generic result-read functions at the trusted worker
+//! provider boundary. They are not accepted as reusable `agentRole` ceiling
+//! names, registered catalog functions, or fixed-inventory entries.
+//! Internal targets remain `FunctionVisibility::Internal`. Admission resolves
+//! model-tool names to immutable exact function IDs whose source contracts are
+//! delegable, and execution retains the Agent actor plus that exact grant.
+//! Internal discovery remains hidden; every public or internal call outside
+//! the admitted grant fails closed, and `delegation=never` cannot be bypassed.
+//! Agent-runner bundles separately declare `agentRole` as disabled or as one
+//! reviewed discoverable reusable role. Enabled declarations pin role name,
+//! collaboration instructions, model/reasoning defaults, delegable tool
+//! ceiling, limits, and result mode to the immutable worker version.
+//! Discovery, spawn, role upgrade, and native upgrade availability all share
+//! one executable-role predicate: the worker must still be an enabled,
+//! non-retired, healthy agent runner with a discoverable enabled declaration.
 //! Verification evidence inside an immutable version is deterministic.
 //! Activation time belongs to the append-only `worker_health` ledger, so
 //! re-verifying byte-identical source reuses one content version while still
@@ -473,10 +526,21 @@
 //! snapshot. Explicit purge creates and verifies a compressed archive of the
 //! worker's bundles, state, and operational evidence before removing them, and
 //! refuses to archive known credential material.
-//! Invocation cancellation is causal and isolated: `worker_cancel`
+//! Invocation cancellation is causal and isolated: model agents use
+//! `agent_manage` on a worker-execution handle; the hidden compatibility
+//! `worker_cancel` reaches the same owned mixed subtree. Cancellation
 //! terminalizes the selected queued or running invocation and its durable
 //! descendants, cancels their process/request/child agents, and leaves
-//! unrelated traces plus the worker enabled. Agent invocations persist their
+//! unrelated traces plus the worker enabled. Cancelling an agent workload is
+//! management-recursive rather than trace-recursive: one uncapped store query
+//! finds every nonterminal assignment in its exact owned reusable-agent
+//! subtree, then each assignment's mixed execution descendants are cancelled.
+//! Live transcript runs are aborted at their safe cancellation boundary and
+//! running assignment attempts finish as immutable interrupted evidence before
+//! terminal assignment results are committed. Assignment-free auxiliary runs
+//! use the same exact subtree cancellation: a pre-admission reservation is
+//! tombstoned until its invoking guard exits, and every delayed or leased wake
+//! becomes retained passive evidence rather than starting later. Agent invocations persist their
 //! child session id as run
 //! evidence. Every invocation also retains the originating user session for its
 //! causal trace; descendants inherit the trace root's origin rather than
@@ -528,6 +592,8 @@ use crate::domains::registration::composition::{
 mod agent_delivery_effects;
 mod artifacts;
 mod contract;
+#[cfg(test)]
+pub(crate) use contract::function_definitions as test_function_definitions;
 mod dispatches;
 mod handlers;
 mod host;
@@ -580,6 +646,12 @@ pub(crate) use contract::{
 
 pub(crate) use notifications::apns::validate_private_key as validate_apns_private_key;
 pub(crate) use runtime::WorkerRuntime;
+
+/// Authenticated client capability for the complete reusable-agent management
+/// protocol. The socket advertises this only in builds that register the
+/// relations, inspect, history, messaging, management, retry, result, and
+/// promotion operations together.
+pub(crate) const AGENT_COORDINATION_CAPABILITY: &str = "agent_coordination.v1";
 #[cfg(test)]
 pub(crate) use surface::{AvailableWorkerToolSnapshot, SurfaceToolSnapshot};
 pub(crate) use surface::{

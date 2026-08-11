@@ -69,6 +69,100 @@ fn begin_run_rejects_busy_session() {
 }
 
 #[test]
+fn auxiliary_reservation_is_consumed_only_by_its_exact_admission_key() {
+    let orch = make_orchestrator();
+    let reservation = orch
+        .try_reserve_auxiliary_run("s1", "delivery-admission-1")
+        .expect("reserve auxiliary delivery run");
+
+    assert!(orch.has_pending_or_active_run("s1"));
+    assert!(orch.begin_run("s1", "unreserved-run").is_err());
+    assert!(
+        orch.begin_run_with_admission_key("s1", "wrong-run", Some("other-key"))
+            .is_err()
+    );
+
+    let run = orch
+        .begin_run_with_admission_key("s1", "reserved-run", Some("delivery-admission-1"))
+        .expect("matching delivery admission must consume its reservation");
+    drop(reservation);
+    assert!(orch.has_active_run("s1"));
+    assert!(orch.try_reserve_lifecycle_runs(&["s1".to_owned()]).is_err());
+
+    drop(run);
+    assert!(!orch.has_pending_or_active_run("s1"));
+    let lifecycle = orch
+        .try_reserve_lifecycle_runs(&["s1".to_owned()])
+        .expect("released run permits lifecycle mutation");
+    drop(lifecycle);
+}
+
+#[test]
+fn lifecycle_reservation_is_exact_and_close_blocks_future_run_admission() {
+    let orch = make_orchestrator();
+    let lifecycle = orch
+        .try_reserve_lifecycle_runs(&["s2".to_owned(), "s1".to_owned(), "s2".to_owned()])
+        .expect("reserve exact lifecycle transcript set");
+
+    assert!(orch.has_pending_or_active_run("s1"));
+    assert!(orch.has_pending_or_active_run("s2"));
+    assert!(orch.begin_run("s1", "run-before-close").is_err());
+    assert!(
+        orch.try_reserve_auxiliary_run("s2", "delivery-after-lifecycle")
+            .is_none()
+    );
+
+    lifecycle.commit_closed();
+    assert!(!orch.has_pending_or_active_run("s1"));
+    assert!(orch.begin_run("s1", "run-after-close").is_err());
+    assert!(
+        orch.try_reserve_auxiliary_run("s2", "delivery-after-close")
+            .is_none()
+    );
+    assert!(orch.begin_run("unrelated", "unrelated-run").is_ok());
+}
+
+#[test]
+fn subtree_cancellation_atomically_revokes_pending_and_active_run_admission() {
+    let orch = make_orchestrator();
+    let pending = orch
+        .try_reserve_auxiliary_run("s1", "pending-before-cancel")
+        .expect("reserve pending auxiliary wake");
+    let active = orch.begin_run("s2", "active-before-cancel").unwrap();
+    let active_token = active.cancel_token();
+
+    let cancellation = orch
+        .reserve_agent_run_cancellation(&["s2".to_owned(), "s1".to_owned(), "s2".to_owned()])
+        .expect("reserve exact cancellation subtree");
+    assert!(active_token.is_cancelled());
+    assert!(
+        orch.begin_run_with_admission_key(
+            "s1",
+            "cancelled-pending-run",
+            Some("pending-before-cancel"),
+        )
+        .is_err()
+    );
+    assert!(
+        orch.try_reserve_auxiliary_run("s1", "wake-during-cancel")
+            .is_none()
+    );
+    assert!(orch.try_reserve_lifecycle_runs(&["s2".to_owned()]).is_err());
+    assert!(orch.begin_run("unrelated", "unrelated-run").is_ok());
+
+    drop(cancellation);
+    assert!(
+        orch.begin_run_with_admission_key("s1", "still-tombstoned", Some("pending-before-cancel"),)
+            .is_err(),
+        "the cancelled wake remains blocked until its original guard exits"
+    );
+    drop(pending);
+    assert!(orch.begin_run("s1", "new-work-after-cancel").is_ok());
+    drop(active);
+    assert!(orch.begin_run("s2", "new-work-after-active-exits").is_ok());
+}
+
+#[test]
 fn dropping_run_clears_active() {
     let orch = make_orchestrator();
     let run = orch.begin_run("s1", "run_1").unwrap();

@@ -6,7 +6,7 @@ use serde_json::Value;
 use super::super::{ActivitySummaryLine, ToolEventIdentity, ToolInvocationSummary};
 use super::{BaseEvent, CompactionReason};
 use crate::shared::protocol::content::ThinkingContentKind;
-use crate::shared::protocol::messages::TokenUsage;
+use crate::shared::protocol::messages::{AgentMessageContent, TokenUsage};
 use crate::shared::protocol::model_tools::ToolResult;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -194,6 +194,16 @@ tron_events! {
     MessageUpdate {
         content: String,
     } => "message_update",
+
+    /// A durable engine-authenticated coordination message materialized at a
+    /// recipient's provider-safe boundary. `event_id` and the base sequence
+    /// identify the already-persisted session event; consumers must never
+    /// persist this live projection a second time.
+    AgentCoordinationMessage {
+        #[serde(rename = "eventId")]
+        event_id: String,
+        content: AgentMessageContent,
+    } => "message.agent",
 
     // -- Tool invocation --
 

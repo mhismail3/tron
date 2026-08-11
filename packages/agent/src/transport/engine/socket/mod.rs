@@ -394,6 +394,10 @@ impl EngineWsSession {
             session_id: message.session_id,
             workspace_id: message.workspace_id,
         });
+        let capabilities = [
+            crate::domains::terminal::CAPABILITY,
+            crate::domains::worker_kernel::AGENT_COORDINATION_CAPABILITY,
+        ];
         self.send_value(json!({
             "type": "hello.ok",
             "id": message.id,
@@ -401,7 +405,7 @@ impl EngineWsSession {
             "minimumSupportedVersion": MIN_PROTOCOL_VERSION,
             "serverId": "tron-engine",
             "maxMessageSize": self.max_frame_bytes,
-            "capabilities": self.ctx.terminal_service.capabilities(),
+            "capabilities": capabilities,
         }))
     }
 

@@ -108,7 +108,7 @@ pub(super) fn append_event_in_tx_with_identity(
 
     if matches!(
         opts.event_type,
-        EventType::MessageUser | EventType::MessageAssistant
+        EventType::MessageUser | EventType::MessageAgent | EventType::MessageAssistant
     ) {
         counters.message_count = Some(1);
     }
@@ -238,7 +238,7 @@ impl EventStore {
 
     /// Delete a message by appending a `message.deleted` event.
     ///
-    /// The target event must be a message event (`message.user`, `message.assistant`,
+    /// The target event must be a user/assistant message event (`message.user`, `message.assistant`,
     /// or `tool.invocation.completed`). The original event is never modified — deletion is recorded
     /// as a new event and applied during message reconstruction.
     #[tracing::instrument(skip(self), fields(session_id, target_event_id))]

@@ -230,6 +230,10 @@ struct ChatView: View {
             }
 
             if presentationMode == .workerAudit {
+                // Read-only transcripts still own a live suffix. The
+                // coordinator subscribes before its durable snapshot and the
+                // view model buffers frames until that snapshot commits.
+                viewModel.startLiveEventStream()
                 let historyWasProvisional = !viewModel.hasAuthoritativeHistory
                 let initialReconstructionOutcome = await viewModel.reconstructReadOnlyTranscript()
                 guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }

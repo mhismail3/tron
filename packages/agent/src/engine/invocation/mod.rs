@@ -24,9 +24,11 @@
 //!   into the durable record.
 //! - Local agent and worker paths carry their concrete actor identity.
 //! - Working directory, advertised surface pins, causal depth, delegated worker
-//!   parent, and a worker-selected agent-turn ceiling are closed typed
-//!   execution inputs. The latter two are causal/reliability evidence, never
-//!   authorization or semantic routing inputs.
+//!   parent, reusable-assignment identities/write scopes, and a worker-selected
+//!   agent-turn ceiling are closed typed execution inputs. The live catalog
+//!   overwrites the declared workspace effect from the selected source
+//!   contract before handler execution. These resource facts coordinate work;
+//!   they are not operating-system containment or semantic routing inputs.
 //! - Durable records preserve session/workspace/trace/idempotency references so
 //!   replay manifests can explain why an invocation occurred.
 //! - Model-originated direct calls carry the advertised function revision and,

@@ -229,7 +229,7 @@ fn make_agent_with_responder_for_session(
             compaction_trigger_config:
                 crate::domains::agent::context::types::CompactionTriggerConfig::default(),
             invocation_abort_registry: Arc::new(InvocationAbortRegistry::new()),
-            engine_host: crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
+            engine_host: crate::shared::server::test_support::new_agent_test_engine_host(),
         },
         session_id,
     );

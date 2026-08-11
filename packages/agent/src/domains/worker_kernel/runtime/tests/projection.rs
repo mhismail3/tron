@@ -262,7 +262,7 @@ async fn graph_projects_linked_agent_and_model_session_truth() {
     assert!(metrics.get("nodes").is_none());
     assert!(metrics.get("timeline").is_none());
 
-    for index in 0..127 {
+    for index in 0..61 {
         runtime
             .store
             .begin_invocation_with_context(
@@ -283,12 +283,30 @@ async fn graph_projects_linked_agent_and_model_session_truth() {
             )
             .unwrap();
     }
+    let graph_ceiling_error = runtime
+        .store
+        .begin_invocation_with_context(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({"query":"One execution beyond the coordination graph ceiling"}),
+            "graph-agent-over-ceiling-child",
+            "graph-agent-trace",
+            2,
+            "agent",
+            Some("origin-session"),
+            WorkerInteractionMode::Foreground,
+            None,
+            Some(&completed_child.invocation_id),
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
     assert!(
-        runtime
-            .project_run_metrics(&completed_child)
-            .unwrap_err()
-            .contains("exceeds the bounded metrics projection")
+        graph_ceiling_error.contains("configured ceiling of 64 execution nodes"),
+        "{graph_ceiling_error}"
     );
+    assert!(runtime.project_run_metrics(&completed_child).is_ok());
 }
 
 #[test]

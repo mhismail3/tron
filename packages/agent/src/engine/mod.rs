@@ -18,6 +18,9 @@
 //!
 //! - Trusted-local agent and worker invocations carry identities, provenance,
 //!   hashes, and traces as observable evidence, not permission objects.
+//! - Visible root Agent actors retain the ordinary public surface. Reusable
+//!   child Agent actors are identified by stable execution topology and fail
+//!   closed unless every invocation carries an immutable exact function grant.
 //! - Remote clients and external transports remain authenticated.
 //! - Requests and responses are validated against the registered JSON schemas.
 //! - Durable mutation and invocation delivery retain idempotency and causal truth.
@@ -55,9 +58,10 @@ pub use kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, WorkerId};
 pub(crate) use kernel::schema::validate_payload as validate_engine_schema_payload;
 pub(crate) use kernel::schema::validate_schema_definition as validate_engine_schema_definition;
 pub use kernel::types::{
-    CatalogRevision, DedupeScope, DirectWorkerToolContract, EffectClass, FunctionDefinition,
-    FunctionRevision, FunctionVisibility, IdempotencyContract, IdempotencyScope, ModelToolAudience,
-    ModelToolContract, RiskLevel, StreamVisibility,
+    CatalogRevision, DedupeScope, DelegationPolicy, DirectWorkerToolContract, EffectClass,
+    FunctionDefinition, FunctionRevision, FunctionVisibility, IdempotencyContract,
+    IdempotencyScope, ModelToolAudience, ModelToolContract, RiskLevel, StreamVisibility,
+    WorkspaceEffect,
 };
 
 #[cfg(test)]

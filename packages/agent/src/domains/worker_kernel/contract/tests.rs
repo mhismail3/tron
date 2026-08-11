@@ -1,19 +1,21 @@
 use super::*;
 use crate::domains::worker_kernel::types::{
-    BUNDLE_SCHEMA, SourceProvenance, WorkerBundle, WorkerDependency, WorkerRunner, WorkerTrigger,
+    BUNDLE_SCHEMA, SourceProvenance, WorkerAgentResultMode, WorkerAgentRole, WorkerAgentRoleLimits,
+    WorkerBundle, WorkerDependency, WorkerRunner, WorkerTrigger,
 };
-use crate::engine::DedupeScope;
+use crate::engine::{DedupeScope, DelegationPolicy, FunctionRevision};
 use serde_json::Value;
 
 #[test]
 fn background_receipt_points_to_the_non_blocking_resume_primitive() {
     let message = background_worker_receipt_message("worker-run-one");
 
-    assert!(message.contains("agent_wait_for_workers"));
-    assert!(message.contains(r#""invocationIds":["worker-run-one"]"#));
+    assert!(message.contains("agent_wait"));
+    assert!(message.contains(r#""kind":"worker_invocation""#));
+    assert!(message.contains(r#""id":"worker-run-one""#));
     assert!(message.contains(r#""mode":"all""#));
     assert!(message.contains("Do not poll"));
-    assert!(message.contains("worker_await"));
+    assert!(!message.contains("worker_await"));
 }
 
 #[test]
@@ -58,6 +60,211 @@ fn worker_result_projection_is_internal_kernel_reconstruction_not_model_vocabula
 }
 
 #[test]
+fn native_agent_management_protocol_is_complete_and_never_model_projected() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let expected = [
+        "agent::relations",
+        "agent::inspect",
+        "agent::assignments",
+        "agent::messages",
+        "agent::message_detail",
+        "agent::result_read",
+        "agent::operator_message",
+        "agent::manage",
+        "agent::retry",
+        "agent::promote",
+    ];
+    for function_id in expected {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.id.as_str() == function_id)
+            .unwrap_or_else(|| panic!("missing {function_id}"));
+        assert_eq!(definition.visibility, FunctionVisibility::NativeClient);
+        assert!(definition.model_tool.is_none());
+        assert_eq!(
+            definition
+                .request_schema
+                .as_ref()
+                .expect("native request schema")["additionalProperties"],
+            false
+        );
+        let response = definition
+            .response_schema
+            .as_ref()
+            .expect("native response schema");
+        assert_eq!(response["additionalProperties"], false);
+        assert!(response["required"].is_array());
+    }
+}
+
+#[test]
+fn reusable_agent_coordination_is_exactly_five_ordinary_contracts() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let expected = [
+        ("worker_kernel::agent_discover", "agent_discover", 1_u32),
+        ("worker_kernel::agent_spawn", "agent_spawn", 1),
+        ("worker_kernel::agent_send", "agent_send", 2),
+        ("worker_kernel::agent_wait", "agent_wait", 1),
+        ("worker_kernel::agent_manage", "agent_manage", 1),
+    ];
+    let projected = definitions
+        .iter()
+        .filter_map(|definition| {
+            definition.model_tool.as_ref().and_then(|tool| {
+                (tool.group.as_deref() == Some("agent_coordination")).then_some((definition, tool))
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(projected.len(), expected.len());
+    for (function_id, model_name, revision) in expected {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.id.as_str() == function_id)
+            .unwrap_or_else(|| panic!("missing {function_id}"));
+        let tool = definition.model_tool.as_ref().expect("model projection");
+        assert_eq!(tool.name, model_name);
+        assert!(matches!(tool.audience, ModelToolAudience::Ordinary));
+        assert_eq!(definition.revision, FunctionRevision(u64::from(revision)));
+        assert_eq!(definition.delegation_policy, DelegationPolicy::Inherit);
+        let request = definition.request_schema.as_ref().unwrap();
+        let closed = request["additionalProperties"] == false
+            || request["oneOf"].as_array().is_some_and(|branches| {
+                !branches.is_empty()
+                    && branches
+                        .iter()
+                        .all(|branch| branch["additionalProperties"] == false)
+            });
+        assert!(closed, "{function_id} must keep a closed request envelope");
+    }
+}
+
+#[test]
+fn worker_discovery_declares_its_durable_session_promotion() {
+    let definition = function_definitions()
+        .expect("worker-kernel contracts")
+        .into_iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::discover")
+        .expect("worker discover definition");
+
+    assert_eq!(definition.effect_class, EffectClass::IdempotentWrite);
+}
+
+#[test]
+fn agent_discovery_declares_lazy_root_identity_materialization() {
+    let definition = function_definitions()
+        .expect("worker-kernel contracts")
+        .into_iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::agent_discover")
+        .expect("agent discover definition");
+
+    assert_eq!(definition.effect_class, EffectClass::IdempotentWrite);
+    let statuses =
+        definition.request_schema.as_ref().unwrap()["properties"]["status"]["items"]["enum"]
+            .as_array()
+            .unwrap();
+    assert!(statuses.iter().all(|status| status != "closed"));
+}
+
+#[test]
+fn non_model_operator_endpoints_are_native_client_visible() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    for function_id in [
+        "worker_kernel::notification_device_upsert",
+        "worker_kernel::notification_device_disable",
+        "worker_kernel::notification_deliveries",
+        "worker_kernel::notification_delivery_acknowledge",
+        "worker_kernel::notification_delivery_status",
+        "worker_kernel::artifact_deliveries",
+        "worker_kernel::artifact_content",
+        "worker_kernel::artifact_delete",
+        "worker_kernel::role_reviews",
+        "worker_kernel::role_review_start",
+        "worker_kernel::role_review_inspect",
+        "worker_kernel::role_review_apply",
+        "worker_kernel::role_review_reject",
+        "worker_kernel::scheduled_work",
+        "worker_kernel::inbox_dismiss",
+        "worker_kernel::agent_wait_for_workers",
+        "worker_kernel::agent_mailbox_list",
+        "worker_kernel::agent_mailbox_claim",
+        "worker_kernel::result_handoff",
+        "worker_kernel::detach",
+        "worker_kernel::cancel",
+        "worker_kernel::purge",
+        "worker_kernel::webhook_rotate",
+        "worker_kernel::stop_all",
+    ] {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.id.as_str() == function_id)
+            .unwrap_or_else(|| panic!("missing {function_id}"));
+        assert_eq!(definition.visibility, FunctionVisibility::NativeClient);
+        assert!(definition.model_tool.is_none());
+    }
+}
+
+#[test]
+fn role_review_native_protocol_is_closed_confirmed_and_never_model_projected() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let expected = [
+        "worker_kernel::role_reviews",
+        "worker_kernel::role_review_start",
+        "worker_kernel::role_review_inspect",
+        "worker_kernel::role_review_apply",
+        "worker_kernel::role_review_reject",
+    ];
+    for function_id in expected {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.id.as_str() == function_id)
+            .unwrap_or_else(|| panic!("missing {function_id}"));
+        assert_eq!(definition.visibility, FunctionVisibility::NativeClient);
+        assert!(definition.model_tool.is_none());
+        assert_eq!(
+            definition.request_schema.as_ref().unwrap()["additionalProperties"],
+            false
+        );
+        assert_eq!(
+            definition.response_schema.as_ref().unwrap()["additionalProperties"],
+            false
+        );
+    }
+
+    let list = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::role_reviews")
+        .unwrap();
+    let list_request = list.request_schema.as_ref().unwrap();
+    assert_eq!(list_request["properties"]["queueLimit"]["maximum"], 100);
+    assert_eq!(list_request["properties"]["queueOffset"]["minimum"], 0);
+    let list_response = list.response_schema.as_ref().unwrap();
+    assert!(
+        list_response["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "queueNextOffset")
+    );
+
+    let apply = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::role_review_apply")
+        .unwrap();
+    assert_eq!(
+        apply.request_schema.as_ref().unwrap()["properties"]["confirmed"]["const"],
+        true
+    );
+    let proposal = &apply.response_schema.as_ref().unwrap()["properties"]["proposal"];
+    assert!(
+        proposal["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "reviewerInvocationId")
+    );
+}
+
+#[test]
 fn profile_owned_worker_mutations_do_not_require_a_session() {
     let definitions = function_definitions().expect("worker-kernel contracts");
     for function_id in [
@@ -65,6 +272,9 @@ fn profile_owned_worker_mutations_do_not_require_a_session() {
         "worker_kernel::invoke",
         "worker_kernel::result_handoff",
         "worker_kernel::inbox_dismiss",
+        "worker_kernel::role_review_start",
+        "worker_kernel::role_review_apply",
+        "worker_kernel::role_review_reject",
         "worker_kernel::detach",
         "worker_kernel::cancel",
         "worker_kernel::stop",
@@ -260,6 +470,15 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
     );
     assert_eq!(bundle["properties"]["agentTools"]["maxItems"], 32);
     assert_eq!(bundle["properties"]["agentTools"]["uniqueItems"], true);
+    assert_eq!(
+        bundle["properties"]["agentRole"]["oneOf"][1]["properties"]["toolCeiling"]["maxItems"],
+        32
+    );
+    assert_eq!(
+        bundle["properties"]["agentRole"]["oneOf"][1]["properties"]["limits"]["properties"]["maxQueuedAssignments"]
+            ["maximum"],
+        8
+    );
     assert!(
         bundle["required"]
             .as_array()
@@ -316,6 +535,7 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
     assert_eq!(
         bundle["properties"]["engineHooks"]["items"]["enum"],
         json!([
+            "agent_role_review",
             "continuity_context",
             "context_summary",
             "mailbox_curation",
@@ -327,6 +547,9 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
         .as_str()
         .expect("engine hook authoring contract");
     for required_contract in [
+        "agent_role_review input is a closed object requiring action:agent_role_review",
+        "Output is a closed object requiring only agentRole and rationale:string(1..2000)",
+        "never accepts arbitrary bundle rewrites",
         "continuity_context input is a closed object requiring action:continuity_context",
         "empty narrative means no continuity should be injected",
         "supplies the current working-directory identity as project",
@@ -443,6 +666,7 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
             "properties":{"query":{"type":"string"}}
         })),
         agent_tools: Some(vec!["web_fetch".to_owned()]),
+        agent_role: None,
         input_schema: json!({"type":"object"}),
         output_schema: json!({"type":"object"}),
         runner: WorkerRunner::Agent {
@@ -546,6 +770,33 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
         &json!({"bundle":serialized_service}),
     )
     .expect("serialized service bundle remains valid worker_upsert input");
+}
+
+#[test]
+fn agent_role_is_explicit_strict_and_absent_legacy_bundles_need_review() {
+    let declaration = WorkerAgentRole::Enabled {
+        display_name: "Reviewer".to_owned(),
+        summary: "Reviews bounded changes".to_owned(),
+        discoverable: true,
+        collaboration_instructions: "Report evidence and blockers.".to_owned(),
+        default_model: None,
+        default_reasoning_level: Some("high".to_owned()),
+        tool_ceiling: vec!["filesystem_read".to_owned()],
+        limits: WorkerAgentRoleLimits {
+            max_assignment_seconds: Some(900),
+            max_assignment_turns: Some(32),
+            max_child_executions: Some(4),
+            max_queued_assignments: Some(2),
+        },
+        result_mode: WorkerAgentResultMode::Natural,
+    };
+    let encoded = serde_json::to_value(declaration).expect("encode role declaration");
+    assert_eq!(encoded["status"], "enabled");
+    assert_eq!(encoded["toolCeiling"], json!(["filesystem_read"]));
+    assert_eq!(
+        serde_json::to_value(WorkerAgentRole::Disabled).unwrap(),
+        json!({"status":"disabled"})
+    );
 }
 
 #[test]
@@ -915,15 +1166,15 @@ fn worker_result_read_is_bounded_and_integrity_bound() {
     assert!(read.description.contains("JSON path/page"));
     let response = read.response_schema.as_ref().expect("result read response");
     assert_eq!(
-        response["properties"]["reference"]["properties"]["kind"]["const"],
+        response["properties"]["reference"]["oneOf"][0]["properties"]["kind"]["const"],
         "worker_result_reference"
     );
     assert_eq!(
-        response["properties"]["reference"]["properties"]["contentSha256"]["pattern"],
+        response["properties"]["reference"]["oneOf"][0]["properties"]["contentSha256"]["pattern"],
         "^sha256:[0-9a-f]{64}$"
     );
     assert_eq!(
-        response["properties"]["reference"]["properties"]["outputSchemaSha256"]["pattern"],
+        response["properties"]["reference"]["oneOf"][0]["properties"]["outputSchemaSha256"]["pattern"],
         "^sha256:[0-9a-f]{64}$"
     );
 }

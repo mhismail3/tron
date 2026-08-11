@@ -301,6 +301,63 @@ struct WorkerConsoleInteractionTests {
         }
     }
 
+    @Test("Manage Workers role review is capability-gated, server-authorized, and progressively disclosed")
+    func roleReviewUsesCanonicalManagementHierarchy() throws {
+        let root = iosAppRoot()
+        let overview = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Overview/WorkerConsoleViews.swift"
+            ),
+            encoding: .utf8
+        )
+        let sheet = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/UI/WorkerConsole/Domains/WorkerRoleReviewSheet.swift"
+            ),
+            encoding: .utf8
+        )
+        let viewModel = try String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/Session/WorkerKernel/WorkerConsoleViewModel.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(overview.contains("agent_role_review.v1"))
+        #expect(overview.contains("Review agent roles"))
+        #expect(overview.contains("Reviewer unavailable"))
+        #expect(overview.contains("repairRequirement"))
+        #expect(overview.contains("queueNextOffset"))
+        #expect(overview.contains("loadMoreRoleReviewQueue"))
+        #expect(overview.contains("loadOlderRoleReviews"))
+        #expect(overview.contains("currentProposalIds"))
+        #expect(overview.contains("onWorkerDetails"))
+        #expect(overview.contains("selectedWorkerPresented"))
+        #expect(overview.contains("WorkerRoleReviewProposalSheet("))
+
+        #expect(sheet.contains("item.action(\"start_review\")"))
+        #expect(sheet.contains("proposal.action(\"apply\")"))
+        #expect(sheet.contains("proposal.action(\"reject\")"))
+        #expect(sheet.contains(".allowed == true"))
+        #expect(sheet.contains("disabledReason"))
+        #expect(sheet.contains("Version-pinned review"))
+        #expect(sheet.contains("Reviewer invocation"))
+        #expect(sheet.contains("Declaration change"))
+        #expect(sheet.contains("No explicit declaration"))
+        #expect(sheet.contains("Reviewer rationale"))
+        #expect(sheet.contains("WorkerConsoleContinuityBanner"))
+        #expect(sheet.contains("Why this proposal is stale"))
+        #expect(sheet.contains("Retry proposal refresh"))
+        #expect(sheet.contains("Publish and activate this role declaration?"))
+        #expect(!sheet.contains("DisclosureGroup"))
+
+        #expect(viewModel.contains("supportsAgentRoleReview"))
+        #expect(viewModel.contains("roleReviewSnapshot"))
+        #expect(viewModel.contains("connectionState.isConnected"))
+        #expect(viewModel.contains("action(\"apply\")?.allowed == true"))
+        #expect(viewModel.contains("action(\"reject\")?.allowed == true"))
+    }
+
     @Test("Unbounded worker detail uses sheets instead of inline disclosure")
     func unboundedWorkerDetailUsesSheets() throws {
         let root = iosAppRoot()

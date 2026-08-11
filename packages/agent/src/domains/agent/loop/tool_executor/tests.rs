@@ -110,8 +110,15 @@ fn execution_context<'a>(
         trace_id: None,
         parent_invocation_id: None,
         worker_causal_depth: 0,
+        autonomous_wake_hop: 0,
         origin_worker_id: None,
         origin_worker_invocation_id: None,
+        agent_id: None,
+        agent_assignment_id: None,
+        agent_execution_id: None,
+        delegated_function_grant: None,
+        agent_limits: None,
+        agent_write_scopes: None,
         origin_worker_tool_ordinal: None,
     }
 }
@@ -253,10 +260,10 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
     let worker_result = execute_tool(&worker_call, "direct-session", "/tmp", &context).await;
     assert_eq!(worker_result.result.is_error, None);
     let invocation = captured.lock().clone().expect("captured worker invocation");
-    assert_eq!(invocation.causal_context.actor_kind, ActorKind::Worker);
+    assert_eq!(invocation.causal_context.actor_kind, ActorKind::Agent);
     assert_eq!(
         invocation.causal_context.actor_id.as_str(),
-        "worker:semantic-router"
+        "agent:direct-session"
     );
     assert_eq!(
         invocation.causal_context.origin_worker_invocation_id(),

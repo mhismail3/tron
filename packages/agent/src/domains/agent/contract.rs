@@ -177,7 +177,14 @@ fn internal_function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
             "type":"object",
             "additionalProperties":false,
             "required":["sessionId"],
-            "properties":{"sessionId":{"type":"string"}}
+            "properties":{
+                "sessionId":{"type":"string"},
+                "reasoningLevel":{"type":"string"},
+                "deliveryIds":{
+                    "type":"array","minItems":1,"maxItems":8,
+                    "items":{"type":"string"}
+                }
+            }
         }))
         .response_schema(json!({
             "type":"object",
@@ -307,7 +314,10 @@ mod tests {
                     "userInputAnswer",
                 ],
             ),
-            ("agent::delivery_wake", vec!["sessionId"]),
+            (
+                "agent::delivery_wake",
+                vec!["deliveryIds", "reasoningLevel", "sessionId"],
+            ),
         ];
         for (function_id, expected_properties) in expected {
             let schema = specs

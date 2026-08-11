@@ -546,3 +546,54 @@ fn user_interrupt_injects_synthetic_tool_result() {
     assert_eq!(msgs[2].content, "Tool invocation was interrupted.");
     assert_eq!(msgs[3].role, "user");
 }
+
+#[test]
+fn agent_messages_remain_distinct_and_preserve_typed_provenance() {
+    let events = vec![
+        session_start(),
+        ev_with_id(
+            "agent_message_1",
+            EventType::MessageAgent,
+            serde_json::json!({
+                "content": {
+                    "messageId":"msg_1",
+                    "sourceAgentId":"agent_parent",
+                    "sourceName":"Coordinator",
+                    "kind":"instruction",
+                    "authority":"owner",
+                    "text":"Inspect the parser",
+                    "assignmentId":"assignment_1"
+                }
+            }),
+        ),
+        ev_with_id(
+            "agent_message_2",
+            EventType::MessageAgent,
+            serde_json::json!({
+                "content": {
+                    "messageId":"msg_2",
+                    "sourceAgentId":"agent_peer",
+                    "kind":"question",
+                    "authority":"peer",
+                    "text":"Which module owns it?"
+                }
+            }),
+        ),
+    ];
+
+    let result = reconstruct_from_events(&events);
+    let messages = get_messages(&result);
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].role, "agent");
+    assert_eq!(messages[0].content["sourceAgentId"], "agent_parent");
+    assert_eq!(messages[1].role, "agent");
+    assert_eq!(messages[1].content["kind"], "question");
+    assert_eq!(
+        result.messages_with_event_ids[0].event_ids[0].as_deref(),
+        Some("agent_message_1")
+    );
+    assert_eq!(
+        result.messages_with_event_ids[1].event_ids[0].as_deref(),
+        Some("agent_message_2")
+    );
+}

@@ -54,6 +54,57 @@ fn scheduled_work_unifies_recurring_triggers_and_deferred_invocations() {
 }
 
 #[test]
+fn paused_coordination_trace_excludes_queued_worker_until_resume() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(directory.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    store
+        .ensure_root_agent(&NewRootAgent {
+            session_id: "session-paused-worker".to_owned(),
+            workspace_id: "workspace-paused-worker".to_owned(),
+            name: "Paused worker owner".to_owned(),
+            model: Some("test-model".to_owned()),
+            reasoning_level: None,
+            tool_grant: json!([]),
+            limits: json!({}),
+        })
+        .unwrap();
+    let (queued, _) = store
+        .begin_invocation(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({"topic":"pause safely"}),
+            "paused-worker-admission",
+            "trace-paused-worker",
+            0,
+            "manual",
+            Some("session-paused-worker"),
+        )
+        .unwrap();
+    assert_eq!(store.queued_invocations(10).unwrap().len(), 1);
+
+    let pause = store
+        .pause_coordination_trace(
+            "trace-paused-worker",
+            "AGENT_AUTONOMY_PAUSED: autonomous message ceiling reached",
+        )
+        .unwrap();
+    assert_eq!(pause.root_session_id, "session-paused-worker");
+    assert!(store.queued_invocations(10).unwrap().is_empty());
+    assert!(!store.claim_running(&queued.invocation_id).unwrap());
+
+    assert!(
+        store
+            .resume_coordination_trace("trace-paused-worker")
+            .unwrap()
+    );
+    assert_eq!(store.queued_invocations(10).unwrap().len(), 1);
+    assert!(store.claim_running(&queued.invocation_id).unwrap());
+}
+
+#[test]
 fn dismissing_attention_is_idempotent_and_preserves_inbox_evidence() {
     let directory = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(directory.path().to_path_buf()).unwrap();
@@ -765,8 +816,8 @@ fn index_reconstruction_terminalizes_interrupted_queue_for_inactive_rebuilt_work
             .unwrap()
             .unwrap()
             .agent_session_id,
-        None,
-        "a redelivered agent attempt must not inherit its interrupted child session"
+        Some("sess_interrupted".to_owned()),
+        "recovery must retain the exact agent transcript identity"
     );
     let recovered_attempts = reopened.attempts(&queued.invocation_id).unwrap();
     assert_eq!(recovered_attempts.len(), 1);
@@ -1289,7 +1340,7 @@ fn session_organization_outbox_is_atomic_due_bounded_and_recovers_stale_claims()
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        18
+        21
     );
     connection
         .execute(
@@ -1312,7 +1363,7 @@ fn session_organization_outbox_is_atomic_due_bounded_and_recovers_stale_claims()
 }
 
 #[test]
-fn schema_v15_upgrades_through_inbox_disposition_v18() {
+fn schema_v15_upgrades_through_agent_outbox_scheduling_v21() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
     let connection = store.connection().unwrap();
@@ -1320,7 +1371,8 @@ fn schema_v15_upgrades_through_inbox_disposition_v18() {
         .execute_batch(
             "DROP TABLE agent_delivery_outbox;
              DROP TABLE worker_inbox_dispositions;
-             DELETE FROM worker_schema WHERE version IN (16,17,18);",
+             DROP TABLE worker_agent_role_review_proposals;
+             DELETE FROM worker_schema WHERE version IN (16,17,18,19,20,21);",
         )
         .unwrap();
     drop(connection);
@@ -1334,7 +1386,7 @@ fn schema_v15_upgrades_through_inbox_disposition_v18() {
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        18
+        21
     );
     let outbox_exists = connection
         .query_row(
@@ -1358,17 +1410,28 @@ fn schema_v15_upgrades_through_inbox_disposition_v18() {
         )
         .unwrap();
     assert!(dispositions_exist);
+    let role_reviews_exist = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_schema
+                WHERE type='table' AND name='worker_agent_role_review_proposals'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap();
+    assert!(role_reviews_exist);
 }
 
 #[test]
-fn additive_schema_v18_does_not_snapshot_the_full_profile_at_startup() {
+fn additive_schema_v20_does_not_snapshot_the_full_profile_at_startup() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
     let connection = store.connection().unwrap();
     connection
         .execute_batch(
-            "DROP TABLE worker_inbox_dispositions;
-             DELETE FROM worker_schema WHERE version = 18;",
+            "DROP TABLE worker_agent_role_review_proposals;
+             DELETE FROM worker_schema WHERE version=20;",
         )
         .unwrap();
     drop(connection);
@@ -1388,10 +1451,171 @@ fn additive_schema_v18_does_not_snapshot_the_full_profile_at_startup() {
                 row.get::<_, u32>(0)
             })
             .unwrap(),
-        18
+        21
     );
     assert!(
         !temp.path().join("internal/backups").exists(),
         "additive schema changes must not traverse or archive the profile"
+    );
+}
+
+#[test]
+fn schema_v21_adds_due_retry_state_without_losing_pending_outbox_evidence() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let connection = store.connection().unwrap();
+    connection
+        .execute_batch(
+            "DROP INDEX IF EXISTS agent_outbox_due;
+             DROP TABLE agent_outbox;
+             CREATE TABLE agent_outbox (
+                outbox_id TEXT PRIMARY KEY,
+                deduplication_key TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL CHECK(kind IN ('provision','message','result','projection')),
+                agent_id TEXT REFERENCES agent_instances(agent_id) ON DELETE CASCADE,
+                assignment_id TEXT REFERENCES agent_assignments(assignment_id) ON DELETE CASCADE,
+                execution_id TEXT REFERENCES execution_nodes(execution_id) ON DELETE CASCADE,
+                payload_json TEXT NOT NULL,
+                disposition TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(disposition IN ('pending','importing','imported','rejected')),
+                attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts>=0),
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                processed_at TEXT
+             );
+             CREATE INDEX agent_outbox_pending
+                ON agent_outbox(disposition,created_at,outbox_id);
+             INSERT INTO agent_outbox(
+                outbox_id,deduplication_key,kind,payload_json,created_at
+             ) VALUES(
+                'legacy_pending','legacy_pending','projection','{}',
+                '2026-01-01T00:00:00Z'
+             );
+             DELETE FROM worker_schema WHERE version=21;",
+        )
+        .unwrap();
+    drop(connection);
+    drop(store);
+
+    let immutable_payload = temp
+        .path()
+        .join("workspace/workers/example/versions/version/dependencies");
+    std::fs::create_dir_all(&immutable_payload).unwrap();
+    std::fs::write(immutable_payload.join("large-runtime.bin"), [7_u8; 1024]).unwrap();
+
+    let reopened = WorkerStore::open(temp.path().to_path_buf()).unwrap();
+    let connection = reopened.connection().unwrap();
+    assert!(
+        super::super::table_has_column(&connection, "agent_outbox", "next_attempt_at").unwrap()
+    );
+    let retry_state = connection
+        .query_row(
+            "SELECT disposition,next_attempt_at
+             FROM agent_outbox WHERE outbox_id='legacy_pending'",
+            [],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .unwrap();
+    assert_eq!(retry_state.0, "pending");
+    assert_eq!(retry_state.1, "1970-01-01T00:00:00.000Z");
+    assert_eq!(
+        connection
+            .query_row("SELECT MAX(version) FROM worker_schema", [], |row| {
+                row.get::<_, u32>(0)
+            })
+            .unwrap(),
+        21
+    );
+    assert!(
+        !temp.path().join("internal/backups").exists(),
+        "additive v21 retry columns must not snapshot the full profile"
+    );
+}
+
+#[test]
+fn v19_execution_backfill_does_not_promote_later_inferred_worker_parentage() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let published = store.publish(prepared).unwrap();
+    let (parent, _) = store
+        .begin_invocation(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({"topic":"parent"}),
+            "migration-parent",
+            "trace-migration-parentage",
+            0,
+            "manual",
+            Some("session-migration-parentage"),
+        )
+        .unwrap();
+    let (child, _) = store
+        .begin_invocation(
+            &published.worker.worker_id,
+            &published.version,
+            &json!({"topic":"child"}),
+            "migration-child",
+            "trace-migration-parentage",
+            1,
+            "manual",
+            Some("session-migration-parentage"),
+        )
+        .unwrap();
+    let connection = store.connection().unwrap();
+    connection
+        .execute_batch(
+            "DELETE FROM execution_nodes;
+             DELETE FROM worker_schema WHERE version=19;",
+        )
+        .unwrap();
+    drop(connection);
+    drop(store);
+
+    let first_reopen = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let connection = first_reopen.connection().unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT parent_worker_invocation_id FROM worker_invocations
+                 WHERE invocation_id=?1",
+                [&child.invocation_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap()
+            .as_deref(),
+        Some(parent.invocation_id.as_str()),
+        "legacy inference still repairs the worker-only projection"
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT parent_execution_id FROM execution_nodes
+                 WHERE worker_invocation_id=?1",
+                [&child.invocation_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap(),
+        None,
+        "the first v19 backfill must use only ancestry recorded before inference"
+    );
+    drop(connection);
+    drop(first_reopen);
+
+    let second_reopen = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    assert_eq!(
+        second_reopen
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT parent_execution_id FROM execution_nodes
+                 WHERE worker_invocation_id=?1",
+                [&child.invocation_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap(),
+        None,
+        "reopening must not promote inferred worker ancestry into the mixed graph"
     );
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::domains::worker_kernel::types::{WorkerAgentResultMode, WorkerAgentRoleLimits};
 
 #[tokio::test]
 async fn activation_rejects_agent_tool_names_outside_the_live_model_catalog() {
@@ -16,9 +17,233 @@ async fn activation_rejects_agent_tool_names_outside_the_live_model_catalog() {
     let error = runtime.upsert(bundle, None).await.unwrap_err();
     assert_eq!(
         error,
-        "agentTools contains model tools unavailable at activation: arbitrary_device_control"
+        "agentTools or agentRole.toolCeiling contains nondelegable or unavailable model tools at activation: arbitrary_device_control"
     );
     assert!(runtime.store().summary("closed-agent").unwrap().is_none());
+}
+
+#[tokio::test]
+async fn activation_retains_worker_await_and_result_read_only_for_agent_tools() {
+    let (runtime, _home) = test_runtime(None);
+    let mut retained = command_bundle(Vec::new());
+    retained.worker_id = Some("retained-alias-agent".to_owned());
+    retained.name = "Retained alias agent".to_owned();
+    retained.runner = WorkerRunner::Agent {
+        instructions: "Use only the exact retained compatibility operations.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    retained.agent_tools = Some(vec![
+        "worker_await".to_owned(),
+        "worker_result_read".to_owned(),
+    ]);
+    retained.agent_role = Some(WorkerAgentRole::Disabled);
+
+    let published = runtime
+        .upsert(retained, None)
+        .await
+        .expect("one-release agentTools aliases remain load-compatible");
+    assert_eq!(published.worker.worker_id, "retained-alias-agent");
+
+    let mut role = command_bundle(Vec::new());
+    role.worker_id = Some("role-alias-agent".to_owned());
+    role.name = "Role alias agent".to_owned();
+    role.runner = WorkerRunner::Agent {
+        instructions: "Return a result.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    role.agent_role = Some(WorkerAgentRole::Enabled {
+        display_name: "Role alias".to_owned(),
+        summary: "Exercises the role ceiling boundary".to_owned(),
+        discoverable: true,
+        collaboration_instructions: "Return exact evidence.".to_owned(),
+        default_model: None,
+        default_reasoning_level: None,
+        tool_ceiling: vec!["worker_await".to_owned()],
+        limits: WorkerAgentRoleLimits::default(),
+        result_mode: WorkerAgentResultMode::Natural,
+    });
+    let error = runtime.upsert(role, None).await.unwrap_err();
+    assert!(error.contains("worker_await"));
+    assert!(error.contains("agentRole.toolCeiling"));
+}
+
+#[tokio::test]
+async fn reusable_role_tool_ceiling_is_validated_from_source_owned_delegability() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = command_bundle(vec!["true".to_owned()]);
+    bundle.worker_id = Some("review-role".to_owned());
+    bundle.name = "Review role".to_owned();
+    bundle.runner = WorkerRunner::Agent {
+        instructions: "Return an object.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    bundle.agent_role = Some(WorkerAgentRole::Enabled {
+        display_name: "Reviewer".to_owned(),
+        summary: "Reviews bounded evidence".to_owned(),
+        discoverable: true,
+        collaboration_instructions: "Report evidence and blockers.".to_owned(),
+        default_model: None,
+        default_reasoning_level: None,
+        tool_ceiling: vec!["arbitrary_device_control".to_owned()],
+        limits: WorkerAgentRoleLimits::default(),
+        result_mode: WorkerAgentResultMode::Natural,
+    });
+
+    let error = runtime.upsert(bundle, None).await.unwrap_err();
+    assert!(error.contains("agentRole.toolCeiling"));
+    assert!(error.contains("arbitrary_device_control"));
+    assert!(runtime.store().summary("review-role").unwrap().is_none());
+}
+
+#[tokio::test]
+async fn reusable_role_defaults_require_an_available_model_and_canonical_reasoning_level() {
+    let (runtime, _home) = test_runtime(None);
+    let mut unavailable = command_bundle(vec!["true".to_owned()]);
+    unavailable.worker_id = Some("unavailable-model-role".to_owned());
+    unavailable.runner = WorkerRunner::Agent {
+        instructions: "Return a result.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    unavailable.agent_role = Some(WorkerAgentRole::Enabled {
+        display_name: "Unavailable model role".to_owned(),
+        summary: "Exercises role admission".to_owned(),
+        discoverable: true,
+        collaboration_instructions: "Return exact evidence.".to_owned(),
+        default_model: Some("model-that-does-not-exist".to_owned()),
+        default_reasoning_level: Some("high".to_owned()),
+        tool_ceiling: vec!["agent_send".to_owned()],
+        limits: WorkerAgentRoleLimits::default(),
+        result_mode: WorkerAgentResultMode::Natural,
+    });
+    let model_error = runtime.upsert(unavailable, None).await.unwrap_err();
+    assert!(model_error.contains("agent model 'model-that-does-not-exist' is unavailable"));
+
+    let mut invalid_reasoning = command_bundle(vec!["true".to_owned()]);
+    invalid_reasoning.worker_id = Some("invalid-reasoning-role".to_owned());
+    invalid_reasoning.runner = WorkerRunner::Agent {
+        instructions: "Return a result.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    invalid_reasoning.agent_role = Some(WorkerAgentRole::Enabled {
+        display_name: "Invalid reasoning role".to_owned(),
+        summary: "Exercises role admission".to_owned(),
+        discoverable: true,
+        collaboration_instructions: "Return exact evidence.".to_owned(),
+        default_model: Some("gpt-5.6-sol".to_owned()),
+        default_reasoning_level: Some("limitless".to_owned()),
+        tool_ceiling: vec!["agent_send".to_owned()],
+        limits: WorkerAgentRoleLimits::default(),
+        result_mode: WorkerAgentResultMode::Natural,
+    });
+    let reasoning_error = runtime.upsert(invalid_reasoning, None).await.unwrap_err();
+    assert!(reasoning_error.contains("defaultReasoningLevel"));
+
+    let mut unsupported_pair = command_bundle(vec!["true".to_owned()]);
+    unsupported_pair.worker_id = Some("unsupported-reasoning-pair-role".to_owned());
+    unsupported_pair.runner = WorkerRunner::Agent {
+        instructions: "Return a result.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    unsupported_pair.agent_role = Some(WorkerAgentRole::Enabled {
+        display_name: "Unsupported reasoning pair role".to_owned(),
+        summary: "Exercises exact model/reasoning admission".to_owned(),
+        discoverable: true,
+        collaboration_instructions: "Return exact evidence.".to_owned(),
+        default_model: Some("gpt-5.6-sol".to_owned()),
+        default_reasoning_level: Some("none".to_owned()),
+        tool_ceiling: vec!["agent_send".to_owned()],
+        limits: WorkerAgentRoleLimits::default(),
+        result_mode: WorkerAgentResultMode::Natural,
+    });
+    let pair_error = runtime.upsert(unsupported_pair, None).await.unwrap_err();
+    assert!(pair_error.contains("reasoning level 'none' is not supported"));
+}
+
+#[tokio::test]
+async fn architecture_projection_classifies_agent_role_review_without_mutating_bundles() {
+    let (runtime, _home) = test_runtime(None);
+
+    let mut legacy = command_bundle(vec!["true".to_owned()]);
+    legacy.worker_id = Some("legacy-agent-runner".to_owned());
+    legacy.name = "Legacy agent runner".to_owned();
+    legacy.tool_name = Some("worker_legacy_agent_runner".to_owned());
+    legacy.runner = WorkerRunner::Agent {
+        instructions: "Return a concise result.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    runtime.upsert(legacy, None).await.unwrap();
+
+    let mut declared = command_bundle(vec!["true".to_owned()]);
+    declared.worker_id = Some("declared-agent-runner".to_owned());
+    declared.name = "Declared agent runner".to_owned();
+    declared.tool_name = Some("worker_declared_agent_runner".to_owned());
+    declared.runner = WorkerRunner::Agent {
+        instructions: "Return a concise result.".to_owned(),
+        model: None,
+        reasoning_level: None,
+    };
+    declared.agent_role = Some(WorkerAgentRole::Disabled);
+    runtime.upsert(declared, None).await.unwrap();
+
+    let mut command = command_bundle(vec!["true".to_owned()]);
+    command.worker_id = Some("command-runner".to_owned());
+    command.name = "Command runner".to_owned();
+    command.tool_name = Some("worker_command_runner".to_owned());
+    runtime.upsert(command, None).await.unwrap();
+
+    let snapshot = runtime
+        .host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("engine::surface_snapshot").unwrap(),
+            json!({}),
+            CausalContext::new(
+                ActorId::new("system:role-review-test").unwrap(),
+                ActorKind::System,
+                TraceId::new("trace-role-review-test").unwrap(),
+            )
+            .with_idempotency_key("role-review-snapshot"),
+        ))
+        .await;
+    assert_eq!(
+        snapshot.error, None,
+        "surface snapshot: {:?}",
+        snapshot.error
+    );
+    let snapshot = snapshot.value.unwrap();
+    assert!(
+        snapshot["nativeCapabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|capability| capability == "agent_role_review.v1")
+    );
+    let architecture = snapshot["workerArchitecture"].as_array().unwrap().clone();
+    let legacy = architecture
+        .iter()
+        .find(|worker| worker["workerId"] == "legacy-agent-runner")
+        .unwrap();
+    assert_eq!(legacy["roleReview"], "needs_role_review");
+    assert_eq!(legacy["agentRole"], Value::Null);
+
+    let declared = architecture
+        .iter()
+        .find(|worker| worker["workerId"] == "declared-agent-runner")
+        .unwrap();
+    assert_eq!(declared["roleReview"], "declared");
+    assert_eq!(declared["agentRole"]["status"], "disabled");
+
+    let command = architecture
+        .iter()
+        .find(|worker| worker["workerId"] == "command-runner")
+        .unwrap();
+    assert_eq!(command["roleReview"], "ineligible");
 }
 
 #[tokio::test]

@@ -55,7 +55,7 @@ impl WorkerRuntime {
             .unwrap_or("Completed durable worker result");
         let content = format!(
             "A client attached the exact durable result from worker '{}' invocation '{}'. \
-Use worker_result_read with that exact invocation id and bounded JSON pointers/pages when \
+Use result_read with that exact worker-invocation reference and bounded JSON pointers/pages when \
 you need evidence. Do not ask the user to copy raw JSON. Result preview: {}",
             record.worker_id,
             record.invocation_id,
@@ -195,6 +195,89 @@ you need evidence. Do not ask the user to copy raw JSON. Result preview: {}",
         }))
     }
 
+    /// Read one bounded path/page from an exact reusable-agent assignment
+    /// result. Assignment identity is the addressing handle; the store owns
+    /// the integrity-bound result id/reference created at terminal commit.
+    pub(crate) async fn read_agent_assignment_result(
+        &self,
+        invocation: &Invocation,
+        assignment_id: &str,
+        pointer: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Value, String> {
+        let assignment = self
+            .store
+            .agent_assignment(assignment_id)?
+            .ok_or_else(|| format!("agent assignment '{assignment_id}' was not found"))?;
+        let (caller, _) = self.resolve_calling_agent(invocation).await?;
+        let participant = assignment.agent_id == caller.agent_id
+            || assignment.requester_agent_id.as_deref() == Some(&caller.agent_id)
+            || assignment.delegator_agent_id.as_deref() == Some(&caller.agent_id);
+        if !participant
+            && !self.store.has_agent_management(
+                &caller.agent_id,
+                &assignment.agent_id,
+                crate::domains::worker_kernel::persistence::AgentManagementCapability::Assign,
+            )?
+        {
+            return Err(format!(
+                "agent assignment '{assignment_id}' is outside the caller's relationship"
+            ));
+        }
+        if assignment.status
+            != crate::domains::worker_kernel::persistence::AgentAssignmentStatus::Completed
+        {
+            return Err(format!(
+                "agent assignment '{assignment_id}' is not completed"
+            ));
+        }
+        let result_id = assignment
+            .result_id
+            .as_deref()
+            .ok_or_else(|| format!("agent assignment '{assignment_id}' has no result"))?;
+        let output = self
+            .store
+            .resolve_agent_result(result_id)?
+            .ok_or_else(|| format!("agent assignment '{assignment_id}' has no result"))?;
+        validate_pointer(pointer)?;
+        let selected = output.pointer(pointer).ok_or_else(|| {
+            format!(
+                "JSON pointer '{}' does not exist in agent assignment '{assignment_id}'",
+                display_pointer(pointer)
+            )
+        })?;
+        let page = project_result_page(
+            selected,
+            pointer,
+            offset,
+            limit.clamp(1, MAX_RESULT_READ_ITEMS),
+        )?;
+        let reference = assignment.result_reference.as_ref().ok_or_else(|| {
+            format!("agent assignment '{assignment_id}' has no durable result reference")
+        })?;
+        let projected_reference = json!({
+            "kind":"agent_assignment_result_reference",
+            "resultId":result_id,
+            "assignmentId":assignment.assignment_id,
+            "contentSha256":required_result_reference_field(reference, "contentSha256")?,
+            "sizeBytes":required_result_reference_field(reference, "sizeBytes")?,
+            "preview":required_result_reference_field(reference, "preview")?,
+        });
+        Ok(json!({
+            "kind":"agent_assignment_result_chunk",
+            "reference":projected_reference,
+            "pointer":pointer,
+            "value":page.value,
+            "children":page.children,
+            "offset":offset,
+            "returned":page.returned,
+            "total":page.total,
+            "nextOffset":page.next_offset,
+            "truncated":page.truncated,
+        }))
+    }
+
     fn result_reference(&self, record: &InvocationRecord) -> Result<Value, String> {
         self.store
             .result_reference(&record.invocation_id)?
@@ -252,17 +335,24 @@ you need evidence. Do not ask the user to copy raw JSON. Result preview: {}",
     }
 }
 
-#[derive(Debug)]
-struct ResultPage {
-    value: Value,
-    children: Vec<Value>,
-    returned: usize,
-    total: usize,
-    next_offset: Option<usize>,
-    truncated: bool,
+fn required_result_reference_field(reference: &Value, field: &str) -> Result<Value, String> {
+    reference
+        .get(field)
+        .cloned()
+        .ok_or_else(|| format!("agent result reference is missing '{field}'"))
 }
 
-fn project_result_page(
+#[derive(Debug)]
+pub(super) struct ResultPage {
+    pub(super) value: Value,
+    pub(super) children: Vec<Value>,
+    pub(super) returned: usize,
+    pub(super) total: usize,
+    pub(super) next_offset: Option<usize>,
+    pub(super) truncated: bool,
+}
+
+pub(super) fn project_result_page(
     selected: &Value,
     pointer: &str,
     offset: usize,
@@ -379,7 +469,7 @@ fn child_descriptor(pointer: &str, key: &str, value: &Value) -> Result<Value, St
     }))
 }
 
-fn validate_pointer(pointer: &str) -> Result<(), String> {
+pub(super) fn validate_pointer(pointer: &str) -> Result<(), String> {
     if pointer.len() > 2_048 {
         return Err("worker result JSON pointer exceeds 2048 bytes".to_owned());
     }

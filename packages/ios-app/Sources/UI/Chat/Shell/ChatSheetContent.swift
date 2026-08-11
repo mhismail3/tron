@@ -44,6 +44,7 @@ struct ChatSheetContent: View {
                 modelRepository: dependencies.modelRepository,
                 sessionRepository: dependencies.sessionRepository,
                 workerRepository: dependencies.workerKernelRepository,
+                agentRepository: dependencies.agentRepository,
                 onSelectModel: onSelectModel,
                 onSelectReasoningLevel: onSelectReasoningLevel,
                 onFork: {

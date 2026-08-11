@@ -61,6 +61,11 @@ fn convert_messages_impl(
             Message::User { content, .. } => {
                 result.push(convert_user_message(content));
             }
+            Message::Agent { content, .. } => {
+                result.push(convert_user_message(&UserMessageContent::Text(
+                    content.render_for_provider(),
+                )));
+            }
             Message::Assistant { content, .. } => {
                 result.push(convert_assistant_message(content, id_mapping));
             }

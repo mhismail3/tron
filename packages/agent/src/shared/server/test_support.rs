@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use async_trait::async_trait;
+use serde_json::{Value, json};
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
@@ -47,6 +48,68 @@ pub(crate) fn test_settings_path(home: &Path) -> PathBuf {
 
 pub(crate) fn test_auth_path(home: &Path) -> PathBuf {
     crate::shared::foundation::paths::auth_path_for_home(home)
+}
+
+/// Build an isolated Engine host with the mandatory provider-turn services
+/// installed.
+///
+/// Most agent-loop tests intentionally do not construct a full Worker Runtime,
+/// but every production provider turn performs the internal Team Context read.
+/// Keeping that canonical contract in this shared fixture prevents bare test
+/// hosts from accidentally exercising a weaker turn protocol.
+pub(crate) fn new_agent_test_engine_host() -> crate::engine::EngineHostHandle {
+    let host = crate::engine::EngineHostHandle::new_in_memory().expect("test engine host");
+    register_agent_team_context(&host);
+    host
+}
+
+/// Install the canonical Team Context definition with deterministic empty-team
+/// data for a test-owned host.
+pub(crate) fn register_agent_team_context(host: &crate::engine::EngineHostHandle) {
+    const FUNCTION_ID: &str = "worker_kernel::agent_team_context";
+    let definition = crate::domains::worker_kernel::test_function_definitions()
+        .expect("worker-kernel contracts")
+        .into_iter()
+        .find(|definition| definition.id.as_str() == FUNCTION_ID)
+        .expect("canonical agent Team Context contract");
+    host.register_function_for_setup(definition, Arc::new(EmptyAgentTeamContextHandler))
+        .expect("register agent Team Context test handler");
+}
+
+struct EmptyAgentTeamContextHandler;
+
+#[async_trait]
+impl crate::engine::InProcessFunctionHandler for EmptyAgentTeamContextHandler {
+    async fn invoke(&self, invocation: crate::engine::Invocation) -> crate::engine::Result<Value> {
+        let session_id = invocation
+            .payload
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .unwrap_or("test-session");
+        Ok(json!({
+            "self": {
+                "agentId": format!("test-agent:{session_id}"),
+                "name": "Test agent",
+                "role": "general",
+                "owningSessionLabel": session_id,
+                "relationship": "self",
+                "status": "idle",
+                "capabilities": [],
+                "taskPreview": "",
+                "canMessage": true,
+                "canManage": true
+            },
+            "parent": null,
+            "activeAssignment": null,
+            "children": [],
+            "correspondents": [],
+            "unread": [],
+            "authority": {},
+            "resourceClaims": [],
+            "budgets": {},
+            "overflowCount": 0
+        }))
+    }
 }
 
 pub(crate) fn test_settings_runtime(home: &Path) -> Arc<crate::domains::settings::SettingsRuntime> {

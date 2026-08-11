@@ -139,6 +139,10 @@ final class EventRegistry: @unchecked Sendable {
         register(ContextClearedPlugin.self)
         register(MessageDeletedPlugin.self)
         register(TurnFailedPlugin.self)
+        register(AgentCoordinationLifecyclePlugin.self)
+        register(AgentAssignmentProjectionPlugin.self)
+        register(AgentMessageProjectionPlugin.self)
+        register(AgentMessagePlugin.self)
 
         // Session events
         register(ConnectedPlugin.self)

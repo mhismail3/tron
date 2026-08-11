@@ -4,7 +4,13 @@
 //! invocation, bounded history, interaction/causal relationship, trigger, and
 //! state concerns extend that same store without repository wrappers or
 //! duplicate caches. `results` owns canonical typed-result payloads and their
-//! schema migration. Stateless codecs and generic SQL helpers live in `support`;
+//! schema migration. Stateless codecs and generic SQL helpers live in `support`,
+//! while `paths` owns profile and persistent worker-state path access;
+//! `agent_coordination` is internally split by admission, directory/scheduling,
+//! assignment lifecycle, outbox, authority, and resource-claim concerns; every
+//! submodule extends this same store and shares its canonical SQL helpers.
+//! `state_client_actions` owns complete native-action schema fixtures, while
+//! test-only constructors stay beside the production concern they exercise;
 //! `notification_validation` owns the closed device/APNs route validation
 //! boundary; `notification_attention` owns sanitized transport-failure inbox
 //! evidence. `inbox` keeps current Attention as an unresolved-error projection
@@ -18,12 +24,33 @@
 //! writer intent before reading causal lineage, so concurrent engine hooks wait
 //! at the transaction boundary instead of failing a deferred read-to-write
 //! upgrade.
-//! Worker schema v18 adds immutable operator dispositions for worker inbox
-//! failures and an indexed scheduled-trigger projection. Both changes are
-//! additive and transaction-safe, so v18 deliberately does not request a
-//! blocking full-profile snapshot; v17 remains the latest migration whose
-//! recovery policy requires one. v17 added durable requested/effective
-//! invocation model policy;
+//! Worker schema v21 adds due-time scheduling, capped exponential retry, and
+//! terminal poison compensation to the reusable-agent coordination outbox.
+//! The tenth failed import atomically rejects its row and writes deterministic
+//! operator Attention; poisoned provisioning/assignment-admission effects also
+//! fail any still offered/accepted/queued assignment and retain its ordinary
+//! result outbox, so accepted work cannot become an invisible orphan. v20
+//! adds the durable user-confirmed role-review proposal ledger, including exact
+//! target, reviewer version, and reviewer invocation provenance plus restart
+//! repair for an interrupted publication claim. v19 adds the reusable-agent
+//! identity, assignment, mixed
+//! execution topology, management-grant, workspace-claim, and transactional
+//! coordination-outbox ledgers. Trace pause state retains queued mixed work and
+//! effects while excluding them from admission until an explicit resume.
+//! Stable agent directories, management relationships, assignment history, and
+//! workspace claims expose SQL-owned pages with exact totals; presentation
+//! code must not paginate a previously truncated observation list.
+//! Agent-runner workers enter that same service through
+//! `direct_worker_agent_runs`: their single assignment reuses the already
+//! admitted worker execution node, pins one hidden transcript, and couples
+//! interruption/cancellation/failure to the worker ledger transactionally.
+//! Per-attempt transcript baselines prevent evidence emitted by a parked wait
+//! attempt from being mistaken for the resumed assignment's terminal result.
+//! Existing worker invocations are projected into that topology only from their
+//! exact durable parent edges. The change is additive and transaction-safe, so
+//! v19 through v21 deliberately do not request a blocking full-profile
+//! snapshot; v17 remains the latest migration whose recovery policy requires
+//! one. v17 added durable requested/effective invocation model policy;
 //! v16 added the immutable worker-to-agent terminal/effect outbox.
 //! Lifecycle transitions terminalize affected work with that evidence, and
 //! purge rechecks nonterminal/outbox custody under SQLite writer intent.
@@ -37,7 +64,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, PathBuf};
 use std::time::Duration;
 
 use rand::RngCore;
@@ -50,15 +77,17 @@ use super::super::artifacts::ArtifactIntent;
 use super::super::dispatches::PreparedWorkerDispatch;
 use super::super::types::{
     ActiveWorker, BUNDLE_SCHEMA, InvocationRecord, MAX_INVOCATION_SECONDS, PreparedWorker,
-    UpsertOutcome, WebhookCredential, WorkerBundle, WorkerClientAction, WorkerClientDelivery,
-    WorkerCommand, WorkerEngineDelivery, WorkerEngineHook, WorkerInteractionMode,
-    WorkerPresentation, WorkerPresentationSection, WorkerPresentationSectionKind, WorkerRunEvent,
-    WorkerRunStage, WorkerRunner, WorkerState, WorkerSummary, WorkerTrigger,
+    UpsertOutcome, WebhookCredential, WorkerAgentResultMode, WorkerAgentRole, WorkerBundle,
+    WorkerClientAction, WorkerClientDelivery, WorkerCommand, WorkerEngineDelivery,
+    WorkerEngineHook, WorkerInteractionMode, WorkerPresentation, WorkerPresentationSection,
+    WorkerPresentationSectionKind, WorkerRunEvent, WorkerRunStage, WorkerRunner, WorkerState,
+    WorkerSummary, WorkerTrigger,
 };
 use super::super::wakeups::PreparedWorkerWakeup;
 pub(super) use state::{validate_bundle, validate_publishable_bundle};
 use support::*;
 
+mod agent_coordination;
 mod agent_delivery_outbox;
 mod artifacts;
 mod dispatches;
@@ -72,6 +101,23 @@ mod notification_attention;
 mod notification_clients;
 mod notification_validation;
 mod notifications;
+mod paths;
+#[cfg(test)]
+pub(crate) use agent_coordination::NewAgentManagementGrant;
+#[allow(unused_imports)]
+pub(crate) use agent_coordination::{
+    AgentAdmission, AgentAssignmentAttemptRecord, AgentAssignmentKind, AgentAssignmentPage,
+    AgentAssignmentRecord, AgentAssignmentStatus, AgentAssignmentTransition,
+    AgentConfigurationUpdate, AgentExecutionEventRecord, AgentInstanceKind, AgentInstancePage,
+    AgentInstanceRecord, AgentInstanceState, AgentManagementCapability, AgentManagementGrantRecord,
+    AgentOutboxDisposition, AgentOutboxKind, AgentOutboxRecord, AgentOutboxRetryOutcome,
+    AgentRelationPage, AgentResultRecord, AgentRoleUpdate, AgentVisibility,
+    CoordinationTraceStateRecord, ExecutionKind, ExecutionNodeRecord, NewAgentAdmission,
+    NewAgentAssignment, NewAgentAssignmentMessage, NewAgentManagementGrantBatch,
+    NewAgentMessageOutbox, NewDirectWorkerAgentAdmission, NewRootAgent, NewWorkspaceClaim,
+    WorkspaceClaimHolder, WorkspaceClaimKind, WorkspaceClaimPage, WorkspaceClaimRecord,
+    WorkspaceClaimState,
+};
 pub(in crate::domains::worker_kernel) use agent_delivery_outbox::AgentDeliveryOutboxRecord;
 use notification_attention::insert_notification_attention;
 pub(in crate::domains::worker_kernel) use notifications::{
@@ -79,10 +125,19 @@ pub(in crate::domains::worker_kernel) use notifications::{
 };
 mod publication;
 mod results;
+mod role_review;
 mod session_organization;
+#[allow(unused_imports)]
+pub(crate) use role_review::{
+    AGENT_ROLE_REVIEW_SCHEMA_VERSION, AgentRoleReviewProposalPage, AgentRoleReviewProposalRecord,
+    AgentRoleReviewStatus, NewAgentRoleReviewProposal,
+};
 pub(in crate::domains::worker_kernel) use session_organization::SessionOrganizationDispatch;
 mod state;
+mod state_client_actions;
 mod support;
+#[cfg(test)]
+mod test_support;
 mod triggers;
 
 #[derive(Clone)]
@@ -91,30 +146,6 @@ pub struct WorkerStore {
     root: PathBuf,
     state_root: PathBuf,
     database: PathBuf,
-}
-
-struct RemoveDirectoryOnDrop(Option<PathBuf>);
-
-impl RemoveDirectoryOnDrop {
-    fn disarm(&mut self) {
-        self.0 = None;
-    }
-
-    fn cleanup_now(&mut self) -> Result<(), String> {
-        let Some(path) = self.0.take() else {
-            return Ok(());
-        };
-        fs::remove_dir_all(&path)
-            .map_err(|error| format!("remove unpublished worker tree {}: {error}", path.display()))
-    }
-}
-
-impl Drop for RemoveDirectoryOnDrop {
-    fn drop(&mut self) {
-        if let Some(path) = self.0.take() {
-            let _ = fs::remove_dir_all(path);
-        }
-    }
 }
 
 impl WorkerStore {
@@ -151,53 +182,6 @@ impl WorkerStore {
         };
         store.initialize()?;
         Ok(store)
-    }
-
-    #[cfg(test)]
-    pub fn open_without_snapshot(home: PathBuf) -> Result<Self, String> {
-        let root = home
-            .join(crate::shared::foundation::paths::dirs::WORKSPACE)
-            .join(crate::shared::foundation::paths::dirs::WORKERS);
-        let state_root = home
-            .join(crate::shared::foundation::paths::dirs::WORKSPACE)
-            .join(crate::shared::foundation::paths::dirs::WORKER_STATE);
-        let database = home
-            .join(crate::shared::foundation::paths::dirs::INTERNAL)
-            .join(crate::shared::foundation::paths::dirs::DB)
-            .join("workers.sqlite");
-        fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-        crate::shared::foundation::home::set_private_directory_permissions(&root)
-            .map_err(|error| error.to_string())?;
-        fs::create_dir_all(&state_root).map_err(|error| error.to_string())?;
-        crate::shared::foundation::home::set_private_directory_permissions(&state_root)
-            .map_err(|error| error.to_string())?;
-        if let Some(parent) = database.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-            crate::shared::foundation::home::set_private_directory_permissions(parent)
-                .map_err(|error| error.to_string())?;
-        }
-        let store = Self {
-            home,
-            root,
-            state_root,
-            database,
-        };
-        store.initialize()?;
-        Ok(store)
-    }
-
-    pub fn home(&self) -> &Path {
-        &self.home
-    }
-
-    pub fn state_dir(&self, worker_id: &str) -> Result<PathBuf, String> {
-        validate_identifier(worker_id, "workerId")?;
-        let path = self.state_root.join(worker_id);
-        fs::create_dir_all(&path)
-            .map_err(|error| format!("create worker state directory: {error}"))?;
-        crate::shared::foundation::home::set_private_directory_permissions(&path)
-            .map_err(|error| format!("secure worker state directory: {error}"))?;
-        Ok(path)
     }
 
     fn connection(&self) -> Result<Connection, String> {
@@ -509,6 +493,9 @@ impl WorkerStore {
                     VALUES (18, strftime('%Y-%m-%dT%H:%M:%fZ','now'));",
             )
             .map_err(|error| format!("initialize worker inbox disposition schema v18: {error}"))?;
+        agent_coordination::install_schema_v19(&connection)?;
+        role_review::install_schema_v20(&connection)?;
+        agent_coordination::install_schema_v21(&connection)?;
         connection
             .execute(
                 "UPDATE worker_invocations AS child
@@ -915,6 +902,7 @@ impl WorkerStore {
             )
             .map_err(|error| format!("index session organization custody: {error}"))?;
         super::rebuild::rebuild_indexes(&self.root, &self.database)?;
+        self.recover_interrupted_agent_coordination()?;
         self.recover_interrupted()
     }
 
@@ -967,8 +955,7 @@ impl WorkerStore {
             .map_err(|error| format!("recover interrupted worker attempts: {error}"))?;
         transaction
             .execute(
-                "UPDATE worker_invocations SET status='queued', started_at=NULL,
-                    agent_session_id=NULL
+                "UPDATE worker_invocations SET status='queued', started_at=NULL
                  WHERE status='running'",
                 [],
             )
