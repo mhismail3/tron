@@ -160,6 +160,148 @@ struct PresentationStyleGuardTests {
         #expect(shell.contains(".padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)"))
     }
 
+    @Test("dashboard navigation and search require explicit user intent")
+    func dashboardNavigationAndSearch() throws {
+        let shell = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
+            encoding: .utf8
+        )
+        #expect(shell.contains("@State private var presentedSessionID: String?"))
+        #expect(shell.contains(".navigationDestination(item: $presentedSessionID)"))
+        #expect(!shell.contains("NavigationSplitView"))
+        #expect(!shell.contains("List(selection:"))
+        #expect(!shell.contains(".onChange(of: model.selectedSessionID)"))
+        #expect(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
+        #expect(shell.contains("focusOnAppear: true"))
+    }
+
+    @Test("settings containers disclose progressive sub sheets")
+    func progressiveSettingsSheets() throws {
+        let settings = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/SettingsView.swift"),
+            encoding: .utf8
+        )
+        let providers = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Onboarding/SetupComponents.swift"),
+            encoding: .utf8
+        )
+        #expect(!settings.contains("NavigationLink"))
+        #expect(settings.contains("private struct TronProgressiveSheetLink"))
+        #expect(settings.contains(".sheet(isPresented: $isPresented)"))
+        #expect(!settings.contains("Button(\"Log Out\""))
+        #expect(providers.contains("Button(\"Log Out\", systemImage: \"rectangle.portrait.and.arrow.right\", role: .destructive)"))
+        #expect(providers.contains("Image(systemName: \"ellipsis.circle\")"))
+    }
+
+    @Test("tool details are tappable and start at the sheet top")
+    func toolDetailPresentation() throws {
+        let transcript = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
+            encoding: .utf8
+        )
+        #expect(transcript.contains(".sheet(item: $detailPresentation)"))
+        #expect(transcript.contains(".defaultScrollAnchor(.top)"))
+        #expect(transcript.contains(".frame(maxWidth: .infinity, alignment: .topLeading)"))
+        for tool in ["read", "write", "edit", "bash", "grep", "find", "ls"] {
+            #expect(transcript.contains("case \"\(tool)\""), "missing detail presentation mapping for \(tool)")
+        }
+    }
+
+    @Test("camera keeps the historical three-control morphing sheet")
+    func historicalCameraControls() throws {
+        let camera = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/CameraCaptureSheet.swift"),
+            encoding: .utf8
+        )
+        #expect(camera.contains("private var controlButtons: some View"))
+        #expect(camera.contains("private var centerCameraButton: some View"))
+        #expect(camera.contains("systemImage: showingPreview ? \"arrow.counterclockwise\" : \"arrow.triangle.2.circlepath.camera\""))
+        #expect(camera.contains("accessibilityLabel: showingPreview ? \"Go back to capture\" : \"Switch Camera\""))
+        #expect(camera.contains("static let captureGlassSize: CGFloat = 76"))
+        #expect(camera.contains("static let iconButtonSize: CGFloat = 46"))
+        #expect(!camera.contains("accessibilityLabel(\"Close camera\")"))
+        #expect(!camera.contains("capturedImage == nil ? \"camera.fill\""))
+    }
+
+    @Test("chat navigation remains emerald with soft scroll edges")
+    func emeraldNavigationAndScrollEdges() throws {
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
+            encoding: .utf8
+        )
+        #expect(chat.contains(".navigationBarBackButtonHidden(true)"))
+        #expect(chat.contains("Image(systemName: \"chevron.left\")"))
+        #expect(chat.contains(".accessibilityLabel(\"Back\")"))
+        #expect(chat.contains(".background(InteractivePopGestureEnabler())"))
+        #expect(chat.contains(".tronScrollEdgeChrome()"))
+        #expect(chat.contains(".toolbarBackgroundVisibility(.hidden, for: .navigationBar)"))
+        #expect(presentation.contains(".scrollEdgeEffectStyle(.soft, for: .all)"))
+        #expect(!presentation.contains(".scrollEdgeEffectStyle(.automatic"))
+        #expect(presentation.contains(".toolbarBackgroundVisibility(.hidden, for: .navigationBar)"))
+        #expect(!presentation.contains(".toolbarBackground(.regularMaterial, for: .navigationBar)"))
+        #expect(!presentation.contains(".toolbarBackground(.visible, for: .navigationBar)"))
+        let rootPolicy = (presentation.components(separatedBy: "private struct TronPresentationModifier").dropFirst().first ?? "")
+            .components(separatedBy: "private struct TronScrollEdgeChromeModifier").first ?? ""
+        #expect(!rootPolicy.contains("scrollEdgeEffectStyle"))
+        for (url, source) in uiSources where url.lastPathComponent != "TronPresentation.swift" {
+            #expect(!source.contains(".scrollEdgeEffectStyle("), "\(url.lastPathComponent) bypasses local scroll-edge chrome")
+        }
+    }
+
+    @Test("dashboard rows never retain canonical session selection styling")
+    func dashboardRowsDoNotStaySelected() throws {
+        let shell = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
+            encoding: .utf8
+        )
+        #expect(shell.contains("HistoricalSessionRow(session: session)"))
+        #expect(!shell.contains("HistoricalSessionRow(session: session, selected:"))
+        #expect(!shell.contains("let selected: Bool"))
+        #expect(shell.contains(".foregroundStyle(Color.tronEmerald)"))
+    }
+
+    @Test("tool runs, transcript notices, and small labels retain compact readable presentation")
+    func compactToolAndNoticePresentation() throws {
+        let transcript = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
+            encoding: .utf8
+        )
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        #expect(transcript.contains("struct TranscriptNotice: View"))
+        #expect(transcript.contains("struct ToolRunView: View"))
+        #expect(transcript.contains("RoundedRectangle(cornerRadius: 9"))
+        #expect(transcript.contains("TronFont.body(12)).foregroundStyle(Color.tronTextSecondary).italic()"))
+        #expect(chat.contains("ChatTranscriptPresentation.renderItems(in: snapshot)"))
+        #expect(chat.contains("TranscriptNotice("))
+    }
+
+    @Test("sheets use explicit reload toolbar actions instead of pull to refresh")
+    func sheetReloadActions() throws {
+        let sheetOwners = [
+            "Sources/UI/Chat/SessionTreeSheet.swift",
+            "Sources/UI/Settings/AgentExtensionSettings.swift",
+            "Sources/UI/Settings/SettingsView.swift",
+        ]
+        for path in sheetOwners {
+            let source = try String(contentsOf: packageRoot.appending(path: path), encoding: .utf8)
+            #expect(!source.contains(".refreshable"), "\(path) still enables pull to refresh")
+            #expect(source.contains("TronReloadToolbarButton"), "\(path) is missing an explicit reload action")
+        }
+
+        let shell = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
+            encoding: .utf8
+        )
+        #expect(shell.contains(".refreshable { await model.refreshSessions() }"))
+    }
+
     @Test("the application installs the policy at its root")
     func rootPolicy() throws {
         let app = packageRoot.appending(path: "Sources/App/TronMobileApp.swift")

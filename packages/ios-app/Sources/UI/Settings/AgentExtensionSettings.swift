@@ -7,6 +7,7 @@ struct PackagesSettingsView: View {
     @State private var packageToRemove: PackageSummary?
     @State private var workingSources: Set<String> = []
     @State private var checking = false
+    @State private var reloading = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -23,7 +24,7 @@ struct PackagesSettingsView: View {
                         VStack(spacing: 10) {
                             Image(systemName: "shippingbox").font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
                             Text("No packages configured").font(TronTypography.headline)
-                            Text("Pull to refresh or install a package below.")
+                            Text("Use Reload or install a package below.")
                                 .font(TronTypography.bodySM)
                                 .foregroundStyle(Color.tronTextPrimary)
                         }
@@ -89,10 +90,14 @@ struct PackagesSettingsView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle("Packages")
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                TronReloadToolbarButton(isReloading: reloading, action: reload)
+            }
+        }
         .task { await model.loadPackages(cwd: model.selectedSnapshot?.cwd) }
-        .refreshable { await model.loadPackages(cwd: model.selectedSnapshot?.cwd) }
         .confirmationDialog(
             "Remove this package?",
             isPresented: Binding(get: { packageToRemove != nil }, set: { if !$0 { packageToRemove = nil } }),
@@ -100,6 +105,15 @@ struct PackagesSettingsView: View {
         ) { package in
             Button("Remove Package", role: .destructive) { remove(package) }
         } message: { package in Text(package.source) }
+    }
+
+    private func reload() {
+        guard !reloading else { return }
+        reloading = true
+        Task {
+            defer { reloading = false }
+            await model.loadPackages(cwd: model.selectedSnapshot?.cwd)
+        }
     }
 
     private func packageRow(_ package: PackageSummary) -> some View {
@@ -186,7 +200,7 @@ struct TrustSettingsView: View {
             }
             .padding(20)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle("Project Trust")
         .task { await load() }
     }
@@ -225,7 +239,7 @@ struct CustomModelsSettingsView: View {
             }
             .padding(20)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle("Custom Models")
         .task {
             await model.loadCustomModels()
@@ -280,7 +294,7 @@ struct GatewayDiagnosticsView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle("Diagnostics")
         .task { await load() }
         .confirmationDialog("Restart Tron Gateway?", isPresented: $confirmingRestart) {

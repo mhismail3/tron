@@ -95,15 +95,40 @@ status column, uses compact separated session cards, and keeps relative activity
 time at each row's trailing edge. Workspace headers and session cards share the
 same 28-point status-icon anchor: 16 points of outer row inset plus 12 points of
 card content padding. Selectable app-owned cards have one full-card
-hit region and no decorative disclosure chevron. Modal detail flows dismiss
+hit region and no decorative disclosure chevron. Dashboard session rows never
+retain a selected tint. Canonical session selection is
+kept separate from dashboard navigation intent, so opening Settings or search
+cannot reveal a previously selected session. Dashboard search autofocuses in a
+floating bottom safe-area bar immediately above the keyboard. Modal detail flows dismiss
 with the native top-right check action; top-left dismissal controls are reserved
-for navigation, not app-owned sheets. The chat composer
+for navigation, not app-owned sheets. Settings containers and their nested font
+or model choices disclose as progressively stacked sub-sheets rather than
+horizontal navigation pushes; connected-provider logout lives in the provider
+row's compact action menu. The chat composer
 floats over the transcript without an opaque footer; transcript content scrolls
 behind it, a dynamic trailing clearance keeps the last response reachable, and
-the soft bottom scroll-edge effect is rendered behind the floating glass. A tool call and its
-canonical result are presented as one progressively updated chip when both are
-in the bounded transcript page; an unmatched result remains visible when its
-call is outside that page. Transcript rows enter with the historical soft
+the scroll-edge policy is attached to each concrete ScrollView/List inside its
+NavigationStack, matching the working non-gateway presentation boundary. Every
+edge is explicitly soft because iOS 27's automatic top style can resolve to the
+hard cutoff; Tron instead keeps the prominent graduated blur/fade.
+System navigation-bar backgrounds remain hidden at that same boundary so
+scrolling content reaches the toolbar and newer iOS releases can render their
+native top blur/fade instead of having it masked by an app-owned material or
+lost across a sheet-host boundary. Sheets never use pull-to-refresh;
+session history, packages, and providers expose reload as an explicit toolbar
+action while non-sheet dashboard refresh remains available. Every tool chip owns a tappable, top-anchored detail sheet, including
+read/write/edit and filesystem search tools. The immersive camera retains the
+pre-gateway flashlight, morphing shutter/confirmation, and flip/retake controls
+over a full-sheet preview. A tool call and its canonical result are presented as
+one progressively updated chip when both are in the bounded transcript page; an
+unmatched result remains visible when its call is outside that page. Consecutive
+tool-only entries collapse into a single compact run chip whose sub-sheet keeps
+every tool and its individual detail available. Tool chips use a thin rounded
+rectangle rather than a tall capsule. Transcript configuration changes, errors,
+bookmarks, and extension statuses share one readable notification-pill language,
+and thinking text and workspace shortcuts stay above the compact-caption scale.
+The hidden custom back button is paired with a UIKit navigation bridge so the
+native left-edge interactive-pop gesture remains available. Transcript rows enter with the historical soft
 opacity/scale transition, and tool status/result changes use spring and opacity
 content transitions. User turns are trailing-aligned while assistant and tool
 content remain leading-aligned. Initial model/thinking entries describe

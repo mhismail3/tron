@@ -5,6 +5,7 @@ struct TranscriptRow: View {
     let item: TranscriptItem
     var streaming = false
     var toolResults: [String: TranscriptItem] = [:]
+    var rendersToolCalls = true
 
     var body: some View {
         VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 8) {
@@ -32,19 +33,25 @@ struct TranscriptRow: View {
             case .branchSummary:
                 SummaryCard(icon: "arrow.triangle.branch", title: "Branch summary", text: item.summary ?? "", detail: nil)
             case .modelChange:
-                configurationChangeLabel(
+                TranscriptNotice(
                     title: "Model changed",
                     value: item.modelRef.map { "\($0.provider) / \($0.id)" } ?? "Changed",
-                    icon: "cpu"
+                    icon: "cpu",
+                    tint: .tronEmerald
                 )
             case .thinkingChange:
-                configurationChangeLabel(
+                TranscriptNotice(
                     title: "Thinking changed",
                     value: item.level?.capitalized ?? "Changed",
-                    icon: "brain"
+                    icon: "brain",
+                    tint: .tronEmerald
                 )
             case .label:
-                eventLabel(item.label.map { "Bookmark: \($0)" } ?? "Bookmark removed", icon: "bookmark")
+                TranscriptNotice(
+                    title: item.label.map { "Bookmark: \($0)" } ?? "Bookmark removed",
+                    icon: "bookmark",
+                    tint: .tronSlate
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
@@ -79,26 +86,32 @@ struct TranscriptRow: View {
                     case .image:
                         if let id = part.blobId { TranscriptAttachmentChip(blobID: id) }
                     case .toolCall:
-                        if let callID = part.toolCallId, let result = toolResults[callID] {
-                            ToolCard(
-                                title: part.name ?? result.toolName ?? "Tool",
-                                subtitle: result.isError == true ? "Failed" : "Completed",
-                                content: result.text.isEmpty ? result.details?.prettyPrinted ?? "" : result.text,
-                                error: result.isError == true,
-                                structured: result.details
-                            )
-                        } else {
-                            ToolCard(
-                                title: part.name ?? "Tool",
-                                subtitle: "Invocation",
-                                content: part.arguments?.prettyPrinted ?? "",
-                                structured: part.arguments
-                            )
+                        if rendersToolCalls {
+                            if let callID = part.toolCallId, let result = toolResults[callID] {
+                                ToolCard(
+                                    title: part.name ?? result.toolName ?? "Tool",
+                                    subtitle: result.isError == true ? "Failed" : "Completed",
+                                    content: result.text.isEmpty ? result.details?.prettyPrinted ?? "" : result.text,
+                                    error: result.isError == true,
+                                    structured: result.details
+                                )
+                            } else {
+                                ToolCard(
+                                    title: part.name ?? "Tool",
+                                    subtitle: "Invocation",
+                                    content: part.arguments?.prettyPrinted ?? "",
+                                    structured: part.arguments
+                                )
+                            }
                         }
                     }
                 }
                 if let error = item.errorMessage, !error.isEmpty {
-                    Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(TronTypography.caption)
+                    TranscriptNotice(
+                        title: error,
+                        icon: "exclamationmark.triangle.fill",
+                        tint: .tronError
+                    )
                 }
                 if item.role == .assistant,
                    item.content?.contains(where: { $0.type == .text && !($0.text ?? "").isEmpty }) == true,
@@ -117,31 +130,37 @@ struct TranscriptRow: View {
         }
     }
 
-    private func eventLabel(_ text: String, icon: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Image(systemName: icon).accessibilityHidden(true)
-            Text(text).font(TronTypography.body).fixedSize(horizontal: false, vertical: true)
-        }
-        .foregroundStyle(Color.tronTextSecondary)
-        .frame(minHeight: 44, alignment: .leading)
-    }
+}
 
-    private func configurationChangeLabel(title: String, value: String, icon: String) -> some View {
+/// One visual language for transcript events that are not conversation turns.
+/// This deliberately covers configuration changes, errors, bookmarks, and
+/// extension status notices so small one-off labels cannot regress readability.
+struct TranscriptNotice: View {
+    let title: String
+    var value: String? = nil
+    let icon: String
+    let tint: Color
+
+    var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(TronTypography.code(size: TronTypography.sizeBodySM))
-                .foregroundStyle(Color.tronEmerald)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(tint)
             Text(title)
-                .font(TronTypography.code(size: TronTypography.sizeCaption))
-                .foregroundStyle(Color.tronTextMuted)
-            Text(value)
-                .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .medium))
-                .foregroundStyle(Color.tronEmerald)
+                .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(Color.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let value {
+                Text(value)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.tronEmerald.opacity(0.10), in: Capsule())
-        .overlay(Capsule().stroke(Color.tronEmerald.opacity(0.30), lineWidth: 0.5))
+        .padding(.horizontal, 13)
+        .padding(.vertical, 9)
+        .background(tint.opacity(0.10), in: Capsule())
+        .overlay(Capsule().stroke(tint.opacity(0.30), lineWidth: 0.5))
         .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityElement(children: .combine)
     }
@@ -155,9 +174,9 @@ private struct ThinkingBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            if let label, !label.isEmpty { Text(label).font(TronFont.body(9, weight: .semibold)).foregroundStyle(.secondary) }
+            if let label, !label.isEmpty { Text(label).font(TronFont.body(11, weight: .semibold)).foregroundStyle(.secondary) }
             rendered(expanded ? normalized : preview)
-                .font(TronFont.body(10)).foregroundStyle(Color.tronTextSecondary).italic()
+                .font(TronFont.body(12)).foregroundStyle(Color.tronTextSecondary).italic()
                 .lineLimit(expanded || dynamicTypeSize.isAccessibilitySize ? nil : 2).lineSpacing(1)
                 .accessibilityLabel(normalized)
         }
@@ -193,10 +212,34 @@ struct ToolCard: View {
     let content: String
     var error = false
     var structured: JSONValue? = nil
-    @State private var showDetail = false
+    @State private var detailPresentation: ToolDetailPresentation?
+
+    init(
+        title: String,
+        subtitle: String,
+        content: String,
+        error: Bool = false,
+        structured: JSONValue? = nil
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content
+        self.error = error
+        self.structured = structured
+    }
+
+    init(data: ChatToolPresentation) {
+        self.init(
+            title: data.title,
+            subtitle: data.subtitle,
+            content: data.content,
+            error: data.error,
+            structured: data.structured
+        )
+    }
 
     var body: some View {
-        Button { showDetail = true } label: {
+        Button { detailPresentation = ToolDetailPresentation() } label: {
             HStack(spacing: 7) {
                 if subtitle == "Running" {
                     ProgressView().controlSize(.small).tint(accent).frame(width: 18, height: 18)
@@ -206,15 +249,16 @@ struct ToolCard: View {
                 Text(displayTitle).font(TronFont.body(12, weight: .bold)).foregroundStyle(accent).fixedSize(horizontal: false, vertical: true)
                 Text(subtitle.lowercased()).font(TronFont.mono(10, weight: .semibold)).foregroundStyle(accent).fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 10).padding(.vertical, 5)
-            .frame(minHeight: 34)
-            .contentShape(Capsule())
-            .glassEffect(.regular.tint(surfaceAccent.opacity(0.30)).interactive(), in: Capsule())
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .glassEffect(
+                .regular.tint(surfaceAccent.opacity(0.26)).interactive(),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
             .accessibilityHidden(true)
         }
         .buttonStyle(.plain)
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
+        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(displayTitle), \(subtitle)")
@@ -222,7 +266,7 @@ struct ToolCard: View {
         .contentTransition(.opacity)
         .animation(.spring(response: 0.28, dampingFraction: 0.86), value: subtitle)
         .animation(.easeInOut(duration: 0.18), value: content)
-        .sheet(isPresented: $showDetail) {
+        .sheet(item: $detailPresentation) { _ in
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
@@ -235,7 +279,14 @@ struct ToolCard: View {
                         if let structured {
                             TronStructuredJSONView(value: structured, title: displayTitle, accent: accent)
                         } else if content.isEmpty {
-                            ContentUnavailableView("No details", systemImage: icon)
+                            TronSettingsGroup("Details", accent: accent) {
+                                TronSettingsRow(
+                                    icon: icon,
+                                    title: "No additional details",
+                                    subtitle: "The tool completed without displayable output.",
+                                    accent: accent
+                                )
+                            }
                         } else {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(displayTitle == "Run command" ? "OUTPUT" : "DETAILS")
@@ -260,13 +311,15 @@ struct ToolCard: View {
                         }
                     }
                     .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .scrollEdgeEffectStyle(.soft, for: .all)
+                .defaultScrollAnchor(.top)
+                .tronScrollEdgeChrome()
                 .navigationTitle("")
                 .toolbar {
                     ToolbarItem(placement: .principal) { TronSheetTitle(title: displayTitle, accent: accent) }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button { showDetail = false } label: {
+                        Button { detailPresentation = nil } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
                                 .foregroundStyle(Color.tronEmerald)
@@ -277,7 +330,7 @@ struct ToolCard: View {
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
-            .tint(Color.tronEmerald)
+            .tronPresentation()
         }
     }
 
@@ -308,6 +361,95 @@ struct ToolCard: View {
         default: "wrench.and.screwdriver"
         }
     }
+}
+
+struct ToolRunView: View {
+    let run: ChatToolRunPresentation
+
+    @ViewBuilder var body: some View {
+        if let tool = run.tools.first, run.tools.count == 1 {
+            ToolCard(data: tool)
+        } else {
+            ToolRunChip(run: run)
+        }
+    }
+}
+
+private struct ToolRunChip: View {
+    let run: ChatToolRunPresentation
+    @State private var showingDetails = false
+
+    private var accent: Color { run.failureCount > 0 ? .tronError : .tronAccentText }
+    private var surfaceAccent: Color { run.failureCount > 0 ? .tronError : .tronEmerald }
+
+    var body: some View {
+        Button { showingDetails = true } label: {
+            HStack(spacing: 7) {
+                if run.isRunning {
+                    ProgressView().controlSize(.small).tint(accent).frame(width: 18, height: 18)
+                } else {
+                    Image(systemName: run.failureCount > 0 ? "exclamationmark.triangle.fill" : "square.stack.3d.up")
+                        .font(TronFont.body(10, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .frame(width: 18, height: 18)
+                }
+                Text(run.title)
+                    .font(TronFont.body(12, weight: .bold))
+                    .foregroundStyle(accent)
+                if let status = run.status {
+                    Text(status)
+                        .font(TronFont.mono(10, weight: .semibold))
+                        .foregroundStyle(accent.opacity(0.74))
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .glassEffect(
+                .regular.tint(surfaceAccent.opacity(0.26)).interactive(),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(run.title)\(run.status.map { ", \($0)" } ?? "")")
+        .sheet(isPresented: $showingDetails) {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(run.tools) { tool in
+                            ToolCard(data: tool)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .defaultScrollAnchor(.top)
+                .tronScrollEdgeChrome()
+                .navigationTitle("")
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        TronSheetTitle(title: run.title, accent: surfaceAccent)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button { showingDetails = false } label: {
+                            Image(systemName: "checkmark")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(Color.tronEmerald)
+                        }
+                        .accessibilityLabel("Done")
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.hidden)
+            .tronPresentation()
+        }
+    }
+}
+
+private struct ToolDetailPresentation: Identifiable {
+    let id = UUID()
 }
 
 private struct SummaryCard: View {
@@ -396,6 +538,6 @@ private struct ZoomableAttachmentImage: View {
                 .scaledToFit()
                 .padding(16)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
     }
 }

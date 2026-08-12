@@ -45,7 +45,7 @@ struct SettingsView: View {
                 .padding(.top, 18)
                 .padding(.bottom, 40)
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .tronScrollEdgeChrome()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -63,7 +63,7 @@ struct SettingsView: View {
         }
         .presentationDragIndicator(.hidden)
         .gatewayGlobalSheets()
-        .tint(Color.tronEmerald)
+        .tronPresentation()
     }
 
     private func settingsLink<Destination: View>(
@@ -71,12 +71,50 @@ struct SettingsView: View {
         icon: String,
         @ViewBuilder destination: () -> Destination
     ) -> some View {
-        NavigationLink(destination: destination()) {
+        TronProgressiveSheetLink(accessibilityLabel: title, destination: destination) {
             TronSettingsRow(icon: icon, title: title)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
+    }
+}
+
+private struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
+    let accessibilityLabel: String
+    let destination: Destination
+    let label: Label
+    @State private var isPresented = false
+
+    init(
+        accessibilityLabel: String,
+        @ViewBuilder destination: () -> Destination,
+        @ViewBuilder label: () -> Label
+    ) {
+        self.accessibilityLabel = accessibilityLabel
+        self.destination = destination()
+        self.label = label()
+    }
+
+    var body: some View {
+        Button { isPresented = true } label: { label }
+            .buttonStyle(.plain)
+            .accessibilityLabel(accessibilityLabel)
+            .sheet(isPresented: $isPresented) {
+                NavigationStack {
+                    destination
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button { isPresented = false } label: {
+                                    Image(systemName: "checkmark")
+                                        .font(TronTypography.buttonSM)
+                                        .foregroundStyle(Color.tronEmerald)
+                                }
+                                .accessibilityLabel("Done")
+                            }
+                        }
+                }
+                .tronPresentation()
+                .presentationDragIndicator(.hidden)
+            }
     }
 }
 
@@ -110,12 +148,11 @@ private struct AppearanceSettingsView: View {
 
                 TronSettingsGroup("Text Font", accent: .tronPurple) {
                     VStack(alignment: .leading, spacing: 0) {
-                        NavigationLink {
+                        TronProgressiveSheetLink(accessibilityLabel: "Text Font") {
                             FontFamilySelectionView(title: "Text Font", selection: $fonts.selectedFamily, families: FontFamily.textFamilies)
                         } label: {
                             TronSettingsRow(icon: "textformat", title: "Font", subtitle: fonts.selectedFamily.displayName, accent: .tronPurple)
                         }
-                        .buttonStyle(.plain)
                         TronSettingsDivider(accent: .tronPurple)
                         Text("The quick brown fox jumps over the lazy dog.")
                             .font(TronFont.body(16))
@@ -147,12 +184,11 @@ private struct AppearanceSettingsView: View {
 
                 TronSettingsGroup("Code Font", accent: .tronCyan) {
                     VStack(alignment: .leading, spacing: 0) {
-                        NavigationLink {
+                        TronProgressiveSheetLink(accessibilityLabel: "Code Font") {
                             FontFamilySelectionView(title: "Code Font", selection: $fonts.selectedMonoFamily, families: FontFamily.monoFamilies)
                         } label: {
                             TronSettingsRow(icon: "curlybraces", title: "Font", subtitle: fonts.selectedMonoFamily.displayName, accent: .tronCyan)
                         }
-                        .buttonStyle(.plain)
                         TronSettingsDivider(accent: .tronCyan)
                         Text("let result = await tron.run()")
                             .font(TronFont.mono(14))
@@ -185,7 +221,7 @@ private struct AppearanceSettingsView: View {
             .padding(.top, 18)
             .padding(.bottom, 40)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle("Appearance")
     }
 
@@ -245,7 +281,7 @@ private struct FontFamilySelectionView: View {
             }
             .padding(20)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle(title, accent: .tronPurple)
     }
 }
@@ -313,7 +349,7 @@ private struct ConnectionsSettingsView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle("Connections")
         .confirmationDialog("Forget this Mac?", isPresented: $confirmForget) {
             Button("Forget Mac", role: .destructive) { model.forgetCurrentGateway() }
@@ -398,7 +434,7 @@ private struct LegacyImportSettingsView: View {
             }
             .padding(20)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle("Legacy Import")
         .task { await model.inspectLegacyImport() }
     }
@@ -406,28 +442,34 @@ private struct LegacyImportSettingsView: View {
 
 private struct ProvidersSettingsView: View {
     @Environment(AppModel.self) private var model
+    @State private var reloading = false
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 8) {
                 ForEach(model.providers) { provider in
-                    VStack(spacing: 6) {
-                        ProviderSetupRow(provider: provider)
-                        if provider.configured {
-                            Button("Log Out", role: .destructive) {
-                                Task { do { try await model.logout(providerID: provider.id) } catch { model.lastError = error.localizedDescription } }
-                            }
-                            .buttonStyle(TronActionButtonStyle(role: .destructive, expands: false))
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                    }
+                    ProviderSetupRow(provider: provider)
                 }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle("Providers")
-        .refreshable { await model.refreshProviders() }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                TronReloadToolbarButton(isReloading: reloading, action: reload)
+            }
+        }
+    }
+
+    private func reload() {
+        guard !reloading else { return }
+        reloading = true
+        Task {
+            defer { reloading = false }
+            await model.refreshProviders()
+        }
     }
 }
 
@@ -459,13 +501,12 @@ private struct AgentDefaultsSettingsView: View {
                 }
                 TronSettingsGroup("Default Model", accent: .tronPurple) {
                     VStack(spacing: 0) {
-                        NavigationLink {
+                        TronProgressiveSheetLink(accessibilityLabel: "Default Model") {
                             ModelPicker(selection: $selectedModel, models: model.models.filter(\.available))
                                 .tronNavigationTitle("Default Model", accent: .tronPurple)
                         } label: {
                             TronValueRow(icon: "cpu", title: "Model", detail: selectedModel.map { "\($0.provider) / \($0.id)" } ?? "Choose model", accent: .tronPurple)
                         }
-                        .buttonStyle(.plain)
                         TronSettingsDivider(accent: .tronPurple)
                         TronValueRow(icon: "brain", title: "Thinking", accent: .tronPurple) {
                             TronInlineMenu(thinking.capitalized, accent: .tronPurple) {
@@ -498,7 +539,7 @@ private struct AgentDefaultsSettingsView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle("Models and Defaults")
         .task { await model.refreshSettings(); load() }
         .onChange(of: scope) { _, _ in Task { await model.refreshSettings(); load() } }

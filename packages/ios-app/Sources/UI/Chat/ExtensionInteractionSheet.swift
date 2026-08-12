@@ -45,7 +45,7 @@ struct ExtensionInteractionSheet: View {
                 }
                 .padding(20)
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .tronScrollEdgeChrome()
             .navigationTitle("")
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: interaction.title) }

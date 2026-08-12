@@ -9,99 +9,14 @@ struct SessionShellView: View {
     @State private var showImport = false
     @State private var search = ""
     @State private var showingSearch = false
+    @State private var presentedSessionID: String?
     @State private var sessionToDelete: SessionSummary?
     @State private var collapsedWorkspaces = Set<String>()
 
     var body: some View {
-        @Bindable var model = model
-        NavigationSplitView {
-            ZStack(alignment: .bottomTrailing) {
-                List(selection: $model.selectedSessionID) {
-                    ForEach(workspaceGroups, id: \.key) { group in
-                        Section {
-                            if !collapsedWorkspaces.contains(group.key) {
-                                ForEach(group.value) { session in
-                                    sessionButton(session)
-                                }
-                            }
-                        } header: {
-                            workspaceHeader(group.key)
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .environment(\.defaultMinListRowHeight, 38)
-                .contentMargins(.top, 6)
-                .contentMargins(.bottom, 92)
-                .tronCollectionSurface()
-                .scrollEdgeEffectStyle(.soft, for: .all)
-
-                Button { showNewSession = true } label: { Image(systemName: "plus") }
-                    .buttonStyle(TronIconButtonStyle(size: 56))
-                    .accessibilityLabel("New Session")
-                    .accessibilityHint("Opens the new session sheet")
-                    .padding(.trailing, 20)
-                    .padding(.bottom, 8)
-            }
-            .scrollContentBackground(.hidden)
-            .background(Color.tronBackground)
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        Button("Import Session", systemImage: "square.and.arrow.down") { showImport = true }
-                    } label: {
-                        Image("TronLogoVector")
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(height: 28)
-                            .foregroundStyle(Color.tronEmerald)
-                    }
-                    .accessibilityLabel("Open Tron navigation")
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Tron")
-                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                        .foregroundStyle(Color.tronEmerald)
-                }
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button { withAnimation(.snappy(duration: 0.18)) { showingSearch.toggle() } } label: {
-                        Image(systemName: showingSearch ? "xmark" : "magnifyingglass")
-                            .foregroundStyle(Color.tronEmerald)
-                    }
-                    .accessibilityLabel(showingSearch ? "Close session search" : "Search sessions")
-                    Button("Settings", systemImage: "gearshape") { showSettings = true }
-                        .tronToolbarAction(accent: .tronEmerald)
-                }
-            }
-            .overlay(alignment: .top) {
-                if showingSearch {
-                    TronSearchBar(text: $search, prompt: "Search sessions")
-                        .padding(.horizontal, TronSpacing.section)
-                        .padding(.top, 6)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .refreshable { await model.refreshSessions() }
-            .onChange(of: model.selectedSessionID) { _, id in
-                if let id { Task { try? await model.openSession(id) } }
-            }
-        } detail: {
-            if model.selectedSessionID != nil {
-                ChatView()
-            } else {
-                ContentUnavailableView(
-                    "Start with Tron",
-                    systemImage: "bubble.left.and.bubble.right",
-                    description: Text("Create a session in a workspace on your Mac.")
-                )
-                .background(Color.tronBackground)
-            }
-        }
+        dashboardNavigation
         .sheet(isPresented: $showNewSession) {
-            NewSessionSheet()
+            NewSessionSheet { presentedSessionID = $0 }
                 .presentationDetents([.medium, .large], selection: $newSessionDetent)
                 .presentationDragIndicator(.hidden)
         }
@@ -111,47 +26,175 @@ struct SessionShellView: View {
         .fileImporter(
             isPresented: $showImport,
             allowedContentTypes: [.json, .plainText, .data],
-            allowsMultipleSelection: false
-        ) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            let cwd = model.selectedSnapshot?.cwd ?? model.defaultWorkspace
-            guard let cwd else {
-                model.lastError = "Choose a workspace by creating a session before importing."
-                return
-            }
-            Task {
-                do { try await model.importSession(from: url, cwd: cwd) }
-                catch { model.lastError = error.localizedDescription }
-            }
-        }
+            allowsMultipleSelection: false,
+            onCompletion: handleImport
+        )
         .confirmationDialog(
             "Delete \(sessionToDelete?.title ?? "this session")?",
-            isPresented: Binding(
-                get: { sessionToDelete != nil },
-                set: { if !$0 { sessionToDelete = nil } }
-            ),
-            presenting: sessionToDelete
-        ) { session in
-            Button("Delete Session", role: .destructive) {
-                Task {
-                    do { try await model.deleteSession(session.id) }
-                    catch { model.lastError = error.localizedDescription }
-                    sessionToDelete = nil
-                }
+            isPresented: deleteConfirmationPresented,
+            presenting: sessionToDelete,
+            actions: deleteConfirmationActions,
+            message: { _ in
+                Text("This removes the canonical session from the Mac and cannot be undone.")
             }
-        } message: { _ in
-            Text("This removes the canonical session from the Mac and cannot be undone.")
-        }
+        )
         .gatewayGlobalSheets()
     }
 
+    private var dashboardNavigation: some View {
+        NavigationStack {
+            dashboardScreen
+        }
+        .tint(Color.tronEmerald)
+    }
+
+    private var dashboardScreen: some View {
+        ZStack(alignment: .bottomTrailing) {
+            sessionList
+            newSessionButton
+        }
+            .scrollContentBackground(.hidden)
+            .background(Color.tronBackground)
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { dashboardToolbar }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if showingSearch {
+                    TronSearchBar(text: $search, prompt: "Search sessions", focusOnAppear: true)
+                        .padding(.horizontal, TronSpacing.section)
+                        .padding(.vertical, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .refreshable { await model.refreshSessions() }
+            .navigationDestination(item: $presentedSessionID) { _ in
+                ChatView()
+            }
+    }
+
+    private var newSessionButton: some View {
+        Button {
+            showNewSession = true
+        } label: {
+            Image(systemName: "plus")
+        }
+        .buttonStyle(TronIconButtonStyle(size: 56))
+        .accessibilityLabel("New Session")
+        .accessibilityHint("Opens the new session sheet")
+        .padding(.trailing, 20)
+        .padding(.bottom, 8)
+    }
+
+    @ToolbarContentBuilder
+    private var dashboardToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Menu {
+                Button("Import Session", systemImage: "square.and.arrow.down") { showImport = true }
+            } label: {
+                Image("TronLogoVector")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 28)
+                    .foregroundStyle(Color.tronEmerald)
+            }
+            .accessibilityLabel("Open Tron navigation")
+        }
+        ToolbarItem(placement: .principal) {
+            Text("Tron")
+                .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+                .foregroundStyle(Color.tronEmerald)
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) {
+                    showingSearch.toggle()
+                    if !showingSearch { search = "" }
+                }
+            } label: {
+                Image(systemName: showingSearch ? "xmark" : "magnifyingglass")
+                    .foregroundStyle(Color.tronEmerald)
+            }
+            .accessibilityLabel(showingSearch ? "Close session search" : "Search sessions")
+            Button("Settings", systemImage: "gearshape") { showSettings = true }
+                .tronToolbarAction(accent: .tronEmerald)
+        }
+    }
+
+    private func handleImport(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        let cwd = model.selectedSnapshot?.cwd ?? model.defaultWorkspace
+        guard let cwd else {
+            model.lastError = "Choose a workspace by creating a session before importing."
+            return
+        }
+        Task {
+            do {
+                try await model.importSession(from: url, cwd: cwd)
+                presentedSessionID = model.selectedSessionID
+            }
+            catch { model.lastError = error.localizedDescription }
+        }
+    }
+
+    private var deleteConfirmationPresented: Binding<Bool> {
+        Binding(
+            get: { sessionToDelete != nil },
+            set: { if !$0 { sessionToDelete = nil } }
+        )
+    }
+
+    @ViewBuilder
+    private func deleteConfirmationActions(_ session: SessionSummary) -> some View {
+        Button("Delete Session", role: .destructive) {
+            Task {
+                do { try await model.deleteSession(session.id) }
+                catch { model.lastError = error.localizedDescription }
+                sessionToDelete = nil
+            }
+        }
+    }
+
+    private var sessionList: some View {
+        List {
+            sessionSections
+        }
+        .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, 38)
+        .contentMargins(.top, 6)
+        .contentMargins(.bottom, 92)
+        .tronCollectionSurface()
+        .tronScrollEdgeChrome()
+    }
+
+    @ViewBuilder
+    private var sessionSections: some View {
+        ForEach(workspaceGroups, id: \.key) { group in
+            Section {
+                if !collapsedWorkspaces.contains(group.key) {
+                    ForEach(group.value) { session in
+                        sessionButton(session)
+                    }
+                }
+            } header: {
+                workspaceHeader(group.key)
+            }
+        }
+    }
+
     private func sessionButton(_ session: SessionSummary) -> some View {
-        let selected = session.id == model.selectedSessionID
-        return Button { model.selectedSessionID = session.id } label: {
-            HistoricalSessionRow(session: session, selected: selected)
+        return Button {
+            model.selectedSessionID = session.id
+            presentedSessionID = session.id
+            Task {
+                do { try await model.openSession(session.id) }
+                catch { model.lastError = error.localizedDescription }
+            }
+        } label: {
+            HistoricalSessionRow(session: session)
         }
         .buttonStyle(.plain)
-        .tag(session.id)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .listRowInsets(SessionDashboardLayout.rowInsets)
@@ -180,7 +223,7 @@ struct SessionShellView: View {
                 Image(systemName: collapsed ? "plus" : "minus")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
             }
-            .foregroundStyle(Color.tronAccentText)
+            .foregroundStyle(Color.tronEmerald)
             .padding(.leading, SessionDashboardLayout.headerLeadingPadding)
             .padding(.trailing, SessionDashboardLayout.rowContainerHorizontalInset)
             .padding(.top, SessionDashboardLayout.headerTopPadding)
@@ -232,7 +275,6 @@ private enum SessionDashboardLayout {
 
 private struct HistoricalSessionRow: View {
     let session: SessionSummary
-    let selected: Bool
 
     var body: some View {
         HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
@@ -266,7 +308,7 @@ private struct HistoricalSessionRow: View {
         .tronGlassSurface(
             accent: .tronEmerald,
             cornerRadius: 12,
-            tintOpacity: selected ? 0.22 : 0.14,
+            tintOpacity: 0.14,
             interactive: true
         )
         .accessibilityElement(children: .ignore)
@@ -283,6 +325,7 @@ private struct NewSessionSheet: View {
     @State private var showModels = false
     @State private var creating = false
     @State private var trustInspection: JSONValue?
+    let onCreated: (String) -> Void
 
     var body: some View {
         NavigationStack {
@@ -297,7 +340,7 @@ private struct NewSessionSheet: View {
                                         Task { await inspectTrust() }
                                     } label: {
                                         Text(shortcut.title)
-                                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                                             .foregroundStyle(Color.tronAccentText)
                                             .padding(.horizontal, 12)
                                             .padding(.vertical, 6)
@@ -358,7 +401,7 @@ private struct NewSessionSheet: View {
                 .padding(.top, 16)
                 .padding(.bottom, 28)
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "New Session") }
@@ -483,6 +526,7 @@ private struct NewSessionSheet: View {
         do {
             try await model.createSession(cwd: workspace)
             if let selectedModel { try await model.setModel(selectedModel) }
+            if let sessionID = model.selectedSessionID { onCreated(sessionID) }
             dismiss()
         } catch { model.lastError = error.localizedDescription }
     }

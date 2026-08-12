@@ -21,9 +21,24 @@ struct ProviderSetupRow: View {
             }
             Spacer(minLength: 8)
             if provider.configured {
-                Text("Connected")
+                Menu {
+                    Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                        Task {
+                            do { try await model.logout(providerID: provider.id) }
+                            catch { model.lastError = error.localizedDescription }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Connected")
+                        Image(systemName: "ellipsis.circle")
+                            .accessibilityHidden(true)
+                    }
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(Color.tronAccentText)
+                    .frame(minHeight: 44)
+                }
+                .accessibilityLabel("\(provider.name) provider actions")
             } else {
                 Menu {
                     ForEach(provider.authMethods, id: \.self) { method in
@@ -97,7 +112,7 @@ struct ModelPicker: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
     }
 
     private var filtered: [ModelSummary] {

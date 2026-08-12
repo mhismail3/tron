@@ -106,7 +106,7 @@ struct WorkspaceBrowser: View {
                                                 Image(systemName: "checkmark.circle.fill")
                                             }
                                         }
-                                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                                         .foregroundStyle(Color.tronAccentText)
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 7)
@@ -186,7 +186,7 @@ struct WorkspaceBrowser: View {
             .padding(.vertical, 14)
         }
         .scrollClipDisabled()
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
     }
 
     @ViewBuilder
@@ -205,7 +205,7 @@ struct WorkspaceBrowser: View {
                 Image(systemName: icon)
                 Text(title).lineLimit(1)
             }
-            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
             .foregroundStyle(Color.tronAccentText)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)

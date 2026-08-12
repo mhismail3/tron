@@ -108,6 +108,7 @@ private struct AuthPromptContent: View {
             .frame(maxWidth: 620)
             .frame(maxWidth: .infinity)
         }
+        .tronScrollEdgeChrome()
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: prompt.id) { _, _ in value = "" }
     }
@@ -147,6 +148,7 @@ private struct AuthEventContent: View {
             .frame(maxWidth: 620)
             .frame(maxWidth: .infinity)
         }
+        .tronScrollEdgeChrome()
     }
 
     @ViewBuilder private var authURLContent: some View {

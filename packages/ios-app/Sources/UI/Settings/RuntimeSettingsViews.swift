@@ -126,7 +126,7 @@ struct RuntimeBehaviorSettingsView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle("Runtime Behavior")
         .task { await load() }
         .onChange(of: scope) { _, _ in Task { await load() } }
@@ -335,7 +335,7 @@ struct ResourceSettingsView: View {
             .padding(.top, 18)
             .padding(.bottom, 40)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .tronScrollEdgeChrome()
         .tronNavigationTitle("Resource Paths")
         .task { await load() }
         .onChange(of: scope) { _, _ in Task { await load() } }

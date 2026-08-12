@@ -47,7 +47,7 @@ struct SessionContextSheet: View {
                 }
                 .padding(18)
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Manage Session", accent: .tronEmerald) }
@@ -316,7 +316,7 @@ struct SessionContextSheet: View {
                 TronStructuredJSONView(value: model.context ?? .null, title: "Runtime Context", accent: .tronPurple)
                     .padding(18)
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Runtime Context", accent: .tronPurple) }
@@ -388,7 +388,7 @@ struct ForkSheet: View {
                 }
                 .padding(18)
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: position == "before" ? "Fork Session" : "Clone Session") }

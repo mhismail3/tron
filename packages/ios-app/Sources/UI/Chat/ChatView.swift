@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ChatView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var photos: [PhotosPickerItem] = []
     @State private var showCamera = false
@@ -38,6 +39,10 @@ struct ChatView: View {
         .background(Color.tronBackground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
+        .background(InteractivePopGestureEnabler())
+        .tint(Color.tronEmerald)
         .toolbar { toolbar }
         .sheet(isPresented: $showContext) { SessionContextSheet() }
         .sheet(isPresented: $showSettings) { SettingsView().presentationDragIndicator(.hidden) }
@@ -103,10 +108,10 @@ struct ChatView: View {
                             .disabled(model.loadingEarlierTranscript)
                             .frame(maxWidth: .infinity)
                         }
-                        let items = ChatTranscriptPresentation.items(in: snapshot)
+                        let items = ChatTranscriptPresentation.renderItems(in: snapshot)
                         let results = ChatTranscriptPresentation.toolResults(in: snapshot)
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            TranscriptRow(item: item, toolResults: results)
+                            ChatTranscriptRenderRow(item: item, toolResults: results)
                                 .id(item.id)
                                 .opacity(transcriptVisible ? 1 : 0)
                                 .offset(y: transcriptVisible ? 0 : 6)
@@ -121,9 +126,9 @@ struct ChatView: View {
                                 .id("streaming")
                                 .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
                         }
-                        ForEach(snapshot.toolExecutions) { tool in
-                            LiveToolCard(tool: tool)
-                                .id("live-tool-\(tool.id)")
+                        if let liveTools = ChatTranscriptPresentation.liveToolRun(in: snapshot) {
+                            ToolRunView(run: liveTools)
+                                .id("live-\(liveTools.id)")
                                 .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))
                         }
                         if snapshot.phase.isActive && snapshot.extensionUI.working.visible {
@@ -141,7 +146,11 @@ struct ChatView: View {
                         }
                         if !snapshot.extensionUI.statuses.isEmpty {
                             ForEach(snapshot.extensionUI.statuses.sorted(by: { $0.key < $1.key }), id: \.key) { _, value in
-                                Label(value, systemImage: "info.circle").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                                TranscriptNotice(
+                                    title: value,
+                                    icon: "info.circle.fill",
+                                    tint: .tronInfo
+                                )
                             }
                         }
                     } else { ProgressView().frame(maxWidth: .infinity).padding(.top, 80) }
@@ -155,7 +164,7 @@ struct ChatView: View {
                 .animation(.spring(response: 0.28, dampingFraction: 0.86), value: model.selectedSnapshot?.toolExecutions)
             }
             .defaultScrollAnchor(.bottom)
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .tronScrollEdgeChrome()
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 80
             } action: { _, isAtBottom in
@@ -355,6 +364,14 @@ struct ChatView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                    .foregroundStyle(Color.tronEmerald)
+            }
+            .accessibilityLabel("Back")
+        }
         ToolbarItem(placement: .principal) {
             Text(model.selectedSnapshot?.extensionUI.title ?? model.selectedSnapshot?.name ?? model.sessions.first { $0.id == model.selectedSessionID }?.title ?? "Session")
                 .font(TronTypography.headline)
@@ -454,32 +471,22 @@ private struct PendingAttachmentChip: View {
     }
 }
 
-private struct LiveToolCard: View {
-    let tool: ToolExecutionState
+private struct ChatTranscriptRenderRow: View {
+    let item: ChatTranscriptRenderItem
+    let toolResults: [String: TranscriptItem]
 
-    var body: some View {
-        ToolCard(
-            title: tool.toolName,
-            subtitle: subtitle,
-            content: content,
-            error: tool.isError,
-            structured: tool.result ?? tool.partialResult ?? tool.arguments
-        )
-        .accessibilityLabel("\(tool.toolName), \(subtitle)")
-    }
-
-    private var subtitle: String {
-        switch tool.status {
-        case .running: "Running"
-        case .completed: "Completed"
-        case .failed: "Failed"
+    @ViewBuilder var body: some View {
+        switch item {
+        case .transcript(let transcript):
+            TranscriptRow(
+                item: transcript,
+                toolResults: toolResults,
+                rendersToolCalls: false
+            )
+        case .toolRun(let run):
+            ToolRunView(run: run)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-
-    private var content: String {
-        if let result = tool.result { return result.prettyPrinted }
-        if let partial = tool.partialResult { return partial.prettyPrinted }
-        return tool.arguments.prettyPrinted
     }
 }
 

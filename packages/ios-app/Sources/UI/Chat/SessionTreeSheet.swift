@@ -6,6 +6,7 @@ struct SessionTreeSheet: View {
     @State private var selected: SessionTreeNode?
     @State private var labelNode: SessionTreeNode?
     @State private var label = ""
+    @State private var reloading = false
 
     var body: some View {
         NavigationStack {
@@ -17,7 +18,7 @@ struct SessionTreeSheet: View {
                             .foregroundStyle(Color.tronTextMuted)
                         Text("No history available")
                             .font(TronTypography.headline)
-                        Text("Refresh after the session finishes loading.")
+                        Text("Use Reload after the session finishes loading.")
                             .font(TronTypography.bodySM)
                             .foregroundStyle(Color.tronTextPrimary)
                     }
@@ -38,9 +39,12 @@ struct SessionTreeSheet: View {
                     .padding(.vertical, 14)
                 }
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .tronScrollEdgeChrome()
             .navigationTitle("")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    TronReloadToolbarButton(isReloading: reloading, action: reload)
+                }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Session History") }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
@@ -55,7 +59,6 @@ struct SessionTreeSheet: View {
                 if let id = model.selectedSessionID { try? await model.openSession(id) }
                 await model.loadTree()
             }
-            .refreshable { await model.loadTree() }
             .sheet(item: $selected) { node in NavigationSheet(node: node) }
             .alert("Bookmark", isPresented: Binding(
                 get: { labelNode != nil },
@@ -85,6 +88,15 @@ struct SessionTreeSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+    }
+
+    private func reload() {
+        guard !reloading else { return }
+        reloading = true
+        Task {
+            defer { reloading = false }
+            await model.loadTree()
+        }
     }
 }
 
@@ -187,7 +199,7 @@ private struct NavigationSheet: View {
                 }
                 .padding(20)
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .tronScrollEdgeChrome()
             .navigationTitle("")
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Navigate History") }

@@ -66,6 +66,43 @@ struct ChatTranscriptPresentationTests {
         ))
     }
 
+    @Test("consecutive tool calls collapse into one presentation run")
+    func groupsConsecutiveToolCalls() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call-part-1","type":"toolCall","toolCallId":"call-1","name":"read","arguments":{"path":"one"}}]},
+          {"id":"result-1","parentId":"assistant-1","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"result-text-1","type":"text","text":"one"}],"toolCallId":"call-1","toolName":"read","isError":false},
+          {"id":"assistant-2","parentId":"result-1","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"call-part-2","type":"toolCall","toolCallId":"call-2","name":"bash","arguments":{"command":"pwd"}}]},
+          {"id":"result-2","parentId":"assistant-2","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"result-text-2","type":"text","text":"/workspace"}],"toolCallId":"call-2","toolName":"bash","isError":false}
+        ]
+        """)
+
+        let rendered = ChatTranscriptPresentation.renderItems(in: snapshot)
+        #expect(rendered.count == 1)
+        guard case .toolRun(let run) = rendered.first else {
+            Issue.record("Expected one grouped tool run")
+            return
+        }
+        #expect(run.tools.map(\.title) == ["read", "bash"])
+        #expect(run.title == "Used 2 tools")
+    }
+
+    @Test("conversation content interrupts tool grouping")
+    func conversationBreaksToolRuns() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant-tool","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call-part","type":"toolCall","toolCallId":"call","name":"read","arguments":{}}]},
+          {"id":"result","parentId":"assistant-tool","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"result-text","type":"text","text":"done"}],"toolCallId":"call","toolName":"read","isError":false},
+          {"id":"assistant-text","parentId":"result","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"Finished"}]},
+          {"id":"bash","parentId":"assistant-text","timestamp":"2026-01-01T00:00:03Z","kind":"bash","command":"pwd","output":"/workspace","exitCode":0,"cancelled":false,"truncated":false}
+        ]
+        """)
+
+        let rendered = ChatTranscriptPresentation.renderItems(in: snapshot)
+        #expect(rendered.count == 3)
+        #expect(rendered.map(\.id) == ["tool-run-call", "assistant-text", "tool-run-bash"])
+    }
+
     private func fixture(transcript: String) throws -> SessionSnapshot {
         try JSONDecoder.gateway.decode(SessionSnapshot.self, from: Data("""
         {

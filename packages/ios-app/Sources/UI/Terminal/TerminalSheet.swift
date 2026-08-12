@@ -284,6 +284,7 @@ struct TerminalSheet: View {
             .background(Color.tronBackground)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { terminalMenu }
                 ToolbarItem(placement: .principal) {

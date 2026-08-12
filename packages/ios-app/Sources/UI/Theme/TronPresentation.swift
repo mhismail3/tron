@@ -57,6 +57,20 @@ private struct TronPresentationModifier: ViewModifier {
     }
 }
 
+/// Must be attached to the scrolling content inside its NavigationStack.
+/// Applying these preferences at the app root does not reliably bind the
+/// scroll view to navigation chrome across sheet presentation boundaries.
+private struct TronScrollEdgeChromeModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            // Set this explicitly: iOS 27's automatic top edge currently
+            // resolves to the hard cutoff on device, while Tron's established
+            // presentation uses the softer blur/fade on every scroll edge.
+            .scrollEdgeEffectStyle(.soft, for: .all)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+    }
+}
+
 private struct TronCollectionSurfaceModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
@@ -90,6 +104,13 @@ extension View {
     /// Tron's selected family and emerald interaction color.
     func tronPresentation() -> some View {
         modifier(TronPresentationModifier())
+    }
+
+    /// Native top/bottom blur and fade for a scroll owner. Keep this on the
+    /// concrete ScrollView/List inside NavigationStack, matching the previous
+    /// non-gateway app's working toolbar-preference placement.
+    func tronScrollEdgeChrome() -> some View {
+        modifier(TronScrollEdgeChromeModifier())
     }
 
     /// Standard treatment for app-owned Form and List surfaces.
@@ -347,6 +368,7 @@ struct TronSearchBar: View {
     @Binding var text: String
     var prompt = "Search"
     var accent: Color = .tronEmerald
+    var focusOnAppear = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -384,6 +406,11 @@ struct TronSearchBar: View {
         .glassEffect(.regular.tint(accent.opacity(0.12)), in: .capsule)
         .contentShape(Capsule())
         .onTapGesture { focused = true }
+        .task(id: focusOnAppear) {
+            guard focusOnAppear else { return }
+            await Task.yield()
+            focused = true
+        }
         .animation(.easeInOut(duration: 0.15), value: text.isEmpty)
     }
 }
@@ -432,6 +459,28 @@ struct TronSheetTitle: View {
 
     var body: some View {
         TronTitleLabel(title: title, accent: accent)
+    }
+}
+
+struct TronReloadToolbarButton: View {
+    let isReloading: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            if isReloading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Color.tronEmerald)
+            } else {
+                Image(systemName: "arrow.clockwise")
+                    .font(TronTypography.buttonSM)
+                    .foregroundStyle(Color.tronEmerald)
+            }
+        }
+        .disabled(isReloading)
+        .accessibilityLabel("Reload")
+        .accessibilityValue(isReloading ? "In progress" : "")
     }
 }
 

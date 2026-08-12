@@ -175,7 +175,7 @@ private struct JSONFieldSheet: View {
                 }
                 .padding(18)
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: selection.title, accent: accent) }
