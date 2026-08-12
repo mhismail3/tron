@@ -153,12 +153,17 @@ jobs:
           scripts/tron version check
           source VERSION.env
           [[ "$GITHUB_RUN_NUMBER" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]] || exit 1
           (( GITHUB_RUN_NUMBER <= 899999 )) || {
             echo "::error::TestFlight workflow run number exceeds the build namespace"
             exit 1
           }
+          (( GITHUB_RUN_ATTEMPT <= 99 )) || {
+            echo "::error::TestFlight workflow attempt exceeds the build namespace"
+            exit 1
+          }
           marketing_version="${TRON_VERSION%%-*}"
-          apple_build="$((1000 + GITHUB_RUN_NUMBER / 100)).$((GITHUB_RUN_NUMBER % 100)).1"
+          apple_build="$((1000 + GITHUB_RUN_NUMBER / 100)).$((GITHUB_RUN_NUMBER % 100)).$GITHUB_RUN_ATTEMPT"
           {
             echo "canonical=$TRON_VERSION"
             echo "marketing=$marketing_version"
@@ -240,6 +245,8 @@ jobs:
           profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
           p12="$RUNNER_TEMP/distribution.p12"
           wwdr="$RUNNER_TEMP/AppleWWDRCAG3.cer"
+          system_keychain="/Library/Keychains/System.keychain"
+          system_root_keychain="/System/Library/Keychains/SystemRootCertificates.keychain"
           : > "$installed_profiles"
           mkdir -p "$profiles_dir"
           security list-keychains -d user | sed -E 's/^[[:space:]]+//; s/^"//; s/"$//' > "$original_keychains"
@@ -248,6 +255,8 @@ jobs:
             [[ -n "$existing_keychain" ]] && search_list+=("$existing_keychain")
           done < "$original_keychains"
           (( ${#search_list[@]} > 0 ))
+          test -f "$system_keychain"
+          test -f "$system_root_keychain"
 
           printf '%s' "$IOS_DISTRIBUTION_CERT_P12_BASE64" | base64 -d > "$p12"
           test -s "$p12"
@@ -261,7 +270,8 @@ jobs:
           security import "$p12" -k "$keychain" -P "$IOS_DISTRIBUTION_CERT_PASSWORD" \
             -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/xcodebuild >/dev/null
           security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
-          security list-keychains -d user -s "$keychain" "${search_list[@]}"
+          security list-keychains -d user -s \
+            "$keychain" "${search_list[@]}" "$system_keychain" "$system_root_keychain"
           identity="$(security find-identity -v -p codesigning "$keychain" | awk 'length($2) == 40 { print $2; exit }')"
           [[ "$identity" =~ ^[[:xdigit:]]{40}$ ]] || {
             echo "::error::distribution certificate did not produce one signing identity"
