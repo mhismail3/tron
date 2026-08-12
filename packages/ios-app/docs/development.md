@@ -1,5 +1,17 @@
 # Tron iOS development
 
+## Fresh-clone prerequisites
+
+Use Xcode 26 with the iOS 26.2 simulator runtime and XcodeGen 2.45.3. The Xcode
+project is generated and intentionally untracked:
+
+```bash
+scripts/install-ci-tools.sh xcodegen
+export PATH="$PWD/.ci-tools/bin:$PATH"
+cd packages/ios-app
+xcodegen generate
+```
+
 ## Generate and build
 
 ```bash
@@ -41,6 +53,9 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests
 ```
 
+`scripts/ios-ci-test.sh` is the fresh-clone unit checkpoint: it generates the
+project, builds once, and runs the complete unit target without rebuilding.
+
 Run UI tests separately because simulator launch dominates their cost:
 
 ```bash
@@ -67,9 +82,11 @@ scripts/ios-gateway-e2e-test iterate
 
 The focused runner disables Xcode's failure sysdiagnose collection, which can
 otherwise add a ten-minute timeout after a UI assertion. Use `logs`, `status`,
-`stop`, and `clean` to inspect or manage the persistent fixture. CI uses the
-same script and reuses its UI-test products for smoke and real-gateway tests.
-Full unit and UI suites remain final checkpoint validation, not an edit loop.
+`stop`, and `clean` to inspect or manage the persistent fixture. CI owns the
+complete unit target; smoke/accessibility and real-gateway UI journeys remain
+explicit cross-module/release checkpoints because they are slower and depend on
+simulator integration rather than ordinary source compilation. Full UI suites
+remain final checkpoint validation, not an edit loop.
 
 Typography or control-style changes must run
 `TronMobileTests/FontSettingsTests` and
@@ -112,6 +129,20 @@ full screen: the mounted shell toolbar, detent, centered title, card geometry,
 page dots, and toolbar navigation are all part of the parity contract. Copy may
 change only where gateway security semantics require one-time enrollment rather
 than a permanent pairing token.
+
+## Internal TestFlight beta delivery
+
+After CI succeeds for the current `main` head, `.github/workflows/release-ios.yml`
+archives the `Tron`/`Prod` app (`com.tron.mobile`) and uploads it to the configured
+internal all-build TestFlight group. This is beta distribution only: the workflow
+has no public TestFlight, Beta App Review, or App Store release path.
+
+The `ios-testflight` GitHub environment owns App Store Connect credentials,
+distribution certificate/profile secrets, and
+`ASC_TESTFLIGHT_INTERNAL_GROUP_ID`. Every workflow attempt receives a unique
+three-segment Apple build number. The workflow rechecks the current `main` head
+before upload and removes temporary keychain/profile material in an `always()`
+step. Public distribution and App Store release remain manual.
 
 ## Gateway fixture work
 

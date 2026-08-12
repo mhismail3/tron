@@ -91,12 +91,13 @@ stage_node() {
     rm -rf "$temp"
 }
 
-mkdir -p "$APP_DIR/dist" "$RUNTIME_DIR" \
+mkdir -p "$APP_DIR/dist" "$APP_DIR/scripts" "$RUNTIME_DIR" \
     "$HELPER_DIR/MacOS" "$HELPER_DIR/Resources" \
     "$DEV_HELPER_DIR/MacOS" "$DEV_HELPER_DIR/Resources"
 rm -rf "$APP_DIR/dist" "$APP_DIR/node_modules"
 cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
 cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
+cp "$GATEWAY_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/"
 # npm prune in the source tree would damage developer dependencies. Install an
 # independent production tree directly into the generated app payload.
 (cd "$APP_DIR" && npm ci --omit=dev --ignore-scripts=false)

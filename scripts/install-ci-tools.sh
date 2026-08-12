@@ -5,8 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$ROOT/config/ci-toolchain.env"
 CACHE="${TRON_CI_TOOLS_DIR:-$ROOT/.ci-tools}"
-BIN="$CACHE/bin"; DOWNLOADS="$CACHE/downloads"
-mkdir -p "$BIN" "$DOWNLOADS"
+BIN="$CACHE/bin"; DOWNLOADS="$CACHE/downloads"; SHARE="$CACHE/share"
+mkdir -p "$BIN" "$DOWNLOADS" "$SHARE"
 
 fetch() {
   local url="$1" sha="$2" out="$3"
@@ -24,15 +24,11 @@ for tool in "$@"; do
       stage="$CACHE/xcodegen-$TRON_CI_XCODEGEN_VERSION"; rm -rf "$stage"; mkdir -p "$stage"
       ditto -x -k "$archive" "$stage"
       executable="$(find "$stage" -type f -name xcodegen -perm -111 | head -1)"
+      presets="$(find "$stage" -type d -path '*/share/xcodegen/SettingPresets' | head -1)"
       [[ -n "$executable" ]] || { echo "xcodegen executable missing" >&2; exit 1; }
+      [[ -n "$presets" ]] || { echo "xcodegen setting presets missing" >&2; exit 1; }
       ln -sfn "$executable" "$BIN/xcodegen"
-      ;;
-    create-dmg)
-      archive="$DOWNLOADS/create-dmg-$TRON_CI_CREATE_DMG_VERSION.tar.gz"
-      fetch "$TRON_CI_CREATE_DMG_URL" "$TRON_CI_CREATE_DMG_SHA256" "$archive"
-      stage="$CACHE/create-dmg-$TRON_CI_CREATE_DMG_VERSION"; rm -rf "$stage"; mkdir -p "$stage"
-      tar -xzf "$archive" -C "$stage" --strip-components=1
-      chmod 0755 "$stage/create-dmg"; ln -sfn "$stage/create-dmg" "$BIN/create-dmg"
+      ln -sfn "$(dirname "$presets")" "$SHARE/xcodegen"
       ;;
     asc)
       case "$(uname -m)" in

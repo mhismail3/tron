@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# tron-version - centralized release version helper
+# tron-version - centralized version helper
 #
-# VERSION.env is the only hand-edited release identity file. Every
+# VERSION.env is the only hand-edited product identity file. Every
 # platform-specific version field is a generated mirror for a tool that
 # cannot read VERSION.env directly.
 
@@ -31,8 +31,6 @@ Commands:
   print              Print derived version fields as KEY=value lines
   check              Read-only validation of all mirrored version fields
   sync               Update mirrors from VERSION.env
-  github-output      Validate a hosted release ref and write GitHub step outputs
-  github-ios-output  Resolve the hosted iOS TestFlight channel, SHA, and build
   bump beta|patch|minor
                      Update VERSION.env, sync mirrors, and print the result
   test               Run shell-level version helper tests
@@ -111,131 +109,6 @@ TRON_RELEASE_TITLE=$TRON_RELEASE_TITLE
 TRON_DMG_NAME=$TRON_DMG_NAME
 TRON_IS_PRERELEASE=$TRON_IS_PRERELEASE
 EOF
-}
-
-write_github_release_outputs() {
-    check_versions
-    [ -n "${GITHUB_OUTPUT:-}" ] || die "GITHUB_OUTPUT is required for github-output"
-
-    local mode
-    if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" == tron-v* ]]; then
-        if [ "$GITHUB_REF_NAME" != "$TRON_RELEASE_TAG" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match VERSION.env release tag $TRON_RELEASE_TAG" >&2
-            return 1
-        fi
-        mode="tag"
-    else
-        mode="VERSION.env"
-    fi
-
-    if [[ -z "$TRON_VERSION" || -z "$TRON_RELEASE_TAG" || -z "$TRON_DMG_NAME" ||
-          -z "$TRON_DISPLAY_VERSION" || -z "$TRON_APPLE_BUILD" ||
-          -z "$TRON_APPLE_MARKETING_VERSION" || -z "$TRON_RELEASE_TITLE" ||
-          -z "$TRON_IS_PRERELEASE" ]]; then
-        echo "::error::could not resolve centralized version fields" >&2
-        return 1
-    fi
-
-    printf '%s\n' \
-        "version=$TRON_VERSION" "mode=$mode" "tag=$TRON_RELEASE_TAG" \
-        "dmg_name=$TRON_DMG_NAME" "display_version=$TRON_DISPLAY_VERSION" \
-        "apple_build=$TRON_APPLE_BUILD" "marketing_version=$TRON_APPLE_MARKETING_VERSION" \
-        "release_title=$TRON_RELEASE_TITLE" "is_prerelease=$TRON_IS_PRERELEASE" \
-        >> "$GITHUB_OUTPUT"
-    echo "Resolved version=$TRON_VERSION ($TRON_DISPLAY_VERSION) / Apple build $TRON_APPLE_BUILD from $mode"
-}
-
-write_github_ios_outputs() {
-    check_versions
-    [ -n "${GITHUB_OUTPUT:-}" ] || die "GITHUB_OUTPUT is required for github-ios-output"
-
-    local event_name="${GITHUB_EVENT_NAME:-}"
-    local run_number="${GITHUB_RUN_NUMBER:-}"
-    local channel source_sha trigger_mode dry_run apple_build owner_run_number lane
-
-    if [[ ! "$run_number" =~ ^[1-9][0-9]*$ ]]; then
-        die "GITHUB_RUN_NUMBER must be a positive integer: ${run_number:-<missing>}"
-    fi
-
-    case "$event_name" in
-        workflow_run)
-            [ "${TRON_UPSTREAM_WORKFLOW:-}" = "CI" ] \
-                || die "automatic iOS delivery requires the CI workflow"
-            [ "${TRON_UPSTREAM_EVENT:-}" = "push" ] \
-                || die "automatic iOS delivery requires a CI push run"
-            [ "${TRON_UPSTREAM_CONCLUSION:-}" = "success" ] \
-                || die "automatic iOS delivery requires successful CI"
-            [ "${TRON_UPSTREAM_BRANCH:-}" = "main" ] \
-                || die "automatic iOS delivery requires the main branch"
-            channel="internal"
-            source_sha="${TRON_UPSTREAM_SHA:-}"
-            trigger_mode="main-ci"
-            owner_run_number="${TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER:-}"
-            [[ "$owner_run_number" =~ ^[1-9][0-9]*$ ]] \
-                || die "automatic iOS delivery requires a positive owner run number"
-            lane=1
-            ;;
-        push)
-            [ -z "${TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER:-}" ] \
-                || die "the automatic iOS build owner override is workflow_run-only"
-            [ "${GITHUB_REF_TYPE:-}" = "tag" ] \
-                || die "iOS push delivery requires a release tag"
-            [ "${GITHUB_REF_NAME:-}" = "$TRON_RELEASE_TAG" ] \
-                || die "tag ${GITHUB_REF_NAME:-<missing>} does not match VERSION.env release tag $TRON_RELEASE_TAG"
-            channel="external"
-            source_sha="${GITHUB_SHA:-}"
-            trigger_mode="tag"
-            owner_run_number="$run_number"
-            lane=2
-            ;;
-        workflow_dispatch)
-            [ -z "${TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER:-}" ] \
-                || die "the automatic iOS build owner override is workflow_run-only"
-            channel="${TRON_IOS_CHANNEL_INPUT:-dry-run}"
-            case "$channel" in
-                dry-run|internal|external)
-                    [ "${GITHUB_REF_TYPE:-}" = "branch" ] && [ "${GITHUB_REF_NAME:-}" = "main" ] \
-                        || die "manual iOS delivery is restricted to the main branch"
-                    ;;
-                *) die "iOS TestFlight channel must be dry-run, internal, or external: $channel" ;;
-            esac
-            source_sha="${GITHUB_SHA:-}"
-            trigger_mode="manual"
-            owner_run_number="$run_number"
-            lane=2
-            ;;
-        *)
-            die "unsupported iOS TestFlight event: ${event_name:-<missing>}"
-            ;;
-    esac
-
-    [[ "$source_sha" =~ ^[[:xdigit:]]{40}$ ]] \
-        || die "iOS TestFlight source SHA must be a full 40-character commit id: ${source_sha:-<missing>}"
-    if [ "$channel" = "dry-run" ]; then
-        dry_run="true"
-    else
-        dry_run="false"
-    fi
-
-    # CFBundleVersion supports three bounded integer segments. Reserve the
-    # third segment as the delivery lane. Every fresh hosted build is allocated
-    # from the Release workflow's single monotonic run-number counter; an
-    # automatic retry passes the authenticated original owner run number here.
-    # The 1000 major-segment epoch also moves the hosted namespace above the
-    # legacy bare-integer build numbers used before this mapping shipped.
-    if (( owner_run_number > 899999 )); then
-        die "iOS hosted build owner run number exceeds the supported range: $owner_run_number"
-    fi
-    apple_build="$((1000 + owner_run_number / 100)).$((owner_run_number % 100)).$lane"
-
-    printf '%s\n' \
-        "version=$TRON_VERSION" "mode=$trigger_mode" "tag=$TRON_RELEASE_TAG" \
-        "dmg_name=$TRON_DMG_NAME" "display_version=$TRON_DISPLAY_VERSION" \
-        "apple_build=$apple_build" "marketing_version=$TRON_APPLE_MARKETING_VERSION" \
-        "release_title=$TRON_RELEASE_TITLE" "is_prerelease=$TRON_IS_PRERELEASE" \
-        "channel=$channel" "dry_run=$dry_run" "source_sha=$source_sha" \
-        >> "$GITHUB_OUTPUT"
-    echo "Resolved iOS $channel delivery for ${source_sha:0:12} / Apple build $apple_build from $trigger_mode"
 }
 
 replace_regex() {
@@ -422,124 +295,6 @@ self_test() {
     "$PROJECT_DIR/scripts/tron" version check >/dev/null
     ! "$PROJECT_DIR/scripts/tron" version sync --check >/dev/null 2>&1 || die "sync --check alias remains accepted"
 
-    local github_output output_keys
-    github_output="$(mktemp)"
-    for ref_type in branch tag; do
-        : > "$github_output"
-        GITHUB_OUTPUT="$github_output" GITHUB_REF_TYPE="$ref_type" \
-            GITHUB_REF_NAME="$([ "$ref_type" = tag ] && echo "$TRON_RELEASE_TAG" || echo main)" \
-            "$PROJECT_DIR/scripts/tron" version github-output >/dev/null
-        grep -Fqx "mode=$([ "$ref_type" = tag ] && echo tag || echo VERSION.env)" "$github_output" \
-            || die "github-output omitted $ref_type mode"
-    done
-    output_keys="$(cut -d= -f1 "$github_output" | paste -sd, -)"
-    [ "$output_keys" = "version,mode,tag,dmg_name,display_version,apple_build,marketing_version,release_title,is_prerelease" ] \
-        || die "github-output keys changed: $output_keys"
-
-    : > "$github_output"
-    if GITHUB_OUTPUT="$github_output" \
-        GITHUB_REF_TYPE="tag" \
-        GITHUB_REF_NAME="${TRON_RELEASE_TAG}-mismatch" \
-        "$PROJECT_DIR/scripts/tron" version github-output >/dev/null 2>&1; then
-        die "github-output accepted a mismatched release tag"
-    fi
-    [ ! -s "$github_output" ] || die "github-output wrote fields for a mismatched release tag"
-
-    local test_sha="0123456789abcdef0123456789abcdef01234567"
-    : > "$github_output"
-    GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_run" GITHUB_RUN_NUMBER="27" \
-        TRON_UPSTREAM_WORKFLOW="CI" TRON_UPSTREAM_EVENT="push" \
-        TRON_UPSTREAM_CONCLUSION="success" TRON_UPSTREAM_BRANCH="main" \
-        TRON_UPSTREAM_SHA="$test_sha" TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER="37" \
-        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
-    for expected in \
-        "mode=main-ci" "apple_build=1000.37.1" "channel=internal" "dry_run=false" \
-        "source_sha=$test_sha"; do
-        grep -Fqx "$expected" "$github_output" || die "github-ios-output omitted $expected"
-    done
-
-    local owner expected_build
-    for owner in 99 100 899999; do
-        case "$owner" in
-            99) expected_build="1000.99.1" ;;
-            100) expected_build="1001.0.1" ;;
-            899999) expected_build="9999.99.1" ;;
-        esac
-        : > "$github_output"
-        GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_run" GITHUB_RUN_NUMBER="27" \
-            TRON_UPSTREAM_WORKFLOW="CI" TRON_UPSTREAM_EVENT="push" \
-            TRON_UPSTREAM_CONCLUSION="success" TRON_UPSTREAM_BRANCH="main" \
-            TRON_UPSTREAM_SHA="$test_sha" TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER="$owner" \
-            "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
-        grep -Fqx "apple_build=$expected_build" "$github_output" \
-            || die "github-ios-output mapped owner $owner to the wrong hosted build"
-    done
-
-    : > "$github_output"
-    GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="push" GITHUB_RUN_NUMBER="28" \
-        GITHUB_REF_TYPE="tag" GITHUB_REF_NAME="$TRON_RELEASE_TAG" GITHUB_SHA="$test_sha" \
-        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
-    for expected in "mode=tag" "apple_build=1000.28.2" "channel=external" "dry_run=false"; do
-        grep -Fqx "$expected" "$github_output" || die "github-ios-output omitted $expected"
-    done
-
-    : > "$github_output"
-    GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_dispatch" GITHUB_RUN_NUMBER="29" \
-        GITHUB_REF_TYPE="branch" GITHUB_REF_NAME="main" GITHUB_SHA="$test_sha" \
-        TRON_IOS_CHANNEL_INPUT="dry-run" \
-        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null
-    for expected in "mode=manual" "apple_build=1000.29.2" "channel=dry-run" "dry_run=true"; do
-        grep -Fqx "$expected" "$github_output" || die "github-ios-output omitted $expected"
-    done
-
-    : > "$github_output"
-    if GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_run" GITHUB_RUN_NUMBER="30" \
-        TRON_UPSTREAM_WORKFLOW="CI" TRON_UPSTREAM_EVENT="pull_request" \
-        TRON_UPSTREAM_CONCLUSION="success" TRON_UPSTREAM_BRANCH="main" \
-        TRON_UPSTREAM_SHA="$test_sha" \
-        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null 2>&1; then
-        die "github-ios-output accepted pull-request CI for automatic delivery"
-    fi
-    [ ! -s "$github_output" ] || die "github-ios-output wrote fields for rejected CI"
-
-    : > "$github_output"
-    if GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_dispatch" GITHUB_RUN_NUMBER="31" \
-        GITHUB_REF_TYPE="branch" GITHUB_REF_NAME="feature" GITHUB_SHA="$test_sha" \
-        TRON_IOS_CHANNEL_INPUT="internal" \
-        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null 2>&1; then
-        die "github-ios-output accepted live manual delivery outside main"
-    fi
-    [ ! -s "$github_output" ] || die "github-ios-output wrote fields for rejected manual delivery"
-
-    : > "$github_output"
-    if GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_dispatch" GITHUB_RUN_NUMBER="32" \
-        GITHUB_REF_TYPE="branch" GITHUB_REF_NAME="feature" GITHUB_SHA="$test_sha" \
-        TRON_IOS_CHANNEL_INPUT="dry-run" \
-        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null 2>&1; then
-        die "github-ios-output accepted manual dry-run outside main"
-    fi
-    [ ! -s "$github_output" ] || die "github-ios-output wrote fields for rejected dry-run"
-
-    : > "$github_output"
-    if GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="push" GITHUB_RUN_NUMBER="215" \
-        GITHUB_REF_TYPE="tag" GITHUB_REF_NAME="$TRON_RELEASE_TAG" GITHUB_SHA="$test_sha" \
-        TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER="215" \
-        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null 2>&1; then
-        die "github-ios-output accepted the automatic build owner override for a tag"
-    fi
-    [ ! -s "$github_output" ] || die "github-ios-output wrote fields for a rejected tag override"
-
-    : > "$github_output"
-    if GITHUB_OUTPUT="$github_output" GITHUB_EVENT_NAME="workflow_run" GITHUB_RUN_NUMBER="33" \
-        TRON_UPSTREAM_WORKFLOW="CI" TRON_UPSTREAM_EVENT="push" \
-        TRON_UPSTREAM_CONCLUSION="success" TRON_UPSTREAM_BRANCH="main" \
-        TRON_UPSTREAM_SHA="$test_sha" TRON_IOS_APPLE_BUILD_OWNER_RUN_NUMBER="900000" \
-        "$PROJECT_DIR/scripts/tron" version github-ios-output >/dev/null 2>&1; then
-        die "github-ios-output accepted an overflowing automatic build owner"
-    fi
-    [ ! -s "$github_output" ] || die "github-ios-output wrote fields for an overflowing owner"
-    rm -f "$github_output"
-
     local invalid
     for invalid in 0.1 0.1-b1 v0.1.b1 0.1.0.0 0.1.0-beta.x 0.1.0-beta.0; do
         TRON_VERSION="$invalid"
@@ -558,12 +313,6 @@ case "$cmd" in
         ;;
     check)
         check_versions
-        ;;
-    github-output)
-        write_github_release_outputs
-        ;;
-    github-ios-output)
-        write_github_ios_outputs
         ;;
     sync)
         [ "$#" -eq 1 ] || die "sync accepts no arguments; use 'tron version check' for read-only validation"

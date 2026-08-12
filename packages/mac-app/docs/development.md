@@ -2,8 +2,9 @@
 
 ## Stage the gateway
 
-Xcode copies generated payloads; it does not run npm or download Node during a
-build. Stage before opening or archiving the project:
+A fresh clone has neither Gateway dependencies/build output nor generated Mac
+payloads. Xcode copies generated payloads; it does not run npm or download Node
+during a build. Stage before opening or archiving the project:
 
 ```bash
 packages/mac-app/scripts/bundle-gateway.sh
@@ -12,7 +13,8 @@ packages/mac-app/scripts/bundle-gateway.sh
 The script:
 
 1. runs locked gateway install and TypeScript build;
-2. creates an independent `npm ci --omit=dev` production tree;
+2. creates an independent `npm ci --omit=dev` production tree, including the
+   owned node-pty postinstall helper;
 3. downloads exact Node 22.22.0 arm64 and x64 archives;
 4. checks hard-coded SHA-256 values;
 5. compiles `tron-gateway-launcher.c` as a universal macOS executable;
@@ -76,7 +78,8 @@ to legacy `~/.tron/auth.json` and never put the local token in the URL.
 
 ## Release
 
-The Mac release workflow stages the gateway, archives with Developer ID signing,
-notarizes the app and DMG, staples both, and publishes only from `tron-v*` tags.
-Manual workflow runs default to unsigned dry-run. Production release remains a
-manual maintainer action; never add an automated deployment command.
+Mac release is manual. Stage the Gateway, generate the project, archive with the
+maintainer's Developer ID identity, notarize and staple the app and DMG, then
+publish the release assets deliberately. `packages/mac-app/scripts/package-dmg.sh`
+owns DMG layout verification and requires `create-dmg` on `PATH`. Never add an
+automated production release or deployment command.

@@ -32,6 +32,7 @@ for generated_output in "$result_bundle" "$enumeration_path" "$metrics_path"; do
   fi
 done
 cd "$ios_dir"
+xcodegen generate
 
 log_ci_event ci_started \
   "destination='$destination' parallel_workers=$parallel_workers enumerate_tests=$enumerate_tests"

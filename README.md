@@ -70,7 +70,7 @@ and Engine/Activity client domains are intentionally absent.
 ## Requirements
 
 - macOS 15 or newer
-- Xcode 26 and XcodeGen
+- Xcode 26 and XcodeGen 2.45.3
 - Node 22.22.0 for gateway development
 - Tailscale on the Mac and iPhone for mobile operation
 
@@ -96,6 +96,10 @@ scripts/tron dev --tailscale
 scripts/tron ios generate
 scripts/tron mac generate
 ```
+
+A fresh clone contains no generated Xcode projects or staged Mac gateway. Run
+`npm ci` before the Gateway build, `xcodegen generate` before either native
+build, and `bundle-gateway.sh` before building the Mac app.
 
 ### Focused native tests
 
@@ -147,5 +151,6 @@ or credentials.
 - [Mac development and packaging](packages/mac-app/docs/development.md)
 - [Contributing](CONTRIBUTING.md)
 
-There is no automated production deployment command. Releases and production
-deployments are manual-only.
+Successful `main` CI publishes an internal TestFlight beta for the maintainer.
+App Store release, public TestFlight distribution, Mac signing/notarization, and
+production deployment remain manual-only.

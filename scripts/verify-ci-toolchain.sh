@@ -15,9 +15,10 @@ for tool in "$@"; do
       ;;
     xcodegen)
       xcodegen --version | grep -F "$TRON_CI_XCODEGEN_VERSION" >/dev/null
-      ;;
-    create-dmg)
-      command -v create-dmg >/dev/null
+      presets="$(cd "$(dirname "$(command -v xcodegen)")/../share/xcodegen/SettingPresets" 2>/dev/null && pwd -P)" \
+        || { echo "xcodegen setting presets are unavailable" >&2; exit 1; }
+      [[ -f "$presets/base.yml" && -f "$presets/Platforms/iOS.yml" && -f "$presets/Platforms/macOS.yml" ]] \
+        || { echo "xcodegen setting presets are incomplete" >&2; exit 1; }
       ;;
     asc)
       asc version 2>&1 | grep -F "$TRON_CI_ASC_VERSION" >/dev/null

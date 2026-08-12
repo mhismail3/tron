@@ -9,6 +9,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+      - run: scripts/personal-info-guard.sh
+      - run: scripts/tron version check
+      - run: scripts/tron version test
+      - name: Check shell syntax
+        run: |
+          bash -n \
+            scripts/install-ci-tools.sh \
+            scripts/ios-ci-test.sh \
+            scripts/ios-gateway-e2e-test \
+            scripts/ios-release-toolchain-doctor.sh \
+            scripts/personal-info-guard.sh \
+            scripts/tron \
+            scripts/tron-version \
+            scripts/verify-ci-toolchain.sh \
+            packages/mac-app/scripts/bundle-gateway.sh
+
   gateway:
     runs-on: macos-15
     steps:
@@ -26,35 +49,22 @@ jobs:
         working-directory: packages/gateway
       - run: npm audit --omit=dev
         working-directory: packages/gateway
-      - run: scripts/personal-info-guard.sh
 
   ios:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - run: brew install xcodegen
-      - run: xcodegen generate
-        working-directory: packages/ios-app
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: npm
+          cache-dependency-path: packages/gateway/package-lock.json
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: "26.3"
+      - run: scripts/install-ci-tools.sh xcodegen
+      - run: scripts/verify-ci-toolchain.sh ios xcodegen
       - run: scripts/ios-ci-test.sh
-      - name: Build iOS UI-test products once
-        run: |
-          TRON_IOS_DESTINATION='platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro' \
-          scripts/ios-gateway-e2e-test prepare
-          TRON_IOS_DESTINATION='platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro' \
-          scripts/ios-gateway-e2e-test build
-      - name: Run iOS smoke UI test without rebuilding
-        working-directory: packages/ios-app
-        run: |
-          xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron UI Validation' \
-            -configuration Test \
-            -destination 'platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro' \
-            -derivedDataPath "${TMPDIR:-/tmp}/tron-ios-gateway-e2e-derived-$UID" \
-            -only-testing:TronMobileUITests/TronSmokeUITests \
-            -collect-test-diagnostics never
-      - name: Run real gateway-to-iOS E2E without rebuilding
-        run: |
-          TRON_IOS_DESTINATION='platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro' \
-          scripts/ios-gateway-e2e-test run
 
   mac:
     runs-on: macos-26
@@ -65,10 +75,12 @@ jobs:
           node-version: 22.22.0
           cache: npm
           cache-dependency-path: packages/gateway/package-lock.json
-      - run: brew install xcodegen
-      - run: npm ci && npm run build
-        working-directory: packages/gateway
-      - run: packages/mac-app/scripts/bundle-gateway.sh --skip-install
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: "26.3"
+      - run: scripts/install-ci-tools.sh xcodegen
+      - run: scripts/verify-ci-toolchain.sh xcode xcodegen
+      - run: packages/mac-app/scripts/bundle-gateway.sh
       - run: xcodegen generate
         working-directory: packages/mac-app
       - name: Build Mac test products

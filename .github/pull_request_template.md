@@ -19,7 +19,7 @@
 - [ ] No provider credentials, device tokens, personal paths, handles, or domains entered source/fixtures.
 - [ ] New mutations carry command IDs and preserve per-session serialization.
 - [ ] Trust/executable-resource copy does not imply sandboxing.
-- [ ] No automated production deployment path was added or invoked.
+- [ ] No automated production deployment path was added or invoked; the existing internal TestFlight beta lane remains beta-only.
 
 ## Screenshots / output
 
