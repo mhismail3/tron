@@ -11,7 +11,6 @@ struct MacAppStartupMaintenanceTests {
         recordedVersion: MacAppVersionIdentity? = nil,
         onboarded: Bool = true,
         canManageLaunchAgent: Bool = true,
-        serverProcess: ServerProcessInfo? = nil,
         pingResult: ServerPingResult? = nil,
         launchAgentManager: MockLaunchAgentManager = MockLaunchAgentManager()
     ) -> EnvironmentSetup {
@@ -24,7 +23,7 @@ struct MacAppStartupMaintenanceTests {
             applicationBundle: tmp.appendingPathComponent("Tron.app", isDirectory: true),
             bearerTokenPath: tmp.appendingPathComponent("auth.json", isDirectory: false),
             onboardedMarkerPath: tmp.appendingPathComponent("internal/run/.onboarded", isDirectory: false),
-            settingsPath: tmp.appendingPathComponent("settings.toml", isDirectory: false),
+            networkCachePath: tmp.appendingPathComponent("gateway/network.json", isDirectory: false),
             launchAgentPlistPath: tmp.appendingPathComponent("Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist", isDirectory: false),
             launchAgentLabel: "com.tron.server",
             serverPort: 9847,
@@ -45,7 +44,6 @@ struct MacAppStartupMaintenanceTests {
             serverStartHealthCheckAttempts: 1,
             serverStartHealthCheckDelayNanoseconds: 0,
             launchAgentManager: launchAgentManager,
-            probeServerProcess: { _ in serverProcess },
             touchOnboardedSentinel: { },
             currentAppVersion: { currentVersion },
             readRecordedAppVersion: {
@@ -137,34 +135,6 @@ struct MacAppStartupMaintenanceTests {
         #expect(mock.calls.isEmpty)
     }
 
-    @Test("dev server takeover defers update restart and does not record marker")
-    func devServerDefersRestart() async throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
-        let mock = MockLaunchAgentManager()
-        let setup = Self.makeSetup(
-            tmp: tmp,
-            currentVersion: current,
-            serverProcess: ServerProcessInfo(
-                pid: 42,
-                uptime: "00:01",
-                isDevServer: true
-            ),
-            launchAgentManager: mock
-        )
-
-        let result = await MacAppStartupMaintenance.run(
-            setup: setup,
-            controller: nil,
-            context: .existingOnboardedLaunch
-        )
-
-        #expect(result == .skipped(.devServerActive))
-        #expect(mock.calls.isEmpty)
-        #expect(setup.readRecordedAppVersion() == nil)
-    }
-
     @Test("wizard completion records current version without restarting")
     func wizardCompletionRecordsWithoutRestarting() async throws {
         let tmp = TestTempDir.make()
@@ -187,11 +157,6 @@ struct MacAppStartupMaintenanceTests {
         setup.onboardedSentinelExists = {
             lifecycleCalls.withLock { $0.onboardedReads += 1 }
             return onboardedSentinelExists()
-        }
-        let probeServerProcess = setup.probeServerProcess
-        setup.probeServerProcess = { port in
-            lifecycleCalls.withLock { $0.processProbes += 1 }
-            return await probeServerProcess(port)
         }
         let writeRecordedAppVersion = setup.writeRecordedAppVersion
         setup.writeRecordedAppVersion = { version in
@@ -220,7 +185,6 @@ struct MacAppStartupMaintenanceTests {
         let completionCalls = lifecycleCalls.withLock { $0 }
         #expect(completionCalls.recordedVersionReads == 0)
         #expect(completionCalls.onboardedReads == 0)
-        #expect(completionCalls.processProbes == 0)
         #expect(completionCalls.markerWrites == 1)
         let marker = tmp.appendingPathComponent("internal/run/mac-app-version.json", isDirectory: false)
         #expect(MacAppVersionMarkerStore.read(at: marker) == current)
@@ -230,6 +194,5 @@ struct MacAppStartupMaintenanceTests {
 private struct StartupMaintenanceCalls {
     var recordedVersionReads = 0
     var onboardedReads = 0
-    var processProbes = 0
     var markerWrites = 0
 }

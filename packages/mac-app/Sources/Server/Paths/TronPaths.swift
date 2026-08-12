@@ -1,15 +1,11 @@
 import Foundation
 
-/// Canonical Tron-home and bundle paths owned by the wrapper. Mirrors
-/// `packages/agent/src/shared/foundation/paths/mod.rs` for shared user-data
-/// locations and adds the macOS bundle layout for app-owned artifacts.
+/// Canonical Tron-home, gateway-state, and bundle paths owned by the wrapper.
 enum TronPaths {
     private enum HomeComponent {
         static let internalDir = "internal"
         static let runDir = "run"
-        static let databaseDir = "database"
-        static let authFile = "auth.json"
-        static let settingsFile = "settings.toml"
+        static let networkCacheFile = "network.json"
     }
 
     static let tronDataDirEnv = "TRON_DATA_DIR"
@@ -46,11 +42,6 @@ enum TronPaths {
 
     static var internalDir: URL { tronHome.appendingPathComponent(HomeComponent.internalDir, isDirectory: true) }
     static var runDir: URL { internalDir.appendingPathComponent(HomeComponent.runDir, isDirectory: true) }
-    static var databaseLockPath: URL {
-            internalDir
-                .appendingPathComponent(HomeComponent.databaseDir, isDirectory: true)
-                .appendingPathComponent("tron.sqlite.lock", isDirectory: false)
-    }
 
     static let releaseApplicationURL = URL(fileURLWithPath: "/Applications/Tron.app", isDirectory: true)
 
@@ -69,7 +60,15 @@ enum TronPaths {
     }
 
     static var bearerTokenPath: URL {
-        tronHome.appendingPathComponent(HomeComponent.authFile, isDirectory: false)
+        tronHome
+            .appendingPathComponent("gateway", isDirectory: true)
+            .appendingPathComponent("local-auth.json", isDirectory: false)
+    }
+
+    static var enrollmentCodePath: URL {
+        tronHome
+            .appendingPathComponent("gateway", isDirectory: true)
+            .appendingPathComponent("enrollment.json", isDirectory: false)
     }
 
     static var onboardedMarkerPath: URL {
@@ -88,15 +87,10 @@ enum TronPaths {
         runDir.appendingPathComponent(macWrapperLockFileName(bundleIdentifier: Bundle.main.bundleIdentifier), isDirectory: false)
     }
 
-    /// Owner-only local actuator socket created by the signed wrapper. The
-    /// ordinary Mac Operator worker derives this path from its Tron home; no
-    /// socket path or host identity enters its direct tool schema.
-    static var macOperatorSocketPath: URL {
-        runDir.appendingPathComponent("mac-operator.sock", isDirectory: false)
-    }
-
-    static var settingsPath: URL {
-        tronHome.appendingPathComponent(HomeComponent.settingsFile, isDirectory: false)
+    static var networkCachePath: URL {
+        tronHome
+            .appendingPathComponent("gateway", isDirectory: true)
+            .appendingPathComponent(HomeComponent.networkCacheFile, isDirectory: false)
     }
 
     static var launchAgentPlistPath: URL {
@@ -148,7 +142,7 @@ enum TronPaths {
     }
 
     static func agentBundleName(environment: [String: String]) -> String {
-        isIsolatedInstallMode(environment: environment) ? "Tron Server Dev" : "Tron Server"
+        isIsolatedInstallMode(environment: environment) ? "Tron Agent Dev" : "Tron Agent"
     }
     /// Wrapper bundle identifiers that may own the SMAppService
     /// registration. launchd uses the active parent bundle as the

@@ -45,7 +45,7 @@ body:
       description: Where would this live?
       multiple: true
       options:
-        - Rust agent (server)
+        - Tron Gateway
         - iOS app
         - Mac app (Tron.app wrapper)
         - CLI (`tron …`)

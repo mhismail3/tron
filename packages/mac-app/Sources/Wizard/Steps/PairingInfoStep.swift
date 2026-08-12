@@ -19,9 +19,9 @@ struct PairingInfoStep: View {
     /// panel copy so the user knows whether to wait (server still
     /// starting) vs. fix Tailscale.
     enum PairingFailureReason {
-        case noToken
+        case noCode
         case serverUnreachable
-        case tokenRejected
+        case localAuthenticationFailed
         case noTailscaleIP
         case qrGenerationFailed
     }
@@ -120,8 +120,8 @@ struct PairingInfoStep: View {
                 Group {
                     pairingRow(field: .tailscaleIP, label: "Tailscale IP", value: payload.host)
                     pairingRow(field: .port, label: "Port", value: String(payload.port))
-                    pairingRow(field: .pairingToken, label: "Pairing token", value: payload.token, masked: true)
-                    pairingRow(field: .serverName, label: "Server name", value: payload.label ?? LocalComputerName.defaultName)
+                    pairingRow(field: .pairingCode, label: "Pairing code", value: payload.code, masked: true)
+                    pairingRow(field: .serverName, label: "Mac name", value: payload.label ?? LocalComputerName.defaultName)
                 }
                 .transition(PairingInfoStepLayout.revealTransition)
             } else if let failureReason {
@@ -191,9 +191,9 @@ struct PairingInfoStep: View {
     private func failureHeadline(for reason: PairingFailureReason) -> String {
         switch reason {
         case .noTailscaleIP: return "Tailscale IP not detected"
-        case .noToken: return "Pairing token missing"
-        case .serverUnreachable: return "Server not reachable"
-        case .tokenRejected: return "Pairing token rejected"
+        case .noCode: return "Pairing code missing"
+        case .serverUnreachable: return "Tron is not reachable"
+        case .localAuthenticationFailed: return "Tron authentication failed"
         case .qrGenerationFailed: return "QR code failed"
         }
     }
@@ -202,12 +202,12 @@ struct PairingInfoStep: View {
         switch reason {
         case .noTailscaleIP:
             return "Open Tailscale on this Mac and confirm it is signed in. Fresh installs do not need a pre-existing settings file."
-        case .noToken:
-            return "The server has not written its local pairing token yet. Go back to Install or wait a few seconds, then reopen Pairing Info."
+        case .noCode:
+            return "Tron has not issued a current one-time pairing code. Wait a few seconds and try again."
         case .serverUnreachable:
-            return "Tron Server did not answer on this Mac. Go back to Install to confirm it is running, then reopen Pairing Info."
-        case .tokenRejected:
-            return "The local token file does not match the running server. Restart Tron Server from the menu bar, then reopen Pairing Info."
+            return "Tron did not answer on this Mac. Go back to Install to confirm it is running, then reopen Pairing Info."
+        case .localAuthenticationFailed:
+            return "The Mac app could not authenticate to Tron. Restart Tron from the menu bar, then reopen Pairing Info."
         case .qrGenerationFailed:
             return "The pairing values were resolved, but the QR code could not be generated. Use the manual values or reopen Pairing Info."
         }
@@ -228,21 +228,25 @@ struct PairingInfoStep: View {
         // Fresh installs may not have a settings file yet. Prefer live and
         // current-session state, then fall back to server/settings state;
         // cache the selected host for later wrapper and server reads.
-        let token = setup.readBearerToken()
-        guard let token, !token.isEmpty else {
-            fail(.noToken)
+        guard let localToken = setup.readBearerToken(), !localToken.isEmpty else {
+            fail(.localAuthenticationFailed)
             return
         }
 
-        let pingResult = await setup.pingServer(token)
+        let pingResult = await setup.pingServer(localToken)
         switch pingResult {
         case .success:
             break
         case .unauthorized:
-            fail(.tokenRejected)
+            fail(.localAuthenticationFailed)
             return
         case .unreachable, .timeout, .malformedResponse:
             fail(.serverUnreachable)
+            return
+        }
+
+        guard let code = setup.readEnrollmentCode() else {
+            fail(.noCode)
             return
         }
 
@@ -265,7 +269,7 @@ struct PairingInfoStep: View {
         let payload = PairingPayload(
             host: host,
             port: setup.serverPort,
-            token: token,
+            code: code,
             label: LocalComputerName.current()
         )
         guard let url = PairingURLBuilder.makeURL(payload),
@@ -321,7 +325,7 @@ struct PairingInfoStep: View {
 private enum PairingCopyField: Hashable {
     case tailscaleIP
     case port
-    case pairingToken
+    case pairingCode
     case serverName
 }
 

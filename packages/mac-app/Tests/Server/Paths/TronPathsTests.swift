@@ -30,7 +30,7 @@ struct TronPathsTests {
 
     @Test("server helper binary lives inside the bundled Login Item")
     func serverHelperBinaryShape() {
-        #expect(TronPaths.serverHelperBundleProgram(environment: [:]) == "Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron")
+        #expect(TronPaths.serverHelperBundleProgram(environment: [:]) == "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron")
     }
 
     @Test("isolated install mode uses the dev helper, port, and home")
@@ -39,8 +39,8 @@ struct TronPathsTests {
 
         #expect(TronPaths.launchAgentLabel(environment: environment) == "com.tron.server.dev")
         #expect(TronPaths.defaultServerPort(environment: environment) == 9848)
-        #expect(TronPaths.agentBundleName(environment: environment) == "Tron Server Dev")
-        #expect(TronPaths.serverHelperBundleProgram(environment: environment) == "Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron")
+        #expect(TronPaths.agentBundleName(environment: environment) == "Tron Agent Dev")
+        #expect(TronPaths.serverHelperBundleProgram(environment: environment) == "Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron")
         #expect(TronPaths.launchAgentEnvironmentVariables(environment: environment) == [
             TronPaths.tronHomeNameEnv: ".tron-dev",
         ])
@@ -62,21 +62,16 @@ struct TronPathsTests {
         #expect(TronPaths.runDir.path.hasSuffix("/internal/run"))
     }
 
-    @Test("database lock stays beside tron.sqlite")
-    func databaseLockShape() {
-        #expect(TronPaths.databaseLockPath.path.hasSuffix("/internal/database/tron.sqlite.lock"))
-    }
-
     @Test("LaunchAgent plist is bundled in Contents/Library/LaunchAgents")
     func launchAgentPlistShape() {
         #expect(TronPaths.launchAgentLabel(environment: [:]) == "com.tron.server")
         #expect(TronPaths.launchAgentLabel(environment: [TronPaths.isolatedInstallModeEnv: TronPaths.isolatedInstallModeValue]) == "com.tron.server.dev")
     }
 
-    @Test("auth.json lives at the Tron home root")
+    @Test("wrapper credential lives in gateway-owned state")
     func bearerTokenShape() {
-        let tok = TronPaths.bearerTokenPath.path
-        #expect(tok.hasSuffix("/.tron/auth.json"))
+        let token = TronPaths.bearerTokenPath.path
+        #expect(token.hasSuffix("/.tron/gateway/local-auth.json"))
     }
 
     @Test("onboarded sentinel lives in internal/run/")
@@ -98,8 +93,8 @@ struct TronPathsTests {
 
     @Test("engine settings live at the Tron home root")
     func settingsShape() {
-        let s = TronPaths.settingsPath.path
-        #expect(s.hasSuffix("/.tron/settings.toml"))
+        let s = TronPaths.networkCachePath.path
+        #expect(s.hasSuffix("/.tron/gateway/network.json"))
     }
 
 }

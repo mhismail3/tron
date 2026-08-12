@@ -8,7 +8,7 @@ import Foundation
 /// macOS therefore surfaces this permission under the responsible wrapper
 /// app (`Tron.app` in Release, `TronMac.app` in Debug). Probing from this
 /// process keeps the wizard, System Settings row, and launchd attribution
-/// aligned without creating a disabled `Tron Server.app` entry.
+/// aligned without creating a disabled `Tron Agent.app` entry.
 enum MacPermissionProbe {
     enum FileProbeOutcome: Equatable {
         case readable

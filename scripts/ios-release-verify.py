@@ -4085,7 +4085,7 @@ def self_test() -> None:
         tag_source = argparse.Namespace(**vars(direct_source_args))
         tag_source.event = "push"
         tag_source.ref_type = "tag"
-        tag_source.ref_name = "server-v1.2.3"
+        tag_source.ref_name = "tron-v1.2.3"
         tag_source.channel = "external"
         tag_source.mode = "main-ancestor"
         tag_source.observed_main_sha = "f" * 40

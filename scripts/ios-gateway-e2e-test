@@ -1,0 +1,290 @@
+#!/usr/bin/env bash
+# Focused real-gateway iOS E2E harness. Gateway, fixture, DerivedData, and the
+# test build persist across invocations so protocol/UI assertions can iterate
+# without repeating npm installation or a cold Xcode build.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+gateway_dir="$repo_root/packages/gateway"
+ios_dir="$repo_root/packages/ios-app"
+run_root="${TRON_IOS_E2E_STATE_DIR:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-$UID}"
+derived_data="${TRON_IOS_E2E_DERIVED_DATA:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-derived-$UID}"
+state_file="$run_root/state.env"
+pid_file="$run_root/gateway.pid"
+log_file="$run_root/gateway.log"
+destination="${TRON_IOS_DESTINATION:-platform=iOS Simulator,name=iPhone 17 Pro}"
+mkdir -p "$run_root"
+chmod 700 "$run_root"
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/ios-gateway-e2e-test COMMAND
+
+Commands:
+  prepare   Install/build gateway if needed and start one persistent fixture.
+  build     Incrementally build the UI-test products and patch their fixture env.
+  run       Renew the cheap fixture and run only the E2E test, without building.
+  iterate   Incremental build, then one focused test-without-building run.
+  all       Prepare, build, and run. Leaves the fixture running for iteration.
+  status    Print fixture/build status.
+  logs      Follow the persistent gateway log.
+  stop      Stop and remove the gateway fixture; preserve DerivedData.
+  clean     Stop and remove both fixture state and E2E DerivedData.
+
+Typical edit loop:
+  scripts/ios-gateway-e2e-test prepare  # once
+  scripts/ios-gateway-e2e-test build    # once, then after source edits
+  scripts/ios-gateway-e2e-test run      # repeat; renews pairing/session state only
+
+Environment:
+  TRON_IOS_DESTINATION          xcodebuild destination
+  TRON_IOS_E2E_STATE_DIR        persistent fixture directory
+  TRON_IOS_E2E_DERIVED_DATA     persistent focused-test DerivedData
+USAGE
+}
+
+die() { echo "error: $*" >&2; exit 1; }
+
+gateway_running() {
+  [[ -s "$pid_file" ]] || return 1
+  kill -0 "$(<"$pid_file")" 2>/dev/null
+}
+
+stop_gateway() {
+  if gateway_running; then
+    kill "$(<"$pid_file")" 2>/dev/null || true
+    for _ in {1..50}; do gateway_running || break; sleep 0.1; done
+    gateway_running && kill -9 "$(<"$pid_file")" 2>/dev/null || true
+  fi
+  rm -f "$pid_file"
+}
+
+load_state() {
+  [[ -s "$state_file" ]] || die "fixture is not prepared; run '$0 prepare'"
+  # Generated exclusively by this script with shell-escaped values.
+  # shellcheck disable=SC1090
+  source "$state_file"
+  gateway_running || die "fixture gateway is not running; run '$0 prepare'"
+}
+
+install_gateway_if_needed() {
+  local lock_hash installed_hash=""
+  lock_hash="$(shasum -a 256 "$gateway_dir/package-lock.json" | awk '{print $1}')"
+  [[ -s "$run_root/npm-lock.sha256" ]] && installed_hash="$(<"$run_root/npm-lock.sha256")"
+  if [[ ! -d "$gateway_dir/node_modules" || "$installed_hash" != "$lock_hash" ]]; then
+    npm --prefix "$gateway_dir" ci
+    printf '%s\n' "$lock_hash" >"$run_root/npm-lock.sha256"
+  fi
+  npm --prefix "$gateway_dir" run build
+}
+
+write_fixture_extension() {
+  local agent_dir="$1" pi_ai_url
+  pi_ai_url="file://$gateway_dir/node_modules/@earendil-works/pi-ai/dist/index.js"
+  mkdir -p "$agent_dir/extensions"
+  cat >"$agent_dir/extensions/tron-e2e.ts" <<EOF
+import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall } from "$pi_ai_url";
+const faux = fauxProvider({
+  provider: "tron-e2e",
+  models: [{ id: "e2e-model", name: "Tron E2E Model", reasoning: true, input: ["text", "image"], contextWindow: 32768, maxTokens: 4096 }],
+  tokensPerSecond: 8,
+});
+faux.setResponses([
+  async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return fauxAssistantMessage("Streaming response starts now and remains active until the phone disconnects. Detached response complete");
+  },
+  fauxAssistantMessage([
+    fauxThinking("Preparing a portable permission interaction"),
+    fauxText("Checking the command before running it."),
+    fauxToolCall("bash", { command: "sleep 2; printf tool-output" }, { id: "e2e-tool" }),
+  ], { stopReason: "toolUse" }),
+  fauxAssistantMessage("Tool response complete"),
+]);
+export default function (pi) {
+  pi.registerProvider(faux.provider);
+  pi.on("tool_call", async (event, ctx) => {
+    if (event.toolName !== "bash") return undefined;
+    const choice = await ctx.ui.select("Allow this test command?", ["Yes", "No"]);
+    return choice === "Yes" ? undefined : { block: true, reason: "Denied" };
+  });
+}
+EOF
+  cat >"$agent_dir/settings.json" <<'EOF'
+{
+  "defaultProvider": "tron-e2e",
+  "defaultModel": "e2e-model",
+  "defaultThinkingLevel": "low",
+  "defaultProjectTrust": "never",
+  "enableAnalytics": false,
+  "enableInstallTelemetry": false
+}
+EOF
+}
+
+prepare_fixture() {
+  stop_gateway
+  install_gateway_if_needed
+  start_fresh_fixture
+}
+
+start_fresh_fixture() {
+  stop_gateway
+  local tron_home="$run_root/tron" agent_dir="$run_root/agent" workspace="$run_root/workspace" port code
+  rm -rf "$tron_home" "$agent_dir" "$workspace"
+  mkdir -p "$tron_home" "$workspace"
+  write_fixture_extension "$agent_dir"
+  port="$(python3 - <<'PY'
+import socket
+sock = socket.socket()
+sock.bind(("127.0.0.1", 0))
+print(sock.getsockname()[1])
+sock.close()
+PY
+)"
+
+  TRON_DATA_DIR="$tron_home" PI_CODING_AGENT_DIR="$agent_dir" \
+    TRON_GATEWAY_HOST=127.0.0.1 TRON_GATEWAY_PORT="$port" \
+    nohup node "$gateway_dir/dist/index.js" >"$log_file" 2>&1 </dev/null &
+  echo "$!" >"$pid_file"
+
+  for _ in {1..200}; do
+    [[ -s "$tron_home/gateway/enrollment.json" ]] \
+      && curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1 \
+      && break
+    gateway_running || { cat "$log_file" >&2; die "gateway fixture exited"; }
+    sleep 0.1
+  done
+  [[ -s "$tron_home/gateway/enrollment.json" ]] || die "gateway fixture did not become ready"
+  code="$(python3 - "$tron_home/gateway/enrollment.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as handle:
+    print(json.load(handle)["code"])
+PY
+)"
+
+  {
+    printf 'TRON_E2E_PORT=%q\n' "$port"
+    printf 'TRON_E2E_CODE=%q\n' "$code"
+    printf 'TRON_E2E_WORKSPACE=%q\n' "$workspace"
+    printf 'TRON_E2E_TRON_HOME=%q\n' "$tron_home"
+    printf 'TRON_E2E_AGENT_DIR=%q\n' "$agent_dir"
+  } >"$state_file"
+  chmod 600 "$state_file"
+  echo "Gateway fixture ready on 127.0.0.1:$port (pid $(<"$pid_file"))"
+}
+
+find_xctestrun() {
+  [[ -d "$derived_data/Build/Products" ]] || return 0
+  find "$derived_data/Build/Products" -maxdepth 1 -type f \
+    -name 'Tron UI Validation_*.xctestrun' \
+    -exec /usr/bin/stat -f '%m %N' {} + 2>/dev/null \
+    | sort -nr | head -1 | cut -d' ' -f2-
+}
+
+patch_xctestrun() {
+  local xctestrun="$1"
+  python3 - "$xctestrun" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" <<'PY'
+import plistlib, sys
+path, port, code, workspace = sys.argv[1:]
+with open(path, "rb") as handle:
+    document = plistlib.load(handle)
+entry = document["TronMobileUITests"]
+values = {
+    "TRON_E2E_PORT": port,
+    "TRON_E2E_CODE": code,
+    "TRON_E2E_WORKSPACE": workspace,
+}
+entry.setdefault("EnvironmentVariables", {}).update(values)
+entry.setdefault("UITargetAppEnvironmentVariables", {}).update(values)
+entry["DiagnosticCollectionPolicy"] = 0
+with open(path, "wb") as handle:
+    plistlib.dump(document, handle)
+PY
+  printf '%s\n' "$xctestrun" >"$run_root/xctestrun-path"
+}
+
+build_tests() {
+  load_state
+  cd "$ios_dir"
+  xcodegen generate
+  xcodebuild build-for-testing \
+    -project TronMobile.xcodeproj \
+    -scheme 'Tron UI Validation' \
+    -configuration Test \
+    -destination "$destination" \
+    -derivedDataPath "$derived_data" \
+    -quiet
+  local xctestrun
+  xctestrun="$(find_xctestrun)"
+  [[ -n "$xctestrun" ]] || die "focused build did not produce an xctestrun file"
+  patch_xctestrun "$xctestrun"
+  echo "Focused test products ready: $xctestrun"
+}
+
+run_test() {
+  # Pairing invitations are intentionally one-use and each UI run resets its
+  # local profile. Renew only fixture state here; do not reinstall npm packages,
+  # rebuild the gateway, regenerate Xcode, or rebuild test products.
+  start_fresh_fixture
+  load_state
+  local xctestrun=""
+  [[ -s "$run_root/xctestrun-path" ]] && xctestrun="$(<"$run_root/xctestrun-path")"
+  [[ -f "$xctestrun" ]] || xctestrun="$(find_xctestrun)"
+  [[ -f "$xctestrun" ]] || die "test products are not built; run '$0 build'"
+  patch_xctestrun "$xctestrun"
+
+  local started=$SECONDS status result_bundle="$run_root/FocusedE2E.xcresult"
+  rm -rf "$result_bundle"
+  set +e
+  NSUnbufferedIO=YES xcodebuild test-without-building \
+    -xctestrun "$xctestrun" \
+    -destination "$destination" \
+    -only-testing:TronMobileUITests/TronGatewayEndToEndUITests \
+    -parallel-testing-enabled NO \
+    -collect-test-diagnostics never \
+    -resultBundlePath "$result_bundle" \
+    -quiet
+  status=$?
+  set -e
+  echo "Focused E2E run completed in $((SECONDS - started))s (status $status)"
+  if ((status != 0)) && [[ -d "$result_bundle" ]]; then
+    xcrun xcresulttool get test-results tests --path "$result_bundle" 2>/dev/null \
+      | python3 -c 'import json,sys
+try: document=json.load(sys.stdin)
+except Exception: raise SystemExit(0)
+def walk(value):
+    if isinstance(value, dict):
+        if value.get("nodeType") == "Failure Message":
+            print("failure: {}".format(value.get("name", "assertion failed")))
+        for child in value.values(): walk(child)
+    elif isinstance(value, list):
+        for child in value: walk(child)
+walk(document)' 2>/dev/null || true
+  fi
+  return "$status"
+}
+
+show_status() {
+  if gateway_running; then echo "Gateway: running (pid $(<"$pid_file"))"; else echo "Gateway: stopped"; fi
+  [[ -s "$state_file" ]] && { source "$state_file"; echo "Endpoint: 127.0.0.1:$TRON_E2E_PORT"; echo "Workspace: $TRON_E2E_WORKSPACE"; }
+  local xctestrun="$(find_xctestrun)"
+  [[ -n "$xctestrun" ]] && echo "Test products: $xctestrun" || echo "Test products: not built"
+  echo "DerivedData: $derived_data"
+}
+
+command="${1:-all}"
+case "$command" in
+  prepare) prepare_fixture ;;
+  build) build_tests ;;
+  run) run_test ;;
+  iterate) build_tests; run_test ;;
+  all) prepare_fixture; build_tests; run_test ;;
+  status) show_status ;;
+  logs) touch "$log_file"; tail -f "$log_file" ;;
+  stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/workspace" "$state_file" "$run_root/xctestrun-path" ;;
+  clean) stop_gateway; rm -rf "$run_root" "$derived_data" ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; die "unknown command: $command" ;;
+esac

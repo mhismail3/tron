@@ -16,88 +16,88 @@ private func queryValue(_ name: String, in url: URL) -> String? {
 struct PairingURLBuilderTests {
     @Test("required fields are emitted for iOS")
     func emitsRequiredFields() throws {
-        let payload = PairingPayload(host: "100.64.0.1", port: 9847, token: "abc123xyz", label: nil)
+        let payload = PairingPayload(host: "100.64.0.1", port: 9847, code: "abc123xyz", label: nil)
         let url = try #require(PairingURLBuilder.makeURL(payload))
 
         #expect(url.scheme == "tron")
         #expect(url.host == "pair")
         #expect(queryValue("host", in: url) == payload.host)
         #expect(queryValue("port", in: url) == "9847")
-        #expect(queryValue("token", in: url) == payload.token)
+        #expect(queryValue("code", in: url) == payload.code)
         #expect(queryValue("label", in: url) == nil)
     }
 
     @Test("server name label is emitted")
     func emitsLabel() throws {
-        let payload = PairingPayload(host: "100.64.0.1", port: 9847, token: "tok", label: "Studio Mac")
+        let payload = PairingPayload(host: "100.64.0.1", port: 9847, code: "ABCD-EFGH", label: "Studio Mac")
         let url = try #require(PairingURLBuilder.makeURL(payload))
         #expect(queryValue("label", in: url) == "Studio Mac")
     }
 
     @Test("blank server name label is omitted")
     func omitsBlankLabel() throws {
-        let payload = PairingPayload(host: "100.64.0.1", port: 9847, token: "tok", label: "  \n")
+        let payload = PairingPayload(host: "100.64.0.1", port: 9847, code: "ABCD-EFGH", label: "  \n")
         let url = try #require(PairingURLBuilder.makeURL(payload))
         #expect(queryValue("label", in: url) == nil)
     }
 
-    @Test("trailing whitespace in host/token is trimmed")
+    @Test("trailing whitespace in host and code is trimmed")
     func whitespaceTrimming() throws {
-        let payload = PairingPayload(host: "  100.64.0.1\n", port: 9847, token: "\ttok  ", label: nil)
+        let payload = PairingPayload(host: "  100.64.0.1\n", port: 9847, code: "\tABCD-EFGH  ", label: nil)
         let url = try #require(PairingURLBuilder.makeURL(payload))
         #expect(queryValue("host", in: url) == "100.64.0.1")
-        #expect(queryValue("token", in: url) == "tok")
+        #expect(queryValue("code", in: url) == "ABCD-EFGH")
     }
 
     @Test("empty host rejected")
     func emptyHostRejected() {
-        let payload = PairingPayload(host: "", port: 9847, token: "tok", label: nil)
+        let payload = PairingPayload(host: "", port: 9847, code: "ABCD-EFGH", label: nil)
         #expect(PairingURLBuilder.makeURL(payload) == nil)
     }
 
     @Test("whitespace-only host rejected")
     func whitespaceOnlyHostRejected() {
-        let payload = PairingPayload(host: "   \n\t", port: 9847, token: "tok", label: nil)
+        let payload = PairingPayload(host: "   \n\t", port: 9847, code: "ABCD-EFGH", label: nil)
         #expect(PairingURLBuilder.makeURL(payload) == nil)
     }
 
-    @Test("empty token rejected")
-    func emptyTokenRejected() {
-        let payload = PairingPayload(host: "100.64.0.1", port: 9847, token: "", label: nil)
+    @Test("empty code rejected")
+    func emptyCodeRejected() {
+        let payload = PairingPayload(host: "100.64.0.1", port: 9847, code: "", label: nil)
         #expect(PairingURLBuilder.makeURL(payload) == nil)
     }
 
     @Test("zero, negative, and oversized ports are rejected")
     func invalidPortRejected() {
-        #expect(PairingURLBuilder.makeURL(PairingPayload(host: "1.2.3.4", port: 0, token: "t", label: nil)) == nil)
-        #expect(PairingURLBuilder.makeURL(PairingPayload(host: "1.2.3.4", port: -1, token: "t", label: nil)) == nil)
-        #expect(PairingURLBuilder.makeURL(PairingPayload(host: "1.2.3.4", port: 65_536, token: "t", label: nil)) == nil)
+        #expect(PairingURLBuilder.makeURL(PairingPayload(host: "1.2.3.4", port: 0, code: "ABCD-EFGH", label: nil)) == nil)
+        #expect(PairingURLBuilder.makeURL(PairingPayload(host: "1.2.3.4", port: -1, code: "ABCD-EFGH", label: nil)) == nil)
+        #expect(PairingURLBuilder.makeURL(PairingPayload(host: "1.2.3.4", port: 65_536, code: "ABCD-EFGH", label: nil)) == nil)
     }
 
     @Test("port boundaries match the iOS parser")
     func portBoundaries() throws {
-        let payload = PairingPayload(host: "1.2.3.4", port: 65_535, token: "t", label: nil)
+        let payload = PairingPayload(host: "1.2.3.4", port: 65_535, code: "ABCD-EFGH", label: nil)
         let url = try #require(PairingURLBuilder.makeURL(payload))
         #expect(queryValue("port", in: url) == "65535")
     }
 
     @Test("percent-encoded label characters retain their value")
     func percentEncodedLabel() throws {
-        let payload = PairingPayload(host: "1.2.3.4", port: 9847, token: "t", label: "Studio's Mac")
+        let payload = PairingPayload(host: "1.2.3.4", port: 9847, code: "ABCD-EFGH", label: "Studio's Mac")
         let url = try #require(PairingURLBuilder.makeURL(payload))
         #expect(queryValue("label", in: url) == "Studio's Mac")
     }
 
     @Test("hostnames are canonicalized for iOS")
     func hostnameAsHost() throws {
-        let payload = PairingPayload(host: "My-Mac.Tail-Scale.Ts.Net.", port: 9847, token: "t", label: nil)
+        let payload = PairingPayload(host: "My-Mac.Tail-Scale.Ts.Net.", port: 9847, code: "ABCD-EFGH", label: nil)
         let url = try #require(PairingURLBuilder.makeURL(payload))
         #expect(queryValue("host", in: url) == "my-mac.tail-scale.ts.net")
     }
 
     @Test("IPv6 host is emitted unbracketed")
     func ipv6HostAccepted() throws {
-        let payload = PairingPayload(host: "FD7A:115C:A1E0::1", port: 9847, token: "t", label: nil)
+        let payload = PairingPayload(host: "FD7A:115C:A1E0::1", port: 9847, code: "ABCD-EFGH", label: nil)
         let url = try #require(PairingURLBuilder.makeURL(payload))
         #expect(queryValue("host", in: url) == "fd7a:115c:a1e0::1")
     }
@@ -113,7 +113,7 @@ struct PairingURLBuilderTests {
             "mac..tailnet.ts.net",
         ] {
             #expect(
-                PairingURLBuilder.makeURL(PairingPayload(host: host, port: 9847, token: "t", label: nil)) == nil,
+                PairingURLBuilder.makeURL(PairingPayload(host: host, port: 9847, code: "ABCD-EFGH", label: nil)) == nil,
                 "expected \(host) to be rejected"
             )
         }

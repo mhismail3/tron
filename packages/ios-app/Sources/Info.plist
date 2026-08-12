@@ -26,16 +26,16 @@
 	<string>$(TRON_CANONICAL_VERSION)</string>
 	<key>TRONMacDownloadURL</key>
 	<string>$(TRON_MAC_DOWNLOAD_URL)</string>
-	<key>TRONAPNSEnvironment</key>
-	<string>$(TRON_APNS_ENVIRONMENT)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Tron uses the camera to scan Mac pairing QR codes and capture photos for messages.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Tron connects to your Mac over your trusted local or Tailscale network for engine pairing and live sessions.</string>
+	<string>Tron connects to your Mac over your trusted local or Tailscale network for agent sessions.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Tron records voice input so your active speech transcription worker can turn it into a message draft.</string>
+	<string>Tron records voice input so iOS speech recognition can turn it into a message draft.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Tron uses on-device and Apple speech recognition to transcribe message drafts.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -67,10 +67,6 @@
 		<string>Fonts/IBMPlexMono-SemiBold.ttf</string>
 		<string>Fonts/IBMPlexMono-Bold.ttf</string>
 		<string>Fonts/GeistMono-Variable.ttf</string>
-	</array>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>remote-notification</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict>

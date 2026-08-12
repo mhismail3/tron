@@ -84,7 +84,7 @@ struct ExistingInstallDetectorTests {
     func bundledHelperValidationOwnsFailures() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let helper = tmp.appendingPathComponent("Tron Server.app", isDirectory: true)
+        let helper = tmp.appendingPathComponent("Tron Agent.app", isDirectory: true)
         let binary = helper.appendingPathComponent("Contents/MacOS/tron", isDirectory: false)
         let plist = tmp.appendingPathComponent("com.tron.server.plist", isDirectory: false)
 
@@ -97,10 +97,10 @@ struct ExistingInstallDetectorTests {
             )
         }
 
-        #expect(validate() == "Tron Server.app is missing from the application bundle.")
+        #expect(validate() == "Tron Agent.app is missing from the application bundle.")
 
         try FileManager.default.createDirectory(at: helper, withIntermediateDirectories: true)
-        #expect(validate() == "Tron Server.app is missing its tron executable.")
+        #expect(validate() == "Tron Agent.app is missing its tron executable.")
 
         try FileManager.default.createDirectory(at: binary.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data().write(to: binary)
@@ -109,8 +109,8 @@ struct ExistingInstallDetectorTests {
         try Data("<plist/>".utf8).write(to: plist)
         #expect(validate() == nil)
         #expect(
-            validate(signatureProblem: "Tron Server.app signature is invalid")
-                == "Tron Server.app signature is invalid"
+            validate(signatureProblem: "Tron Agent.app signature is invalid")
+                == "Tron Agent.app signature is invalid"
         )
     }
 
@@ -125,7 +125,7 @@ struct ExistingInstallDetectorTests {
             helperBinary: paths.helperBinary,
             plistPath: paths.plistPath,
             bundleVersionResolver: { _ in nil },
-            bundleSignatureProblemResolver: { _ in "Tron Server.app signature is invalid" },
+            bundleSignatureProblemResolver: { _ in "Tron Agent.app signature is invalid" },
             serviceStatusResolver: { .enabled }
         )
 
@@ -144,7 +144,7 @@ struct ExistingInstallDetectorTests {
             plistPath: plist,
             label: "com.tron.server",
             port: 9847,
-            bundleProgram: "Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron",
+            bundleProgram: "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
             environmentVariables: [:],
             associatedBundleIDs: ["com.tron.mac", "com.tron.mac.dev"]
         ))
@@ -182,7 +182,7 @@ struct ExistingInstallDetectorTests {
             plistPath: plist,
             label: "com.tron.server.dev",
             port: 9848,
-            bundleProgram: "Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron",
+            bundleProgram: "Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron",
             environmentVariables: environment,
             associatedBundleIDs: ["com.tron.mac.dev", "com.tron.mac"]
         ))
@@ -191,11 +191,11 @@ struct ExistingInstallDetectorTests {
     @Test("ad-hoc helper signature is rejected before SMAppService registration")
     func adhocHelperSignatureRejected() {
         let problem = ExistingInstallDetector.codeSignatureIdentityProblem("""
-        Executable=/tmp/Tron Server.app/Contents/MacOS/tron
+        Executable=/tmp/Tron Agent.app/Contents/MacOS/tron
         Identifier=com.tron.server
         Signature=adhoc
         TeamIdentifier=not set
-        """, expectedBundleIdentifier: "com.tron.server", helperName: "Tron Server.app")
+        """, expectedBundleIdentifier: "com.tron.server", helperName: "Tron Agent.app")
 
         #expect(problem?.contains("ad-hoc signed") == true)
     }
@@ -203,7 +203,7 @@ struct ExistingInstallDetectorTests {
     @Test("team-signed helper identity is accepted")
     func teamSignedHelperIdentityAccepted() {
         let problem = ExistingInstallDetector.codeSignatureIdentityProblem("""
-        Executable=/tmp/Tron Server.app/Contents/MacOS/tron
+        Executable=/tmp/Tron Agent.app/Contents/MacOS/tron
         Identifier=com.tron.server
         TeamIdentifier=MYGKXH6TY4
         """)
@@ -214,7 +214,7 @@ struct ExistingInstallDetectorTests {
     private typealias HelperFixture = (helperBundle: URL, helperBinary: URL, plistPath: URL)
 
     private func makeHelperFixture(in tmp: URL, includePlist: Bool = true) throws -> HelperFixture {
-        let helper = tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app", isDirectory: true)
+        let helper = tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Agent.app", isDirectory: true)
         let binary = helper.appendingPathComponent("Contents/MacOS/tron", isDirectory: false)
         try FileManager.default.createDirectory(at: binary.deletingLastPathComponent(), withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: binary.path, contents: Data())

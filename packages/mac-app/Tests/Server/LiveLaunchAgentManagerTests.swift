@@ -21,7 +21,7 @@ struct LiveLaunchAgentManagerTests {
         )
         #expect(
             LiveLaunchAgentManager.preRegistrationOutcome(for: .requiresApproval)
-                == .requiresApproval(message: "Approve Tron Server in Login Items to finish installation.")
+                == .requiresApproval(message: "Approve Tron Agent in Login Items to finish installation.")
         )
     }
 
@@ -97,7 +97,7 @@ struct LiveLaunchAgentManagerTests {
         #expect(
             LiveLaunchAgentManager.runtimeRequiresReplacement(
                 runtimeInfo: runtime,
-                expectedHelperPath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron",
+                expectedHelperPath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
                 fileExists: { _ in false }
             )
         )
@@ -106,7 +106,7 @@ struct LiveLaunchAgentManagerTests {
                 for: .enabled,
                 currentVariant: .installedRelease,
                 runtimeInfo: runtime,
-                expectedHelperPath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
+                expectedHelperPath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
             ) == nil
         )
     }
@@ -237,7 +237,7 @@ struct LiveLaunchAgentManagerTests {
             currentVariant: .xcodeDebug,
             runtimeInfo: runtime,
             canManageLaunchAgent: false,
-            expectedHelperPath: "/tmp/Debug/TronMac.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
+            expectedHelperPath: "/tmp/Debug/TronMac.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
         )
         if case .launchdRefused(let message) = outcome {
             #expect(message.contains("companion mode"))
@@ -252,24 +252,21 @@ struct LiveLaunchAgentManagerTests {
             LiveLaunchAgentManager.shouldRefuseExternalServer(
                 status: .notRegistered,
                 runningParentBundleIdentifier: nil,
-                portBound: true,
-                databaseLockHeld: false
+                portBound: true
             )
         )
         #expect(
-            LiveLaunchAgentManager.shouldRefuseExternalServer(
+            !LiveLaunchAgentManager.shouldRefuseExternalServer(
                 status: .notFound,
                 runningParentBundleIdentifier: nil,
-                portBound: false,
-                databaseLockHeld: true
+                portBound: false
             )
         )
         #expect(
             !LiveLaunchAgentManager.shouldRefuseExternalServer(
                 status: .notRegistered,
                 runningParentBundleIdentifier: "com.tron.mac",
-                portBound: true,
-                databaseLockHeld: true
+                portBound: true
             )
         )
     }

@@ -1,30 +1,27 @@
 import Foundation
 
-/// Reads the bearer token from `bearerToken` in `~/.tron/auth.json`.
-/// This is the same file written by the Rust agent's
-/// `app::lifecycle::onboarding` module through the shared auth-storage atomic
-/// writer.
+/// Reads the wrapper-only bearer token from
+/// `~/.tron/gateway/local-auth.json`. This credential authenticates the signed
+/// Mac wrapper and is never included in pairing invitations.
 ///
-/// File format (matches `packages/agent/src/app/lifecycle/onboarding.rs`):
+/// Gateway-owned file format:
 /// ```json
 /// {
-///   "version": 1,
-///   "bearerToken": "<url-safe base64, 32 bytes>",
-///   "providers": {},
+///   "version": 2,
+///   "bearerToken": "trn_<random token>",
+///   "purpose": "local-wrapper-health",
 ///   "lastUpdated": "..."
 /// }
 /// ```
 ///
-/// Security INVARIANT: `auth.json` MUST have owner-only permissions. Any group
-/// or other permission bit indicates either a tampered file or a buggy writer;
-/// in either case the token is treated as untrusted and `read` returns nil with
-/// an `NSLog` audit line. No caller may bypass this check. The Rust writer uses
-/// mode `0o600` at write time (see
-/// `packages/agent/src/domains/auth/credentials/storage/mod.rs::save_auth_storage`).
+/// Security INVARIANT: `local-auth.json` MUST have owner-only permissions. Any
+/// group or other permission bit indicates either a tampered file or a buggy
+/// writer; in either case the token is treated as untrusted and `read` returns
+/// nil with an `NSLog` audit line. No caller may bypass this check.
 ///
 /// Tests in `Tests/Server/BearerTokenReaderTests.swift` cover happy
 /// path, missing file, malformed JSON, missing `bearerToken`, and the
-/// permission guard.
+/// permission guard. The gateway creates this file with mode `0o600`.
 enum BearerTokenReader {
     private struct AuthFile: Decodable {
         let bearerToken: String?

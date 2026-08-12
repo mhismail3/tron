@@ -8,8 +8,6 @@ import SwiftUI
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let setup: EnvironmentSetup
-    private let macOperatorSafety: MacOperatorSafetyState
-    private let onStopMacOperator: @MainActor @Sendable () -> Void
     private let poller: ServerStatusPoller
     private let actionHandler: MenuBarActionHandler
     private var statusItem: NSStatusItem?
@@ -21,16 +19,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// `rebuildMenu()`.
     private(set) var snapshot: ServerStatusSnapshot
 
-    init(
-        setup: EnvironmentSetup,
-        macOperatorSafety: MacOperatorSafetyState = MacOperatorSafetyState(),
-        onStopMacOperator: (@MainActor @Sendable () -> Void)? = nil
-    ) {
+    init(setup: EnvironmentSetup) {
         self.setup = setup
-        self.macOperatorSafety = macOperatorSafety
-        self.onStopMacOperator = onStopMacOperator ?? {
-            macOperatorSafety.stop()
-        }
         self.poller = ServerStatusPoller(setup: setup)
         self.actionHandler = MenuBarActionHandler(setup: setup)
         self.snapshot = ServerStatusSnapshot.checking
@@ -150,18 +140,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Native emergency stop. No worker/socket operation can call the resume
-    /// counterpart, so a compromised or confused worker cannot clear it.
-    func stopMacOperator() {
-        onStopMacOperator()
-        rebuildMenu()
-    }
-
-    func resumeMacOperator() {
-        macOperatorSafety.resumeFromNativeUI()
-        rebuildMenu()
-    }
-
     // MARK: - Menu
 
     private func rebuildMenu() {
@@ -170,8 +148,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             snapshot: snapshot,
             tronHome: setup.tronHome,
             defaultServerPort: setup.serverPort,
-            canManageLaunchAgent: setup.canManageLaunchAgent,
-            macOperatorStopped: macOperatorSafety.snapshot().isStopped
+            canManageLaunchAgent: setup.canManageLaunchAgent
         )
         menu.removeAllItems()
         for descriptor in items {

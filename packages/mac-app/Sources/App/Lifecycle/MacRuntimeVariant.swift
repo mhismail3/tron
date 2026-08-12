@@ -2,7 +2,7 @@ import Foundation
 
 /// The wrapper has four supported operating modes:
 /// - Debug/Xcode (`com.tron.mac.dev`) companion mode, allowed from DerivedData and
-///   meant to observe/control UI while the installed app owns production server registration.
+///   meant to observe/control UI while the installed app owns production agent registration.
 /// - Debug/Xcode isolated install mode, opt-in via `TRON_MAC_INSTALL_MODE=isolated`
 ///   for testing first-run/reinstall flows against a separate label, port, and data tree.
 /// - Installed release (`com.tron.mac` at `/Applications/Tron.app`), used by both
@@ -51,7 +51,7 @@ enum MacRuntimeVariant: Equatable, Sendable {
         case .xcodeDebug, .installedRelease:
             return nil
         case .misplacedRelease:
-            return "Move Tron.app to /Applications before installing the server."
+            return "Move Tron.app to /Applications before installing Tron."
         case .unsupported(let bundleIdentifier):
             let identifier = bundleIdentifier ?? "missing bundle identifier"
             return "Unsupported Tron wrapper build (\(identifier)). Use Xcode Debug or /Applications/Tron.app."

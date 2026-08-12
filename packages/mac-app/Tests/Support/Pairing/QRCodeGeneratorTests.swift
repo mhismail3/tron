@@ -40,7 +40,7 @@ struct QRCodeGeneratorTests {
 
     @Test("round-trip: pairing URL encodes and decodes back")
     func pairingURLRoundTrip() throws {
-        let payload = PairingPayload(host: "100.64.0.1", port: 9847, token: "abc123xyz", label: "My Mac")
+        let payload = PairingPayload(host: "100.64.0.1", port: 9847, code: "abc123xyz", label: "My Mac")
         let url = try #require(PairingURLBuilder.makeURL(payload))
         let urlString = url.absoluteString
 

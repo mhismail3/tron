@@ -6,7 +6,7 @@ import Testing
 struct BearerTokenReaderTests {
     /// Writes `data` to `path` and chmods to 0o600 so the reader's
     /// `permissionsAreSafe` guard accepts the file. Mirrors the writer
-    /// invariant in `packages/agent/src/app/lifecycle/onboarding.rs`.
+    /// invariant in the gateway device store.
     private func writeSecureToken(_ data: Data, to path: URL) throws {
         try data.write(to: path)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
@@ -30,7 +30,7 @@ struct BearerTokenReaderTests {
         #expect(BearerTokenReader.read(at: path) == nil)
     }
 
-    @Test("valid auth.json: bearerToken returned")
+    @Test("valid local-auth.json: bearerToken returned")
     func validJSONObject() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }

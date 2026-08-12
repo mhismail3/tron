@@ -11,7 +11,7 @@ struct EnvironmentSetup: Sendable {
     var applicationBundle: URL
     var bearerTokenPath: URL
     var onboardedMarkerPath: URL
-    var settingsPath: URL
+    var networkCachePath: URL
     var launchAgentPlistPath: URL
 
     var launchAgentLabel: String
@@ -22,19 +22,19 @@ struct EnvironmentSetup: Sendable {
     /// Returns true if the on-disk first-run sentinel exists.
     var onboardedSentinelExists: @Sendable () -> Bool
 
-    /// Reads the bearer token from `~/.tron/auth.json`.
-    /// Returns nil if missing/unreadable.
+    /// Reads the gateway-local health token from `gateway/local-auth.json`.
+    /// It is used only by this signed wrapper and never shown to users.
     var readBearerToken: @Sendable () -> String?
 
-    /// Reads `server.tailscaleIp` from `~/.tron/settings.toml`.
-    /// Returns nil if missing/unset. Pairing treats this as a last-known
-    /// cache only; fresh installs resolve Tailscale live first.
+    /// Reads the short-lived one-time code emitted for mobile enrollment.
+    var readEnrollmentCode: @Sendable () -> String? = { nil }
+
+    /// Reads the disposable Tailscale presentation cache. Pairing resolves
+    /// Tailscale live first.
     var readTailscaleIPFromSettings: @Sendable () -> String?
 
-    /// Writes `server.tailscaleIp` into `~/.tron/settings.toml`
-    /// without disturbing any existing settings. Best-effort cache for
-    /// later server/menu-bar reads; pairing must not depend on this
-    /// write succeeding.
+    /// Updates the disposable Tailscale presentation cache. Pairing must not
+    /// depend on this write succeeding.
     var cacheTailscaleIP: @Sendable (String) -> Void
 
     /// Probes Tailscale on the host - app installed AND `tailscale ip -4`
@@ -76,18 +76,6 @@ struct EnvironmentSetup: Sendable {
     /// LaunchAgent control surface - load/unload/restart/check.
     var launchAgentManager: LaunchAgentManaging
 
-    /// Best-effort local process metadata for the server currently
-    /// listening on the configured port. This covers `tron dev`, which
-    /// intentionally stops the LaunchAgent before binding port 9847.
-    var probeServerProcess: @Sendable (Int) async -> ServerProcessInfo? = { _ in nil }
-
-    /// Stops the `Tron-Dev.app` process currently taking over the server
-    /// port. The live implementation revalidates the port owner before
-    /// sending any signal.
-    var stopDevServer: @Sendable (Int) async -> DevServerStopResult = { port in
-        await DevServerStopper.stop(port: port)
-    }
-
     /// Touches the `~/.tron/internal/run/.onboarded` sentinel atomically.
     var touchOnboardedSentinel: @Sendable () throws -> Void
 
@@ -108,7 +96,7 @@ struct EnvironmentSetup: Sendable {
         applicationBundle: TronPaths.applicationBundle,
         bearerTokenPath: TronPaths.bearerTokenPath,
         onboardedMarkerPath: TronPaths.onboardedMarkerPath,
-        settingsPath: TronPaths.settingsPath,
+        networkCachePath: TronPaths.networkCachePath,
         launchAgentPlistPath: TronPaths.launchAgentPlistPath,
         launchAgentLabel: TronPaths.launchAgentLabel,
         serverPort: TronPaths.defaultServerPort,
@@ -120,16 +108,19 @@ struct EnvironmentSetup: Sendable {
         readBearerToken: {
             BearerTokenReader.read(at: TronPaths.bearerTokenPath)
         },
+        readEnrollmentCode: {
+            EnrollmentCodeReader.read(at: TronPaths.enrollmentCodePath)
+        },
         readTailscaleIPFromSettings: {
-            ServerSettingsReader.tailscaleIP(at: TronPaths.settingsPath)
+            GatewayNetworkCacheReader.tailscaleIP(at: TronPaths.networkCachePath)
         },
         cacheTailscaleIP: { ip in
             do {
-                try ServerSettingsWriter.cacheTailscaleIP(ip, at: TronPaths.settingsPath)
+                try GatewayNetworkCacheWriter.cacheTailscaleIP(ip, at: TronPaths.networkCachePath)
             } catch {
                 NSLog(
                     "[EnvironmentSetup] failed to cache Tailscale IP in %@: %@",
-                    TronPaths.settingsPath.path,
+                    TronPaths.networkCachePath.path,
                     error.localizedDescription
                 )
             }
@@ -150,15 +141,13 @@ struct EnvironmentSetup: Sendable {
             ExistingInstallDetector.validateBundledHelper()
         },
         pingServer: { token in
-            await ServerPing.ping(host: "127.0.0.1", port: TronPaths.defaultServerPort, token: token)
+            let tailscale = await TailscaleProbe.probe()
+            let host = tailscale.displayIP
+                ?? GatewayNetworkCacheReader.tailscaleIP(at: TronPaths.networkCachePath)
+                ?? "127.0.0.1"
+            return await ServerPing.ping(host: host, port: TronPaths.defaultServerPort, token: token)
         },
         launchAgentManager: LiveLaunchAgentManager(),
-        probeServerProcess: { port in
-            await ServerProcessProbe.probe(port: port)
-        },
-        stopDevServer: { port in
-            await DevServerStopper.stop(port: port)
-        },
         touchOnboardedSentinel: {
             try OnboardedSentinelWriter.touch(at: TronPaths.onboardedMarkerPath)
         }

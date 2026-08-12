@@ -12,7 +12,7 @@ import AppKit
 /// that was launched when the grant was made, so granting FDA to the
 /// agent before it exists would prompt the user for a permission they
 /// can't satisfy. By the time the wizard gets here the agent bundle
-/// is already embedded at `Tron.app/Contents/Library/LoginItems/Tron Server.app`
+/// is already embedded at `Tron.app/Contents/Library/LoginItems/Tron Agent.app`
 /// and the LaunchAgent is running. The LaunchAgent associates the helper
 /// with the wrapper bundle IDs, so macOS surfaces the privacy row
 /// under the responsible wrapper app (`Tron.app` in Release,
@@ -39,7 +39,7 @@ struct PermissionsStep: View {
 
             permissionRow(.fullDiskAccess,
                           title: "Full Disk Access",
-                          detail: "Lets Tron Server read and edit files.")
+                          detail: "Lets Tron Agent read and edit files.")
             .padding(.vertical, 1)
 
             Button {

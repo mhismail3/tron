@@ -18,7 +18,7 @@ struct TronUninstallerTests {
             )
             _ = FileManager.default.createFile(atPath: path.path, contents: Data("x".utf8))
         }
-        try createFixtureFile(setup.settingsPath, contents: "[server]\ntailscaleIp = \"100.64.0.1\"\n")
+        try createFixtureFile(setup.networkCachePath, contents: "[server]\ntailscaleIp = \"100.64.0.1\"\n")
         try createFixtureFile(setup.bearerTokenPath, contents: "auth")
 
         let outcome = await TronUninstaller.unregisterAndClean(setup: setup)
@@ -28,7 +28,7 @@ struct TronUninstallerTests {
         for path in runtimeFiles {
             #expect(!FileManager.default.fileExists(atPath: path.path))
         }
-        #expect(FileManager.default.fileExists(atPath: setup.settingsPath.path))
+        #expect(FileManager.default.fileExists(atPath: setup.networkCachePath.path))
         #expect(FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
     }
 
@@ -39,7 +39,7 @@ struct TronUninstallerTests {
         let manager = MockLaunchAgentManager()
         let setup = makeSetup(tmp: tmp, manager: manager)
         try createFixtureFile(
-            setup.settingsPath,
+            setup.networkCachePath,
             contents: """
             [server]
             tailscaleIp = "100.64.0.1"
@@ -53,7 +53,7 @@ struct TronUninstallerTests {
         )
 
         #expect(outcome == .ok)
-        #expect(!FileManager.default.fileExists(atPath: setup.settingsPath.path))
+        #expect(!FileManager.default.fileExists(atPath: setup.networkCachePath.path))
         #expect(!FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
     }
 
@@ -104,7 +104,7 @@ struct TronUninstallerTests {
             applicationBundle: tmp.appendingPathComponent("Tron.app", isDirectory: true),
             bearerTokenPath: profiles.appendingPathComponent("auth.json", isDirectory: false),
             onboardedMarkerPath: run.appendingPathComponent(".onboarded", isDirectory: false),
-            settingsPath: tmp.appendingPathComponent("settings.toml", isDirectory: false),
+            networkCachePath: tmp.appendingPathComponent("gateway/network.json", isDirectory: false),
             launchAgentPlistPath: tmp.appendingPathComponent("Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist"),
             launchAgentLabel: "com.tron.server",
             serverPort: 9847,

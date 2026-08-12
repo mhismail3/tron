@@ -31,13 +31,12 @@ enum MenuBarItemBuilder {
         snapshot: ServerStatusSnapshot,
         tronHome: URL,
         defaultServerPort: Int,
-        canManageLaunchAgent: Bool,
-        macOperatorStopped: Bool = false
+        canManageLaunchAgent: Bool
     ) -> [MenuItemDescriptor] {
         var items: [MenuItemDescriptor] = []
 
         let controlsEnabled = !snapshot.state.isBusy
-        let serviceControlsEnabled = controlsEnabled && !snapshot.isDevServerActive && canManageLaunchAgent
+        let serviceControlsEnabled = controlsEnabled && canManageLaunchAgent
 
         items.append(.header(headerContent(
             snapshot: snapshot,
@@ -53,22 +52,13 @@ enum MenuBarItemBuilder {
 
         items.append(.action(title: "Send feedback", isEnabled: true, action: .sendFeedback))
 
-        items.append(.action(
-            title: macOperatorStopped ? "Resume Mac Operator" : "Stop Mac Operator",
-            isEnabled: true,
-            action: macOperatorStopped ? .resumeMacOperator : .stopMacOperator
-        ))
-
         items.append(.separator)
         if snapshot.state.isRunning {
-            items.append(.action(title: "Pause server", isEnabled: serviceControlsEnabled, action: .pauseServer))
+            items.append(.action(title: "Pause Tron", isEnabled: serviceControlsEnabled, action: .pauseServer))
         } else {
             items.append(.action(title: snapshot.state.resumeTitle, isEnabled: serviceControlsEnabled, action: .resumeServer))
         }
         items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, action: .restartServer))
-        if snapshot.isDevServerActive {
-            items.append(.action(title: "Stop dev server", isEnabled: controlsEnabled, action: .stopDevServer))
-        }
         items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, action: .uninstall))
         items.append(.quit(title: "Quit Tron"))
 
@@ -110,9 +100,6 @@ enum MenuBarItemBuilder {
     }
 
     private static func modeDetail(snapshot: ServerStatusSnapshot) -> String? {
-        if snapshot.isDevServerActive {
-            return "Dev Server active"
-        }
         return nil
     }
 }
@@ -141,7 +128,6 @@ enum ServerBusyAction: String, Equatable, Sendable {
     case restarting = "Restarting"
     case pausing = "Pausing"
     case resuming = "Resuming"
-    case stoppingDevServer = "Stopping dev"
 }
 
 enum ServerStatusState: Equatable, Sendable {
@@ -201,14 +187,14 @@ enum ServerStatusState: Equatable, Sendable {
         if case .busy(let action) = self {
             return "\(action.rawValue)…"
         }
-        return "Restart server"
+        return "Restart Tron"
     }
 
     var resumeTitle: String {
         if case .busy(let action) = self {
             return "\(action.rawValue)…"
         }
-        return "Resume server"
+        return "Resume Tron"
     }
 }
 
@@ -220,20 +206,17 @@ struct ServerStatusSnapshot: Equatable {
     var tailscaleIP: String?
     var processID: Int?
     var uptime: String?
-    var isDevServerActive: Bool
 
     init(
         state: ServerStatusState,
         tailscaleIP: String? = nil,
         processID: Int? = nil,
-        uptime: String? = nil,
-        isDevServerActive: Bool = false
+        uptime: String? = nil
     ) {
         self.state = state
         self.tailscaleIP = tailscaleIP
         self.processID = processID
         self.uptime = uptime
-        self.isDevServerActive = isDevServerActive
     }
 
     static let checking = ServerStatusSnapshot(state: .checking)

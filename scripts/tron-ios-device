@@ -214,8 +214,6 @@ build_install_launch() {
         -resultBundlePath "$xcresult" \
         -allowProvisioningUpdates \
         -allowProvisioningDeviceRegistration \
-        TRON_APNS_ENTITLEMENT_ENVIRONMENT=development \
-        TRON_APNS_ENVIRONMENT=sandbox \
         2>&1 \
         | tee "$log" \
         | pretty_xcode_output

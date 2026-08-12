@@ -1,55 +1,10 @@
-# Dependabot keeps two active dependency ecosystems fresh:
-#   - cargo: the Rust agent. Weekly. Grouped: dev-deps and prod-deps split so a
-#     test-only bump can merge without re-reviewing the runtime surface.
-#   - github-actions: immutable workflow action revisions (actions/checkout,
-#     etc.). Weekly. PRs retain full-SHA pins while advancing their version
-#     comments and pass the repository workflow invariant.
-#
-# Labels keep the queue filterable; low open-PR limits prevent a noisy backlog.
-
 version: 2
 updates:
-  - package-ecosystem: cargo
-    directory: /packages/agent
+  - package-ecosystem: npm
+    directory: /packages/gateway
     schedule:
       interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: "America/Los_Angeles"
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - rust
-    commit-message:
-      prefix: "chore(deps)"
-      include: scope
-    groups:
-      # Group dev-only crates so test-runner bumps don't ping the runtime
-      # reviewer for nothing.
-      dev-dependencies:
-        dependency-type: development
-      # Group all minor/patch runtime updates into one PR per week.
-      runtime-minor:
-        dependency-type: production
-        update-types:
-          - minor
-          - patch
-    ignore:
-      # Major bumps land via dedicated PRs we open ourselves; dependabot's
-      # auto-major PRs are noisy and rarely safe to merge unreviewed.
-      - dependency-name: "*"
-        update-types:
-          - version-update:semver-major
-
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-      day: monday
-    open-pull-requests-limit: 3
-    labels:
-      - dependencies
-      - github-actions
-    commit-message:
-      prefix: "chore(ci)"
-      include: scope

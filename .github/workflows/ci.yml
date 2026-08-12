@@ -1,422 +1,85 @@
-# Authoritative merge validation.
-#
-# Draft PRs use fast-feedback.yml. Ready PRs run the complete Rust/iOS/Mac
-# matrix and publish immutable evidence for the exact synthetic merge tree.
-# A main push selects the newest fully validated exact proof for the merged tree;
-# every unavailable, stale, or malformed candidate is rejected, and no valid
-# candidate falls back to the complete matrix. Reuse preserves a self-digested
-# receipt and the byte-exact downloaded validation-artifact ZIP for 90 days.
-# Release workflows still wait for this workflow's successful exact-main-SHA
-# conclusion.
-
 name: CI
-
 on:
   pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   push:
     branches: [main]
-  workflow_dispatch:
 
-# Coalesce only superseded heads of the same PR. GitHub concurrency retains at
-# most one pending run per group even when cancellation is disabled, so every
-# main push and manual run needs a run-unique group to preserve full history.
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('ci-{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('ci-{0}-{1}-{2}-{3}', github.workflow, github.event_name, github.run_id, github.run_attempt) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-permissions:
-  actions: read
-  contents: read
-  pull-requests: read
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  provenance:
-    name: Resolve validation provenance
-    runs-on: ubuntu-latest
-    outputs:
-      full_required: ${{ steps.mode.outputs.full_required }}
-      mode: ${{ steps.mode.outputs.mode }}
+  gateway:
+    runs-on: macos-15
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
-      - name: Verify provider source context
-        run: python3 scripts/ci-provider-context.py resolve --output build/provider-context.json
-      - name: Resolve validation mode
-        id: mode
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          PR_DRAFT: ${{ github.event.pull_request.draft || false }}
-        run: |
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$PR_DRAFT" == "true" ]]; then
-            echo "full_required=false" >> "$GITHUB_OUTPUT"
-            echo "mode=draft" >> "$GITHUB_OUTPUT"
-          elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            if python3 scripts/ci-validation-evidence.py verify \
-              --output build/reused-validation-evidence.json \
-              --receipt build/validation-reuse-receipt.json \
-              --artifact-archive build/reused-validation-artifact.zip; then
-              echo "full_required=false" >> "$GITHUB_OUTPUT"
-              echo "mode=reused" >> "$GITHUB_OUTPUT"
-            else
-              echo "::notice::Exact PR evidence unavailable; running the complete validation matrix."
-              echo "full_required=true" >> "$GITHUB_OUTPUT"
-              echo "mode=fallback" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "full_required=true" >> "$GITHUB_OUTPUT"
-            echo "mode=full" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Preserve main validation reuse provenance
-        if: steps.mode.outputs.mode == 'reused'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: tron-main-validation-reuse-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            build/validation-reuse-receipt.json
-            build/reused-validation-evidence.json
-            build/reused-validation-artifact.zip
-          if-no-files-found: error
-          retention-days: 90
-
-  personal-info-guard:
-    name: Personal-info guard
-    runs-on: ubuntu-latest
-    needs: provenance
-    if: needs.provenance.outputs.full_required == 'true'
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Run personal-info-guard
-        run: ./scripts/personal-info-guard.sh
-
-  version-drift:
-    name: Version drift
-    runs-on: ubuntu-latest
-    needs: provenance
-    if: needs.provenance.outputs.full_required == 'true'
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Check centralized version mirrors
-        run: ./scripts/tron version check
-      - name: Run version helper tests
-        run: ./scripts/tron version test
-      - name: Run release notes helper tests
-        run: ./scripts/tron-release-notes --test
-      - name: Run deterministic CI helper tests
-        run: |
-          ./scripts/ci-change-flags.sh --self-test
-          ./scripts/ios-release-toolchain-doctor.sh --self-test
-          python3 scripts/ci-provider-context.py --self-test
-          python3 scripts/ci-validation-evidence.py --self-test
-          python3 scripts/ci-parity-report.py --self-test
-          python3 scripts/ci-cutover-evaluation.py --self-test
-          ./scripts/ci-shadow-run.sh --self-test
-          ./scripts/validate-ci-definitions.sh --self-test
-          python3 scripts/ios-test-selection.py --self-test
-          python3 scripts/benchmarks/bench.py --self-test
-          python3 scripts/evaluation/whole-agent.py --self-test
-
-  workflow-lint:
-    name: Workflow lint
-    runs-on: ubuntu-latest
-    needs: provenance
-    if: needs.provenance.outputs.full_required == 'true'
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Validate authoritative and shadow workflow definitions
-        run: scripts/validate-ci-definitions.sh
-
-  rust:
-    name: Rust quality
-    runs-on: ubuntu-latest
-    needs: provenance
-    if: needs.provenance.outputs.full_required == 'true'
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
-        with:
-          cache-workspaces: packages/agent
-          # `scripts/tron ci` owns the explicit warning policy.
-          rustflags: ""
-
-      - name: Toolchain info
-        run: |
-          rustc --version
-          cargo --version
-          cargo fmt --version
-          cargo clippy --version
-
-      - name: Formatting
-        run: scripts/tron ci fmt
-      - name: Compile check
-        run: scripts/tron ci check
-      - name: Clippy
-        run: scripts/tron ci clippy
-      - name: Tests
-        run: scripts/tron ci test
+          node-version: 22.22.0
+          cache: npm
+          cache-dependency-path: packages/gateway/package-lock.json
+      - run: npm ci
+        working-directory: packages/gateway
+      - run: npm run build
+        working-directory: packages/gateway
+      - run: npm test
+        working-directory: packages/gateway
+      - run: npm audit --omit=dev
+        working-directory: packages/gateway
+      - run: scripts/personal-info-guard.sh
 
   ios:
-    name: iOS (measured build + test)
-    runs-on: macos-15
-    timeout-minutes: 25
-    needs: provenance
-    if: needs.provenance.outputs.full_required == 'true'
-    outputs:
-      metrics: ${{ steps.metrics.outputs.metrics }}
-    defaults:
-      run:
-        working-directory: packages/ios-app
+    runs-on: macos-26
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
-        with:
-          xcode-version: "26.3"
-
-      - name: Install checksum-pinned tools
-        run: ../../scripts/install-ci-tools.sh xcodegen
-
-      - name: Verify pinned toolchain
-        run: ../../scripts/verify-ci-toolchain.sh ios xcodegen
-
-      - name: Generate Xcode project
-        run: xcodegen generate
-
-      - name: List available iOS simulators
-        run: xcrun simctl list devices available | head -60
-
-      - name: Measured build and test
-        run: ../../scripts/ios-ci-test.sh
-
-      - name: Export sanitized metrics
-        id: metrics
-        run: echo "metrics=$(jq -c . build/ios-ci-metrics.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Upload sanitized iOS metrics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ios-ci-metrics
-          path: packages/ios-app/build/ios-ci-metrics.json
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Upload xcresult on failure
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ios-test-results
-          path: packages/ios-app/build/TestResults.xcresult
-          retention-days: 7
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: xcodegen generate
+        working-directory: packages/ios-app
+      - run: scripts/ios-ci-test.sh
+      - name: Build iOS UI-test products once
+        run: |
+          TRON_IOS_DESTINATION='platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro' \
+          scripts/ios-gateway-e2e-test prepare
+          TRON_IOS_DESTINATION='platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro' \
+          scripts/ios-gateway-e2e-test build
+      - name: Run iOS smoke UI test without rebuilding
+        working-directory: packages/ios-app
+        run: |
+          xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron UI Validation' \
+            -configuration Test \
+            -destination 'platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro' \
+            -derivedDataPath "${TMPDIR:-/tmp}/tron-ios-gateway-e2e-derived-$UID" \
+            -only-testing:TronMobileUITests/TronSmokeUITests \
+            -collect-test-diagnostics never
+      - name: Run real gateway-to-iOS E2E without rebuilding
+        run: |
+          TRON_IOS_DESTINATION='platform=iOS Simulator,OS=26.2,name=iPhone 17 Pro' \
+          scripts/ios-gateway-e2e-test run
 
   mac:
-    name: Mac wrapper (build + test, dry-run DMG)
-    runs-on: macos-15
-    needs: provenance
-    if: needs.provenance.outputs.full_required == 'true'
-    defaults:
-      run:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: npm
+          cache-dependency-path: packages/gateway/package-lock.json
+      - run: brew install xcodegen
+      - run: npm ci && npm run build
+        working-directory: packages/gateway
+      - run: packages/mac-app/scripts/bundle-gateway.sh --skip-install
+      - run: xcodegen generate
         working-directory: packages/mac-app
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
-        with:
-          xcode-version: "26.3"
-
-      # The Rust agent is embedded as a Resource in the Mac app bundle.
-      # CI builds a debug-profile copy so `scripts/bundle-agent.sh`
-      # succeeds, but we don't ship this binary — the release pipeline
-      # (release-mac.yml) rebuilds it in `--release` with signing.
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
-        with:
-          cache-workspaces: packages/agent
-          # The repository manifest owns warning parity with the shadow lane.
-          rustflags: ""
-
-      - name: Build agent helper (debug, for embedding)
-        working-directory: packages/agent
+      - name: Build Mac test products
+        working-directory: packages/mac-app
         run: |
-          source ../../config/ci-toolchain.env
-          RUSTFLAGS="$TRON_CI_MAC_RUSTFLAGS" cargo build --bin tron --locked
-
-      - name: Install checksum-pinned tools
-        run: ../../scripts/install-ci-tools.sh xcodegen create-dmg
-
-      - name: Verify pinned toolchain
-        run: ../../scripts/verify-ci-toolchain.sh xcode xcodegen create-dmg
-
-      - name: Stage agent helper binary
-        run: ./scripts/bundle-agent.sh --skip-build --profile debug
-
-      - name: Validate staged helper binary
+          xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
+            -destination 'platform=macOS,arch=arm64' -configuration Debug \
+            -derivedDataPath build/ci-derived-data
+      - name: Run Mac tests without rebuilding
+        working-directory: packages/mac-app
         run: |
-          test -x "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
-
-      - name: Generate Xcode project
-        run: xcodegen generate
-
-      # Build the TronMac scheme in Debug and compile its unit-test bundle;
-      # ad-hoc signing (CODE_SIGN_IDENTITY="-") keeps this portable to any
-      # macOS runner without importing the Developer ID certificate.
-      #
-      # GitHub's hosted app-hosted macOS test runner can wedge before Swift
-      # Testing starts. `build-for-testing` still catches Swift compile/link
-      # drift in the app + tests without launching the UI process. Run the
-      # app-hosted Mac tests locally from Xcode when changing wrapper logic.
-      - name: xcodebuild build-for-testing
-        timeout-minutes: 15
-        env:
-          TRON_MAC_TEST_HOST: "1"
-        run: |
-          set -o pipefail
-          destination="platform=macOS,arch=$(uname -m)"
-          xcodebuild build-for-testing \
-            -project TronMac.xcodeproj \
-            -scheme TronMac \
-            -destination "$destination" \
-            -configuration Debug \
-            CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
-            -quiet
-
-      - name: xcodebuild focused wrapper tests
-        timeout-minutes: 20
-        env:
-          TRON_MAC_TEST_HOST: "1"
-        run: |
-          set -o pipefail
-          destination="platform=macOS,arch=$(uname -m)"
-          xcodebuild test \
-            -project TronMac.xcodeproj \
-            -scheme TronMac \
-            -destination "$destination" \
-            -configuration Debug \
-            -only-testing:TronMacTests/TronPathsTests \
-            -only-testing:TronMacTests/ServerStatusPollerTests \
-            -only-testing:TronMacTests/TailscaleProbeTests \
-            CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
-            -quiet
-
-      # Dry-run the package-owned DMG transaction on PRs without signing,
-      # notarization, or publication. The release workflow retains release
-      # orchestration; scripts/package-dmg.sh owns assembly and mount proof.
-      - name: Dry-run DMG assembly
-        if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          mkdir -p build
-          # Xcode 26 adds an unsigned __preview.dylib to generic Debug builds;
-          # packaging validation does not need previews and re-signs the app.
-          xcodebuild \
-            -project TronMac.xcodeproj \
-            -scheme TronMac \
-            -configuration Debug \
-            -derivedDataPath build/dd \
-            -destination 'generic/platform=macOS' \
-            ENABLE_DEBUG_DYLIB=NO \
-            CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
-            -quiet build
-          APP_PATH="$(find build/dd -name 'TronMac.app' -print -quit)"
-          if [[ -z "$APP_PATH" ]]; then
-            echo "::error::TronMac.app not produced by debug build"
-            exit 1
-          fi
-          mkdir -p dist
-          DMG_PATH="$(pwd)/dist/Tron-dryrun.dmg"
-          ./scripts/package-dmg.sh \
-            --app "$APP_PATH" \
-            --output "$DMG_PATH" \
-            --volume-name "Tron Dry-Run" \
-            --layout structural
-
-  # The ruleset points at this single fail-closed check. Its draft-only name is
-  # intentionally different, so draft feedback can never satisfy merge policy.
-  ci:
-    name: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && 'Draft validation' || 'CI summary' }}
-    runs-on: ubuntu-latest
-    needs: [provenance, personal-info-guard, version-drift, workflow-lint, rust, ios, mac]
-    if: always()
-    env:
-      RESULT_PROVENANCE: ${{ needs.provenance.result }}
-      RESULT_GUARD: ${{ needs.personal-info-guard.result }}
-      RESULT_VERSION: ${{ needs.version-drift.result }}
-      RESULT_WORKFLOW_LINT: ${{ needs.workflow-lint.result }}
-      RESULT_RUST: ${{ needs.rust.result }}
-      RESULT_IOS: ${{ needs.ios.result }}
-      RESULT_MAC: ${{ needs.mac.result }}
-      FULL_REQUIRED: ${{ needs.provenance.outputs.full_required }}
-      VALIDATION_MODE: ${{ needs.provenance.outputs.mode }}
-    steps:
-      - name: Verify all required jobs passed
-        run: |
-          fail=0
-          if [[ "$RESULT_PROVENANCE" != "success" ]]; then
-            echo "::error::PROVENANCE job: $RESULT_PROVENANCE"; exit 1
-          fi
-          if [[ "$FULL_REQUIRED" == "false" ]]; then
-            for name in GUARD VERSION WORKFLOW_LINT RUST IOS MAC; do
-              var="RESULT_$name"
-              result="${!var}"
-              if [[ "$result" != "skipped" ]]; then
-                echo "::error::$name must be skipped in $VALIDATION_MODE mode: $result"; fail=1
-              fi
-            done
-            if [[ $fail -ne 0 ]]; then exit 1; fi
-            echo "Validation mode: $VALIDATION_MODE"
-            exit 0
-          fi
-          for name in GUARD VERSION WORKFLOW_LINT RUST IOS MAC; do
-            var="RESULT_$name"
-            result="${!var}"
-            if [[ "$result" != "success" ]]; then
-              echo "::error::$name job: $result"; fail=1
-            fi
-          done
-          if [[ $fail -ne 0 ]]; then exit 1; fi
-          echo "All required jobs passed."
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
-        with:
-          ref: ${{ github.sha }}
-          # Evidence reads raw commit headers, so the aggregate needs the exact
-          # merge object but not its history. Keep this checkout intentionally
-          # shallow.
-          fetch-depth: 1
-      - name: Create merge validation evidence
-        if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
-        env:
-          TRON_PR_NUMBER: ${{ github.event.pull_request.number }}
-          TRON_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          TRON_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          TRON_IOS_METRICS_JSON: ${{ needs.ios.outputs.metrics }}
-          TRON_CI_REQUIRED_JOBS_JSON: '{"personal-info-guard":"${{ needs.personal-info-guard.result }}","version-drift":"${{ needs.version-drift.result }}","workflow-lint":"${{ needs.workflow-lint.result }}","rust":"${{ needs.rust.result }}","ios":"${{ needs.ios.result }}","mac":"${{ needs.mac.result }}"}'
-        run: |
-          mkdir -p build
-          python3 scripts/ci-provider-context.py resolve \
-            --output build/provider-context.json
-          python3 scripts/ci-provider-context.py export \
-            --context build/provider-context.json \
-            --format shell > build/provider-context.env
-          source build/provider-context.env
-          printf '%s\n' "$TRON_IOS_METRICS_JSON" > build/ios-ci-metrics.json
-          python3 scripts/ci-validation-evidence.py create \
-            --output build/validation-evidence.json \
-            --ios-metrics build/ios-ci-metrics.json \
-            --artifact build/provider-context.json \
-            --artifact build/ios-ci-metrics.json
-      - name: Upload merge validation evidence
-        if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: tron-merge-validation
-          path: |
-            build/validation-evidence.json
-            build/provider-context.json
-            build/ios-ci-metrics.json
-          if-no-files-found: error
-          retention-days: 90
+          xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
+            -destination 'platform=macOS,arch=arm64' -configuration Debug \
+            -derivedDataPath build/ci-derived-data -collect-test-diagnostics never

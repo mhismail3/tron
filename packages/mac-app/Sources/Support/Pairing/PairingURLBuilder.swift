@@ -1,12 +1,12 @@
 import Foundation
 
-/// Builds `tron://pair?host=...&port=...&token=...&label=...` URLs for
+/// Builds `tron://pair?host=...&port=...&code=...&label=...` URLs for
 /// the iOS `PairingURLParser` to consume.
 enum PairingURLBuilder {
     private static let scheme = "tron"
     private static let host = "pair"
 
-    /// Builds a `tron://pair?host=…&port=…&token=…[&label=…]` URL.
+    /// Builds a `tron://pair?host=…&port=…&code=…[&label=…]` URL.
     /// The optional `label` value is the iOS server name.
     /// Returns nil if any required field is empty or malformed after trimming.
     static func makeURL(_ payload: PairingPayload) -> URL? {
@@ -14,8 +14,8 @@ enum PairingURLBuilder {
               (1...65_535).contains(payload.port) else {
             return nil
         }
-        let trimmedToken = payload.token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedToken.isEmpty else {
+        let trimmedCode = payload.code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (8...32).contains(trimmedCode.count) else {
             return nil
         }
 
@@ -25,7 +25,7 @@ enum PairingURLBuilder {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "host", value: canonicalHost),
             URLQueryItem(name: "port", value: String(payload.port)),
-            URLQueryItem(name: "token", value: trimmedToken),
+            URLQueryItem(name: "code", value: trimmedCode),
         ]
         if let label = payload.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
             items.append(URLQueryItem(name: "label", value: label))

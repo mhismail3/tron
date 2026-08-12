@@ -2,7 +2,7 @@
 #
 # Builds a signed, notarized, stapled DMG for `Tron.app` and attaches it to
 # a GitHub Release. Triggered by:
-#   - Tag push matching `server-v*` (e.g. `server-v0.1.0-beta.1`)
+#   - Tag push matching `tron-v*` (e.g. `tron-v0.1.0-beta.1`)
 #   - Manual `workflow_dispatch`, which defaults to an unsigned dry-run and
 #     never publishes. The version always comes from VERSION.env.
 #
@@ -10,9 +10,9 @@
 #
 #   1. Resolve the target version from VERSION.env and verify any tag
 #      matches the centralized release tag.
-#   2. Build the Rust agent helper in release mode (cached).
-#   3. Stage the agent into both embedded helper apps via
-#      `packages/mac-app/scripts/bundle-agent.sh`.
+#   2. Build the locked TypeScript gateway.
+#   3. Stage the gateway, exact Node runtimes, and universal helper launcher via
+#      `packages/mac-app/scripts/bundle-gateway.sh`.
 #   4. Generate the Xcode project with XcodeGen and archive the
 #      `TronMac` scheme with explicit Developer ID signing for a release;
 #      dry-runs disable signing and exercise the release-layout package path.
@@ -62,7 +62,7 @@ name: Release (Mac DMG)
 on:
   push:
     tags:
-      - "server-v*"
+      - "tron-v*"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -150,15 +150,17 @@ jobs:
           echo "dry_run=$flag" >> "$GITHUB_OUTPUT"
           echo "Dry-run=$flag"
 
-      # ── Rust toolchain ─────────────────────────────────────────────
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+      # ── Gateway + Xcode toolchains ─────────────────────────────────
+      - name: Install Node
+        uses: actions/setup-node@v4
         with:
-          cache-workspaces: packages/agent
+          node-version: 22.22.0
+          cache: npm
+          cache-dependency-path: packages/gateway/package-lock.json
 
-      - name: Build agent helper (release)
-        working-directory: packages/agent
-        run: cargo build --release --bin tron --locked
+      - name: Build gateway
+        working-directory: packages/gateway
+        run: npm ci && npm run build
 
       # ── Xcode toolchain ────────────────────────────────────────────
       - name: Pin Xcode
@@ -166,23 +168,17 @@ jobs:
         with:
           xcode-version: "26.3"
 
-      - name: Install checksum-pinned tools
-        run: scripts/install-ci-tools.sh xcodegen create-dmg
+      - name: Install packaging tools
+        run: brew install xcodegen create-dmg
 
-      - name: Verify pinned toolchain
-        run: scripts/verify-ci-toolchain.sh xcode xcodegen create-dmg
+      - name: Stage gateway into embedded Login Item
+        run: packages/mac-app/scripts/bundle-gateway.sh --skip-install
 
-      - name: Stage agent helper binary into embedded Login Item
-        working-directory: packages/mac-app
+      - name: Validate staged gateway
         run: |
-          # --skip-build because we already built the release binaries above;
-          # the script just copies + chmod + stages atomically.
-          ./scripts/bundle-agent.sh --skip-build
-
-      - name: Validate staged helper binary
-        working-directory: packages/mac-app
-        run: |
-          test -x "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
+          test -x "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
+          test -x "packages/mac-app/Sources/Resources/Gateway/runtime/node-arm64"
+          test -f "packages/mac-app/Sources/Resources/Gateway/app/dist/index.js"
 
       - name: Generate Xcode project
         working-directory: packages/mac-app
@@ -326,8 +322,8 @@ jobs:
           test -d "$APP_PATH" || { echo "::error::archive missing $APP_BUNDLE"; exit 1; }
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
           ls -la "$APP_PATH/Contents/MacOS"
-          test -f "$APP_PATH/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron" \
-            || { echo "::error::Tron Server.app helper missing"; exit 1; }
+          test -f "$APP_PATH/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron" \
+            || { echo "::error::Tron Agent.app helper missing"; exit 1; }
           test -f "$APP_PATH/Contents/Library/LaunchAgents/com.tron.server.plist" \
             || { echo "::error::bundled LaunchAgent plist missing"; exit 1; }
 
@@ -337,7 +333,7 @@ jobs:
       # WITHOUT `--deep` so the helper's signature is preserved. The
       # earlier `--deep` flag was a footgun: it recursively re-signs every
       # already-signed binary, blowing away the hardened-runtime + entitlements
-      # we just applied to `Tron Server.app`. Apple now warns against `--deep`
+      # we just applied to `Tron Agent.app`. Apple now warns against `--deep`
       # for exactly this reason (`man codesign`, "DEEP DEPRECATION").
       #
       # Verification uses `--deep` because it's a read-only walk and we
@@ -346,7 +342,7 @@ jobs:
         if: steps.drymode.outputs.dry_run != 'true'
         run: |
           set -euo pipefail
-          HELPER="$APP_PATH/Contents/Library/LoginItems/Tron Server.app"
+          HELPER="$APP_PATH/Contents/Library/LoginItems/Tron Agent.app"
           codesign --force --timestamp --options runtime \
             --keychain "$KEYCHAIN" \
             --sign "$SIGN_IDENT" \
@@ -371,7 +367,7 @@ jobs:
           # Defence in depth: confirm the helper's signature is still
           # the one we applied above (not silently re-signed by Xcode
           # or replaced by `--deep`).
-          codesign --display --verbose=2 "$APP_PATH/Contents/Library/LoginItems/Tron Server.app"
+          codesign --display --verbose=2 "$APP_PATH/Contents/Library/LoginItems/Tron Agent.app"
 
       # ── Notarize + staple ─────────────────────────────────────────
       #

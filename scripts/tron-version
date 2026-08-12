@@ -83,8 +83,8 @@ derive_version_fields() {
         TRON_DISPLAY_VERSION="${TRON_DISPLAY_VERSION} (Beta ${TRON_BETA_NUMBER})"
     fi
 
-    TRON_RELEASE_TAG="server-v${TRON_VERSION}"
-    TRON_RELEASE_TITLE="Tron Server ${TRON_DISPLAY_VERSION}"
+    TRON_RELEASE_TAG="tron-v${TRON_VERSION}"
+    TRON_RELEASE_TITLE="Tron ${TRON_DISPLAY_VERSION}"
     TRON_ASSET_VERSION="$(asset_version "$TRON_VERSION")"
     TRON_DMG_NAME="tron-v${TRON_ASSET_VERSION}.dmg"
     if [[ "$TRON_VERSION" == *-* ]]; then
@@ -118,7 +118,7 @@ write_github_release_outputs() {
     [ -n "${GITHUB_OUTPUT:-}" ] || die "GITHUB_OUTPUT is required for github-output"
 
     local mode
-    if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" == server-v* ]]; then
+    if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" == tron-v* ]]; then
         if [ "$GITHUB_REF_NAME" != "$TRON_RELEASE_TAG" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match VERSION.env release tag $TRON_RELEASE_TAG" >&2
             return 1
@@ -248,11 +248,20 @@ replace_regex() {
 sync_versions() {
     derive_version_fields
 
-    replace_regex "$PROJECT_DIR/packages/agent/Cargo.toml" \
-        '(?m)(^version = ")[^"]+(")' \
-        "\${1}${TRON_VERSION}\${2}"
-    replace_regex "$PROJECT_DIR/packages/agent/Cargo.lock" \
-        '(\[\[package\]\]\nname = "tron"\nversion = ")[^"]+(")' \
+    (
+        cd "$PROJECT_DIR"
+        TRON_SYNC_VERSION="$TRON_VERSION" node - <<'NODE'
+const fs = require("node:fs");
+for (const path of ["packages/gateway/package.json", "packages/gateway/package-lock.json"]) {
+  const document = JSON.parse(fs.readFileSync(path, "utf8"));
+  document.version = process.env.TRON_SYNC_VERSION;
+  if (document.packages?.[""]) document.packages[""].version = process.env.TRON_SYNC_VERSION;
+  fs.writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`);
+}
+NODE
+    )
+    replace_regex "$PROJECT_DIR/packages/gateway/src/version.ts" \
+        '(GATEWAY_VERSION = ")[^"]+(")' \
         "\${1}${TRON_VERSION}\${2}"
 
     replace_regex "$PROJECT_DIR/packages/mac-app/project.yml" \
@@ -311,32 +320,19 @@ check_grep_count() {
     fi
 }
 
-cargo_lock_tron_version() {
-    awk '
-        $0 == "[[package]]" { in_pkg = 1; name = ""; version = ""; next }
-        in_pkg && $1 == "name" && $3 == "\"tron\"" { name = "tron"; next }
-        in_pkg && $1 == "version" { gsub(/"/, "", $3); version = $3; next }
-        in_pkg && $0 == "" {
-            if (name == "tron") { print version; printed = 1; exit }
-            in_pkg = 0
-        }
-        END {
-            if (!printed && in_pkg && name == "tron") print version
-        }
-    ' "$PROJECT_DIR/packages/agent/Cargo.lock"
-}
-
 check_versions() {
     failures=0
     derive_version_fields
 
-    local canonical_build_setting cargo_version
+    local canonical_build_setting gateway_package_version gateway_lock_version
     # This is an Xcode build-setting token, not shell interpolation.
     # shellcheck disable=SC2016
     canonical_build_setting='$(TRON_CANONICAL_VERSION)'
-    cargo_version=$(awk -F'"' '$1 == "version = " { print $2; exit }' "$PROJECT_DIR/packages/agent/Cargo.toml")
-    check_equals "Cargo.toml package version" "$cargo_version" "$TRON_VERSION"
-    check_equals "Cargo.lock tron package version" "$(cargo_lock_tron_version)" "$TRON_VERSION"
+    gateway_package_version=$(cd "$PROJECT_DIR" && node -p "require('./packages/gateway/package.json').version")
+    gateway_lock_version=$(cd "$PROJECT_DIR" && node -p "require('./packages/gateway/package-lock.json').version")
+    check_equals "gateway package version" "$gateway_package_version" "$TRON_VERSION"
+    check_equals "gateway lock version" "$gateway_lock_version" "$TRON_VERSION"
+    check_grep_count "gateway source version" 1 "GATEWAY_VERSION = \"${TRON_VERSION}\"" "$PROJECT_DIR/packages/gateway/src/version.ts"
 
     check_grep_count "Mac MARKETING_VERSION" 1 "MARKETING_VERSION: \"${TRON_APPLE_MARKETING_VERSION}\"" "$PROJECT_DIR/packages/mac-app/project.yml"
     check_grep_count "Mac CURRENT_PROJECT_VERSION" 1 "CURRENT_PROJECT_VERSION: \"${TRON_APPLE_BUILD}\"" "$PROJECT_DIR/packages/mac-app/project.yml"

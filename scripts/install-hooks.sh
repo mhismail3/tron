@@ -23,9 +23,9 @@ set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 
-if git diff --cached --name-only --diff-filter=ACMR | grep -Eq '^packages/agent/.*\.rs$'; then
-    echo "rustfmt-guard: checking packages/agent formatting..."
-    (cd "$ROOT/packages/agent" && cargo fmt --all -- --check)
+if git diff --cached --name-only --diff-filter=ACMR | grep -Eq '^packages/gateway/.*\.(ts|json)$'; then
+    echo "gateway-guard: checking TypeScript..."
+    (cd "$ROOT/packages/gateway" && npm run build)
 fi
 
 exec "$ROOT/scripts/personal-info-guard.sh" --staged
@@ -34,4 +34,4 @@ HOOK
 chmod +x "$PRE_COMMIT"
 
 echo "✅ Installed pre-commit hook → $PRE_COMMIT"
-echo "   It runs rustfmt for staged Rust changes and scripts/personal-info-guard.sh --staged."
+echo "   It checks staged gateway TypeScript and runs scripts/personal-info-guard.sh --staged."

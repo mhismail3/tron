@@ -2,15 +2,15 @@ import Foundation
 
 enum MenuBarLogReadError: Error, Equatable {
     case serverUnavailable
-    case engineProtocolFailed(String)
+    case gatewayRequestFailed(String)
     case unreadableOutput(String)
 
     var message: String {
         switch self {
         case .serverUnavailable:
-            return "The Tron server is not reachable."
-        case .engineProtocolFailed(let detail):
-            return detail.isEmpty ? "logs::recent failed." : detail
+            return "Tron is not reachable."
+        case .gatewayRequestFailed(let detail):
+            return detail.isEmpty ? "The log request failed." : detail
         case .unreadableOutput(let detail):
             return detail
         }
@@ -19,8 +19,7 @@ enum MenuBarLogReadError: Error, Equatable {
 
 enum MenuBarLogReader {
     static let defaultLimit = 200
-    static let requestID = "mac-logs-recent"
-    static let helloID = "mac-engine-hello"
+    static let requestID = "mac-system-logs"
 
     static func fetchRecentLogs(
         host: String = "127.0.0.1",
@@ -29,7 +28,7 @@ enum MenuBarLogReader {
         limit: Int = defaultLimit,
         timeout: TimeInterval = 5
     ) async -> Result<String, MenuBarLogReadError> {
-        guard let url = URLComponents(string: "ws://\(host):\(port)/engine")?.url else {
+        guard let url = URLComponents(string: "ws://\(host):\(port)/v1/socket")?.url else {
             return .failure(.serverUnavailable)
         }
 
@@ -47,22 +46,19 @@ enum MenuBarLogReader {
 
         let hello: [String: Any] = [
             "type": "hello",
-            "id": helloID,
-            "protocolVersion": 1,
-            "clientName": "tron-mac",
-            "clientVersion": "tron-mac-wrapper",
+            "protocolVersion": 2,
         ]
         let payload: [String: Any] = [
-            "type": "invoke",
+            "type": "request",
             "id": requestID,
-            "functionId": "logs::recent",
-            "payload": ["limit": limit],
+            "method": "system.logs",
+            "params": ["limit": limit],
         ]
         guard let helloData = try? JSONSerialization.data(withJSONObject: hello, options: []),
               let helloString = String(data: helloData, encoding: .utf8),
               let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
               let str = String(data: data, encoding: .utf8) else {
-            return .failure(.unreadableOutput("Could not encode logs::recent request."))
+            return .failure(.unreadableOutput("Could not encode the log request."))
         }
 
         do {
@@ -72,18 +68,18 @@ enum MenuBarLogReader {
             for _ in 0..<8 {
                 let message = try await task.receive()
                 guard let raw = messageData(from: message) else {
-                    return .failure(.unreadableOutput("Could not read logs::recent response."))
+                    return .failure(.unreadableOutput("Could not read the log response."))
                 }
 
                 switch decodeFrame(data: raw) {
                 case .result(let result):
-                    return .success(format(result.entries))
+                    return .success(format(result.records))
                 case .ignore:
                     continue
                 case .error(let message):
-                    return .failure(.engineProtocolFailed(message))
+                    return .failure(.gatewayRequestFailed(message))
                 case .malformed:
-                    return .failure(.unreadableOutput("Unexpected logs::recent response."))
+                    return .failure(.unreadableOutput("Unexpected log response."))
                 }
             }
 
@@ -108,26 +104,21 @@ enum MenuBarLogReader {
             return .ignore
         }
         if let error = json["error"] as? [String: Any] {
-            return .error(error["message"] as? String ?? "logs::recent failed")
+            return .error(error["message"] as? String ?? "Log request failed")
         }
         guard json["ok"] as? Bool != false else {
-            return .error("logs::recent failed")
+            return .error("Log request failed")
         }
-        guard let envelope = try? JSONDecoder().decode(EngineFunctionCallResponseEnvelope<RecentLogsResult>.self, from: data),
+        guard let envelope = try? JSONDecoder().decode(GatewayResponseEnvelope<RecentLogsResult>.self, from: data),
               let result = envelope.result else {
             return .malformed
         }
         return .result(result)
     }
 
-    static func format(_ entries: [RecentLogEntry]) -> String {
-        entries.map { entry in
-            let component = entry.component.isEmpty ? "server" : entry.component
-            var line = "[\(entry.timestamp)] \(entry.level.uppercased()) \(component): \(entry.message)"
-            if let error = entry.errorMessage, !error.isEmpty {
-                line += " - \(error)"
-            }
-            return line
+    static func format(_ records: [RecentLogEntry]) -> String {
+        records.map { entry in
+            "[\(entry.timestamp)] \(entry.level.uppercased()) TRON: \(entry.message)"
         }
         .joined(separator: "\n")
     }
@@ -144,24 +135,16 @@ enum MenuBarLogReader {
     }
 }
 
-private struct EngineFunctionCallResponseEnvelope<Result: Decodable & Equatable>: Decodable, Equatable {
+private struct GatewayResponseEnvelope<Result: Decodable & Equatable>: Decodable, Equatable {
     var result: Result?
 }
 
 struct RecentLogsResult: Decodable, Equatable {
-    var entries: [RecentLogEntry]
-    var count: Int
+    var records: [RecentLogEntry]
 }
 
 struct RecentLogEntry: Decodable, Equatable {
-    var id: Int64
     var timestamp: String
     var level: String
-    var component: String
     var message: String
-    var origin: String?
-    var sessionId: String?
-    var workspaceId: String?
-    var traceId: String?
-    var errorMessage: String?
 }

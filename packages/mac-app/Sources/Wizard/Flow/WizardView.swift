@@ -448,7 +448,7 @@ struct WizardShell<Content: View>: View {
             return "Retry install"
         }
         if case .registered = state.existingInstallStatus {
-            return "Start server"
+            return "Start Tron"
         }
         return "Install"
     }

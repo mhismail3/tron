@@ -11,9 +11,6 @@ enum MenuBarAction: Equatable, Sendable {
     case pauseServer
     case resumeServer
     case restartServer
-    case stopDevServer
-    case stopMacOperator
-    case resumeMacOperator
     case uninstall
 }
 
@@ -46,12 +43,6 @@ final class MenuBarActionHandler {
             await resumeServer()
         case .restartServer:
             await restartServer()
-        case .stopDevServer:
-            await stopDevServer()
-        case .stopMacOperator:
-            menuBarController?.stopMacOperator()
-        case .resumeMacOperator:
-            menuBarController?.resumeMacOperator()
         case .uninstall:
             await confirmAndUninstall()
         }
@@ -70,7 +61,7 @@ final class MenuBarActionHandler {
         switch outcome {
         case .ok, .alreadyLoaded:
             await finishServerStartAction(
-                successTitle: "Tron server restarted",
+                successTitle: "Tron restarted",
                 successBody: "The menu bar status has been refreshed.",
                 failureTitle: "Restart failed"
             )
@@ -99,7 +90,7 @@ final class MenuBarActionHandler {
         await refreshStatus()
         switch outcome {
         case .ok, .alreadyLoaded:
-            await MenuBarNotifier.post(title: "Tron server paused", body: "Resume it from the Tron menu bar when needed.")
+            await MenuBarNotifier.post(title: "Tron paused", body: "Resume it from the Tron menu bar when needed.")
         case .requiresApproval(let message):
             LoginItemsSettingsOpener.open()
             await MenuBarNotifier.post(title: "Pause blocked", body: message)
@@ -124,7 +115,7 @@ final class MenuBarActionHandler {
         switch outcome {
         case .ok, .alreadyLoaded:
             await finishServerStartAction(
-                successTitle: "Tron server resumed",
+                successTitle: "Tron resumed",
                 successBody: "The menu bar status has been refreshed.",
                 failureTitle: "Resume failed"
             )
@@ -146,46 +137,6 @@ final class MenuBarActionHandler {
         }
     }
 
-    private func stopDevServer() async {
-        let current = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
-        let port = current.state.runningPort ?? setup.serverPort
-        applyBusy(.stoppingDevServer)
-
-        switch await setup.stopDevServer(port) {
-        case .stopped:
-            let outcome = await resumeServerAfterDevStop()
-            switch outcome {
-            case .ok, .alreadyLoaded:
-                await finishServerStartAction(
-                    successTitle: "Dev server stopped",
-                    successBody: "The installed Tron Server is running again.",
-                    failureTitle: "Resume failed"
-                )
-            case .requiresApproval(let message):
-                await refreshStatus()
-                LoginItemsSettingsOpener.open()
-                await MenuBarNotifier.post(title: "Resume blocked", body: message)
-                await presentNonBlockingError(title: "Resume blocked", message: message)
-            case .launchdRefused(let message), .unknown(let message):
-                await refreshStatus()
-                await MenuBarNotifier.post(title: "Resume failed", body: message)
-                await presentNonBlockingError(title: "Resume failed", message: message)
-            case .binaryMissing(let path):
-                await refreshStatus()
-                let message = "Binary missing: \(path)"
-                await MenuBarNotifier.post(title: "Resume failed", body: message)
-                await presentNonBlockingError(title: "Resume failed", message: message)
-            }
-        case .notActive:
-            await refreshStatus()
-            await MenuBarNotifier.post(title: "Dev server not active", body: "The menu bar status has been refreshed.")
-        case .failed(let message):
-            await refreshStatus()
-            await MenuBarNotifier.post(title: "Stop dev server failed", body: message)
-            await presentNonBlockingError(title: "Stop dev server failed", message: message)
-        }
-    }
-
     private func sendFeedback() async {
         let snapshot = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
         await MenuBarFeedbackAction.present(snapshot: snapshot, token: setup.readBearerToken())
@@ -196,9 +147,9 @@ final class MenuBarActionHandler {
         let alert = NSAlert()
         alert.messageText = "Uninstall Tron?"
         alert.informativeText = """
-        This unregisters the Tron Server Login Item.
+        This unregisters the Tron Agent Login Item.
 
-        Your workspace files in ~/.tron/workspace/ and your conversation history in ~/.tron/internal/database/ are preserved.
+        Canonical Tron sessions and provider credentials are preserved. Legacy Tron files are also left untouched.
         """
         alert.alertStyle = .warning
         let resetOptionsStack = NSStackView()
@@ -207,17 +158,17 @@ final class MenuBarActionHandler {
         resetOptionsStack.spacing = 6
 
         let resetSettingsCheckbox = NSButton(
-            checkboxWithTitle: "Reset settings",
+            checkboxWithTitle: "Reset network cache",
             target: nil,
             action: nil
         )
-        resetSettingsCheckbox.toolTip = "Also removes ~/.tron/settings.toml so compiled defaults apply. The database is never removed."
+        resetSettingsCheckbox.toolTip = "Also removes Tron's disposable network cache. Sessions and credentials are never removed."
         let resetCredentialsCheckbox = NSButton(
-            checkboxWithTitle: "Reset saved credentials",
+            checkboxWithTitle: "Reset Mac wrapper credential",
             target: nil,
             action: nil
         )
-        resetCredentialsCheckbox.toolTip = "Also removes ~/.tron/auth.json. The database is never removed."
+        resetCredentialsCheckbox.toolTip = "Also removes gateway/local-auth.json. Provider and device credentials are never removed."
 
         resetSettingsCheckbox.sizeToFit()
         resetCredentialsCheckbox.sizeToFit()
@@ -309,11 +260,11 @@ final class MenuBarActionHandler {
     private func unhealthyStartMessage(result: ServerPingResult) -> String {
         switch result {
         case .success:
-            return "The server is running."
+            return "Tron is running."
         case .unauthorized:
-            return "The Tron Server started but rejected the local bearer token. Re-pair or restart after updating /Applications/Tron.app."
+            return "The Tron Agent started but rejected the local bearer token. Re-pair or restart after updating /Applications/Tron.app."
         case .unreachable, .timeout, .malformedResponse:
-            return "The Tron Server was loaded by ServiceManagement, but /health never became reachable. Update or reinstall /Applications/Tron.app, then restart the server."
+            return "The Tron Agent was loaded by ServiceManagement, but /health never became reachable. Update or reinstall /Applications/Tron.app, then restart Tron."
         }
     }
 
@@ -323,8 +274,7 @@ final class MenuBarActionHandler {
             state: .busy(action),
             tailscaleIP: current.tailscaleIP,
             processID: current.processID,
-            uptime: current.uptime,
-            isDevServerActive: current.isDevServerActive
+            uptime: current.uptime
         ))
     }
 
@@ -342,40 +292,12 @@ final class MenuBarActionHandler {
 
     private func ensureLaunchAgentManagementAllowed(actionTitle: String) async -> Bool {
         guard setup.canManageLaunchAgent else {
-            let message = "This Xcode wrapper is running in companion mode. Use the installed Tron.app for server install, pause, restart, and uninstall actions, or use the isolated install scheme for reinstall testing."
+            let message = "This Xcode wrapper is running in companion mode. Use the installed Tron.app for Tron install, pause, restart, and uninstall actions, or use the isolated install scheme for reinstall testing."
             await MenuBarNotifier.post(title: actionTitle, body: message)
             await presentNonBlockingError(title: actionTitle, message: message)
             return false
         }
         return true
-    }
-
-    private func resumeServerAfterDevStop() async -> LaunchAgentOutcome {
-        if setup.canManageLaunchAgent {
-            return await setup.launchAgentManager.load(
-                plistPath: setup.launchAgentPlistPath,
-                label: setup.launchAgentLabel
-            )
-        }
-
-        let executable = TronPaths.releaseApplicationURL
-            .appendingPathComponent("Contents/MacOS", isDirectory: true)
-            .appendingPathComponent("Tron", isDirectory: false)
-        guard FileManager.default.fileExists(atPath: executable.path) else {
-            return .launchdRefused(
-                message: "The installed Tron.app is required to resume the production server after stopping dev mode."
-            )
-        }
-        let result = await Subprocess.run(
-            executable: executable,
-            arguments: ["--tron-start-server-and-quit"]
-        )
-        guard result.exitCode == 0 else {
-            return .launchdRefused(
-                message: result.stderr.isEmpty ? result.stdout : result.stderr
-            )
-        }
-        return .ok
     }
 
 }

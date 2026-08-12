@@ -46,7 +46,6 @@ enum MacAppStartupContext: Equatable, Sendable {
 enum MacAppStartupSkipReason: Equatable, Sendable {
     case notOnboarded
     case unmanagedWrapper
-    case devServerActive
     case versionAlreadyRecorded
 }
 
@@ -72,13 +71,11 @@ enum MacAppStartupMaintenance {
 
         let recordedVersion = setup.readRecordedAppVersion()
         let onboarded = setup.onboardedSentinelExists()
-        let devServerActive = await setup.probeServerProcess(setup.serverPort)?.isDevServer == true
         if let reason = restartSkipReason(
             currentVersion: currentVersion,
             recordedVersion: recordedVersion,
             canManageLaunchAgent: setup.canManageLaunchAgent,
-            onboarded: onboarded,
-            devServerActive: devServerActive
+            onboarded: onboarded
         ) {
             return .skipped(reason)
         }
@@ -123,12 +120,10 @@ enum MacAppStartupMaintenance {
         currentVersion: MacAppVersionIdentity,
         recordedVersion: MacAppVersionIdentity?,
         canManageLaunchAgent: Bool,
-        onboarded: Bool,
-        devServerActive: Bool
+        onboarded: Bool
     ) -> MacAppStartupSkipReason? {
         if !onboarded { return .notOnboarded }
         if !canManageLaunchAgent { return .unmanagedWrapper }
-        if devServerActive { return .devServerActive }
         if recordedVersion == currentVersion { return .versionAlreadyRecorded }
         return nil
     }

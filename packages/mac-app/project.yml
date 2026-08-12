@@ -41,6 +41,7 @@ targets:
         optional: true
         excludes:
           - "Library/**"
+          - "Gateway/**"
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist
@@ -65,12 +66,21 @@ targets:
           set -euo pipefail
           SRC="$SRCROOT/Sources/Resources/Library"
           DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Library"
+          GATEWAY_SRC="$SRCROOT/Sources/Resources/Gateway"
+          GATEWAY_DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/Gateway"
           test -d "$SRC" || { echo "Missing bundled Library resources at $SRC" >&2; exit 1; }
-          rm -rf "$DST"
-          mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
+          test -d "$GATEWAY_SRC" || { echo "Missing bundled Gateway resources at $GATEWAY_SRC; run scripts/bundle-gateway.sh" >&2; exit 1; }
+          rm -rf "$DST" "$GATEWAY_DST"
+          mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources"
           ditto "$SRC" "$DST"
+          ditto "$GATEWAY_SRC" "$GATEWAY_DST"
           if [ -d "$DST/LoginItems" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
             SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
+            find "$GATEWAY_DST" -type f \( -perm -111 -o -name '*.node' \) | while IFS= read -r NATIVE; do
+              if file "$NATIVE" | grep -q 'Mach-O'; then
+                codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$NATIVE"
+              fi
+            done
             for HELPER in "$DST"/LoginItems/*.app; do
               [ -d "$HELPER" ] || continue
               codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$HELPER"
@@ -108,7 +118,6 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_RUNNER_WAIT_FOR_DEBUGGER: NO
         PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.tests
-        CODE_SIGN_IDENTITY: "-"
 
 schemes:
   TronMac:

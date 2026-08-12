@@ -1,6 +1,6 @@
 import Foundation
 
-/// Result of a single `system::ping` engine probe. The four non-success cases
+/// Result of a single authenticated Tron Gateway probe. The four non-success cases
 /// drive distinct UI affordances in the menu bar / wizard so the user
 /// gets the right action ("re-pair" vs "wait for boot" vs "check
 /// network").
@@ -19,17 +19,16 @@ enum ServerPingResult: Sendable, Equatable {
     case malformedResponse
 }
 
-/// One-shot `system::ping` over the engine WebSocket protocol. Used by the install step's
-/// "wait for server" loop AND by the menu bar's status poller.
+/// One-shot `system.info` request over the stable Tron Gateway protocol. Used
+/// by the install step's "wait for Tron" loop and by the menu bar poller.
 enum ServerPing {
-    static let requestID = "mac-system-ping"
-    static let helloID = "mac-engine-hello"
+    static let requestID = "mac-system-info"
 
     /// Performs a single ping with a default 3 s timeout. Classifies
     /// failures so the caller can render the right state without
     /// guessing.
     static func ping(host: String, port: Int, token: String?, timeout: TimeInterval = 3) async -> ServerPingResult {
-        guard let url = URLComponents(string: "ws://\(host):\(port)/engine")?.url else {
+        guard let url = URLComponents(string: "ws://\(host):\(port)/v1/socket")?.url else {
             return .unreachable
         }
 
@@ -54,19 +53,13 @@ enum ServerPing {
 
         let hello: [String: Any] = [
             "type": "hello",
-            "id": helloID,
-            "protocolVersion": 1,
-            "clientName": "tron-mac",
-            "clientVersion": "tron-mac-wrapper",
+            "protocolVersion": 2,
         ]
         let payload: [String: Any] = [
-            "type": "invoke",
+            "type": "request",
             "id": requestID,
-            "functionId": "system::ping",
-            "payload": [
-                "protocolVersion": 1,
-                "clientVersion": "tron-mac-wrapper",
-            ]
+            "method": "system.info",
+            "params": [:],
         ]
         guard let helloData = try? JSONSerialization.data(withJSONObject: hello, options: []),
               let helloString = String(data: helloData, encoding: .utf8),
@@ -146,12 +139,10 @@ enum ServerPing {
         let result: ResultFrame?
 
         struct ResultFrame: Decodable {
-            let pong: Bool
-            let timestamp: String
-            let serverVersion: String
-            let serverProtocolVersion: Int
-            let minClientProtocolVersion: Int
-            let compatible: Bool
+            let gatewayVersion: String
+            let protocolVersion: Int
+            let minProtocolVersion: Int
+            let machineId: String
         }
     }
 
@@ -174,13 +165,12 @@ enum ServerPing {
             return .error
         }
         guard let value = frame.result,
-              value.pong,
-              !value.timestamp.isEmpty,
-              !value.serverVersion.isEmpty,
-              value.compatible else {
+              !value.gatewayVersion.isEmpty,
+              value.protocolVersion >= value.minProtocolVersion,
+              !value.machineId.isEmpty else {
             return .malformed
         }
-        return .result(ServerPingInfo(version: value.serverVersion))
+        return .result(ServerPingInfo(version: value.gatewayVersion))
     }
 
     private static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {

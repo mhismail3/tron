@@ -15,14 +15,9 @@ Apply this policy unless the user explicitly requests another variant:
 - Use `Tron` / `Prod` whenever installing an app on the user's physical device
   for the user to evaluate.
 - Do not install the Beta bundle on the user's physical device by default.
-- Do not describe a locally development-signed Prod build as a production APNs
-  acceptance build. The device helper deliberately uses APNs sandbox for local
-  Prod installs; require TestFlight or an App Store export for a production
-  provider claim.
-
 Prefer the simulator for Codex-owned testing. Use a physical device only for a
-user-requested install or device-only behavior such as APNs, camera, or hardware
-integration.
+user-requested install or device-only behavior such as camera, local-network,
+Keychain, or hardware integration.
 
 ## Simulator
 
@@ -40,7 +35,9 @@ For hosted simulator tests, select the `Tron Beta` scheme. Its test action uses
 the isolated `Test` configuration by project design:
 
 ```bash
-cd packages/ios-app && xcodegen generate && xcodebuild test -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+cd packages/ios-app && xcodegen generate
+xcodebuild build-for-testing -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+xcodebuild test-without-building -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/<Suite>
 ```
 
 ## Physical device

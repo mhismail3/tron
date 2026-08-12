@@ -1,0 +1,144 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { ModelRuntime, createAgentSessionServices } from "@earendil-works/pi-coding-agent";
+import { loadConfig } from "./config.js";
+import { DeviceStore } from "./security/device-store.js";
+import { TrustService } from "./admin/trust-service.js";
+import { FilesystemService } from "./machine/filesystem-service.js";
+import { UploadStore } from "./machine/upload-store.js";
+import { TerminalService } from "./machine/terminal-service.js";
+import { SettingsService } from "./admin/settings-service.js";
+import { ModelConfigService } from "./admin/model-config-service.js";
+import { PackageService } from "./admin/package-service.js";
+import { AuthBroker } from "./admin/auth-broker.js";
+import { LegacyImportService } from "./admin/legacy-import-service.js";
+import { RuntimeRegistry } from "./sessions/runtime-registry.js";
+import { GatewayLogger } from "./transport/logger.js";
+import { CommandReceiptStore } from "./transport/command-receipts.js";
+import { GatewayService } from "./transport/gateway-service.js";
+import { GatewayServer } from "./transport/server.js";
+
+const config = await loadConfig();
+process.env.PI_CODING_AGENT_DIR = config.agentDir;
+process.env.PI_CODING_AGENT ??= "true";
+process.env.AI_AGENT ??= "pi";
+process.env.PI_SKIP_VERSION_CHECK ??= "1";
+
+const logger = new GatewayLogger();
+const devices = new DeviceStore(config.tronHome, config.machineId);
+await devices.initialize();
+
+const modelRuntime = await ModelRuntime.create({
+  authPath: join(config.agentDir, "auth.json"),
+  modelsPath: join(config.agentDir, "models.json"),
+  modelsStorePath: join(config.agentDir, "models-store.json"),
+  refreshOnCreate: true,
+  allowModelNetwork: false,
+});
+// Compose global extension providers into the administration runtime used by
+// onboarding. Project providers remain isolated in their RuntimeSlot runtime.
+// Retain these services for the gateway lifetime. Their resource loader owns
+// global extension runtime state used by administration model/auth operations;
+// constructing and immediately discarding it can orphan that state.
+const administrationServices = await createAgentSessionServices({
+  cwd: homedir(),
+  agentDir: config.agentDir,
+  modelRuntime,
+  resourceLoaderReloadOptions: { resolveProjectTrust: async () => false },
+});
+for (const diagnostic of administrationServices.diagnostics) {
+  logger.log(diagnostic.type === "error" ? "error" : diagnostic.type === "warning" ? "warning" : "info", diagnostic.message);
+}
+const trust = new TrustService(config.agentDir);
+const filesystem = new FilesystemService();
+const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
+const settings = new SettingsService(config.agentDir, modelRuntime);
+const modelConfig = new ModelConfigService(config.agentDir);
+const receipts = new CommandReceiptStore(config.tronHome);
+await receipts.prune();
+
+let transport: GatewayServer;
+const sessions = new RuntimeRegistry({
+  agentDir: config.agentDir,
+  tronHome: config.tronHome,
+  idleRuntimeMs: config.idleRuntimeMs,
+  trust,
+  broadcast: (sessionId, topic, payload) => transport?.broadcastSession(sessionId, topic, payload),
+  sessionListChanged: () => transport?.notifySessionListChanged(),
+});
+await sessions.initialize();
+
+const terminal = new TerminalService(
+  config.terminalReplayBytes,
+  (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),
+);
+const auth = new AuthBroker(modelRuntime, (clientId, topic, payload) => transport?.emitToClient(clientId, topic, payload));
+const packages = new PackageService(config.agentDir, trust, (topic, payload) => transport?.broadcast(topic, payload));
+const legacyImport = new LegacyImportService(config.tronHome);
+
+let stopping = false;
+async function shutdown(reason: string, exitCode = 0): Promise<void> {
+  if (stopping) return;
+  stopping = true;
+  logger.log("info", `Stopping gateway (${reason})`);
+  const forced = setTimeout(() => process.exit(1), 15_000);
+  forced.unref();
+  try {
+    await transport.close();
+    terminal.dispose();
+    await sessions.dispose();
+    clearTimeout(forced);
+    process.exit(exitCode);
+  } catch (error) {
+    logger.log("error", error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
+const service = new GatewayService({
+  config,
+  modelRuntime,
+  devices,
+  sessions,
+  filesystem,
+  uploads,
+  terminals: terminal,
+  trust,
+  settings,
+  modelConfig,
+  packages,
+  auth,
+  legacyImport,
+  logger,
+  receipts,
+  // LaunchAgent KeepAlive restarts unsuccessful exits; an administrative
+  // restart must therefore use a deliberate non-zero service exit code.
+  requestRestart: () => void shutdown("requested restart", 75),
+  deviceRevoked: (deviceId) => transport?.disconnectDevice(deviceId),
+});
+transport = new GatewayServer({
+  host: config.host,
+  port: config.port,
+  maxFrameBytes: config.maxFrameBytes,
+  maxUploadBytes: config.maxUploadBytes,
+  devices,
+  uploads,
+  sessions,
+  auth,
+  service,
+  logger,
+});
+
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.once("SIGINT", () => void shutdown("SIGINT"));
+process.on("uncaughtException", (error) => {
+  logger.log("error", `Uncaught exception: ${error.message}`);
+  void shutdown("uncaught exception", 1);
+});
+process.on("unhandledRejection", (error) => {
+  logger.log("error", `Unhandled rejection: ${error instanceof Error ? error.message : String(error)}`);
+});
+
+const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_000);
+enrollmentTimer.unref();
+await transport.listen();

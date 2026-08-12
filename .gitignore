@@ -1,6 +1,6 @@
-# Rust build outputs
-**/target/
+# TypeScript build outputs
 *.tsbuildinfo
+**/dist/
 
 # IDE
 .idea/
@@ -8,6 +8,9 @@
 *.swp
 *.swo
 *~
+
+# CI tool cache
+.ci-tools/
 
 # Xcode
 *.xcuserstate
@@ -39,15 +42,13 @@ Thumbs.db
 # Node/Bun asset tooling
 node_modules/
 package-lock.json
+!packages/gateway/package-lock.json
 
 # Python (utility scripts)
 __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
-
-# Script artifacts (benchmarks, etc.)
-scripts/artifacts/
 
 # Temporary
 tmp/
@@ -60,9 +61,6 @@ temp/
 
 # Debug
 .debug/
-
-# Tron agent worktrees
-.worktrees/
 
 # Claude runtime state
 .claude/scheduled_tasks.lock

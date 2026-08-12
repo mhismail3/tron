@@ -1,108 +1,91 @@
-#!/bin/bash
-# tron - workspace development and contributor service entrypoint
-#
-# Workspace-only commands dispatch here. Runtime routing and help are owned by
-# tron-lib.sh so this entrypoint stays aligned with the installed tron-cli.
+#!/usr/bin/env bash
+# Tron contributor entry point. Production deployment is intentionally absent;
+# releases are performed manually by the repository owner.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GATEWAY="$ROOT/packages/gateway"
 
-set -e
+usage() {
+  cat <<'EOF'
+Usage: scripts/tron <command> [options]
 
-#=============================================================================
-# WORKSPACE RESOLUTION
-#=============================================================================
+Commands:
+  dev [--tailscale] [--background]  Build and run an isolated gateway on port 9848
+  dev --stop                        Stop the background isolated gateway
+  dev --status                      Report isolated gateway status
+  ci [check|test|all]               Validate the gateway and repository policy
+  bundle gateway                    Stage the Mac gateway payload and Node runtimes
+  ios generate                      Regenerate the iOS Xcode project
+  mac generate                      Regenerate the macOS Xcode project
+  version                           Print the canonical Tron version
 
-# Resolve symlinks to get the real script location
-SOURCE="${BASH_SOURCE[0]}"
-while [ -L "$SOURCE" ]; do
-    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-    SOURCE="$(readlink "$SOURCE")"
-    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
-done
-SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-
-# Ensure Rust toolchain commands are available even in non-interactive shells.
-if ! command -v cargo >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
-    export PATH="$HOME/.cargo/bin:$PATH"
-fi
-
-#=============================================================================
-# SHARED LIBRARY
-#=============================================================================
-
-source "$SCRIPT_DIR/tron-lib.sh"
-
-#=============================================================================
-# WORKSPACE-ONLY CONFIGURATION
-#=============================================================================
-
-# Contributor helper bundles built by workspace-only install/deploy commands.
-TRON_BUNDLE_ID="com.tron.agent"
-
-# Rust workspace
-RUST_WORKSPACE="$PROJECT_DIR/packages/agent"
-RELEASE_BINARY="$RUST_WORKSPACE/target/release/tron"
-DEV_SERVER_BINARY="$RUST_WORKSPACE/target/dev-server/tron"
-BENCH_SCRIPT="$SCRIPT_DIR/benchmarks/bench.py"
-BENCH_BASELINE_DIR="$SCRIPT_DIR/benchmarks/baselines"
-BENCH_GATE_ITERATIONS=50
-BENCH_GATE_MAX_P95_REGRESSION_PCT=15
-BENCH_GATE_MAX_MEAN_REGRESSION_PCT=35
-
-#=============================================================================
-# COMMAND MODULES
-#=============================================================================
-
-for tron_cmd_module in "$SCRIPT_DIR"/tron.d/*.sh; do
-    [ -e "$tron_cmd_module" ] && source "$tron_cmd_module"
-done
-unset tron_cmd_module
-
-#=============================================================================
-# HELP
-#=============================================================================
-
-cmd_help() {
-    echo ""
-    echo -e "${CYAN}Tron - Persistent AI Coding Agent${NC}"
-    echo ""
-    echo "Usage: tron <command> [options]"
-    echo ""
-    echo -e "${BOLD}Development (workspace only):${NC}"
-    echo "  dev             Start server (dev-server profile; -b build, -t test, -d background)"
-    echo "  ci              Run CI checks (fmt, check, clippy, test, bench, doc)"
-    echo "  bench           Performance benchmarks (run, bless, compare)"
-    echo "  version         Print/check/sync centralized release version mirrors"
-    echo "  setup           First-time project setup"
-    echo ""
-    echo -e "${BOLD}Manual Deployment (workspace only):${NC}"
-    echo "  preflight       Pre-deploy infrastructure check"
-    echo "  manual-deploy   Build, test, swap contributor service binary, restart (--force, --ci)"
-    echo "  install         Initial setup (launchd + CLI)"
-    echo ""
-    show_runtime_command_help
-    echo -e "${BOLD}Build profiles:${NC}"
-    echo "  cargo check                        # Fast correctness check (no binary)"
-    echo "  cargo build --profile dev-server   # Dev server (thin LTO, fast)"
-    echo "  cargo build --release              # Production (fat LTO, comprehensive)"
-    echo ""
+There is no deploy command. Production deployment is manual-only.
+EOF
 }
 
-#=============================================================================
-# MAIN DISPATCH
-#=============================================================================
-
-case "${1:-help}" in
-    help|--help|-h) cmd_help; exit 0 ;;
-esac
-
-case "$1" in
-    dev)       shift; cmd_dev "$@" ;;
-    ci)        shift; cmd_ci "$@" ;;
-    bench)     shift; cmd_bench "$@" ;;
-    version)   shift; "$SCRIPT_DIR/tron-version" "$@" ;;
-    preflight) cmd_preflight ;;
-    manual-deploy) shift; cmd_manual_deploy "$@" ;;
-    install)   shift; cmd_install "$@" ;;
-    setup)     shift; cmd_setup "$@" ;;
-    *) dispatch_runtime_command "$@" ;;
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  help|-h|--help) usage ;;
+  version)
+    if (($# == 0)); then
+      awk -F= '/^TRON_VERSION=/{gsub(/"/,"",$2); print $2}' "$ROOT/VERSION.env"
+    else
+      exec "$ROOT/scripts/tron-version" "$@"
+    fi
+    ;;
+  dev)
+    action=run; background=0; host=127.0.0.1
+    while (($#)); do
+      case "$1" in
+        --stop) action=stop ;;
+        --status) action=status ;;
+        --background|-b) background=1 ;;
+        --tailscale) host=tailscale ;;
+        *) echo "unknown dev option: $1" >&2; exit 64 ;;
+      esac; shift
+    done
+    state="$HOME/.tron-dev/gateway"; pid_file="$state/dev.pid"; log="$state/dev.log"
+    mkdir -p "$state"
+    if [[ "$action" == stop ]]; then
+      if [[ -f "$pid_file" ]]; then kill "$(cat "$pid_file")" 2>/dev/null || true; rm -f "$pid_file"; fi
+      exit 0
+    fi
+    if [[ "$action" == status ]]; then
+      if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then echo "running pid $(cat "$pid_file")"; else echo "stopped"; exit 1; fi
+      exit 0
+    fi
+    (cd "$GATEWAY" && npm run build)
+    args=("$GATEWAY/dist/index.js" --host "$host" --port 9848)
+    if ((background)); then
+      TRON_HOME_NAME=.tron-dev nohup node "${args[@]}" >"$log" 2>&1 & echo $! >"$pid_file"
+      echo "Tron development gateway started (pid $(cat "$pid_file"), log $log)"
+    else
+      TRON_HOME_NAME=.tron-dev exec node "${args[@]}"
+    fi
+    ;;
+  ci)
+    scope="${1:-all}"
+    case "$scope" in
+      check) (cd "$GATEWAY" && npm ci && npm run build && npm audit --omit=dev) ;;
+      test) (cd "$GATEWAY" && npm test) ;;
+      all)
+        (cd "$GATEWAY" && npm ci && npm run build && npm test && npm audit --omit=dev)
+        "$ROOT/scripts/personal-info-guard.sh"
+        ;;
+      *) echo "unknown ci scope: $scope" >&2; exit 64 ;;
+    esac
+    ;;
+  bundle)
+    [[ "${1:-}" == gateway ]] || { usage >&2; exit 64; }
+    exec "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" "${@:2}"
+    ;;
+  ios)
+    [[ "${1:-}" == generate ]] || { usage >&2; exit 64; }
+    (cd "$ROOT/packages/ios-app" && xcodegen generate)
+    ;;
+  mac)
+    [[ "${1:-}" == generate ]] || { usage >&2; exit 64; }
+    (cd "$ROOT/packages/mac-app" && xcodegen generate)
+    ;;
+  *) usage >&2; exit 64 ;;
 esac

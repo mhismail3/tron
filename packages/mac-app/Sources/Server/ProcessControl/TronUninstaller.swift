@@ -18,7 +18,7 @@ enum TronUninstaller {
     ) async -> LaunchAgentOutcome {
         guard setup.canManageLaunchAgent else {
             return .launchdRefused(
-                message: "This Xcode Debug wrapper is in companion mode and cannot uninstall the production Tron Server."
+                message: "This Xcode Debug wrapper is in companion mode and cannot uninstall the production Tron Agent."
             )
         }
         let outcome = await setup.launchAgentManager.unload(label: setup.launchAgentLabel)
@@ -36,7 +36,7 @@ enum TronUninstaller {
             try? fm.removeItem(at: path)
         }
         if options.resetSettings {
-            try? ServerSettingsWriter.deleteSettings(at: setup.settingsPath)
+            try? GatewayNetworkCacheWriter.deleteCache(at: setup.networkCachePath)
         }
         if options.resetCredentials {
             try? fm.removeItem(at: setup.bearerTokenPath)

@@ -192,8 +192,6 @@ struct CommandModeHostView: View {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
-    private let macOperatorSafety = MacOperatorSafetyState()
-    private var macOperatorBridge: MacOperatorHostBridge?
     private var wizardCompletionObserver: NSObjectProtocol?
     private var instanceLock: SingleInstanceLock?
 
@@ -278,7 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .invalidBundledHelper(let problem):
                 NSLog("[Tron] Cannot start server from command mode: %@", problem)
             case .unmanagedWrapper:
-                NSLog("[Tron] Cannot start server from command mode: Debug companion mode does not manage the production server")
+                NSLog("[Tron] Cannot start server from command mode: Debug companion mode does not manage the production agent")
             case .launchAgentFailed(let outcome):
                 NSLog("[Tron] Command-mode server start returned %@", String(describing: outcome))
             case .unhealthy(let health):
@@ -297,7 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let outcome = await TronUninstaller.unregisterAndClean(setup: EnvironmentSetup.live)
             switch outcome {
             case .ok, .alreadyLoaded:
-                NSLog("[Tron] Unregistered Tron Server")
+                NSLog("[Tron] Unregistered Tron Agent")
             case .requiresApproval(let message), .launchdRefused(let message), .unknown(let message):
                 NSLog("[Tron] Command-mode uninstall failed: %@", message)
             case .binaryMissing(let path):
@@ -312,12 +310,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Tear down the menu bar before releasing the single-instance
         // lock so a second wrapper cannot observe a half-disposed item.
-        if let macOperatorBridge {
-            macOperatorBridge.stop()
-        } else {
-            macOperatorSafety.stop()
-        }
-        macOperatorBridge = nil
         menuBarController?.dispose()
         menuBarController = nil
         instanceLock?.release()
@@ -326,31 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func installMenuBar(setup: EnvironmentSetup, context: MacAppStartupContext) {
         guard menuBarController == nil else { return }
-        if setup.canManageLaunchAgent, macOperatorBridge == nil {
-            do {
-                let bridge = MacOperatorHostBridge(
-                    socketURL: TronPaths.macOperatorSocketPath,
-                    safety: macOperatorSafety
-                )
-                try bridge.start()
-                macOperatorBridge = bridge
-            } catch {
-                // Do not log the socket path or a native error description:
-                // both can contain user-specific home-directory information.
-                NSLog("[Tron] Mac Operator host bridge could not start.")
-            }
-        }
-        let controller = MenuBarController(
-            setup: setup,
-            macOperatorSafety: macOperatorSafety,
-            onStopMacOperator: { [weak self] in
-                if let bridge = self?.macOperatorBridge {
-                    bridge.emergencyStop()
-                } else {
-                    self?.macOperatorSafety.stop()
-                }
-            }
-        )
+        let controller = MenuBarController(setup: setup)
         controller.install()
         menuBarController = controller
         Task { [weak controller] in

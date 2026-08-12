@@ -157,35 +157,28 @@ install_beta() {
 check_affected() {
     local simulator_id="$1"
     local base_ref="${2:-origin/main}"
-    local selection mode reason line
-    # macOS still ships Bash 3.2, where expanding an empty array under `set -u`
-    # fails. Reuse the function's positional parameters so full validation can
-    # pass zero filters while focused validation appends only selected tests.
-    set --
-    selection="$(python3 "$ROOT_DIR/scripts/ios-test-selection.py" "$base_ref" --format lines)"
-    mode="$(printf '%s\n' "$selection" | sed -n '1p')"
-    reason="$(printf '%s\n' "$selection" | sed -n '2p')"
-    if [ "$mode" = "none" ]; then
-        echo "No iOS validation required: $reason"
+    if git -C "$ROOT_DIR" diff --quiet "$base_ref" -- packages/ios-app scripts/tron-ios-simulator; then
+        echo "No iOS validation required: no iOS-owned changes"
         return
     fi
-    if [ "$mode" = "focused" ]; then
-        while IFS= read -r line; do
-            [ -n "$line" ] && set -- "$@" "-only-testing:$line"
-        done < <(printf '%s\n' "$selection" | tail -n +3)
-    fi
-    echo "iOS validation mode: $mode ($reason)"
+    echo "iOS validation mode: complete focused target"
     boot_simulator "$simulator_id"
     (
         cd "$IOS_DIR"
         xcodegen generate
-        xcodebuild test \
+        xcodebuild build-for-testing \
             -project TronMobile.xcodeproj \
             -scheme "Tron Beta" \
-            -configuration Beta \
+            -configuration Test \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -derivedDataPath "$TEST_DERIVED_DATA"
+        xcodebuild test-without-building \
+            -project TronMobile.xcodeproj \
+            -scheme "Tron Beta" \
+            -configuration Test \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$TEST_DERIVED_DATA" \
-            "$@"
+            -only-testing:TronMobileTests
     )
 }
 

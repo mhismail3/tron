@@ -247,7 +247,7 @@ struct InstallStep: View {
             }
             state.existingInstallStatus = setup.detectExistingInstall()
         } else {
-            stages[.awaitPing] = .failed("Server did not respond within 30 seconds")
+            stages[.awaitPing] = .failed("Tron did not respond within 30 seconds")
             state.installOutcome = .awaitPingTimedOut
         }
     }
@@ -313,9 +313,9 @@ struct InstallStep: View {
         case .success: return ""
         case .invalidApplicationLocation(let message): return message
         case .helperValidationFailed(let message): return message
-        case .serviceRequiresApproval: return "Approve Tron Server in System Settings > Login Items, then return here."
-        case .serviceRegistrationFailed(let message): return "Could not register Tron Server: \(message)"
-        case .awaitPingTimedOut: return "The server did not respond in time. Open the logs window from the Tron menu bar after approving the Login Item."
+        case .serviceRequiresApproval: return "Approve Tron Agent in System Settings > Login Items, then return here."
+        case .serviceRegistrationFailed(let message): return "Could not register Tron Agent: \(message)"
+        case .awaitPingTimedOut: return "Tron did not respond in time. Open the logs window from the Tron menu bar after approving the Login Item."
         }
     }
 
@@ -351,7 +351,7 @@ struct InstallStep: View {
                 .font(.system(size: 17, weight: .semibold))
                 .frame(width: WizardCardLayout.iconColumnWidth, alignment: .center)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Tron Server is registered")
+                Text("Tron Agent is registered")
                     .font(TronTypography.wizardSubheadline)
                     .foregroundStyle(Color.tronEmerald)
                 Text("Start it to confirm this Mac is reachable.")
@@ -391,7 +391,7 @@ struct InstallStep: View {
                 .font(.system(size: 17, weight: .semibold))
                 .frame(width: WizardCardLayout.iconColumnWidth, alignment: .center)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Tron Server is ready")
+                Text("Tron Agent is ready")
                     .font(TronTypography.wizardSubheadline)
                     .foregroundStyle(Color.tronEmerald)
                 Text("Current status: \(installStatusText ?? "Checking...")")
@@ -432,14 +432,14 @@ enum LoginItemsSettingsOpener {
 }
 
 enum InstallStepContent {
-    static let intro = "Install Tron Server on this Mac. It runs quietly in the background so your iPhone can connect."
+    static let intro = "Install Tron on this Mac. It runs quietly in the background so your iPhone can connect."
     static let notStartedPlaceholder = "Installation not started"
     static let stagePaceDelayNanoseconds: UInt64 = 350_000_000
 
     static func label(for stage: InstallPipelineStage) -> String {
         switch stage {
         case .validateApplication: return "Confirm app location"
-        case .validateHelper: return "Verify server helper"
+        case .validateHelper: return "Verify agent runtime"
         case .registerAgent: return "Register Login Item"
         case .awaitPing: return "Confirm it's running"
         }

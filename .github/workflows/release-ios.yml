@@ -64,7 +64,7 @@ name: Release (iOS TestFlight)
 on:
   push:
     tags:
-      - "server-v*"
+      - "tron-v*"
   workflow_run:
     workflows: ["CI"]
     types: [completed]

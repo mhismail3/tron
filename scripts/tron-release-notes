@@ -93,7 +93,7 @@ find_previous_tag() {
     local candidate
     while IFS= read -r candidate; do
         [ "$candidate" = "$TAG" ] && continue
-        [[ "$candidate" =~ ^(server|mac)-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || continue
+        [[ "$candidate" =~ ^(tron|server|mac)-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || continue
         if git merge-base --is-ancestor "$candidate" "$TAG" 2>/dev/null; then
             printf '%s\n' "$candidate"
             return
@@ -241,18 +241,18 @@ self_test() {
     printf 'root\n' > "$tmp/file.txt"
     git -C "$tmp" add file.txt
     git -C "$tmp" commit -qm "Initial server release"
-    git -C "$tmp" tag mac-v0.1.0-beta.1
+    git -C "$tmp" tag tron-v0.1.0-beta.1
 
     printf 'next\n' >> "$tmp/file.txt"
     git -C "$tmp" commit -am "Add install repair flow" -q
-    git -C "$tmp" tag server-v0.1.0-beta.2
+    git -C "$tmp" tag tron-v0.1.0-beta.2
 
     sha="$tmp/tron-v0.1.0-beta2.dmg.sha256"
     echo "abcdef1234567890  tron-v0.1.0-beta2.dmg" > "$sha"
     notes="$tmp/notes.md"
     if (
         cd "$tmp"
-        env -u GITHUB_REPOSITORY "$script" --tag server-v0.1.0-beta.2 --version 0.1.0-beta.2 \
+        env -u GITHUB_REPOSITORY "$script" --tag tron-v0.1.0-beta.2 --version 0.1.0-beta.2 \
             --display-version "v0.1 (Beta 2)" --asset "$tmp/tron-v0.1.0-beta2.dmg" \
             --sha256-file "$sha" --output "$tmp/missing-owner.md"
     ) >/dev/null 2>"$tmp/missing-owner.err"; then
@@ -263,7 +263,7 @@ self_test() {
     (
         cd "$tmp"
         GITHUB_REPOSITORY=acme/tron "$script" \
-            --tag server-v0.1.0-beta.2 \
+            --tag tron-v0.1.0-beta.2 \
             --version 0.1.0-beta.2 \
             --display-version "v0.1 (Beta 2)" \
             --apple-build 2 \
@@ -274,22 +274,22 @@ self_test() {
 
     [ "$(head -n 1 "$notes")" = "## Release" ] || die "notes body must start below GitHub's release title"
     ! grep -q '^# ' "$notes" || die "notes body must not duplicate GitHub's release title"
-    grep -qx -- "- Git tag: \`server-v0.1.0-beta.2\`" "$notes" || die "notes omitted tag"
+    grep -qx -- "- Git tag: \`tron-v0.1.0-beta.2\`" "$notes" || die "notes omitted tag"
     grep -qx -- "- macOS DMG: \`tron-v0.1.0-beta2.dmg\`" "$notes" || die "notes omitted normalized asset name"
     grep -qx -- "- SHA256: \`abcdef1234567890\`" "$notes" || die "notes omitted sha"
-    grep -q "changes since \`mac-v0.1.0-beta.1\`" "$notes" || die "notes omitted previous range"
+    grep -q "changes since \`tron-v0.1.0-beta.1\`" "$notes" || die "notes omitted previous range"
     grep -q "Add install repair flow" "$notes" || die "notes omitted release commit"
-    grep -qx "https://github.com/acme/tron/compare/mac-v0.1.0-beta.1...server-v0.1.0-beta.2" "$notes" || die "notes omitted hosted compare URL"
+    grep -qx "https://github.com/acme/tron/compare/tron-v0.1.0-beta.1...tron-v0.1.0-beta.2" "$notes" || die "notes omitted hosted compare URL"
 
     for i in $(seq 1 80); do
         printf 'line %s\n' "$i" >> "$tmp/file.txt"
         git -C "$tmp" commit -am "Add generated release note entry $i with enough extra text to force deterministic truncation under the configured GitHub release body budget" -q
     done
-    git -C "$tmp" tag server-v0.1.0-beta.3
+    git -C "$tmp" tag tron-v0.1.0-beta.3
     (
         cd "$tmp"
         TRON_RELEASE_NOTES_MAX_BYTES=4000 "$script" \
-            --tag server-v0.1.0-beta.3 \
+            --tag tron-v0.1.0-beta.3 \
             --version 0.1.0-beta.3 \
             --display-version "v0.1 (Beta 3)" \
             --apple-build 3 \
@@ -308,12 +308,12 @@ self_test() {
     printf 'root\n' > "$first_tmp/file.txt"
     git -C "$first_tmp" add file.txt
     git -C "$first_tmp" commit -qm "Initial server release"
-    git -C "$first_tmp" tag server-v0.1.0-beta.1
+    git -C "$first_tmp" tag tron-v0.1.0-beta.1
 
     (
         cd "$first_tmp"
         "$script" \
-            --tag server-v0.1.0-beta.1 \
+            --tag tron-v0.1.0-beta.1 \
             --version 0.1.0-beta.1 \
             --display-version "v0.1 (Beta 1)" \
             --asset "$first_tmp/tron-v0.1.0-beta1.dmg" \
@@ -321,8 +321,8 @@ self_test() {
             --repo-url https://example.com/acme/tron \
             --output "$notes"
     )
-    grep -q "initial release history through \`server-v0.1.0-beta.1\`" "$notes" || die "first-release notes omitted initial range"
-    grep -qx "https://example.com/acme/tron/commits/server-v0.1.0-beta.1" "$notes" || die "first-release notes omitted commits URL"
+    grep -q "initial release history through \`tron-v0.1.0-beta.1\`" "$notes" || die "first-release notes omitted initial range"
+    grep -qx "https://example.com/acme/tron/commits/tron-v0.1.0-beta.1" "$notes" || die "first-release notes omitted commits URL"
 
     rm -rf "$tmp"
     trap - EXIT

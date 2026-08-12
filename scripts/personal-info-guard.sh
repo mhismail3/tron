@@ -44,8 +44,6 @@ PATTERNS=(
 # Regression-guard files construct personal-info needles from fragments. Each
 # entry is matched as a glob against the file path relative to repo root.
 ALLOWLIST_PATHS=(
-    'packages/agent/src/shared/foundation/paths/mod.rs'
-    'packages/agent/src/shared/foundation/paths/tests.rs'
     'scripts/personal-info-guard.sh'
     '.git/*'
     'target/*'
@@ -65,7 +63,7 @@ SCAN_PATHS=(
     'CONTRIBUTING.md'
     'README.md'
     'VERSION.env'
-    'packages/agent'
+    'packages/gateway'
     'packages/ios-app'
     'packages/mac-app'
     'scripts'
@@ -166,9 +164,8 @@ if [ "$offenders_total" -gt 0 ]; then
     echo ""
     echo "❌ FAIL — $offenders_total personal-info offender(s) found."
     echo ""
-    echo "User-specific values belong in ~/.tron runtime state,"
-    echo "not the source tree. See packages/agent/src/shared/foundation/paths/"
-    echo "for the regression-guard pattern that catches Rust offenders at test time."
+    echo "User-specific values belong in ~/.tron runtime state, not the source tree."
+    echo "The repository guard scans every shipped client and gateway source."
     exit 1
 fi
 

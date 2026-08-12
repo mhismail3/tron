@@ -8,13 +8,14 @@
     <key>ProgramArguments</key>
     <array>
         <string>tron</string>
+        <string>--host</string>
+        <string>tailscale</string>
         <string>--port</string>
         <string>9848</string>
-        <string>--quiet</string>
     </array>
 
     <key>BundleProgram</key>
-    <string>Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron</string>
+    <string>Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron</string>
 
     <key>RunAtLoad</key>
     <true/>

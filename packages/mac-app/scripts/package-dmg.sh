@@ -43,8 +43,12 @@ case "$layout" in structural|release) ;; *) die "--layout must be structural or 
 [ -d "$app" ] || die "app bundle not found: $app"
 bundle="$(basename "$app")"
 [[ "$bundle" == *.app ]] || die "--app must name an .app bundle"
-helper="Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
+helper="Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
+gateway="Contents/Resources/Gateway/app/dist/index.js"
+runtime="Contents/Resources/Gateway/runtime/node-arm64"
 [ -x "$app/$helper" ] || die "app bundle is missing executable helper: $app/$helper"
+[ -f "$app/$gateway" ] || die "app bundle is missing gateway entrypoint: $app/$gateway"
+[ -x "$app/$runtime" ] || die "app bundle is missing Node runtime: $app/$runtime"
 
 work="$(mktemp -d)"
 source="$work/source"

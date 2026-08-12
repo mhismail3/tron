@@ -59,14 +59,12 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             )
         }
         let externalPortBound = await isPortBound(TronPaths.defaultServerPort)
-        let databaseLockHeld = await isDatabaseLockHeld()
         if Self.shouldRefuseExternalServer(
             status: status,
             runningParentBundleIdentifier: runningParent,
-            portBound: externalPortBound,
-            databaseLockHeld: databaseLockHeld
+            portBound: externalPortBound
         ) {
-            return .launchdRefused(message: "Another Tron server is already running on port \(TronPaths.defaultServerPort). Stop it before installing Tron Server.")
+            return .launchdRefused(message: "Another Tron is already running on port \(TronPaths.defaultServerPort). Stop it before installing Tron Agent.")
         }
 
         if Self.shouldUnregisterBeforeRegister(
@@ -80,7 +78,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                 try await service.unregister()
             } catch {
                 return .launchdRefused(
-                    message: "Tron Server is registered but launchd has no loaded job, and macOS refused to replace the registration: \(error.localizedDescription)"
+                    message: "Tron Agent is registered but launchd has no loaded job, and macOS refused to replace the registration: \(error.localizedDescription)"
                 )
             }
         }
@@ -95,13 +93,13 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         case .enabled:
             return .ok
         case .requiresApproval:
-            return .requiresApproval(message: "Approve Tron Server in Login Items to finish installation.")
+            return .requiresApproval(message: "Approve Tron Agent in Login Items to finish installation.")
         case .notFound:
-            return .unknown(message: "ServiceManagement could not find the bundled Tron Server LaunchAgent after registration.")
+            return .unknown(message: "ServiceManagement could not find the bundled Tron Agent LaunchAgent after registration.")
         case .notRegistered:
-            return .unknown(message: "Tron Server was not registered.")
+            return .unknown(message: "Tron Agent was not registered.")
         @unknown default:
-            return .unknown(message: "Tron Server registration returned an unknown status.")
+            return .unknown(message: "Tron Agent registration returned an unknown status.")
         }
     }
 
@@ -116,7 +114,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     ) -> LaunchAgentOutcome? {
         switch status {
         case .requiresApproval:
-            return .requiresApproval(message: "Approve Tron Server in Login Items to finish installation.")
+            return .requiresApproval(message: "Approve Tron Agent in Login Items to finish installation.")
         case .enabled, .notRegistered, .notFound, .unknown:
             let runtimeIsStale = runtimeRequiresReplacement(runtimeInfo: runtimeInfo, expectedHelperPath: expectedHelperPath)
             let resolvedParent = runtimeInfo?.parentBundleIdentifier ?? runningParentBundleIdentifier
@@ -124,7 +122,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             if !canManageLaunchAgent {
                 if runtimeIsStale || resolvedParent == nil {
                     return .launchdRefused(
-                        message: "This Xcode Debug wrapper is in companion mode and cannot install or repair the production Tron Server. Use /Applications/Tron.app, or run the isolated install-testing scheme."
+                        message: "This Xcode Debug wrapper is in companion mode and cannot install or repair the production Tron Agent. Use /Applications/Tron.app, or run the isolated install-testing scheme."
                     )
                 }
                 return .alreadyLoaded
@@ -152,7 +150,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                 return nil
             }
             return .launchdRefused(
-                message: "Tron Server is currently managed by \(resolvedParent). Stop that build before installing this one."
+                message: "Tron Agent is currently managed by \(resolvedParent). Stop that build before installing this one."
             )
         }
     }
@@ -175,15 +173,14 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     static func shouldRefuseExternalServer(
         status: ExistingInstallDetector.ServiceRegistrationStatus,
         runningParentBundleIdentifier: String?,
-        portBound: Bool,
-        databaseLockHeld: Bool
+        portBound: Bool
     ) -> Bool {
         guard status != .enabled,
               status != .requiresApproval,
               runningParentBundleIdentifier == nil else {
             return false
         }
-        return portBound || databaseLockHeld
+        return portBound
     }
 
     static func shouldUnregisterBeforeRegister(
@@ -364,17 +361,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/usr/sbin/lsof"),
             arguments: ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"]
-        )
-        return result.exitCode == 0 && !result.stdout.isEmpty
-    }
-
-    private func isDatabaseLockHeld() async -> Bool {
-        guard FileManager.default.fileExists(atPath: TronPaths.databaseLockPath.path) else {
-            return false
-        }
-        let result = await Subprocess.run(
-            executable: URL(fileURLWithPath: "/usr/sbin/lsof"),
-            arguments: [TronPaths.databaseLockPath.path]
         )
         return result.exitCode == 0 && !result.stdout.isEmpty
     }

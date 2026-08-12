@@ -41,10 +41,6 @@
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Tron. All rights reserved.</string>
     <key>NSSystemAdministrationUsageDescription</key>
-    <string>Tron installs a LaunchAgent so the headless server starts at login.</string>
-    <key>NSAccessibilityUsageDescription</key>
-    <string>Tron uses Accessibility only when you ask the Mac Operator to observe or operate the foreground app.</string>
-    <key>NSScreenCaptureUsageDescription</key>
-    <string>Tron uses Screen Recording only when you ask the Mac Operator to inspect the foreground window.</string>
+    <string>Tron installs a background agent so accepted work continues when the app closes.</string>
 </dict>
 </plist>

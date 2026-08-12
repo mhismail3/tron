@@ -1,202 +1,151 @@
 # Tron
 
-<p align="center">
-  <img src="packages/ios-app/docs/assets/tron-logo.png" width="112" alt="Tron logo">
-</p>
+Tron is a private coding agent designed around a native iPhone experience. The
+agent runs continuously on your Mac; the SwiftUI app is its primary interface.
+Accepted work continues when the phone disconnects, and reconnecting converges
+to an authoritative session snapshot.
 
-**A persistent, local-first agent for Mac and iPhone that can create workers
-and coordinate reusable agents.**
+To users, the product and agent are **Tron**. Internally, Tron Gateway embeds the
+pinned Pi SDK as its agent runtime. Pi is an implementation dependency, not a
+second product users must configure or operate.
 
-Tron runs an AI agent as a background service on your Mac and provides a native
-iOS interface for conversations, durable sessions, agent coordination, and
-worker operations. A model can research, author, test, activate, and reuse an
-engine-global worker through one atomic operation. It can also spawn durable
-child agents, exchange typed messages, reuse them across assignments, wait for
-mixed agent/worker results, and manage the resulting hierarchy through stable
-opaque handles.
-
-## Why Tron
-
-- Natural-language work can become an immediately active, persistent typed tool.
-- Agent, command, and lazy resident-service workers share one durable runtime.
-- Reusable agents retain one identity and transcript across FIFO assignments;
-  messages, waits, results, cancellation, recovery, and authority are Engine
-  contracts rather than behavior supplied by an optional delegation worker.
-- Manual calls, schedules, engine events, and authenticated local webhooks share
-  one at-least-once dispatcher.
-- Worker completions, peer-agent messages, and explicit waits share
-  one durable Agent Delivery path. Optional policy workers never block a model
-  request; delivery-only wakeups resume a task without inventing a user message.
-- Runtime-managed scheduler, reminder, and notification-policy workers divide
-  time calculation, occurrence lifecycle, and delivery relevance. The engine
-  durably hands work between them and transports narrow notification intents;
-  iOS owns permission, presentation, deep links, and read state.
-- Local agents and workers use the Mac user's normal authority without
-  per-call permission objects or proposal-only activation steps.
-- Provenance, immutable versions, dependency locks, audit history, secret
-  isolation, execution ceilings, failure disablement, rollback, and stop-all
-  remain because they improve reliability.
-- Core source changes are prepared and tested in isolated Git worktrees. A
-  later explicit user-authored message is required before application.
-
-## System Shape
+## System
 
 ```text
- iPhone / iPad                         Mac
-┌──────────────────┐         ┌──────────────────────────┐
-│ SwiftUI client   │─/engine▶│ Rust agent + worker core │
-│ chat + agents +  │         │ turns, coordination,     │
-│ workers          │         │ runners, dispatch        │
-└──────────────────┘         └────────────┬─────────────┘
-                                         │
-                 schedules → reminders → notification policy
-                                         │
-                              relay or direct APNs transport
+┌──────────────────────┐      Tailscale       ┌─────────────────────────┐
+│ Tron for iPhone      │◀── authenticated ──▶│ Tron Gateway on Mac     │
+│ SwiftUI chat + tools │      WebSocket       │ sessions + files + PTY │
+└──────────────────────┘                      └───────────┬─────────────┘
+                                                         │ stable SDK
+                                             ┌───────────▼─────────────┐
+                                             │ pinned agent runtime    │
+                                             │ canonical JSONL/config  │
+                                             └─────────────────────────┘
 ```
 
-The Rust server owns model execution, authenticated transport, durable session
-truth, reusable-agent identities and assignments, typed coordination messages,
-atomic worker handoffs, Agent Delivery admission and recovery, worker storage,
-and provider-acceptance evidence. Spawned agents keep hidden durable transcript
-sessions until an authenticated user promotes one into the ordinary Sessions
-list.
-The iOS app is a thin client. Manage Session has an Agents surface for child
-hierarchies, correspondents, assignments, chats, results, usage, authority,
-resource claims, recovery evidence, and server-authorized management actions.
-Its Worker Console covers health, versions, triggers, typed invocation, runs,
-inbox, rollback, retirement, cancellation, and stop controls, alongside
-synchronized native notification and Artifact Inboxes.
-Artifact content stays in engine-owned content-addressed custody until explicit
-deletion; preview, share, export, and Attach to Draft use the existing native
-attachment pipeline.
-The Mac app packages and supervises the server and owns pairing; it is not a
-second engine client. Its signed wrapper also hosts the narrow Mac Operator
-actuator for explicitly requested foreground-app work; the ordinary worker
-owns the plan and confirmation policy, while native code enforces permissions,
-fresh-window identity, serialized actions, and the user-controlled emergency
-stop.
+- **iOS** owns chat presentation, onboarding, settings, attachments, forks,
+  context inspection, and SwiftTerm presentation.
+- **Gateway** owns enrollment, authentication, detached session supervision,
+  uploads, filesystem access, project trust, package administration, extension
+  interactions, and PTYs.
+- **The embedded runtime** owns model/provider behavior, tools, extensions,
+  settings, credentials, compaction, retries, and canonical session JSONL.
+- **The Mac app** installs and supervises the always-running gateway and emits
+  short-lived one-time pairing invitations.
 
-Worker bundles live under:
+Tron does not mirror sessions into SQLite and does not reconstruct state from an
+event journal. Local iOS snapshots are bounded, disposable offline presentation
+state only.
+
+## Security model
+
+- Pairing QR codes contain a short-lived one-time code, never a permanent token.
+- Device tokens are stored in the iOS Keychain; only hashes are persisted on the
+  Mac. Authorized devices can be listed and revoked.
+- Provider credentials stay in the runtime credential store on the Mac and are
+  never returned to iOS.
+- The Mac wrapper uses a separate owner-only local credential under
+  `~/.tron/gateway/`.
+- Project trust controls whether project-local settings and executable resources
+  load. Trust is **not a sandbox**. Agent tools, extensions, and packages run
+  with the Mac user's authority.
+- Mobile exposure binds explicitly to the detected Tailscale interface. The
+  default developer gateway remains loopback-only.
+
+Do not open the same session concurrently in another runtime client: the
+canonical session format does not provide a cross-process session-file lock.
+
+## Repository
 
 ```text
-~/.tron/workspace/workers/<worker-id>/versions/<content-hash>/
+packages/gateway/   TypeScript gateway and protocol tests
+packages/ios-app/   native SwiftUI iPhone app and share extension
+packages/mac-app/   macOS installer, menu bar, pairing, and gateway packaging
+scripts/tron        contributor entry point
 ```
 
-Worker-owned mutable data lives separately under
-`~/.tron/workspace/worker-state/<worker-id>/`; verified profile and purge
-archives live under `~/.tron/internal/backups/`.
+The retired custom Rust backend, worker platform, browser operator, APNs relay,
+and Engine/Activity client domains are intentionally absent.
 
-Each version contains its schemas, runner, source or instructions, dependency
-lock, provenance, triggers, secret-binding names, smoke tests, health checks,
-and sealed verification evidence. SQLite holds rebuildable routes and trigger
-indexes plus durable attempts, causal traces, worker results, delivery outbox
-evidence, health, and audit history.
-
-## Install
-
-The supported end-user path is the Mac app plus the iOS beta:
-
-1. Install and sign in to [Tailscale](https://tailscale.com) on the Mac.
-2. Download the latest Tron DMG from this repository's Releases page.
-3. Move `Tron.app` to `/Applications` and complete its setup wizard.
-4. Install the iOS beta from the wizard and scan the pairing code.
-
-The Mac app installs and monitors the local server. Normal use does not require
-the command line.
-
-## Develop
-
-Requirements:
+## Requirements
 
 - macOS 15 or newer
-- Rust through `rustup` using [`rust-toolchain.toml`](rust-toolchain.toml)
-- Xcode 26 or newer
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+- Xcode 26 and XcodeGen
+- Node 22.22.0 for gateway development
+- Tailscale on the Mac and iPhone for mobile operation
+
+Production dependencies are exact-pinned. The shipped Mac app bundles exact
+Node runtimes and the locked gateway production tree.
+
+## Development
 
 ```bash
-scripts/tron setup
-scripts/tron dev --background
-scripts/tron login
+# Gateway: fast, deterministic checks
+cd packages/gateway
+npm ci
+npm run build
+npm test
+
+# Isolated gateway, loopback on port 9848
+scripts/tron dev
+
+# Expose the isolated gateway on the detected Tailscale address
+scripts/tron dev --tailscale
+
+# Generate native projects
+scripts/tron ios generate
+scripts/tron mac generate
 ```
 
-Useful commands:
+### Focused native tests
 
-```bash
-scripts/tron status --json
-scripts/tron logs
-scripts/tron ci fmt check clippy test
-```
-
-Worker-first execution is the engine architecture: trusted local sessions can
-create, activate, discover, and run persistent workers without enabling a
-separate mode.
-
-Build the iOS app:
+Build for testing once, then use `test-without-building` while iterating:
 
 ```bash
 cd packages/ios-app
-xcodegen generate
-open TronMobile.xcodeproj
-```
+xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/SnapshotCacheTests
 
-Build the Mac wrapper:
-
-```bash
 cd packages/mac-app
-./scripts/bundle-agent.sh --profile debug
-xcodegen generate
-open TronMac.xcodeproj
+xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
+  -configuration Debug -destination 'platform=macOS,arch=arm64'
+xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
+  -configuration Debug -destination 'platform=macOS,arch=arm64' \
+  -only-testing:TronMacTests/PairingURLBuilderTests
 ```
 
-Use `scripts/tron dev` for development. Production deployment is manual-only;
-the agent must never invoke `tron deploy`.
+This avoids rebuilding or running unrelated suites for each edit. Run broader
+suites only after focused owners are green.
 
-## Validate
-
-Run focused tests while iterating. For a broad checkpoint:
+## Mac packaging
 
 ```bash
-scripts/tron ci fmt check clippy test
-scripts/personal-info-guard.sh
+packages/mac-app/scripts/bundle-gateway.sh
 ```
 
-The deterministic `last30days` replay and a natural-language model-loop proof
-of proactive create → immediate typed call → report are part of the Rust
-library suite. Its real upstream dependency proof is deliberately opt-in:
+The script builds the gateway, installs a separate production-only dependency
+tree, verifies checksum-pinned Node 22.22.0 arm64/x64 archives, and compiles a
+universal launcher for both Login Item variants. Generated payloads are ignored.
 
-```bash
-TRON_WORKER_LIVE_NETWORK=1 \
-  cargo test --manifest-path packages/agent/Cargo.toml \
-  last30days_upstream_live_network_dependency_is_locked_and_activates -- --ignored
-```
+## Legacy session migration
+
+The iOS Settings screen can import sessions from the retired authenticated local
+server running on loopback (default migration port `9849`). The gateway reads the
+legacy owner-only credential locally, imports message history into canonical
+Tron sessions, records idempotent receipts, and never modifies legacy databases
+or credentials.
 
 ## Documentation
 
-- [Technical project reference](packages/agent/docs/project-reference.md) —
-  worker contracts, dispatch, storage, authority, protocol, and POC
-  acceptance.
-- [Contributing](CONTRIBUTING.md) — development, testing, commits, and releases.
-- [Rust module map](packages/agent/src/lib.rs) — server ownership and entry
-  points; each `mod.rs` documents its subtree.
-- [iOS architecture](packages/ios-app/docs/architecture.md) and
-  [development guide](packages/ios-app/docs/development.md).
-- [Mac architecture](packages/mac-app/docs/architecture.md) and
-  [development guide](packages/mac-app/docs/development.md).
+- [Gateway architecture and protocol](packages/gateway/README.md)
+- [iOS architecture](packages/ios-app/docs/architecture.md)
+- [iOS development](packages/ios-app/docs/development.md)
+- [Mac architecture](packages/mac-app/docs/architecture.md)
+- [Mac development and packaging](packages/mac-app/docs/development.md)
+- [Contributing](CONTRIBUTING.md)
 
-## Project Rules
-
-- Code, tests, and documentation ship together.
-- Root-cause fixes take priority over transitional adapters.
-- Secrets and personal information never belong in the repository.
-- Filesystem bundles are canonical worker state; clients do not invent truth.
-- Production code must have an independent production consumer; tests and
-  self-description do not justify inert runtime surfaces.
-- Re-hardening must respond to an observed failure and preserve accepted worker
-  workflows.
-- Production deployment is manual-only.
-
-See [AGENTS.md](AGENTS.md) for the complete engineering rules.
-
-## License
-
-MIT
+There is no automated production deployment command. Releases and production
+deployments are manual-only.

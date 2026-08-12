@@ -9,8 +9,7 @@ struct ServerStatusPollerTests {
         pingResult: ServerPingResult = .unreachable,
         tailscaleFromSettings: String? = nil,
         serverPort: Int = 9847,
-        launchAgentLoaded: Bool = false,
-        serverProcess: ServerProcessInfo? = nil
+        launchAgentLoaded: Bool = false
     ) -> EnvironmentSetup {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let launchAgentManager = MockLaunchAgentManager()
@@ -21,7 +20,7 @@ struct ServerStatusPollerTests {
             applicationBundle: tmp,
             bearerTokenPath: tmp,
             onboardedMarkerPath: tmp,
-            settingsPath: tmp,
+            networkCachePath: tmp,
             launchAgentPlistPath: tmp,
             launchAgentLabel: "com.tron.server",
             serverPort: serverPort,
@@ -41,10 +40,6 @@ struct ServerStatusPollerTests {
                 return pingResult
             },
             launchAgentManager: launchAgentManager,
-            probeServerProcess: { port in
-                #expect(port == serverPort)
-                return serverProcess
-            },
             touchOnboardedSentinel: { }
         )
     }
@@ -75,26 +70,6 @@ struct ServerStatusPollerTests {
         #expect(snapshot.tailscaleIP == "100.64.0.1")
         #expect(snapshot.processID == 16027)
         #expect(snapshot.uptime == "01:07:42")
-        #expect(snapshot.isDevServerActive == false)
-    }
-
-    @Test("running: tron dev takeover uses the port owner for PID/uptime and marks dev mode")
-    func devTakeoverRuntimeSnapshot() async throws {
-        let setup = Self.makeSetup(
-            token: "abc123",
-            pingResult: .success(ServerPingInfo(version: "0.5.0")),
-            tailscaleFromSettings: "100.64.0.1",
-            serverProcess: ServerProcessInfo(
-                pid: 24680,
-                uptime: "00:00:09",
-                isDevServer: true
-            )
-        )
-        let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        #expect(snapshot.state == .running(version: "0.5.0", port: 9847))
-        #expect(snapshot.processID == 24680)
-        #expect(snapshot.uptime == "00:00:09")
-        #expect(snapshot.isDevServerActive == true)
     }
 
     @Test("unreachable + launchd unloaded: paused")

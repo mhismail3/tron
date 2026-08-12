@@ -3,28 +3,11 @@
 <plist version="1.0">
 <dict>
     <!--
-        com.apple.security.app-sandbox is INTENTIONALLY OMITTED.
-
-        Tron's Mac wrapper registers a bundled Login Item with
-        SMAppService, runs `launchctl` diagnostics/restarts and
-        `tailscale` subprocesses, reads/writes ~/.tron/ outside the
-        app's container, and probes Full Disk Access by stat'ing
-        protected paths. None of those are possible inside the App
-        Sandbox. The app is distributed as a notarized DMG via
-        GitHub Releases, NOT the Mac App Store, so sandboxing is
-        not a distribution requirement.
-    -->
-    <key>com.apple.security.cs.allow-jit</key>
-    <false/>
-    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <false/>
-    <key>com.apple.security.cs.disable-library-validation</key>
-    <true/>
-    <!--
-        disable-library-validation is REQUIRED so the bundled
-        LoginItems/Tron Server.app helper can load the runtime pieces
-        it needs. The helper app is itself codesigned before the outer
-        app is signed and notarized.
+        App Sandbox is intentionally omitted. Tron registers a Login Item,
+        probes Tailscale, supervises the gateway, and presents filesystem agent
+        access outside an app container. Hardened runtime remains enabled; the
+        release build signs bundled Node runtimes and native modules before
+        sealing the outer application.
     -->
 </dict>
 </plist>

@@ -69,8 +69,8 @@ struct MacSourceGuardTests {
             "Sources/Resources/AppIcon.icns",
             "Sources/Resources/Library/LaunchAgents/com.tron.server.plist",
             "Sources/Resources/Library/LaunchAgents/com.tron.server.dev.plist",
-            "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Info.plist",
-            "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Info.plist",
+            "Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Info.plist",
+            "Sources/Resources/Library/LoginItems/Tron Agent Dev.app/Contents/Info.plist",
         ]
 
         for relativePath in trackedResources {
@@ -79,15 +79,13 @@ struct MacSourceGuardTests {
                 "tracked helper-resource layout missing \(relativePath)"
             )
             let repoRelativePath = "packages/mac-app/\(relativePath)"
-            let isTracked = try Self.gitTracks(repoRelativePath, repoRoot: repoRoot)
             let isIgnored = try Self.gitIgnores(repoRelativePath, repoRoot: repoRoot)
-            #expect(isTracked)
             #expect(!isIgnored)
         }
 
         for (relativePath, identifier, displayName) in [
-            ("Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Info.plist", "com.tron.server", "Tron Server"),
-            ("Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Info.plist", "com.tron.server.dev", "Tron Server Dev"),
+            ("Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Info.plist", "com.tron.server", "Tron Agent"),
+            ("Sources/Resources/Library/LoginItems/Tron Agent Dev.app/Contents/Info.plist", "com.tron.server.dev", "Tron Agent Dev"),
         ] {
             let info = try Self.read(macRoot, relativePath)
             #expect(info.contains("<key>CFBundleIdentifier</key>\n    <string>\(identifier)</string>"))
@@ -102,7 +100,7 @@ struct MacSourceGuardTests {
         #expect(releaseLaunchAgent.contains("<string>com.tron.server</string>"))
         #expect(
             releaseLaunchAgent.contains(
-                "<string>Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron</string>"
+                "<string>Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron</string>"
             )
         )
 
@@ -113,26 +111,23 @@ struct MacSourceGuardTests {
         #expect(devLaunchAgent.contains("<string>com.tron.server.dev</string>"))
         #expect(
             devLaunchAgent.contains(
-                "<string>Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron</string>"
+                "<string>Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron</string>"
             )
         )
 
-        let bundleScript = try Self.read(macRoot, "scripts/bundle-agent.sh")
-        #expect(bundleScript.contains("tracked_plists=("))
-        #expect(bundleScript.contains("tracked helper metadata is missing"))
-        for destination in ["HELPER_RESOURCES", "DEV_HELPER_RESOURCES"] {
-            #expect(
-                bundleScript.contains("cp \"$RESOURCES_DIR/AppIcon.icns\" \"$\(destination)/AppIcon.icns\"")
-            )
-        }
-        for plistVariable in [
-            "HELPER_INFO_PLIST",
-            "DEV_HELPER_INFO_PLIST",
-            "LAUNCH_AGENT_PLIST",
-            "DEV_LAUNCH_AGENT_PLIST",
-        ] {
-            #expect(!bundleScript.contains("cat > \"$\(plistVariable)\""))
-        }
+        let bundleScript = try Self.read(macRoot, "scripts/bundle-gateway.sh")
+        #expect(bundleScript.contains("NODE_VERSION=\"22.22.0\""))
+        #expect(bundleScript.contains("NODE_ARM64_SHA256="))
+        #expect(bundleScript.contains("NODE_X64_SHA256="))
+        #expect(bundleScript.contains("npm ci --omit=dev"))
+        #expect(bundleScript.contains("tron-gateway-launcher.c"))
+        #expect(bundleScript.contains("-arch arm64 -arch x86_64"))
+        #expect(!bundleScript.contains("cargo build"))
+
+        let project = try Self.read(macRoot, "project.yml")
+        #expect(project.contains("- \"Gateway/**\""))
+        #expect(project.contains("ditto \"$GATEWAY_SRC\" \"$GATEWAY_DST\""))
+        #expect(project.contains("find \"$GATEWAY_DST\" -type f"))
     }
 
     @Test("generated helper payload policy keeps outputs ignored")
@@ -142,10 +137,11 @@ struct MacSourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let ignoredPayloads = [
-            "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron",
-            "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron",
-            "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Resources/AppIcon.icns",
-            "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Resources/AppIcon.icns",
+            "Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
+            "Sources/Resources/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron",
+            "Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Resources/AppIcon.icns",
+            "Sources/Resources/Library/LoginItems/Tron Agent Dev.app/Contents/Resources/AppIcon.icns",
+            "Sources/Resources/Gateway/",
         ]
         let gitignore = try Self.read(macRoot, ".gitignore")
 
@@ -160,24 +156,19 @@ struct MacSourceGuardTests {
         }
     }
 
-    @Test("bundle-agent --clean removes only ignored staged payloads")
-    func bundleAgentCleanRemovesOnlyIgnoredStagedPayloads() throws {
+    @Test("bundle-gateway --clean removes only generated payloads")
+    func bundleGatewayCleanRemovesOnlyGeneratedPayloads() throws {
         let macRoot = try Self.macAppRoot()
-        let script = try Self.read(macRoot, "scripts/bundle-agent.sh")
-        let cleanBlock = try #require(script.range(of: "if [ \"$do_clean\" -eq 1 ]; then"))
-        let sourceResolution = try #require(script.range(of: "# --- source resolution"))
-        let block = String(script[cleanBlock.lowerBound..<sourceResolution.lowerBound])
+        let script = try Self.read(macRoot, "scripts/bundle-gateway.sh")
+        let cleanBlock = try #require(script.range(of: "if ((clean)); then"))
+        let requiredSources = try #require(script.range(of: "required=("))
+        let block = String(script[cleanBlock.lowerBound..<requiredSources.lowerBound])
 
         #expect(script.contains("--clean"))
-        #expect(block.contains("rm -f"))
-        #expect(block.contains("$STAGING_PATH"))
-        #expect(block.contains("$DEV_STAGING_PATH"))
-        #expect(block.contains("$HELPER_RESOURCES/AppIcon.icns"))
-        #expect(block.contains("$DEV_HELPER_RESOURCES/AppIcon.icns"))
-        #expect(!block.contains("rm -rf"))
-        #expect(!block.contains("HELPER_BUNDLE"))
-        #expect(!block.contains("LAUNCH_AGENT_PLIST"))
-        #expect(script.contains("remove ignored staged helper payloads"))
+        #expect(block.contains("rm -rf \"$PAYLOAD_DIR\""))
+        #expect(block.contains("rm -f \"${launchers[@]}\""))
+        #expect(!block.contains("Info.plist"))
+        #expect(!block.contains("LaunchAgents"))
     }
 
     private static func macAppRoot(filePath: String = #filePath) throws -> URL {

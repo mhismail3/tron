@@ -57,99 +57,24 @@ struct MenuBarItemBuilderTests {
         }
     }
 
-    @Test("dev snapshot: header calls out active dev server")
-    func devSnapshotHeader() throws {
-        let snap = ServerStatusSnapshot(
-            state: .running(version: "0.5.0", port: 9847),
-            tailscaleIP: "100.64.0.1",
-            processID: 24680,
-            uptime: "00:00:09",
-            isDevServerActive: true
-        )
-        let items = Self.build(snapshot: snap)
-
-        if case .header(let content) = items[0] {
-            #expect(content.status == "Running")
-            #expect(content.pid == 24680)
-            #expect(content.uptime == "00:00:09")
-            #expect(content.modeDetail == "Dev Server active")
-        } else {
-            Issue.record("status should live in custom header")
-        }
-    }
-
-    @Test("dev snapshot: stop dev action appears and service controls are disabled")
-    func devSnapshotControls() throws {
-        let snap = ServerStatusSnapshot(
-            state: .running(version: "0.5.0", port: 9847),
-            isDevServerActive: true
-        )
-        let items = Self.build(snapshot: snap)
-        let titles = items.map(\.title)
-
-        #expect(titles == [
-            "Tron",
-            "—",
-            "Show pairing info",
-            "Open Tron folder",
-            "Show logs",
-            "Send feedback",
-            "Stop Mac Operator",
-            "—",
-            "Pause server",
-            "Restart server",
-            "Stop dev server",
-            "Uninstall Tron",
-            "Quit Tron",
-        ])
-
-        for item in items {
-            if case .action(let title, let isEnabled, _) = item {
-                if title == "Stop dev server" {
-                    #expect(isEnabled == true)
-                }
-                if ["Pause server", "Restart server", "Uninstall Tron"].contains(title) {
-                    #expect(isEnabled == false, "\(title) should be disabled while dev owns port 9847")
-                }
-            }
-        }
-    }
-
-    @Test("dev snapshot: stop dev appears with server controls")
-    func stopDevAppearsWithServerControlsDuringTakeover() throws {
-        let snap = ServerStatusSnapshot(
-            state: .running(version: "0.5.0", port: 9847),
-            isDevServerActive: true
-        )
-        let titles = Self.build(snapshot: snap).map(\.title)
-
-        #expect(Array(titles.suffix(5)) == [
-            "Pause server",
-            "Restart server",
-            "Stop dev server",
-            "Uninstall Tron",
-            "Quit Tron",
-        ])
-    }
-
-    @Test("running snapshot includes Pause server (not Resume)")
+    @Test("running snapshot includes Pause Tron (not Resume)")
     func pauseShownWhileRunning() throws {
         let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
         let items = Self.build(snapshot: snap)
 
         let titles = items.map(\.title)
-        #expect(titles.contains("Pause server"))
-        #expect(!titles.contains("Resume server"))
+        #expect(titles.contains("Pause Tron"))
+        #expect(!titles.contains("Resume Tron"))
     }
 
-    @Test("paused snapshot includes Resume server (not Pause)")
+    @Test("paused snapshot includes Resume Tron (not Pause)")
     func resumeShownWhilePaused() throws {
         let snap = ServerStatusSnapshot(state: .paused)
         let items = Self.build(snapshot: snap)
 
         let titles = items.map(\.title)
-        #expect(titles.contains("Resume server"))
-        #expect(!titles.contains("Pause server"))
+        #expect(titles.contains("Resume Tron"))
+        #expect(!titles.contains("Pause Tron"))
     }
 
     @Test("menu always has pairing, folder, logs, feedback, server controls, uninstall, quit")
@@ -160,18 +85,17 @@ struct MenuBarItemBuilderTests {
         let titles = Set(items.map(\.title))
         for required in [
             "Show pairing info",
-            "Restart server",
+            "Restart Tron",
             "Show logs",
             "Open Tron folder",
             "Send feedback",
-            "Stop Mac Operator",
             "Uninstall Tron",
             "Quit Tron",
         ] {
             #expect(titles.contains(required), "missing \(required) in menu")
         }
         #expect(!titles.contains("Show Developer Options"))
-        #expect(!titles.contains("Start dev server"))
+        #expect(!titles.contains("Start development agent"))
     }
 
     @Test("menu sections use the canonical order")
@@ -186,10 +110,9 @@ struct MenuBarItemBuilderTests {
             "Open Tron folder",
             "Show logs",
             "Send feedback",
-            "Stop Mac Operator",
             "—",
-            "Pause server",
-            "Restart server",
+            "Pause Tron",
+            "Restart Tron",
             "Uninstall Tron",
             "Quit Tron",
         ])
@@ -209,34 +132,15 @@ struct MenuBarItemBuilderTests {
             "Show pairing info": .showPairingInfo,
             "Show logs": .viewLogs,
             "Send feedback": .sendFeedback,
-            "Stop Mac Operator": .stopMacOperator,
-            "Pause server": .pauseServer,
-            "Restart server": .restartServer,
+            "Pause Tron": .pauseServer,
+            "Restart Tron": .restartServer,
             "Uninstall Tron": .uninstall,
         ])
 
         let pausedItems = Self.build(snapshot: ServerStatusSnapshot(state: .paused))
-        #expect(pausedItems.contains(.action(title: "Resume server", isEnabled: true, action: .resumeServer)))
+        #expect(pausedItems.contains(.action(title: "Resume Tron", isEnabled: true, action: .resumeServer)))
 
-        let devSnapshot = ServerStatusSnapshot(
-            state: .running(version: "0.5.0", port: 9847),
-            isDevServerActive: true
-        )
-        let devItems = Self.build(snapshot: devSnapshot)
-        #expect(devItems.contains(.action(title: "Stop dev server", isEnabled: true, action: .stopDevServer)))
 
-        let stoppedItems = MenuBarItemBuilder.build(
-            snapshot: snap,
-            tronHome: URL(fileURLWithPath: "/tmp/tron", isDirectory: true),
-            defaultServerPort: 9847,
-            canManageLaunchAgent: true,
-            macOperatorStopped: true
-        )
-        #expect(stoppedItems.contains(.action(
-            title: "Resume Mac Operator",
-            isEnabled: true,
-            action: .resumeMacOperator
-        )))
     }
 
     @Test("debug companion disables production LaunchAgent controls")
@@ -246,7 +150,7 @@ struct MenuBarItemBuilderTests {
 
         for item in items {
             if case .action(let title, let isEnabled, _) = item,
-               ["Pause server", "Restart server", "Uninstall Tron"].contains(title) {
+               ["Pause Tron", "Restart Tron", "Uninstall Tron"].contains(title) {
                 #expect(!isEnabled, "\(title) should be disabled in companion mode")
             }
         }
@@ -260,11 +164,11 @@ struct MenuBarItemBuilderTests {
 
         #expect(!titles.contains("Show Developer Options"))
         #expect(!titles.contains("Hide Developer Options"))
-        #expect(!titles.contains("Start dev server"))
-        #expect(!titles.contains("Start dev server after tests"))
-        #expect(!titles.contains("Build, test, and start dev server"))
+        #expect(!titles.contains("Start development agent"))
+        #expect(!titles.contains("Start development agent after tests"))
+        #expect(!titles.contains("Build, test, and start development agent"))
         #expect(!titles.contains("Open dev command log"))
-        #expect(!titles.contains("Stop dev server"))
+        #expect(!titles.contains("Stop development agent"))
     }
 
     @Test("busy snapshot disables server controls and shows transient action title")

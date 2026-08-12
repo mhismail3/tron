@@ -111,6 +111,9 @@ targets:
       - path: Tests
         createIntermediateGroups: true
         optional: true
+      - path: ../protocol-fixtures
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: TronMobile
     settings:
@@ -128,6 +131,9 @@ targets:
       - path: UITests
         createIntermediateGroups: true
         optional: true
+      - path: docs/assets/parity
+        buildPhase: resources
+        createIntermediateGroups: true
     dependencies:
       - target: TronMobile
     settings:
@@ -188,6 +194,10 @@ schemes:
       config: Beta
     test:
       config: Test
+      environmentVariables:
+        TRON_E2E_PORT: "$(TRON_E2E_PORT_VALUE)"
+        TRON_E2E_CODE: "$(TRON_E2E_CODE_VALUE)"
+        TRON_E2E_WORKSPACE: "$(TRON_E2E_WORKSPACE_VALUE)"
       targets:
         - TronMobileUITests
     profile:

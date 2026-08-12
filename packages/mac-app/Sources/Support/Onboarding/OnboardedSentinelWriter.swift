@@ -1,7 +1,7 @@
 import Foundation
 
 /// Atomic-write the `.onboarded` sentinel using the same
-/// `tempfile + sync + rename` recipe as the Rust agent.
+/// `tempfile + sync + rename` recipe used by gateway-owned state.
 enum OnboardedSentinelWriter {
     enum Failure: Error, Equatable {
         case parentDirectoryMissing(URL)
@@ -16,8 +16,7 @@ enum OnboardedSentinelWriter {
 
         let tmp = parent.appendingPathComponent(".onboarded.\(UUID().uuidString).tmp", isDirectory: false)
         // Include fractional seconds so repeated touches within the same
-        // second produce distinct bodies. Rust's serde_json ISO timestamps
-        // include millis too — keeps the format consistent across sides.
+        // second produce distinct bodies.
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let body = formatter.string(from: Date()) + "\n"

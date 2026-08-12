@@ -40,7 +40,7 @@ enum ExistingInstallDetector {
         case .notRegistered:
             return .none
         case .notFound:
-            return .partial(reason: "macOS cannot find the bundled Tron Server Login Item")
+            return .partial(reason: "macOS cannot find the bundled Tron Agent Login Item")
         case .unknown(let message):
             return .partial(reason: message)
         }
@@ -66,7 +66,7 @@ enum ExistingInstallDetector {
         case .notFound:
             return .notFound
         @unknown default:
-            return .unknown("Tron Server registration is in an unknown state")
+            return .unknown("Tron Agent registration is in an unknown state")
         }
     }
 
@@ -109,7 +109,7 @@ enum ExistingInstallDetector {
         }
         return plistLabel == label
             && bundleProgram == expectedBundleProgram
-            && args == ["tron", "--port", "\(port)", "--quiet"]
+            && args == ["tron", "--host", "tailscale", "--port", "\(port)"]
             && environmentVariables == expectedEnvironmentVariables
             && associatedBundleIDs == expectedAssociatedBundleIDs
     }

@@ -33,7 +33,7 @@ struct ServerStatusPoller: Sendable {
     }
 
     /// Performs a single status probe synchronously. Used by tests +
-    /// the wizard's "wait for server" loop. The state mapping mirrors
+    /// the wizard's "wait for Tron" loop. The state mapping mirrors
     /// the INVARIANT documented on `ServerPingResult`.
     static func singleSnapshot(setup: EnvironmentSetup) async -> ServerStatusSnapshot {
         let token = setup.readBearerToken()
@@ -41,16 +41,12 @@ struct ServerStatusPoller: Sendable {
         switch result {
         case .success(let info):
             let port = setup.serverPort
-            async let launchAgentRuntime = setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
-            async let portProcess = setup.probeServerProcess(port)
-            let runtimeInfo = await launchAgentRuntime
-            let serverProcess = await portProcess
+            let runtimeInfo = await setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
             return ServerStatusSnapshot(
                 state: .running(version: info.version, port: port),
                 tailscaleIP: setup.readTailscaleIPFromSettings(),
-                processID: serverProcess?.pid ?? runtimeInfo?.pid,
-                uptime: serverProcess?.uptime ?? runtimeInfo?.uptime,
-                isDevServerActive: serverProcess?.isDevServer == true
+                processID: runtimeInfo?.pid,
+                uptime: runtimeInfo?.uptime
             )
         case .unauthorized:
             return ServerStatusSnapshot(

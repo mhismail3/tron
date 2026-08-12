@@ -7,7 +7,7 @@ import SwiftUI
 struct DoneStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Tron lives in your menu bar from here on. Click the icon any time to copy your pairing info, restart the server, or send feedback.")
+            Text("Tron lives in your menu bar from here on. Click the icon any time to copy your pairing info, restart Tron, or send feedback.")
                 .font(TronTypography.wizardBody)
                 .foregroundStyle(.secondary)
                 .lineSpacing(2)

@@ -16,7 +16,7 @@ struct InstallPipelineStageOrderingTests {
 
     @Test("each install stage has visible labels and deliberate pacing")
     func installStageCopyAndPacing() {
-        #expect(InstallStepContent.intro == "Install Tron Server on this Mac. It runs quietly in the background so your iPhone can connect.")
+        #expect(InstallStepContent.intro == "Install Tron on this Mac. It runs quietly in the background so your iPhone can connect.")
         #expect(InstallStepContent.notStartedPlaceholder == "Installation not started")
         #expect(InstallStepContent.stagePaceDelayNanoseconds >= 300_000_000)
         #expect(InstallStepContent.stagePaceDelayNanoseconds <= 600_000_000)
@@ -72,7 +72,7 @@ struct InstallPipelineStageOrderingTests {
         let source = try String(contentsOf: step, encoding: .utf8)
 
         #expect(source.contains("private var serverReadyBanner"))
-        #expect(source.contains("Tron Server is ready"))
+        #expect(source.contains("Tron Agent is ready"))
         #expect(source.contains("Current status:"))
         #expect(source.contains("refreshInstallStatus"))
         #expect(source.contains("private var currentInstallRunSucceeded"))
