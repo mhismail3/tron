@@ -30,17 +30,24 @@ struct ChatTranscriptGeometry: Equatable {
     static let zero = ChatTranscriptGeometry(offsetY: 0, contentHeight: 0, containerHeight: 0)
     var isValid: Bool { contentHeight > 0 && containerHeight > 0 }
     var distanceFromBottom: CGFloat {
-        let rawDistance = contentHeight - offsetY - containerHeight - bottomInset
+        // ScrollGeometry's content offset is measured through the content insets;
+        // the physical bottom is therefore content + bottom inset - viewport.
+        let rawDistance = contentHeight + bottomInset - offsetY - containerHeight
         guard rawDistance.isFinite else { return .greatestFiniteMagnitude }
         return max(0, rawDistance)
     }
     var isAtBottom: Bool { isValid && distanceFromBottom <= 80 }
     var isAtExactBottom: Bool { isValid && distanceFromBottom <= 2 }
+
+    func isViewportOnlyChange(from previous: Self) -> Bool {
+        abs(contentHeight - previous.contentHeight) <= 0.5
+            && (abs(containerHeight - previous.containerHeight) > 0.5
+                || abs(bottomInset - previous.bottomInset) > 0.5)
+    }
 }
 
 enum ChatOpenPresentationPhase: Equatable {
     case opening
-    case positioning
     case ready
     case failed(String)
 }
@@ -49,38 +56,19 @@ struct ChatOpenPresentationState: Equatable {
     let sessionID: String
     private(set) var epoch: Int = 0
     private(set) var phase: ChatOpenPresentationPhase = .opening
-    private(set) var stableBottomObservations = 0
 
     mutating func begin() -> Int {
         epoch &+= 1
         phase = .opening
-        stableBottomObservations = 0
         return epoch
     }
 
     mutating func installAuthoritativeBaseline(sessionID: String, epoch: Int) -> Bool {
         guard sessionID == self.sessionID, epoch == self.epoch, phase == .opening else { return false }
-        phase = .positioning
-        stableBottomObservations = 0
+        // The authoritative handshake is the readiness boundary. Physical
+        // SwiftUI geometry is best-effort and may legally coalesce callbacks.
+        phase = .ready
         return true
-    }
-
-    mutating func observePosition(sessionID: String, epoch: Int, geometry: ChatTranscriptGeometry) -> Bool {
-        guard sessionID == self.sessionID, epoch == self.epoch, phase == .positioning else { return false }
-        if geometry.isAtExactBottom {
-            stableBottomObservations += 1
-            if stableBottomObservations >= 2 {
-                phase = .ready
-                return true
-            }
-        } else {
-            stableBottomObservations = 0
-        }
-        return false
-    }
-
-    mutating func failPositioning(sessionID: String, epoch: Int) -> Bool {
-        fail(sessionID: sessionID, epoch: epoch, message: "Tron could not position the latest messages. Try again.")
     }
 
     mutating func fail(sessionID: String, epoch: Int, message: String) -> Bool {
@@ -216,10 +204,9 @@ struct ChatToolRunPresentation: Hashable, Identifiable {
 
     init(tools: [ChatToolPresentation], anchorID: String? = nil) {
         self.tools = tools
-        // Prefer the runtime's monotonic call order. If an earlier ordinal arrives
-        // after a later progress frame, the run still converges to one deterministic
-        // identity instead of depending on callback arrival order.
-        self.anchorID = anchorID ?? tools.map(\.id).min() ?? "empty"
+        // Callers provide canonical content order or the runtime's monotonic
+        // ordinal order. Opaque call IDs are not sortable order keys.
+        self.anchorID = anchorID ?? tools.first?.id ?? "empty"
     }
 
     var id: String { "tool-run-" + anchorID }

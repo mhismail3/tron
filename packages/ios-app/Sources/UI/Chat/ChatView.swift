@@ -47,10 +47,11 @@ struct ChatView: View {
     var body: some View {
         transcript
             .safeAreaInset(edge: .bottom, spacing: 0) {
+                // Keep the primary control structurally present during sync;
+                // readiness disables interaction but never removes its layout.
                 composer
                     .allowsHitTesting(isTranscriptReady)
                     .accessibilityHidden(!isTranscriptReady)
-                    .opacity(isTranscriptReady ? 1 : 0)
             }
             .overlay(alignment: .top) { topBlur }
         .onGeometryChange(for: CGFloat.self) { geometry in
@@ -176,7 +177,6 @@ struct ChatView: View {
         .contentMargins(.horizontal, 16, for: .scrollContent)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.bottom, for: .alignment)
-        .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .scrollPosition($transcriptScrollPosition)
         .tronScrollEdgeChrome()
         .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.15) { ids in
@@ -190,16 +190,20 @@ struct ChatView: View {
         } action: { previous, geometry in
             transcriptGeometry = geometry
             guard isTranscriptReady else { return }
-            if scrollCoordinator.geometryChanged(previous: previous, current: geometry) {
+            if geometry.isViewportOnlyChange(from: previous) {
+                scrollCoordinator.viewportChanged(previous: previous, current: geometry)
+            } else if scrollCoordinator.geometryChanged(previous: previous, current: geometry) {
                 scrollToTail(animated: false)
             }
         }
         .onScrollPhaseChange { oldPhase, newPhase, context in
-            scrollCoordinator.scrollPhaseChanged(
+            if scrollCoordinator.scrollPhaseChanged(
                 from: oldPhase,
                 to: newPhase,
                 finalGeometry: ChatTranscriptGeometry(context.geometry)
-            )
+            ) {
+                scrollToTail(animated: false)
+            }
         }
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: scrollToBottomRequest) { _, _ in
@@ -290,7 +294,7 @@ struct ChatView: View {
 
     @ViewBuilder private var openingSurface: some View {
         switch openPresentation.phase {
-        case .opening, .positioning:
+        case .opening:
             VStack(spacing: 12) {
                 ProgressView().controlSize(.regular)
                 Text("Opening conversation…")
@@ -341,7 +345,7 @@ struct ChatView: View {
                     return
                 }
                 modelPresentationGeneration = generation
-                await positionLatestTail(epoch: epoch)
+                positionLatestTail(epoch: epoch)
             } catch is CancellationError {
                 return
             } catch {
@@ -358,22 +362,19 @@ struct ChatView: View {
     }
 
     @MainActor
-    private func positionLatestTail(epoch: Int) async {
-        for _ in 0..<75 {
-            guard !Task.isCancelled,
-                  openPresentation.epoch == epoch,
-                  openPresentation.phase == .positioning else { return }
-            scrollCoordinator.beginOpeningBottomScroll()
+    private func positionLatestTail(epoch: Int) {
+        // `ScrollPosition(edge: .bottom)` and the initial anchor provide the
+        // baseline. Reissue once in the same MainActor turn that makes the
+        // transcript ready, before native interaction can claim ownership.
+        guard !Task.isCancelled,
+              openPresentation.epoch == epoch,
+              openPresentation.phase == .ready else { return }
+        scrollCoordinator.beginOpeningBottomScroll()
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
             transcriptScrollPosition.scrollTo(edge: .bottom)
-            await Task.yield()
-            try? await Task.sleep(for: .milliseconds(16))
-            if openPresentation.observePosition(
-                sessionID: sessionID,
-                epoch: epoch,
-                geometry: transcriptGeometry
-            ) { return }
         }
-        _ = openPresentation.failPositioning(sessionID: sessionID, epoch: epoch)
     }
 
     @MainActor
@@ -420,7 +421,7 @@ struct ChatView: View {
                 // Restore the semantic row first, then allow bounded late-layout
                 // corrections while Markdown/attachments settle. Every pass is
                 // generation-scoped and cancellation-aware.
-                if let anchorID {
+                if let anchorID, scrollCoordinator.canRestorePrependPosition {
                     var position = transcriptScrollPosition
                     position.scrollTo(id: anchorID, anchor: .top)
                     transcriptScrollPosition = position
@@ -429,8 +430,10 @@ struct ChatView: View {
                 var stablePasses = 0
                 for _ in 0..<60 {
                     guard !Task.isCancelled,
-                          modelPresentationGeneration == presentationGeneration else { return }
+                          modelPresentationGeneration == presentationGeneration,
+                          scrollCoordinator.canRestorePrependPosition else { return }
                     try? await Task.sleep(for: .milliseconds(16))
+                    guard scrollCoordinator.canRestorePrependPosition else { return }
                     let height = transcriptGeometry.contentHeight
                     let isStable = height > previousGeometry.contentHeight + 0.5 && abs(height - lastHeight) < 0.5
                     stablePasses = isStable ? stablePasses + 1 : 0

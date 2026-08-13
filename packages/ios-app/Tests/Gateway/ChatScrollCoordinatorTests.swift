@@ -42,6 +42,21 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.canAutomaticallyFollow)
     }
 
+    @Test("growth arriving during an outstanding follow is retried when scrolling settles")
+    func deferredGrowthRetries() {
+        let coordinator = ChatScrollCoordinator()
+        let firstGrowth = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_080, containerHeight: 400)
+        let secondGrowth = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_160, containerHeight: 400)
+        #expect(coordinator.geometryChanged(previous: bottom, current: firstGrowth))
+        #expect(!coordinator.geometryChanged(previous: firstGrowth, current: secondGrowth))
+        #expect(coordinator.scrollPhaseChanged(
+            from: .animating,
+            to: .idle,
+            finalGeometry: secondGrowth
+        ))
+        #expect(coordinator.beginAutomaticBottomScroll())
+    }
+
     @Test("detached growth preserves viewport and marks semantic responses unread")
     func detachedGrowthAndUnread() {
         let coordinator = ChatScrollCoordinator()
@@ -64,13 +79,28 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.userScrolledAway)
     }
 
+    @Test("a new user gesture cancels prepend correction and owns final state")
+    func userInterruptsPrependRestoration() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.beginPrependingHistory()
+        #expect(coordinator.canRestorePrependPosition)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: nil)
+        #expect(!coordinator.canRestorePrependPosition)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
+        coordinator.endPrependingHistory(preserveScrolledAway: false)
+        #expect(coordinator.userScrolledAway)
+        #expect(!coordinator.isAtBottom)
+    }
+
     @Test("composer inset change is viewport geometry, not transcript growth")
     func composerInsetDoesNotManufactureGrowth() {
         let coordinator = ChatScrollCoordinator()
         let before = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_000, containerHeight: 400, bottomInset: 72)
         let after = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_000, containerHeight: 320, bottomInset: 152)
+        #expect(after.isViewportOnlyChange(from: before))
         coordinator.viewportChanged(previous: before, current: after)
         #expect(!coordinator.hasUnreadContent)
+        #expect(coordinator.isAtBottom)
         #expect(coordinator.canAutomaticallyFollow)
     }
 

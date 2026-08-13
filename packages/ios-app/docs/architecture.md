@@ -33,16 +33,20 @@ WebSocket frame. Opening a new chat presentation always synchronizes a fresh aut
 latest page; disposable cached or previously paged prefixes are never revealed as
 its baseline. The transcript remains behind a nonblank opening surface until the
 two-phase `session.open`/`session.sync` handshake installs its authoritative tail,
-then the whole stage fades and rises in (opacity only under Reduce Motion). Native
-`ScrollPosition` starts at the bottom, but physical layout callbacks are never a
-correctness gate because SwiftUI may coalesce them. The composer remains mounted
-and visible throughout opening so transient synchronization cannot remove the
-primary chat control; sending stays disabled until the authoritative baseline is
-ready. A failed transport/sync open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
+then the whole stage fades and rises in (opacity only under Reduce Motion). That
+handshake immediately marks the stage ready; native `ScrollPosition` starts at the
+bottom and receives one same-turn best-effort positioning hint before interaction
+is enabled, but physical layout callbacks are never a correctness gate because
+SwiftUI may coalesce them. The
+composer remains mounted and visible throughout opening so transient synchronization
+cannot remove the primary chat control; sending stays disabled until the authoritative
+baseline is ready. A failed transport/sync open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
 resynchronization merge compatible live tails with history explicitly loaded in
 that viewport so a detached reader is not displaced. Explicit earlier-page loads
 remain request-only, are scoped to the exact mount generation/cursor, and restore the
 former visible anchor with bounded late-layout correction so the viewport does not jump.
+A gesture that begins during that correction cancels every remaining position write
+and its final native geometry wins over the pre-load detached state.
 A just-created empty session remains locally selected until Pi indexes it after
 its first user message; absence from discovery alone does not discard the
 newly returned authoritative snapshot.
@@ -82,7 +86,9 @@ content height. A compact scroll coordinator is the sole owner of following inte
 combines native `ScrollPosition` ownership, phase-final geometry, inset-aware bottom
 distance, prepend ownership, and durable user scroll-away. Only measured transcript
 height growth can request an automatic tail position; progress-only tool mutations and
-composer/inset changes cannot. Direct or accessibility scrolling always wins. Horizontal
+composer/inset changes cannot. Insets are classified as viewport-only geometry and
+there is no independent size-change anchor that can reposition a detached reader.
+Direct or accessibility scrolling always wins. Horizontal
 content margins live outside the nonanimated lazy row stack, and existing rows never
 participate in stack-wide insertion or scale animations. Thinking, Markdown, tool, and
 working rows therefore remain stable above the composer while the user follows the tail. Terminal output has its own monotonic sequence and reconnect replay cursor.

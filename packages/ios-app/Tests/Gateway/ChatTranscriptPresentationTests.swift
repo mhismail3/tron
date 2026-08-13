@@ -14,6 +14,16 @@ struct ChatTranscriptPresentationTests {
         let ready = ChatTranscriptGeometry(offsetY: 400, contentHeight: 800, containerHeight: 400)
         #expect(ready.isValid)
         #expect(ready.isAtExactBottom)
+
+        let insetBottom = ChatTranscriptGeometry(
+            offsetY: 472, contentHeight: 800, containerHeight: 400, bottomInset: 72
+        )
+        let insetAway = ChatTranscriptGeometry(
+            offsetY: 372, contentHeight: 800, containerHeight: 400, bottomInset: 72
+        )
+        #expect(insetBottom.isAtExactBottom)
+        #expect(insetAway.distanceFromBottom == 100)
+        #expect(!insetAway.isAtBottom)
     }
 
     @Test("chat toolbar title remains bounded during interactive navigation")
@@ -68,7 +78,7 @@ struct ChatTranscriptPresentationTests {
         #expect(idle.identity != anotherIdle.identity)
     }
 
-    @Test("authoritative sync requires stable bottom positioning before reveal")
+    @Test("authoritative sync reveals immediately without geometry callbacks")
     func chatOpenPresentationState() {
         var state = ChatOpenPresentationState(sessionID: "session-a")
         let epoch = state.begin()
@@ -80,39 +90,7 @@ struct ChatTranscriptPresentationTests {
 
         let installed = state.installAuthoritativeBaseline(sessionID: "session-a", epoch: epoch)
         #expect(installed)
-        #expect(state.phase == .positioning)
-        let invalid = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: .zero)
-        #expect(!invalid)
-        let bottom = ChatTranscriptGeometry(offsetY: 400, contentHeight: 800, containerHeight: 400)
-        let firstBottom = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: bottom)
-        #expect(!firstBottom)
-        #expect(state.stableBottomObservations == 1)
-        let secondBottom = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: bottom)
-        #expect(secondBottom)
         #expect(state.phase == .ready)
-    }
-
-    @Test("positioning resets instability and fails recoverably after a bounded coordinator deadline")
-    func chatOpenPositioningFailure() {
-        var state = ChatOpenPresentationState(sessionID: "session-a")
-        let epoch = state.begin()
-        let installed = state.installAuthoritativeBaseline(sessionID: "session-a", epoch: epoch)
-        #expect(installed)
-        let bottom = ChatTranscriptGeometry(offsetY: 400, contentHeight: 800, containerHeight: 400)
-        let away = ChatTranscriptGeometry(offsetY: 200, contentHeight: 800, containerHeight: 400)
-        let firstBottom = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: bottom)
-        let movedAway = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: away)
-        #expect(!firstBottom)
-        #expect(!movedAway)
-        #expect(state.stableBottomObservations == 0)
-        let staleFailure = state.failPositioning(sessionID: "session-a", epoch: epoch - 1)
-        let currentFailure = state.failPositioning(sessionID: "session-a", epoch: epoch)
-        #expect(!staleFailure)
-        #expect(currentFailure)
-        guard case .failed = state.phase else {
-            Issue.record("expected recoverable positioning failure")
-            return
-        }
     }
 
     @Test("stale presentation callbacks cannot fail a newer opening epoch")
@@ -215,14 +193,13 @@ struct ChatTranscriptPresentationTests {
         ))
     }
 
-    @Test("tool run identity is deterministic when an earlier ordinal arrives late")
-    func toolRunIdentityIgnoresArrivalOrder() {
-        let laterOnly = ChatToolRunPresentation(tools: [toolPresentation("call-2")])
-        let expanded = ChatToolRunPresentation(tools: [toolPresentation("call-1"), toolPresentation("call-2")])
-        let reversed = ChatToolRunPresentation(tools: [toolPresentation("call-2"), toolPresentation("call-1")])
-        #expect(expanded.id == reversed.id)
-        #expect(expanded.id == "tool-run-call-1")
-        #expect(laterOnly.id == "tool-run-call-2")
+    @Test("tool run identity follows authoritative order rather than opaque ID sorting")
+    func toolRunIdentityUsesAuthoritativeOrder() {
+        let ordered = ChatToolRunPresentation(tools: [
+            toolPresentation("opaque-z-first"),
+            toolPresentation("opaque-a-second"),
+        ])
+        #expect(ordered.id == "tool-run-opaque-z-first")
     }
 
     @Test("compaction token counts use compact K shorthand")

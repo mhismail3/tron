@@ -18,6 +18,7 @@ final class ChatScrollCoordinator {
     private var isUserDrivenSettling = false
     private var automaticBottomRequestOutstanding = false
     private var pendingGrowthFollow = false
+    private var prependInterruptedByUser = false
 
     var canAutomaticallyFollow: Bool {
         !userScrolledAway
@@ -26,6 +27,12 @@ final class ChatScrollCoordinator {
             && !pendingNativeUserGeometry
             && !isUserDrivenSettling
             && !isPrependingHistory
+    }
+
+    /// Prepend correction may continue across asynchronous row layout, but a new
+    /// gesture permanently transfers ownership back to the user.
+    var canRestorePrependPosition: Bool {
+        isPrependingHistory && !prependInterruptedByUser && !isUserInteracting
     }
 
     func resetForPresentation() {
@@ -40,11 +47,13 @@ final class ChatScrollCoordinator {
         isUserDrivenSettling = false
         automaticBottomRequestOutstanding = false
         pendingGrowthFollow = false
+        prependInterruptedByUser = false
     }
 
     func scrollPositionChanged(isPositionedByUser: Bool) {
-        if isPositionedByUser && !isNativeUserOwned {
+        if isPositionedByUser {
             pendingNativeUserGeometry = true
+            if isPrependingHistory { prependInterruptedByUser = true }
         }
         isNativeUserOwned = isPositionedByUser
         if isPositionedByUser, !isAtBottom {
@@ -52,13 +61,16 @@ final class ChatScrollCoordinator {
         }
     }
 
+    /// Returns true when deferred transcript growth should issue one bottom
+    /// command now that direct interaction or an in-flight command has settled.
+    @discardableResult
     func scrollPhaseChanged(
         from oldPhase: ScrollPhase,
         to newPhase: ScrollPhase,
         finalGeometry: ChatTranscriptGeometry?
-    ) {
+    ) -> Bool {
         if newPhase == .idle, let finalGeometry {
-            geometryChanged(previous: finalGeometry, current: finalGeometry)
+            _ = geometryChanged(previous: finalGeometry, current: finalGeometry)
         }
 
         let wasInteracting = isUserInteracting
@@ -67,17 +79,30 @@ final class ChatScrollCoordinator {
         isUserDrivenSettling = newPhase == .animating
             && (wasUserDrivenSettling || Self.isDirectUserPhase(oldPhase))
 
-        if isUserInteracting && !wasInteracting { hadUserInteraction = true }
-        if wasInteracting && !isUserInteracting && !isAtBottom { commitScrollAway() }
-
-        if newPhase == .idle {
-            if isAtBottom {
-                releaseAtBottom()
-            }
-            if pendingGrowthFollow, canAutomaticallyFollow {
-                pendingGrowthFollow = false
-            }
+        if isUserInteracting && !wasInteracting {
+            hadUserInteraction = true
+            if isPrependingHistory { prependInterruptedByUser = true }
         }
+        if wasInteracting && !isUserInteracting,
+           finalGeometry?.isAtExactBottom != true {
+            commitScrollAway()
+        }
+
+        guard newPhase == .idle else { return false }
+        if finalGeometry?.isAtExactBottom == true {
+            releaseAtBottom()
+            return false
+        }
+
+        // A nonanimated request can be coalesced before reaching the newest
+        // extent. Preserve one retry opportunity instead of silently dropping it.
+        if automaticBottomRequestOutstanding, !userScrolledAway {
+            pendingGrowthFollow = true
+        }
+        guard pendingGrowthFollow, canAutomaticallyFollow else { return false }
+        pendingGrowthFollow = false
+        automaticBottomRequestOutstanding = true
+        return true
     }
 
     /// Returns true exactly when measured transcript growth should issue one
@@ -88,6 +113,7 @@ final class ChatScrollCoordinator {
         current: ChatTranscriptGeometry
     ) -> Bool {
         let previousAtBottom = isAtBottom
+        let grew = current.contentHeight > previous.contentHeight + 0.5
         let hasUserAttribution = isUserInteracting
             || hadUserInteraction
             || isNativeUserOwned
@@ -95,7 +121,7 @@ final class ChatScrollCoordinator {
             || isUserDrivenSettling
 
         isAtBottom = current.isAtBottom
-        if hasUserAttribution && !current.isAtBottom {
+        if hasUserAttribution && !current.isAtExactBottom {
             commitScrollAway()
         } else if current.isAtExactBottom {
             releaseAtBottom()
@@ -105,17 +131,15 @@ final class ChatScrollCoordinator {
         if !isUserInteracting { hadUserInteraction = false }
 
         if automaticBottomRequestOutstanding {
-            if current.isAtExactBottom { automaticBottomRequestOutstanding = false }
+            if grew, !userScrolledAway { pendingGrowthFollow = true }
             return false
         }
 
         guard previous.isValid,
-              current.contentHeight > previous.contentHeight + 0.5,
+              grew,
               previousAtBottom,
               canAutomaticallyFollow else {
-            if current.contentHeight > previous.contentHeight + 0.5,
-               previousAtBottom,
-               !userScrolledAway {
+            if grew, previousAtBottom, !userScrolledAway {
                 pendingGrowthFollow = true
             }
             return false
@@ -127,9 +151,19 @@ final class ChatScrollCoordinator {
     /// Composer/safe-area changes resize the viewport; they are not transcript
     /// growth and must never manufacture a follow request or unread content.
     func viewportChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
-        guard previous.contentHeight == current.contentHeight else { return }
-        isAtBottom = current.isAtBottom
-        if current.isAtExactBottom { releaseAtBottom() }
+        guard current.isViewportOnlyChange(from: previous) else { return }
+        if current.isAtExactBottom {
+            releaseAtBottom()
+        } else if isUserInteracting || isNativeUserOwned || pendingNativeUserGeometry {
+            commitScrollAway()
+        } else if previous.isAtBottom || isAtBottom {
+            // Preserve logical pinned ownership while SwiftUI applies the safe-
+            // area inset. The inset itself must not issue a scroll command.
+            isAtBottom = true
+        } else {
+            isAtBottom = current.isAtBottom
+        }
+        pendingNativeUserGeometry = false
     }
 
     /// Claims app ownership before the binding mutation. Returns false when a
@@ -144,9 +178,8 @@ final class ChatScrollCoordinator {
         return true
     }
 
-    /// Opening owns the viewport before the transcript is interactive. Repeated
-    /// bounded positioning observations may therefore reissue the same command,
-    /// while normal automatic following remains coalesced.
+    /// Opening owns the viewport before the transcript becomes interactive.
+    /// Positioning remains best-effort and never participates in readiness.
     func beginOpeningBottomScroll() {
         isNativeUserOwned = false
         pendingNativeUserGeometry = false
@@ -158,10 +191,7 @@ final class ChatScrollCoordinator {
     func confirmAutomaticBottomScroll(_ geometry: ChatTranscriptGeometry) {
         isAtBottom = geometry.isAtBottom
         guard geometry.isAtExactBottom else { return }
-        automaticBottomRequestOutstanding = false
-        userScrolledAway = false
-        hasUnreadContent = false
-        pendingGrowthFollow = false
+        releaseAtBottom()
     }
 
     func semanticResponseArrived() {
@@ -170,13 +200,19 @@ final class ChatScrollCoordinator {
 
     func beginPrependingHistory() {
         isPrependingHistory = true
+        prependInterruptedByUser = false
         pendingGrowthFollow = false
     }
 
     func endPrependingHistory(preserveScrolledAway: Bool) {
         isPrependingHistory = false
+        pendingGrowthFollow = false
+        guard !prependInterruptedByUser else {
+            prependInterruptedByUser = false
+            return
+        }
         userScrolledAway = preserveScrolledAway
-        isAtBottom = !preserveScrolledAway && isAtBottom
+        if preserveScrolledAway { isAtBottom = false }
     }
 
     func clearUnreadAfterExplicitJump() {

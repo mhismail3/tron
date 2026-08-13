@@ -662,7 +662,8 @@ private struct ToolElapsedText: View {
                 .foregroundStyle(color)
                 .monospacedDigit()
                 .lineLimit(1)
-                .frame(width: 48, alignment: .trailing)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 48, alignment: .trailing)
         }
     }
 }
@@ -715,7 +716,8 @@ private struct ToolRunElapsedText: View {
                 .foregroundStyle(color)
                 .monospacedDigit()
                 .lineLimit(1)
-                .frame(width: 48, alignment: .trailing)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 48, alignment: .trailing)
         }
     }
 }
