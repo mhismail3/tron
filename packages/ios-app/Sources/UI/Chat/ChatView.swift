@@ -50,6 +50,9 @@ struct ChatView: View {
         ZStack(alignment: .bottom) {
             transcript
             composer
+                .allowsHitTesting(isTranscriptReady)
+                .accessibilityHidden(!isTranscriptReady)
+                .opacity(isTranscriptReady ? 1 : 0)
                 .background {
                     GeometryReader { geometry in
                         Color.clear.preference(
@@ -328,7 +331,7 @@ struct ChatView: View {
 
     @ViewBuilder private var openingSurface: some View {
         switch openPresentation.phase {
-        case .opening:
+        case .opening, .positioning:
             VStack(spacing: 12) {
                 ProgressView().controlSize(.regular)
                 Text("Opening conversation…")
@@ -382,7 +385,7 @@ struct ChatView: View {
                     return
                 }
                 modelPresentationGeneration = generation
-                scrollToTail(animated: false)
+                await positionLatestTail(epoch: epoch)
             } catch is CancellationError {
                 return
             } catch {
@@ -396,6 +399,24 @@ struct ChatView: View {
         openingTask = task
         await task.value
         if openPresentation.epoch == epoch { openingTask = nil }
+    }
+
+    @MainActor
+    private func positionLatestTail(epoch: Int) async {
+        for _ in 0..<75 {
+            guard !Task.isCancelled,
+                  openPresentation.epoch == epoch,
+                  openPresentation.phase == .positioning else { return }
+            scrollToTail(animated: false)
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(16))
+            if openPresentation.observePosition(
+                sessionID: sessionID,
+                epoch: epoch,
+                geometry: transcriptGeometry
+            ) { return }
+        }
+        _ = openPresentation.failPositioning(sessionID: sessionID, epoch: epoch)
     }
 
     @MainActor

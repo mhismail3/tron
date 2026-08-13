@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearRequestSynchronizations, encodeOutboundFrame } from "./server.js";
+import { clearRequestSynchronizations, encodeOutboundFrame, releaseOwnedSubscription } from "./server.js";
 
 describe("bounded outbound gateway frames", () => {
   it("returns a correlated error instead of closing the socket for an oversized response", () => {
@@ -34,6 +34,17 @@ describe("bounded outbound gateway frames", () => {
       clearTimeout(firstTimeout);
       clearTimeout(otherTimeout);
     }
+  });
+
+  it("ignores stale subscription closes and accepts the current owner", () => {
+    const tokens = new Map([["session", "current"]]);
+    let releases = 0;
+    expect(releaseOwnedSubscription(tokens, "session", "stale", () => { releases += 1; })).toBe(false);
+    expect(tokens.get("session")).toBe("current");
+    expect(releases).toBe(0);
+    expect(releaseOwnedSubscription(tokens, "session", "current", () => { releases += 1; })).toBe(true);
+    expect(tokens.has("session")).toBe(false);
+    expect(releases).toBe(1);
   });
 
   it("turns an oversized snapshot event into a bounded resync hint", () => {

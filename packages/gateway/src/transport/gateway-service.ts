@@ -31,7 +31,7 @@ export interface ClientContext {
   beginSynchronization(sessionId: string): string;
   establishSynchronization(sessionId: string, snapshot: import("../protocol/types.js").SessionSnapshot): void;
   completeSynchronization(sessionId: string, syncToken: string): void;
-  unsubscribe(sessionId: string): void;
+  unsubscribe(sessionId: string, subscriptionToken?: string): boolean;
   attachTerminal(terminalId: string): void;
   detachTerminal(terminalId: string): void;
 }
@@ -152,7 +152,7 @@ export class GatewayService {
         const syncToken = client.beginSynchronization(sessionId);
         const snapshot = slot.snapshot();
         client.establishSynchronization(sessionId, snapshot);
-        return safeJson({ session: snapshot, syncToken });
+        return safeJson({ session: snapshot, syncToken, subscriptionToken: syncToken });
       }
       case "session.sync": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
@@ -171,8 +171,8 @@ export class GatewayService {
       }
       case "session.close": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
-        client.unsubscribe(sessionId);
-        return { closed: true };
+        const subscriptionToken = string(params.subscriptionToken, "subscriptionToken", { max: 200 });
+        return { closed: client.unsubscribe(sessionId, subscriptionToken) };
       }
       case "session.delete":
         return this.mutation(client, method, params, async () => {

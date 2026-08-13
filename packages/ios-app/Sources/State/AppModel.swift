@@ -60,7 +60,11 @@ final class AppModel {
         var id: String { "\(sessionId):\(revision)" }
     }
 
-    private struct SessionOpenResponse: Decodable { let session: SessionSnapshot; let syncToken: String }
+    private struct SessionOpenResponse: Decodable {
+        let session: SessionSnapshot
+        let syncToken: String
+        let subscriptionToken: String
+    }
     private struct SessionMutationResponse: Codable { let sessionId: String }
     private struct CommandStatusParams: Codable { let method, commandId: String }
     private struct CommandStatusResponse: Decodable { let status: String; let result: JSONValue? }
@@ -138,6 +142,7 @@ final class AppModel {
     private var foregroundReconciliationTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var subscribedSessionID: String?
+    private var subscriptionTokenBySession: [String: String] = [:]
     private var sessionEventSynchronizer = SessionEventSynchronizer()
     private var pendingAuthoritativeResyncSessionIDs: Set<String> = []
     private var pendingBranchReplacementSessionIDs: Set<String> = []
@@ -613,13 +618,44 @@ final class AppModel {
         if let expectedPresentationGeneration,
            mountedPresentationGenerationBySession[sessionID] != nil,
            mountedPresentationGenerationBySession[sessionID] != expectedPresentationGeneration { return }
-        struct Params: Codable { let sessionId: String }
+        guard let subscriptionToken = subscriptionTokenBySession[sessionID] else { return }
+        struct Params: Codable { let sessionId, subscriptionToken: String }
         struct Response: Decodable { let closed: Bool }
-        let _: Response? = try? await client.request("session.close", Params(sessionId: sessionID))
-        if let expectedPresentationGeneration,
-           mountedPresentationGenerationBySession[sessionID] != nil,
-           mountedPresentationGenerationBySession[sessionID] != expectedPresentationGeneration { return }
+        let response: Response? = try? await client.request(
+            "session.close",
+            Params(sessionId: sessionID, subscriptionToken: subscriptionToken)
+        )
+        guard Self.shouldClearSubscription(
+            installedToken: subscriptionTokenBySession[sessionID],
+            closingToken: subscriptionToken,
+            gatewayClosed: response?.closed == true
+        ) else { return }
+        subscriptionTokenBySession[sessionID] = nil
         if subscribedSessionID == sessionID { subscribedSessionID = nil }
+    }
+
+    private func closeSubscriptionIfOwned(_ sessionID: String, subscriptionToken: String) async {
+        struct Params: Codable { let sessionId, subscriptionToken: String }
+        struct Response: Decodable { let closed: Bool }
+        let response: Response? = try? await client.request(
+            "session.close",
+            Params(sessionId: sessionID, subscriptionToken: subscriptionToken)
+        )
+        guard Self.shouldClearSubscription(
+            installedToken: subscriptionTokenBySession[sessionID],
+            closingToken: subscriptionToken,
+            gatewayClosed: response?.closed == true
+        ) else { return }
+        subscriptionTokenBySession[sessionID] = nil
+        if subscribedSessionID == sessionID { subscribedSessionID = nil }
+    }
+
+    static func shouldClearSubscription(
+        installedToken: String?,
+        closingToken: String,
+        gatewayClosed: Bool
+    ) -> Bool {
+        gatewayClosed && installedToken == closingToken
     }
 
     func send(_ text: String, behavior: String? = nil) async throws {
@@ -1524,22 +1560,19 @@ final class AppModel {
             pendingAuthoritativeResyncSessionIDs.remove(sessionID)
         }
         let token = sessionEventSynchronizer.begin(sessionID: sessionID)
+        var openedSubscriptionToken: String?
         do {
             struct Params: Codable { let sessionId: String }
             let response: SessionOpenResponse = try await client.request("session.open", Params(sessionId: sessionID), timeout: .seconds(60))
+            openedSubscriptionToken = response.subscriptionToken
             if let presentationGeneration,
                presentationGeneration != self.presentationOpenGeneration || selectedSessionID != sessionID {
                 sessionEventSynchronizer.cancel(sessionID: sessionID, token: token)
-                // The same-session subscription may already belong to a newer
-                // mount. Only close when selection has moved elsewhere; request
-                // ordering then guarantees a later open owns the final state.
-                if selectedSessionID != sessionID,
-                   mountedPresentationGenerationBySession[sessionID] == nil {
-                    await closeSubscription(sessionID)
-                }
+                await closeSubscriptionIfOwned(sessionID, subscriptionToken: response.subscriptionToken)
                 return false
             }
             subscribedSessionID = sessionID
+            subscriptionTokenBySession[sessionID] = response.subscriptionToken
             if replacingVisibleTranscript || pendingBranchReplacementSessionIDs.remove(sessionID) != nil {
                 snapshots[sessionID] = Self.installingSnapshot(
                     current: snapshots[sessionID],
@@ -1577,7 +1610,9 @@ final class AppModel {
             // events and let the next open replace it instead of applying them
             // against a stale cached snapshot or surfacing a transient sync race.
             sessionEventSynchronizer.cancel(sessionID: sessionID, token: token)
-            await closeSubscription(sessionID)
+            if let openedSubscriptionToken {
+                await closeSubscriptionIfOwned(sessionID, subscriptionToken: openedSubscriptionToken)
+            }
             if let failure = error as? GatewayFailure,
                failure.retryable || failure.code == "response_too_large" {
                 // A failed attempt is not an invalidation that arrived during a

@@ -38,8 +38,12 @@ local database.
 
 A newly navigated chat opens exactly once and replaces any disposable cached or
 previously expanded projection with a fresh bounded authoritative latest tail.
-It does not enter the visible event-rendering state until bottom positioning is
-confirmed. A reconnect while that same chat remains mounted instead receives
+It does not enter the visible event-rendering state until two valid exact-bottom
+geometry observations confirm positioning; bounded positioning attempts fail into
+a recoverable Retry surface instead of revealing an intermediate position. The
+opaque opening surface also hides and disables the complete composer interaction
+stage until readiness. Session subscription ownership is token-scoped end to end,
+so a stale close cannot unsubscribe a newer same-session mount. A reconnect while that same chat remains mounted instead receives
 complete current runtime state and preserves compatible explicitly paged history
 and the reader's follow/detached mode. If a pathological live
 tool run exceeds the ordinary projection budget, duplicate tool detail is

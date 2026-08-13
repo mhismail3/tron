@@ -20,6 +20,18 @@ export interface ActiveSessionSynchronization {
   requestId: string;
 }
 
+export function releaseOwnedSubscription(
+  tokens: Map<string, string>,
+  sessionId: string,
+  token: string,
+  release: () => void,
+): boolean {
+  if (tokens.get(sessionId) !== token) return false;
+  tokens.delete(sessionId);
+  release();
+  return true;
+}
+
 export function clearRequestSynchronizations(
   synchronizations: Map<string, ActiveSessionSynchronization>,
   requestId: string,
@@ -43,6 +55,7 @@ interface Connection {
   terminals: Set<string>;
   inFlight: Set<string>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
+  subscriptionTokens: Map<string, string>;
   helloTimer: NodeJS.Timeout;
 }
 
@@ -277,6 +290,7 @@ export class GatewayServer {
       terminals: new Set(),
       inFlight: new Set(),
       synchronizations: new Map(),
+      subscriptionTokens: new Map(),
       helloTimer: setTimeout(() => socket.close(1008, "hello required"), 5_000),
     };
     this.clients.set(connection.id, connection);
@@ -344,6 +358,7 @@ export class GatewayServer {
           connection.openedSessions.add(sessionId);
           this.options.sessions.subscribe(connection.id, sessionId);
           const syncToken = randomUUID();
+          connection.subscriptionTokens.set(sessionId, syncToken);
           const barrier = new SessionSyncBarrier();
           barrier.begin(syncToken);
           const timeout = setTimeout(() => {
@@ -372,12 +387,23 @@ export class GatewayServer {
           }
           synchronizationCompletions.push({ sessionId, syncToken });
         },
-        unsubscribe: (sessionId) => {
+        unsubscribe: (sessionId, subscriptionToken) => {
+          if (subscriptionToken !== undefined) {
+            return releaseOwnedSubscription(connection.subscriptionTokens, sessionId, subscriptionToken, () => {
+              connection.subscriptions.delete(sessionId);
+              const synchronization = connection.synchronizations.get(sessionId);
+              if (synchronization) clearTimeout(synchronization.timeout);
+              connection.synchronizations.delete(sessionId);
+              this.options.sessions.unsubscribe(connection.id, sessionId);
+            });
+          }
+          connection.subscriptionTokens.delete(sessionId);
           connection.subscriptions.delete(sessionId);
           const synchronization = connection.synchronizations.get(sessionId);
           if (synchronization) clearTimeout(synchronization.timeout);
           connection.synchronizations.delete(sessionId);
           this.options.sessions.unsubscribe(connection.id, sessionId);
+          return true;
         },
         attachTerminal: (terminalId) => {
           if (![...connection.openedSessions].some((sessionId) => this.options.service.terminalBelongsToSession(terminalId, sessionId))) {

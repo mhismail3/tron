@@ -9,7 +9,7 @@ import type { ContentPart, JsonValue, SessionSnapshot, TranscriptItem } from "..
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
 
 interface LocalAuthDocument { bearerToken: string }
-interface SnapshotEnvelope { session: SessionSnapshot; syncToken: string }
+interface SnapshotEnvelope { session: SessionSnapshot; syncToken: string; subscriptionToken: string }
 interface SessionMutationEnvelope { sessionId: string }
 interface SessionListEnvelope { sessions: Array<{ id: string; name?: string; firstMessage: string; cwd: string }>; nextCursor?: string; listRevision: number }
 
@@ -70,10 +70,10 @@ async function connectResilient(client: GatewayProtocolClient): Promise<void> {
   }
 }
 
-async function synchronize(client: GatewayProtocolClient, sessionId: string): Promise<SessionSnapshot> {
+async function synchronize(client: GatewayProtocolClient, sessionId: string): Promise<SnapshotEnvelope> {
   const baseline = await client.request("session.open", { sessionId }) as unknown as SnapshotEnvelope;
   await client.request("session.sync", { sessionId, syncToken: baseline.syncToken });
-  return baseline.session;
+  return baseline;
 }
 
 async function listSessions(client: GatewayProtocolClient): Promise<SessionListEnvelope["sessions"]> {
@@ -124,7 +124,9 @@ export async function runTerminalChat(): Promise<void> {
     }
   }
 
-  let snapshot = await synchronize(client, sessionId);
+  let baseline = await synchronize(client, sessionId);
+  let snapshot = baseline.session;
+  let subscriptionToken = baseline.subscriptionToken;
   let rendered = assistantText(snapshot);
   let cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
   let awaitingOperation: string | undefined;
@@ -186,7 +188,9 @@ export async function runTerminalChat(): Promise<void> {
         client = new GatewayProtocolClient(socketURL, await localToken(tronHome));
         try {
           await connectResilient(client);
-          snapshot = await synchronize(client, sessionId);
+          baseline = await synchronize(client, sessionId);
+          snapshot = baseline.session;
+          subscriptionToken = baseline.subscriptionToken;
           cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
           const current = assistantText(snapshot);
           const delta = renderDelta(rendered, current);
@@ -275,7 +279,7 @@ export async function runTerminalChat(): Promise<void> {
   } finally {
     unsubscribers.forEach((unsubscribe) => unsubscribe());
     readline.close();
-    await client.request("session.close", { sessionId }).catch(() => null);
+    await client.request("session.close", { sessionId, subscriptionToken }).catch(() => null);
     client.close();
   }
 }

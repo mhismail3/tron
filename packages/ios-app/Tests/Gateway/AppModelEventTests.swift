@@ -78,6 +78,19 @@ struct AppModelEventTests {
         #expect(model.selectedSnapshot?.eventSequence == 91)
     }
 
+    @Test("subscription cleanup clears only the exact gateway-confirmed owner")
+    func subscriptionOwnership() {
+        #expect(AppModel.shouldClearSubscription(
+            installedToken: "current", closingToken: "current", gatewayClosed: true
+        ))
+        #expect(!AppModel.shouldClearSubscription(
+            installedToken: "current", closingToken: "stale", gatewayClosed: true
+        ))
+        #expect(!AppModel.shouldClearSubscription(
+            installedToken: "current", closingToken: "current", gatewayClosed: false
+        ))
+    }
+
     @Test("fresh presentation replaces expanded history while reconnect preserves it")
     func snapshotInstallModes() throws {
         let baseline = try loadSnapshot()

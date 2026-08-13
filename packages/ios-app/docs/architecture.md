@@ -51,8 +51,10 @@ newly returned authoritative snapshot.
 Events are invalidation or live-presentation hints. They do not form a durable
 event journal and are never replayed into a local database. `session.open` uses
 a two-phase subscription barrier: the authoritative snapshot and ephemeral sync
-token are returned first; iOS installs that baseline and acknowledges the token
-before the gateway releases later events. While a resync is in
+token are returned first; the same opaque token remains the subscription ownership
+credential after synchronization. iOS installs that baseline and acknowledges the
+token before the gateway releases later events, and `session.close` only releases a
+subscription whose current token matches. While a resync is in
 flight, iOS quarantines that session's events, discards those covered by the new
 baseline, and replays the contiguous remainder. Gaps, runtime-generation changes,
 buffer overflow, oversized frames, reconnect, and foreground activation all
