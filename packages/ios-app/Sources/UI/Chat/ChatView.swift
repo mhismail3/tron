@@ -32,6 +32,7 @@ struct ChatView: View {
     @State private var speech = SpeechTranscriber()
     @State private var composerHeight: CGFloat = 72
     @State private var composerTextHeight: CGFloat = 20
+    @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
     @State private var scrollToBottomRequest = 0
     @State private var tailFollowTask: Task<Void, Never>?
     @State private var tailFollowGeneration = 0
@@ -66,6 +67,11 @@ struct ChatView: View {
                     }
             }
             .overlay(alignment: .top) { topBlur }
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            geometry.size.width
+        } action: { width in
+            toolbarContainerWidth = width
+        }
         .onPreferenceChange(ComposerHeightPreferenceKey.self) { composerHeight = $0 }
         .background(Color.tronBackground)
         .navigationTitle("")
@@ -74,7 +80,9 @@ struct ChatView: View {
         .navigationBarBackButtonHidden(true)
         .background(InteractivePopGestureEnabler())
         .tint(Color.tronEmerald)
-        .toolbar { toolbar }
+        .toolbar {
+            toolbar(titleWidth: ChatToolbarTitleLayout.width(containerWidth: toolbarContainerWidth))
+        }
         .sheet(isPresented: $showContext) { SessionContextSheet() }
         .sheet(isPresented: $showSettings) { SettingsView(scope: .project).presentationDragIndicator(.hidden) }
         .sheet(isPresented: attachmentPresentationBinding(for: .camera)) {
@@ -698,7 +706,14 @@ struct ChatView: View {
         return min(max(Int((Double(tokens) / Double(usage.contextWindow) * 100).rounded()), 0), 100)
     }
 
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+    private var chatTitle: String {
+        selectedAuthoritativeSnapshot?.extensionUI.title
+            ?? selectedAuthoritativeSnapshot?.name
+            ?? model.sessions.first { $0.id == sessionID }?.title
+            ?? "Session"
+    }
+
+    @ToolbarContentBuilder private func toolbar(titleWidth: CGFloat) -> some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left")
@@ -708,10 +723,14 @@ struct ChatView: View {
             .accessibilityLabel("Back")
         }
         ToolbarItem(placement: .principal) {
-            Text(selectedAuthoritativeSnapshot?.extensionUI.title ?? selectedAuthoritativeSnapshot?.name ?? model.sessions.first { $0.id == sessionID }?.title ?? "Session")
+            Text(chatTitle)
                 .font(TronTypography.headline)
                 .foregroundStyle(Color.tronEmerald)
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: titleWidth)
+                .clipped()
+                .accessibilityLabel(chatTitle)
         }
         ToolbarItem(placement: .primaryAction) {
             Button { showSettings = true } label: {

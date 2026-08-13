@@ -16,6 +16,14 @@ struct ChatTranscriptPresentationTests {
         #expect(ready.isAtExactBottom)
     }
 
+    @Test("chat toolbar title remains bounded during interactive navigation")
+    func toolbarTitleWidth() {
+        #expect(ChatToolbarTitleLayout.width(containerWidth: 0) == 80)
+        #expect(ChatToolbarTitleLayout.width(containerWidth: 402) == 250)
+        #expect(ChatToolbarTitleLayout.width(containerWidth: 440) == 288)
+        #expect(ChatToolbarTitleLayout.width(containerWidth: 1_024) == 360)
+    }
+
     @Test("attachment menu state is scoped to the viewed session and authoritative phase")
     func attachmentAvailability() {
         #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(

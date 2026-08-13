@@ -163,7 +163,10 @@ icon buttons, loading labels, and prominent actions use shared semantic
 components. Toolbar and sheet action icons use Tron emerald while their
 container geometry and Liquid Glass remain default iOS styling rather than
 receiving a second app-drawn container. The chat toolbar's trailing gear opens
-app Settings; Manage Session is owned by the composer's context ring. App-owned workspace
+app Settings; Manage Session is owned by the composer's context ring. Its principal title
+is explicitly bounded from the mounted chat viewport and clipped after tail truncation,
+so a cancelled interactive-pop transition cannot temporarily restore intrinsic-width text
+across the back or Settings controls. App-owned workspace
 rows, session cards, setup cards, composer surfaces, attachment chips, tool
 chips and details, structured-data disclosures, Manage Session content, and
 settings groups use Tron's tinted Liquid Glass surfaces. The dashboard keeps

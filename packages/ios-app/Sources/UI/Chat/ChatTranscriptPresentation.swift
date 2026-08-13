@@ -267,6 +267,17 @@ enum ChatComposerGrowthFollowDecision: Equatable {
     case followWhenIdle
 }
 
+enum ChatToolbarTitleLayout {
+    static let defaultContainerWidth: CGFloat = 402
+    static let horizontalControlReservation: CGFloat = 152
+    static let minimumWidth: CGFloat = 80
+    static let maximumWidth: CGFloat = 360
+
+    static func width(containerWidth: CGFloat) -> CGFloat {
+        min(maximumWidth, max(minimumWidth, containerWidth - horizontalControlReservation))
+    }
+}
+
 struct ChatAttachmentMenuIdentity: Hashable {
     let sessionID: String
     let actionsEnabled: Bool
