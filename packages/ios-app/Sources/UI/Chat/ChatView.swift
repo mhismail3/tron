@@ -652,9 +652,7 @@ struct ChatView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(.white)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(Color.tronEmerald))
+                    .foregroundStyle(Color.tronEmerald)
                     .frame(width: 40, height: 40)
                     .contentShape(Circle())
             }

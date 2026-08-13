@@ -525,7 +525,10 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
         #expect(chat.contains("Color.clear\n                    .frame(height: 48)"))
         #expect(chat.contains("composer.fixedSize(horizontal: false, vertical: true)"))
-        #expect(chat.contains(".background(Circle().fill(Color.tronEmerald))"))
+        let attachmentButton = (chat.components(separatedBy: "Image(systemName: \"plus\")").dropFirst().first ?? "")
+            .components(separatedBy: ".accessibilityLabel(\"Add attachment\")").first ?? ""
+        #expect(attachmentButton.contains(".foregroundStyle(Color.tronEmerald)"))
+        #expect(!attachmentButton.contains("Circle().fill"))
         #expect(!chat.contains(".contentMargins(.horizontal, 16, for: .scrollContent)"))
         let stableRow = (chat.components(separatedBy: "private func stableTranscriptRow").dropFirst().first ?? "")
             .components(separatedBy: "private var selectedAuthoritativeSnapshot").first ?? ""
