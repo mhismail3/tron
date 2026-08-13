@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RuntimeBehaviorSettingsView: View {
     @Environment(AppModel.self) private var model
+    let allowsProjectScope: Bool
     @State private var scope = "global"
     @State private var transport = "auto"
     @State private var steeringMode = "one-at-a-time"
@@ -128,8 +129,12 @@ struct RuntimeBehaviorSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Runtime Behavior")
-        .task { await load() }
+        .task {
+            if !allowsProjectScope { scope = "global" }
+            await load()
+        }
         .onChange(of: scope) { _, _ in Task { await load() } }
+        .task(id: model.settingsRevision) { await load() }
     }
 
     private var scopeGroup: some View {
@@ -137,7 +142,7 @@ struct RuntimeBehaviorSettingsView: View {
             VStack(spacing: 0) {
                 choiceRow("scope", "Settings Scope", scope == "project" ? "Current Project" : "Global Defaults") {
                     Button("Global Defaults") { scope = "global" }
-                    Button("Current Project") { scope = "project" }.disabled(model.selectedSnapshot == nil)
+                    if allowsProjectScope { Button("Current Project") { scope = "project" } }
                 }
                 Text(scope == "project" ? "These overrides apply only to the trusted current workspace." : "These defaults apply to every workspace on this Mac.")
                     .font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).padding(14)
@@ -180,7 +185,12 @@ struct RuntimeBehaviorSettingsView: View {
 
     private func load() async {
         await model.refreshSettings()
-        guard let root = model.settings?.objectValue,
+        loadFromProjection()
+    }
+
+    private func loadFromProjection() {
+        guard !saving,
+              let root = model.settings?.objectValue,
               let value = root["effective"]?.objectValue else { return }
         transport = value.string("transport", fallback: "auto")
         steeringMode = value.string("steeringMode", fallback: "one-at-a-time")
@@ -260,7 +270,55 @@ struct RuntimeBehaviorSettingsView: View {
 }
 
 struct ResourceSettingsView: View {
+    private enum Editor: String, Identifiable {
+        case extensions, skills, prompts, themes, shellPath, shellPrefix, npmCommand, sessionDir, proxy
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .extensions: "Extension Locations"
+            case .skills: "Skill Locations"
+            case .prompts: "Prompt Locations"
+            case .themes: "Terminal Theme Locations"
+            case .shellPath: "Shell Executable"
+            case .shellPrefix: "Shell Command Prefix"
+            case .npmCommand: "Package Manager Command"
+            case .sessionDir: "Session Storage Directory"
+            case .proxy: "HTTP Proxy"
+            }
+        }
+        var explanation: String {
+            switch self {
+            case .extensions: "Additional extension files or folders outside Tron's automatically discovered extension locations. Extensions execute with your Mac user authority."
+            case .skills: "Additional skill files or folders outside the standard global and project skill locations."
+            case .prompts: "Additional prompt-template files or folders. Standard prompts folders are discovered automatically."
+            case .themes: "Additional terminal-only theme files or folders. These do not change the Tron app appearance."
+            case .shellPath: "Overrides the shell executable used for agent shell commands. Leave empty to use the Mac account's default shell."
+            case .shellPrefix: "Runs this text before every agent shell command. Leave empty unless your shell environment requires initialization."
+            case .npmCommand: "Overrides the command used to install and update packages. Enter argv components separated by spaces, for example: mise exec node@20 -- npm."
+            case .sessionDir: "Overrides where canonical session JSONL files are stored. Leave empty to use Tron's standard session location."
+            case .proxy: "Routes provider HTTP and HTTPS traffic through this proxy. The existing value is write-only and is not returned to this iPhone."
+            }
+        }
+        var placeholder: String {
+            switch self {
+            case .extensions: "/path/to/extension.ts"
+            case .skills: "~/.codex/skills"
+            case .prompts: "/path/to/prompts"
+            case .themes: "/path/to/theme.json"
+            case .shellPath: "/bin/zsh"
+            case .shellPrefix: "source ~/.profile"
+            case .npmCommand: "mise exec node@20 -- npm"
+            case .sessionDir: "~/.pi/agent/sessions"
+            case .proxy: "http://127.0.0.1:7890"
+            }
+        }
+        var acceptsMultipleLines: Bool {
+            switch self { case .extensions, .skills, .prompts, .themes: true; default: false }
+        }
+    }
+
     @Environment(AppModel.self) private var model
+    let allowsProjectScope: Bool
     @State private var scope = "global"
     @State private var extensions = ""
     @State private var skills = ""
@@ -272,88 +330,188 @@ struct ResourceSettingsView: View {
     @State private var sessionDir = ""
     @State private var proxy = ""
     @State private var saving = false
+    @State private var editor: Editor?
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
-                TronSettingsGroup("Scope") {
+                scopeGroup
+
+                Label(
+                    "Tron already discovers resources in the standard global and trusted-project folders. Add locations here only when resources live somewhere else.",
+                    systemImage: "info.circle"
+                )
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronTextPrimary)
+                .padding(14)
+                .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
+
+                TronSettingsGroup("Additional Locations", detail: "Optional paths outside automatic discovery.") {
                     VStack(spacing: 0) {
-                        TronValueRow(icon: "scope", title: "Settings Scope") {
-                            TronInlineMenu(scope == "project" ? "Current Project" : "Global Defaults") {
-                                Button("Global Defaults") { scope = "global" }
-                                Button("Current Project") { scope = "project" }
-                                    .disabled(model.selectedSnapshot == nil)
-                            }
-                        }
-                        TronSettingsDivider()
-                        Text(scope == "project"
-                             ? "These overrides apply only to the trusted current workspace."
-                             : "These defaults apply to every workspace on this Mac.")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .padding(12)
+                        editorRow(.extensions, icon: "shippingbox", value: extensions, accent: .tronPurple)
+                        TronSettingsDivider(accent: .tronPurple)
+                        editorRow(.skills, icon: "sparkles", value: skills, accent: .tronEmerald)
+                        TronSettingsDivider(accent: .tronPurple)
+                        editorRow(.prompts, icon: "text.quote", value: prompts, accent: .tronCyan)
+                        TronSettingsDivider(accent: .tronPurple)
+                        editorRow(.themes, icon: "paintpalette", value: themes, accent: .tronTeal)
                     }
                 }
 
-                TronSettingsGroup(
-                    "Resource Paths",
-                    detail: "Enter one path per line. Project paths load only after the workspace is trusted."
-                ) {
+                TronSettingsGroup("Advanced Mac Overrides", detail: "Normally leave these on System Default.", accent: .tronSlate) {
                     VStack(spacing: 0) {
-                        multiline("Extensions", text: $extensions)
-                        TronSettingsDivider()
-                        multiline("Skills", text: $skills)
-                        TronSettingsDivider()
-                        multiline("Prompt templates", text: $prompts)
-                        TronSettingsDivider()
-                        multiline("Themes (terminal only)", text: $themes)
+                        editorRow(.shellPath, icon: "terminal", value: shellPath, accent: .tronTeal)
+                        TronSettingsDivider(accent: .tronSlate)
+                        editorRow(.shellPrefix, icon: "text.insert", value: shellPrefix, accent: .tronTeal)
+                        TronSettingsDivider(accent: .tronSlate)
+                        editorRow(.npmCommand, icon: "shippingbox.and.arrow.backward", value: npmCommand, accent: .tronPurple)
+                        TronSettingsDivider(accent: .tronSlate)
+                        editorRow(.sessionDir, icon: "externaldrive", value: sessionDir, accent: .tronCyan)
+                        TronSettingsDivider(accent: .tronSlate)
+                        editorRow(.proxy, icon: "network", value: proxy, accent: .tronAmber)
                     }
-                    .padding(12)
                 }
 
-                TronSettingsGroup("Mac Runtime", accent: .tronTeal) {
-                    VStack(spacing: 12) {
-                        TextField("Shell path", text: $shellPath).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .tronField(monospaced: true, compact: true)
-                        TextField("Shell command prefix", text: $shellPrefix).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .tronField(monospaced: true, compact: true)
-                        TextField("npm command", text: $npmCommand).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .tronField(monospaced: true, compact: true)
-                        TextField("Session directory", text: $sessionDir).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .tronField(monospaced: true, compact: true)
-                        SecureField("HTTP proxy (write only)", text: $proxy).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .tronField(monospaced: true, compact: true)
-                    }
-                    .padding(12)
-                }
-
-                Button(saving ? "Saving…" : "Save Resource Settings") { Task { await save() } }
+                Button(saving ? "Saving…" : "Save Changes") { Task { await save() } }
                     .buttonStyle(TronActionButtonStyle(role: .primary))
                     .disabled(saving)
             }
             .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 40)
+            .padding(.vertical, 18)
         }
+        .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Resource Paths")
-        .task { await load() }
+        .tronNavigationTitle("Resource Locations")
+        .task {
+            if !allowsProjectScope { scope = "global" }
+            await load()
+        }
         .onChange(of: scope) { _, _ in Task { await load() } }
+        .task(id: model.settingsRevision) { await load() }
+        .sheet(item: $editor) { value in editorSheet(value) }
     }
 
-    @ViewBuilder
-    private func multiline(_ title: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-            TextField(title, text: text, axis: .vertical).lineLimit(2...6)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .tronField(monospaced: true, compact: true)
+    private var scopeGroup: some View {
+        TronSettingsGroup("Applies To") {
+            TronValueRow(icon: "scope", title: scope == "project" ? "Current Project" : "Every Project", detail: scopeExplanation) {
+                if allowsProjectScope {
+                    TronInlineMenu(scope == "project" ? "Project" : "Global") {
+                        Button("Every Project") { scope = "global" }
+                        Button("Current Project") { scope = "project" }
+                    }
+                }
+            }
+        }
+    }
+
+    private var scopeExplanation: String {
+        scope == "project" ? "Saved in this trusted project's settings." : "Saved as defaults for this Mac."
+    }
+
+    private func editorRow(_ value: Editor, icon: String, value text: String, accent: Color) -> some View {
+        Button { editor = value } label: {
+            TronSettingsRow(icon: icon, title: value.title, subtitle: summary(value, text: text), accent: accent)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens an editor with an explanation and examples")
+    }
+
+    private func summary(_ editor: Editor, text: String) -> String {
+        if editor == .proxy, text.isEmpty,
+           model.settings?.objectValue?["effective"]?.objectValue?["httpProxyConfigured"]?.boolValue == true {
+            return "Configured · value hidden"
+        }
+        let values = editor.acceptsMultipleLines ? lines(text) : (text.isEmpty ? [] : [text])
+        guard !values.isEmpty else {
+            return editor.acceptsMultipleLines ? "Automatic discovery only" : "System Default"
+        }
+        if editor.acceptsMultipleLines { return "\(values.count) additional location\(values.count == 1 ? "" : "s")" }
+        return text
+    }
+
+    private func editorSheet(_ value: Editor) -> some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Label(value.explanation, systemImage: "info.circle")
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .padding(14)
+                        .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
+                    if value == .proxy {
+                        SecureField(value.placeholder, text: binding(for: value))
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .tronField(monospaced: true, compact: true)
+                    } else {
+                        TextField(value.placeholder, text: binding(for: value), axis: value.acceptsMultipleLines ? .vertical : .horizontal)
+                            .lineLimit(value.acceptsMultipleLines ? 3...10 : 1...1)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .tronField(monospaced: true, compact: true)
+                    }
+                    if value.acceptsMultipleLines {
+                        TronCaption("Enter one file, directory, glob, or exclusion per line.")
+                    }
+                    Button("Use System Default") { binding(for: value).wrappedValue = "" }
+                        .buttonStyle(TronActionButtonStyle())
+                }
+                .padding(18)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .tronScrollEdgeChrome()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: value.title) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { editor = nil } label: {
+                        Image(systemName: "checkmark").foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+    }
+
+    private func binding(for editor: Editor) -> Binding<String> {
+        Binding {
+            switch editor {
+            case .extensions: extensions
+            case .skills: skills
+            case .prompts: prompts
+            case .themes: themes
+            case .shellPath: shellPath
+            case .shellPrefix: shellPrefix
+            case .npmCommand: npmCommand
+            case .sessionDir: sessionDir
+            case .proxy: proxy
+            }
+        } set: { value in
+            switch editor {
+            case .extensions: extensions = value
+            case .skills: skills = value
+            case .prompts: prompts = value
+            case .themes: themes = value
+            case .shellPath: shellPath = value
+            case .shellPrefix: shellPrefix = value
+            case .npmCommand: npmCommand = value
+            case .sessionDir: sessionDir = value
+            case .proxy: proxy = value
+            }
         }
     }
 
     private func load() async {
-        await model.refreshSettings()
-        guard let root = model.settings?.objectValue,
+        await model.refreshSettings(
+            cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil,
+            useSelectedProject: scope == "project"
+        )
+        loadFromProjection()
+    }
+
+    private func loadFromProjection() {
+        guard !saving, editor == nil,
+              let root = model.settings?.objectValue,
               let value = root["effective"]?.objectValue else { return }
         shellPath = value["shellPath"]?.stringValue ?? ""
         shellPrefix = value["shellCommandPrefix"]?.stringValue ?? ""
@@ -382,7 +540,7 @@ struct ResourceSettingsView: View {
             "sessionDir": sessionDir.isEmpty ? .null : .string(sessionDir),
         ]
         if !proxy.isEmpty { patch["httpProxy"] = .string(proxy) }
-        do { try await model.updateSettings(.object(patch), scope: scope) }
+        do { try await model.updateSettings(.object(patch), scope: scope, cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil) }
         catch { model.lastError = error.localizedDescription }
     }
 

@@ -21,10 +21,23 @@ export interface SessionSummary {
   messageCount: number;
   firstMessage: string;
   phase: SessionPhase;
+  summaryRevision: number;
+}
+
+/** Bounded global projection used to update dashboard rows without subscribing
+ * every client to every full session transcript. */
+export interface SessionSummaryUpdate {
+  sessionId: string;
+  summaryRevision: number;
+  phase: SessionPhase;
+  name?: string;
+  updatedAt: string;
+  messageCount: number;
+  firstMessage: string;
 }
 
 export type ContentPart =
-  | { id: string; type: "text"; text: string }
+  | { id: string; type: "text"; text: string; attachment?: { name: string; mimeType: string; size: number } }
   | { id: string; type: "thinking"; text: string; redacted?: boolean }
   | { id: string; type: "image"; mimeType: string; blobId: string }
   | { id: string; type: "toolCall"; toolCallId: string; name: string; arguments: JsonValue };
@@ -49,6 +62,13 @@ export type TranscriptItem =
       isError?: boolean;
       details?: JsonValue;
       usage?: JsonValue;
+      /** Exact runtime timing when the owning Gateway observed this call. Older
+       * canonical entries may omit it and clients derive an observed interval. */
+      startedAt?: string;
+      completedAt?: string;
+      durationMs?: number;
+      lastProgressAt?: string;
+      progressSequence?: number;
     }
   | TranscriptBase & {
       kind: "bash";
@@ -96,13 +116,23 @@ export type TranscriptItem =
 export interface ToolExecutionState {
   toolCallId: string;
   toolName: string;
+  /** Monotonic within one active run; authoritative tie-breaker for parallel calls. */
+  order: number;
   status: "running" | "completed" | "failed";
   arguments: JsonValue;
   partialResult?: JsonValue;
   result?: JsonValue;
+  /** Bounded text extracted from Pi's current tool result for immediate audit. */
+  output?: string;
+  outputTruncated?: boolean;
   isError: boolean;
   startedAt: string;
   updatedAt: string;
+  lastProgressAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  /** Monotonic per call; authoritative even when wall-clock timestamps collide. */
+  progressSequence: number;
 }
 
 export interface RetryState {
@@ -155,6 +185,7 @@ export interface SessionStats {
   toolResults: number;
   totalMessages: number;
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+  latestCacheHitRate?: number;
   cost: number;
 }
 
@@ -192,8 +223,10 @@ export interface SessionTreeNode {
   kind: TranscriptItem["kind"] | "sessionInfo";
   label?: string;
   preview: string;
-  item?: TranscriptItem;
-  children: SessionTreeNode[];
+  role?: "user" | "assistant" | "toolResult";
+  depth: number;
+  childCount: number;
+  isCurrentPath: boolean;
 }
 
 export interface CommandInfo {

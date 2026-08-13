@@ -15,6 +15,26 @@ function redact(value: unknown, key = ""): unknown {
   return value;
 }
 
+function restoreRedacted(next: unknown, previous: unknown): unknown {
+  if (next === "<redacted>") {
+    if (previous === undefined) {
+      throw new GatewayError("invalid_request", "A redacted secret cannot be written without a canonical value");
+    }
+    return previous;
+  }
+  if (Array.isArray(next)) {
+    const prior = Array.isArray(previous) ? previous : [];
+    return next.map((value, index) => restoreRedacted(value, prior[index]));
+  }
+  if (typeof next === "object" && next !== null) {
+    const prior = typeof previous === "object" && previous !== null && !Array.isArray(previous)
+      ? previous as Record<string, unknown>
+      : {};
+    return Object.fromEntries(Object.entries(next).map(([key, value]) => [key, restoreRedacted(value, prior[key])]));
+  }
+  return next;
+}
+
 export class ModelConfigService {
   private readonly path: string;
 
@@ -56,7 +76,8 @@ export class ModelConfigService {
   async put(raw: unknown): Promise<{ requiresRestart: true }> {
     const document = object(raw, "models document");
     await this.validate(document);
-    await updateJsonLocked<Record<string, unknown>>(this.path, { providers: {} }, () => document);
+    await updateJsonLocked<Record<string, unknown>>(this.path, { providers: {} }, (current) =>
+      restoreRedacted(document, current) as Record<string, unknown>);
     return { requiresRestart: true };
   }
 }

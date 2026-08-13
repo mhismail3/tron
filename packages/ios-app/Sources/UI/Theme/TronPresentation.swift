@@ -63,9 +63,9 @@ private struct TronPresentationModifier: ViewModifier {
 private struct TronScrollEdgeChromeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
-            // Set this explicitly: iOS 27's automatic top edge currently
-            // resolves to the hard cutoff on device, while Tron's established
-            // presentation uses the softer blur/fade on every scroll edge.
+            // Keep both edges softly graduated. The hard top style produces
+            // an opaque cutoff on physical iOS 27 hardware instead of Tron's
+            // established translucent blur into navigation chrome.
             .scrollEdgeEffectStyle(.soft, for: .all)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
     }
@@ -369,43 +369,62 @@ struct TronSearchBar: View {
     var prompt = "Search"
     var accent: Color = .tronEmerald
     var focusOnAppear = false
+    var onClose: (() -> Void)?
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(spacing: TronSpacing.lg) {
-            Image(systemName: "magnifyingglass")
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(accent)
-                .accessibilityHidden(true)
-            TextField(prompt, text: $text)
-                .textFieldStyle(.plain)
-                .font(TronTypography.body)
-                .foregroundStyle(Color.tronTextPrimary)
-                .tint(accent)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-                .focused($focused)
-            if !text.isEmpty {
+        HStack(spacing: 8) {
+            HStack(spacing: TronSpacing.lg) {
+                Image(systemName: "magnifyingglass")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(accent)
+                    .accessibilityHidden(true)
+                TextField("", text: $text, prompt: Text(prompt).foregroundStyle(accent.opacity(0.68)))
+                    .textFieldStyle(.plain)
+                    .font(TronTypography.body)
+                    .foregroundStyle(accent)
+                    .tint(accent)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .focused($focused)
+                if !text.isEmpty {
+                    Button {
+                        text = ""
+                        focused = true
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(TronTypography.body)
+                            .foregroundStyle(accent.opacity(0.72))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.leading, TronSpacing.inputHorizontal)
+            .padding(.trailing, text.isEmpty ? TronSpacing.inputHorizontal : 0)
+            .frame(minHeight: 44)
+            .glassEffect(.clear.tint(accent.opacity(0.10)).interactive(), in: .capsule)
+            .contentShape(Capsule())
+            .onTapGesture { focused = true }
+
+            if let onClose {
                 Button {
-                    text = ""
-                    focused = true
+                    focused = false
+                    onClose()
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(TronTypography.body)
-                        .foregroundStyle(Color.tronTextMuted)
+                    Image(systemName: "xmark")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                        .foregroundStyle(accent)
                         .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                        .glassEffect(.clear.tint(accent.opacity(0.10)).interactive(), in: .circle)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
+                .accessibilityLabel("Close search")
             }
         }
-        .padding(.leading, TronSpacing.inputHorizontal)
-        .padding(.trailing, text.isEmpty ? TronSpacing.inputHorizontal : 0)
-        .frame(minHeight: 44)
-        .glassEffect(.regular.tint(accent.opacity(0.12)), in: .capsule)
-        .contentShape(Capsule())
-        .onTapGesture { focused = true }
         .task(id: focusOnAppear) {
             guard focusOnAppear else { return }
             await Task.yield()

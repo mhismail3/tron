@@ -11,6 +11,8 @@ struct SessionShellView: View {
     @State private var showingSearch = false
     @State private var presentedSessionID: String?
     @State private var sessionToDelete: SessionSummary?
+    @State private var sessionToRename: SessionSummary?
+    @State private var renameName = ""
     @State private var collapsedWorkspaces = Set<String>()
 
     var body: some View {
@@ -38,6 +40,12 @@ struct SessionShellView: View {
                 Text("This removes the canonical session from the Mac and cannot be undone.")
             }
         )
+        .alert("Rename Session", isPresented: renameConfirmationPresented, presenting: sessionToRename) { session in
+            TextField("Session name", text: $renameName)
+            Button("Save") { rename(session) }
+                .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) { sessionToRename = nil }
+        }
         .gatewayGlobalSheets()
     }
 
@@ -68,8 +76,9 @@ struct SessionShellView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await model.refreshSessions() }
-            .navigationDestination(item: $presentedSessionID) { _ in
+            .navigationDestination(item: $presentedSessionID) { sessionID in
                 ChatView()
+                    .task(id: sessionID) { try? await model.openSession(sessionID) }
             }
     }
 
@@ -145,6 +154,28 @@ struct SessionShellView: View {
         )
     }
 
+    private var renameConfirmationPresented: Binding<Bool> {
+        Binding(
+            get: { sessionToRename != nil },
+            set: { if !$0 { sessionToRename = nil } }
+        )
+    }
+
+    private func beginRename(_ session: SessionSummary) {
+        renameName = session.title
+        sessionToRename = session
+    }
+
+    private func rename(_ session: SessionSummary) {
+        let name = renameName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        Task {
+            do { try await model.renameSession(session.id, name: name) }
+            catch { model.lastError = error.localizedDescription }
+            sessionToRename = nil
+        }
+    }
+
     @ViewBuilder
     private func deleteConfirmationActions(_ session: SessionSummary) -> some View {
         Button("Delete Session", role: .destructive) {
@@ -200,6 +231,8 @@ struct SessionShellView: View {
         .listRowInsets(SessionDashboardLayout.rowInsets)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button("Delete", systemImage: "trash", role: .destructive) { sessionToDelete = session }
+            Button("Rename", systemImage: "pencil") { beginRename(session) }
+                .tint(Color.tronPurple)
         }
     }
 

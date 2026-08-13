@@ -13,6 +13,8 @@ Commands:
   dev [--tailscale] [--background]  Build and run an isolated gateway on port 9848
   dev --stop                        Stop the background isolated gateway
   dev --status                      Report isolated gateway status
+  chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
+                                    Attach terminal chat to the Gateway-owned runtime
   ci [check|test|all]               Validate the gateway and repository policy
   bundle gateway                    Stage the Mac gateway payload and Node runtimes
   ios generate                      Regenerate the iOS Xcode project
@@ -62,6 +64,10 @@ case "$cmd" in
     else
       TRON_HOME_NAME=.tron-dev exec node "${args[@]}"
     fi
+    ;;
+  chat)
+    (cd "$GATEWAY" && npm run build >/dev/null)
+    exec node "$GATEWAY/dist/client/terminal-chat.js" "$@"
     ;;
   ci)
     scope="${1:-all}"

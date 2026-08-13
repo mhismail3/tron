@@ -69,8 +69,10 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         sleep(2)
         app.launchArguments = ["-tronSetupComplete.v1", "YES", "-ApplePersistenceIgnoreState", "YES"]
         app.launch()
-        let reconnectedInput = app.textFields["Message input"]
-        XCTAssertTrue(reconnectedInput.waitForExistence(timeout: 20))
+        let reconnectedInput = reopenSessionAfterColdLaunch(
+            app,
+            sessionTitle: "continue while disconnected"
+        )
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Detached response complete")).firstMatch.waitForExistence(timeout: 20))
 
         reconnectedInput.tap(); reconnectedInput.typeText("exercise portable tool UI")
@@ -78,10 +80,17 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Allow this test command?"].waitForExistence(timeout: 15))
         let allow = app.buttons["Yes"]
         XCTAssertTrue(allow.waitForExistence(timeout: 3))
-        allow.tap()
-        _ = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "running")).firstMatch.waitForExistence(timeout: 2)
-        XCTAssertTrue(app.staticTexts["Tool response complete"].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.staticTexts["Run command"].waitForExistence(timeout: 5))
+        for _ in 0..<3 {
+            XCTAssertTrue(allow.waitForExistence(timeout: 4))
+            allow.tap()
+        }
+        let liveGroup = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Using 3 tools")).firstMatch
+        XCTAssertTrue(liveGroup.waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["Tool response complete after all three tools."].waitForExistence(timeout: 20))
+        let settledGroup = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Used 3 tools")).firstMatch
+        XCTAssertTrue(settledGroup.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Used 3 tools")).count, 1)
+        XCTAssertLessThan(settledGroup.frame.maxY, app.textFields["Message input"].frame.minY)
         if app.keyboards.firstMatch.exists {
             XCUIDevice.shared.press(.home)
             app.activate()
@@ -138,7 +147,7 @@ final class TronGatewayEndToEndUITests: XCTestCase {
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
         ]
         app.launch()
-        XCTAssertTrue(app.textFields["Message input"].waitForExistence(timeout: 20))
+        _ = reopenSessionAfterColdLaunch(app, sessionTitle: "continue while disconnected")
         for label in ["continue while disconnected"] {
             let text = app.staticTexts[label].firstMatch
             if !text.exists { app.swipeDown() }
@@ -164,6 +173,11 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         XCTAssertTrue(contextRow.waitForExistence(timeout: 3))
         XCTAssertGreaterThan(contextRow.frame.height, 44)
         app.buttons["Done"].tap()
+        app.buttons["Settings"].tap()
+        let projectTrust = app.buttons["Project Trust"]
+        for _ in 0..<6 where !projectTrust.exists { app.swipeUp() }
+        XCTAssertTrue(projectTrust.waitForExistence(timeout: 3), "Project Trust must remain reachable from project Settings at accessibility XXXL")
+        app.buttons["Done"].tap()
         app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Back", "Tron")).firstMatch.tap()
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5))
         app.buttons["Settings"].tap()
@@ -174,11 +188,43 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         XCTAssertTrue(codeFont.waitForExistence(timeout: 5))
         app.swipeRight()
         XCTAssertTrue(app.buttons["Appearance"].waitForExistence(timeout: 5))
-        for label in ["Runtime Behavior", "Resource Paths", "Packages and Resources", "Project Trust"] {
+        for label in ["Runtime Behavior", "Resource Paths", "Packages and Resources"] {
             let row = app.buttons[label]
             for _ in 0..<4 where !row.exists { app.swipeUp() }
             XCTAssertTrue(row.waitForExistence(timeout: 3), "\(label) must remain reachable at accessibility XXXL")
         }
+    }
+
+    @MainActor
+    private func reopenSessionAfterColdLaunch(
+        _ app: XCUIApplication,
+        sessionTitle: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let input = app.textFields["Message input"]
+        if input.waitForExistence(timeout: 3) { return input }
+
+        // A process relaunch intentionally restores canonical session summaries,
+        // not transient NavigationStack intent. Re-enter through the authoritative
+        // dashboard row before asserting transcript convergence.
+        let session = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH[c] %@", sessionTitle)
+        ).firstMatch
+        XCTAssertTrue(
+            session.waitForExistence(timeout: 20),
+            "The relaunched dashboard must expose the canonical session",
+            file: file,
+            line: line
+        )
+        session.tap()
+        XCTAssertTrue(
+            input.waitForExistence(timeout: 20),
+            "Opening the canonical session must restore the composer",
+            file: file,
+            line: line
+        )
+        return input
     }
 
     @MainActor
@@ -197,7 +243,8 @@ final class TronGatewayEndToEndUITests: XCTestCase {
             "Packages and Resources", "Project Trust", "continue while disconnected",
             "Configuration", "Model", "tron-e2e / e2e-model",
             "Thinking", "Low", "Reasoning effort for this session", "Rename Session",
-            "Automatic compaction", "31K tokens left", "2.2K used · 33K window",
+            "Automatic compaction", "31K tokens left", "30K tokens left",
+            "2.2K used · 33K window", "2.3K used · 33K window",
             "Text Font", "Text weight", "Code Font", "About Fonts", "Recursive",
             "Light", "Heavy", "Font", "let result = await tron.run()",
         ]
@@ -207,12 +254,13 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         // after an accessibility-XXXL relaunch.
         let screenshotVerifiedGlassContrastLabels: Set<String> = [
             "Agent", "Gateway", "Automatic compaction", "7%",
-            "2.2K used · 33K window", "Configuration", "Model", "tron-e2e / e2e-model",
+            "2.2K used · 33K window", "2.3K used · 33K window", "Configuration", "Model", "tron-e2e / e2e-model",
             "Rename Session", "Thinking", "Low",
             "Reasoning effort for this session", "Text Font", "Text weight",
             "Code Font", "About Fonts", "Recursive", "Light", "Heavy",
-            "Appearance", "Providers", "Packages and Resources", "Project Trust",
-            "Import Legacy Sessions", "Font",
+            "Appearance", "Providers", "Runtime Behavior", "Resource Paths",
+            "Packages and Resources", "Project Trust", "Custom Models",
+            "Import Legacy Sessions", "Font", "Code weight",
         ]
         XCTAssertNoThrow(try app.performAccessibilityAudit { issue in
             let element = issue.element

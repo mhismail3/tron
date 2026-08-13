@@ -51,7 +51,7 @@ struct PresentationStyleGuardTests {
     @Test("settings and modal details use composed glass groups instead of stock collections")
     func noStockSettingsCollections() {
         let composedOwners = [
-            "AgentExtensionSettings.swift", "RuntimeSettingsViews.swift", "SettingsView.swift",
+            "AgentExtensionSettings.swift", "RuntimeSettingsViews.swift", "SettingsView.swift", "ProjectResourcesView.swift",
             "ExtensionInteractionSheet.swift", "SessionContextSheet.swift", "SessionTreeSheet.swift",
         ]
         for (url, source) in uiSources where composedOwners.contains(url.lastPathComponent) {
@@ -79,6 +79,7 @@ struct PresentationStyleGuardTests {
             #"TextField("Name", text: $newFolder)"#,
             #"TextField("Label", text: $label)"#,
             #"TextField("Name", text: $name)"#,
+            #"TextField("Session name", text: $renameName)"#,
         ]
 
         for (url, source) in uiSources where url.lastPathComponent != "TronPresentation.swift" {
@@ -173,6 +174,8 @@ struct PresentationStyleGuardTests {
         #expect(!shell.contains(".onChange(of: model.selectedSessionID)"))
         #expect(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
         #expect(shell.contains("focusOnAppear: true"))
+        #expect(shell.contains("Button(\"Rename\", systemImage: \"pencil\")"))
+        #expect(shell.contains("model.renameSession(session.id, name: name)"))
     }
 
     @Test("settings containers disclose progressive sub sheets")
@@ -189,8 +192,108 @@ struct PresentationStyleGuardTests {
         #expect(settings.contains("private struct TronProgressiveSheetLink"))
         #expect(settings.contains(".sheet(isPresented: $isPresented)"))
         #expect(!settings.contains("Button(\"Log Out\""))
+        #expect(settings.contains("enum Scope { case dashboard, project }"))
+        #expect(settings.contains("if scope == .project"))
+        #expect(settings.contains(".providerAuthPresenter()"))
+        #expect(settings.contains("currently visible provider"))
         #expect(providers.contains("Button(\"Log Out\", systemImage: \"rectangle.portrait.and.arrow.right\", role: .destructive)"))
-        #expect(providers.contains("Image(systemName: \"ellipsis.circle\")"))
+        #expect(providers.contains("Image(systemName: \"ellipsis\")"))
+    }
+
+    @Test("project resources and diagnostics use readable bounded presentations")
+    func gatewayDetailPresentations() throws {
+        let context = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionContextSheet.swift"),
+            encoding: .utf8
+        )
+        let resources = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ProjectResourcesView.swift"),
+            encoding: .utf8
+        )
+        let settings = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/AgentExtensionSettings.swift"),
+            encoding: .utf8
+        )
+        #expect(context.contains("ProjectResourcesView()"))
+        #expect(context.contains("snapshot.stats.latestCacheHitRate"))
+        for title in ["Extensions", "Prompts", "Skills", "Context Files", "Tools"] {
+            #expect(resources.contains("\(title)"))
+        }
+        #expect(settings.contains("private struct GatewayLogRecord"))
+        #expect(settings.contains("Newest entries first"))
+        #expect(settings.contains("Advanced JSON"))
+        let runtimeSettings = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/RuntimeSettingsViews.swift"),
+            encoding: .utf8
+        )
+        #expect(runtimeSettings.contains("Additional Locations"))
+        #expect(runtimeSettings.contains("Advanced Mac Overrides"))
+        #expect(runtimeSettings.contains("Automatic discovery only"))
+    }
+
+    @Test("composer owns capped UIKit scrolling and attachment photos keep stable previews")
+    func robustComposerAndAttachmentPresentation() throws {
+        let composer = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
+            encoding: .utf8
+        )
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let preview = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/AttachmentImagePreviewSheet.swift"),
+            encoding: .utf8
+        )
+        let transcript = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
+            encoding: .utf8
+        )
+        #expect(composer.contains("struct MultilineComposerTextView: UIViewRepresentable"))
+        #expect(composer.contains("scrollRangeToVisible(view.selectedRange)"))
+        #expect(composer.contains("usesInternalScrolling"))
+        #expect(composer.contains("context.coordinator.reconcileFocus(on: view)"))
+        #expect(composer.contains("hasMirroredFocus"))
+        #expect(chat.contains("MultilineComposerTextView("))
+        #expect(!chat.contains("TextField(\"\", text: $text, axis: .vertical)"))
+        let pendingChip = (chat.components(separatedBy: "private struct PendingAttachmentChip").dropFirst().first ?? "")
+            .components(separatedBy: "private struct ChatTranscriptRenderRow").first ?? ""
+        #expect(pendingChip.contains("AttachmentImagePreviewSheet(image: image)"))
+        #expect(pendingChip.contains(".frame(width: 44, height: 44, alignment: .topTrailing)"))
+        #expect(pendingChip.contains(".regular.tint(Color.tronBlue.opacity(0.18)),"))
+        #expect(!pendingChip.contains("Color.tronBlue.opacity(0.18)).interactive()"))
+        #expect(preview.contains(".presentationDetents([.medium])"))
+        #expect(preview.contains("ConcentricRectangle("))
+        #expect(preview.contains("maximumZoomScale = 5"))
+        let sentImageChip = (transcript.components(separatedBy: "private struct TranscriptImageChip").dropFirst().first ?? "")
+            .components(separatedBy: "private struct TranscriptFileChip").first ?? ""
+        #expect(!sentImageChip.isEmpty)
+        #expect(sentImageChip.contains(".frame(width: 64, height: 64)"))
+        #expect(sentImageChip.contains("AttachmentImagePreviewSheet(image: image)"))
+        #expect(!sentImageChip.contains(".presentationDetents([.medium, .large])"))
+        #expect(!transcript.contains("private struct ZoomableAttachmentImage"))
+        #expect(transcript.contains("private struct TranscriptFileChip"))
+    }
+
+    @Test("thinking traces stay complete, compact, and noninteractive")
+    func thinkingTraceAccessibility() throws {
+        let transcript = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
+            encoding: .utf8
+        )
+        let block = (transcript.components(separatedBy: "private struct ThinkingBlock").dropFirst().first ?? "")
+            .components(separatedBy: "private struct MarkdownText").first ?? ""
+        #expect(block.contains("@Environment(\\.accessibilityReduceMotion)"))
+        #expect(block.contains("animatesInsertion"))
+        #expect(block.contains("State(initialValue: animatesInsertion ? [] : Set(segments.map(\\.id)))"))
+        #expect(block.contains(".accessibilityLabel(accessibleParagraph)"))
+        #expect(block.contains("return \"\\(label). \\(paragraph)\""))
+        #expect(block.contains("withAnimation(.easeOut(duration: 0.28))"))
+        #expect(!block.contains("Button {"))
+        #expect(!block.contains("expanded"))
+        #expect(!block.contains(".lineLimit("))
+        #expect(!block.contains("minHeight: 44"))
+        #expect(!block.contains(".onTapGesture"))
     }
 
     @Test("tool details are tappable and start at the sheet top")
@@ -200,7 +303,8 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         #expect(transcript.contains(".sheet(item: $detailPresentation)"))
-        #expect(transcript.contains(".defaultScrollAnchor(.top)"))
+        #expect(transcript.contains(".defaultScrollAnchor(.top, for: .initialOffset)"))
+        #expect(transcript.contains(".defaultScrollAnchor(.top, for: .alignment)"))
         #expect(transcript.contains(".frame(maxWidth: .infinity, alignment: .topLeading)"))
         for tool in ["read", "write", "edit", "bash", "grep", "find", "ls"] {
             #expect(transcript.contains("case \"\(tool)\""), "missing detail presentation mapping for \(tool)")
@@ -221,6 +325,32 @@ struct PresentationStyleGuardTests {
         #expect(camera.contains("static let iconButtonSize: CGFloat = 46"))
         #expect(!camera.contains("accessibilityLabel(\"Close camera\")"))
         #expect(!camera.contains("capturedImage == nil ? \"camera.fill\""))
+    }
+
+    @Test("chat transcript controls share compact pills and preserve the viewport while prepending")
+    func compactTranscriptPillPresentation() throws {
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let transcript = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
+            encoding: .utf8
+        )
+        #expect(chat.contains("Load earlier messages"))
+        #expect(chat.contains("New response"))
+        #expect(chat.components(separatedBy: ".chatTranscriptPill()").count - 1 == 2)
+        #expect(transcript.contains("struct ChatTranscriptPillModifier: ViewModifier"))
+        #expect(transcript.contains("TronTypography.sizeBodySM"))
+        #expect(transcript.contains(".padding(.vertical, 6)"))
+        #expect(transcript.contains(".fixedSize(horizontal: false, vertical: true)"))
+        #expect(transcript.contains(".frame(minWidth: 44, minHeight: 44)"))
+        #expect(transcript.contains(".contentShape(Rectangle())"))
+        #expect(!transcript.contains(".fixedSize()"))
+        #expect(transcript.contains("detail: item.tokensBefore.map(ChatTokenCountPresentation.beforeCompaction)"))
+        #expect(transcript.components(separatedBy: ".chatTranscriptPill()").count - 1 == 1)
+        #expect(chat.contains("position.scrollTo(y: max(0, previousGeometry.offsetY + delta))"))
+        #expect(!chat.contains("TronActionButtonStyle(expands: false)"))
     }
 
     @Test("chat navigation remains emerald with soft scroll edges")
@@ -277,8 +407,18 @@ struct PresentationStyleGuardTests {
         #expect(transcript.contains("struct TranscriptNotice: View"))
         #expect(transcript.contains("struct ToolRunView: View"))
         #expect(transcript.contains("RoundedRectangle(cornerRadius: 9"))
-        #expect(transcript.contains("TronFont.body(12)).foregroundStyle(Color.tronTextSecondary).italic()"))
-        #expect(chat.contains("ChatTranscriptPresentation.renderItems(in: snapshot)"))
+        #expect(transcript.contains(".padding(.vertical, 6)"))
+        #expect(transcript.components(separatedBy: "ProgressView().controlSize(.small)").count >= 3)
+        #expect(transcript.contains(".font(TronFont.body(12))"))
+        #expect(transcript.contains(".foregroundStyle(Color.tronTextSecondary)"))
+        #expect(transcript.contains(".italic()"))
+        #expect(chat.contains("ChatTranscriptPresentation.timeline(in: snapshot)"))
+        #expect(!chat.contains("ChatTranscriptPresentation.liveToolRun"))
+        #expect(chat.contains("composerHeight + 20"))
+        #expect(chat.contains("ChatTailFollowPolicy.shouldFollowContentGrowth"))
+        #expect(chat.contains("scheduleTailFollow(using: proxy"))
+        #expect(chat.contains(".equatable()"))
+        #expect(!chat.contains("model.selectedSnapshot?.transcript.map(\\.id)"))
         #expect(chat.contains("TranscriptNotice("))
     }
 

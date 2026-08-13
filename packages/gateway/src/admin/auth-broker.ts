@@ -27,6 +27,7 @@ export class AuthBroker {
   constructor(
     private readonly modelRuntime: ModelRuntime,
     private readonly emit: AdminEventSink,
+    private readonly broadcast: (topic: string, payload: JsonValue) => void = () => {},
   ) {}
 
   start(clientId: string, providerId: string, authType: AuthType, modelRuntime: ModelRuntime = this.modelRuntime): string {
@@ -116,5 +117,6 @@ export class AuthBroker {
       success,
       ...(success ? {} : { error: error instanceof Error ? error.message : String(error) }),
     });
+    if (success) this.broadcast("providers.changed", {});
   }
 }

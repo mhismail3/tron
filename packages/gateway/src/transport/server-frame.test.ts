@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { encodeOutboundFrame } from "./server.js";
+import { clearRequestSynchronizations, encodeOutboundFrame } from "./server.js";
 
 describe("bounded outbound gateway frames", () => {
   it("returns a correlated error instead of closing the socket for an oversized response", () => {
@@ -17,6 +17,23 @@ describe("bounded outbound gateway frames", () => {
       ok: false,
       error: { code: "response_too_large" },
     });
+  });
+
+  it("clears a failed open transaction so the same session can synchronize again immediately", () => {
+    const firstTimeout = setTimeout(() => {}, 60_000);
+    const otherTimeout = setTimeout(() => {}, 60_000);
+    const synchronizations = new Map<string, any>([
+      ["session", { requestId: "failed-open", timeout: firstTimeout }],
+      ["other", { requestId: "other-open", timeout: otherTimeout }],
+    ]);
+    try {
+      clearRequestSynchronizations(synchronizations, "failed-open");
+      expect(synchronizations.has("session")).toBe(false);
+      expect(synchronizations.has("other")).toBe(true);
+    } finally {
+      clearTimeout(firstTimeout);
+      clearTimeout(otherTimeout);
+    }
   });
 
   it("turns an oversized snapshot event into a bounded resync hint", () => {

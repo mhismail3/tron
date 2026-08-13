@@ -18,7 +18,7 @@ interface Receipt {
 
 export class CommandReceiptStore {
   private readonly directory: string;
-  private readonly mutex = new AsyncMutex();
+  private readonly lanes = new Map<string, { mutex: AsyncMutex; users: number }>();
 
   constructor(tronHome: string) {
     this.directory = join(tronHome, "gateway", "command-receipts");
@@ -46,10 +46,14 @@ export class CommandReceiptStore {
     if (!/^[A-Za-z0-9._:-]{8,160}$/.test(commandId)) {
       throw new GatewayError("invalid_request", "Mutating requests require a stable commandId");
     }
-    return this.mutex.run(async () => {
+    const identityHash = createHash("sha256").update(identity).digest("base64url");
+    const key = createHash("sha256").update(identityHash).update("\0").update(method).update("\0").update(commandId).digest("base64url");
+    const lane = this.lanes.get(key) ?? { mutex: new AsyncMutex(), users: 0 };
+    lane.users += 1;
+    this.lanes.set(key, lane);
+    try {
+      return await lane.mutex.run(async () => {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      const identityHash = createHash("sha256").update(identity).digest("base64url");
-      const key = createHash("sha256").update(identityHash).update("\0").update(method).update("\0").update(commandId).digest("base64url");
       const path = join(this.directory, `${key}.json`);
       const existing = await readJson<Receipt | null>(path, null);
       if (existing) {
@@ -71,7 +75,11 @@ export class CommandReceiptStore {
       const result = await operation();
       await atomicWriteJson(path, { ...pending, status: "completed", result });
       return result;
-    });
+      });
+    } finally {
+      lane.users -= 1;
+      if (lane.users === 0 && this.lanes.get(key) === lane) this.lanes.delete(key);
+    }
   }
 
   async prune(maxAgeMs = 24 * 60 * 60_000): Promise<void> {

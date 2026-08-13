@@ -12,10 +12,10 @@ struct GatewayProtocolContractTests {
           "model":{"provider":"anthropic","id":"model"},"thinkingLevel":"high",
           "availableThinkingLevels":["off","high"],
           "contextUsage":{"tokens":120,"contextWindow":1000,"percent":12},
-          "stats":{"userMessages":1,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":1,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cost":0},
+          "stats":{"userMessages":1,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":1,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"latestCacheHitRate":99.7,"cost":0},
           "queued":{"steering":[],"followUp":["later"]},
           "transcript":[
-            {"id":"entry-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"entry-1:0","type":"text","text":"hello"}]},
+            {"id":"entry-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"entry-1:0","type":"text","text":"hello"},{"id":"entry-1:1","type":"text","text":"notes.pdf","attachment":{"name":"notes.pdf","mimeType":"application/pdf","size":2048}}]},
             {"id":"entry-2","parentId":"entry-1","timestamp":"2026-01-01T00:00:01Z","kind":"modelChange","modelRef":{"provider":"openai","id":"next"}}
           ],"transcriptStart":10,"transcriptTotal":12,
           "leafEntryId":"entry-2","toolExecutions":[],
@@ -29,8 +29,29 @@ struct GatewayProtocolContractTests {
         #expect(snapshot.transcript.first?.text == "hello")
         #expect(snapshot.transcript.last?.modelRef == ModelRef(provider: "openai", id: "next"))
         #expect(snapshot.transcript.first?.content?.first?.id == "entry-1:0")
+        #expect(snapshot.transcript.first?.content?.last?.type == .text)
+        #expect(snapshot.transcript.first?.content?.last?.attachment?.name == "notes.pdf")
+        #expect(snapshot.transcript.first?.content?.last?.attachment?.size == 2048)
         #expect(snapshot.transcriptStart == 10)
         #expect(snapshot.transcriptTotal == 12)
+        #expect(snapshot.stats.latestCacheHitRate == 99.7)
+    }
+
+    @Test("dashboard summary update carries a monotonic revision")
+    func summaryUpdateDecodes() throws {
+        let data = Data(#"{"sessionId":"session-1","summaryRevision":7,"phase":"running","updatedAt":"2026-01-01T00:00:01Z","messageCount":2,"firstMessage":"hello"}"#.utf8)
+        let update = try JSONDecoder.gateway.decode(SessionSummaryUpdate.self, from: data)
+        #expect(update.summaryRevision == 7)
+        #expect(update.phase == .running)
+    }
+
+    @Test("flat session-tree projection decodes")
+    func treeDecodes() throws {
+        let data = Data(#"[{"id":"entry","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","preview":"hello","role":"user","depth":0,"childCount":1,"isCurrentPath":true}]"#.utf8)
+        let nodes = try JSONDecoder.gateway.decode([SessionTreeNode].self, from: data)
+        #expect(nodes.first?.role == .user)
+        #expect(nodes.first?.isCurrentPath == true)
+        #expect(nodes.first?.depth == 0)
     }
 
     @Test("stored gateway profiles migrate when device identity was absent")

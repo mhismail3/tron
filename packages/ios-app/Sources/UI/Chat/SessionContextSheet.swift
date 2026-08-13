@@ -12,6 +12,8 @@ struct SessionContextSheet: View {
     @State private var compacting = false
     @State private var exportedURL: URL?
     @State private var exporting = false
+    @State private var gitBranch: String?
+    @State private var gitDirty = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -64,7 +66,10 @@ struct SessionContextSheet: View {
                 if let id = model.selectedSessionID { try? await model.openSession(id) }
                 await model.loadContext()
                 await model.loadResources()
+                await loadGit(snapshot: model.selectedSnapshot)
             }
+            .task(id: model.selectedSessionContextRevision) { await model.loadContext() }
+            .task(id: model.selectedSessionResourceRevision) { await model.loadResources() }
             .sheet(isPresented: $showRaw) { runtimeContextSheet }
             .sheet(isPresented: $showFork) { ForkSheet() }
             .sheet(isPresented: $showTree) { SessionTreeSheet() }
@@ -146,20 +151,29 @@ struct SessionContextSheet: View {
 
     @ViewBuilder
     private func metrics(_ snapshot: SessionSnapshot) -> some View {
+        let cacheRate = snapshot.stats.latestCacheHitRate.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—"
         let values = [
             (snapshot.stats.tokens.input.formatted(.number.notation(.compactName)), "Input"),
-            ("\(snapshot.stats.toolCalls)", "Tools"),
+            (cacheRate, "Cache hit"),
             (snapshot.stats.tokens.output.formatted(.number.notation(.compactName)), "Output"),
+            (snapshot.stats.tokens.cacheRead.formatted(.number.notation(.compactName)), "Cache read"),
+            (snapshot.stats.tokens.cacheWrite.formatted(.number.notation(.compactName)), "Cache write"),
             (snapshot.stats.cost.formatted(.currency(code: "USD")), "Cost"),
         ]
         if dynamicTypeSize.isAccessibilitySize {
             Grid(horizontalSpacing: 12, verticalSpacing: 12) {
                 GridRow { metric(values[0].0, values[0].1); metric(values[1].0, values[1].1) }
                 GridRow { metric(values[2].0, values[2].1); metric(values[3].0, values[3].1) }
+                GridRow { metric(values[4].0, values[4].1); metric(values[5].0, values[5].1) }
             }
         } else {
-            HStack(spacing: 0) {
-                ForEach(Array(values.enumerated()), id: \.offset) { _, value in metric(value.0, value.1) }
+            Grid(horizontalSpacing: 0, verticalSpacing: 8) {
+                GridRow {
+                    ForEach(0..<3, id: \.self) { index in metric(values[index].0, values[index].1) }
+                }
+                GridRow {
+                    ForEach(3..<6, id: \.self) { index in metric(values[index].0, values[index].1) }
+                }
             }
         }
     }
@@ -251,6 +265,20 @@ struct SessionContextSheet: View {
                 manageRow(icon: "arrow.triangle.branch", title: "Fork Session", subtitle: "Create a canonical branch from a user message", accent: .tronTeal) { showFork = true }
                 TronSettingsDivider(accent: .tronCyan)
                 manageRow(icon: "terminal", title: "Terminal", subtitle: "Open or reattach the retained Mac terminal", accent: .tronEmerald) { showTerminal = true }
+                if let gitBranch {
+                    TronSettingsDivider(accent: .tronCyan)
+                    TronSettingsRow(
+                        icon: "arrow.triangle.branch",
+                        title: "Current Branch",
+                        subtitle: gitDirty ? "Uncommitted changes" : "Working tree clean",
+                        accent: .tronTeal
+                    ) {
+                        Text(gitBranch)
+                            .font(TronTypography.codeContent)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .lineLimit(1)
+                    }
+                }
             }
         }
     }
@@ -258,6 +286,18 @@ struct SessionContextSheet: View {
     private func maintenanceSection(_ snapshot: SessionSnapshot) -> some View {
         TronSettingsGroup("Runtime", accent: .tronAmber) {
             VStack(spacing: 0) {
+                NavigationLink {
+                    ProjectResourcesView()
+                } label: {
+                    TronSettingsRow(
+                        icon: "shippingbox",
+                        title: "Project Resources",
+                        subtitle: "Extensions, prompts, skills, context files, and tools",
+                        accent: .tronTeal
+                    )
+                }
+                .buttonStyle(.plain)
+                TronSettingsDivider(accent: .tronAmber)
                 manageRow(icon: "arrow.clockwise", title: "Reload Resources", subtitle: "Reload extensions, skills, prompts, and project resources", accent: .tronAmber) {
                     Task {
                         try? await model.reloadResources()
@@ -335,6 +375,20 @@ struct SessionContextSheet: View {
         .tint(Color.tronEmerald)
     }
 
+    private func loadGit(snapshot: SessionSnapshot?) async {
+        guard let snapshot else { return }
+        struct Params: Codable { let path: String }
+        guard let value = try? await model.client.requestValue("git.inspect", Params(path: snapshot.cwd)),
+              let object = value.objectValue,
+              object["isRepository"]?.boolValue == true else {
+            gitBranch = nil
+            gitDirty = false
+            return
+        }
+        gitBranch = object["branch"]?.stringValue
+        gitDirty = object["dirty"]?.boolValue ?? false
+    }
+
     private func prepareExport(_ format: String) {
         exporting = true
         Task {
@@ -348,62 +402,88 @@ struct SessionContextSheet: View {
 struct ForkSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var position = "before"
+    @State private var selectedNode: SessionTreeNode?
+    @State private var reloading = false
+
+    private var prompts: [SessionTreeNode] {
+        model.sessionTree.filter { $0.role == .user && !$0.preview.isEmpty }.reversed()
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    TronSegmentedControl(
-                        options: [("Fork and edit prompt", "before"), ("Clone after prompt", "at")],
-                        selection: $position
-                    )
-                    TronCaption(position == "before"
-                        ? "Creates a new session before the selected message and restores that prompt to the composer for editing."
-                        : "Creates a new session containing the selected message and everything before it.")
-
-                    TronSettingsGroup("Choose a message", accent: .tronTeal) {
-                        VStack(spacing: 0) {
-                            ForEach(Array((model.selectedSnapshot?.transcript.filter { $0.role == .user } ?? []).enumerated()), id: \.element.id) { index, item in
-                                if index > 0 { TronSettingsDivider(accent: .tronTeal) }
-                                Button {
-                                    Task {
-                                        do {
-                                            _ = try await model.fork(entryID: item.id, position: position)
-                                            dismiss()
-                                        } catch { model.lastError = error.localizedDescription }
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    Label("Choose the user prompt where the new canonical session should branch. The current session remains unchanged.", systemImage: "arrow.triangle.branch")
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .padding(14)
+                        .tronGlassSurface(accent: .tronTeal, tintOpacity: 0.09)
+                    if reloading && prompts.isEmpty {
+                        TronLoadingState(label: "Loading prompts…")
+                            .frame(maxWidth: .infinity)
+                            .padding(24)
+                    } else if prompts.isEmpty {
+                        TronGlassCard(accent: .tronSlate) {
+                            VStack(spacing: 10) {
+                                Text("No fork points available").font(TronTypography.headline)
+                                Text("Reload the canonical session tree to find user prompts.")
+                                    .font(TronTypography.bodySM)
+                                    .foregroundStyle(Color.tronTextSecondary)
+                                Button("Reload Prompts") { reload() }
+                                    .buttonStyle(TronActionButtonStyle(expands: false))
+                            }
+                            .padding(20)
+                            .frame(maxWidth: .infinity)
+                        }
+                    } else {
+                        TronSettingsGroup("User Prompts", detail: "Newest first", accent: .tronTeal) {
+                            VStack(spacing: 0) {
+                                ForEach(Array(prompts.enumerated()), id: \.element.id) { index, node in
+                                    if index > 0 { TronSettingsDivider(accent: .tronTeal) }
+                                    Button { selectedNode = node } label: {
+                                        TronSettingsRow(
+                                            icon: node.isCurrentPath ? "person.crop.circle" : "arrow.triangle.branch",
+                                            title: node.preview,
+                                            subtitle: node.isCurrentPath ? "Current branch" : "Earlier branch",
+                                            accent: node.isCurrentPath ? .tronTeal : .tronPurple
+                                        )
                                     }
-                                } label: {
-                                    TronSettingsRow(
-                                        icon: "bubble.left",
-                                        title: item.text,
-                                        subtitle: item.timestamp,
-                                        accent: .tronTeal
-                                    )
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
                 }
                 .padding(18)
             }
+            .defaultScrollAnchor(.top)
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: position == "before" ? "Fork Session" : "Clone Session") }
+                ToolbarItem(placement: .topBarLeading) { TronReloadToolbarButton(isReloading: reloading, action: reload) }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Fork Session") }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                        Image(systemName: "checkmark").foregroundStyle(Color.tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }
             }
-            .task { await model.loadTree() }
+            .task(id: model.selectedSessionStructureRevision) { await load() }
+            .sheet(item: $selectedNode) { node in ForkConfirmationSheet(node: node) }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+    }
+
+    private func load() async {
+        reloading = true
+        defer { reloading = false }
+        await model.loadTree()
+    }
+
+    private func reload() {
+        guard !reloading else { return }
+        Task { await load() }
     }
 }

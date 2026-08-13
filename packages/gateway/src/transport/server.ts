@@ -12,16 +12,37 @@ import type { AuthBroker } from "../admin/auth-broker.js";
 import type { GatewayLogger } from "./logger.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
+import { SessionSyncBarrier, type BufferedSessionEvent } from "./session-sync.js";
+
+export interface ActiveSessionSynchronization {
+  barrier: SessionSyncBarrier;
+  timeout: NodeJS.Timeout;
+  requestId: string;
+}
+
+export function clearRequestSynchronizations(
+  synchronizations: Map<string, ActiveSessionSynchronization>,
+  requestId: string,
+): void {
+  for (const [sessionId, synchronization] of synchronizations) {
+    if (synchronization.requestId !== requestId) continue;
+    clearTimeout(synchronization.timeout);
+    synchronizations.delete(sessionId);
+  }
+}
 
 interface Connection {
   id: string;
   identity: string;
   isLocal: boolean;
   socket: WebSocket;
+  alive: boolean;
   ready: boolean;
   subscriptions: Set<string>;
+  openedSessions: Set<string>;
   terminals: Set<string>;
   inFlight: Set<string>;
+  synchronizations: Map<string, ActiveSessionSynchronization>;
   helloTimer: NodeJS.Timeout;
 }
 
@@ -110,7 +131,13 @@ export class GatewayServer {
     this.server.on("upgrade", (request, socket, head) => void this.handleUpgrade(request, socket, head));
     this.heartbeat = setInterval(() => {
       for (const connection of this.clients.values()) {
-        if (connection.socket.readyState === WebSocket.OPEN) connection.socket.ping();
+        if (connection.socket.readyState !== WebSocket.OPEN) continue;
+        if (!connection.alive) {
+          connection.socket.terminate();
+          continue;
+        }
+        connection.alive = false;
+        connection.socket.ping();
       }
     }, 25_000);
     this.heartbeat.unref();
@@ -128,8 +155,11 @@ export class GatewayServer {
   }
 
   broadcastSession(sessionId: string, topic: string, payload: JsonValue): void {
+    const event: BufferedSessionEvent = { type: "event", topic, sessionId, payload };
     for (const client of this.clients.values()) {
-      if (client.ready && client.subscriptions.has(sessionId)) this.send(client, { type: "event", topic, sessionId, payload });
+      if (!client.ready || !client.subscriptions.has(sessionId)) continue;
+      const deliverable = client.synchronizations.get(sessionId)?.barrier.offer(event) ?? event;
+      if (deliverable) this.send(client, deliverable);
     }
   }
 
@@ -240,14 +270,21 @@ export class GatewayServer {
       identity,
       isLocal,
       socket,
+      alive: true,
       ready: false,
       subscriptions: new Set(),
+      openedSessions: new Set(),
       terminals: new Set(),
       inFlight: new Set(),
+      synchronizations: new Map(),
       helloTimer: setTimeout(() => socket.close(1008, "hello required"), 5_000),
     };
     this.clients.set(connection.id, connection);
-    socket.on("message", (data, binary) => void this.onMessage(connection, binary ? data : data.toString()));
+    socket.on("message", (data, binary) => {
+      connection.alive = true;
+      void this.onMessage(connection, binary ? data : data.toString());
+    });
+    socket.on("pong", () => { connection.alive = true; });
     socket.on("close", () => this.disconnect(connection));
     socket.on("error", () => this.disconnect(connection));
   }
@@ -273,15 +310,20 @@ export class GatewayServer {
     }
 
     if (frame.type !== "request" || typeof frame.id !== "string" || typeof frame.method !== "string") {
-      return this.send(connection, { type: "response", id: typeof frame.id === "string" ? frame.id : "invalid", ok: false, error: publicError(new GatewayError("invalid_request", "Malformed request envelope")) });
+      this.send(connection, { type: "response", id: typeof frame.id === "string" ? frame.id : "invalid", ok: false, error: publicError(new GatewayError("invalid_request", "Malformed request envelope")) });
+      return;
     }
     if (frame.id.length > 160 || frame.method.length > 160 || connection.inFlight.has(frame.id)) {
-      return this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(new GatewayError("invalid_request", "Invalid or duplicate request id")) });
+      this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(new GatewayError("invalid_request", "Invalid or duplicate request id")) });
+      return;
     }
     if (connection.inFlight.size >= 32) {
-      return this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(new GatewayError("busy", "Too many concurrent requests", true)) });
+      this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(new GatewayError("busy", "Too many concurrent requests", true)) });
+      return;
     }
     connection.inFlight.add(frame.id);
+    const requestId = frame.id;
+    const synchronizationCompletions: Array<{ sessionId: string; syncToken: string }> = [];
     try {
       const context: ClientContext = {
         id: connection.id,
@@ -289,34 +331,111 @@ export class GatewayServer {
         isLocal: connection.isLocal,
         subscribe: (sessionId) => {
           connection.subscriptions.add(sessionId);
+          connection.openedSessions.add(sessionId);
           this.options.sessions.subscribe(connection.id, sessionId);
+        },
+        beginSynchronization: (sessionId) => {
+          const previous = connection.synchronizations.get(sessionId);
+          if (previous) {
+            clearTimeout(previous.timeout);
+            connection.synchronizations.delete(sessionId);
+          }
+          connection.subscriptions.add(sessionId);
+          connection.openedSessions.add(sessionId);
+          this.options.sessions.subscribe(connection.id, sessionId);
+          const syncToken = randomUUID();
+          const barrier = new SessionSyncBarrier();
+          barrier.begin(syncToken);
+          const timeout = setTimeout(() => {
+            const active = connection.synchronizations.get(sessionId);
+            if (active?.barrier !== barrier) return;
+            connection.synchronizations.delete(sessionId);
+            this.send(connection, {
+              type: "event",
+              topic: "transport.resyncRequired",
+              sessionId,
+              payload: { reason: "subscription synchronization timed out" },
+            });
+          }, 30_000);
+          timeout.unref();
+          connection.synchronizations.set(sessionId, { barrier, timeout, requestId });
+          return syncToken;
+        },
+        establishSynchronization: (sessionId, snapshot) => {
+          const active = connection.synchronizations.get(sessionId);
+          if (!active) throw new GatewayError("conflict", "Session synchronization was not established before snapshot capture");
+          active.barrier.establish(snapshot);
+        },
+        completeSynchronization: (sessionId, syncToken) => {
+          if (!connection.synchronizations.has(sessionId)) {
+            throw new GatewayError("conflict", "Session synchronization is no longer active", true);
+          }
+          synchronizationCompletions.push({ sessionId, syncToken });
         },
         unsubscribe: (sessionId) => {
           connection.subscriptions.delete(sessionId);
+          const synchronization = connection.synchronizations.get(sessionId);
+          if (synchronization) clearTimeout(synchronization.timeout);
+          connection.synchronizations.delete(sessionId);
           this.options.sessions.unsubscribe(connection.id, sessionId);
         },
-        attachTerminal: (terminalId) => connection.terminals.add(terminalId),
+        attachTerminal: (terminalId) => {
+          if (![...connection.openedSessions].some((sessionId) => this.options.service.terminalBelongsToSession(terminalId, sessionId))) {
+            throw new GatewayError("invalid_request", "Open the terminal's session before attaching", false);
+          }
+          connection.terminals.add(terminalId);
+        },
         detachTerminal: (terminalId) => connection.terminals.delete(terminalId),
       };
       const result = await this.options.service.invoke(context, frame.method, frame.params ?? {});
-      this.send(connection, { type: "response", id: frame.id, ok: true, result });
+      const responseSentIntact = this.send(connection, { type: "response", id: frame.id, ok: true, result });
+      if (!responseSentIntact) clearRequestSynchronizations(connection.synchronizations, requestId);
+      // The acknowledgement is enqueued before the barrier is removed. Because
+      // this block is synchronous, no newer broadcast can overtake the buffered
+      // catch-up on the WebSocket.
+      for (const completion of synchronizationCompletions) {
+        const active = connection.synchronizations.get(completion.sessionId);
+        if (!active) continue;
+        const completed = active.barrier.commit(completion.syncToken);
+        clearTimeout(active.timeout);
+        connection.synchronizations.delete(completion.sessionId);
+        if (completed.overflowed) {
+          this.send(connection, {
+            type: "event",
+            topic: "transport.resyncRequired",
+            sessionId: completion.sessionId,
+            payload: { reason: "subscription catch-up overflow" },
+          });
+        } else {
+          for (const event of completed.events) this.send(connection, event);
+        }
+      }
     } catch (error) {
+      clearRequestSynchronizations(connection.synchronizations, requestId);
       this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(error) });
     } finally {
       connection.inFlight.delete(frame.id);
     }
   }
 
-  private send(connection: Connection, value: unknown): void {
-    if (connection.socket.readyState !== WebSocket.OPEN) return;
+  private send(connection: Connection, value: unknown): boolean {
+    if (connection.socket.readyState !== WebSocket.OPEN) return false;
+    const direct = JSON.stringify(value);
+    if (Buffer.byteLength(direct) <= this.options.maxFrameBytes) {
+      connection.socket.send(direct);
+      return true;
+    }
     const encoded = encodeOutboundFrame(value, this.options.maxFrameBytes);
-    if (!encoded) return;
+    if (!encoded) return false;
     connection.socket.send(encoded);
+    return false;
   }
 
   private disconnect(connection: Connection): void {
     if (!this.clients.delete(connection.id)) return;
     clearTimeout(connection.helloTimer);
+    for (const synchronization of connection.synchronizations.values()) clearTimeout(synchronization.timeout);
+    connection.synchronizations.clear();
     this.options.sessions.unsubscribeClient(connection.id);
     this.options.auth.cancelClient(connection.id);
   }

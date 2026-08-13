@@ -14,6 +14,7 @@
   "stats": {
     "userMessages": 1, "assistantMessages": 1, "toolCalls": 2, "toolResults": 1, "totalMessages": 4,
     "tokens": { "input": 100, "output": 50, "cacheRead": 25, "cacheWrite": 10, "total": 185 },
+    "latestCacheHitRate": 62.5,
     "cost": 0.0125
   },
   "queued": { "steering": ["correct course"], "followUp": ["then verify"] },
@@ -26,7 +27,8 @@
       "role": "user",
       "content": [
         { "id": "user-entry:0", "type": "text", "text": "hello" },
-        { "id": "user-entry:1", "type": "image", "mimeType": "image/png", "blobId": "image-blob" }
+        { "id": "user-entry:1", "type": "image", "mimeType": "image/png", "blobId": "image-blob" },
+        { "id": "user-entry:2", "type": "text", "text": "fixture.pdf", "attachment": { "name": "fixture.pdf", "mimeType": "application/pdf", "size": 55972 } }
       ]
     },
     {
@@ -55,7 +57,12 @@
       "toolCallId": "tool-call",
       "toolName": "read",
       "isError": false,
-      "details": { "path": "README.md" }
+      "details": { "path": "README.md" },
+      "startedAt": "2026-01-01T00:00:01Z",
+      "completedAt": "2026-01-01T00:00:02Z",
+      "durationMs": 1000,
+      "lastProgressAt": "2026-01-01T00:00:02Z",
+      "progressSequence": 3
     },
     {
       "id": "bash-entry",
@@ -148,12 +155,17 @@
     {
       "toolCallId": "live-tool",
       "toolName": "bash",
+      "order": 0,
       "status": "running",
       "arguments": { "command": "build" },
       "partialResult": { "content": "working" },
+      "output": "working\nstep two",
+      "outputTruncated": false,
       "isError": false,
       "startedAt": "2026-01-01T00:00:10Z",
-      "updatedAt": "2026-01-01T00:00:11Z"
+      "updatedAt": "2026-01-01T00:00:11Z",
+      "lastProgressAt": "2026-01-01T00:00:11Z",
+      "progressSequence": 2
     }
   ],
   "extensionUI": {

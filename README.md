@@ -54,6 +54,9 @@ state only.
 
 Do not open the same session concurrently in another runtime client: the
 canonical session format does not provide a cross-process session-file lock.
+Use `scripts/tron chat [--session <id>]` for terminal chat; it attaches to the
+same Gateway-owned runtime as iOS and therefore stays on the authoritative
+snapshot/event sequence instead of becoming a competing JSONL writer.
 
 ## Repository
 

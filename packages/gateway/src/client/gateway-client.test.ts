@@ -1,0 +1,60 @@
+import { createServer } from "node:http";
+import { AddressInfo } from "node:net";
+import { WebSocketServer } from "ws";
+import { afterEach, describe, expect, it } from "vitest";
+import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
+
+const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
+
+async function fixture() {
+  const server = createServer();
+  const sockets = new WebSocketServer({ server });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as AddressInfo).port;
+  cleanups.push(async () => {
+    for (const socket of sockets.clients) socket.terminate();
+    await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  return { sockets, url: `ws://127.0.0.1:${port}` };
+}
+
+describe("stable gateway protocol client", () => {
+  it("correlates requests and delivers session events", async () => {
+    const { sockets, url } = await fixture();
+    sockets.on("connection", (socket, request) => {
+      expect(request.headers.authorization).toBe("Bearer local-token");
+      socket.on("message", (raw) => {
+        const frame = JSON.parse(raw.toString()) as any;
+        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 2 }));
+        if (frame.type === "request") {
+          socket.send(JSON.stringify({ type: "response", id: frame.id, ok: true, result: { value: 1 } }));
+          socket.send(JSON.stringify({ type: "event", topic: "session.snapshot", sessionId: "session", payload: { revision: 1 } }));
+        }
+      });
+    });
+    const client = new GatewayProtocolClient(url, "local-token");
+    await client.connect();
+    const events: string[] = [];
+    client.onEvent((event) => events.push(`${event.topic}:${event.sessionId}`));
+    expect(await client.request("system.info", {})).toEqual({ value: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(events).toEqual(["session.snapshot:session"]);
+    client.close();
+  });
+
+  it("rejects pending work when the connection drops", async () => {
+    const { sockets, url } = await fixture();
+    sockets.on("connection", (socket) => {
+      socket.on("message", (raw) => {
+        const frame = JSON.parse(raw.toString()) as any;
+        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 2 }));
+        if (frame.type === "request") socket.terminate();
+      });
+    });
+    const client = new GatewayProtocolClient(url, "local-token");
+    await client.connect();
+    await expect(client.request("session.open", { sessionId: "session" })).rejects.toBeInstanceOf(GatewayClientError);
+  });
+});

@@ -2,13 +2,17 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "@earendil-works/pi-coding-agent";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { BlobStore } from "./blob-store.js";
-import type { ContentPart, JsonValue, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
+import type { ContentPart, JsonValue, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
 
 const MAX_TEXT = 64_000;
 const MAX_JSON_STRING = 100_000;
 const MAX_PROJECTED_JSON_BYTES = 96_000;
 const MAX_CONTENT_BYTES = 320_000;
+const COMPACT_LIVE_TOOL_JSON_BYTES = 12_000;
+const MAX_LIVE_TOOL_OUTPUT_BYTES = 48_000;
 export const TRANSCRIPT_PAGE_BYTES = 600_000;
+/** Leaves headroom for the response/event envelope under the 1 MiB socket cap. */
+export const SESSION_SNAPSHOT_BYTES = 800_000;
 
 function boundedText(value: string): string {
   return value.length <= MAX_TEXT ? value : `${value.slice(0, MAX_TEXT)}\n… output truncated by gateway`;
@@ -34,14 +38,196 @@ export function safeJson(value: unknown, depth = 0, seen = new WeakSet<object>()
   return null;
 }
 
-function boundedJson(value: unknown): JsonValue {
+function boundedUtf8Tail(value: string, maximumBytes: number): { value: string; truncated: boolean } {
+  const encoded = Buffer.from(value);
+  if (encoded.length <= maximumBytes) return { value, truncated: false };
+  return {
+    value: encoded.subarray(encoded.length - maximumBytes).toString("utf8").replace(/^\uFFFD/u, ""),
+    truncated: true,
+  };
+}
+
+function utf8Prefix(value: string, maximumBytes: number): string {
+  const encoded = Buffer.from(value);
+  if (encoded.length <= maximumBytes) return value;
+  return encoded.subarray(0, maximumBytes).toString("utf8").replace(/\uFFFD$/u, "");
+}
+
+function utf8Suffix(value: string, maximumBytes: number): string {
+  const encoded = Buffer.from(value);
+  if (encoded.length <= maximumBytes) return value;
+  return encoded.subarray(encoded.length - maximumBytes).toString("utf8").replace(/^\uFFFD/u, "");
+}
+
+/** Extracts only explicit display text from Pi's current AgentToolResult. Arbitrary
+ * detail objects remain structured JSON and are never guessed into user-facing
+ * output. The newest tail is retained because command tools stream cumulative
+ * output and the current lines are the most useful audit evidence. */
+export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_OUTPUT_BYTES): {
+  output?: string;
+  outputTruncated?: true;
+} {
+  const collect = (candidate: unknown, depth = 0): string[] => {
+    if (depth > 4 || candidate === null || candidate === undefined) return [];
+    if (typeof candidate === "string") return [candidate];
+    if (Array.isArray(candidate)) return candidate.flatMap((item) => collect(item, depth + 1));
+    if (typeof candidate !== "object") return [];
+    const record = candidate as Record<string, unknown>;
+    if (record.type === "text" && typeof record.text === "string") return [record.text];
+    if (Array.isArray(record.content)) return collect(record.content, depth + 1);
+    if (typeof record.output === "string") return [record.output];
+    if (typeof record.text === "string") return [record.text];
+    return [];
+  };
+  const output = collect(value).filter(Boolean).join("\n");
+  if (!output) return {};
+  if (Buffer.byteLength(output) <= maximumBytes) return { output };
+  const marker = "… earlier live output truncated by gateway …\n";
+  return {
+    output: marker + utf8Suffix(output, Math.max(256, maximumBytes - Buffer.byteLength(marker))),
+    outputTruncated: true,
+  };
+}
+
+/** The JSON frame stays bounded independently from the readable live-output
+ * channel. If Pi streams a huge text result, retain only a recent tail here too
+ * rather than serializing the whole value before projectJson can compact it. */
+export function projectToolResult(value: unknown, maximumBytes = 24_000): JsonValue {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return projectJson(value, maximumBytes);
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.content)) return projectJson(value, maximumBytes);
+  let truncated = false;
+  const content = record.content.slice(-128).map((part) => {
+    if (!part || typeof part !== "object" || Array.isArray(part)) return part;
+    const projected = { ...part as Record<string, unknown> };
+    if (typeof projected.text === "string") {
+      const bounded = boundedUtf8Tail(projected.text, Math.max(1_024, maximumBytes - 1_024));
+      projected.text = bounded.value;
+      truncated ||= bounded.truncated;
+    }
+    return projected;
+  });
+  const bounded = projectJson({ ...record, content }, maximumBytes);
+  if (!truncated || typeof bounded !== "object" || bounded === null || Array.isArray(bounded)) return bounded;
+  return { ...bounded, truncated: true };
+}
+
+export function projectJson(value: unknown, maximumBytes = MAX_PROJECTED_JSON_BYTES): JsonValue {
   const projected = safeJson(value);
   const encoded = JSON.stringify(projected);
-  if (Buffer.byteLength(encoded) <= MAX_PROJECTED_JSON_BYTES) return projected;
+  if (Buffer.byteLength(encoded) <= maximumBytes) return projected;
+  const previewBytes = Math.max(256, Math.min(24_000, maximumBytes - 128));
   return {
     truncated: true,
-    preview: `${encoded.slice(0, 24_000)}…`,
+    preview: `${utf8Prefix(encoded, previewBytes)}…`,
   };
+}
+
+function frameBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value));
+}
+
+/**
+ * Fits every live session snapshot to a strict wire budget without touching Pi's
+ * canonical state. Large tool payloads become readable previews first. While an
+ * operation is active, transcript rows are never removed: doing so would make a
+ * subscribed chat replace already-visible history with a shorter tail. Status,
+ * operation, ordering, and canonical transcript cursors always survive.
+ */
+export function fitSessionSnapshot(
+  snapshot: SessionSnapshot,
+  maximumBytes = SESSION_SNAPSHOT_BYTES,
+): SessionSnapshot {
+  if (frameBytes(snapshot) <= maximumBytes) return snapshot;
+
+  let projected: SessionSnapshot = {
+    ...snapshot,
+    toolExecutions: snapshot.toolExecutions.map((tool) => ({
+      ...tool,
+      arguments: projectJson(tool.arguments, COMPACT_LIVE_TOOL_JSON_BYTES),
+      ...(tool.partialResult === undefined
+        ? {}
+        : { partialResult: projectJson(tool.partialResult, COMPACT_LIVE_TOOL_JSON_BYTES) }),
+      ...(tool.result === undefined
+        ? {}
+        : { result: projectJson(tool.result, COMPACT_LIVE_TOOL_JSON_BYTES) }),
+    })),
+    diagnostics: [
+      ...snapshot.diagnostics,
+      { type: "projection", message: "Large live details were compacted for this mobile snapshot." },
+    ],
+  };
+  if (frameBytes(projected) <= maximumBytes) return projected;
+
+  // Completed output is canonical in the transcript. Do not duplicate partial
+  // output in the live overlay when the frame is under pressure.
+  projected = {
+    ...projected,
+    toolExecutions: projected.toolExecutions.map((tool) => {
+      if (tool.status === "running") return tool;
+      const { partialResult: _partialResult, ...withoutPartialResult } = tool;
+      return withoutPartialResult;
+    }),
+  };
+
+  // A resumed idle session may use a smaller fitted tail. An active session must
+  // keep its baseline page stable for the lifetime of the open subscription;
+  // mobile merges later snapshots with any history it has explicitly prepended.
+  if (projected.phase === "idle" || projected.phase === "interrupted") {
+    let removed = 0;
+    const transcript = [...projected.transcript];
+    while (transcript.length > 0 && frameBytes({ ...projected, transcript }) > maximumBytes) {
+      transcript.shift();
+      removed += 1;
+    }
+    projected = {
+      ...projected,
+      transcript,
+      transcriptStart: projected.transcriptStart + removed,
+    };
+    if (frameBytes(projected) <= maximumBytes) return projected;
+  }
+
+  projected = {
+    ...projected,
+    extensionUI: {
+      ...projected.extensionUI,
+      statuses: {},
+      widgets: [],
+      editorText: "",
+    },
+  };
+  if (frameBytes(projected) <= maximumBytes) return projected;
+
+  // A single streaming message can itself be large. It remains canonical and
+  // will return through paged transcript projection once settled.
+  const { streaming: _streaming, ...withoutStreaming } = projected;
+  projected = withoutStreaming;
+  if (frameBytes(projected) <= maximumBytes) return projected;
+
+  const tools = projected.toolExecutions.slice(-256).map((tool) => {
+    const { partialResult: _partialResult, result: _result, ...metadata } = tool;
+    return { ...metadata, arguments: { truncated: true } };
+  });
+  projected = {
+    ...projected,
+    ...(projected.phase === "idle" || projected.phase === "interrupted"
+      ? { transcript: [], transcriptStart: projected.transcriptTotal }
+      : {}),
+    toolExecutions: tools,
+    diagnostics: [{ type: "projection", message: "Large live detail is available from canonical paged history after the run settles." }],
+  };
+  if (frameBytes(projected) <= maximumBytes) return projected;
+
+  if (projected.phase !== "idle" && projected.phase !== "interrupted") {
+    // Preserve the active canonical baseline before sacrificing live detail.
+    // Tool identities/order remain in the streaming/canonical call projection
+    // and return through events or the next fitted snapshot.
+    projected = { ...projected, toolExecutions: [] };
+    if (frameBytes(projected) <= maximumBytes) return projected;
+  }
+
+  return projected;
 }
 
 type ProjectableContent = string | Array<
@@ -51,37 +237,101 @@ type ProjectableContent = string | Array<
   | { type: "toolCall"; id: string; name: string; arguments: unknown }
 >;
 
-function projectContent(content: ProjectableContent, blobs: BlobStore, ownerId: string): ContentPart[] {
-  if (typeof content === "string") return [{ id: `${ownerId}:0`, type: "text", text: boundedText(content) }];
+const ATTACHMENT_TAG = /<attachment\b([^<>]*?)\s*\/>/g;
+const ATTACHMENT_ATTRIBUTE = /([a-z-]+)="([^"]*)"/g;
+const ATTACHMENT_LIKE_TAG = /<attachment\b[^>]*>/gi;
+const ATTACHMENT_PATH_ATTRIBUTE = /\s+path\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi;
+
+function safeAttachmentFallback(value: string): string {
+  return value.replace(ATTACHMENT_LIKE_TAG, (tag) => tag.replace(ATTACHMENT_PATH_ATTRIBUTE, ""));
+}
+
+function unescapeXML(value: string): string {
+  return value
+    .replaceAll("&quot;", '"')
+    .replaceAll("&gt;", ">")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&amp;", "&");
+}
+
+function projectUserText(text: string, ownerId: string, nextIndex: () => number): ContentPart[] {
+  const projected: ContentPart[] = [];
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  ATTACHMENT_TAG.lastIndex = 0;
+  while ((match = ATTACHMENT_TAG.exec(text)) !== null) {
+    const attributes = new Map<string, string>();
+    ATTACHMENT_ATTRIBUTE.lastIndex = 0;
+    for (let attribute = ATTACHMENT_ATTRIBUTE.exec(match[1] ?? ""); attribute; attribute = ATTACHMENT_ATTRIBUTE.exec(match[1] ?? "")) {
+      attributes.set(attribute[1]!, unescapeXML(attribute[2]!));
+    }
+    const name = attributes.get("name");
+    const mimeType = attributes.get("mime-type");
+    const size = Number(attributes.get("size"));
+    const path = attributes.get("path");
+    if (!name || !mimeType || !path || !Number.isSafeInteger(size) || size < 0) continue;
+
+    const leading = safeAttachmentFallback(text.slice(cursor, match.index)).replace(/\s+$/, "");
+    if (leading) projected.push({ id: `${ownerId}:${nextIndex()}`, type: "text", text: boundedText(leading) });
+    projected.push({
+      id: `${ownerId}:${nextIndex()}`,
+      type: "text",
+      text: name,
+      attachment: { name, mimeType, size },
+    });
+    cursor = match.index + match[0].length;
+  }
+  if (projected.length === 0) {
+    return [{ id: `${ownerId}:${nextIndex()}`, type: "text", text: boundedText(safeAttachmentFallback(text)) }];
+  }
+  const trailing = safeAttachmentFallback(text.slice(cursor)).replace(/^\s+/, "");
+  if (trailing) projected.push({ id: `${ownerId}:${nextIndex()}`, type: "text", text: boundedText(trailing) });
+  return projected;
+}
+
+function projectContent(content: ProjectableContent, blobs: BlobStore, ownerId: string, extractAttachments = false): ContentPart[] {
+  const source = typeof content === "string" ? [{ type: "text" as const, text: content }] : content;
   const projected: ContentPart[] = [];
   let bytes = 2;
-  for (const [index, part] of content.entries()) {
-    const id = `${ownerId}:${index}`;
-    let candidate: ContentPart | undefined;
+  let outputIndex = 0;
+  const nextIndex = () => outputIndex++;
+  for (const part of source) {
+    let candidates: ContentPart[] = [];
     switch (part.type) {
       case "text":
-        candidate = { id, type: "text", text: boundedText(part.text) };
+        candidates = extractAttachments
+          ? projectUserText(part.text, ownerId, nextIndex)
+          : [{ id: `${ownerId}:${nextIndex()}`, type: "text", text: boundedText(part.text) }];
         break;
       case "image":
-        candidate = { id, type: "image", mimeType: part.mimeType, blobId: blobs.register(part.data, part.mimeType) };
+        candidates = [{ id: `${ownerId}:${nextIndex()}`, type: "image", mimeType: part.mimeType, blobId: blobs.register(part.data, part.mimeType) }];
         break;
       case "thinking":
-        candidate = { id, type: "thinking", text: boundedText(part.thinking), ...(part.redacted ? { redacted: true } : {}) };
+        candidates = [{ id: `${ownerId}:${nextIndex()}`, type: "thinking", text: boundedText(part.thinking), ...(part.redacted ? { redacted: true } : {}) }];
         break;
       case "toolCall":
-        candidate = { id, type: "toolCall", toolCallId: part.id, name: part.name, arguments: boundedJson(part.arguments) };
+        candidates = [{ id: `${ownerId}:${nextIndex()}`, type: "toolCall", toolCallId: part.id, name: part.name, arguments: projectJson(part.arguments) }];
         break;
     }
-    if (!candidate) continue;
-    const candidateBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
-    if (bytes + candidateBytes > MAX_CONTENT_BYTES) {
-      projected.push({ id: `${ownerId}:truncated`, type: "text", text: "… additional content omitted from this mobile projection" });
-      break;
+    for (const candidate of candidates) {
+      const candidateBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
+      if (bytes + candidateBytes > MAX_CONTENT_BYTES) {
+        projected.push({ id: `${ownerId}:truncated`, type: "text", text: "… additional content omitted from this mobile projection" });
+        return projected;
+      }
+      projected.push(candidate);
+      bytes += candidateBytes;
     }
-    projected.push(candidate);
-    bytes += candidateBytes;
   }
   return projected;
+}
+
+export interface ToolProjectionMetadata {
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  lastProgressAt: string;
+  progressSequence: number;
 }
 
 export function projectMessage(
@@ -90,10 +340,11 @@ export function projectMessage(
   timestamp: string,
   message: AgentMessage,
   blobs: BlobStore,
+  toolMetadata?: ToolProjectionMetadata,
 ): TranscriptItem | undefined {
   switch (message.role) {
     case "user":
-      return { id, parentId, timestamp, kind: "message", role: "user", content: projectContent(message.content, blobs, id) };
+      return { id, parentId, timestamp, kind: "message", role: "user", content: projectContent(message.content, blobs, id, true) };
     case "assistant":
       return {
         id,
@@ -106,7 +357,7 @@ export function projectMessage(
         modelId: message.model,
         stopReason: message.stopReason,
         ...(message.errorMessage ? { errorMessage: boundedText(message.errorMessage) } : {}),
-        usage: boundedJson(message.usage),
+        usage: projectJson(message.usage),
       };
     case "toolResult":
       return {
@@ -119,8 +370,20 @@ export function projectMessage(
         toolCallId: message.toolCallId,
         toolName: message.toolName,
         isError: message.isError,
-        ...(message.details === undefined ? {} : { details: boundedJson(message.details) }),
-        ...(message.usage === undefined ? {} : { usage: boundedJson(message.usage) }),
+        ...(message.details === undefined ? {} : { details: projectJson(message.details) }),
+        ...(message.usage === undefined ? {} : { usage: projectJson(message.usage) }),
+        ...(toolMetadata ? {
+          startedAt: toolMetadata.startedAt,
+          ...(toolMetadata.completedAt ? { completedAt: toolMetadata.completedAt } : {}),
+          ...(toolMetadata.durationMs === undefined ? {} : { durationMs: toolMetadata.durationMs }),
+          lastProgressAt: toolMetadata.lastProgressAt,
+          progressSequence: toolMetadata.progressSequence,
+        } : {
+          // Pi JSONL does not currently persist tool execution start/end metadata.
+          // The result timestamp is an observed completion anchor; clients pair it
+          // with the canonical call timestamp as a conservative history fallback.
+          completedAt: timestamp,
+        }),
       };
     case "bashExecution":
       return {
@@ -145,7 +408,7 @@ export function projectMessage(
         kind: "customMessage",
         customType: message.customType,
         content: projectContent(message.content, blobs, id),
-        ...(message.details === undefined ? {} : { details: boundedJson(message.details) }),
+        ...(message.details === undefined ? {} : { details: projectJson(message.details) }),
       };
     case "branchSummary":
       return { id, parentId, timestamp, kind: "branchSummary", summary: boundedText(message.summary) };
@@ -163,10 +426,21 @@ export function projectMessage(
   }
 }
 
-export function projectEntry(entry: SessionEntry, blobs: BlobStore): TranscriptItem | undefined {
+export function projectEntry(
+  entry: SessionEntry,
+  blobs: BlobStore,
+  toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
+): TranscriptItem | undefined {
   switch (entry.type) {
     case "message":
-      return projectMessage(entry.id, entry.parentId, entry.timestamp, entry.message, blobs);
+      return projectMessage(
+        entry.id,
+        entry.parentId,
+        entry.timestamp,
+        entry.message,
+        blobs,
+        entry.message.role === "toolResult" ? toolMetadata?.get(entry.message.toolCallId) : undefined,
+      );
     case "custom_message":
       if (!entry.display) return undefined;
       return {
@@ -176,7 +450,7 @@ export function projectEntry(entry: SessionEntry, blobs: BlobStore): TranscriptI
         kind: "customMessage",
         customType: entry.customType,
         content: projectContent(entry.content, blobs, entry.id),
-        ...(entry.details === undefined ? {} : { details: boundedJson(entry.details) }),
+        ...(entry.details === undefined ? {} : { details: projectJson(entry.details) }),
       };
     case "custom":
       return {
@@ -185,7 +459,7 @@ export function projectEntry(entry: SessionEntry, blobs: BlobStore): TranscriptI
         timestamp: entry.timestamp,
         kind: "customEntry",
         customType: entry.customType,
-        ...(entry.data === undefined ? {} : { data: boundedJson(entry.data) }),
+        ...(entry.data === undefined ? {} : { data: projectJson(entry.data) }),
       };
     case "compaction":
       return {
@@ -195,8 +469,8 @@ export function projectEntry(entry: SessionEntry, blobs: BlobStore): TranscriptI
         kind: "compaction",
         summary: boundedText(entry.summary),
         tokensBefore: entry.tokensBefore,
-        ...(entry.details === undefined ? {} : { details: boundedJson(entry.details) }),
-        ...(entry.usage === undefined ? {} : { usage: boundedJson(entry.usage) }),
+        ...(entry.details === undefined ? {} : { details: projectJson(entry.details) }),
+        ...(entry.usage === undefined ? {} : { usage: projectJson(entry.usage) }),
         ...(entry.fromHook === undefined ? {} : { fromHook: entry.fromHook }),
       };
     case "branch_summary":
@@ -206,8 +480,8 @@ export function projectEntry(entry: SessionEntry, blobs: BlobStore): TranscriptI
         timestamp: entry.timestamp,
         kind: "branchSummary",
         summary: boundedText(entry.summary),
-        ...(entry.details === undefined ? {} : { details: boundedJson(entry.details) }),
-        ...(entry.usage === undefined ? {} : { usage: boundedJson(entry.usage) }),
+        ...(entry.details === undefined ? {} : { details: projectJson(entry.details) }),
+        ...(entry.usage === undefined ? {} : { usage: projectJson(entry.usage) }),
         ...(entry.fromHook === undefined ? {} : { fromHook: entry.fromHook }),
       };
     case "model_change":
@@ -250,9 +524,18 @@ function preview(item: TranscriptItem | undefined, entry: SessionEntry): string 
   }
 }
 
-const MAX_TREE_NODES = 4_000;
+// safeJson intentionally bounds arrays to 1,000 values. Keep the tree page
+// within that generic transport bound so selected nodes are never discarded
+// after projectTree has chosen the newest useful history.
+const MAX_TREE_NODES = 1_000;
+export const TREE_PROJECTION_BYTES = 700_000;
 
-function projectedTreeNode(node: PiSessionTreeNode, blobs: BlobStore): SessionTreeNode {
+function projectedTreeNode(
+  node: PiSessionTreeNode,
+  blobs: BlobStore,
+  depth: number,
+  currentPath: Set<string>,
+): SessionTreeNode {
   const item = projectEntry(node.entry, blobs);
   return {
     id: node.entry.id,
@@ -261,34 +544,53 @@ function projectedTreeNode(node: PiSessionTreeNode, blobs: BlobStore): SessionTr
     kind: item?.kind ?? "sessionInfo",
     ...(node.label ? { label: node.label } : {}),
     preview: preview(item, node.entry),
-    ...(item ? { item } : {}),
-    children: [],
+    ...(item?.kind === "message" ? { role: item.role } : {}),
+    depth,
+    childCount: node.children.length,
+    isCurrentPath: currentPath.has(node.entry.id),
   };
 }
 
 export function projectTree(manager: SessionManager, blobs: BlobStore): SessionTreeNode[] {
   const canonicalRoots = manager.getTree();
-  const projectedRoots: SessionTreeNode[] = [];
-  const work: Array<{ source: PiSessionTreeNode; target: SessionTreeNode[] }> = [];
+  const currentPath = new Set(manager.getBranch().map((entry) => entry.id));
+  const byId = new Map<string, SessionTreeNode>();
+  const work: Array<{ source: PiSessionTreeNode; depth: number }> = [];
   for (let index = canonicalRoots.length - 1; index >= 0; index -= 1) {
-    work.push({ source: canonicalRoots[index]!, target: projectedRoots });
+    work.push({ source: canonicalRoots[index]!, depth: 0 });
   }
-  let admitted = 0;
-  while (work.length > 0 && admitted < MAX_TREE_NODES) {
-    const { source, target } = work.pop()!;
-    const projected = projectedTreeNode(source, blobs);
-    target.push(projected);
-    admitted += 1;
+  while (work.length > 0) {
+    const { source, depth } = work.pop()!;
+    byId.set(source.entry.id, projectedTreeNode(source, blobs, depth, currentPath));
     for (let index = source.children.length - 1; index >= 0; index -= 1) {
-      work.push({ source: source.children[index]!, target: projected.children });
+      work.push({ source: source.children[index]!, depth: depth + 1 });
     }
   }
-  return projectedRoots;
+
+  // Admit the newest canonical entries first, then restore chronological order.
+  // This keeps the current fork/navigation points useful when a large session
+  // exceeds the bounded mobile projection.
+  const selected: SessionTreeNode[] = [];
+  let bytes = 2;
+  const entries = manager.getEntries();
+  for (let index = entries.length - 1; index >= 0 && selected.length < MAX_TREE_NODES; index -= 1) {
+    const node = byId.get(entries[index]!.id);
+    if (!node) continue;
+    const nodeBytes = Buffer.byteLength(JSON.stringify(node)) + 1;
+    if (bytes + nodeBytes > TREE_PROJECTION_BYTES) break;
+    bytes += nodeBytes;
+    selected.push(node);
+  }
+  return selected.reverse();
 }
 
-export function projectTranscript(manager: SessionManager, blobs: BlobStore): TranscriptItem[] {
+export function projectTranscript(
+  manager: SessionManager,
+  blobs: BlobStore,
+  toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
+): TranscriptItem[] {
   return manager.getBranch().flatMap((entry) => {
-    const projected = projectEntry(entry, blobs);
+    const projected = projectEntry(entry, blobs, toolMetadata);
     return projected ? [projected] : [];
   });
 }
@@ -304,9 +606,14 @@ export function projectTranscriptPage(
   blobs: BlobStore,
   before?: number,
   byteBudget = TRANSCRIPT_PAGE_BYTES,
+  expectedNextEntryId?: string,
+  toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
 ): TranscriptPage {
-  const transcript = projectTranscript(manager, blobs);
+  const transcript = projectTranscript(manager, blobs, toolMetadata);
   const end = Math.max(0, Math.min(before ?? transcript.length, transcript.length));
+  if (expectedNextEntryId !== undefined && transcript[end]?.id !== expectedNextEntryId) {
+    throw new Error("session transcript anchor changed");
+  }
   let start = end;
   let bytes = 2;
   while (start > 0) {

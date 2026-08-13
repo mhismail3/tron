@@ -24,7 +24,7 @@ struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedError {
     var errorDescription: String? { message }
 }
 
-struct GatewayEvent: Decodable, Sendable {
+struct GatewayEvent: Decodable, Sendable, Equatable {
     let type: String
     let topic: String
     let sessionId: String?

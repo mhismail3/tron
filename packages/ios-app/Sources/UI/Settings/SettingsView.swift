@@ -1,9 +1,16 @@
 import SwiftUI
 
 struct SettingsView: View {
+    enum Scope { case dashboard, project }
+
+    let scope: Scope
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    init(scope: Scope = .dashboard) {
+        self.scope = scope
+    }
 
     var body: some View {
         NavigationStack {
@@ -18,17 +25,21 @@ struct SettingsView: View {
                     }
                     TronSettingsGroup("Agent") {
                         VStack(spacing: 0) {
-                            settingsLink("Providers", icon: "key") { ProvidersSettingsView() }
+                            settingsLink("Providers", icon: "key") {
+                                ProvidersSettingsView(sessionID: scope == .project ? model.selectedSessionID : nil)
+                            }
                             TronSettingsDivider()
-                            settingsLink("Models and Defaults", icon: "cpu") { AgentDefaultsSettingsView() }
+                            settingsLink("Models and Defaults", icon: "cpu") { AgentDefaultsSettingsView(allowsProjectScope: scope == .project) }
                             TronSettingsDivider()
-                            settingsLink("Runtime Behavior", icon: "gearshape.2") { RuntimeBehaviorSettingsView() }
+                            settingsLink("Runtime Behavior", icon: "gearshape.2") { RuntimeBehaviorSettingsView(allowsProjectScope: scope == .project) }
                             TronSettingsDivider()
-                            settingsLink("Resource Paths", icon: "folder.badge.gearshape") { ResourceSettingsView() }
+                            settingsLink("Resource Paths", icon: "folder.badge.gearshape") { ResourceSettingsView(allowsProjectScope: scope == .project) }
                             TronSettingsDivider()
-                            settingsLink("Packages and Resources", icon: "shippingbox") { PackagesSettingsView() }
-                            TronSettingsDivider()
-                            settingsLink("Project Trust", icon: "checkmark.shield") { TrustSettingsView() }
+                            settingsLink("Packages and Resources", icon: "shippingbox") { PackagesSettingsView(projectCWD: scope == .project ? model.selectedSnapshot?.cwd : nil) }
+                            if scope == .project {
+                                TronSettingsDivider()
+                                settingsLink("Project Trust", icon: "checkmark.shield") { TrustSettingsView() }
+                            }
                             TronSettingsDivider()
                             settingsLink("Custom Models", icon: "slider.horizontal.3") { CustomModelsSettingsView() }
                         }
@@ -59,10 +70,16 @@ struct SettingsView: View {
                     }
                 }
             }
-            .task { await model.refreshAll() }
         }
         .presentationDragIndicator(.hidden)
         .gatewayGlobalSheets()
+        .task {
+            await model.refreshAll(
+                projectSessionID: scope == .project ? model.selectedSessionID : nil,
+                projectCWD: scope == .project ? model.selectedSnapshot?.cwd : nil,
+                useSelectedProject: scope == .project
+            )
+        }
         .tronPresentation()
     }
 
@@ -351,10 +368,13 @@ private struct ConnectionsSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Connections")
-        .confirmationDialog("Forget this Mac?", isPresented: $confirmForget) {
+        .alert("Forget this Mac?", isPresented: $confirmForget) {
+            Button("Cancel", role: .cancel) {}
             Button("Forget Mac", role: .destructive) { model.forgetCurrentGateway() }
-        } message: { Text("The device token is removed from this iPhone. Revoke it on the Mac or from another paired device if the iPhone is lost.") }
-        .confirmationDialog(
+        } message: {
+            Text("The pairing token will be removed from this iPhone. You must pair again to reconnect.")
+        }
+        .alert(
             "Revoke \(deviceToRevoke?.name ?? "device")?",
             isPresented: Binding(
                 get: { deviceToRevoke != nil },
@@ -362,6 +382,7 @@ private struct ConnectionsSettingsView: View {
             ),
             presenting: deviceToRevoke
         ) { device in
+            Button("Cancel", role: .cancel) { deviceToRevoke = nil }
             Button("Revoke Device", role: .destructive) {
                 Task {
                     do { try await model.revokeDevice(device.id) }
@@ -442,13 +463,14 @@ private struct LegacyImportSettingsView: View {
 
 private struct ProvidersSettingsView: View {
     @Environment(AppModel.self) private var model
+    let sessionID: String?
     @State private var reloading = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 8) {
                 ForEach(model.providers) { provider in
-                    ProviderSetupRow(provider: provider)
+                    ProviderSetupRow(provider: provider, sessionID: sessionID)
                 }
             }
             .padding(.horizontal, 20)
@@ -456,10 +478,16 @@ private struct ProvidersSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Providers")
+        // Provider login must be presented by the currently visible provider
+        // sheet, not by Settings or the dashboard underneath its sheet stack.
+        .providerAuthPresenter()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)
             }
+        }
+        .task(id: model.providerRevision) {
+            await model.refreshProviders(sessionID: sessionID, useSelectedProject: false)
         }
     }
 
@@ -468,13 +496,14 @@ private struct ProvidersSettingsView: View {
         reloading = true
         Task {
             defer { reloading = false }
-            await model.refreshProviders()
+            await model.refreshProviders(sessionID: sessionID, useSelectedProject: false)
         }
     }
 }
 
 private struct AgentDefaultsSettingsView: View {
     @Environment(AppModel.self) private var model
+    let allowsProjectScope: Bool
     @State private var selectedModel: ModelRef?
     @State private var thinking = "medium"
     @State private var compaction = true
@@ -489,8 +518,9 @@ private struct AgentDefaultsSettingsView: View {
                     TronValueRow(icon: "scope", title: "Settings Scope") {
                         TronInlineMenu(scope == "project" ? "Current Project" : "Global Defaults") {
                             Button("Global Defaults") { scope = "global" }
-                            Button("Current Project") { scope = "project" }
-                                .disabled(model.selectedSnapshot == nil)
+                            if allowsProjectScope {
+                                Button("Current Project") { scope = "project" }
+                            }
                         }
                     }
                     Text(scope == "project" ? "Overrides apply only to the trusted current workspace." : "Defaults apply to every Tron workspace on this Mac.")
@@ -526,11 +556,20 @@ private struct AgentDefaultsSettingsView: View {
                 }
                 TronSettingsGroup("Project Resources", detail: "Trust controls project resource loading; it is not a sandbox.", accent: .tronAmber) {
                     TronValueRow(icon: "checkmark.shield", title: "Default Trust", accent: .tronAmber) {
-                        TronInlineMenu(trust.capitalized, accent: .tronAmber) {
+                        Menu {
                             Button("Ask") { trust = "ask" }
                             Button("Always") { trust = "always" }
                             Button("Never") { trust = "never" }
+                        } label: {
+                            Text(trust.capitalized)
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                .foregroundStyle(Color.tronAmber)
+                                .padding(.horizontal, 10)
+                                .frame(minHeight: 36)
+                                .contentShape(Capsule())
+                                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.10)).interactive(), in: Capsule())
                         }
+                        .accessibilityLabel("Default Trust: \(trust.capitalized)")
                     }
                 }
                 Button("Save Defaults") { Task { await save() } }
@@ -541,8 +580,13 @@ private struct AgentDefaultsSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Models and Defaults")
-        .task { await model.refreshSettings(); load() }
+        .task {
+            if !allowsProjectScope { scope = "global" }
+            await model.refreshSettings()
+            load()
+        }
         .onChange(of: scope) { _, _ in Task { await model.refreshSettings(); load() } }
+        .task(id: model.settingsRevision) { await model.refreshSettings(); load() }
     }
 
     private func load() {

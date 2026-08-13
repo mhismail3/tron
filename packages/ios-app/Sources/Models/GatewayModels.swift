@@ -39,6 +39,24 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     let messageCount: Int
     let firstMessage: String
     let phase: SessionPhase
+    let summaryRevision: Int?
+
+    init(
+        id: String, name: String?, cwd: String, parentSessionId: String?,
+        createdAt: String, updatedAt: String, messageCount: Int,
+        firstMessage: String, phase: SessionPhase, summaryRevision: Int? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.cwd = cwd
+        self.parentSessionId = parentSessionId
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.messageCount = messageCount
+        self.firstMessage = firstMessage
+        self.phase = phase
+        self.summaryRevision = summaryRevision
+    }
 
     var title: String {
         if let name, !name.isEmpty { return name }
@@ -48,6 +66,15 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
 
     var workspaceName: String {
         URL(fileURLWithPath: cwd).lastPathComponent.isEmpty ? cwd : URL(fileURLWithPath: cwd).lastPathComponent
+    }
+
+    var safeCachedProjection: SessionSummary {
+        guard phase.isActive else { return self }
+        return SessionSummary(
+            id: id, name: name, cwd: cwd, parentSessionId: parentSessionId,
+            createdAt: createdAt, updatedAt: updatedAt, messageCount: messageCount,
+            firstMessage: firstMessage, phase: .interrupted, summaryRevision: summaryRevision
+        )
     }
 
     func relativeActivityDescription(relativeTo now: Date = .now) -> String {
@@ -60,6 +87,16 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+struct SessionSummaryUpdate: Codable, Hashable, Sendable {
+    let sessionId: String
+    let summaryRevision: Int
+    let phase: SessionPhase
+    let name: String?
+    let updatedAt: String
+    let messageCount: Int
+    let firstMessage: String
+}
+
 struct ContextUsage: Codable, Hashable, Sendable {
     let tokens: Int?
     let contextWindow: Int
@@ -67,10 +104,17 @@ struct ContextUsage: Codable, Hashable, Sendable {
 }
 
 struct ContentPart: Codable, Hashable, Sendable, Identifiable {
+    struct Attachment: Codable, Hashable, Sendable {
+        let name: String
+        let mimeType: String
+        let size: Int
+    }
+
     enum Kind: String, Codable, Sendable { case text, thinking, image, toolCall }
     let id: String
     let type: Kind
     let text: String?
+    let attachment: Attachment?
     let redacted: Bool?
     let mimeType: String?
     let blobId: String?
@@ -101,6 +145,11 @@ struct MessageTranscriptItem: TranscriptPayload {
     let isError: Bool?
     let details: JSONValue?
     let usage: JSONValue?
+    let startedAt: String?
+    let completedAt: String?
+    let durationMs: Int?
+    let lastProgressAt: String?
+    let progressSequence: Int?
 }
 
 struct BashTranscriptItem: TranscriptPayload {
@@ -264,6 +313,11 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         default: nil
         }
     }
+    var startedAt: String? { if case .message(let value) = self { value.startedAt } else { nil } }
+    var completedAt: String? { if case .message(let value) = self { value.completedAt } else { nil } }
+    var durationMs: Int? { if case .message(let value) = self { value.durationMs } else { nil } }
+    var lastProgressAt: String? { if case .message(let value) = self { value.lastProgressAt } else { nil } }
+    var progressSequence: Int? { if case .message(let value) = self { value.progressSequence } else { nil } }
     var command: String? { if case .bash(let value) = self { value.command } else { nil } }
     var output: String? { if case .bash(let value) = self { value.output } else { nil } }
     var exitCode: Int? { if case .bash(let value) = self { value.exitCode } else { nil } }
@@ -342,14 +396,47 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     enum Status: String, Codable, Sendable { case running, completed, failed }
     let toolCallId: String
     let toolName: String
+    let order: Int?
     let status: Status
     let arguments: JSONValue
     let partialResult: JSONValue?
     let result: JSONValue?
+    let output: String?
+    let outputTruncated: Bool?
     let isError: Bool
     let startedAt: String
     let updatedAt: String
+    let lastProgressAt: String?
+    let completedAt: String?
+    let durationMs: Int?
+    let progressSequence: Int?
     var id: String { toolCallId }
+
+    init(
+        toolCallId: String, toolName: String, order: Int? = nil, status: Status,
+        arguments: JSONValue, partialResult: JSONValue?, result: JSONValue?,
+        output: String? = nil, outputTruncated: Bool? = nil,
+        isError: Bool, startedAt: String, updatedAt: String,
+        lastProgressAt: String? = nil, completedAt: String? = nil,
+        durationMs: Int? = nil, progressSequence: Int? = nil
+    ) {
+        self.toolCallId = toolCallId
+        self.toolName = toolName
+        self.order = order
+        self.status = status
+        self.arguments = arguments
+        self.partialResult = partialResult
+        self.result = result
+        self.output = output
+        self.outputTruncated = outputTruncated
+        self.isError = isError
+        self.startedAt = startedAt
+        self.updatedAt = updatedAt
+        self.lastProgressAt = lastProgressAt
+        self.completedAt = completedAt
+        self.durationMs = durationMs
+        self.progressSequence = progressSequence
+    }
 }
 
 struct RetryState: Codable, Hashable, Sendable {
@@ -388,6 +475,7 @@ struct SessionStats: Codable, Hashable, Sendable {
     let toolResults: Int
     let totalMessages: Int
     let tokens: Tokens
+    let latestCacheHitRate: Double?
     let cost: Double
 }
 
@@ -437,8 +525,10 @@ struct SessionTreeNode: Codable, Hashable, Identifiable, Sendable {
     let kind: String
     let label: String?
     let preview: String
-    let item: TranscriptItem?
-    let children: [SessionTreeNode]
+    let role: TranscriptItem.Role?
+    let depth: Int
+    let childCount: Int
+    let isCurrentPath: Bool
 }
 
 struct CommandInfo: Codable, Hashable, Identifiable, Sendable {

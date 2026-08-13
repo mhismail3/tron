@@ -17,9 +17,16 @@ struct SharedProtocolFixtureTests {
 
         #expect(snapshot.runtimeGeneration == "fixture-generation")
         #expect(Set(snapshot.transcript.map(\.kind)) == Set(TranscriptItem.Kind.allFixtureKinds))
-        #expect(snapshot.transcript.first?.content?.map(\.id) == ["user-entry:0", "user-entry:1"])
+        #expect(snapshot.transcript.first?.content?.map(\.id) == ["user-entry:0", "user-entry:1", "user-entry:2"])
+        #expect(snapshot.transcript.first?.content?.last?.type == .text)
+        #expect(snapshot.transcript.first?.content?.last?.attachment?.name == "fixture.pdf")
+        #expect(snapshot.transcript.first?.content?.last?.attachment?.size == 55_972)
         #expect(snapshot.transcript.first { $0.kind == .modelChange }?.modelRef == ModelRef(provider: "next-provider", id: "next-model"))
         #expect(snapshot.toolExecutions.first?.status == .running)
+        #expect(snapshot.toolExecutions.first?.order == 0)
+        #expect(snapshot.toolExecutions.first?.output == "working\nstep two")
+        #expect(snapshot.toolExecutions.first?.progressSequence == 2)
+        #expect(snapshot.transcript.first(where: { $0.toolCallId == "tool-call" })?.durationMs == 1_000)
         #expect(snapshot.extensionUI.pendingInteractions.first?.method == .select)
 
         let encoded = try JSONEncoder.gateway.encode(snapshot)

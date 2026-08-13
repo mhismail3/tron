@@ -11,7 +11,23 @@ describe("shared protocol-v2 fixtures", () => {
       "message", "bash", "customMessage", "customEntry", "compaction",
       "branchSummary", "modelChange", "thinkingChange", "label",
     ]));
-    expect(snapshot.toolExecutions[0]).toMatchObject({ toolCallId: "live-tool", status: "running" });
+    expect(snapshot.transcript[0]).toMatchObject({
+      content: expect.arrayContaining([
+        {
+          id: "user-entry:2", type: "text", text: "fixture.pdf",
+          attachment: { name: "fixture.pdf", mimeType: "application/pdf", size: 55_972 },
+        },
+      ]),
+    });
+    expect(snapshot.toolExecutions[0]).toMatchObject({
+      toolCallId: "live-tool",
+      order: 0,
+      status: "running",
+      output: "working\nstep two",
+      progressSequence: 2,
+    });
+    expect(snapshot.transcript.find((item) => item.kind === "message" && item.role === "toolResult"))
+      .toMatchObject({ durationMs: 1_000, progressSequence: 3 });
     expect(snapshot.extensionUI.pendingInteractions[0]).toMatchObject({ method: "select" });
     expect(snapshot.eventSequence).toBeGreaterThan(snapshot.revision);
   });

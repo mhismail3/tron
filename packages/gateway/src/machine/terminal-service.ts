@@ -79,6 +79,10 @@ export class TerminalService {
     return [...this.terminals.values()].filter((terminal) => terminal.sessionId === sessionId).map((terminal) => this.summary(terminal));
   }
 
+  belongsToSession(id: string, sessionId: string): boolean {
+    return this.get(id).sessionId === sessionId;
+  }
+
   attach(id: string, afterSequence: number): { terminal: TerminalSummary; chunks: Array<{ sequence: number; data: string }>; reset: boolean } {
     const terminal = this.get(id);
     const first = terminal.output[0]?.sequence ?? terminal.sequence + 1;

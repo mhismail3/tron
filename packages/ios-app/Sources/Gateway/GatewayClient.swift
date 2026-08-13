@@ -11,9 +11,14 @@ actor GatewayClient {
     private var session: URLSession?
     private var socket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
+    private var livenessTask: Task<Void, Never>?
     private var pending: [String: PendingRequest] = [:]
+    private var processingInboundFrame = false
+    private var inboundFrames: [Data] = []
     private var generation = 0
     private var intentionalDisconnectGenerations: Set<Int> = []
+    private var lastInboundAt: ContinuousClock.Instant?
+    private var overflowResyncSignaled = false
     private(set) var info: GatewayInfo?
     private var profile: GatewayProfile?
     private var token: String?
@@ -27,6 +32,7 @@ actor GatewayClient {
     deinit {
         eventContinuation.finish()
         receiveTask?.cancel()
+        livenessTask?.cancel()
         socket?.cancel(with: .goingAway, reason: nil)
     }
 
@@ -65,7 +71,10 @@ actor GatewayClient {
         }
         let info = decoded.info
         self.info = info
+        lastInboundAt = .now
+        overflowResyncSignaled = false
         receiveTask = Task { [weak self] in await self?.receiveLoop(generation: currentGeneration) }
+        livenessTask = Task { [weak self] in await self?.monitorLiveness(generation: currentGeneration) }
         return info
     }
 
@@ -83,6 +92,15 @@ actor GatewayClient {
         )
         profile = nil
         token = nil
+    }
+
+    func ensureResponsive(maximumSilence: Duration = .seconds(35)) async throws {
+        guard socket != nil, let lastInboundAt else {
+            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+        }
+        if ContinuousClock.now - lastInboundAt <= maximumSilence { return }
+        struct Response: Decodable { let protocolVersion: Int }
+        let _: Response = try await request("system.info", EmptyParams(), timeout: .seconds(8))
     }
 
     func request<P: Encodable, R: Decodable>(
@@ -113,7 +131,7 @@ actor GatewayClient {
                     do {
                         try await socket.send(.data(JSONEncoder.gateway.encode(frame)))
                     } catch {
-                        fail(id: id, error: error)
+                        fail(id: id, error: Self.transportFailure(error))
                     }
                 }
             }
@@ -161,16 +179,65 @@ actor GatewayClient {
         while !Task.isCancelled, generation == expected, let socket {
             do {
                 let message = try await socket.receive()
-                try handle(Self.data(from: message))
+                lastInboundAt = .now
+                enqueue(Self.data(from: message))
             } catch {
                 let intentional = intentionalDisconnectGenerations.remove(expected) != nil
                 guard generation == expected, !intentional, !(error is CancellationError) else { return }
-                disconnect(reason: error)
+                let failure = Self.transportFailure(error)
+                disconnect(reason: failure)
                 eventContinuation.yield(GatewayEvent(
                     type: "event",
                     topic: "transport.disconnected",
                     sessionId: nil,
-                    payload: .object(["message": .string(error.localizedDescription)])
+                    payload: .object(["message": .string(failure.message)])
+                ))
+                return
+            }
+        }
+    }
+
+    private func monitorLiveness(generation expected: Int) async {
+        while !Task.isCancelled, generation == expected, socket != nil {
+            try? await Task.sleep(for: .seconds(20))
+            guard !Task.isCancelled, generation == expected, socket != nil else { return }
+            do {
+                try await ensureResponsive(maximumSilence: .seconds(35))
+            } catch {
+                guard generation == expected else { return }
+                let failure = Self.transportFailure(error)
+                disconnect(reason: failure)
+                eventContinuation.yield(GatewayEvent(
+                    type: "event",
+                    topic: "transport.disconnected",
+                    sessionId: nil,
+                    payload: .object(["message": .string(failure.message)])
+                ))
+                return
+            }
+        }
+    }
+
+    private func enqueue(_ data: Data) {
+        inboundFrames.append(data)
+        drainInboundFrames()
+    }
+
+    private func drainInboundFrames() {
+        guard !processingInboundFrame else { return }
+        processingInboundFrame = true
+        defer { processingInboundFrame = false }
+        while !inboundFrames.isEmpty {
+            let data = inboundFrames.removeFirst()
+            do { try handle(data) }
+            catch {
+                let failure = Self.transportFailure(error)
+                disconnect(reason: failure)
+                eventContinuation.yield(GatewayEvent(
+                    type: "event",
+                    topic: "transport.disconnected",
+                    sessionId: nil,
+                    payload: .object(["message": .string(failure.message)])
                 ))
                 return
             }
@@ -189,12 +256,19 @@ actor GatewayClient {
             else { waiter.continuation.resume(throwing: response.error ?? GatewayFailure(code: "invalid_response", message: "Gateway returned an invalid error.", retryable: false, details: nil)) }
         case "event":
             let event = try JSONDecoder.gateway.decode(GatewayEvent.self, from: data)
-            if case .dropped = eventContinuation.yield(event) {
+            if case .dropped = eventContinuation.yield(event), !overflowResyncSignaled {
+                overflowResyncSignaled = true
+                disconnect(reason: GatewayFailure(
+                    code: "event_overflow",
+                    message: "The live event buffer overflowed; reconnecting for an authoritative snapshot.",
+                    retryable: true,
+                    details: nil
+                ))
                 _ = eventContinuation.yield(GatewayEvent(
                     type: "event",
-                    topic: "transport.resyncRequired",
-                    sessionId: event.sessionId,
-                    payload: .object(["reason": .string("event buffer overflow")])
+                    topic: "transport.disconnected",
+                    sessionId: nil,
+                    payload: .object(["message": .string("Live event buffer overflow")])
                 ))
             }
         default:
@@ -216,17 +290,27 @@ actor GatewayClient {
         if intentional, receiveTask != nil { intentionalDisconnectGenerations.insert(generation) }
         receiveTask?.cancel()
         receiveTask = nil
+        livenessTask?.cancel()
+        livenessTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         session?.invalidateAndCancel()
         session = nil
         info = nil
+        lastInboundAt = nil
+        overflowResyncSignaled = false
         let waiters = pending.values
         pending.removeAll()
+        inboundFrames.removeAll()
         for waiter in waiters {
             waiter.timeout.cancel()
             waiter.continuation.resume(throwing: reason)
         }
+    }
+
+    private nonisolated static func transportFailure(_ error: Error) -> GatewayFailure {
+        if let failure = error as? GatewayFailure { return failure }
+        return GatewayFailure(code: "disconnected", message: error.localizedDescription, retryable: true, details: nil)
     }
 
     private nonisolated static func data(from message: URLSessionWebSocketTask.Message) -> Data {

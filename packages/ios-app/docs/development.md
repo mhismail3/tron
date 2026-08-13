@@ -81,8 +81,11 @@ scripts/ios-gateway-e2e-test iterate
 ```
 
 The focused runner disables Xcode's failure sysdiagnose collection, which can
-otherwise add a ten-minute timeout after a UI assertion. Use `logs`, `status`,
-`stop`, and `clean` to inspect or manage the persistent fixture. CI owns the
+otherwise add a ten-minute timeout after a UI assertion. Its reconnect journey
+cold-launches back to the authoritative dashboard and explicitly reopens the
+session; transient `NavigationStack` state is not part of restoration or cache
+truth. Use `logs`, `status`, `stop`, and `clean` to inspect or manage the
+persistent fixture. CI owns the
 complete unit target; smoke/accessibility and real-gateway UI journeys remain
 explicit cross-module/release checkpoints because they are slower and depend on
 simulator integration rather than ordinary source compilation. Full UI suites

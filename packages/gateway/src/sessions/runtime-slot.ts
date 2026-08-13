@@ -22,6 +22,7 @@ import type {
   SessionOperationState,
   SessionPhase,
   SessionSnapshot,
+  SessionSummaryUpdate,
   SessionTreeNode,
   ToolExecutionState,
 } from "../protocol/types.js";
@@ -29,13 +30,25 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { BlobStore } from "./blob-store.js";
 import { ExtensionUIBroker } from "./extension-ui.js";
-import { projectMessage, projectTranscriptPage, projectTree, safeJson, type TranscriptPage } from "./projection.js";
+import {
+  fitSessionSnapshot,
+  projectJson,
+  projectMessage,
+  projectToolOutput,
+  projectToolResult,
+  projectTranscriptPage,
+  projectTree,
+  safeJson,
+  type ToolProjectionMetadata,
+  type TranscriptPage,
+} from "./projection.js";
 import type { RunMarkerStore } from "./run-markers.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
 export interface RuntimeSlotHooks {
   broadcast: SessionBroadcast;
+  summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
   rekey: (previousId: string, nextId: string, slot: RuntimeSlot) => void;
@@ -65,10 +78,19 @@ export class RuntimeSlot {
   private phase: SessionPhase;
   private disposed = false;
   private snapshotTimer: NodeJS.Timeout | undefined;
+  private activityHeartbeat: NodeJS.Timeout | undefined;
+  private readonly toolProgressTimers = new Map<string, NodeJS.Timeout>();
+  private readonly toolProgressPublishedAt = new Map<string, number>();
   private activeOperationId: string | undefined;
   private operation: SessionOperationState | undefined;
   private retry: RetryState | undefined;
+  private resourceReloadOptions: { resolveProjectTrust: () => Promise<boolean> } | undefined;
   private readonly toolExecutions = new Map<string, ToolExecutionState>();
+  /** Bounded runtime timing enriches the mobile projection without changing Pi
+   * JSONL. Historical entries without retained metadata use timestamp fallback. */
+  private readonly toolMetadata = new Map<string, ToolProjectionMetadata>();
+  private nextToolOrder = 0;
+  private lastPublishedSummary: SessionSummaryUpdate | undefined;
   private lastTouchedAt = Date.now();
 
   private constructor(
@@ -142,11 +164,16 @@ export class RuntimeSlot {
       // leak project providers between concurrent Tron sessions. Credentials and
       // model files remain canonical through their shared file paths.
       const modelRuntime = await this.dependencies.createModelRuntime();
+      this.resourceReloadOptions = {
+        // Reload must re-read the canonical decision. Capturing the value from
+        // runtime creation would leave project code loaded after trust changes.
+        resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
+      };
       const services = await createAgentSessionServices({
         cwd: trust.cwd,
         agentDir: this.dependencies.agentDir,
         modelRuntime,
-        resourceLoaderReloadOptions: { resolveProjectTrust: async () => trust.trusted },
+        resourceLoaderReloadOptions: this.resourceReloadOptions,
       });
       const created = await createAgentSessionFromServices({
         services,
@@ -175,7 +202,13 @@ export class RuntimeSlot {
       fork: (entryId, options) => this.runtime.fork(entryId, options),
       navigateTree: (targetId, options) => this.runtime.session.navigateTree(targetId, options),
       switchSession: (sessionPath, options) => this.runtime.switchSession(sessionPath, options),
-      reload: () => this.runtime.session.reload(),
+      reload: async () => {
+        await this.runtime.session.resourceLoader.reload(this.resourceReloadOptions);
+        await this.runtime.session.reload();
+        this.revision += 1;
+        this.emit("session.resourcesChanged", {});
+        this.publishSnapshot();
+      },
     };
   }
 
@@ -209,15 +242,47 @@ export class RuntimeSlot {
     });
   }
 
+  private summary(): SessionSummaryUpdate {
+    const entries = this.sessionManager.getEntries();
+    let firstMessage = "";
+    let messageCount = 0;
+    let updatedAt = this.sessionManager.getHeader()?.timestamp ?? new Date().toISOString();
+    for (const entry of entries) {
+      if (entry.type === "message") {
+        messageCount += 1;
+        if (!firstMessage && entry.message.role === "user") {
+          firstMessage = (typeof entry.message.content === "string"
+            ? entry.message.content
+            : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join(""))
+            .trim();
+        }
+      }
+      updatedAt = entry.timestamp;
+    }
+    const name = this.sessionManager.getSessionName();
+    return {
+      sessionId: this.id,
+      summaryRevision: 0,
+      phase: this.phase,
+      ...(name ? { name } : {}),
+      updatedAt,
+      messageCount,
+      firstMessage,
+    };
+  }
+
   private onEvent(event: AgentSessionEvent): void {
     this.revision += 1;
     this.touch();
     switch (event.type) {
       case "agent_start":
         this.phase = "running";
+        this.toolExecutions.clear();
+        this.nextToolOrder = 0;
         this.activeOperationId ??= randomUUID();
         this.operation ??= { id: this.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
         void this.dependencies.markers.mark(this.id, this.activeOperationId);
+        this.startActivityHeartbeat();
         this.publishSnapshot();
         break;
       case "agent_settled":
@@ -226,6 +291,9 @@ export class RuntimeSlot {
         this.operation = undefined;
         this.retry = undefined;
         this.toolExecutions.clear();
+        this.nextToolOrder = 0;
+        this.stopActivityHeartbeat();
+        this.clearToolProgressTimers();
         void this.dependencies.markers.clear(this.id);
         this.hooks.settled(this.id);
         this.publishSnapshot();
@@ -288,53 +356,85 @@ export class RuntimeSlot {
       }
       case "tool_execution_start": {
         const now = new Date().toISOString();
+        const existing = this.toolExecutions.get(event.toolCallId);
+        const startedAt = existing?.startedAt ?? now;
+        const progressSequence = (existing?.progressSequence ?? 0) + 1;
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
+          order: existing?.order ?? this.nextToolOrder++,
           status: "running",
-          arguments: safeJson(event.args),
+          arguments: projectJson(event.args),
           isError: false,
-          startedAt: now,
+          startedAt,
           updatedAt: now,
+          lastProgressAt: now,
+          progressSequence,
         };
         this.toolExecutions.set(event.toolCallId, state);
-        this.emit("session.toolProgress", safeJson(state));
+        this.rememberToolMetadata(event.toolCallId, state);
+        this.publishToolProgress(state, true);
         this.scheduleSnapshot();
         break;
       }
       case "tool_execution_update": {
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
+        const output = projectToolOutput(event.partialResult);
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
+          order: existing?.order ?? this.nextToolOrder++,
           status: "running",
-          arguments: safeJson(event.args),
-          partialResult: safeJson(event.partialResult),
+          arguments: projectJson(event.args),
+          partialResult: projectToolResult(event.partialResult),
+          ...(output.output === undefined
+            ? (existing?.output === undefined ? {} : {
+                output: existing.output,
+                ...(existing.outputTruncated ? { outputTruncated: true } : {}),
+              })
+            : output),
           isError: false,
           startedAt: existing?.startedAt ?? now,
           updatedAt: now,
+          lastProgressAt: now,
+          progressSequence: (existing?.progressSequence ?? 0) + 1,
         };
         this.toolExecutions.set(event.toolCallId, state);
-        this.emit("session.toolProgress", safeJson(state));
+        this.rememberToolMetadata(event.toolCallId, state);
+        this.publishToolProgress(state);
         break;
       }
       case "tool_execution_end": {
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
+        const startedAt = existing?.startedAt ?? now;
+        const output = projectToolOutput(event.result);
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
+          order: existing?.order ?? this.nextToolOrder++,
           status: event.isError ? "failed" : "completed",
           arguments: existing?.arguments ?? null,
           ...(existing?.partialResult === undefined ? {} : { partialResult: existing.partialResult }),
-          result: safeJson(event.result),
+          result: projectToolResult(event.result),
+          ...(output.output === undefined
+            ? (existing?.output === undefined ? {} : {
+                output: existing.output,
+                ...(existing.outputTruncated ? { outputTruncated: true } : {}),
+              })
+            : output),
           isError: event.isError,
-          startedAt: existing?.startedAt ?? now,
+          startedAt,
           updatedAt: now,
+          lastProgressAt: now,
+          completedAt: now,
+          durationMs: Number.isFinite(Date.parse(startedAt)) ? Math.max(0, Date.parse(now) - Date.parse(startedAt)) : 0,
+          progressSequence: (existing?.progressSequence ?? 0) + 1,
         };
         this.toolExecutions.set(event.toolCallId, state);
-        this.emit("session.toolProgress", safeJson(state));
+        this.rememberToolMetadata(event.toolCallId, state);
+        this.publishToolProgress(state, true);
         this.scheduleSnapshot();
         break;
       }
@@ -342,14 +442,95 @@ export class RuntimeSlot {
         this.emit("session.bashProgress", safeJson(event));
         break;
       case "entry_appended":
+        if (event.entry.type === "message" && event.entry.message.role === "toolResult") {
+          // The canonical result now owns presentation. Keeping the same payload
+          // in the live overlay for the rest of a long run duplicates output and
+          // can grow snapshots without bound.
+          this.toolExecutions.delete(event.entry.message.toolCallId);
+        }
+        this.emit("session.structureChanged", { branchChanged: false });
+        this.scheduleSnapshot();
+        break;
       case "message_end":
       case "queue_update":
+        this.scheduleSnapshot();
+        break;
       case "thinking_level_changed":
+        this.emit("session.contextChanged", {});
+        this.scheduleSnapshot();
+        break;
       case "session_info_changed":
         this.scheduleSnapshot();
+        this.hooks.changed(this.id);
         break;
       default:
         break;
+    }
+  }
+
+  private publishToolProgress(state: ToolExecutionState, immediate = false): void {
+    const minimumIntervalMs = 200;
+    const now = Date.now();
+    const last = this.toolProgressPublishedAt.get(state.toolCallId) ?? 0;
+    const pending = this.toolProgressTimers.get(state.toolCallId);
+    if (immediate || now - last >= minimumIntervalMs) {
+      if (pending) clearTimeout(pending);
+      this.toolProgressTimers.delete(state.toolCallId);
+      this.toolProgressPublishedAt.set(state.toolCallId, now);
+      this.emit("session.toolProgress", safeJson(state));
+      return;
+    }
+    if (pending) return;
+    const timer = setTimeout(() => {
+      this.toolProgressTimers.delete(state.toolCallId);
+      const current = this.toolExecutions.get(state.toolCallId);
+      if (!current) return;
+      this.toolProgressPublishedAt.set(state.toolCallId, Date.now());
+      this.emit("session.toolProgress", safeJson(current));
+    }, minimumIntervalMs - (now - last));
+    timer.unref();
+    this.toolProgressTimers.set(state.toolCallId, timer);
+  }
+
+  private clearToolProgressTimers(): void {
+    for (const timer of this.toolProgressTimers.values()) clearTimeout(timer);
+    this.toolProgressTimers.clear();
+    this.toolProgressPublishedAt.clear();
+  }
+
+  private startActivityHeartbeat(): void {
+    this.stopActivityHeartbeat();
+    this.activityHeartbeat = setInterval(() => {
+      if (this.disposed || !this.isBusy) return;
+      this.emit("session.heartbeat", safeJson({
+        phase: this.phase,
+        ...(this.activeOperationId ? { operationId: this.activeOperationId } : {}),
+        activeToolCallIds: [...this.toolExecutions.values()]
+          .filter((tool) => tool.status === "running")
+          .map((tool) => tool.toolCallId),
+      }));
+    }, 10_000);
+    this.activityHeartbeat.unref();
+  }
+
+  private stopActivityHeartbeat(): void {
+    if (this.activityHeartbeat) clearInterval(this.activityHeartbeat);
+    this.activityHeartbeat = undefined;
+  }
+
+  private rememberToolMetadata(toolCallId: string, state: ToolExecutionState): void {
+    this.toolMetadata.delete(toolCallId);
+    this.toolMetadata.set(toolCallId, {
+      startedAt: state.startedAt,
+      ...(state.completedAt ? { completedAt: state.completedAt } : {}),
+      ...(state.durationMs === undefined ? {} : { durationMs: state.durationMs }),
+      lastProgressAt: state.lastProgressAt,
+      progressSequence: state.progressSequence,
+    });
+    while (this.toolMetadata.size > 2_048) {
+      const oldest = this.toolMetadata.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.toolMetadata.delete(oldest);
     }
   }
 
@@ -365,11 +546,12 @@ export class RuntimeSlot {
     const session = this.runtime.session;
     const contextUsage = session.getContextUsage();
     const stats = session.getSessionStats();
+    const latestCacheHitRate = this.latestCacheHitRate();
     const streaming = session.state.streamingMessage
       ? projectMessage("streaming", null, new Date().toISOString(), session.state.streamingMessage, this.dependencies.blobs)
       : undefined;
     const transcriptPage = this.transcriptPage();
-    return {
+    return fitSessionSnapshot({
       sessionId: session.sessionId,
       runtimeGeneration: this.runtimeGeneration,
       revision: this.revision,
@@ -389,6 +571,7 @@ export class RuntimeSlot {
         toolResults: stats.toolResults,
         totalMessages: stats.totalMessages,
         tokens: stats.tokens,
+        ...(latestCacheHitRate === undefined ? {} : { latestCacheHitRate }),
         cost: stats.cost,
       },
       queued: { steering: [...session.getSteeringMessages()], followUp: [...session.getFollowUpMessages()] },
@@ -399,20 +582,45 @@ export class RuntimeSlot {
       ...(session.sessionManager.getLeafId() ? { leafEntryId: session.sessionManager.getLeafId()! } : {}),
       ...(this.operation ? { operation: this.operation } : {}),
       ...(this.retry ? { retry: this.retry } : {}),
-      toolExecutions: [...this.toolExecutions.values()],
+      toolExecutions: [...this.toolExecutions.values()].sort((left, right) => left.order - right.order),
       extensionUI: this.ui.state(),
       diagnostics: this.runtime.diagnostics.map((diagnostic) => ({ type: diagnostic.type, message: diagnostic.message })),
-    };
+    });
   }
 
-  transcriptPage(before?: number): TranscriptPage {
-    return projectTranscriptPage(this.runtime.session.sessionManager, this.dependencies.blobs, before);
+  transcriptPage(before?: number, expectedNextEntryId?: string): TranscriptPage {
+    try {
+      return projectTranscriptPage(
+        this.runtime.session.sessionManager,
+        this.dependencies.blobs,
+        before,
+        undefined,
+        expectedNextEntryId,
+        this.toolMetadata,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("anchor changed")) {
+        throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
+      }
+      throw error;
+    }
   }
 
   publishSnapshot(): void {
     if (this.disposed) return;
     this.eventSequence += 1;
     this.hooks.broadcast(this.id, "session.snapshot", this.snapshot(this.eventSequence) as unknown as JsonValue);
+    const summary = this.summary();
+    if (!this.lastPublishedSummary
+      || summary.sessionId !== this.lastPublishedSummary.sessionId
+      || summary.phase !== this.lastPublishedSummary.phase
+      || summary.name !== this.lastPublishedSummary.name
+      || summary.updatedAt !== this.lastPublishedSummary.updatedAt
+      || summary.messageCount !== this.lastPublishedSummary.messageCount
+      || summary.firstMessage !== this.lastPublishedSummary.firstMessage) {
+      this.lastPublishedSummary = summary;
+      this.hooks.summaryChanged(summary);
+    }
   }
 
   async prompt(text: string, images: ImageContent[] = [], behavior?: "steer" | "followUp"): Promise<{ operationId: string }> {
@@ -507,6 +715,7 @@ export class RuntimeSlot {
       if (unknown.length > 0) throw new GatewayError("invalid_request", `Unknown agent tools: ${unknown.join(", ")}`);
       this.runtime.session.setActiveToolsByName(toolNames);
       this.revision += 1;
+      this.emit("session.contextChanged", {});
       this.publishSnapshot();
     });
   }
@@ -565,6 +774,7 @@ export class RuntimeSlot {
       if (!this.sessionManager.getEntry(entryId)) throw new GatewayError("not_found", "Session entry was not found");
       this.sessionManager.appendLabelChange(entryId, label?.trim() || undefined);
       this.revision += 1;
+      this.emit("session.structureChanged", { branchChanged: false });
       this.publishSnapshot();
     });
   }
@@ -578,6 +788,7 @@ export class RuntimeSlot {
       const next = this.id;
       if (previous !== next) this.hooks.rekey(previous, next, this);
       this.revision += 1;
+      this.emit("session.structureChanged", { branchChanged: true });
       this.publishSnapshot();
       return { sessionId: next, ...(result.selectedText ? { selectedText: result.selectedText } : {}) };
     });
@@ -599,9 +810,22 @@ export class RuntimeSlot {
       this.operation = undefined;
       if (result.cancelled) throw new GatewayError("cancelled", "Tree navigation was cancelled by an extension");
       this.revision += 1;
+      this.emit("session.structureChanged", { branchChanged: true });
       this.publishSnapshot();
       return result.editorText ? { editorText: result.editorText } : {};
     });
+  }
+
+  private latestCacheHitRate(): number | undefined {
+    const entries = this.runtime.session.sessionManager.getEntries();
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index]!;
+      if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+      const { input, cacheRead, cacheWrite } = entry.message.usage;
+      const promptTokens = input + cacheRead + cacheWrite;
+      return promptTokens > 0 ? (cacheRead / promptTokens) * 100 : undefined;
+    }
+    return undefined;
   }
 
   tree(): SessionTreeNode[] {
@@ -654,11 +878,49 @@ export class RuntimeSlot {
     const session = this.runtime.session;
     const loader = session.resourceLoader;
     return {
-      tools: session.getAllTools(),
-      skills: loader.getSkills(),
-      prompts: loader.getPrompts(),
-      extensions: loader.getExtensions().extensions.map((extension) => ({ path: extension.path, source: extension.sourceInfo })),
-      contextFiles: loader.getAgentsFiles().agentsFiles.map((file) => ({ path: file.path })),
+      tools: session.getAllTools().map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        scope: tool.sourceInfo.scope,
+        source: tool.sourceInfo.source,
+        parameters: tool.parameters,
+        promptGuidelines: tool.promptGuidelines,
+      })),
+      skills: {
+        skills: loader.getSkills().skills.map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+          path: skill.filePath,
+          scope: skill.sourceInfo.scope,
+          source: skill.sourceInfo.source,
+          disableModelInvocation: skill.disableModelInvocation,
+        })),
+        diagnostics: loader.getSkills().diagnostics,
+      },
+      prompts: {
+        prompts: loader.getPrompts().prompts.map((prompt) => ({
+          name: prompt.name,
+          description: prompt.description,
+          argumentHint: prompt.argumentHint,
+          path: prompt.filePath,
+          scope: prompt.sourceInfo.scope,
+          source: prompt.sourceInfo.source,
+        })),
+        diagnostics: loader.getPrompts().diagnostics,
+      },
+      extensions: loader.getExtensions().extensions.map((extension) => ({
+        name: basename(extension.path),
+        path: extension.path,
+        resolvedPath: extension.resolvedPath,
+        scope: extension.sourceInfo.scope,
+        source: extension.sourceInfo.source,
+        tools: Array.from(extension.tools.keys()),
+        commands: Array.from(extension.commands.keys()),
+      })),
+      contextFiles: loader.getAgentsFiles().agentsFiles.map((file) => ({
+        name: basename(file.path),
+        path: file.path,
+      })),
     };
   }
 
@@ -669,8 +931,10 @@ export class RuntimeSlot {
   async reload(): Promise<void> {
     await this.lane.run(async () => {
       this.assertIdle();
+      await this.runtime.session.resourceLoader.reload(this.resourceReloadOptions);
       await this.runtime.session.reload();
       this.revision += 1;
+      this.emit("session.resourcesChanged", {});
       this.publishSnapshot();
     });
   }
@@ -707,6 +971,8 @@ export class RuntimeSlot {
     if (this.isBusy) throw new GatewayError("busy", "Cannot evict a busy session runtime");
     this.disposed = true;
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
+    this.stopActivityHeartbeat();
+    this.clearToolProgressTimers();
     this.unsubscribe?.();
     this.ui.cancelAll();
     await this.runtime.dispose();

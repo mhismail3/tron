@@ -104,6 +104,7 @@ struct OnboardingView: View {
         }
         .tint(.tronEmerald)
         .gatewayGlobalSheets()
+        .providerAuthPresenter()
         .alert("Tron", isPresented: Binding(
             get: { model.onboardingError != nil || model.lastError != nil },
             set: { if !$0 { model.onboardingError = nil; model.lastError = nil } }

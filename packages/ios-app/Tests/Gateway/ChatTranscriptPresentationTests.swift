@@ -66,6 +66,209 @@ struct ChatTranscriptPresentationTests {
         ))
     }
 
+    @Test("tail follow tracks settling content only while the user stays at the bottom")
+    func tailFollowContentGrowthPolicy() {
+        #expect(ChatTailFollowPolicy.shouldFollowContentGrowth(
+            previousHeight: 1_000,
+            currentHeight: 1_080,
+            userScrolledAway: false,
+            isUserInteracting: false,
+            isRestoringEarlierMessages: false
+        ))
+        #expect(!ChatTailFollowPolicy.shouldFollowContentGrowth(
+            previousHeight: 1_000,
+            currentHeight: 1_080,
+            userScrolledAway: true,
+            isUserInteracting: false,
+            isRestoringEarlierMessages: false
+        ))
+        #expect(!ChatTailFollowPolicy.shouldFollowContentGrowth(
+            previousHeight: 1_000,
+            currentHeight: 1_000.4,
+            userScrolledAway: false,
+            isUserInteracting: false,
+            isRestoringEarlierMessages: false
+        ))
+        #expect(!ChatTailFollowPolicy.shouldFollowContentGrowth(
+            previousHeight: 0,
+            currentHeight: 1_000,
+            userScrolledAway: false,
+            isUserInteracting: false,
+            isRestoringEarlierMessages: false
+        ))
+        #expect(!ChatTailFollowPolicy.shouldFollowContentGrowth(
+            previousHeight: 1_000,
+            currentHeight: 1_080,
+            userScrolledAway: false,
+            isUserInteracting: true,
+            isRestoringEarlierMessages: false
+        ))
+        #expect(!ChatTailFollowPolicy.shouldFollowContentGrowth(
+            previousHeight: 1_000,
+            currentHeight: 1_080,
+            userScrolledAway: false,
+            isUserInteracting: false,
+            isRestoringEarlierMessages: true
+        ))
+        #expect(ChatTailFollowPolicy.userScrolledUp(previousOffset: 500, currentOffset: 494))
+        #expect(!ChatTailFollowPolicy.userScrolledUp(previousOffset: 500, currentOffset: 499.5))
+    }
+
+    @Test("compaction token counts use compact K shorthand")
+    func compactCompactionTokenCounts() {
+        #expect(ChatTokenCountPresentation.beforeCompaction(0) == "0 tokens before compaction")
+        #expect(ChatTokenCountPresentation.beforeCompaction(1) == "1 token before compaction")
+        #expect(ChatTokenCountPresentation.beforeCompaction(999) == "999 tokens before compaction")
+        #expect(ChatTokenCountPresentation.beforeCompaction(1_000) == "1K tokens before compaction")
+        #expect(ChatTokenCountPresentation.beforeCompaction(12_300) == "12.3K tokens before compaction")
+        #expect(ChatTokenCountPresentation.beforeCompaction(322_486) == "322K tokens before compaction")
+    }
+
+    @Test("prompt images and files share one attachment strip above text")
+    func promptAttachmentStrip() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"user","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[
+            {"id":"user:0","type":"text","text":"What about these?"},
+            {"id":"user:1","type":"image","mimeType":"image/jpeg","blobId":"photo"},
+            {"id":"user:2","type":"text","text":"notes.pdf","attachment":{"name":"notes.pdf","mimeType":"application/pdf","size":2048}}
+          ]}
+        ]
+        """)
+        let item = try #require(snapshot.transcript.first)
+        let attachments = ChatTranscriptPresentation.attachmentParts(in: item)
+        #expect(attachments.map(\.type) == [.image, .text])
+        #expect(attachments.last?.attachment?.name == "notes.pdf")
+        #expect(attachments.last?.attachment?.size == 2048)
+    }
+
+    @Test("consecutive thinking lines become one complete inline run")
+    func groupsConsecutiveThinkingLines() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"thinking-1","type":"thinking","text":"  Inspecting the transcript  \\nChecking spacing..."},
+            {"id":"thinking-2","type":"thinking","text":"Confirming   the grouped lines…\\n..."},
+            {"id":"answer","type":"text","text":"Done"}
+          ]}
+        ]
+        """)
+        let item = try #require(snapshot.transcript.first)
+        let parts = ChatTranscriptPresentation.messageParts(in: item)
+
+        #expect(parts.count == 2)
+        guard case .thinking(let run) = parts[0] else {
+            Issue.record("Expected one thinking run")
+            return
+        }
+        #expect(run.id == "thinking-1")
+        #expect(run.segments.map(\.id) == [
+            "thinking-1:line:0",
+            "thinking-1:line:1",
+            "thinking-2:line:0",
+            "thinking-2:line:1",
+        ])
+        #expect(run.segments.map(\.text) == [
+            "Inspecting the transcript…",
+            "Checking spacing…",
+            "Confirming the grouped lines…",
+            "…",
+        ])
+        guard case .content(let answer) = parts[1] else {
+            Issue.record("Expected answer after thinking")
+            return
+        }
+        #expect(answer.id == "answer")
+    }
+
+    @Test("content boundaries keep thinking runs separate and stable")
+    func thinkingRunBoundaries() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"thinking-1","type":"thinking","text":"First"},
+            {"id":"call","type":"toolCall","toolCallId":"call-1","name":"read","arguments":{}},
+            {"id":"thinking-empty","type":"thinking","text":"  \\n  "},
+            {"id":"thinking-2","type":"thinking","text":"Second"}
+          ]}
+        ]
+        """)
+        let item = try #require(snapshot.transcript.first)
+        let parts = ChatTranscriptPresentation.messageParts(in: item)
+
+        #expect(parts.map(\.id) == ["thinking-thinking-1", "content-call", "thinking-thinking-2"])
+        guard case .thinking(let trailingRun) = parts[2] else {
+            Issue.record("Expected trailing thinking run")
+            return
+        }
+        #expect(trailingRun.segments.map(\.id) == ["thinking-2:line:0"])
+        #expect(trailingRun.segments.map(\.text) == ["Second…"])
+    }
+
+    @Test("timeline preserves thinking around an intervening tool")
+    func preservesThinkingToolOrder() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"thinking-1","type":"thinking","text":"First"},
+            {"id":"call","type":"toolCall","toolCallId":"call-1","name":"read","arguments":{}},
+            {"id":"thinking-2","type":"thinking","text":"Second"}
+          ]}
+        ]
+        """)
+        let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
+
+        #expect(timeline.ids == [
+            "assistant",
+            "tool-run-call-1",
+            "assistant-slice-thinking-thinking-2",
+        ])
+        guard case .message(let first) = timeline.items[0],
+              case .thinking(let firstRun) = first.parts.first,
+              case .message(let last) = timeline.items[2],
+              case .thinking(let lastRun) = last.parts.first else {
+            Issue.record("Expected thinking slices around the tool run")
+            return
+        }
+        #expect(firstRun.segments.map(\.text) == ["First…"])
+        #expect(lastRun.segments.map(\.text) == ["Second…"])
+    }
+
+    @Test("thinking barriers preserve exact order across multiple consolidated tool runs")
+    func thinkingBarriersPreserveToolOrder() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"thinking-1","type":"thinking","text":"First"},
+            {"id":"call-1","type":"toolCall","toolCallId":"call-1","name":"read","arguments":{}},
+            {"id":"call-2","type":"toolCall","toolCallId":"call-2","name":"read","arguments":{}},
+            {"id":"thinking-2","type":"thinking","text":"Between"},
+            {"id":"call-3","type":"toolCall","toolCallId":"call-3","name":"bash","arguments":{}},
+            {"id":"thinking-3","type":"thinking","text":"Last"}
+          ]}
+        ]
+        """)
+        let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
+
+        #expect(timeline.ids == [
+            "assistant",
+            "tool-run-call-1",
+            "assistant-slice-thinking-thinking-2",
+            "tool-run-call-3",
+            "assistant-slice-thinking-thinking-3",
+        ])
+        guard case .toolRun(let firstRun) = timeline.items[1],
+              case .message(let between) = timeline.items[2],
+              case .thinking(let betweenThinking) = between.parts.first,
+              case .toolRun(let secondRun) = timeline.items[3] else {
+            Issue.record("Expected thinking to split canonical tool runs")
+            return
+        }
+        #expect(firstRun.tools.map(\.id) == ["call-1", "call-2"])
+        #expect(betweenThinking.segments.map(\.text) == ["Between…"])
+        #expect(secondRun.tools.map(\.id) == ["call-3"])
+    }
+
     @Test("consecutive tool calls collapse into one presentation run")
     func groupsConsecutiveToolCalls() throws {
         let snapshot = try fixture(transcript: """
@@ -84,7 +287,180 @@ struct ChatTranscriptPresentationTests {
             return
         }
         #expect(run.tools.map(\.title) == ["read", "bash"])
+        #expect(run.tools[0].request == .object(["path": .string("one")]))
+        #expect(run.tools[0].response == nil)
+        #expect(run.tools[1].request == .object(["command": .string("pwd")]))
         #expect(run.title == "Used 2 tools")
+    }
+
+    @Test("parallel live tools keep one stable canonical row through settlement")
+    func liveToolsKeepStableTimelineIdentity() throws {
+        let callOne = "call-1"
+        let callTwo = "call-2"
+        let callThree = "call-3"
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"user","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"user:0","type":"text","text":"test tools"}]}
+        ]
+        """)
+        snapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[
+          {"id":"thinking","type":"thinking","text":"Testing tools"},
+          {"id":"part-1","type":"toolCall","toolCallId":"\(callOne)","name":"bash","arguments":{"command":"pwd"}},
+          {"id":"part-2","type":"toolCall","toolCallId":"\(callTwo)","name":"read","arguments":{"path":"README.md"}},
+          {"id":"part-3","type":"toolCall","toolCallId":"\(callThree)","name":"subagent","arguments":{}}
+        ]}
+        """)
+        snapshot.toolExecutions = [
+            tool(callOne, "bash", startedAt: "2026-01-01T00:00:01Z"),
+            tool(callTwo, "read", startedAt: "2026-01-01T00:00:01Z"),
+            tool(callThree, "subagent", startedAt: "2026-01-01T00:00:01Z"),
+        ]
+
+        let live = ChatTranscriptPresentation.timeline(in: snapshot)
+        #expect(live.ids == ["user", "streaming", "tool-run-call-1"])
+        guard case .toolRun(let liveRun) = live.items.last else {
+            Issue.record("Expected a live tool run")
+            return
+        }
+        #expect(liveRun.tools.map(\.id) == [callOne, callTwo, callThree])
+        #expect(liveRun.title == "Using 3 tools")
+
+        snapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[
+          {"id":"thinking","type":"thinking","text":"Testing tools"},
+          {"id":"part-1","type":"toolCall","toolCallId":"\(callOne)","name":"bash","arguments":{"command":"pwd"}}
+        ]}
+        """)
+        snapshot.toolExecutions = [snapshot.toolExecutions[0]]
+        let partial = ChatTranscriptPresentation.timeline(in: snapshot)
+        #expect(partial.ids.last == "tool-run-call-1")
+
+        snapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[
+          {"id":"thinking","type":"thinking","text":"Testing tools"},
+          {"id":"part-1","type":"toolCall","toolCallId":"\(callOne)","name":"bash","arguments":{"command":"pwd"}},
+          {"id":"part-2","type":"toolCall","toolCallId":"\(callTwo)","name":"read","arguments":{"path":"README.md"}},
+          {"id":"part-3","type":"toolCall","toolCallId":"\(callThree)","name":"subagent","arguments":{}}
+        ]}
+        """)
+        snapshot.toolExecutions = [
+            tool(callThree, "subagent", startedAt: "2026-01-01T00:00:01Z", order: 2),
+            tool(callOne, "bash", startedAt: "2026-01-01T00:00:01Z", order: 0),
+            tool(callTwo, "read", startedAt: "2026-01-01T00:00:01Z", order: 1),
+        ]
+        let expanded = ChatTranscriptPresentation.timeline(in: snapshot)
+        #expect(expanded.ids.last == partial.ids.last)
+        guard case .toolRun(let expandedRun) = expanded.items.last else {
+            Issue.record("Expected expanded live tool run")
+            return
+        }
+        #expect(expandedRun.tools.map(\.id) == [callOne, callTwo, callThree])
+
+        snapshot.transcript = try transcript("""
+        [
+          {"id":"user","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"user:0","type":"text","text":"test tools"}]},
+          {"id":"assistant-tools","parentId":"user","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[
+            {"id":"thinking","type":"thinking","text":"Testing tools"},
+            {"id":"part-1","type":"toolCall","toolCallId":"\(callOne)","name":"bash","arguments":{"command":"pwd"}},
+            {"id":"part-2","type":"toolCall","toolCallId":"\(callTwo)","name":"read","arguments":{"path":"README.md"}},
+            {"id":"part-3","type":"toolCall","toolCallId":"\(callThree)","name":"subagent","arguments":{}}
+          ]},
+          {"id":"result-1","parentId":"assistant-tools","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"toolResult","content":[{"id":"r1","type":"text","text":"one"}],"toolCallId":"\(callOne)","toolName":"bash","isError":false},
+          {"id":"result-2","parentId":"result-1","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"toolResult","content":[{"id":"r2","type":"text","text":"two"}],"toolCallId":"\(callTwo)","toolName":"read","isError":false},
+          {"id":"result-3","parentId":"result-2","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"toolResult","content":[{"id":"r3","type":"text","text":"three"}],"toolCallId":"\(callThree)","toolName":"subagent","isError":false}
+        ]
+        """)
+        snapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"All done"}]}
+        """)
+        snapshot.toolExecutions = snapshot.toolExecutions.map {
+            tool($0.toolCallId, $0.toolName, status: .completed, startedAt: $0.startedAt)
+        }
+
+        let completing = ChatTranscriptPresentation.timeline(in: snapshot)
+        #expect(completing.ids == ["user", "assistant-tools", "tool-run-call-1", "streaming"])
+        #expect(completing.ids.filter { $0 == "tool-run-call-1" }.count == 1)
+        guard case .toolRun(let completedRun) = completing.items[2] else {
+            Issue.record("Expected the settled tool run before the response")
+            return
+        }
+        #expect(completedRun.title == "Used 3 tools")
+
+        snapshot.transcript.append(try message("""
+        {"id":"assistant-final","parentId":"result-3","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"All done"}]}
+        """))
+        snapshot.streaming = nil
+        snapshot.toolExecutions = []
+        let settled = ChatTranscriptPresentation.timeline(in: snapshot)
+        #expect(settled.ids == ["user", "assistant-tools", "tool-run-call-1", "assistant-final"])
+    }
+
+    @Test("live tool order is deterministic when progress events arrive out of order")
+    func deterministicLiveToolOrder() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.toolExecutions = [
+            tool("later", "read", startedAt: "2026-01-01T00:00:01Z", order: 2),
+            tool("same-b", "bash", startedAt: "2026-01-01T00:00:01Z", order: 1),
+            tool("same-a", "find", startedAt: "2026-01-01T00:00:01Z", order: 0),
+        ]
+        let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
+        guard case .toolRun(let run) = timeline.items.first else {
+            Issue.record("Expected deterministic live run")
+            return
+        }
+        #expect(run.tools.map(\.id) == ["same-a", "same-b", "later"])
+    }
+
+    @Test("live output, monotonic progress, and execution timing stay auditable")
+    func liveToolAuditProjection() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"wait","name":"subagent_wait","arguments":{"id":"child"}}]}
+        ]
+        """)
+        snapshot.toolExecutions = [ToolExecutionState(
+            toolCallId: "wait",
+            toolName: "subagent_wait",
+            order: 0,
+            status: .running,
+            arguments: .object(["id": .string("child")]),
+            partialResult: .object(["content": .array([.object(["type": .string("text"), "text": .string("Waiting 12s · reviewer: read")])])]),
+            result: nil,
+            output: "Waiting 12s · reviewer: read",
+            isError: false,
+            startedAt: "2026-01-01T00:00:01Z",
+            updatedAt: "2026-01-01T00:00:13Z",
+            lastProgressAt: "2026-01-01T00:00:13Z",
+            progressSequence: 14
+        )]
+
+        guard case .toolRun(let run) = ChatTranscriptPresentation.timeline(in: snapshot).items.first else {
+            Issue.record("Expected live tool run")
+            return
+        }
+        let tool = try #require(run.tools.first)
+        #expect(tool.content == "Waiting 12s · reviewer: read")
+        #expect(tool.progressSequence == 14)
+        #expect(tool.elapsedMilliseconds(at: try #require(ToolTiming.date("2026-01-01T00:00:13Z"))) == 12_000)
+        #expect(ToolTiming.format(milliseconds: 478_000) == "7m 58s")
+    }
+
+    @Test("canonical history derives timing when exact runtime metadata is unavailable")
+    func canonicalTimingFallback() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"read","name":"read","arguments":{}}]},
+          {"id":"result","parentId":"assistant","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"text","type":"text","text":"done"}],"toolCallId":"read","toolName":"read","isError":false,"completedAt":"2026-01-01T00:00:03Z"}
+        ]
+        """)
+        guard case .toolRun(let run) = ChatTranscriptPresentation.timeline(in: snapshot).items.first,
+              let tool = run.tools.first else {
+            Issue.record("Expected canonical tool run")
+            return
+        }
+        #expect(tool.durationMs == 2_000)
+        #expect(tool.elapsedMilliseconds() == 2_000)
     }
 
     @Test("conversation content interrupts tool grouping")
@@ -100,7 +476,40 @@ struct ChatTranscriptPresentationTests {
 
         let rendered = ChatTranscriptPresentation.renderItems(in: snapshot)
         #expect(rendered.count == 3)
-        #expect(rendered.map(\.id) == ["tool-run-call", "assistant-text", "tool-run-bash"])
+        #expect(rendered.map(\.id) == ["tool-run-call", "assistant-text", "bash"])
+    }
+
+    private func message(_ value: String) throws -> TranscriptItem {
+        try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data(value.utf8))
+    }
+
+    private func transcript(_ value: String) throws -> [TranscriptItem] {
+        try JSONDecoder.gateway.decode([TranscriptItem].self, from: Data(value.utf8))
+    }
+
+    private func tool(
+        _ id: String,
+        _ name: String,
+        status: ToolExecutionState.Status = .running,
+        startedAt: String,
+        order: Int? = nil
+    ) -> ToolExecutionState {
+        ToolExecutionState(
+            toolCallId: id,
+            toolName: name,
+            order: order,
+            status: status,
+            arguments: .object([:]),
+            partialResult: nil,
+            result: status == .running ? nil : .object(["ok": .bool(true)]),
+            isError: status == .failed,
+            startedAt: startedAt,
+            updatedAt: startedAt,
+            lastProgressAt: startedAt,
+            completedAt: status == .running ? nil : startedAt,
+            durationMs: status == .running ? nil : 0,
+            progressSequence: 1
+        )
     }
 
     private func fixture(transcript: String) throws -> SessionSnapshot {

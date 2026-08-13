@@ -1,4 +1,165 @@
 import SwiftUI
+import UIKit
+
+/// UIKit owns selection and the capped editor's internal scroll position. A
+/// vertical SwiftUI TextField can repeatedly relayout at its line cap and lose
+/// the insertion point while typing; this control keeps one stable scroll owner.
+struct MultilineComposerTextView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    @Binding var height: CGFloat
+    let isEditable: Bool
+    var maximumLines = 8
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.delegate = context.coordinator
+        view.backgroundColor = .clear
+        view.textColor = UIColor(Color.tronEmerald)
+        view.tintColor = UIColor(Color.tronEmerald)
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.contentInset = .zero
+        view.alwaysBounceVertical = false
+        view.keyboardDismissMode = .interactive
+        view.adjustsFontForContentSizeCategory = true
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.accessibilityLabel = "Message input"
+        context.coordinator.updateFont(on: view)
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.updateFont(on: view)
+        view.isEditable = isEditable
+        view.isSelectable = isEditable
+        if view.text != text {
+            view.text = text
+            view.selectedRange = NSRange(location: (text as NSString).length, length: 0)
+        }
+        context.coordinator.updateLayout(of: view, keepCaretVisible: true)
+
+        context.coordinator.reconcileFocus(on: view)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: MultilineComposerTextView
+        private var usesInternalScrolling = false
+        private var lastWidth: CGFloat = 0
+        private(set) var hasMirroredFocus = false
+
+        init(_ parent: MultilineComposerTextView) { self.parent = parent }
+
+        func reconcileFocus(on view: UITextView) {
+            // A direct tap makes UITextView first responder before SwiftUI mirrors
+            // the delegate callback. Never resign from that one stale render.
+            // Programmatic dismissal is explicit only after UIKit has reported
+            // focus for this responder lifetime.
+            if parent.isFocused, !view.isFirstResponder, parent.isEditable {
+                DispatchQueue.main.async { [weak view, weak self] in
+                    guard let view, let self,
+                          self.parent.isFocused,
+                          self.parent.isEditable,
+                          view.window != nil,
+                          !view.isFirstResponder else { return }
+                    view.becomeFirstResponder()
+                }
+            } else if Self.shouldResign(
+                desiredFocus: parent.isFocused,
+                isFirstResponder: view.isFirstResponder,
+                hasMirroredFocus: hasMirroredFocus
+            ) {
+                view.resignFirstResponder()
+            }
+        }
+
+        static func shouldResign(
+            desiredFocus: Bool,
+            isFirstResponder: Bool,
+            hasMirroredFocus: Bool
+        ) -> Bool {
+            !desiredFocus && isFirstResponder && hasMirroredFocus
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            hasMirroredFocus = true
+            if !parent.isFocused { parent.isFocused = true }
+            updateLayout(of: textView, keepCaretVisible: true)
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            hasMirroredFocus = false
+            if parent.isFocused { parent.isFocused = false }
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            if parent.text != textView.text { parent.text = textView.text }
+            updateLayout(of: textView, keepCaretVisible: true)
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            guard textView.isFirstResponder else { return }
+            keepCaretVisible(in: textView)
+        }
+
+        func updateFont(on view: UITextView) {
+            let base = TronFontLoader.createUIFont(size: TronTypography.sizeBodyLG, weight: .regular)
+            let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: base)
+            if view.font != font { view.font = font }
+        }
+
+        func updateLayout(of view: UITextView, keepCaretVisible: Bool) {
+            guard view.bounds.width > 0, let font = view.font else { return }
+            let fitting = view.sizeThatFits(CGSize(width: view.bounds.width, height: .greatestFiniteMagnitude)).height
+            let minimum = ceil(font.lineHeight)
+            let maximum = ceil(font.lineHeight * CGFloat(max(parent.maximumLines, 1)))
+
+            // Hysteresis prevents the backing scroll view toggling on and off as
+            // the final wrapped line fluctuates by a fraction during typing.
+            if usesInternalScrolling {
+                usesInternalScrolling = fitting > maximum - font.lineHeight
+            } else {
+                usesInternalScrolling = fitting > maximum + 0.5
+            }
+            if view.isScrollEnabled != usesInternalScrolling {
+                view.isScrollEnabled = usesInternalScrolling
+            }
+
+            let resolvedHeight = min(max(fitting, minimum), maximum)
+            if abs(parent.height - resolvedHeight) > 0.5 {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, abs(self.parent.height - resolvedHeight) > 0.5 else { return }
+                    self.parent.height = resolvedHeight
+                }
+            }
+            if lastWidth != view.bounds.width {
+                lastWidth = view.bounds.width
+                view.layoutIfNeeded()
+            }
+            if keepCaretVisible { self.keepCaretVisible(in: view) }
+        }
+
+        private func keepCaretVisible(in view: UITextView) {
+            guard usesInternalScrolling else {
+                if view.contentOffset != .zero { view.setContentOffset(.zero, animated: false) }
+                return
+            }
+            DispatchQueue.main.async {
+                view.layoutIfNeeded()
+                view.scrollRangeToVisible(view.selectedRange)
+                let minimumY = -view.adjustedContentInset.top
+                let maximumY = max(minimumY, view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
+                let boundedY = min(max(view.contentOffset.y, minimumY), maximumY)
+                if abs(view.contentOffset.y - boundedY) > 0.5 {
+                    view.setContentOffset(CGPoint(x: 0, y: boundedY), animated: false)
+                }
+            }
+        }
+    }
+}
 
 /// Historical session-owned context indicator. Its value is projected from the
 /// canonical snapshot and tapping it opens Manage Session; it owns no runtime

@@ -96,11 +96,13 @@ faux.setResponses([
     return fauxAssistantMessage("Streaming response starts now and remains active until the phone disconnects. Detached response complete");
   },
   fauxAssistantMessage([
-    fauxThinking("Preparing a portable permission interaction"),
-    fauxText("Checking the command before running it."),
-    fauxToolCall("bash", { command: "sleep 2; printf tool-output" }, { id: "e2e-tool" }),
+    fauxThinking("Preparing portable parallel tool interactions"),
+    fauxText("Checking the commands before running them."),
+    fauxToolCall("bash", { command: "sleep 2; printf first-output" }, { id: "e2e-tool-1" }),
+    fauxToolCall("bash", { command: "sleep 1; printf second-output" }, { id: "e2e-tool-2" }),
+    fauxToolCall("bash", { command: "printf third-output" }, { id: "e2e-tool-3" }),
   ], { stopReason: "toolUse" }),
-  fauxAssistantMessage("Tool response complete"),
+  fauxAssistantMessage("Tool response complete after all three tools."),
 ]);
 export default function (pi) {
   pi.registerProvider(faux.provider);

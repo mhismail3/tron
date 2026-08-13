@@ -27,7 +27,11 @@ struct TronStructuredJSONView: View {
                 })
             case .array(let values):
                 fieldSection(values.enumerated().map {
-                    (label: "Item \($0.offset + 1)", component: String($0.offset), value: $0.element)
+                    (
+                        label: arrayItemTitle($0.element, index: $0.offset),
+                        component: String($0.offset),
+                        value: $0.element
+                    )
                 })
             case .string(let text): primitive(text)
             case .number(let number): primitive(number.formatted())
@@ -131,6 +135,24 @@ struct TronStructuredJSONView: View {
             .tronGlassSurface(accent: accent, tintOpacity: 0.10)
     }
 
+    private func arrayItemTitle(_ value: JSONValue, index: Int) -> String {
+        if let text = value.stringValue, !text.isEmpty {
+            return URL(fileURLWithPath: text).lastPathComponent.ifEmpty(text)
+        }
+        guard let object = value.objectValue else { return "Entry \(index + 1)" }
+        for key in ["name", "title", "displayName", "label", "id", "source", "path", "filePath", "command"] {
+            guard let text = object[key]?.stringValue, !text.isEmpty else { continue }
+            return ["path", "filePath"].contains(key)
+                ? URL(fileURLWithPath: text).lastPathComponent.ifEmpty(text)
+                : text
+        }
+        if let provider = object["provider"]?.stringValue,
+           let id = object["modelId"]?.stringValue ?? object["id"]?.stringValue {
+            return "\(provider) / \(id)"
+        }
+        return "Entry \(index + 1)"
+    }
+
     private func childPath(_ component: String) -> String {
         path == "$" ? "$.\(component)" : "\(path).\(component)"
     }
@@ -193,6 +215,10 @@ private struct JSONFieldSheet: View {
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)
     }
+}
+
+private extension String {
+    func ifEmpty(_ fallback: String) -> String { isEmpty ? fallback : self }
 }
 
 private extension JSONValue {

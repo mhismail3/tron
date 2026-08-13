@@ -2,7 +2,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
-import type { SessionSummary } from "../protocol/types.js";
+import type { SessionSummary, SessionSummaryUpdate } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
@@ -16,6 +16,8 @@ export class RuntimeRegistry {
   private readonly markers: RunMarkerStore;
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
+  private readonly summaryRevisions = new Map<string, number>();
+  private revision = 0;
   private evictionTimer?: NodeJS.Timeout;
 
   constructor(
@@ -26,10 +28,15 @@ export class RuntimeRegistry {
       modelRuntimeFactory?: () => Promise<ModelRuntime>;
       trust: TrustService;
       broadcast: SessionBroadcast;
+      sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
       sessionListChanged: () => void;
     },
   ) {
     this.markers = new RunMarkerStore(options.tronHome);
+  }
+
+  get listRevision(): number {
+    return this.revision;
   }
 
   async initialize(): Promise<void> {
@@ -41,19 +48,32 @@ export class RuntimeRegistry {
   private hooks() {
     return {
       broadcast: this.options.broadcast,
-      changed: () => this.options.sessionListChanged(),
+      summaryChanged: (summary: SessionSummaryUpdate) => {
+        const summaryRevision = (this.summaryRevisions.get(summary.sessionId) ?? 0) + 1;
+        this.summaryRevisions.set(summary.sessionId, summaryRevision);
+        this.revision += 1;
+        this.options.sessionSummaryChanged({ ...summary, summaryRevision });
+      },
+      changed: () => {
+        this.revision += 1;
+        this.options.sessionListChanged();
+      },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
       rekey: (previousId: string, nextId: string, slot: RuntimeSlot) => {
         const existing = this.slots.get(nextId);
         if (existing && existing !== slot) throw new GatewayError("conflict", "Replacement session is already active");
         if (this.slots.get(previousId) === slot) this.slots.delete(previousId);
         this.slots.set(nextId, slot);
+        const previousSummaryRevision = this.summaryRevisions.get(previousId);
+        this.summaryRevisions.delete(previousId);
+        if (previousSummaryRevision !== undefined) this.summaryRevisions.set(nextId, previousSummaryRevision);
         if (this.interrupted.delete(previousId)) this.interrupted.add(nextId);
         const subscribers = this.subscribers.get(previousId);
         if (subscribers) {
           this.subscribers.delete(previousId);
           this.subscribers.set(nextId, subscribers);
         }
+        this.revision += 1;
         this.options.sessionListChanged();
       },
     };
@@ -99,6 +119,7 @@ export class RuntimeRegistry {
         messageCount: session.messageCount,
         firstMessage: session.firstMessage,
         phase: slot ? slot.snapshot().phase : this.interrupted.has(session.id) ? "interrupted" : "idle",
+        summaryRevision: this.summaryRevisions.get(session.id) ?? 0,
       };
     });
   }
@@ -110,6 +131,7 @@ export class RuntimeRegistry {
       const id = manager.getSessionId();
       const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
       this.slots.set(id, slot);
+      this.revision += 1;
       this.options.sessionListChanged();
       return slot;
     });
@@ -143,6 +165,7 @@ export class RuntimeRegistry {
       try {
         await slot.importFromJsonl(path, trust.cwd);
         this.slots.set(slot.id, slot);
+        this.revision += 1;
         this.options.sessionListChanged();
         return slot;
       } catch (error) {
@@ -151,6 +174,15 @@ export class RuntimeRegistry {
         throw error;
       }
     });
+  }
+
+  async reloadProject(cwdInput: string): Promise<void> {
+    const cwd = await this.options.trust.canonicalDirectory(cwdInput);
+    const slots = [...this.slots.values()].filter((slot) => slot.cwd === cwd);
+    await Promise.all(slots.map(async (slot) => {
+      if (slot.isBusy) throw new GatewayError("busy", "Stop active sessions before changing project trust", true);
+      await slot.reload();
+    }));
   }
 
   async delete(sessionId: string): Promise<void> {
@@ -162,9 +194,11 @@ export class RuntimeRegistry {
       if (slot) await slot.dispose();
       this.slots.delete(sessionId);
       this.subscribers.delete(sessionId);
+      this.summaryRevisions.delete(sessionId);
       this.interrupted.delete(sessionId);
       await this.markers.clear(sessionId);
       await rm(info.path, { force: true });
+      this.revision += 1;
       this.options.sessionListChanged();
     });
   }

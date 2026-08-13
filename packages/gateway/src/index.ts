@@ -13,6 +13,7 @@ import { PackageService } from "./admin/package-service.js";
 import { AuthBroker } from "./admin/auth-broker.js";
 import { LegacyImportService } from "./admin/legacy-import-service.js";
 import { RuntimeRegistry } from "./sessions/runtime-registry.js";
+import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { CommandReceiptStore } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
@@ -64,6 +65,7 @@ const sessions = new RuntimeRegistry({
   idleRuntimeMs: config.idleRuntimeMs,
   trust,
   broadcast: (sessionId, topic, payload) => transport?.broadcastSession(sessionId, topic, payload),
+  sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
   sessionListChanged: () => transport?.notifySessionListChanged(),
 });
 await sessions.initialize();
@@ -72,7 +74,11 @@ const terminal = new TerminalService(
   config.terminalReplayBytes,
   (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),
 );
-const auth = new AuthBroker(modelRuntime, (clientId, topic, payload) => transport?.emitToClient(clientId, topic, payload));
+const auth = new AuthBroker(
+  modelRuntime,
+  (clientId, topic, payload) => transport?.emitToClient(clientId, topic, payload),
+  (topic, payload) => transport?.broadcast(topic, payload),
+);
 const packages = new PackageService(config.agentDir, trust, (topic, payload) => transport?.broadcast(topic, payload));
 const legacyImport = new LegacyImportService(config.tronHome);
 
@@ -115,6 +121,7 @@ const service = new GatewayService({
   // restart must therefore use a deliberate non-zero service exit code.
   requestRestart: () => void shutdown("requested restart", 75),
   deviceRevoked: (deviceId) => transport?.disconnectDevice(deviceId),
+  broadcast: (topic, payload) => transport?.broadcast(topic, payload),
 });
 transport = new GatewayServer({
   host: config.host,

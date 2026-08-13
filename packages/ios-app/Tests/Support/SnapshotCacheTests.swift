@@ -12,7 +12,7 @@ struct SnapshotCacheTests {
             sessionId: "session", runtimeGeneration: "generation", revision: 1, eventSequence: 3,
             phase: .running, name: nil, cwd: "/workspace", parentSessionId: nil,
             model: nil, thinkingLevel: "off", availableThinkingLevels: ["off"], contextUsage: nil,
-            stats: .init(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0, tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), cost: 0),
+            stats: .init(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0, tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
             queued: .init(steering: [], followUp: []), transcript: [], transcriptStart: 10, transcriptTotal: 12,
             streaming: nil, leafEntryId: nil,
             operation: .init(id: "operation", kind: .prompt, startedAt: "2026-01-01T00:00:00Z", reason: nil),

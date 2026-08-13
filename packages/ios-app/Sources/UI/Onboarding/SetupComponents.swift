@@ -3,6 +3,7 @@ import SwiftUI
 struct ProviderSetupRow: View {
     @Environment(AppModel.self) private var model
     let provider: ProviderSummary
+    var sessionID: String? = nil
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -21,41 +22,49 @@ struct ProviderSetupRow: View {
             }
             Spacer(minLength: 8)
             if provider.configured {
-                Menu {
-                    Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                        Task {
-                            do { try await model.logout(providerID: provider.id) }
-                            catch { model.lastError = error.localizedDescription }
+                HStack(spacing: 8) {
+                    Label("Connected", systemImage: "checkmark.circle.fill")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(Color.tronAccentText)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.18)), in: Capsule())
+
+                    Menu {
+                        Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                            Task {
+                                do { try await model.logout(providerID: provider.id, sessionID: sessionID) }
+                                catch { model.lastError = error.localizedDescription }
+                            }
                         }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                            .foregroundStyle(Color.tronEmerald)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.14)).interactive(), in: .circle)
                     }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text("Connected")
-                        Image(systemName: "ellipsis.circle")
-                            .accessibilityHidden(true)
-                    }
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(Color.tronAccentText)
-                    .frame(minHeight: 44)
+                    .accessibilityLabel("\(provider.name) provider actions")
                 }
-                .accessibilityLabel("\(provider.name) provider actions")
             } else {
                 Menu {
                     ForEach(provider.authMethods, id: \.self) { method in
                         Button(method == "oauth" ? "Sign in" : "Enter API key") {
                             Task {
-                                do { try await model.beginAuth(providerID: provider.id, authType: method) }
+                                do { try await model.beginAuth(providerID: provider.id, authType: method, sessionID: sessionID) }
                                 catch { model.lastError = error.localizedDescription }
                             }
                         }
                     }
                 } label: {
                     Label("Connect", systemImage: "person.crop.circle.badge.plus")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                         .foregroundStyle(Color.tronAccentText)
-                        .padding(.horizontal, 10)
-                        .frame(minHeight: 40)
-                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.12)).interactive(), in: Capsule())
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .contentShape(Capsule())
+                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.16)).interactive(), in: Capsule())
                 }
                 .accessibilityLabel("Connect \(provider.name)")
             }
@@ -71,12 +80,11 @@ struct ModelPicker: View {
     @Binding var selection: ModelRef?
     let models: [ModelSummary]
     @State private var search = ""
+    @State private var showingSearch = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 8) {
-                TronSearchBar(text: $search, prompt: "Search models")
-                    .padding(.bottom, 4)
                 ForEach(filtered) { model in
                     Button { selection = model.ref } label: {
                         HStack(spacing: 12) {
@@ -110,8 +118,44 @@ struct ModelPicker: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 72)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Group {
+                if showingSearch {
+                    TronSearchBar(
+                        text: $search,
+                        prompt: "Search models",
+                        focusOnAppear: true,
+                        onClose: {
+                            withAnimation(.snappy(duration: 0.18)) {
+                                search = ""
+                                showingSearch = false
+                            }
+                        }
+                    )
+                } else {
+                    Button {
+                        withAnimation(.snappy(duration: 0.18)) { showingSearch = true }
+                    } label: {
+                        Label("Search models", systemImage: "magnifyingglass")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(Color.tronEmerald)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .padding(.horizontal, TronSpacing.inputHorizontal)
+                            .contentShape(Capsule())
+                            .glassEffect(.clear.tint(Color.tronEmerald.opacity(0.10)).interactive(), in: .capsule)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Search models")
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color.clear)
+        }
+        .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
     }
 

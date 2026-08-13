@@ -11,7 +11,10 @@ private final class TerminalController {
     var history: [TerminalSummary] = []
     private var resizeTask: Task<Void, Never>?
 
-    var isRunning: Bool { terminal?.exitedAt == nil }
+    func isRunning(model: AppModel) -> Bool {
+        guard let terminal else { return false }
+        return terminal.exitedAt == nil && !model.terminalExited.contains(terminal.id)
+    }
 
     func start(model: AppModel) async {
         guard terminal == nil else { return }
@@ -329,7 +332,7 @@ struct TerminalSheet: View {
 
     private var terminalMenu: some View {
         Menu {
-            if !controller.isRunning {
+            if !controller.isRunning(model: model) {
                 Button("Open Live Terminal", systemImage: "terminal") {
                     Task { await controller.openLive(model: model) }
                 }
@@ -348,7 +351,7 @@ struct TerminalSheet: View {
                 }
             }
             Button("Quit Terminal", role: .destructive) { confirmQuit = true }
-                .disabled(!controller.isRunning)
+                .disabled(!controller.isRunning(model: model))
         } label: {
             Image(systemName: "ellipsis")
                 .font(TronTypography.buttonSM)

@@ -12,7 +12,10 @@ struct TronMobileApp: App {
                 .environment(model)
                 .tronPresentation()
                 .preferredColorScheme(appearance.mode.colorScheme)
-                .task { await model.start() }
+                .task {
+                    await RetiredNotificationBadge.clear()
+                    await model.start()
+                }
                 .onOpenURL { url in
                     if let invitation = PairingInvitationParser.parse(url) {
                         Task {
@@ -25,7 +28,10 @@ struct TronMobileApp: App {
                     }
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { model.becameActive() }
+                    if phase == .active {
+                        Task { await RetiredNotificationBadge.clear() }
+                        model.becameActive()
+                    }
                 }
         }
     }

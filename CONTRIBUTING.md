@@ -45,7 +45,9 @@ npm audit --omit=dev
 
 Gateway mutations require `commandId`. Distinct sessions may run concurrently;
 all mutations for one session stay serialized. A disconnect must not abort an
-accepted run.
+accepted run. Use `scripts/tron chat --session <id>` when testing terminal/mobile
+handoff: it attaches to the Gateway-owned runtime. Never open the same canonical
+JSONL simultaneously in a separate Pi process.
 
 ### iOS
 

@@ -28,6 +28,9 @@ export interface ClientContext {
   identity: string;
   isLocal: boolean;
   subscribe(sessionId: string): void;
+  beginSynchronization(sessionId: string): string;
+  establishSynchronization(sessionId: string, snapshot: import("../protocol/types.js").SessionSnapshot): void;
+  completeSynchronization(sessionId: string, syncToken: string): void;
   unsubscribe(sessionId: string): void;
   attachTerminal(terminalId: string): void;
   detachTerminal(terminalId: string): void;
@@ -51,6 +54,7 @@ export interface GatewayServiceDependencies {
   receipts: CommandReceiptStore;
   requestRestart: () => void;
   deviceRevoked: (deviceId: string) => void;
+  broadcast: (topic: string, payload: JsonValue) => void;
 }
 
 export class GatewayService {
@@ -115,6 +119,7 @@ export class GatewayService {
 
       case "session.list": {
         const sessions = await this.dependencies.sessions.list();
+        const listRevision = this.dependencies.sessions.listRevision;
         const rawCursor = optionalString(params.cursor, "cursor", 20);
         const offset = rawCursor === undefined ? 0 : integer(Number(rawCursor), "cursor", 0, Number.MAX_SAFE_INTEGER);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 500);
@@ -122,36 +127,47 @@ export class GatewayService {
         const nextOffset = offset + page.length;
         return safeJson({
           sessions: page,
+          listRevision,
           ...(nextOffset < sessions.length ? { nextCursor: String(nextOffset) } : {}),
         });
       }
-      case "session.create":
-        return this.mutation(client, method, params, async () => {
+      case "session.create": {
+        const created = await this.mutation(client, method, params, async () => {
           const slot = await this.dependencies.sessions.create(string(params.cwd, "cwd", { max: 4_096 }));
-          client.subscribe(slot.id);
-          return safeJson({ session: slot.snapshot() });
-        });
-      case "session.import":
-        return this.mutation(client, method, params, async () => {
+          return safeJson({ sessionId: slot.id });
+        }) as { sessionId: string };
+        return safeJson(created);
+      }
+      case "session.import": {
+        const imported = await this.mutation(client, method, params, async () => {
           const path = await this.dependencies.uploads.prepareSessionImport(string(params.uploadId, "uploadId", { max: 100 }));
           const slot = await this.dependencies.sessions.importFromJsonl(path, string(params.cwd, "cwd", { max: 4_096 }));
-          client.subscribe(slot.id);
-          return safeJson({ session: slot.snapshot() });
-        });
+          return safeJson({ sessionId: slot.id });
+        }) as { sessionId: string };
+        return safeJson(imported);
+      }
       case "session.open": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
         const slot = await this.dependencies.sessions.acquire(sessionId);
-        client.subscribe(sessionId);
-        return safeJson({ session: slot.snapshot() });
+        const syncToken = client.beginSynchronization(sessionId);
+        const snapshot = slot.snapshot();
+        client.establishSynchronization(sessionId, snapshot);
+        return safeJson({ session: snapshot, syncToken });
+      }
+      case "session.sync": {
+        const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+        client.completeSynchronization(sessionId, string(params.syncToken, "syncToken", { max: 200 }));
+        return { synchronized: true };
       }
       case "session.transcript": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
         const before = params.before === undefined
           ? undefined
           : integer(params.before, "before", 0, Number.MAX_SAFE_INTEGER);
+        const expectedNextEntryId = optionalString(params.expectedNextEntryId, "expectedNextEntryId", 200);
         const slot = await this.dependencies.sessions.acquire(sessionId);
         client.subscribe(sessionId);
-        return safeJson(slot.transcriptPage(before));
+        return safeJson(slot.transcriptPage(before, expectedNextEntryId));
       }
       case "session.close": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
@@ -240,16 +256,22 @@ export class GatewayService {
           );
           return { updated: true };
         });
-      case "session.tree":
-        return safeJson((await this.slot(params)).tree());
-      case "session.commands":
-        return safeJson({ commands: (await this.slot(params)).commands() });
-      case "session.export":
-        return safeJson(await (await this.slot(params)).export(oneOf(params.format, "format", ["html", "jsonl"] as const)));
+      case "session.tree": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson(slot.tree());
+      }
+      case "session.commands": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson({ commands: slot.commands() });
+      }
+      case "session.export": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson(await slot.export(oneOf(params.format, "format", ["html", "jsonl"] as const)));
+      }
       case "session.context":
-        return (await this.slot(params)).context();
+        return (await this.openedSlot(client, params)).context();
       case "session.resources":
-        return (await this.slot(params)).resources();
+        return (await this.openedSlot(client, params)).resources();
       case "session.reloadResources":
         return this.mutation(client, method, params, async () => {
           await (await this.slot(params)).reload();
@@ -287,11 +309,14 @@ export class GatewayService {
       case "auth.logout":
         return this.mutation(client, method, params, async () => {
           await (await this.modelRuntime(params)).logout(string(params.providerId, "providerId", { max: 120 }));
+          this.dependencies.broadcast("providers.changed", {});
           return { loggedOut: true };
         });
 
       case "settings.get": {
         const cwd = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
+        const scope = params.scope === undefined ? "project" : oneOf(params.scope, "scope", ["global", "project"] as const);
+        if (scope === "global") return safeJson(this.dependencies.settings.get(cwd, false));
         const inspection = await this.dependencies.trust.inspect(cwd);
         return safeJson(this.dependencies.settings.get(inspection.cwd, inspection.effectiveDecision === true));
       }
@@ -302,18 +327,23 @@ export class GatewayService {
           const resolved = scope === "project"
             ? await this.dependencies.trust.requireResolved(cwdInput)
             : { cwd: await this.dependencies.trust.canonicalDirectory(cwdInput), trusted: false };
-          return safeJson(await this.dependencies.settings.update(params.patch, {
+          const result = await this.dependencies.settings.update(params.patch, {
             cwd: resolved.cwd,
             scope,
             projectTrusted: scope === "project" && resolved.trusted,
-          }));
+          });
+          this.dependencies.broadcast("settings.changed", { scope, cwd: resolved.cwd });
+          return safeJson(result);
         });
       case "trust.inspect":
         return safeJson(await this.dependencies.trust.inspect(string(params.cwd, "cwd", { max: 4_096 })));
       case "trust.set":
         return this.mutation(client, method, params, async () => {
           const decision = params.decision === null ? null : boolean(params.decision, "decision");
-          return safeJson(await this.dependencies.trust.set(string(params.cwd, "cwd", { max: 4_096 }), decision));
+          const result = await this.dependencies.trust.set(string(params.cwd, "cwd", { max: 4_096 }), decision);
+          await this.dependencies.sessions.reloadProject(result.cwd);
+          this.dependencies.broadcast("trust.changed", safeJson(result));
+          return safeJson(result);
         });
       case "packages.list":
         return safeJson(await this.dependencies.packages.list(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
@@ -322,18 +352,27 @@ export class GatewayService {
       case "packages.install":
       case "packages.remove":
       case "packages.update":
-        return this.mutation(client, method, params, async () => safeJson(await this.dependencies.packages.mutate(
-          method.slice("packages.".length) as "install" | "remove" | "update",
-          method === "packages.update" ? optionalString(params.source, "source", 2_000) : string(params.source, "source", { max: 2_000 }),
-          optionalString(params.cwd, "cwd", 4_096) ?? process.cwd(),
-          params.local === undefined ? false : boolean(params.local, "local"),
-        )));
+        return this.mutation(client, method, params, async () => {
+          const cwd = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
+          const result = await this.dependencies.packages.mutate(
+            method.slice("packages.".length) as "install" | "remove" | "update",
+            method === "packages.update" ? optionalString(params.source, "source", 2_000) : string(params.source, "source", { max: 2_000 }),
+            cwd,
+            params.local === undefined ? false : boolean(params.local, "local"),
+          );
+          this.dependencies.broadcast("packages.changed", { cwd });
+          return safeJson(result);
+        });
       case "models.custom.get":
         return safeJson(await this.dependencies.modelConfig.get());
       case "models.custom.validate":
         return safeJson(await this.dependencies.modelConfig.validate(params.document));
       case "models.custom.put":
-        return this.mutation(client, method, params, async () => safeJson(await this.dependencies.modelConfig.put(params.document)));
+        return this.mutation(client, method, params, async () => {
+          const result = await this.dependencies.modelConfig.put(params.document);
+          this.dependencies.broadcast("models.customChanged", {});
+          return safeJson(result);
+        });
       case "models.refresh":
         return this.mutation(client, method, params, async () => {
           const controller = new AbortController();
@@ -361,7 +400,7 @@ export class GatewayService {
         return safeJson(await this.dependencies.filesystem.inspectGit(string(params.path, "path", { max: 4_096 })));
 
       case "terminal.list": {
-        const slot = await this.slot(params);
+        const slot = await this.openedSlot(client, params);
         return safeJson({ terminals: this.dependencies.terminals.list(slot.id) });
       }
       case "terminal.open":
@@ -410,6 +449,18 @@ export class GatewayService {
       default:
         throw new GatewayError("not_found", `Unknown gateway method: ${method}`);
     }
+  }
+
+  terminalBelongsToSession(terminalId: string, sessionId: string): boolean {
+    return this.dependencies.terminals.belongsToSession(terminalId, sessionId);
+  }
+
+  private async openedSlot(client: ClientContext, params: Record<string, unknown>) {
+    const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+    if (!this.dependencies.sessions.isSubscribed(client.id, sessionId)) {
+      throw new GatewayError("invalid_request", "Open the session before reading its live runtime projection");
+    }
+    return this.dependencies.sessions.acquire(sessionId);
   }
 
   private async slot(params: Record<string, unknown>) {
