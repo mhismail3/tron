@@ -56,7 +56,9 @@ struct ChatView: View {
                 // resizing or shifting the transcript viewport.
                 Color.clear
                     .frame(height: 48)
-                    .overlay(alignment: .bottom) { composer }
+                    .overlay(alignment: .bottom) {
+                        composer.fixedSize(horizontal: false, vertical: true)
+                    }
             }
             .overlay(alignment: .top) { topBlur }
         .onGeometryChange(for: CGFloat.self) { geometry in
@@ -650,7 +652,9 @@ struct ChatView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronEmerald)
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Color.tronEmerald))
                     .frame(width: 40, height: 40)
                     .contentShape(Circle())
             }

@@ -523,7 +523,9 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("ChatTranscriptPresentation.timeline(in: snapshot)"))
         #expect(!chat.contains("ChatTranscriptPresentation.liveToolRun"))
         #expect(chat.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
-        #expect(chat.contains("Color.clear\n                    .frame(height: 48)\n                    .overlay(alignment: .bottom) { composer }"))
+        #expect(chat.contains("Color.clear\n                    .frame(height: 48)"))
+        #expect(chat.contains("composer.fixedSize(horizontal: false, vertical: true)"))
+        #expect(chat.contains(".background(Circle().fill(Color.tronEmerald))"))
         #expect(!chat.contains(".contentMargins(.horizontal, 16, for: .scrollContent)"))
         let stableRow = (chat.components(separatedBy: "private func stableTranscriptRow").dropFirst().first ?? "")
             .components(separatedBy: "private var selectedAuthoritativeSnapshot").first ?? ""

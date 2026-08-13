@@ -81,8 +81,8 @@ the exact Pi content order without hiding or moving thinking traces.
 The immutable navigation session ID owns one opening task and one typed
 `ScrollPosition`; duplicate dashboard opens and competing proxy scroll commands are
 forbidden. The ScrollView reserves one fixed one-line bottom safe-area footprint; the
-composer overlays that footprint and grows upward for wrapped text, staged attachments,
-and extension widgets. Composer growth therefore changes neither transcript content height
+composer overlays that footprint with an intrinsic vertical size and grows upward for
+wrapped text, staged attachments, and extension widgets. Composer growth therefore changes neither transcript content height
 nor viewport height and cannot push a detached or pinned reader. A compact scroll coordinator
 is the sole owner of following intent: it
 combines native `ScrollPosition` ownership, phase-final geometry, inset-aware bottom
