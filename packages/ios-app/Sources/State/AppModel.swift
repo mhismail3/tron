@@ -539,7 +539,8 @@ final class AppModel {
     }
 
     func closeSessionPresentation(_ id: String, generation: Int) async {
-        guard mountedPresentationGenerationBySession[id] == generation else { return }
+        guard generation == presentationOpenGeneration,
+              mountedPresentationGenerationBySession[id] == generation else { return }
         mountedPresentationGenerationBySession[id] = nil
         authoritativeSessionIDs.remove(id)
         await closeSubscription(id, expectedPresentationGeneration: generation)
@@ -1515,6 +1516,12 @@ final class AppModel {
                 return await synchronizeSession(sessionID)
             }
             return snapshots[sessionID] != nil
+        }
+        // A fresh/manual presentation retry consumes invalidation that predates
+        // this attempt. Any new invalidation arriving while the request is in
+        // flight inserts the marker again and triggers exactly one follow-up.
+        if replacingVisibleTranscript {
+            pendingAuthoritativeResyncSessionIDs.remove(sessionID)
         }
         let token = sessionEventSynchronizer.begin(sessionID: sessionID)
         do {
