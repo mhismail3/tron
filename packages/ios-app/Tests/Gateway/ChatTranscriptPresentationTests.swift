@@ -68,7 +68,7 @@ struct ChatTranscriptPresentationTests {
         #expect(idle.identity != anotherIdle.identity)
     }
 
-    @Test("authoritative sync reveals without waiting for physical layout callbacks")
+    @Test("authoritative sync requires stable bottom positioning before reveal")
     func chatOpenPresentationState() {
         var state = ChatOpenPresentationState(sessionID: "session-a")
         let epoch = state.begin()
@@ -80,7 +80,39 @@ struct ChatTranscriptPresentationTests {
 
         let installed = state.installAuthoritativeBaseline(sessionID: "session-a", epoch: epoch)
         #expect(installed)
+        #expect(state.phase == .positioning)
+        let invalid = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: .zero)
+        #expect(!invalid)
+        let bottom = ChatTranscriptGeometry(offsetY: 400, contentHeight: 800, containerHeight: 400)
+        let firstBottom = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: bottom)
+        #expect(!firstBottom)
+        #expect(state.stableBottomObservations == 1)
+        let secondBottom = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: bottom)
+        #expect(secondBottom)
         #expect(state.phase == .ready)
+    }
+
+    @Test("positioning resets instability and fails recoverably after a bounded coordinator deadline")
+    func chatOpenPositioningFailure() {
+        var state = ChatOpenPresentationState(sessionID: "session-a")
+        let epoch = state.begin()
+        let installed = state.installAuthoritativeBaseline(sessionID: "session-a", epoch: epoch)
+        #expect(installed)
+        let bottom = ChatTranscriptGeometry(offsetY: 400, contentHeight: 800, containerHeight: 400)
+        let away = ChatTranscriptGeometry(offsetY: 200, contentHeight: 800, containerHeight: 400)
+        let firstBottom = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: bottom)
+        let movedAway = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: away)
+        #expect(!firstBottom)
+        #expect(!movedAway)
+        #expect(state.stableBottomObservations == 0)
+        let staleFailure = state.failPositioning(sessionID: "session-a", epoch: epoch - 1)
+        let currentFailure = state.failPositioning(sessionID: "session-a", epoch: epoch)
+        #expect(!staleFailure)
+        #expect(currentFailure)
+        guard case .failed = state.phase else {
+            Issue.record("expected recoverable positioning failure")
+            return
+        }
     }
 
     @Test("stale presentation callbacks cannot fail a newer opening epoch")
@@ -183,126 +215,14 @@ struct ChatTranscriptPresentationTests {
         ))
     }
 
-    @Test("tail follow tracks settling content only while the user stays at the bottom")
-    func tailFollowContentGrowthPolicy() {
-        #expect(ChatTailFollowPolicy.shouldFollowContentGrowth(
-            previousHeight: 1_000,
-            currentHeight: 1_080,
-            userScrolledAway: false,
-            isUserInteracting: false,
-            isRestoringEarlierMessages: false
-        ))
-        #expect(!ChatTailFollowPolicy.shouldFollowContentGrowth(
-            previousHeight: 1_000,
-            currentHeight: 1_080,
-            userScrolledAway: true,
-            isUserInteracting: false,
-            isRestoringEarlierMessages: false
-        ))
-        #expect(!ChatTailFollowPolicy.shouldFollowContentGrowth(
-            previousHeight: 1_000,
-            currentHeight: 1_000.4,
-            userScrolledAway: false,
-            isUserInteracting: false,
-            isRestoringEarlierMessages: false
-        ))
-        #expect(!ChatTailFollowPolicy.shouldFollowContentGrowth(
-            previousHeight: 0,
-            currentHeight: 1_000,
-            userScrolledAway: false,
-            isUserInteracting: false,
-            isRestoringEarlierMessages: false
-        ))
-        #expect(!ChatTailFollowPolicy.shouldFollowContentGrowth(
-            previousHeight: 1_000,
-            currentHeight: 1_080,
-            userScrolledAway: false,
-            isUserInteracting: true,
-            isRestoringEarlierMessages: false
-        ))
-        #expect(!ChatTailFollowPolicy.shouldFollowContentGrowth(
-            previousHeight: 1_000,
-            currentHeight: 1_080,
-            userScrolledAway: false,
-            isUserInteracting: false,
-            isRestoringEarlierMessages: true
-        ))
-        #expect(ChatTailFollowPolicy.userScrolledUp(previousOffset: 500, currentOffset: 494))
-        #expect(!ChatTailFollowPolicy.userScrolledUp(previousOffset: 500, currentOffset: 499.5))
-    }
-
-    @Test("composer growth re-anchors only while following the tail")
-    func tailFollowComposerGrowthPolicy() {
-        #expect(ChatTailFollowPolicy.shouldFollowComposerGrowth(
-            previousHeight: 72,
-            currentHeight: 120,
-            userScrolledAway: false,
-            isUserInteracting: false,
-            isRestoringEarlierMessages: false
-        ))
-        #expect(!ChatTailFollowPolicy.shouldFollowComposerGrowth(
-            previousHeight: 120,
-            currentHeight: 72,
-            userScrolledAway: false,
-            isUserInteracting: false,
-            isRestoringEarlierMessages: false
-        ))
-        #expect(!ChatTailFollowPolicy.shouldFollowComposerGrowth(
-            previousHeight: 72,
-            currentHeight: 72.4,
-            userScrolledAway: false,
-            isUserInteracting: false,
-            isRestoringEarlierMessages: false
-        ))
-        #expect(!ChatTailFollowPolicy.shouldFollowComposerGrowth(
-            previousHeight: 72,
-            currentHeight: 120,
-            userScrolledAway: true,
-            isUserInteracting: false,
-            isRestoringEarlierMessages: false
-        ))
-        #expect(!ChatTailFollowPolicy.shouldFollowComposerGrowth(
-            previousHeight: 72,
-            currentHeight: 120,
-            userScrolledAway: false,
-            isUserInteracting: true,
-            isRestoringEarlierMessages: false
-        ))
-        #expect(!ChatTailFollowPolicy.shouldFollowComposerGrowth(
-            previousHeight: 72,
-            currentHeight: 120,
-            userScrolledAway: false,
-            isUserInteracting: false,
-            isRestoringEarlierMessages: true
-        ))
-        #expect(ChatTailFollowPolicy.composerGrowthFollowDecision(
-            previousHeight: 72,
-            currentHeight: 120,
-            userScrolledAway: false,
-            isUserInteracting: false,
-            isRestoringEarlierMessages: false
-        ) == .followNow)
-        #expect(ChatTailFollowPolicy.composerGrowthFollowDecision(
-            previousHeight: 72,
-            currentHeight: 120,
-            userScrolledAway: false,
-            isUserInteracting: true,
-            isRestoringEarlierMessages: false
-        ) == .followWhenIdle)
-        #expect(ChatTailFollowPolicy.composerGrowthFollowDecision(
-            previousHeight: 72,
-            currentHeight: 120,
-            userScrolledAway: true,
-            isUserInteracting: true,
-            isRestoringEarlierMessages: false
-        ) == .ignore)
-        #expect(ChatTailFollowPolicy.composerGrowthFollowDecision(
-            previousHeight: 72,
-            currentHeight: 120,
-            userScrolledAway: false,
-            isUserInteracting: true,
-            isRestoringEarlierMessages: true
-        ) == .ignore)
+    @Test("tool run identity is deterministic when an earlier ordinal arrives late")
+    func toolRunIdentityIgnoresArrivalOrder() {
+        let laterOnly = ChatToolRunPresentation(tools: [toolPresentation("call-2")])
+        let expanded = ChatToolRunPresentation(tools: [toolPresentation("call-1"), toolPresentation("call-2")])
+        let reversed = ChatToolRunPresentation(tools: [toolPresentation("call-2"), toolPresentation("call-1")])
+        #expect(expanded.id == reversed.id)
+        #expect(expanded.id == "tool-run-call-1")
+        #expect(laterOnly.id == "tool-run-call-2")
     }
 
     @Test("compaction token counts use compact K shorthand")
@@ -668,6 +588,23 @@ struct ChatTranscriptPresentationTests {
         let rendered = ChatTranscriptPresentation.renderItems(in: snapshot)
         #expect(rendered.count == 3)
         #expect(rendered.map(\.id) == ["tool-run-call", "assistant-text", "bash"])
+    }
+
+    private func toolPresentation(_ id: String) -> ChatToolPresentation {
+        ChatToolPresentation(
+            id: id,
+            title: "read",
+            subtitle: "Running",
+            request: nil,
+            response: nil,
+            content: "",
+            error: false,
+            startedAt: nil,
+            completedAt: nil,
+            durationMs: nil,
+            lastProgressAt: nil,
+            progressSequence: nil
+        )
     }
 
     private func message(_ value: String) throws -> TranscriptItem {

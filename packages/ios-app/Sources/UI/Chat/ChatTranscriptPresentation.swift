@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Presentation-only filtering for Pi's canonical transcript. Configuration
 /// entries before the first conversational entry describe session bootstrap
@@ -8,16 +9,38 @@ struct ChatTranscriptGeometry: Equatable {
     let offsetY: CGFloat
     let contentHeight: CGFloat
     let containerHeight: CGFloat
+    let bottomInset: CGFloat
+
+    init(offsetY: CGFloat, contentHeight: CGFloat, containerHeight: CGFloat, bottomInset: CGFloat = 0) {
+        self.offsetY = offsetY
+        self.contentHeight = contentHeight
+        self.containerHeight = containerHeight
+        self.bottomInset = bottomInset
+    }
+
+    init(_ geometry: ScrollGeometry) {
+        self.init(
+            offsetY: geometry.contentOffset.y,
+            contentHeight: geometry.contentSize.height,
+            containerHeight: geometry.containerSize.height,
+            bottomInset: geometry.contentInsets.bottom
+        )
+    }
 
     static let zero = ChatTranscriptGeometry(offsetY: 0, contentHeight: 0, containerHeight: 0)
     var isValid: Bool { contentHeight > 0 && containerHeight > 0 }
-    var distanceFromBottom: CGFloat { max(0, contentHeight - (offsetY + containerHeight)) }
+    var distanceFromBottom: CGFloat {
+        let rawDistance = contentHeight - offsetY - containerHeight - bottomInset
+        guard rawDistance.isFinite else { return .greatestFiniteMagnitude }
+        return max(0, rawDistance)
+    }
     var isAtBottom: Bool { isValid && distanceFromBottom <= 80 }
     var isAtExactBottom: Bool { isValid && distanceFromBottom <= 2 }
 }
 
 enum ChatOpenPresentationPhase: Equatable {
     case opening
+    case positioning
     case ready
     case failed(String)
 }
@@ -26,20 +49,38 @@ struct ChatOpenPresentationState: Equatable {
     let sessionID: String
     private(set) var epoch: Int = 0
     private(set) var phase: ChatOpenPresentationPhase = .opening
+    private(set) var stableBottomObservations = 0
 
     mutating func begin() -> Int {
         epoch &+= 1
         phase = .opening
+        stableBottomObservations = 0
         return epoch
     }
 
-    /// The authoritative two-phase session handshake is the presentation gate.
-    /// Scroll positioning remains best-effort because physical SwiftUI can
-    /// coalesce geometry and visibility callbacks indefinitely.
     mutating func installAuthoritativeBaseline(sessionID: String, epoch: Int) -> Bool {
         guard sessionID == self.sessionID, epoch == self.epoch, phase == .opening else { return false }
-        phase = .ready
+        phase = .positioning
+        stableBottomObservations = 0
         return true
+    }
+
+    mutating func observePosition(sessionID: String, epoch: Int, geometry: ChatTranscriptGeometry) -> Bool {
+        guard sessionID == self.sessionID, epoch == self.epoch, phase == .positioning else { return false }
+        if geometry.isAtExactBottom {
+            stableBottomObservations += 1
+            if stableBottomObservations >= 2 {
+                phase = .ready
+                return true
+            }
+        } else {
+            stableBottomObservations = 0
+        }
+        return false
+    }
+
+    mutating func failPositioning(sessionID: String, epoch: Int) -> Bool {
+        fail(sessionID: sessionID, epoch: epoch, message: "Tron could not position the latest messages. Try again.")
     }
 
     mutating func fail(sessionID: String, epoch: Int, message: String) -> Bool {
@@ -68,26 +109,6 @@ struct ChatTranscriptPageRequest: Equatable {
             && self.runtimeGeneration == runtimeGeneration
             && transcriptStart == before
             && firstTranscriptID == expectedNextEntryID
-    }
-}
-
-struct ChatTranscriptLayoutState: Equatable {
-    let sessionID: String
-    let canonicalEntryCount: Int
-    let tailEntryID: String?
-    let streamingEntryID: String?
-    let toolCallIDs: [String]
-    let showsWorking: Bool
-    let statusIDs: [String]
-
-    init(snapshot: SessionSnapshot) {
-        sessionID = snapshot.sessionId
-        canonicalEntryCount = snapshot.transcriptTotal ?? snapshot.transcript.count
-        tailEntryID = snapshot.transcript.last?.id
-        streamingEntryID = snapshot.streaming?.id
-        toolCallIDs = snapshot.toolExecutions.map(\.toolCallId).sorted()
-        showsWorking = snapshot.phase.isActive && snapshot.extensionUI.working.visible
-        statusIDs = snapshot.extensionUI.statuses.keys.sorted()
     }
 }
 
@@ -191,10 +212,17 @@ enum ChatTokenCountPresentation {
 
 struct ChatToolRunPresentation: Hashable, Identifiable {
     let tools: [ChatToolPresentation]
-    /// A run keeps the identity of its first canonical call while parallel or
-    /// sequential calls join it. Live-to-settled projection therefore updates
-    /// one row instead of removing and reinserting the group.
-    var id: String { "tool-run-" + (tools.first?.id ?? "empty") }
+    let anchorID: String
+
+    init(tools: [ChatToolPresentation], anchorID: String? = nil) {
+        self.tools = tools
+        // Prefer the runtime's monotonic call order. If an earlier ordinal arrives
+        // after a later progress frame, the run still converges to one deterministic
+        // identity instead of depending on callback arrival order.
+        self.anchorID = anchorID ?? tools.map(\.id).min() ?? "empty"
+    }
+
+    var id: String { "tool-run-" + anchorID }
     var isRunning: Bool { tools.contains(where: \.isRunning) }
     var failureCount: Int { tools.filter(\.error).count }
     var title: String { "\(isRunning ? "Using" : "Used") \(tools.count) \(tools.count == 1 ? "tool" : "tools")" }
@@ -261,12 +289,6 @@ struct ChatTranscriptTimeline {
     var ids: [String] { items.map(\.id) }
 }
 
-enum ChatComposerGrowthFollowDecision: Equatable {
-    case ignore
-    case followNow
-    case followWhenIdle
-}
-
 enum ChatToolbarTitleLayout {
     static let defaultContainerWidth: CGFloat = 402
     static let horizontalControlReservation: CGFloat = 152
@@ -313,80 +335,16 @@ enum ChatAttachmentAvailabilityPolicy {
     }
 }
 
-enum ChatTailFollowPolicy {
-    static func shouldFollowContentGrowth(
-        previousHeight: CGFloat,
-        currentHeight: CGFloat,
-        userScrolledAway: Bool,
-        isUserInteracting: Bool,
-        isRestoringEarlierMessages: Bool
-    ) -> Bool {
-        shouldFollowMeasuredGrowth(
-            previousHeight: previousHeight,
-            currentHeight: currentHeight,
-            userScrolledAway: userScrolledAway,
-            isUserInteracting: isUserInteracting,
-            isRestoringEarlierMessages: isRestoringEarlierMessages
-        )
-    }
-
-    static func shouldFollowComposerGrowth(
-        previousHeight: CGFloat,
-        currentHeight: CGFloat,
-        userScrolledAway: Bool,
-        isUserInteracting: Bool,
-        isRestoringEarlierMessages: Bool
-    ) -> Bool {
-        composerGrowthFollowDecision(
-            previousHeight: previousHeight,
-            currentHeight: currentHeight,
-            userScrolledAway: userScrolledAway,
-            isUserInteracting: isUserInteracting,
-            isRestoringEarlierMessages: isRestoringEarlierMessages
-        ) == .followNow
-    }
-
-    static func composerGrowthFollowDecision(
-        previousHeight: CGFloat,
-        currentHeight: CGFloat,
-        userScrolledAway: Bool,
-        isUserInteracting: Bool,
-        isRestoringEarlierMessages: Bool
-    ) -> ChatComposerGrowthFollowDecision {
-        guard !userScrolledAway,
-              !isRestoringEarlierMessages,
-              previousHeight > 0,
-              currentHeight > previousHeight + 0.5 else { return .ignore }
-        return isUserInteracting ? .followWhenIdle : .followNow
-    }
-
-    private static func shouldFollowMeasuredGrowth(
-        previousHeight: CGFloat,
-        currentHeight: CGFloat,
-        userScrolledAway: Bool,
-        isUserInteracting: Bool,
-        isRestoringEarlierMessages: Bool
-    ) -> Bool {
-        !userScrolledAway
-            && !isUserInteracting
-            && !isRestoringEarlierMessages
-            && previousHeight > 0
-            && currentHeight > previousHeight + 0.5
-    }
-
-    static func userScrolledUp(previousOffset: CGFloat, currentOffset: CGFloat) -> Bool {
-        currentOffset < previousOffset - 1
-    }
-}
-
 enum ChatUnreadResponsePolicy {
     static func shouldMarkUnread(
         previous: ChatResponseState?,
         current: ChatResponseState,
         userScrolledAway: Bool
     ) -> Bool {
-        guard let previous, previous.sessionID == current.sessionID else { return false }
-        return previous != current && userScrolledAway
+        guard let previous, previous.sessionID == current.sessionID, userScrolledAway else { return false }
+        return previous.canonicalEntryCount != current.canonicalEntryCount
+            || previous.tailEntryID != current.tailEntryID
+            || previous.streaming != current.streaming
     }
 }
 

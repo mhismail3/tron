@@ -76,16 +76,16 @@ text, attachment, or notification boundary flushes the current group, preserving
 the exact Pi content order without hiding or moving thinking traces.
 The immutable navigation session ID owns one opening task and one typed
 `ScrollPosition`; duplicate dashboard opens and competing proxy scroll commands are
-forbidden. The composer is installed as a structural bottom safe-area inset, so the
-transcript viewport ends above the complete composer—including attachment chips and
-multiline growth—instead of simulating clearance in scroll content. Tail-follow still
-reacts to response-state, content-height, and measured composer changes to preserve
-continuity. Growth measured during direct scrolling is coalesced until scrolling
-becomes idle; any upward gesture, scroll-away, or earlier-history restoration cancels
-that intent. Thinking, Markdown, tool, and working rows therefore remain above the
-composer by layout even when follow timing is delayed. Structural row insertions animate,
-while stable long-history rows use equatable inputs and avoid stack-wide animation
-for streaming progress. Terminal output has its own monotonic sequence and reconnect replay cursor.
+forbidden. The composer is the ScrollView's bottom safe-area inset, never a measured
+fake transcript row, so pending photos shrink the viewport without changing transcript
+content height. A compact scroll coordinator is the sole owner of following intent: it
+combines native `ScrollPosition` ownership, phase-final geometry, inset-aware bottom
+distance, prepend ownership, and durable user scroll-away. Only measured transcript
+height growth can request an automatic tail position; progress-only tool mutations and
+composer/inset changes cannot. Direct or accessibility scrolling always wins. Horizontal
+content margins live outside the nonanimated lazy row stack, and existing rows never
+participate in stack-wide insertion or scale animations. Thinking, Markdown, tool, and
+working rows therefore remain stable above the composer while the user follows the tail. Terminal output has its own monotonic sequence and reconnect replay cursor.
 Secondary live-runtime reads require that exact session to be opened first, so a
 stale selection cannot read or render another session's context, tree, resources,
 export, or terminal inventory.
@@ -264,7 +264,8 @@ concentrically rounded preview with native pinch and double-tap zoom. Earlier-hi
 content-sized compact pill treatment while preserving 44-point semantic targets and the
 exact visible transcript offset when rows prepend. The multiline composer
 gives its capped UIKit text view sole ownership of caret visibility and internal
-scrolling while the outer SwiftUI layout measures only actual height changes.
+scrolling. The composer itself is the transcript ScrollView's bottom safe-area inset;
+no height preference or synthetic transcript spacer mirrors its geometry.
 Diagnostics parses the bounded
 Gateway log records into level-filtered rows and copyable details rather than
 showing raw JSON. Custom models have a guided provider/model editor while the

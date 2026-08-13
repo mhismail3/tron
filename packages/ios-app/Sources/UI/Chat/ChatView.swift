@@ -26,20 +26,11 @@ struct ChatView: View {
     @State private var pagingTask: Task<Void, Never>?
     @State private var modelPresentationGeneration: Int?
     @State private var pendingEditorRequest: AppModel.EditorRequest?
-    @State private var transcriptAtBottom = true
-    @State private var userScrolledAway = false
-    @State private var hasUnreadTranscript = false
     @State private var speech = SpeechTranscriber()
-    @State private var composerHeight: CGFloat = 72
     @State private var composerTextHeight: CGFloat = 20
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
     @State private var scrollToBottomRequest = 0
-    @State private var tailFollowTask: Task<Void, Never>?
-    @State private var tailFollowGeneration = 0
-    @State private var tailFollowRequested = false
-    @State private var pendingComposerGrowthFollow = false
-    @State private var isUserInteractingWithTranscript = false
-    @State private var isRestoringEarlierMessages = false
+    @State private var scrollCoordinator = ChatScrollCoordinator()
     @State private var visibleTranscriptRowIDs: [String] = []
     @State private var transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
     @State private var transcriptGeometry = ChatTranscriptGeometry.zero
@@ -57,14 +48,9 @@ struct ChatView: View {
         transcript
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 composer
-                    .background {
-                        GeometryReader { geometry in
-                            Color.clear.preference(
-                                key: ComposerHeightPreferenceKey.self,
-                                value: geometry.size.height
-                            )
-                        }
-                    }
+                    .allowsHitTesting(isTranscriptReady)
+                    .accessibilityHidden(!isTranscriptReady)
+                    .opacity(isTranscriptReady ? 1 : 0)
             }
             .overlay(alignment: .top) { topBlur }
         .onGeometryChange(for: CGFloat.self) { geometry in
@@ -72,7 +58,6 @@ struct ChatView: View {
         } action: { width in
             toolbarContainerWidth = width
         }
-        .onPreferenceChange(ComposerHeightPreferenceKey.self) { composerHeight = $0 }
         .background(Color.tronBackground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -144,7 +129,6 @@ struct ChatView: View {
             pagingTask?.cancel()
             pagingTask = nil
             cancelAttachmentPresentation(includingActive: true)
-            cancelTailFollow()
             if let generation = modelPresentationGeneration {
                 Task { await model.closeSessionPresentation(sessionID, generation: generation) }
             }
@@ -160,18 +144,19 @@ struct ChatView: View {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if let snapshot = selectedAuthoritativeSnapshot {
                     if (snapshot.transcriptStart ?? 0) > 0 {
-                        earlierMessagesChip(snapshot: snapshot)
-                            .id("earlier-messages")
+                        stableTranscriptRow(id: "earlier-messages") {
+                            earlierMessagesChip(snapshot: snapshot)
+                        }
                     }
-                    let transcript = ChatTranscriptPresentation.timeline(in: snapshot)
-                    ForEach(transcript.items) { item in
-                        ChatTranscriptRenderRow(
-                            item: item,
-                            hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel
-                        )
-                        .equatable()
-                        .id(item.id)
-                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+                    let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
+                    ForEach(timeline.items) { item in
+                        stableTranscriptRow(id: item.id) {
+                            ChatTranscriptRenderRow(
+                                item: item,
+                                hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel
+                            )
+                            .equatable()
+                        }
                     }
                     runtimeRows(snapshot)
                 }
@@ -180,139 +165,82 @@ struct ChatView: View {
                     .id("transcript-bottom")
                     .accessibilityHidden(true)
             }
-                .padding(.horizontal, 16).padding(.vertical, 12)
-                .scrollTargetLayout()
-                // Animate only structural insertions/removals. Streaming text and
-                // progress updates keep stable rows out of a stack-wide layout
-                // transaction, which avoids re-rendering long transcript tails.
-                .animation(isTranscriptReady && !reduceMotion ? .easeOut(duration: 0.20) : nil, value: transcriptLayoutState)
-                .opacity(isTranscriptReady ? 1 : 0)
-                .offset(y: isTranscriptReady || reduceMotion ? 0 : 8)
-                .animation(reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.26), value: isTranscriptReady)
-                .accessibilityHidden(!isTranscriptReady)
-                .allowsHitTesting(isTranscriptReady)
+            .padding(.vertical, 12)
+            .scrollTargetLayout()
+            .opacity(isTranscriptReady ? 1 : 0)
+            .offset(y: isTranscriptReady || reduceMotion ? 0 : 8)
+            .animation(reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.26), value: isTranscriptReady)
+            .accessibilityHidden(!isTranscriptReady)
+            .allowsHitTesting(isTranscriptReady)
         }
+        .contentMargins(.horizontal, 16, for: .scrollContent)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.bottom, for: .alignment)
+        .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .scrollPosition($transcriptScrollPosition)
         .tronScrollEdgeChrome()
         .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.15) { ids in
-                visibleTranscriptRowIDs = ids.filter { $0 != "transcript-bottom" }
+            visibleTranscriptRowIDs = ids.filter { $0 != "transcript-bottom" }
+        }
+        .onChange(of: transcriptScrollPosition.isPositionedByUser) { _, positionedByUser in
+            scrollCoordinator.scrollPositionChanged(isPositionedByUser: positionedByUser)
         }
         .onScrollGeometryChange(for: ChatTranscriptGeometry.self) { geometry in
-                ChatTranscriptGeometry(
-                    offsetY: geometry.contentOffset.y,
-                    contentHeight: geometry.contentSize.height,
-                    containerHeight: geometry.containerSize.height
-                )
+            ChatTranscriptGeometry(geometry)
         } action: { previous, geometry in
-                transcriptGeometry = geometry
-                let isAtBottom = geometry.isAtBottom
-                transcriptAtBottom = isAtBottom
-                if isUserInteractingWithTranscript,
-                   ChatTailFollowPolicy.userScrolledUp(
-                    previousOffset: previous.offsetY,
-                    currentOffset: geometry.offsetY
-                   ) {
-                    userScrolledAway = true
-                    pendingComposerGrowthFollow = false
-                    cancelTailFollow()
-                } else if geometry.isAtExactBottom {
-                    userScrolledAway = false
-                    hasUnreadTranscript = false
-                }
-                if isTranscriptReady,
-                   ChatTailFollowPolicy.shouldFollowContentGrowth(
-                    previousHeight: previous.contentHeight,
-                    currentHeight: geometry.contentHeight,
-                    userScrolledAway: userScrolledAway,
-                    isUserInteracting: isUserInteractingWithTranscript,
-                    isRestoringEarlierMessages: isRestoringEarlierMessages
-                   ) {
-                    scheduleTailFollow(delay: .milliseconds(12))
-                }
+            transcriptGeometry = geometry
+            guard isTranscriptReady else { return }
+            if scrollCoordinator.geometryChanged(previous: previous, current: geometry) {
+                scrollToTail(animated: false)
             }
-        .onScrollPhaseChange { _, phase, _ in
-                let interacting = phase == .interacting || phase == .tracking || phase == .decelerating
-                isUserInteractingWithTranscript = interacting
-                if interacting {
-                    // A direct gesture always wins over automatic following,
-                    // including a drag that begins inside the former 80pt tail tolerance.
-                    cancelTailFollow()
-                } else {
-                    if transcriptGeometry.isAtExactBottom {
-                        userScrolledAway = false
-                        hasUnreadTranscript = false
-                    }
-                    if pendingComposerGrowthFollow {
-                        pendingComposerGrowthFollow = false
-                        if !userScrolledAway, !isRestoringEarlierMessages {
-                            scheduleTailFollow(delay: .milliseconds(12))
-                        }
-                    }
-                }
-            }
+        }
+        .onScrollPhaseChange { oldPhase, newPhase, context in
+            scrollCoordinator.scrollPhaseChanged(
+                from: oldPhase,
+                to: newPhase,
+                finalGeometry: ChatTranscriptGeometry(context.geometry)
+            )
+        }
         .scrollDismissesKeyboard(.interactively)
-        .onChange(of: composerHeight) { previousHeight, currentHeight in
-                switch ChatTailFollowPolicy.composerGrowthFollowDecision(
-                    previousHeight: previousHeight,
-                    currentHeight: currentHeight,
-                    userScrolledAway: userScrolledAway,
-                    isUserInteracting: isUserInteractingWithTranscript,
-                    isRestoringEarlierMessages: isRestoringEarlierMessages
-                ) {
-                case .ignore:
-                    break
-                case .followNow:
-                    scheduleTailFollow(delay: .milliseconds(12))
-                case .followWhenIdle:
-                    pendingComposerGrowthFollow = true
-                }
-            }
         .onChange(of: scrollToBottomRequest) { _, _ in
-                scrollToTail(animated: true)
-            }
+            scrollToTail(animated: true, force: true)
+        }
         .onChange(of: responseState, initial: true) { previous, current in
-                guard let current else {
-                    hasUnreadTranscript = false
-                    transcriptAtBottom = true
-                    userScrolledAway = false
-                    return
-                }
-                guard previous?.sessionID == current.sessionID else {
-                    // Opening or creating a session hydrates its first authoritative
-                    // snapshot before scroll geometry settles. That baseline is not
-                    // unread response content and must not inherit another session's pill.
-                    hasUnreadTranscript = false
-                    transcriptAtBottom = true
-                    userScrolledAway = false
-                    return
-                }
-                if isTranscriptReady, !userScrolledAway {
-                    scheduleTailFollow(delay: .milliseconds(28))
-                } else if ChatUnreadResponsePolicy.shouldMarkUnread(
-                    previous: previous,
-                    current: current,
-                    userScrolledAway: userScrolledAway
-                ) {
-                    hasUnreadTranscript = true
-                }
+            guard let current else { return }
+            guard previous?.sessionID == current.sessionID else { return }
+            if ChatUnreadResponsePolicy.shouldMarkUnread(
+                previous: previous,
+                current: current,
+                userScrolledAway: scrollCoordinator.userScrolledAway
+            ) {
+                scrollCoordinator.semanticResponseArrived()
             }
+        }
         .overlay(alignment: .bottomTrailing) {
-                if hasUnreadTranscript {
-                    Button {
-                        scrollToTail(animated: true)
-                    } label: {
-                        Label("New response", systemImage: "arrow.down")
-                            .chatTranscriptPill()
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("New response")
-                    .padding(.trailing, 12)
-                    .padding(.bottom, 8)
+            if scrollCoordinator.hasUnreadContent {
+                Button {
+                    scrollToTail(animated: true, force: true)
+                } label: {
+                    Label("New response", systemImage: "arrow.down")
+                        .chatTranscriptPill()
                 }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("New response")
+                .padding(.trailing, 12)
+                .padding(.bottom, 8)
             }
+        }
         .overlay { openingSurface }
+    }
+
+    private func stableTranscriptRow<Content: View>(
+        id: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .id(id)
     }
 
     private var selectedAuthoritativeSnapshot: SessionSnapshot? {
@@ -323,29 +251,29 @@ struct ChatView: View {
         selectedAuthoritativeSnapshot.map(ChatResponseState.init)
     }
 
-    private var transcriptLayoutState: ChatTranscriptLayoutState? {
-        selectedAuthoritativeSnapshot.map(ChatTranscriptLayoutState.init)
-    }
-
     private var isTranscriptReady: Bool { openPresentation.phase == .ready }
 
     @ViewBuilder private func runtimeRows(_ snapshot: SessionSnapshot) -> some View {
         if snapshot.phase.isActive && snapshot.extensionUI.working.visible {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(snapshot.extensionUI.working.message ?? statusText(snapshot.phase)).foregroundStyle(.secondary)
-                    if let retry = snapshot.retry {
-                        Text("Attempt \(retry.attempt)\(retry.maxAttempts.map { " of \($0)" } ?? "")")
-                            .foregroundStyle(.tertiary)
+            stableTranscriptRow(id: "runtime-working") {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(snapshot.extensionUI.working.message ?? statusText(snapshot.phase)).foregroundStyle(.secondary)
+                        if let retry = snapshot.retry {
+                            Text("Attempt \(retry.attempt)\(retry.maxAttempts.map { " of \($0)" } ?? "")")
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                 }
+                .font(TronTypography.caption).padding(.vertical, 4)
             }
-            .font(TronTypography.caption).padding(.vertical, 4)
         }
         if !snapshot.extensionUI.statuses.isEmpty {
-            ForEach(snapshot.extensionUI.statuses.sorted(by: { $0.key < $1.key }), id: \.key) { _, value in
-                TranscriptNotice(title: value, icon: "info.circle.fill", tint: .tronInfo)
+            ForEach(snapshot.extensionUI.statuses.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                stableTranscriptRow(id: "runtime-status-\(key)") {
+                    TranscriptNotice(title: value, icon: "info.circle.fill", tint: .tronInfo)
+                }
             }
         }
     }
@@ -362,7 +290,7 @@ struct ChatView: View {
 
     @ViewBuilder private var openingSurface: some View {
         switch openPresentation.phase {
-        case .opening:
+        case .opening, .positioning:
             VStack(spacing: 12) {
                 ProgressView().controlSize(.regular)
                 Text("Opening conversation…")
@@ -399,14 +327,11 @@ struct ChatView: View {
         openingTask?.cancel()
         pagingTask?.cancel()
         modelPresentationGeneration = nil
-        cancelTailFollow()
+        scrollCoordinator.resetForPresentation()
         let epoch = openPresentation.begin()
         transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
         transcriptGeometry = .zero
         visibleTranscriptRowIDs = []
-        userScrolledAway = false
-        hasUnreadTranscript = false
-        pendingComposerGrowthFollow = false
         let task = Task { @MainActor in
             do {
                 let generation = try await model.openSessionPresentation(sessionID)
@@ -416,7 +341,7 @@ struct ChatView: View {
                     return
                 }
                 modelPresentationGeneration = generation
-                scrollToTail(animated: false)
+                await positionLatestTail(epoch: epoch)
             } catch is CancellationError {
                 return
             } catch {
@@ -433,61 +358,38 @@ struct ChatView: View {
     }
 
     @MainActor
-    private func scrollToTail(animated: Bool, clearsUnread: Bool = true) {
-        var position = transcriptScrollPosition
-        let update = { position.scrollTo(edge: .bottom) }
+    private func positionLatestTail(epoch: Int) async {
+        for _ in 0..<75 {
+            guard !Task.isCancelled,
+                  openPresentation.epoch == epoch,
+                  openPresentation.phase == .positioning else { return }
+            scrollCoordinator.beginOpeningBottomScroll()
+            transcriptScrollPosition.scrollTo(edge: .bottom)
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(16))
+            if openPresentation.observePosition(
+                sessionID: sessionID,
+                epoch: epoch,
+                geometry: transcriptGeometry
+            ) { return }
+        }
+        _ = openPresentation.failPositioning(sessionID: sessionID, epoch: epoch)
+    }
+
+    @MainActor
+    private func scrollToTail(animated: Bool, force: Bool = false) {
+        guard scrollCoordinator.beginAutomaticBottomScroll(force: force) else { return }
+        let update = {
+            transcriptScrollPosition.scrollTo(edge: .bottom)
+        }
         if animated && !reduceMotion {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.86), update)
+            withAnimation(.easeOut(duration: 0.16), update)
         } else {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction, update)
         }
-        transcriptScrollPosition = position
-        userScrolledAway = false
-        if clearsUnread { hasUnreadTranscript = false }
-    }
-
-    @MainActor
-    private func scheduleTailFollow(delay: Duration) {
-        tailFollowRequested = true
-        // Keep one bounded-latency follower alive. A trailing debounce can be
-        // starved forever by progress arriving faster than its delay.
-        guard tailFollowTask == nil else { return }
-        tailFollowGeneration &+= 1
-        let generation = tailFollowGeneration
-        tailFollowTask = Task { @MainActor in
-            await Task.yield()
-            try? await Task.sleep(for: delay)
-            while !Task.isCancelled {
-                guard !userScrolledAway,
-                      !isUserInteractingWithTranscript,
-                      !isRestoringEarlierMessages else { break }
-                tailFollowRequested = false
-                scrollToTail(animated: true, clearsUnread: false)
-                // Let this scroll and another layout pass settle before deciding
-                // whether growth during the pass needs one more follow.
-                try? await Task.sleep(for: .milliseconds(72))
-                guard !Task.isCancelled else { break }
-                if !tailFollowRequested && transcriptGeometry.isAtExactBottom { break }
-            }
-            guard tailFollowGeneration == generation else { return }
-            tailFollowTask = nil
-            if tailFollowRequested,
-               !userScrolledAway,
-               !isUserInteractingWithTranscript,
-               !isRestoringEarlierMessages {
-                scheduleTailFollow(delay: .milliseconds(12))
-            }
-        }
-    }
-
-    @MainActor
-    private func cancelTailFollow() {
-        tailFollowGeneration &+= 1
-        tailFollowTask?.cancel()
-        tailFollowTask = nil
-        tailFollowRequested = false
+        if force { scrollCoordinator.clearUnreadAfterExplicitJump() }
     }
 
     private func earlierMessagesChip(snapshot: SessionSnapshot) -> some View {
@@ -498,16 +400,13 @@ struct ChatView: View {
             let previousGeometry = transcriptGeometry
             let visibleIDs = Set(visibleTranscriptRowIDs)
             let anchorID = ChatTranscriptPresentation.timeline(in: snapshot).ids.first(where: visibleIDs.contains)
-            let wasScrolledAway = userScrolledAway
+            let wasScrolledAway = scrollCoordinator.userScrolledAway
             guard let presentationGeneration = modelPresentationGeneration else { return }
-            isRestoringEarlierMessages = true
-            pendingComposerGrowthFollow = false
-            cancelTailFollow()
+            scrollCoordinator.beginPrependingHistory()
             pagingTask?.cancel()
             pagingTask = Task { @MainActor in
                 defer {
-                    isRestoringEarlierMessages = false
-                    userScrolledAway = wasScrolledAway
+                    scrollCoordinator.endPrependingHistory(preserveScrolledAway: wasScrolledAway)
                     pagingTask = nil
                 }
                 await model.loadEarlierTranscript(presentationGeneration: presentationGeneration)
@@ -970,13 +869,6 @@ private struct ChatTranscriptRenderRow: View, Equatable {
             ToolRunView(run: run)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-}
-
-private struct ComposerHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat { 72 }
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 
