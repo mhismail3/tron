@@ -36,13 +36,18 @@ local database.
   while terminal exit updates both controls and status;
 - stopping/restart topics move connection state into reconnect mode.
 
-A reconnect always opens the selected session and receives complete current
-runtime state with a bounded authoritative transcript tail. If a pathological live
+A newly navigated chat opens exactly once and replaces any disposable cached or
+previously expanded projection with a fresh bounded authoritative latest tail.
+It does not enter the visible event-rendering state until bottom positioning is
+confirmed. A reconnect while that same chat remains mounted instead receives
+complete current runtime state and preserves compatible explicitly paged history
+and the reader's follow/detached mode. If a pathological live
 tool run exceeds the ordinary projection budget, duplicate tool detail is
 compacted while an active snapshot retains its canonical baseline rows. iOS also
 merges an overlapping authoritative tail with any earlier pages already loaded in
 that open chat, so a tool burst or resync cannot reveal a new history boundary or
-hide visible rows. Only a resumed idle session begins from a bounded latest page.
+hide visible rows. A later navigation presentation always begins again from the
+bounded latest page; this cold-presentation rule is distinct from in-place reconnect.
 Phase, operation, tool ordering, and canonical paging cursors remain authoritative. The run continues on the Mac;
 the app catches up without presenting transport errors as modal alerts. Foreground activation
 coalesces to one responsiveness/list/session reconciliation; an aborted or resumed network path

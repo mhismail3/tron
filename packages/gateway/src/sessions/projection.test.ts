@@ -236,6 +236,15 @@ describe("transcript projection", () => {
     expect(fitted.transcriptStart + fitted.transcript.length).toBe(snapshot.transcriptTotal);
   });
 
+  it("advances a page containing one projected item above the requested page target", () => {
+    const manager = SessionManager.inMemory("/tmp/oversized-page-item");
+    manager.appendMessage({ role: "user", content: "x".repeat(2_000), timestamp: 1 });
+    const page = projectTranscriptPage(manager, new BlobStore(), undefined, 100);
+    expect(page.start).toBe(0);
+    expect(page.total).toBe(1);
+    expect(page.items).toHaveLength(1);
+  });
+
   it("pages large canonical branches without exceeding the snapshot frame budget", () => {
     const manager = SessionManager.inMemory("/tmp/large-project");
     for (let index = 0; index < 24; index += 1) {

@@ -77,8 +77,8 @@ struct SessionShellView: View {
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await model.refreshSessions() }
             .navigationDestination(item: $presentedSessionID) { sessionID in
-                ChatView()
-                    .task(id: sessionID) { try? await model.openSession(sessionID) }
+                ChatView(sessionID: sessionID)
+                    .id(sessionID)
             }
     }
 
@@ -216,12 +216,7 @@ struct SessionShellView: View {
 
     private func sessionButton(_ session: SessionSummary) -> some View {
         return Button {
-            model.selectedSessionID = session.id
             presentedSessionID = session.id
-            Task {
-                do { try await model.openSession(session.id) }
-                catch { model.lastError = error.localizedDescription }
-            }
         } label: {
             HistoricalSessionRow(session: session)
         }

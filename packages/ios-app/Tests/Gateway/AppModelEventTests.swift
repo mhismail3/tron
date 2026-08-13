@@ -78,6 +78,35 @@ struct AppModelEventTests {
         #expect(model.selectedSnapshot?.eventSequence == 91)
     }
 
+    @Test("fresh presentation replaces expanded history while reconnect preserves it")
+    func snapshotInstallModes() throws {
+        let baseline = try loadSnapshot()
+        var expanded = baseline
+        expanded.transcriptStart = 10
+        expanded.transcriptTotal = 10 + expanded.transcript.count
+        var authoritative = baseline
+        authoritative.eventSequence += 1
+        authoritative.transcript = Array(baseline.transcript.suffix(3))
+        authoritative.transcriptStart = 15
+        authoritative.transcriptTotal = 18
+
+        let fresh = AppModel.installingSnapshot(
+            current: expanded,
+            authoritative: authoritative,
+            mode: .freshPresentation
+        )
+        #expect(fresh.transcript.map(\.id) == authoritative.transcript.map(\.id))
+        #expect(fresh.transcriptStart == 15)
+
+        let reconnected = AppModel.installingSnapshot(
+            current: expanded,
+            authoritative: authoritative,
+            mode: .reconnect
+        )
+        #expect(reconnected.transcript.count >= authoritative.transcript.count)
+        #expect(reconnected.eventSequence == authoritative.eventSequence)
+    }
+
     @Test("live snapshots preserve explicitly loaded history while advancing the authoritative tail")
     func liveSnapshotPreservesLoadedTranscript() throws {
         let baseline = try loadSnapshot()

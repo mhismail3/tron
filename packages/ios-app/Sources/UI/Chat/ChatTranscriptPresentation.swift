@@ -4,6 +4,66 @@ import Foundation
 /// entries before the first conversational entry describe session bootstrap
 /// state and belong in Manage Session, not in the chat transcript. Later
 /// configuration entries remain visible as compact change notifications.
+struct ChatTranscriptGeometry: Equatable {
+    let offsetY: CGFloat
+    let contentHeight: CGFloat
+    let containerHeight: CGFloat
+
+    static let zero = ChatTranscriptGeometry(offsetY: 0, contentHeight: 0, containerHeight: 0)
+    var isValid: Bool { contentHeight > 0 && containerHeight > 0 }
+    var distanceFromBottom: CGFloat { max(0, contentHeight - (offsetY + containerHeight)) }
+    var isAtBottom: Bool { isValid && distanceFromBottom <= 80 }
+    var isAtExactBottom: Bool { isValid && distanceFromBottom <= 2 }
+}
+
+enum ChatOpenPresentationPhase: Equatable {
+    case opening
+    case staging
+    case ready
+    case failed(String)
+}
+
+struct ChatOpenPresentationState: Equatable {
+    let sessionID: String
+    private(set) var epoch: Int = 0
+    private(set) var phase: ChatOpenPresentationPhase = .opening
+
+    mutating func begin() -> Int {
+        epoch &+= 1
+        phase = .opening
+        return epoch
+    }
+
+    mutating func installAuthoritativeBaseline(sessionID: String, epoch: Int) -> Bool {
+        guard sessionID == self.sessionID, epoch == self.epoch, phase == .opening else { return false }
+        phase = .staging
+        return true
+    }
+
+    mutating func observeLayout(
+        sessionID: String,
+        epoch: Int,
+        geometryIsValid: Bool,
+        tailIsVisible: Bool,
+        isAtExactBottom: Bool
+    ) -> Bool {
+        guard sessionID == self.sessionID,
+              epoch == self.epoch,
+              phase == .staging,
+              geometryIsValid,
+              tailIsVisible,
+              isAtExactBottom else { return false }
+        phase = .ready
+        return true
+    }
+
+    mutating func fail(sessionID: String, epoch: Int, message: String) -> Bool {
+        guard sessionID == self.sessionID, epoch == self.epoch else { return false }
+        phase = .failed(message)
+        return true
+    }
+}
+
 struct ChatTranscriptLayoutState: Equatable {
     let sessionID: String
     let canonicalEntryCount: Int
@@ -194,8 +254,60 @@ struct ChatTranscriptTimeline {
     var ids: [String] { items.map(\.id) }
 }
 
+enum ChatComposerGrowthFollowDecision: Equatable {
+    case ignore
+    case followNow
+    case followWhenIdle
+}
+
 enum ChatTailFollowPolicy {
     static func shouldFollowContentGrowth(
+        previousHeight: CGFloat,
+        currentHeight: CGFloat,
+        userScrolledAway: Bool,
+        isUserInteracting: Bool,
+        isRestoringEarlierMessages: Bool
+    ) -> Bool {
+        shouldFollowMeasuredGrowth(
+            previousHeight: previousHeight,
+            currentHeight: currentHeight,
+            userScrolledAway: userScrolledAway,
+            isUserInteracting: isUserInteracting,
+            isRestoringEarlierMessages: isRestoringEarlierMessages
+        )
+    }
+
+    static func shouldFollowComposerGrowth(
+        previousHeight: CGFloat,
+        currentHeight: CGFloat,
+        userScrolledAway: Bool,
+        isUserInteracting: Bool,
+        isRestoringEarlierMessages: Bool
+    ) -> Bool {
+        composerGrowthFollowDecision(
+            previousHeight: previousHeight,
+            currentHeight: currentHeight,
+            userScrolledAway: userScrolledAway,
+            isUserInteracting: isUserInteracting,
+            isRestoringEarlierMessages: isRestoringEarlierMessages
+        ) == .followNow
+    }
+
+    static func composerGrowthFollowDecision(
+        previousHeight: CGFloat,
+        currentHeight: CGFloat,
+        userScrolledAway: Bool,
+        isUserInteracting: Bool,
+        isRestoringEarlierMessages: Bool
+    ) -> ChatComposerGrowthFollowDecision {
+        guard !userScrolledAway,
+              !isRestoringEarlierMessages,
+              previousHeight > 0,
+              currentHeight > previousHeight + 0.5 else { return .ignore }
+        return isUserInteracting ? .followWhenIdle : .followNow
+    }
+
+    private static func shouldFollowMeasuredGrowth(
         previousHeight: CGFloat,
         currentHeight: CGFloat,
         userScrolledAway: Bool,

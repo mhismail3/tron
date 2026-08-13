@@ -4,6 +4,67 @@ import Testing
 
 @Suite("Chat transcript presentation")
 struct ChatTranscriptPresentationTests {
+    @Test("zero and partial geometry never masquerade as bottom readiness")
+    func chatGeometryValidity() {
+        #expect(!ChatTranscriptGeometry.zero.isValid)
+        #expect(!ChatTranscriptGeometry.zero.isAtExactBottom)
+        let partial = ChatTranscriptGeometry(offsetY: 0, contentHeight: 100, containerHeight: 0)
+        #expect(!partial.isValid)
+        #expect(!partial.isAtBottom)
+        let ready = ChatTranscriptGeometry(offsetY: 400, contentHeight: 800, containerHeight: 400)
+        #expect(ready.isValid)
+        #expect(ready.isAtExactBottom)
+    }
+
+    @Test("chat opening reveals only after matching authoritative tail readiness")
+    func chatOpenPresentationState() {
+        var state = ChatOpenPresentationState(sessionID: "session-a")
+        let epoch = state.begin()
+        let wrongSession = state.installAuthoritativeBaseline(sessionID: "session-b", epoch: epoch)
+        let staleBaseline = state.installAuthoritativeBaseline(sessionID: "session-a", epoch: epoch - 1)
+        #expect(!wrongSession)
+        #expect(!staleBaseline)
+        #expect(state.phase == .opening)
+        let installed = state.installAuthoritativeBaseline(sessionID: "session-a", epoch: epoch)
+        #expect(installed)
+        let invalidGeometry = state.observeLayout(
+            sessionID: "session-a", epoch: epoch,
+            geometryIsValid: false, tailIsVisible: true, isAtExactBottom: true
+        )
+        let hiddenTail = state.observeLayout(
+            sessionID: "session-a", epoch: epoch,
+            geometryIsValid: true, tailIsVisible: false, isAtExactBottom: true
+        )
+        let awayFromBottom = state.observeLayout(
+            sessionID: "session-a", epoch: epoch,
+            geometryIsValid: true, tailIsVisible: true, isAtExactBottom: false
+        )
+        #expect(!invalidGeometry)
+        #expect(!hiddenTail)
+        #expect(!awayFromBottom)
+        let ready = state.observeLayout(
+            sessionID: "session-a", epoch: epoch,
+            geometryIsValid: true, tailIsVisible: true, isAtExactBottom: true
+        )
+        #expect(ready)
+        #expect(state.phase == .ready)
+    }
+
+    @Test("stale presentation callbacks cannot fail a newer opening epoch")
+    func staleChatOpenCallbacks() {
+        var state = ChatOpenPresentationState(sessionID: "session-a")
+        let staleEpoch = state.begin()
+        let currentEpoch = state.begin()
+        let stale = state.fail(sessionID: "session-a", epoch: staleEpoch, message: "stale")
+        let wrongSession = state.fail(sessionID: "session-b", epoch: currentEpoch, message: "wrong session")
+        #expect(!stale)
+        #expect(!wrongSession)
+        #expect(state.phase == .opening)
+        let failed = state.fail(sessionID: "session-a", epoch: currentEpoch, message: "offline")
+        #expect(failed)
+        #expect(state.phase == .failed("offline"))
+    }
+
     @Test("bootstrap configuration stays in Manage Session")
     func hidesBootstrapConfiguration() throws {
         let snapshot = try fixture(transcript: """
@@ -112,6 +173,80 @@ struct ChatTranscriptPresentationTests {
         ))
         #expect(ChatTailFollowPolicy.userScrolledUp(previousOffset: 500, currentOffset: 494))
         #expect(!ChatTailFollowPolicy.userScrolledUp(previousOffset: 500, currentOffset: 499.5))
+    }
+
+    @Test("composer growth re-anchors only while following the tail")
+    func tailFollowComposerGrowthPolicy() {
+        #expect(ChatTailFollowPolicy.shouldFollowComposerGrowth(
+            previousHeight: 72,
+            currentHeight: 120,
+            userScrolledAway: false,
+            isUserInteracting: false,
+            isRestoringEarlierMessages: false
+        ))
+        #expect(!ChatTailFollowPolicy.shouldFollowComposerGrowth(
+            previousHeight: 120,
+            currentHeight: 72,
+            userScrolledAway: false,
+            isUserInteracting: false,
+            isRestoringEarlierMessages: false
+        ))
+        #expect(!ChatTailFollowPolicy.shouldFollowComposerGrowth(
+            previousHeight: 72,
+            currentHeight: 72.4,
+            userScrolledAway: false,
+            isUserInteracting: false,
+            isRestoringEarlierMessages: false
+        ))
+        #expect(!ChatTailFollowPolicy.shouldFollowComposerGrowth(
+            previousHeight: 72,
+            currentHeight: 120,
+            userScrolledAway: true,
+            isUserInteracting: false,
+            isRestoringEarlierMessages: false
+        ))
+        #expect(!ChatTailFollowPolicy.shouldFollowComposerGrowth(
+            previousHeight: 72,
+            currentHeight: 120,
+            userScrolledAway: false,
+            isUserInteracting: true,
+            isRestoringEarlierMessages: false
+        ))
+        #expect(!ChatTailFollowPolicy.shouldFollowComposerGrowth(
+            previousHeight: 72,
+            currentHeight: 120,
+            userScrolledAway: false,
+            isUserInteracting: false,
+            isRestoringEarlierMessages: true
+        ))
+        #expect(ChatTailFollowPolicy.composerGrowthFollowDecision(
+            previousHeight: 72,
+            currentHeight: 120,
+            userScrolledAway: false,
+            isUserInteracting: false,
+            isRestoringEarlierMessages: false
+        ) == .followNow)
+        #expect(ChatTailFollowPolicy.composerGrowthFollowDecision(
+            previousHeight: 72,
+            currentHeight: 120,
+            userScrolledAway: false,
+            isUserInteracting: true,
+            isRestoringEarlierMessages: false
+        ) == .followWhenIdle)
+        #expect(ChatTailFollowPolicy.composerGrowthFollowDecision(
+            previousHeight: 72,
+            currentHeight: 120,
+            userScrolledAway: true,
+            isUserInteracting: true,
+            isRestoringEarlierMessages: false
+        ) == .ignore)
+        #expect(ChatTailFollowPolicy.composerGrowthFollowDecision(
+            previousHeight: 72,
+            currentHeight: 120,
+            userScrolledAway: false,
+            isUserInteracting: true,
+            isRestoringEarlierMessages: true
+        ) == .ignore)
     }
 
     @Test("compaction token counts use compact K shorthand")

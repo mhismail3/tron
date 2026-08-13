@@ -5,6 +5,8 @@ import UIKit
 @MainActor
 @Observable
 final class AppModel {
+    enum SessionSnapshotInstallMode { case freshPresentation, reconnect }
+
     enum ConnectionState: Equatable {
         case unpaired, connecting, connected, reconnecting, unauthorized, offline(String)
     }
@@ -109,6 +111,7 @@ final class AppModel {
     var context: JSONValue?
     var sessionTree: [SessionTreeNode] = []
     var loadingEarlierTranscript = false
+    private(set) var authoritativeSessionIDs: Set<String> = []
     var commands: [CommandInfo] = []
     var resources: JSONValue?
     var packageState: PackageInventory?
@@ -144,6 +147,7 @@ final class AppModel {
     private var attachedTerminalIDs: Set<String> = []
     private var reconcilingTerminalIDs: Set<String> = []
     private var workspaceLoadGeneration = 0
+    private var presentationOpenGeneration = 0
 
     init(
         client: GatewayClient = GatewayClient(),
@@ -168,6 +172,11 @@ final class AppModel {
 
     var selectedSnapshot: SessionSnapshot? {
         selectedSessionID.flatMap { snapshots[$0] }
+    }
+
+    func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
+        guard authoritativeSessionIDs.contains(sessionID) else { return nil }
+        return snapshots[sessionID]
     }
 
     var selectedSessionStructureRevision: Int {
@@ -241,6 +250,7 @@ final class AppModel {
         profiles.select(profile)
         sessions = []
         snapshots = [:]
+        authoritativeSessionIDs = []
         selectedSessionID = nil
         subscribedSessionID = nil
         clearLiveConnectionState()
@@ -254,6 +264,7 @@ final class AppModel {
         gatewayInfo = nil
         sessions = []
         snapshots = [:]
+        authoritativeSessionIDs = []
         selectedSessionID = nil
         subscribedSessionID = nil
         clearLiveConnectionState()
@@ -490,6 +501,33 @@ final class AppModel {
         await refreshSessions()
     }
 
+    /// Starts a new mounted chat presentation. Unlike reconnect synchronization,
+    /// this always installs a fresh authoritative bounded tail and never carries
+    /// an explicitly paged prefix across navigation lifetimes.
+    func openSessionPresentation(_ id: String) async throws {
+        presentationOpenGeneration &+= 1
+        let generation = presentationOpenGeneration
+        if subscribedSessionID != id { await closeCurrentSubscription() }
+        guard generation == presentationOpenGeneration else { throw CancellationError() }
+        selectedSessionID = id
+        authoritativeSessionIDs.remove(id)
+        let synchronized = await synchronizeSession(
+            id,
+            replacingVisibleTranscript: true,
+            presentationGeneration: generation
+        )
+        guard generation == presentationOpenGeneration,
+              selectedSessionID == id,
+              synchronized,
+              subscribedSessionID == id else {
+            throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
+        }
+        authoritativeSessionIDs.insert(id)
+        async let providerRefresh: Void = refreshProviders()
+        async let commandRefresh: Void = loadCommands()
+        _ = await (providerRefresh, commandRefresh)
+    }
+
     func openSession(_ id: String) async throws {
         if subscribedSessionID != id { await closeCurrentSubscription() }
         selectedSessionID = id
@@ -499,6 +537,7 @@ final class AppModel {
                 throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
             }
         }
+        authoritativeSessionIDs.insert(id)
         async let providerRefresh: Void = refreshProviders()
         async let commandRefresh: Void = loadCommands()
         _ = await (providerRefresh, commandRefresh)
@@ -532,10 +571,14 @@ final class AppModel {
 
     private func closeCurrentSubscription() async {
         guard let sessionID = subscribedSessionID else { return }
+        await closeSubscription(sessionID)
+    }
+
+    private func closeSubscription(_ sessionID: String) async {
         struct Params: Codable { let sessionId: String }
         struct Response: Decodable { let closed: Bool }
         let _: Response? = try? await client.request("session.close", Params(sessionId: sessionID))
-        subscribedSessionID = nil
+        if subscribedSessionID == sessionID { subscribedSessionID = nil }
     }
 
     func send(_ text: String, behavior: String? = nil) async throws {
@@ -1404,7 +1447,11 @@ final class AppModel {
     }
 
     @discardableResult
-    private func synchronizeSession(_ sessionID: String) async -> Bool {
+    private func synchronizeSession(
+        _ sessionID: String,
+        replacingVisibleTranscript: Bool = false,
+        presentationGeneration: Int? = nil
+    ) async -> Bool {
         if sessionEventSynchronizer.isSynchronizing(sessionID: sessionID) {
             let token = sessionEventSynchronizer.token(sessionID: sessionID)
             let deadline = ContinuousClock.now + .seconds(65)
@@ -1413,6 +1460,13 @@ final class AppModel {
                 try? await Task.sleep(for: .milliseconds(10))
             }
             guard sessionEventSynchronizer.token(sessionID: sessionID) != token else { return false }
+            if replacingVisibleTranscript {
+                return await synchronizeSession(
+                    sessionID,
+                    replacingVisibleTranscript: true,
+                    presentationGeneration: presentationGeneration
+                )
+            }
             if pendingAuthoritativeResyncSessionIDs.remove(sessionID) != nil {
                 return await synchronizeSession(sessionID)
             }
@@ -1422,9 +1476,19 @@ final class AppModel {
         do {
             struct Params: Codable { let sessionId: String }
             let response: SessionOpenResponse = try await client.request("session.open", Params(sessionId: sessionID), timeout: .seconds(60))
+            if let presentationGeneration,
+               presentationGeneration != self.presentationOpenGeneration || selectedSessionID != sessionID {
+                sessionEventSynchronizer.cancel(sessionID: sessionID, token: token)
+                await closeSubscription(sessionID)
+                return false
+            }
             subscribedSessionID = sessionID
-            if pendingBranchReplacementSessionIDs.remove(sessionID) != nil {
-                snapshots[sessionID] = response.session
+            if replacingVisibleTranscript || pendingBranchReplacementSessionIDs.remove(sessionID) != nil {
+                snapshots[sessionID] = Self.installingSnapshot(
+                    current: snapshots[sessionID],
+                    authoritative: response.session,
+                    mode: .freshPresentation
+                )
             } else {
                 apply(response.session)
             }
@@ -1435,11 +1499,19 @@ final class AppModel {
                 eventSequence: installed.eventSequence
             )
             guard let replay = sessionEventSynchronizer.complete(sessionID: sessionID, token: token, baseline: cursor) else {
-                return await synchronizeSession(sessionID)
+                return await synchronizeSession(
+                    sessionID,
+                    replacingVisibleTranscript: replacingVisibleTranscript,
+                    presentationGeneration: presentationGeneration
+                )
             }
             for event in replay { await handleDeliveredEvent(event) }
             if pendingAuthoritativeResyncSessionIDs.remove(sessionID) != nil {
-                return await synchronizeSession(sessionID)
+                return await synchronizeSession(
+                    sessionID,
+                    replacingVisibleTranscript: replacingVisibleTranscript,
+                    presentationGeneration: presentationGeneration
+                )
             }
             notifications = Self.removingSessionCatchUpNotice(from: notifications)
             return true
@@ -1448,6 +1520,7 @@ final class AppModel {
             // events and let the next open replace it instead of applying them
             // against a stale cached snapshot or surfacing a transient sync race.
             sessionEventSynchronizer.cancel(sessionID: sessionID, token: token)
+            await closeSubscription(sessionID)
             if let failure = error as? GatewayFailure,
                failure.retryable || failure.code == "response_too_large" {
                 pendingAuthoritativeResyncSessionIDs.insert(sessionID)
@@ -1555,6 +1628,19 @@ final class AppModel {
                 phase: installed.phase,
                 summaryRevision: current.summaryRevision
             )
+        }
+    }
+
+    static func installingSnapshot(
+        current: SessionSnapshot?,
+        authoritative: SessionSnapshot,
+        mode: SessionSnapshotInstallMode
+    ) -> SessionSnapshot {
+        switch mode {
+        case .freshPresentation:
+            authoritative
+        case .reconnect:
+            current.map { mergingVisibleTranscript(current: $0, authoritative: authoritative) } ?? authoritative
         }
     }
 

@@ -619,9 +619,14 @@ export function projectTranscriptPage(
   while (start > 0) {
     const itemBytes = Buffer.byteLength(JSON.stringify(transcript[start - 1])) + 1;
     if (bytes + itemBytes > byteBudget && start < end) break;
-    // Projection limits guarantee ordinary items remain below the page budget.
-    // Never return an empty, non-advancing page for an unknown oversized shape.
-    if (itemBytes > byteBudget) break;
+    // Projection limits normally keep an item below the page target. If a future
+    // legal shape exceeds it, make the cursor advance with that one item rather
+    // than returning an empty page forever; the outer snapshot fitter still owns
+    // the strict WebSocket frame limit.
+    if (itemBytes > byteBudget) {
+      start -= 1;
+      break;
+    }
     bytes += itemBytes;
     start -= 1;
   }

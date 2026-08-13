@@ -29,13 +29,15 @@ cursor-paginated sessions and model catalogs, and replaces local state with
 authoritative snapshots. Session snapshots carry a byte-bounded current
 transcript tail; `transcriptStart`/`transcriptTotal` expose earlier canonical Pi
 entries, which the chat can request backward without risking an oversized
-WebSocket frame. Opening or resuming a long session starts at that bounded latest
-page and offers a compact Liquid Glass earlier-history pill. Once the chat is
-open, later authoritative snapshots merge their overlapping canonical tail with
-all history already loaded in that viewport; live tool bursts and resynchronization
-can never replace the visible branch with a shorter page. Explicit earlier-page
-loads prepend rows and restore the former first-visible anchor so the viewport
-does not jump.
+WebSocket frame. Opening a new chat presentation always synchronizes a fresh authoritative bounded
+latest page; disposable cached or previously paged prefixes are never revealed as
+its baseline. The transcript remains behind a nonblank opening surface until valid
+layout geometry and the bottom sentinel confirm exact tail positioning, then the
+whole stage fades and rises in (opacity only under Reduce Motion). A failed open
+shows an explicit retry surface. Once that mounted chat is ready, reconnect and
+resynchronization merge compatible live tails with history explicitly loaded in
+that viewport so a detached reader is not displaced. Explicit earlier-page loads
+remain request-only and restore the former visible anchor so the viewport does not jump.
 A just-created empty session remains locally selected until Pi indexes it after
 its first user message; absence from discovery alone does not discard the
 newly returned authoritative snapshot.
@@ -62,10 +64,16 @@ row keeps the first call's identity as it moves from invocation to completion.
 Consolidation applies only to consecutive tool calls: every canonical thinking,
 text, attachment, or notification boundary flushes the current group, preserving
 the exact Pi content order without hiding or moving thinking traces.
-Tail-follow includes measured floating-composer clearance and reacts to both
-response-state changes and later content-height settlement. Thinking, Markdown,
-tool, and working rows therefore remain above the composer while the user follows
-the tail; explicit user scroll-away always wins. Structural row insertions animate,
+The immutable navigation session ID owns one opening task and one typed
+`ScrollPosition`; duplicate dashboard opens and competing proxy scroll commands are
+forbidden. Tail-follow includes measured floating-composer clearance and reacts to both
+response-state changes and later content-height settlement. Meaningful measured
+overlay growth explicitly re-anchors after layout only while the user remains in
+follow mode. Growth measured during direct scrolling is coalesced until scrolling
+becomes idle; any upward gesture, scroll-away, or earlier-history restoration cancels
+that intent. Thinking, Markdown, tool, and working rows therefore remain above the
+composer
+while the user follows the tail. Structural row insertions animate,
 while stable long-history rows use equatable inputs and avoid stack-wide animation
 for streaming progress. Terminal output has its own monotonic sequence and reconnect replay cursor.
 Secondary live-runtime reads require that exact session to be opened first, so a
