@@ -2,6 +2,12 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum ChatAttachmentDestination: Hashable {
+    case camera
+    case photos
+    case files
+}
+
 struct ChatView: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
@@ -9,9 +15,9 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var photos: [PhotosPickerItem] = []
-    @State private var showCamera = false
-    @State private var showPhotos = false
-    @State private var showFiles = false
+    @State private var attachmentDestination: ChatAttachmentDestination?
+    @State private var queuedAttachmentDestination: ChatAttachmentDestination?
+    @State private var attachmentPresentationTask: Task<Void, Never>?
     @State private var showContext = false
     @State private var showSettings = false
     @State private var sending = false
@@ -47,19 +53,19 @@ struct ChatView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            transcript
-            topBlur
-            composer
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: ComposerHeightPreferenceKey.self,
-                            value: geometry.size.height
-                        )
+        transcript
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                composer
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: ComposerHeightPreferenceKey.self,
+                                value: geometry.size.height
+                            )
+                        }
                     }
-                }
-        }
+            }
+            .overlay(alignment: .top) { topBlur }
         .onPreferenceChange(ComposerHeightPreferenceKey.self) { composerHeight = $0 }
         .background(Color.tronBackground)
         .navigationTitle("")
@@ -71,15 +77,31 @@ struct ChatView: View {
         .toolbar { toolbar }
         .sheet(isPresented: $showContext) { SessionContextSheet() }
         .sheet(isPresented: $showSettings) { SettingsView(scope: .project).presentationDragIndicator(.hidden) }
-        .sheet(isPresented: $showCamera) {
+        .sheet(isPresented: attachmentPresentationBinding(for: .camera)) {
             CameraCaptureSheet { image in Task { await importCameraImage(image) } }
         }
-        .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: 5, matching: .images)
+        .photosPicker(
+            isPresented: attachmentPresentationBinding(for: .photos),
+            selection: $photos,
+            maxSelectionCount: 5,
+            matching: .images
+        )
         .sheet(item: interactionBinding) { interaction in ExtensionInteractionSheet(interaction: interaction) }
-        .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+        .fileImporter(
+            isPresented: attachmentPresentationBinding(for: .files),
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
             Task { await importFiles(result) }
         }
         .onChange(of: photos) { _, values in Task { await importPhotos(values) } }
+        .onChange(of: attachmentMenuState) { previous, current in
+            if previous.sessionID != current.sessionID {
+                cancelAttachmentPresentation(includingActive: true)
+            } else if !current.actionsEnabled {
+                cancelAttachmentPresentation(includingActive: false)
+            }
+        }
         .onChange(of: speech.transcript) { _, value in if !value.isEmpty { text = value } }
         .onChange(of: speech.error) { _, value in if let value { model.lastError = value } }
         .onChange(of: model.editorRequest) { _, request in
@@ -113,6 +135,7 @@ struct ChatView: View {
             openingTask = nil
             pagingTask?.cancel()
             pagingTask = nil
+            cancelAttachmentPresentation(includingActive: true)
             cancelTailFollow()
             if let generation = modelPresentationGeneration {
                 Task { await model.closeSessionPresentation(sessionID, generation: generation) }
@@ -145,9 +168,7 @@ struct ChatView: View {
                     runtimeRows(snapshot)
                 }
                 Color.clear
-                    .frame(height: max(88, composerHeight + 20))
-                Color.clear
-                    .frame(height: 1)
+                    .frame(height: 12)
                     .id("transcript-bottom")
                     .accessibilityHidden(true)
             }
@@ -280,7 +301,7 @@ struct ChatView: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("New response")
                     .padding(.trailing, 12)
-                    .padding(.bottom, composerHeight + 8)
+                    .padding(.bottom, 8)
                 }
             }
         .overlay { openingSurface }
@@ -625,9 +646,18 @@ struct ChatView: View {
             )
             .overlay(alignment: .bottomLeading) {
                 Menu {
-                    Button("Take Photo", systemImage: "camera") { showCamera = true }
-                    Button("Select Photos", systemImage: "photo.on.rectangle") { showPhotos = true }
-                    Button("Attach Files", systemImage: "folder") { showFiles = true }
+                    Button("Take Photo", systemImage: "camera") {
+                        requestAttachmentPresentation(.camera)
+                    }
+                    .disabled(!attachmentActionsEnabled)
+                    Button("Select Photos", systemImage: "photo.on.rectangle") {
+                        requestAttachmentPresentation(.photos)
+                    }
+                    .disabled(!attachmentActionsEnabled)
+                    Button("Attach Files", systemImage: "folder") {
+                        requestAttachmentPresentation(.files)
+                    }
+                    .disabled(!attachmentActionsEnabled)
                 } label: {
                     Image(systemName: "plus")
                         .font(TronTypography.buttonSM)
@@ -635,6 +665,9 @@ struct ChatView: View {
                         .frame(width: 40, height: 40)
                         .contentShape(Circle())
                 }
+                // Native menu action attributes may be cached across navigation.
+                // Replace only when the viewed session or effective availability changes.
+                .id(attachmentMenuState.identity)
                 .accessibilityLabel("Add attachment")
                 .padding(.leading, 4)
             }
@@ -694,6 +727,61 @@ struct ChatView: View {
         Binding(
             get: { selectedAuthoritativeSnapshot?.extensionUI.pendingInteractions.first },
             set: { _ in }
+        )
+    }
+
+    private var attachmentMenuState: ChatAttachmentMenuState {
+        ChatAttachmentMenuState(
+            sessionID: sessionID,
+            phase: selectedAuthoritativeSnapshot?.phase,
+            isTranscriptReady: isTranscriptReady,
+            isSending: sending
+        )
+    }
+
+    private var attachmentActionsEnabled: Bool { attachmentMenuState.actionsEnabled }
+
+    private func requestAttachmentPresentation(_ destination: ChatAttachmentDestination) {
+        guard attachmentActionsEnabled else { return }
+
+        // A native Menu is still dismissing when its action runs. Presenting a
+        // sheet or system picker synchronously can collide with that transient
+        // presentation controller on physical iOS. Queue one destination, force
+        // a fresh presentation edge, and activate it after dismissal settles.
+        attachmentPresentationTask?.cancel()
+        attachmentDestination = nil
+        queuedAttachmentDestination = destination
+        attachmentPresentationTask = Task { @MainActor in
+            do { try await Task.sleep(for: .milliseconds(200)) }
+            catch { return }
+            guard !Task.isCancelled,
+                  queuedAttachmentDestination == destination,
+                  attachmentActionsEnabled else { return }
+            queuedAttachmentDestination = nil
+            attachmentDestination = destination
+        }
+    }
+
+    private func cancelAttachmentPresentation(includingActive: Bool) {
+        attachmentPresentationTask?.cancel()
+        attachmentPresentationTask = nil
+        queuedAttachmentDestination = nil
+        if includingActive { attachmentDestination = nil }
+    }
+
+    private func attachmentPresentationBinding(
+        for destination: ChatAttachmentDestination
+    ) -> Binding<Bool> {
+        Binding(
+            get: { attachmentDestination == destination },
+            set: { isPresented in
+                if isPresented {
+                    guard attachmentActionsEnabled else { return }
+                    attachmentDestination = destination
+                } else if attachmentDestination == destination {
+                    attachmentDestination = nil
+                }
+            }
         )
     }
 

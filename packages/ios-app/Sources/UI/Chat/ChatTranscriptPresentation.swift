@@ -267,6 +267,41 @@ enum ChatComposerGrowthFollowDecision: Equatable {
     case followWhenIdle
 }
 
+struct ChatAttachmentMenuIdentity: Hashable {
+    let sessionID: String
+    let actionsEnabled: Bool
+}
+
+struct ChatAttachmentMenuState: Hashable {
+    let sessionID: String
+    let phase: SessionPhase?
+    let isTranscriptReady: Bool
+    let isSending: Bool
+
+    var actionsEnabled: Bool {
+        ChatAttachmentAvailabilityPolicy.actionsEnabled(
+            isTranscriptReady: isTranscriptReady,
+            phase: phase,
+            isSending: isSending
+        )
+    }
+
+    var identity: ChatAttachmentMenuIdentity {
+        ChatAttachmentMenuIdentity(sessionID: sessionID, actionsEnabled: actionsEnabled)
+    }
+}
+
+enum ChatAttachmentAvailabilityPolicy {
+    static func actionsEnabled(
+        isTranscriptReady: Bool,
+        phase: SessionPhase?,
+        isSending: Bool
+    ) -> Bool {
+        guard isTranscriptReady, let phase else { return false }
+        return !phase.isActive && !isSending
+    }
+}
+
 enum ChatTailFollowPolicy {
     static func shouldFollowContentGrowth(
         previousHeight: CGFloat,

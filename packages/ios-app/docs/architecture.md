@@ -76,14 +76,14 @@ text, attachment, or notification boundary flushes the current group, preserving
 the exact Pi content order without hiding or moving thinking traces.
 The immutable navigation session ID owns one opening task and one typed
 `ScrollPosition`; duplicate dashboard opens and competing proxy scroll commands are
-forbidden. Tail-follow includes measured floating-composer clearance and reacts to both
-response-state changes and later content-height settlement. Meaningful measured
-overlay growth explicitly re-anchors after layout only while the user remains in
-follow mode. Growth measured during direct scrolling is coalesced until scrolling
+forbidden. The composer is installed as a structural bottom safe-area inset, so the
+transcript viewport ends above the complete composer—including attachment chips and
+multiline growth—instead of simulating clearance in scroll content. Tail-follow still
+reacts to response-state, content-height, and measured composer changes to preserve
+continuity. Growth measured during direct scrolling is coalesced until scrolling
 becomes idle; any upward gesture, scroll-away, or earlier-history restoration cancels
 that intent. Thinking, Markdown, tool, and working rows therefore remain above the
-composer
-while the user follows the tail. Structural row insertions animate,
+composer by layout even when follow timing is delayed. Structural row insertions animate,
 while stable long-history rows use equatable inputs and avoid stack-wide animation
 for streaming progress. Terminal output has its own monotonic sequence and reconnect replay cursor.
 Secondary live-runtime reads require that exact session to be opened first, so a
@@ -103,7 +103,15 @@ diagnostics. Model identity is always `(provider,id)`; model IDs alone are not
 assumed globally unique.
 
 The composer supports text, native speech transcription, images, and bounded
-file uploads. Images become native image input. Other files remain agent-readable
+file uploads. The native attachment menu derives enablement from the immutable viewed
+session and an explicit authoritative phase; a missing phase remains unavailable. Its
+identity changes only when the session or effective availability changes, so disabled
+actions from a running chat cannot be reused in an idle chat without replacing the menu
+for unrelated phase churn. Menu selections enter one cancellation-aware queue and become
+the active camera, photo, or file destination only after the native menu dismissal settles,
+preventing a competing presentation controller from dropping the selection on physical
+iOS. Camera, photo, and file importers share that enum-valued presentation state rather
+than independent Booleans. Images become native image input. Other files remain agent-readable
 through a deterministic canonical path envelope, while the mobile projection
 removes that path and exposes only display-safe name/type/size metadata. Sent
 images and files share one attachment strip above the prompt text: images use the
@@ -174,13 +182,12 @@ with the native top-right check action; top-left dismissal controls are reserved
 for navigation, not app-owned sheets. Settings containers and their nested font
 or model choices disclose as progressively stacked sub-sheets rather than
 horizontal navigation pushes; connected-provider logout lives in the provider
-row's compact action menu. The chat composer
-floats over the transcript without an opaque footer. Its UIKit text view is the
-sole first-responder owner; SwiftUI mirrors delegate focus only for presentation,
-so transcript relayout and programmatic tail-follow cannot dismiss a direct tap.
-Transcript content scrolls
-behind it, a dynamic trailing clearance keeps the last response reachable, and
-the scroll-edge policy is attached to each concrete ScrollView/List inside its
+row's compact action menu. The chat composer remains visually floating without an
+opaque footer, but structurally reserves the transcript's bottom safe area. Its UIKit
+text view is the sole first-responder owner; SwiftUI mirrors delegate focus only for
+presentation, so transcript relayout and programmatic tail-follow cannot dismiss a
+direct tap. Transcript content ends above the complete composer, and the scroll-edge
+policy is attached to each concrete ScrollView/List inside its
 NavigationStack, matching the working non-gateway presentation boundary. Every
 edge is explicitly soft because the hard top style renders as an opaque cutoff
 on physical iOS 27 hardware instead of Tron's graduated translucent blur.

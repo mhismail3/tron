@@ -16,6 +16,50 @@ struct ChatTranscriptPresentationTests {
         #expect(ready.isAtExactBottom)
     }
 
+    @Test("attachment menu state is scoped to the viewed session and authoritative phase")
+    func attachmentAvailability() {
+        #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(
+            isTranscriptReady: false, phase: .idle, isSending: false
+        ))
+        #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(
+            isTranscriptReady: true, phase: nil, isSending: false
+        ))
+        #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(
+            isTranscriptReady: true, phase: .running, isSending: false
+        ))
+        #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(
+            isTranscriptReady: true, phase: .idle, isSending: true
+        ))
+        #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(
+            isTranscriptReady: true, phase: .idle, isSending: false
+        ))
+        #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(
+            isTranscriptReady: true, phase: .interrupted, isSending: false
+        ))
+
+        let running = ChatAttachmentMenuState(
+            sessionID: "session", phase: .running,
+            isTranscriptReady: true, isSending: false
+        )
+        let compacting = ChatAttachmentMenuState(
+            sessionID: "session", phase: .compacting,
+            isTranscriptReady: true, isSending: false
+        )
+        let idle = ChatAttachmentMenuState(
+            sessionID: "session", phase: .idle,
+            isTranscriptReady: true, isSending: false
+        )
+        let anotherIdle = ChatAttachmentMenuState(
+            sessionID: "another-session", phase: .idle,
+            isTranscriptReady: true, isSending: false
+        )
+        #expect(!running.actionsEnabled)
+        #expect(idle.actionsEnabled)
+        #expect(running.identity == compacting.identity)
+        #expect(running.identity != idle.identity)
+        #expect(idle.identity != anotherIdle.identity)
+    }
+
     @Test("authoritative sync reveals without waiting for physical layout callbacks")
     func chatOpenPresentationState() {
         var state = ChatOpenPresentationState(sessionID: "session-a")
