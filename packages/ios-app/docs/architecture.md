@@ -33,13 +33,12 @@ WebSocket frame. Opening a new chat presentation always synchronizes a fresh aut
 latest page; disposable cached or previously paged prefixes are never revealed as
 its baseline. The transcript remains behind a nonblank opening surface until the
 two-phase `session.open`/`session.sync` handshake installs its authoritative tail,
-then a bounded generation-scoped positioning coordinator confirms stable exact-bottom
-geometry before the whole stage fades and rises in (opacity only under Reduce Motion).
-Native `ScrollPosition` retries nonanimated positioning across layout changes and
-falls back to an explicit Retry surface rather than leaving a permanent opening view.
-The composer remains mounted for stable geometry but is visually hidden, inaccessible,
-and noninteractive until the authoritative tail is positioned. A failed transport,
-sync, or positioning open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
+then the whole stage fades and rises in (opacity only under Reduce Motion). Native
+`ScrollPosition` starts at the bottom, but physical layout callbacks are never a
+correctness gate because SwiftUI may coalesce them. The composer remains mounted
+and visible throughout opening so transient synchronization cannot remove the
+primary chat control; sending stays disabled until the authoritative baseline is
+ready. A failed transport/sync open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
 resynchronization merge compatible live tails with history explicitly loaded in
 that viewport so a detached reader is not displaced. Explicit earlier-page loads
 remain request-only, are scoped to the exact mount generation/cursor, and restore the
@@ -54,7 +53,10 @@ a two-phase subscription barrier: the authoritative snapshot and ephemeral sync
 token are returned first; the same opaque token remains the subscription ownership
 credential after synchronization. iOS installs that baseline and acknowledges the
 token before the gateway releases later events, and `session.close` only releases a
-subscription whose current token matches. While a resync is in
+subscription whose current token matches. Older protocol-v2 gateways omit the
+explicit ownership field; iOS safely treats their per-open `syncToken` as the same
+identity during rolling upgrades, avoiding interruption of Gateway-owned runs.
+While a resync is in
 flight, iOS quarantines that session's events, discards those covered by the new
 baseline, and replays the contiguous remainder. Gaps, runtime-generation changes,
 buffer overflow, oversized frames, reconnect, and foreground activation all

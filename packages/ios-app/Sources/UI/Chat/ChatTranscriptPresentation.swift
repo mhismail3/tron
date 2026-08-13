@@ -18,7 +18,6 @@ struct ChatTranscriptGeometry: Equatable {
 
 enum ChatOpenPresentationPhase: Equatable {
     case opening
-    case positioning
     case ready
     case failed(String)
 }
@@ -27,38 +26,20 @@ struct ChatOpenPresentationState: Equatable {
     let sessionID: String
     private(set) var epoch: Int = 0
     private(set) var phase: ChatOpenPresentationPhase = .opening
-    private(set) var stableBottomObservations = 0
 
     mutating func begin() -> Int {
         epoch &+= 1
         phase = .opening
-        stableBottomObservations = 0
         return epoch
     }
 
+    /// The authoritative two-phase session handshake is the presentation gate.
+    /// Scroll positioning remains best-effort because physical SwiftUI can
+    /// coalesce geometry and visibility callbacks indefinitely.
     mutating func installAuthoritativeBaseline(sessionID: String, epoch: Int) -> Bool {
         guard sessionID == self.sessionID, epoch == self.epoch, phase == .opening else { return false }
-        phase = .positioning
-        stableBottomObservations = 0
+        phase = .ready
         return true
-    }
-
-    mutating func observePosition(sessionID: String, epoch: Int, geometry: ChatTranscriptGeometry) -> Bool {
-        guard sessionID == self.sessionID, epoch == self.epoch, phase == .positioning else { return false }
-        if geometry.isAtExactBottom {
-            stableBottomObservations += 1
-            if stableBottomObservations >= 2 {
-                phase = .ready
-                return true
-            }
-        } else {
-            stableBottomObservations = 0
-        }
-        return false
-    }
-
-    mutating func failPositioning(sessionID: String, epoch: Int) -> Bool {
-        fail(sessionID: sessionID, epoch: epoch, message: "Tron could not position the latest messages. Try again.")
     }
 
     mutating func fail(sessionID: String, epoch: Int, message: String) -> Bool {

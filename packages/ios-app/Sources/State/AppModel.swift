@@ -60,10 +60,22 @@ final class AppModel {
         var id: String { "\(sessionId):\(revision)" }
     }
 
-    private struct SessionOpenResponse: Decodable {
+    struct SessionOpenResponse: Decodable {
         let session: SessionSnapshot
         let syncToken: String
         let subscriptionToken: String
+
+        private enum CodingKeys: String, CodingKey { case session, syncToken, subscriptionToken }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            session = try container.decode(SessionSnapshot.self, forKey: .session)
+            syncToken = try container.decode(String.self, forKey: .syncToken)
+            // Early protocol-v2 gateways use the synchronization token as the
+            // subscription identity. New gateways expose that same value under
+            // an explicit field so stale closes can be rejected end to end.
+            subscriptionToken = try container.decodeIfPresent(String.self, forKey: .subscriptionToken) ?? syncToken
+        }
     }
     private struct SessionMutationResponse: Codable { let sessionId: String }
     private struct CommandStatusParams: Codable { let method, commandId: String }

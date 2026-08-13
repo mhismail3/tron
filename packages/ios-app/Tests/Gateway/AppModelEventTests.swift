@@ -78,6 +78,31 @@ struct AppModelEventTests {
         #expect(model.selectedSnapshot?.eventSequence == 91)
     }
 
+    @Test("older protocol-v2 opens reuse the sync token as subscription ownership")
+    func legacySessionOpenTokenFallback() throws {
+        let snapshot = try loadSnapshot()
+        let open = try JSONValue.object([
+            "session": try JSONValue.encode(snapshot),
+            "syncToken": .string("legacy-token"),
+        ]).decode(AppModel.SessionOpenResponse.self)
+
+        #expect(open.syncToken == "legacy-token")
+        #expect(open.subscriptionToken == "legacy-token")
+    }
+
+    @Test("explicit subscription ownership wins when the gateway sends it")
+    func currentSessionOpenToken() throws {
+        let snapshot = try loadSnapshot()
+        let open = try JSONValue.object([
+            "session": try JSONValue.encode(snapshot),
+            "syncToken": .string("sync-token"),
+            "subscriptionToken": .string("subscription-token"),
+        ]).decode(AppModel.SessionOpenResponse.self)
+
+        #expect(open.syncToken == "sync-token")
+        #expect(open.subscriptionToken == "subscription-token")
+    }
+
     @Test("subscription cleanup clears only the exact gateway-confirmed owner")
     func subscriptionOwnership() {
         #expect(AppModel.shouldClearSubscription(

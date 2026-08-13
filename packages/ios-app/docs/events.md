@@ -38,12 +38,16 @@ local database.
 
 A newly navigated chat opens exactly once and replaces any disposable cached or
 previously expanded projection with a fresh bounded authoritative latest tail.
-It does not enter the visible event-rendering state until two valid exact-bottom
-geometry observations confirm positioning; bounded positioning attempts fail into
-a recoverable Retry surface instead of revealing an intermediate position. The
-opaque opening surface also hides and disables the complete composer interaction
-stage until readiness. Session subscription ownership is token-scoped end to end,
-so a stale close cannot unsubscribe a newer same-session mount. A reconnect while that same chat remains mounted instead receives
+It enters the visible event-rendering state as soon as the authoritative two-phase
+handshake completes. Native scroll positioning remains best-effort and never gates
+readiness because physical SwiftUI can coalesce geometry callbacks. The composer
+remains visible throughout opening, while sending stays disabled until readiness.
+Session subscription ownership is token-scoped end to end,
+so a stale close cannot unsubscribe a newer same-session mount. During a rolling
+upgrade, iOS accepts an older protocol-v2 `session.open` without the explicit
+`subscriptionToken` and uses its `syncToken`, which is the same per-open identity;
+this keeps existing Gateway-owned runs available until the Gateway can be restarted
+safely. A reconnect while that same chat remains mounted instead receives
 complete current runtime state and preserves compatible explicitly paged history
 and the reader's follow/detached mode. If a pathological live
 tool run exceeds the ordinary projection budget, duplicate tool detail is

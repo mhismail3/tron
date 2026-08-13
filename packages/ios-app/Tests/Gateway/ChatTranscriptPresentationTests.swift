@@ -16,7 +16,7 @@ struct ChatTranscriptPresentationTests {
         #expect(ready.isAtExactBottom)
     }
 
-    @Test("authoritative sync requires stable bottom positioning before reveal")
+    @Test("authoritative sync reveals without waiting for physical layout callbacks")
     func chatOpenPresentationState() {
         var state = ChatOpenPresentationState(sessionID: "session-a")
         let epoch = state.begin()
@@ -28,39 +28,7 @@ struct ChatTranscriptPresentationTests {
 
         let installed = state.installAuthoritativeBaseline(sessionID: "session-a", epoch: epoch)
         #expect(installed)
-        #expect(state.phase == .positioning)
-        let invalid = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: .zero)
-        #expect(!invalid)
-        let bottom = ChatTranscriptGeometry(offsetY: 400, contentHeight: 800, containerHeight: 400)
-        let firstBottom = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: bottom)
-        #expect(!firstBottom)
-        #expect(state.stableBottomObservations == 1)
-        let secondBottom = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: bottom)
-        #expect(secondBottom)
         #expect(state.phase == .ready)
-    }
-
-    @Test("positioning resets instability and fails recoverably after a bounded coordinator deadline")
-    func chatOpenPositioningFailure() {
-        var state = ChatOpenPresentationState(sessionID: "session-a")
-        let epoch = state.begin()
-        let installed = state.installAuthoritativeBaseline(sessionID: "session-a", epoch: epoch)
-        #expect(installed)
-        let bottom = ChatTranscriptGeometry(offsetY: 400, contentHeight: 800, containerHeight: 400)
-        let away = ChatTranscriptGeometry(offsetY: 200, contentHeight: 800, containerHeight: 400)
-        let firstBottom = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: bottom)
-        let movedAway = state.observePosition(sessionID: "session-a", epoch: epoch, geometry: away)
-        #expect(!firstBottom)
-        #expect(!movedAway)
-        #expect(state.stableBottomObservations == 0)
-        let staleFailure = state.failPositioning(sessionID: "session-a", epoch: epoch - 1)
-        let currentFailure = state.failPositioning(sessionID: "session-a", epoch: epoch)
-        #expect(!staleFailure)
-        #expect(currentFailure)
-        guard case .failed = state.phase else {
-            Issue.record("expected recoverable positioning failure")
-            return
-        }
     }
 
     @Test("stale presentation callbacks cannot fail a newer opening epoch")
