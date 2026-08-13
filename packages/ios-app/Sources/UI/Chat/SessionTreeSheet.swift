@@ -102,6 +102,7 @@ struct SessionTreeSheet: View {
                 Button("Cancel", role: .cancel) { labelNode = nil }
             }
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }
@@ -309,6 +310,7 @@ private struct NavigationSheet: View {
                 }
             }
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }
@@ -396,6 +398,7 @@ struct ForkConfirmationSheet: View {
                 }
             }
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }

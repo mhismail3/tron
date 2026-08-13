@@ -19,6 +19,7 @@ struct SessionShellView: View {
         dashboardNavigation
         .sheet(isPresented: $showNewSession) {
             NewSessionSheet { presentedSessionID = $0 }
+                .tronTopBlur(.sheet)
                 .presentationDetents([.medium, .large], selection: $newSessionDetent)
                 .presentationDragIndicator(.hidden)
         }
@@ -59,6 +60,7 @@ struct SessionShellView: View {
     private var dashboardScreen: some View {
         ZStack(alignment: .bottomTrailing) {
             sessionList
+            TronTopBlurOverlay(style: .dashboard)
             newSessionButton
         }
             .scrollContentBackground(.hidden)
@@ -457,6 +459,7 @@ private struct NewSessionSheet: View {
             .sheet(isPresented: $showModels) {
                 NavigationStack {
                     ModelPicker(selection: $selectedModel, models: model.models.filter(\.available))
+                        .tronTopBlurSurface()
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
                             ToolbarItem(placement: .principal) { TronSheetTitle(title: "Model") }
@@ -470,6 +473,7 @@ private struct NewSessionSheet: View {
                             }
                         }
                 }
+                .tronTopBlur(.sheet)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
             }

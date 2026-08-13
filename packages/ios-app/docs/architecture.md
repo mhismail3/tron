@@ -183,10 +183,15 @@ NavigationStack, matching the working non-gateway presentation boundary. Every
 edge is explicitly soft because the hard top style renders as an opaque cutoff
 on physical iOS 27 hardware instead of Tron's graduated translucent blur.
 System navigation-bar backgrounds remain hidden at that same boundary so
-scrolling content reaches the toolbar. Chat adds one bounded, noninteractive
-top backdrop that is strongest beneath the toolbar and eases completely into
-the transcript; it stays outside the scroll owner so transcript geometry and
-tail following remain authoritative. Provider authentication is presented only by
+scrolling content reaches the toolbar. Dashboard and chat add bounded,
+noninteractive top backdrops that are strongest beneath their toolbars and ease
+completely into scrolling content; chat uses the tallest fade. Progressive
+medium/large sheets and full-height settings/terminal sheets share a shorter
+fade sized to navigation chrome, while immersive camera and image sheets remain
+unmodified. Sheet backdrops are attached to the concrete scrolling surface
+inside each NavigationStack (or its non-scrolling content surface), so toolbar
+titles and controls always render above the effect. Each backdrop stays outside
+scroll content so scrolling geometry and tail following remain authoritative. Provider authentication is presented only by
 the currently visible Providers or Onboarding surface, preventing an underlying
 sheet from deferring the login prompt until the user navigates back. Sheets never use pull-to-refresh;
 session history, packages, and providers expose reload as an explicit toolbar

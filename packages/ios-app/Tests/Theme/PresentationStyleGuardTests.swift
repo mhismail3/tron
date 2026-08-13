@@ -150,6 +150,67 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("slider.horizontal.3"))
     }
 
+    @Test("top blur uses distinct chat, dashboard, and sheet proportions")
+    func topBlurCoverage() throws {
+        let blur = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTopVariableBlur.swift"),
+            encoding: .utf8
+        )
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let shell = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
+            encoding: .utf8
+        )
+        let app = try String(
+            contentsOf: packageRoot.appending(path: "Sources/App/TronMobileApp.swift"),
+            encoding: .utf8
+        )
+        let settings = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/SettingsView.swift"),
+            encoding: .utf8
+        )
+        let terminal = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Terminal/TerminalSheet.swift"),
+            encoding: .utf8
+        )
+        let camera = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/CameraCaptureSheet.swift"),
+            encoding: .utf8
+        )
+        let imagePreview = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/AttachmentImagePreviewSheet.swift"),
+            encoding: .utf8
+        )
+
+        #expect(blur.contains("case .chat: 188"))
+        #expect(blur.contains("case .dashboard: 176"))
+        #expect(blur.contains("case .sheet: 124"))
+        #expect(chat.contains("TronTopBlurOverlay(style: .chat)"))
+        #expect(shell.contains("TronTopBlurOverlay(style: .dashboard)"))
+        #expect(app.contains(".tronTopBlur(.sheet)"))
+        #expect(settings.matches(#"\.tronTopBlur\(\.sheet\)"#) >= 2)
+        #expect(terminal.contains(".tronTopBlur(.sheet)"))
+        #expect(!camera.contains("tronTopBlur"))
+        #expect(!imagePreview.contains("tronTopBlur"))
+        #expect(blur.contains(".allowsHitTesting(false)"))
+        #expect(blur.contains(".accessibilityHidden(true)"))
+        #expect(blur.contains("content.environment(\\.tronTopBlurStyle, style)"))
+        #expect(blur.contains("func tronTopBlurSurface()"))
+        #expect(!blur.contains("TronNavigationTopBlurInstaller"))
+
+        for (url, source) in uiSources {
+            let detentCount = source.matches(#"\.presentationDetents\(\[\.medium, \.large\]"#)
+            let blurCount = source.matches(#"\.tronTopBlur\(\.sheet\)"#)
+            #expect(
+                blurCount >= detentCount,
+                "\(url.lastPathComponent) has \(detentCount) medium/large sheets but only \(blurCount) sheet blurs"
+            )
+        }
+    }
+
     @Test("dashboard header and row share the historical icon anchor")
     func dashboardAlignment() throws {
         let shell = try String(

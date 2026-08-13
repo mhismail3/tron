@@ -435,6 +435,7 @@ struct ToolCard: View {
                     }
                 }
             }
+            .tronTopBlur(.sheet)
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
             .tronPresentation()
@@ -627,6 +628,7 @@ private struct ToolRunChip: View {
                     }
                 }
             }
+            .tronTopBlur(.sheet)
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
             .tronPresentation()
@@ -774,6 +776,7 @@ private struct SummaryNotice: View {
                     }
                 }
             }
+            .tronTopBlur(.sheet)
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }

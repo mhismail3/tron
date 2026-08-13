@@ -469,6 +469,7 @@ struct ResourceSettingsView: View {
                 }
             }
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }

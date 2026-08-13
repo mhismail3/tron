@@ -609,6 +609,7 @@ struct GatewayDiagnosticsView: View {
                     }
                 }
             }
+            .tronTopBlur(.sheet)
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }

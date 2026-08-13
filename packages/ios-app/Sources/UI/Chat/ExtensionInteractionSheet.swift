@@ -64,6 +64,7 @@ struct ExtensionInteractionSheet: View {
             }
             .onAppear { text = interaction.prefill ?? "" }
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled()

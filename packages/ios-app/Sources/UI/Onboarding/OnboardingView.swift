@@ -61,6 +61,7 @@ struct OnboardingView: View {
                     .padding(.horizontal, TronSpacing.xlarge)
                     .padding(.bottom, 10)
             }
+            .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

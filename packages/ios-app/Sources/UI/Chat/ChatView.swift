@@ -49,6 +49,7 @@ struct ChatView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             transcript
+            topBlur
             composer
                 .allowsHitTesting(isTranscriptReady)
                 .accessibilityHidden(!isTranscriptReady)
@@ -120,6 +121,10 @@ struct ChatView: View {
                 Task { await model.closeSessionPresentation(sessionID, generation: generation) }
             }
         }
+    }
+
+    private var topBlur: some View {
+        TronTopBlurOverlay(style: .chat)
     }
 
     private var transcript: some View {

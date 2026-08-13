@@ -133,6 +133,26 @@ page dots, and toolbar navigation are all part of the parity contract. Copy may
 change only where gateway security semantics require one-time enrollment rather
 than a permanent pairing token.
 
+## Chat top-blur validation
+
+The chat's top-edge overlay is inspired by
+[jtrivedi/VariableBlurView](https://github.com/jtrivedi/VariableBlurView). The
+`Tron Fast` `ProdDebug` build enables its guarded private `CAFilter`
+variable-radius path for local visual iteration only. The Objective-C bridge
+catches runtime exceptions and falls back cleanly if the private filter or
+backdrop hierarchy changes. Other configurations compile the App-Review-safe
+public fallback: a gradient-masked `UIVisualEffectView`. Do not
+add `TRON_PRIVATE_VARIABLE_BLUR` to an archived configuration; private API is
+not eligible for App Store distribution.
+
+Validate this chrome on a physical device while scrolling high-contrast content
+beneath the chat, dashboard, and representative medium/large sheet toolbars.
+Chat uses a 188-point fade, dashboard 176 points, and sheets a compact 124 points.
+Check that each top stays legible, the lower edge has no visible cutoff, toolbar
+controls remain tappable, and light/dark modes retain the same gradual
+transition. Immersive camera and image-preview sheets intentionally have no
+added backdrop.
+
 ## Internal TestFlight beta delivery
 
 After CI succeeds for the current `main` head, `.github/workflows/release-ios.yml`

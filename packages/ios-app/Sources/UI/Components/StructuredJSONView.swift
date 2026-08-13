@@ -211,6 +211,7 @@ private struct JSONFieldSheet: View {
                 }
             }
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)

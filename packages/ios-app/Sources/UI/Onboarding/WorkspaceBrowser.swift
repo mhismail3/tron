@@ -76,6 +76,7 @@ struct WorkspaceBrowser: View {
                 Task { await load(path: currentPath, navigation: true) }
             }
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)

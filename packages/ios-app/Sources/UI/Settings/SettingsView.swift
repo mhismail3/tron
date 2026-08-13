@@ -71,6 +71,7 @@ struct SettingsView: View {
                 }
             }
         }
+        .tronTopBlur(.sheet)
         .presentationDragIndicator(.hidden)
         .gatewayGlobalSheets()
         .task {
@@ -129,6 +130,7 @@ private struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
                             }
                         }
                 }
+                .tronTopBlur(.sheet)
                 .tronPresentation()
                 .presentationDragIndicator(.hidden)
             }

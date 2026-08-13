@@ -80,6 +80,7 @@ struct SessionContextSheet: View {
                 Button("Cancel", role: .cancel) {}
             }
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)
@@ -370,6 +371,7 @@ struct SessionContextSheet: View {
                 }
             }
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)
@@ -472,6 +474,7 @@ struct ForkSheet: View {
             .task(id: model.selectedSessionStructureRevision) { await load() }
             .sheet(item: $selectedNode) { node in ForkConfirmationSheet(node: node) }
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }

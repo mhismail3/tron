@@ -285,6 +285,7 @@ struct TerminalSheet: View {
                 }
             }
             .background(Color.tronBackground)
+            .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -324,6 +325,7 @@ struct TerminalSheet: View {
         } message: {
             Text("The shell and its running process group will stop. Closing the sheet alone only detaches.")
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)

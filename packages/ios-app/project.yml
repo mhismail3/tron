@@ -61,6 +61,7 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Support/PrivateVariableBlurBridge.h
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_EMIT_LOC_STRINGS: YES
