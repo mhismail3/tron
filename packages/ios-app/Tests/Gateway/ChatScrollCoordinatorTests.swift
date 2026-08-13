@@ -70,16 +70,47 @@ struct ChatScrollCoordinatorTests {
         #expect(!coordinator.userScrolledAway)
     }
 
+    @Test("user-driven settling commits upward movement only when it reaches idle")
+    func userDrivenSettlingDetachesAtIdle() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .animating, finalGeometry: nil)
+        #expect(!coordinator.userScrolledAway)
+        coordinator.scrollPhaseChanged(from: .animating, to: .idle, finalGeometry: away)
+        #expect(coordinator.userScrolledAway)
+        #expect(!coordinator.isAtBottom)
+    }
+
+    @Test("bottom rubber-banding never detaches or exposes catch-up")
+    func bottomRubberBandStaysPinned() {
+        let coordinator = ChatScrollCoordinator()
+        let overscrolledBottom = ChatTranscriptGeometry(
+            offsetY: 630, contentHeight: 1_000, containerHeight: 400
+        )
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.geometryChanged(previous: bottom, current: overscrolledBottom)
+        coordinator.geometryChanged(previous: overscrolledBottom, current: bottom)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: bottom)
+        #expect(!coordinator.userScrolledAway)
+        #expect(!coordinator.hasUnreadContent)
+        #expect(coordinator.isAtBottom)
+    }
+
     @Test("scrolling back to the exact bottom clears unread and resumes following")
     func manualReturnToBottomRepins() {
         let coordinator = ChatScrollCoordinator()
         coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.geometryChanged(previous: bottom, current: away)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
         coordinator.semanticResponseArrived()
         #expect(coordinator.userScrolledAway)
         #expect(coordinator.hasUnreadContent)
 
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.geometryChanged(previous: away, current: bottom)
         coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: bottom)
         #expect(!coordinator.userScrolledAway)

@@ -20,6 +20,7 @@ final class ChatScrollCoordinator {
     private var pendingGrowthFollow = false
     private var prependInterruptedByUser = false
     private var userInteractionStartOffsetY: CGFloat?
+    private var userInteractionStartDistanceFromBottom: CGFloat?
 
     var canAutomaticallyFollow: Bool {
         !userScrolledAway
@@ -50,6 +51,7 @@ final class ChatScrollCoordinator {
         pendingGrowthFollow = false
         prependInterruptedByUser = false
         userInteractionStartOffsetY = nil
+        userInteractionStartDistanceFromBottom = nil
     }
 
     func scrollPositionChanged(isPositionedByUser: Bool) {
@@ -84,21 +86,28 @@ final class ChatScrollCoordinator {
         if isUserInteracting && !wasInteracting {
             hadUserInteraction = true
             userInteractionStartOffsetY = finalGeometry?.offsetY
+            userInteractionStartDistanceFromBottom = finalGeometry?.distanceFromBottom
             if isPrependingHistory { prependInterruptedByUser = true }
         }
 
         guard newPhase == .idle else { return false }
-        let movedTowardOlderContent = userInteractionStartOffsetY.map { start in
-            guard let finalGeometry else { return false }
-            return finalGeometry.offsetY < start - 1
-        } ?? false
+        let movedTowardOlderContent: Bool
+        if let startOffsetY = userInteractionStartOffsetY,
+           let startDistance = userInteractionStartDistanceFromBottom,
+           let finalGeometry {
+            movedTowardOlderContent = finalGeometry.offsetY < startOffsetY - 1
+                && finalGeometry.distanceFromBottom > startDistance + 1
+        } else {
+            movedTowardOlderContent = false
+        }
         userInteractionStartOffsetY = nil
+        userInteractionStartDistanceFromBottom = nil
 
         if finalGeometry?.isAtExactBottom == true {
             releaseAtBottom()
             return false
         }
-        if wasInteracting,
+        if (wasInteracting || wasUserDrivenSettling),
            movedTowardOlderContent,
            (!isPrependingHistory || prependInterruptedByUser) {
             commitScrollAway()
@@ -133,6 +142,7 @@ final class ChatScrollCoordinator {
         let grew = current.contentHeight > previous.contentHeight + 0.5
         let movedTowardOlderContent = previous.isValid
             && current.offsetY < previous.offsetY - 1
+            && current.distanceFromBottom > previous.distanceFromBottom + 1
         let hasUserAttribution = isUserInteracting
             || hadUserInteraction
             || isNativeUserOwned
@@ -143,8 +153,13 @@ final class ChatScrollCoordinator {
         if current.isAtExactBottom {
             releaseAtBottom()
         } else if hasUserAttribution,
+                  !isUserInteracting,
+                  !isUserDrivenSettling,
                   movedTowardOlderContent,
                   (!isPrependingHistory || prependInterruptedByUser) {
+            // Phase-owned gestures commit at idle from their start/final
+            // geometry. This path covers accessibility/native movement that
+            // publishes geometry without a direct phase.
             commitScrollAway()
         }
 

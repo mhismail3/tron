@@ -86,10 +86,13 @@ content height. A compact scroll coordinator is the sole owner of following inte
 combines native `ScrollPosition` ownership, phase-final geometry, inset-aware bottom
 distance, prepend ownership, and durable user scroll-away. Upward user geometry is
 the only ordinary transition from pinned to detached; native ownership alone cannot
-detach a reader when streamed growth moves the physical bottom. Reaching the exact
-bottom or tapping **New response** immediately re-pins the transcript, and every later
-measured height increase reissues a coalescible bottom command until another upward
-gesture. Progress-only tool mutations and composer/inset changes cannot request a tail
+detach a reader when streamed growth moves the physical bottom. A gesture commits
+detachment only after its settled geometry has moved toward older content, so bottom-edge
+rubber-banding cannot flash the catch-up control. While detached, a circular glass down-arrow
+morphs from the composer's trailing edge. Reaching the exact bottom or tapping that control
+immediately re-pins the transcript, and every later measured height increase reissues a
+coalescible bottom command until another upward gesture. Progress-only tool mutations and
+composer/inset changes cannot request a tail
 position. Insets are classified as viewport-only geometry and there is no independent
 size-change anchor that can reposition a detached reader. Direct or accessibility
 scrolling always wins. Horizontal

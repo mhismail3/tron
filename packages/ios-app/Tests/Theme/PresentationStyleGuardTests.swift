@@ -408,7 +408,7 @@ struct PresentationStyleGuardTests {
         #expect(!camera.contains("capturedImage == nil ? \"camera.fill\""))
     }
 
-    @Test("chat transcript controls share compact pills and preserve the viewport while prepending")
+    @Test("chat transcript controls preserve compact history pills and a glass catch-up control")
     func compactTranscriptPillPresentation() throws {
         let chat = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
@@ -419,8 +419,18 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         #expect(chat.contains("Load earlier messages"))
-        #expect(chat.contains("New response"))
+        #expect(!chat.contains("New response"))
         #expect(chat.components(separatedBy: ".chatTranscriptPill()").count - 1 >= 2)
+        let catchUpButton = (chat.components(separatedBy: "private var catchUpButton").dropFirst().first ?? "")
+            .components(separatedBy: "private var composerTrailingMode").first ?? ""
+        #expect(catchUpButton.contains("Image(systemName: \"arrow.down\")"))
+        #expect(catchUpButton.contains(".frame(width: 44, height: 44)"))
+        #expect(catchUpButton.contains("in: .circle"))
+        #expect(catchUpButton.contains(".glassEffectTransition(.matchedGeometry)"))
+        #expect(catchUpButton.contains(".accessibilityLabel(\"Catch up\")"))
+        #expect(!catchUpButton.contains(".chatTranscriptPill()"))
+        #expect(chat.contains("GlassEffectContainer(spacing: 8)"))
+        #expect(chat.contains("if scrollCoordinator.userScrolledAway"))
         #expect(transcript.contains("struct ChatTranscriptPillModifier: ViewModifier"))
         #expect(transcript.contains("TronTypography.sizeBodySM"))
         #expect(transcript.contains(".padding(.vertical, 6)"))

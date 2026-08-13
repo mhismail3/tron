@@ -34,6 +34,7 @@ struct ChatView: View {
     @State private var visibleTranscriptRowIDs: [String] = []
     @State private var transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
     @State private var transcriptGeometry = ChatTranscriptGeometry.zero
+    @Namespace private var composerGlassNamespace
     // UITextView is the responder owner. This mirrors delegate callbacks for
     // placeholder/scroll presentation; SwiftUI FocusState must not compete with
     // a UIViewRepresentable that has no `.focused` registration.
@@ -190,16 +191,13 @@ struct ChatView: View {
         } action: { previous, geometry in
             transcriptGeometry = geometry
             guard isTranscriptReady else { return }
-            let wasScrolledAway = scrollCoordinator.userScrolledAway
             if geometry.isViewportOnlyChange(from: previous) {
                 scrollCoordinator.viewportChanged(previous: previous, current: geometry)
             } else if scrollCoordinator.geometryChanged(previous: previous, current: geometry) {
                 scrollToTail(animated: false)
             }
-            markActiveResponseUnreadAfterDetach(wasScrolledAway: wasScrolledAway)
         }
         .onScrollPhaseChange { oldPhase, newPhase, context in
-            let wasScrolledAway = scrollCoordinator.userScrolledAway
             if scrollCoordinator.scrollPhaseChanged(
                 from: oldPhase,
                 to: newPhase,
@@ -207,7 +205,6 @@ struct ChatView: View {
             ) {
                 scrollToTail(animated: false)
             }
-            markActiveResponseUnreadAfterDetach(wasScrolledAway: wasScrolledAway)
         }
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: scrollToBottomRequest) { _, _ in
@@ -222,21 +219,6 @@ struct ChatView: View {
                 userScrolledAway: scrollCoordinator.userScrolledAway
             ) {
                 scrollCoordinator.semanticResponseArrived()
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if scrollCoordinator.hasUnreadContent {
-                Button {
-                    scrollToTail(animated: true, force: true)
-                } label: {
-                    Label("New response", systemImage: "arrow.down")
-                        .chatTranscriptPill()
-                }
-                .buttonStyle(.plain)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("New response")
-                .padding(.trailing, 12)
-                .padding(.bottom, 8)
             }
         }
         .overlay { openingSurface }
@@ -257,17 +239,6 @@ struct ChatView: View {
 
     private var responseState: ChatResponseState? {
         selectedAuthoritativeSnapshot.map(ChatResponseState.init)
-    }
-
-    private var isActiveResponse: Bool {
-        selectedAuthoritativeSnapshot?.phase.isActive == true
-    }
-
-    private func markActiveResponseUnreadAfterDetach(wasScrolledAway: Bool) {
-        guard !wasScrolledAway,
-              scrollCoordinator.userScrolledAway,
-              isActiveResponse else { return }
-        scrollCoordinator.semanticResponseArrived()
     }
 
     private var isTranscriptReady: Bool { openPresentation.phase == .ready }
@@ -508,95 +479,20 @@ struct ChatView: View {
                 .transition(.opacity)
             }
 
-            HStack(alignment: .bottom, spacing: 4) {
-                Color.clear
-                    .frame(width: 40, height: 40)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-
-                ZStack(alignment: .leading) {
-                    if text.isEmpty && !composerFocused {
-                        Text(speech.isRecording ? "Listening…" : "Type here")
-                            .font(TronTypography.input)
-                            .foregroundStyle(Color.tronEmerald)
-                            .padding(.leading, 2)
-                            .padding(.vertical, 10)
-                            .transition(.opacity)
-                            .accessibilityHidden(true)
-                    }
-                    MultilineComposerTextView(
-                        text: $text,
-                        isFocused: Binding(
-                            get: { composerFocused },
-                            set: { composerFocused = $0 }
-                        ),
-                        height: $composerTextHeight,
-                        isEditable: isTranscriptReady && selectedAuthoritativeSnapshot?.phase.isActive != true
-                    )
-                    .frame(height: composerTextHeight)
-                    .padding(.horizontal, 2)
-                    .padding(.vertical, 10)
-                    .onChange(of: composerFocused) { _, focused in
-                        guard focused else { return }
-                        scrollToBottomRequest += 1
+            GlassEffectContainer(spacing: 8) {
+                HStack(alignment: .bottom, spacing: 8) {
+                    composerInputBar
+                    if scrollCoordinator.userScrolledAway {
+                        catchUpButton
                     }
                 }
-                .frame(minHeight: 40)
-                .animation(.easeOut(duration: 0.18), value: speech.isRecording)
-
-                if let snapshot = selectedAuthoritativeSnapshot, !speech.isRecording {
-                    SessionContextProgressButton(
-                        contextPercentage: contextPercentage(snapshot),
-                        modelName: snapshot.model.map { "\($0.provider) / \($0.id)" },
-                        isCompacting: snapshot.phase == .compacting
-                    ) { showContext = true }
-                }
-
-                ComposerTrailingButton(
-                    mode: composerTrailingMode,
-                    isDisabled: sending || !isTranscriptReady,
-                    onSend: { Task { await send() } },
-                    onAbort: { Task { await model.abort() } },
-                    onMicTap: {
-                        composerFocused = false
-                        Task { await speech.toggle() }
-                    }
-                )
             }
-            .frame(minHeight: 40)
-            .padding(.horizontal, 4)
-            .glassEffect(
-                .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
-                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .animation(
+                reduceMotion
+                    ? .easeOut(duration: 0.12)
+                    : .spring(response: 0.32, dampingFraction: 0.82),
+                value: scrollCoordinator.userScrolledAway
             )
-            .overlay(alignment: .bottomLeading) {
-                Menu {
-                    Button("Take Photo", systemImage: "camera") {
-                        requestAttachmentPresentation(.camera)
-                    }
-                    .disabled(!attachmentActionsEnabled)
-                    Button("Select Photos", systemImage: "photo.on.rectangle") {
-                        requestAttachmentPresentation(.photos)
-                    }
-                    .disabled(!attachmentActionsEnabled)
-                    Button("Attach Files", systemImage: "folder") {
-                        requestAttachmentPresentation(.files)
-                    }
-                    .disabled(!attachmentActionsEnabled)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(Color.tronEmerald)
-                        .frame(width: 40, height: 40)
-                        .contentShape(Circle())
-                }
-                // Native menu action attributes may be cached across navigation.
-                // Replace only when the viewed session or effective availability changes.
-                .id(attachmentMenuState.identity)
-                .accessibilityLabel("Add attachment")
-                .padding(.leading, 4)
-            }
-            .buttonStyle(.plain)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
 
@@ -606,6 +502,127 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    private var composerInputBar: some View {
+        HStack(alignment: .bottom, spacing: 4) {
+            Color.clear
+                .frame(width: 40, height: 40)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+
+            ZStack(alignment: .leading) {
+                if text.isEmpty && !composerFocused {
+                    Text(speech.isRecording ? "Listening…" : "Type here")
+                        .font(TronTypography.input)
+                        .foregroundStyle(Color.tronEmerald)
+                        .padding(.leading, 2)
+                        .padding(.vertical, 10)
+                        .transition(.opacity)
+                        .accessibilityHidden(true)
+                }
+                MultilineComposerTextView(
+                    text: $text,
+                    isFocused: Binding(
+                        get: { composerFocused },
+                        set: { composerFocused = $0 }
+                    ),
+                    height: $composerTextHeight,
+                    isEditable: isTranscriptReady && selectedAuthoritativeSnapshot?.phase.isActive != true
+                )
+                .frame(height: composerTextHeight)
+                .padding(.horizontal, 2)
+                .padding(.vertical, 10)
+                .onChange(of: composerFocused) { _, focused in
+                    guard focused else { return }
+                    scrollToBottomRequest += 1
+                }
+            }
+            .frame(minHeight: 40)
+            .animation(.easeOut(duration: 0.18), value: speech.isRecording)
+
+            if let snapshot = selectedAuthoritativeSnapshot, !speech.isRecording {
+                SessionContextProgressButton(
+                    contextPercentage: contextPercentage(snapshot),
+                    modelName: snapshot.model.map { "\($0.provider) / \($0.id)" },
+                    isCompacting: snapshot.phase == .compacting
+                ) { showContext = true }
+            }
+
+            ComposerTrailingButton(
+                mode: composerTrailingMode,
+                isDisabled: sending || !isTranscriptReady,
+                onSend: { Task { await send() } },
+                onAbort: { Task { await model.abort() } },
+                onMicTap: {
+                    composerFocused = false
+                    Task { await speech.toggle() }
+                }
+            )
+        }
+        .frame(maxWidth: .infinity, minHeight: 40)
+        .padding(.horizontal, 4)
+        .glassEffect(
+            .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
+        .glassEffectID("chat-composer", in: composerGlassNamespace)
+        .overlay(alignment: .bottomLeading) {
+            Menu {
+                Button("Take Photo", systemImage: "camera") {
+                    requestAttachmentPresentation(.camera)
+                }
+                .disabled(!attachmentActionsEnabled)
+                Button("Select Photos", systemImage: "photo.on.rectangle") {
+                    requestAttachmentPresentation(.photos)
+                }
+                .disabled(!attachmentActionsEnabled)
+                Button("Attach Files", systemImage: "folder") {
+                    requestAttachmentPresentation(.files)
+                }
+                .disabled(!attachmentActionsEnabled)
+            } label: {
+                Image(systemName: "plus")
+                    .font(TronTypography.buttonSM)
+                    .foregroundStyle(Color.tronEmerald)
+                    .frame(width: 40, height: 40)
+                    .contentShape(Circle())
+            }
+            // Native menu action attributes may be cached across navigation.
+            // Replace only when the viewed session or effective availability changes.
+            .id(attachmentMenuState.identity)
+            .accessibilityLabel("Add attachment")
+            .padding(.leading, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var catchUpButton: some View {
+        Button {
+            scrollToTail(animated: true, force: true)
+        } label: {
+            Image(systemName: "arrow.down")
+                .font(TronTypography.buttonSM)
+                .foregroundStyle(Color.tronEmerald)
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(
+            .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
+            in: .circle
+        )
+        .glassEffectID("chat-catch-up", in: composerGlassNamespace)
+        .glassEffectTransition(.matchedGeometry)
+        .transition(
+            reduceMotion
+                ? .opacity
+                : .move(edge: .leading)
+                    .combined(with: .scale(scale: 0.82, anchor: .leading))
+                    .combined(with: .opacity)
+        )
+        .accessibilityLabel("Catch up")
+        .accessibilityHint("Returns to the latest response and follows new messages")
     }
 
     private var composerTrailingMode: ComposerTrailingMode {
