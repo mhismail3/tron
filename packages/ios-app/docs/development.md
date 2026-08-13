@@ -78,6 +78,9 @@ scripts/ios-gateway-e2e-test run
 
 # After a Swift edit:
 scripts/ios-gateway-e2e-test iterate
+
+# Exercise only native attachment menu → camera/photo/file presentations:
+TRON_E2E_ATTACHMENT_ONLY=1 scripts/ios-gateway-e2e-test iterate
 ```
 
 The focused runner disables Xcode's failure sysdiagnose collection, which can

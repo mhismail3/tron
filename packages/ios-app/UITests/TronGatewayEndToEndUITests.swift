@@ -3,6 +3,13 @@ import XCTest
 final class TronGatewayEndToEndUITests: XCTestCase {
     @MainActor
     func testStreamingToolsDialogsAndReconnectConvergeThroughRealGateway() throws {
+        addUIInterruptionMonitor(withDescription: "Camera permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            if deny.exists { deny.tap(); return true }
+            let allow = alert.buttons["Allow"]
+            if allow.exists { allow.tap(); return true }
+            return false
+        }
         let environment = ProcessInfo.processInfo.environment
         guard let port = environment["TRON_E2E_PORT"],
               let code = environment["TRON_E2E_CODE"],
@@ -60,8 +67,10 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         XCTAssertTrue(create.waitForExistence(timeout: 5))
         create.tap()
 
-        let input = app.textFields["Message input"]
+        let input = app.textViews["Message input"]
         XCTAssertTrue(input.waitForExistence(timeout: 15))
+        assertAttachmentMenuPresentsNativeDestinations(app)
+        if environment["TRON_E2E_ATTACHMENT_ONLY"] == "1" { return }
         input.tap(); input.typeText("continue while disconnected")
         app.buttons["Send message"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Streaming response starts now")).firstMatch.waitForExistence(timeout: 15))
@@ -90,11 +99,11 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         let settledGroup = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Used 3 tools")).firstMatch
         XCTAssertTrue(settledGroup.waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Used 3 tools")).count, 1)
-        XCTAssertLessThan(settledGroup.frame.maxY, app.textFields["Message input"].frame.minY)
+        XCTAssertLessThan(settledGroup.frame.maxY, app.textViews["Message input"].frame.minY)
         if app.keyboards.firstMatch.exists {
             XCUIDevice.shared.press(.home)
             app.activate()
-            XCTAssertTrue(app.textFields["Message input"].waitForExistence(timeout: 8))
+            XCTAssertTrue(app.textViews["Message input"].waitForExistence(timeout: 8))
         }
         captureVisualCheckpoint(app, name: "Pi-backed completed chat")
         assertAccessibilityAuditPasses(app, screen: "completed chat")
@@ -196,13 +205,75 @@ final class TronGatewayEndToEndUITests: XCTestCase {
     }
 
     @MainActor
+    private func assertAttachmentMenuPresentsNativeDestinations(
+        _ app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let addAttachment = app.buttons["Add attachment"]
+        XCTAssertTrue(addAttachment.waitForExistence(timeout: 5), file: file, line: line)
+
+        addAttachment.tap()
+        let takePhoto = app.buttons["Take Photo"]
+        XCTAssertTrue(takePhoto.waitForExistence(timeout: 3), file: file, line: line)
+        XCTAssertTrue(takePhoto.isEnabled, file: file, line: line)
+        takePhoto.tap()
+        app.tap()
+        XCTAssertTrue(
+            app.buttons["Capture photo"].waitForExistence(timeout: 5),
+            "Selecting Take Photo must present the camera sheet",
+            file: file,
+            line: line
+        )
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        XCTAssertTrue(
+            app.buttons["Capture photo"].waitForNonExistence(timeout: 5),
+            "The camera sheet must dismiss before another attachment destination is requested",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(addAttachment.waitForExistence(timeout: 5), file: file, line: line)
+
+        addAttachment.tap()
+        let attachFiles = app.buttons["Attach Files"]
+        XCTAssertTrue(attachFiles.waitForExistence(timeout: 3), file: file, line: line)
+        XCTAssertTrue(attachFiles.isEnabled, file: file, line: line)
+        attachFiles.tap()
+        let fileCancel = app.buttons["Cancel"]
+        XCTAssertTrue(
+            fileCancel.waitForExistence(timeout: 5),
+            "Selecting Attach Files must present the native file importer",
+            file: file,
+            line: line
+        )
+        fileCancel.tap()
+        XCTAssertTrue(addAttachment.waitForExistence(timeout: 5), file: file, line: line)
+
+        addAttachment.tap()
+        let selectPhotos = app.buttons["Select Photos"]
+        XCTAssertTrue(selectPhotos.waitForExistence(timeout: 3), file: file, line: line)
+        XCTAssertTrue(selectPhotos.isEnabled, file: file, line: line)
+        selectPhotos.tap()
+        let photoCancel = app.buttons["Cancel"]
+        XCTAssertTrue(
+            photoCancel.waitForExistence(timeout: 5),
+            "Selecting Select Photos must present the native photo picker",
+            file: file,
+            line: line
+        )
+        photoCancel.tap()
+        XCTAssertTrue(addAttachment.waitForExistence(timeout: 5), file: file, line: line)
+    }
+
+    @MainActor
     private func reopenSessionAfterColdLaunch(
         _ app: XCUIApplication,
         sessionTitle: String,
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let input = app.textFields["Message input"]
+        let input = app.textViews["Message input"]
         if input.waitForExistence(timeout: 3) { return input }
 
         // A process relaunch intentionally restores canonical session summaries,
