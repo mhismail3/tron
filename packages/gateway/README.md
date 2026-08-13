@@ -66,6 +66,12 @@ dashboard immediately without broadcasting full transcripts; clients subscribe
 to `session.snapshot`, progress, tool, queue, and extension events only for chats
 they actually open. Active operations also emit a bounded sequenced heartbeat, so
 a long tool with no output remains distinguishable from a broken mobile stream.
+The embedded runtime's active-run flag outranks an older settlement callback when
+an extension completion immediately triggers a continuation, so phase, operation,
+and Stop controls cannot become idle while a newer turn is executing. Extension-
+owned detached work remains distinct from that foreground phase: its portable
+widget projection stays visible after the parent turn settles, while aborting a
+wait does not falsely claim to stop the detached worker.
 Parallel tool events carry a monotonic per-run ordinal; each call additionally has
 a monotonic progress sequence, bounded display-safe live-output tail, runtime start,
 last-progress/completion timestamps, and duration. The Gateway coalesces high-rate
@@ -143,9 +149,12 @@ editing cannot erase credentials it was never allowed to read.
    available through branch-stable anchors.
 6. A run marker exists only for an admitted active operation. Startup projects a
    surviving marker as `interrupted`; prompts are never replayed automatically.
-7. Fork/session replacement rekeys the same owning slot and subscriptions.
-8. Idle runtimes may be evicted only while not busy and unsubscribed.
-9. The gateway is the sole mutable runtime owner. Terminal and mobile chat surfaces
+7. A foreground snapshot cannot be idle while the embedded runtime is streaming,
+   and an idle snapshot cannot retain a running foreground-tool overlay. Detached
+   extension work is represented separately by extension UI state.
+8. Fork/session replacement rekeys the same owning slot and subscriptions.
+9. Idle runtimes may be evicted only while not busy and unsubscribed.
+10. The gateway is the sole mutable runtime owner. Terminal and mobile chat surfaces
    must attach to this runtime; opening the JSONL in an independent Pi process is
    unsupported because Pi has no cross-process session lock.
 

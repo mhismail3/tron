@@ -48,4 +48,31 @@ describe("ExtensionUIBroker", () => {
     expect(broker.state().widgets).toEqual([]);
     expect(events.some((event) => event.topic === "session.editorText")).toBe(true);
   });
+
+  it("projects bounded plain text from extension-owned TUI widgets", () => {
+    const broker = new ExtensionUIBroker(() => {});
+    const context = broker.context();
+    const component = {
+      render: () => [
+        "\u001b[32mAsync agents · background\u001b[0m",
+        ...Array.from({ length: 20 }, (_, index) => `worker ${index}`),
+      ],
+    };
+
+    context.setWidget("subagent-async", (() => component) as never);
+
+    expect(broker.state().widgets).toEqual([{
+      key: "subagent-async",
+      placement: "aboveEditor",
+      lines: [
+        "Async agents · background",
+        ...Array.from({ length: 11 }, (_, index) => `worker ${index}`),
+      ],
+    }]);
+
+    context.setWidget("plain", ["x".repeat(600), ...Array.from({ length: 20 }, (_, index) => `line ${index}`)]);
+    const plain = broker.state().widgets.find((widget) => widget.key === "plain")!;
+    expect(plain.lines).toHaveLength(12);
+    expect(plain.lines[0]).toHaveLength(512);
+  });
 });

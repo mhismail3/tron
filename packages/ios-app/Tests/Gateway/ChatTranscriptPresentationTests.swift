@@ -391,6 +391,7 @@ struct ChatTranscriptPresentationTests {
           {"id":"user","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"user:0","type":"text","text":"test tools"}]}
         ]
         """)
+        snapshot.phase = .running
         snapshot.streaming = try message("""
         {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[
           {"id":"thinking","type":"thinking","text":"Testing tools"},
@@ -487,6 +488,7 @@ struct ChatTranscriptPresentationTests {
     @Test("live tool order is deterministic when progress events arrive out of order")
     func deterministicLiveToolOrder() throws {
         var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
         snapshot.toolExecutions = [
             tool("later", "read", startedAt: "2026-01-01T00:00:01Z", order: 2),
             tool("same-b", "bash", startedAt: "2026-01-01T00:00:01Z", order: 1),
@@ -507,6 +509,7 @@ struct ChatTranscriptPresentationTests {
           {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"wait","name":"subagent_wait","arguments":{"id":"child"}}]}
         ]
         """)
+        snapshot.phase = .running
         snapshot.toolExecutions = [ToolExecutionState(
             toolCallId: "wait",
             toolName: "subagent_wait",
@@ -565,6 +568,24 @@ struct ChatTranscriptPresentationTests {
         let rendered = ChatTranscriptPresentation.renderItems(in: snapshot)
         #expect(rendered.count == 3)
         #expect(rendered.map(\.id) == ["tool-run-call", "assistant-text", "bash"])
+    }
+
+    @Test("idle snapshots never present retained foreground tools as running")
+    func idleRunningToolIsInterrupted() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"wait","name":"subagent_wait","arguments":{}}]}
+        ]
+        """)
+        snapshot.toolExecutions = [tool("wait", "subagent_wait", startedAt: "2026-01-01T00:00:01Z")]
+
+        guard case .toolRun(let run) = ChatTranscriptPresentation.renderItems(in: snapshot).first else {
+            Issue.record("Expected retained tool run")
+            return
+        }
+        #expect(run.title == "Used 1 tool")
+        #expect(!run.isRunning)
+        #expect(run.tools.first?.subtitle == "Interrupted")
     }
 
     private func toolPresentation(_ id: String) -> ChatToolPresentation {

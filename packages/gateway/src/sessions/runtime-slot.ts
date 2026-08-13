@@ -130,7 +130,31 @@ export class RuntimeSlot {
   }
 
   get isBusy(): boolean {
-    return this.phase === "running" || this.phase === "compacting" || this.phase === "retrying" || this.runtime?.session.isBashRunning === true;
+    return this.effectivePhase === "running"
+      || this.effectivePhase === "compacting"
+      || this.effectivePhase === "retrying"
+      || this.runtime?.session.isBashRunning === true;
+  }
+
+  /** AgentSession can start an extension-triggered continuation while an older
+   * `agent_settled` callback is still unwinding. AgentSession's full streaming
+   * lifecycle is the authoritative foreground owner in that overlap. */
+  private get hasActiveAgentRun(): boolean {
+    const session = this.runtime?.session;
+    return session?.isStreaming === true || session?.state.isStreaming === true;
+  }
+
+  private get effectivePhase(): SessionPhase {
+    if (this.hasActiveAgentRun && (this.phase === "idle" || this.phase === "interrupted")) return "running";
+    return this.phase;
+  }
+
+  private ensureAgentProjection(): void {
+    if (!this.hasActiveAgentRun) return;
+    if (this.phase === "idle" || this.phase === "interrupted") this.phase = "running";
+    this.activeOperationId ??= randomUUID();
+    this.operation ??= { id: this.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
+    if (!this.activityHeartbeat) this.startActivityHeartbeat();
   }
 
   get touchedAt(): number {
@@ -263,7 +287,7 @@ export class RuntimeSlot {
     return {
       sessionId: this.id,
       summaryRevision: 0,
-      phase: this.phase,
+      phase: this.effectivePhase,
       ...(name ? { name } : {}),
       updatedAt,
       messageCount,
@@ -282,10 +306,18 @@ export class RuntimeSlot {
         this.activeOperationId ??= randomUUID();
         this.operation ??= { id: this.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
         void this.dependencies.markers.mark(this.id, this.activeOperationId);
-        this.startActivityHeartbeat();
+        if (!this.activityHeartbeat) this.startActivityHeartbeat();
         this.publishSnapshot();
         break;
       case "agent_settled":
+        // An extension completion can trigger the next turn while the previous
+        // settlement callback is still unwinding. Never let that older callback
+        // mark a newer agent-core run idle or erase its live tools.
+        if (this.hasActiveAgentRun) {
+          this.ensureAgentProjection();
+          this.publishSnapshot();
+          break;
+        }
         this.phase = "idle";
         this.activeOperationId = undefined;
         this.operation = undefined;
@@ -342,19 +374,23 @@ export class RuntimeSlot {
         break;
       case "auto_retry_end":
         this.emit("session.retry", safeJson(event));
-        if (!event.success) {
-          this.phase = "idle";
-          this.operation = undefined;
-        }
+        // Retry completion is nested inside the overall AgentSession run. Only
+        // `agent_settled` owns the foreground-to-idle transition; otherwise an
+        // aborted/failed retry can hide a continuation that is already active.
+        this.ensureAgentProjection();
         this.retry = undefined;
         this.scheduleSnapshot();
         break;
       case "message_update": {
+        if (!this.hasActiveAgentRun) break;
+        this.ensureAgentProjection();
         const message = projectMessage("streaming", null, new Date().toISOString(), event.message, this.dependencies.blobs);
         this.emit("session.progress", safeJson({ message }));
         break;
       }
       case "tool_execution_start": {
+        if (!this.hasActiveAgentRun) break;
+        this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
         const startedAt = existing?.startedAt ?? now;
@@ -378,6 +414,8 @@ export class RuntimeSlot {
         break;
       }
       case "tool_execution_update": {
+        if (!this.hasActiveAgentRun) break;
+        this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
         const output = projectToolOutput(event.partialResult);
@@ -406,6 +444,8 @@ export class RuntimeSlot {
         break;
       }
       case "tool_execution_end": {
+        if (!this.hasActiveAgentRun) break;
+        this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
         const startedAt = existing?.startedAt ?? now;
@@ -503,7 +543,7 @@ export class RuntimeSlot {
     this.activityHeartbeat = setInterval(() => {
       if (this.disposed || !this.isBusy) return;
       this.emit("session.heartbeat", safeJson({
-        phase: this.phase,
+        phase: this.effectivePhase,
         ...(this.activeOperationId ? { operationId: this.activeOperationId } : {}),
         activeToolCallIds: [...this.toolExecutions.values()]
           .filter((tool) => tool.status === "running")
@@ -544,6 +584,7 @@ export class RuntimeSlot {
 
   snapshot(sequence = this.eventSequence): SessionSnapshot {
     const session = this.runtime.session;
+    this.ensureAgentProjection();
     const contextUsage = session.getContextUsage();
     const stats = session.getSessionStats();
     const latestCacheHitRate = this.latestCacheHitRate();
@@ -556,7 +597,7 @@ export class RuntimeSlot {
       runtimeGeneration: this.runtimeGeneration,
       revision: this.revision,
       eventSequence: sequence,
-      phase: this.phase,
+      phase: this.effectivePhase,
       ...(session.sessionName ? { name: session.sessionName } : {}),
       cwd: session.sessionManager.getCwd(),
       ...(session.sessionManager.getHeader()?.parentSession ? { parentSessionId: session.sessionManager.getHeader()!.parentSession } : {}),
@@ -582,7 +623,9 @@ export class RuntimeSlot {
       ...(session.sessionManager.getLeafId() ? { leafEntryId: session.sessionManager.getLeafId()! } : {}),
       ...(this.operation ? { operation: this.operation } : {}),
       ...(this.retry ? { retry: this.retry } : {}),
-      toolExecutions: [...this.toolExecutions.values()].sort((left, right) => left.order - right.order),
+      toolExecutions: [...this.toolExecutions.values()]
+        .filter((tool) => this.effectivePhase === "running" || tool.status !== "running")
+        .sort((left, right) => left.order - right.order),
       extensionUI: this.ui.state(),
       diagnostics: this.runtime.diagnostics.map((diagnostic) => ({ type: diagnostic.type, message: diagnostic.message })),
     });

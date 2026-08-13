@@ -13,6 +13,50 @@ interface PendingInteraction {
 
 type UIBroadcast = (topic: string, payload: JsonValue) => void;
 
+const PORTABLE_WIDGET_WIDTH = 76;
+const PORTABLE_WIDGET_LINES = 12;
+const PORTABLE_WIDGET_LINE_CHARACTERS = 512;
+
+function plainWidgetTheme(): unknown {
+  return new Proxy({}, {
+    get: () => (...args: unknown[]) => String(args.at(-1) ?? ""),
+  });
+}
+
+function stripTerminalPresentation(value: string): string {
+  return value
+    .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, "")
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .trimEnd();
+}
+
+function boundedWidgetLines(lines: string[]): string[] {
+  return lines
+    .map(stripTerminalPresentation)
+    .filter(Boolean)
+    .map((line) => line.slice(0, PORTABLE_WIDGET_LINE_CHARACTERS))
+    .slice(0, PORTABLE_WIDGET_LINES);
+}
+
+function renderPortableWidget(content: unknown): string[] | undefined {
+  if (Array.isArray(content) && content.every((line) => typeof line === "string")) {
+    return boundedWidgetLines(content);
+  }
+  if (typeof content !== "function") return undefined;
+  try {
+    const component = content(undefined, plainWidgetTheme()) as { render?: (width: number) => unknown } | undefined;
+    if (!component || typeof component.render !== "function") return undefined;
+    const rendered = component.render(PORTABLE_WIDGET_WIDTH);
+    if (!Array.isArray(rendered) || !rendered.every((line) => typeof line === "string")) return undefined;
+    return boundedWidgetLines(rendered);
+  } catch {
+    // A TUI-only widget may depend on terminal state. It remains optional and
+    // must never destabilize the authoritative session projection.
+    return undefined;
+  }
+}
+
 /**
  * Bridges the portable subset of Pi extension UI onto Tron's native protocol.
  * Arbitrary TUI components intentionally degrade exactly like Pi RPC custom():
@@ -157,9 +201,10 @@ export class ExtensionUIBroker {
           broker.broadcast("session.widget", { key, lines: null });
           return;
         }
-        if (Array.isArray(content) && content.every((line) => typeof line === "string")) {
+        const lines = renderPortableWidget(content);
+        if (lines) {
           const placement = options?.placement === "belowEditor" ? "belowEditor" : "aboveEditor";
-          const widget: ExtensionWidget = { key, lines: content, placement };
+          const widget: ExtensionWidget = { key, lines, placement };
           broker.widgets.set(key, widget);
           broker.broadcast("session.widget", widget as unknown as JsonValue);
         }

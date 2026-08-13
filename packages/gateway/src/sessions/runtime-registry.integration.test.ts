@@ -94,6 +94,70 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     );
   });
 
+  it("does not let an older settlement hide an extension-triggered continuation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-settlement-overlap-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([
+      mkdir(agentDir),
+      mkdir(join(cwd, ".pi", "extensions"), { recursive: true }),
+    ]);
+    await writeFile(join(cwd, ".pi", "extensions", "continuation.ts"), `
+let triggered = false;
+export default function (pi) {
+  pi.on("agent_settled", () => {
+    if (triggered) return;
+    triggered = true;
+    pi.sendMessage({ customType: "test-continuation", content: "continue", display: false }, { triggerTurn: true });
+  });
+}
+`);
+
+    const faux = fauxProvider({ provider: "tron-settlement-overlap", tokensPerSecond: 10_000 });
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    faux.setResponses([
+      fauxAssistantMessage("first complete"),
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return fauxAssistantMessage("continuation complete");
+      },
+    ]);
+    const snapshots: Array<{ phase: string; operation?: unknown }> = [];
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: createModels,
+      trust,
+      broadcast: (_sessionId, topic, payload) => {
+        if (topic === "session.snapshot") snapshots.push(payload as { phase: string; operation?: unknown });
+      },
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("start");
+
+    await waitUntil(() => faux.state.callCount === 2);
+    expect(slot.snapshot()).toMatchObject({ phase: "running", operation: { kind: "prompt" } });
+    const continuationSnapshotIndex = snapshots.length;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(snapshots.slice(continuationSnapshotIndex).every((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
+    await waitUntil(() => !slot.isBusy);
+    expect(slot.snapshot()).toMatchObject({ phase: "idle" });
+    expect(snapshots.some((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
+  });
+
   it("projects stable ordinals for parallel tools from start through completion", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-tool-order-integration-"));
     const agentDir = join(root, "agent");

@@ -380,7 +380,7 @@ enum ChatTranscriptPresentation {
         var anchoredCallIDs = Set<String>()
 
         func appendTools(_ tools: [ChatToolPresentation]) {
-            for tool in tools {
+            for tool in tools.map({ foregroundPresentation($0, phase: snapshot.phase) }) {
                 anchoredCallIDs.insert(tool.id)
                 if let index = pendingTools.firstIndex(where: { $0.id == tool.id }) {
                     pendingTools[index] = tool
@@ -625,6 +625,31 @@ enum ChatTranscriptPresentation {
         case .completed: "Completed"
         case .failed: "Failed"
         }
+    }
+
+    /// Protocol-v2 Gateways released before foreground/tool reconciliation can
+    /// report an idle parent with a retained running overlay after aborting a
+    /// wait tool. Do not animate that impossible foreground state or offer a
+    /// Stop action that cannot terminate extension-owned detached work.
+    private static func foregroundPresentation(
+        _ tool: ChatToolPresentation,
+        phase: SessionPhase
+    ) -> ChatToolPresentation {
+        guard !phase.isActive, tool.isRunning else { return tool }
+        return ChatToolPresentation(
+            id: tool.id,
+            title: tool.title,
+            subtitle: "Interrupted",
+            request: tool.request,
+            response: tool.response,
+            content: tool.content,
+            error: true,
+            startedAt: tool.startedAt,
+            completedAt: tool.completedAt,
+            durationMs: tool.durationMs,
+            lastProgressAt: tool.lastProgressAt,
+            progressSequence: tool.progressSequence
+        )
     }
 
     private static func hasNonToolPresentation(_ item: TranscriptItem) -> Bool {

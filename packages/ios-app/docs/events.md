@@ -56,7 +56,10 @@ merges an overlapping authoritative tail with any earlier pages already loaded i
 that open chat, so a tool burst or resync cannot reveal a new history boundary or
 hide visible rows. A later navigation presentation always begins again from the
 bounded latest page; this cold-presentation rule is distinct from in-place reconnect.
-Phase, operation, tool ordering, and canonical paging cursors remain authoritative. The run continues on the Mac;
+Phase, operation, tool ordering, and canonical paging cursors remain authoritative. A rolling-upgrade
+client also normalizes the impossible legacy combination of an idle phase and retained running-tool
+overlay to an interrupted chip; it does not expose a fake Stop action for extension-owned detached
+work. Current Gateways project that background work separately through extension UI state. The run continues on the Mac;
 the app catches up without presenting transport errors as modal alerts. Foreground activation
 coalesces to one responsiveness/list/session reconciliation; an aborted or resumed network path
 enters the ordinary reconnect loop. A temporary catch-up pill is deduplicated and removed by the
