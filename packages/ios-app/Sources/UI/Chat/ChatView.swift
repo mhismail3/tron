@@ -12,6 +12,7 @@ struct ChatView: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var photos: [PhotosPickerItem] = []
@@ -24,6 +25,7 @@ struct ChatView: View {
     @State private var openPresentation: ChatOpenPresentationState
     @State private var openingTask: Task<Void, Never>?
     @State private var pagingTask: Task<Void, Never>?
+    @State private var catchUpTask: Task<Void, Never>?
     @State private var modelPresentationGeneration: Int?
     @State private var pendingEditorRequest: AppModel.EditorRequest?
     @State private var speech = SpeechTranscriber()
@@ -34,6 +36,7 @@ struct ChatView: View {
     @State private var visibleTranscriptRowIDs: [String] = []
     @State private var transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
     @State private var transcriptGeometry = ChatTranscriptGeometry.zero
+    @State private var composerInputBarHeight: CGFloat = 40
     @Namespace private var composerGlassNamespace
     // UITextView is the responder owner. This mirrors delegate callbacks for
     // placeholder/scroll presentation; SwiftUI FocusState must not compete with
@@ -48,11 +51,12 @@ struct ChatView: View {
     var body: some View {
         transcript
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                // Keep the primary control structurally present during sync;
-                // readiness disables interaction but never removes its layout.
-                composer
-                    .allowsHitTesting(isTranscriptReady)
-                    .accessibilityHidden(!isTranscriptReady)
+                // Reserve one stable line. Multiline text, attachments, and
+                // extension widgets expand upward in the overlay without
+                // resizing or shifting the transcript viewport.
+                Color.clear
+                    .frame(height: 48)
+                    .overlay(alignment: .bottom) { composer }
             }
             .overlay(alignment: .top) { topBlur }
         .onGeometryChange(for: CGFloat.self) { geometry in
@@ -60,7 +64,7 @@ struct ChatView: View {
         } action: { width in
             toolbarContainerWidth = width
         }
-        .background(Color.tronBackground)
+        .background { Color.tronBackground.ignoresSafeArea(.all) }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -130,6 +134,8 @@ struct ChatView: View {
             openingTask = nil
             pagingTask?.cancel()
             pagingTask = nil
+            catchUpTask?.cancel()
+            catchUpTask = nil
             cancelAttachmentPresentation(includingActive: true)
             if let generation = modelPresentationGeneration {
                 Task { await model.closeSessionPresentation(sessionID, generation: generation) }
@@ -175,7 +181,6 @@ struct ChatView: View {
             .accessibilityHidden(!isTranscriptReady)
             .allowsHitTesting(isTranscriptReady)
         }
-        .contentMargins(.horizontal, 16, for: .scrollContent)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.bottom, for: .alignment)
         .scrollPosition($transcriptScrollPosition)
@@ -198,6 +203,10 @@ struct ChatView: View {
             }
         }
         .onScrollPhaseChange { oldPhase, newPhase, context in
+            if newPhase == .interacting || newPhase == .tracking || newPhase == .decelerating {
+                catchUpTask?.cancel()
+                catchUpTask = nil
+            }
             if scrollCoordinator.scrollPhaseChanged(
                 from: oldPhase,
                 to: newPhase,
@@ -229,6 +238,7 @@ struct ChatView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
+            .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(id)
     }
@@ -370,13 +380,63 @@ struct ChatView: View {
             transcriptScrollPosition.scrollTo(edge: .bottom)
         }
         if animated && !reduceMotion {
-            withAnimation(.easeOut(duration: 0.16), update)
+            withAnimation(.smooth(duration: 0.26), update)
         } else {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction, update)
         }
         if force { scrollCoordinator.clearUnreadAfterExplicitJump() }
+    }
+
+    @MainActor
+    private func catchUpToTail() {
+        catchUpTask?.cancel()
+        catchUpTask = nil
+        guard scrollCoordinator.beginAutomaticBottomScroll(force: true) else { return }
+        // The tap is the durable follow decision, not the eventual animation
+        // callback. New streamed growth therefore remains pinned immediately.
+        scrollCoordinator.clearUnreadAfterExplicitJump()
+
+        if reduceMotion {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                transcriptScrollPosition.scrollTo(edge: .bottom)
+            }
+            return
+        }
+
+        let longDistanceThreshold = max(320, transcriptGeometry.containerHeight * 0.8)
+        guard transcriptGeometry.distanceFromBottom > longDistanceThreshold else {
+            withAnimation(.smooth(duration: 0.30)) {
+                transcriptScrollPosition.scrollTo(edge: .bottom)
+            }
+            return
+        }
+
+        // Do not animate through a long lazy transcript: jump invisibly to a
+        // small reveal distance, then animate only the final visible approach.
+        let revealDistance = min(140, max(80, transcriptGeometry.containerHeight * 0.18))
+        let bottomOffset = transcriptGeometry.contentHeight
+            + transcriptGeometry.bottomInset
+            - transcriptGeometry.containerHeight
+        var stagedPosition = transcriptScrollPosition
+        stagedPosition.scrollTo(y: max(0, bottomOffset - revealDistance))
+        var stagingTransaction = Transaction()
+        stagingTransaction.disablesAnimations = true
+        withTransaction(stagingTransaction) {
+            transcriptScrollPosition = stagedPosition
+        }
+
+        catchUpTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            withAnimation(.smooth(duration: 0.30)) {
+                transcriptScrollPosition.scrollTo(edge: .bottom)
+            }
+            catchUpTask = nil
+        }
     }
 
     private func earlierMessagesChip(snapshot: SessionSnapshot) -> some View {
@@ -528,7 +588,8 @@ struct ChatView: View {
                         set: { composerFocused = $0 }
                     ),
                     height: $composerTextHeight,
-                    isEditable: isTranscriptReady && selectedAuthoritativeSnapshot?.phase.isActive != true
+                    isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady),
+                    keyboardAppearance: colorScheme == .dark ? .dark : .light
                 )
                 .frame(height: composerTextHeight)
                 .padding(.horizontal, 2)
@@ -567,6 +628,11 @@ struct ChatView: View {
             in: RoundedRectangle(cornerRadius: 22, style: .continuous)
         )
         .glassEffectID("chat-composer", in: composerGlassNamespace)
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            geometry.size.height
+        } action: { height in
+            composerInputBarHeight = max(40, height)
+        }
         .overlay(alignment: .bottomLeading) {
             Menu {
                 Button("Take Photo", systemImage: "camera") {
@@ -599,12 +665,12 @@ struct ChatView: View {
 
     private var catchUpButton: some View {
         Button {
-            scrollToTail(animated: true, force: true)
+            catchUpToTail()
         } label: {
             Image(systemName: "arrow.down")
                 .font(TronTypography.buttonSM)
                 .foregroundStyle(Color.tronEmerald)
-                .frame(width: 44, height: 44)
+                .frame(width: composerInputBarHeight, height: composerInputBarHeight)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -626,12 +692,12 @@ struct ChatView: View {
     }
 
     private var composerTrailingMode: ComposerTrailingMode {
-        if selectedAuthoritativeSnapshot?.phase.isActive == true { return .stopAgent }
-        if speech.isRecording { return .stopRecording }
-        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.pendingAttachments.isEmpty {
-            return .send
-        }
-        return .record
+        ChatComposerPolicy.trailingMode(
+            phase: selectedAuthoritativeSnapshot?.phase,
+            isRecording: speech.isRecording,
+            hasContent: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !model.pendingAttachments.isEmpty
+        )
     }
 
     private func contextPercentage(_ snapshot: SessionSnapshot) -> Int {
@@ -741,13 +807,19 @@ struct ChatView: View {
     private func send() async {
         let outgoing = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !outgoing.isEmpty || !model.pendingAttachments.isEmpty else { return }
+        let behavior = ChatComposerPolicy.submissionBehavior(phase: selectedAuthoritativeSnapshot?.phase)
         text = ""
-        composerFocused = false
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        if !ChatComposerPolicy.preservesFocus(submissionBehavior: behavior) {
+            composerFocused = false
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
         sending = true
         defer { sending = false }
-        do { try await model.send(outgoing) }
-        catch { text = outgoing; model.lastError = error.localizedDescription }
+        do { try await model.send(outgoing, behavior: behavior) }
+        catch {
+            text = ChatComposerPolicy.restoredDraft(outgoing: outgoing, currentDraft: text)
+            model.lastError = error.localizedDescription
+        }
     }
 
     private func importCameraImage(_ image: UIImage) async {

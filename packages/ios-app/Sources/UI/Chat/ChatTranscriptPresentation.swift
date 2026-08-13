@@ -317,8 +317,11 @@ enum ChatAttachmentAvailabilityPolicy {
         phase: SessionPhase?,
         isSending: Bool
     ) -> Bool {
-        guard isTranscriptReady, let phase else { return false }
-        return !phase.isActive && !isSending
+        guard isTranscriptReady, phase != nil else { return false }
+        // Uploads remain staged locally and the eventual prompt carries the
+        // active turn's steer behavior, so a running response is not a reason
+        // to disable camera, photos, or files.
+        return !isSending
     }
 }
 

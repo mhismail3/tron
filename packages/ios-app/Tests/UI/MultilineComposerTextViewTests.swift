@@ -15,7 +15,8 @@ struct MultilineComposerTextViewTests {
             text: Binding(get: { text }, set: { text = $0 }),
             isFocused: Binding(get: { focused }, set: { focused = $0 }),
             height: Binding(get: { height }, set: { height = $0 }),
-            isEditable: true
+            isEditable: true,
+            keyboardAppearance: .dark
         )
         let coordinator = control.makeCoordinator()
         #expect(!MultilineComposerTextView.Coordinator.shouldResign(
@@ -35,6 +36,59 @@ struct MultilineComposerTextViewTests {
         ))
     }
 
+    @Test("active chats keep text entry available for steering")
+    func activeChatComposerPolicy() {
+        for phase in [SessionPhase.running, .compacting, .retrying] {
+            #expect(ChatComposerPolicy.isTextEditable(isTranscriptReady: true))
+            #expect(ChatComposerPolicy.trailingMode(
+                phase: phase,
+                isRecording: false,
+                hasContent: true
+            ) == .send)
+            let behavior = ChatComposerPolicy.submissionBehavior(phase: phase)
+            #expect(behavior == "steer")
+            #expect(ChatComposerPolicy.preservesFocus(submissionBehavior: behavior))
+        }
+    }
+
+    @Test("failed steering restores the outgoing message without overwriting new input")
+    func failedSteeringRestoresDraft() {
+        #expect(ChatComposerPolicy.restoredDraft(
+            outgoing: "first steering message",
+            currentDraft: "second draft"
+        ) == "first steering message\nsecond draft")
+        #expect(ChatComposerPolicy.restoredDraft(
+            outgoing: "first steering message",
+            currentDraft: ""
+        ) == "first steering message")
+        #expect(ChatComposerPolicy.restoredDraft(
+            outgoing: "",
+            currentDraft: "attachment follow-up"
+        ) == "attachment follow-up")
+    }
+
+    @Test("an empty active composer keeps the stop action")
+    func emptyActiveComposerStopsAgent() {
+        #expect(ChatComposerPolicy.trailingMode(
+            phase: .running,
+            isRecording: false,
+            hasContent: false
+        ) == .stopAgent)
+    }
+
+    @Test("idle messages remain ordinary prompts")
+    func idleComposerPolicy() {
+        #expect(ChatComposerPolicy.trailingMode(
+            phase: .idle,
+            isRecording: false,
+            hasContent: true
+        ) == .send)
+        let behavior = ChatComposerPolicy.submissionBehavior(phase: .idle)
+        #expect(behavior == nil)
+        #expect(!ChatComposerPolicy.preservesFocus(submissionBehavior: behavior))
+        #expect(ChatComposerPolicy.isTextEditable(isTranscriptReady: false))
+    }
+
     @Test("grows to eight lines then gives scrolling to the text view")
     func cappedGrowth() async throws {
         var text = ""
@@ -44,7 +98,8 @@ struct MultilineComposerTextViewTests {
             text: Binding(get: { text }, set: { text = $0 }),
             isFocused: Binding(get: { focused }, set: { focused = $0 }),
             height: Binding(get: { height }, set: { height = $0 }),
-            isEditable: true
+            isEditable: true,
+            keyboardAppearance: .dark
         )
         let coordinator = control.makeCoordinator()
         let view = UITextView(frame: CGRect(x: 0, y: 0, width: 240, height: 20))

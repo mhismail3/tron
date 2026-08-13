@@ -42,7 +42,7 @@ struct ChatTranscriptPresentationTests {
         #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(
             isTranscriptReady: true, phase: nil, isSending: false
         ))
-        #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(
+        #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(
             isTranscriptReady: true, phase: .running, isSending: false
         ))
         #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(
@@ -71,10 +71,10 @@ struct ChatTranscriptPresentationTests {
             sessionID: "another-session", phase: .idle,
             isTranscriptReady: true, isSending: false
         )
-        #expect(!running.actionsEnabled)
+        #expect(running.actionsEnabled)
         #expect(idle.actionsEnabled)
         #expect(running.identity == compacting.identity)
-        #expect(running.identity != idle.identity)
+        #expect(running.identity == idle.identity)
         #expect(idle.identity != anotherIdle.identity)
     }
 

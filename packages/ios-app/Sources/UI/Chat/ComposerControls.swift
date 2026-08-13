@@ -9,6 +9,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
     @Binding var isFocused: Bool
     @Binding var height: CGFloat
     let isEditable: Bool
+    let keyboardAppearance: UIKeyboardAppearance
     var maximumLines = 8
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -25,6 +26,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         view.alwaysBounceVertical = false
         view.keyboardDismissMode = .interactive
         view.adjustsFontForContentSizeCategory = true
+        view.keyboardAppearance = keyboardAppearance
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.accessibilityLabel = "Message input"
         context.coordinator.updateFont(on: view)
@@ -36,6 +38,10 @@ struct MultilineComposerTextView: UIViewRepresentable {
         context.coordinator.updateFont(on: view)
         view.isEditable = isEditable
         view.isSelectable = isEditable
+        if view.keyboardAppearance != keyboardAppearance {
+            view.keyboardAppearance = keyboardAppearance
+            if view.isFirstResponder { view.reloadInputViews() }
+        }
         if view.text != text {
             view.text = text
             view.selectedRange = NSRange(location: (text as NSString).length, length: 0)
@@ -218,6 +224,39 @@ enum ComposerTrailingMode: Equatable {
     case stopRecording
     case send
     case record
+}
+
+enum ChatComposerPolicy {
+    static func isTextEditable(isTranscriptReady: Bool) -> Bool {
+        // Drafting is local and remains available while authoritative opening
+        // finishes; send and attachment mutations retain their own readiness gates.
+        true
+    }
+
+    static func trailingMode(
+        phase: SessionPhase?,
+        isRecording: Bool,
+        hasContent: Bool
+    ) -> ComposerTrailingMode {
+        if isRecording { return .stopRecording }
+        if hasContent { return .send }
+        if phase?.isActive == true { return .stopAgent }
+        return .record
+    }
+
+    static func submissionBehavior(phase: SessionPhase?) -> String? {
+        phase?.isActive == true ? "steer" : nil
+    }
+
+    static func preservesFocus(submissionBehavior: String?) -> Bool {
+        submissionBehavior != nil
+    }
+
+    static func restoredDraft(outgoing: String, currentDraft: String) -> String {
+        guard !outgoing.isEmpty else { return currentDraft }
+        guard !currentDraft.isEmpty else { return outgoing }
+        return "\(outgoing)\n\(currentDraft)"
+    }
 }
 
 struct ComposerTrailingButton: View {
