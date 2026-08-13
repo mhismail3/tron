@@ -616,19 +616,59 @@ export function projectTranscriptPage(
   }
   let start = end;
   let bytes = 2;
+  const selected: TranscriptItem[] = [];
   while (start > 0) {
-    const itemBytes = Buffer.byteLength(JSON.stringify(transcript[start - 1])) + 1;
-    if (bytes + itemBytes > byteBudget && start < end) break;
-    // Projection limits normally keep an item below the page target. If a future
-    // legal shape exceeds it, make the cursor advance with that one item rather
-    // than returning an empty page forever; the outer snapshot fitter still owns
-    // the strict WebSocket frame limit.
+    const item = transcript[start - 1]!;
+    const itemBytes = Buffer.byteLength(JSON.stringify(item)) + 1;
+    if (bytes + itemBytes > byteBudget && selected.length > 0) break;
     if (itemBytes > byteBudget) {
+      // session.transcript responses are not passed through the snapshot fitter.
+      // Compact an unexpectedly oversized legal item before returning it so the
+      // page both advances and stays inside its production wire budget.
+      const compacted = compactTranscriptPageItem(item, Math.max(256, byteBudget - 3));
+      selected.unshift(compacted);
       start -= 1;
       break;
     }
+    selected.unshift(item);
     bytes += itemBytes;
     start -= 1;
   }
-  return { items: transcript.slice(start, end), start, total: transcript.length };
+  return { items: selected, start, total: transcript.length };
+}
+
+function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number): TranscriptItem {
+  let compacted = item;
+  if (item.kind === "message") {
+    const { details: _details, usage: _usage, ...base } = item;
+    compacted = {
+      ...base,
+      content: item.content.map((part) => {
+        if (part.type !== "text" && part.type !== "thinking") return part;
+        return { ...part, text: utf8Prefix(part.text, Math.max(64, Math.floor(byteBudget / 3))) };
+      }),
+      ...(item.details === undefined ? {} : { details: { truncated: true, preview: "Oversized detail omitted from mobile page." } }),
+      ...(item.usage === undefined ? {} : { usage: projectJson(item.usage, 256) }),
+    };
+  } else if (item.kind === "bash") {
+    compacted = { ...item, command: utf8Prefix(item.command, 256), output: utf8Suffix(item.output, Math.max(64, byteBudget - 1_024)), truncated: true };
+  } else if (item.kind === "customMessage") {
+    compacted = { ...item, content: [], details: { truncated: true, preview: "Oversized custom message omitted from mobile page." } };
+  } else if (item.kind === "customEntry") {
+    compacted = { ...item, data: { truncated: true, preview: "Oversized custom entry omitted from mobile page." } };
+  } else if (item.kind === "compaction" || item.kind === "branchSummary") {
+    const { details: _details, usage: _usage, ...base } = item;
+    compacted = { ...base, summary: utf8Prefix(item.summary, Math.max(64, byteBudget - 1_024)) };
+  }
+  if (Buffer.byteLength(JSON.stringify(compacted)) <= byteBudget) return compacted;
+  // Metadata alone is small; this final message-shaped marker retains canonical
+  // identity/order while guaranteeing a bounded response for future item shapes.
+  return {
+    id: item.id,
+    parentId: item.parentId,
+    timestamp: item.timestamp,
+    kind: "message",
+    role: "assistant",
+    content: [{ id: `${item.id}:truncated`, type: "text", text: "… transcript item omitted from this mobile page" }],
+  };
 }

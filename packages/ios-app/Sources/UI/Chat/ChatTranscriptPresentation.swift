@@ -18,7 +18,6 @@ struct ChatTranscriptGeometry: Equatable {
 
 enum ChatOpenPresentationPhase: Equatable {
     case opening
-    case staging
     case ready
     case failed(String)
 }
@@ -34,25 +33,11 @@ struct ChatOpenPresentationState: Equatable {
         return epoch
     }
 
+    /// The authoritative two-phase session handshake is the presentation gate.
+    /// Scroll positioning remains best-effort because physical SwiftUI can
+    /// coalesce geometry and visibility callbacks indefinitely.
     mutating func installAuthoritativeBaseline(sessionID: String, epoch: Int) -> Bool {
         guard sessionID == self.sessionID, epoch == self.epoch, phase == .opening else { return false }
-        phase = .staging
-        return true
-    }
-
-    mutating func observeLayout(
-        sessionID: String,
-        epoch: Int,
-        geometryIsValid: Bool,
-        tailIsVisible: Bool,
-        isAtExactBottom: Bool
-    ) -> Bool {
-        guard sessionID == self.sessionID,
-              epoch == self.epoch,
-              phase == .staging,
-              geometryIsValid,
-              tailIsVisible,
-              isAtExactBottom else { return false }
         phase = .ready
         return true
     }
@@ -61,6 +46,28 @@ struct ChatOpenPresentationState: Equatable {
         guard sessionID == self.sessionID, epoch == self.epoch else { return false }
         phase = .failed(message)
         return true
+    }
+}
+
+struct ChatTranscriptPageRequest: Equatable {
+    let sessionID: String
+    let presentationGeneration: Int
+    let runtimeGeneration: String
+    let before: Int
+    let expectedNextEntryID: String?
+
+    func canInstall(
+        sessionID: String,
+        presentationGeneration: Int,
+        runtimeGeneration: String,
+        transcriptStart: Int?,
+        firstTranscriptID: String?
+    ) -> Bool {
+        self.sessionID == sessionID
+            && self.presentationGeneration == presentationGeneration
+            && self.runtimeGeneration == runtimeGeneration
+            && transcriptStart == before
+            && firstTranscriptID == expectedNextEntryID
     }
 }
 

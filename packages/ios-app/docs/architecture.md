@@ -31,13 +31,19 @@ transcript tail; `transcriptStart`/`transcriptTotal` expose earlier canonical Pi
 entries, which the chat can request backward without risking an oversized
 WebSocket frame. Opening a new chat presentation always synchronizes a fresh authoritative bounded
 latest page; disposable cached or previously paged prefixes are never revealed as
-its baseline. The transcript remains behind a nonblank opening surface until valid
-layout geometry and the bottom sentinel confirm exact tail positioning, then the
-whole stage fades and rises in (opacity only under Reduce Motion). A failed open
-shows an explicit retry surface. Once that mounted chat is ready, reconnect and
+its baseline. The transcript remains behind a nonblank opening surface until the
+two-phase `session.open`/`session.sync` handshake installs its authoritative tail,
+then a bounded generation-scoped positioning coordinator confirms stable exact-bottom
+geometry before the whole stage fades and rises in (opacity only under Reduce Motion).
+Native `ScrollPosition` retries nonanimated positioning across layout changes and
+falls back to an explicit Retry surface rather than leaving a permanent opening view.
+The composer remains mounted for stable geometry but is visually hidden, inaccessible,
+and noninteractive until the authoritative tail is positioned. A failed transport,
+sync, or positioning open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
 resynchronization merge compatible live tails with history explicitly loaded in
 that viewport so a detached reader is not displaced. Explicit earlier-page loads
-remain request-only and restore the former visible anchor so the viewport does not jump.
+remain request-only, are scoped to the exact mount generation/cursor, and restore the
+former visible anchor with bounded late-layout correction so the viewport does not jump.
 A just-created empty session remains locally selected until Pi indexes it after
 its first user message; absence from discovery alone does not discard the
 newly returned authoritative snapshot.
@@ -175,9 +181,10 @@ NavigationStack, matching the working non-gateway presentation boundary. Every
 edge is explicitly soft because the hard top style renders as an opaque cutoff
 on physical iOS 27 hardware instead of Tron's graduated translucent blur.
 System navigation-bar backgrounds remain hidden at that same boundary so
-scrolling content reaches the toolbar and newer iOS releases can render their
-native top blur/fade instead of having it masked by an app-owned material or
-lost across a sheet-host boundary. Provider authentication is presented only by
+scrolling content reaches the toolbar. Chat adds one bounded, noninteractive
+top backdrop that is strongest beneath the toolbar and eases completely into
+the transcript; it stays outside the scroll owner so transcript geometry and
+tail following remain authoritative. Provider authentication is presented only by
 the currently visible Providers or Onboarding surface, preventing an underlying
 sheet from deferring the login prompt until the user navigates back. Sheets never use pull-to-refresh;
 session history, packages, and providers expose reload as an explicit toolbar

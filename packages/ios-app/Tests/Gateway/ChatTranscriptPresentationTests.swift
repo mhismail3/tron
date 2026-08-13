@@ -16,7 +16,7 @@ struct ChatTranscriptPresentationTests {
         #expect(ready.isAtExactBottom)
     }
 
-    @Test("chat opening reveals only after matching authoritative tail readiness")
+    @Test("authoritative sync reveals without waiting for physical layout callbacks")
     func chatOpenPresentationState() {
         var state = ChatOpenPresentationState(sessionID: "session-a")
         let epoch = state.begin()
@@ -25,28 +25,9 @@ struct ChatTranscriptPresentationTests {
         #expect(!wrongSession)
         #expect(!staleBaseline)
         #expect(state.phase == .opening)
+
         let installed = state.installAuthoritativeBaseline(sessionID: "session-a", epoch: epoch)
         #expect(installed)
-        let invalidGeometry = state.observeLayout(
-            sessionID: "session-a", epoch: epoch,
-            geometryIsValid: false, tailIsVisible: true, isAtExactBottom: true
-        )
-        let hiddenTail = state.observeLayout(
-            sessionID: "session-a", epoch: epoch,
-            geometryIsValid: true, tailIsVisible: false, isAtExactBottom: true
-        )
-        let awayFromBottom = state.observeLayout(
-            sessionID: "session-a", epoch: epoch,
-            geometryIsValid: true, tailIsVisible: true, isAtExactBottom: false
-        )
-        #expect(!invalidGeometry)
-        #expect(!hiddenTail)
-        #expect(!awayFromBottom)
-        let ready = state.observeLayout(
-            sessionID: "session-a", epoch: epoch,
-            geometryIsValid: true, tailIsVisible: true, isAtExactBottom: true
-        )
-        #expect(ready)
         #expect(state.phase == .ready)
     }
 
@@ -63,6 +44,29 @@ struct ChatTranscriptPresentationTests {
         let failed = state.fail(sessionID: "session-a", epoch: currentEpoch, message: "offline")
         #expect(failed)
         #expect(state.phase == .failed("offline"))
+    }
+
+    @Test("earlier page responses require the exact mounted generation and cursor")
+    func earlierPageRequestIdentity() {
+        let request = ChatTranscriptPageRequest(
+            sessionID: "session-a",
+            presentationGeneration: 7,
+            runtimeGeneration: "runtime-a",
+            before: 40,
+            expectedNextEntryID: "entry-40"
+        )
+        #expect(request.canInstall(
+            sessionID: "session-a", presentationGeneration: 7,
+            runtimeGeneration: "runtime-a", transcriptStart: 40, firstTranscriptID: "entry-40"
+        ))
+        #expect(!request.canInstall(
+            sessionID: "session-a", presentationGeneration: 8,
+            runtimeGeneration: "runtime-a", transcriptStart: 40, firstTranscriptID: "entry-40"
+        ))
+        #expect(!request.canInstall(
+            sessionID: "session-a", presentationGeneration: 7,
+            runtimeGeneration: "runtime-a", transcriptStart: 20, firstTranscriptID: "entry-20"
+        ))
     }
 
     @Test("bootstrap configuration stays in Manage Session")

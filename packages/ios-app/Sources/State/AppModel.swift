@@ -148,6 +148,7 @@ final class AppModel {
     private var reconcilingTerminalIDs: Set<String> = []
     private var workspaceLoadGeneration = 0
     private var presentationOpenGeneration = 0
+    private var mountedPresentationGenerationBySession: [String: Int] = [:]
 
     init(
         client: GatewayClient = GatewayClient(),
@@ -177,6 +178,10 @@ final class AppModel {
     func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
         guard authoritativeSessionIDs.contains(sessionID) else { return nil }
         return snapshots[sessionID]
+    }
+
+    func presentationGeneration(for sessionID: String) -> Int? {
+        mountedPresentationGenerationBySession[sessionID]
     }
 
     var selectedSessionStructureRevision: Int {
@@ -504,7 +509,7 @@ final class AppModel {
     /// Starts a new mounted chat presentation. Unlike reconnect synchronization,
     /// this always installs a fresh authoritative bounded tail and never carries
     /// an explicitly paged prefix across navigation lifetimes.
-    func openSessionPresentation(_ id: String) async throws {
+    func openSessionPresentation(_ id: String) async throws -> Int {
         presentationOpenGeneration &+= 1
         let generation = presentationOpenGeneration
         if subscribedSessionID != id { await closeCurrentSubscription() }
@@ -523,9 +528,21 @@ final class AppModel {
             throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
         }
         authoritativeSessionIDs.insert(id)
-        async let providerRefresh: Void = refreshProviders()
-        async let commandRefresh: Void = loadCommands()
-        _ = await (providerRefresh, commandRefresh)
+        mountedPresentationGenerationBySession[id] = generation
+        Task { [weak self] in
+            guard let self else { return }
+            async let providerRefresh: Void = self.refreshProviders(sessionID: id, useSelectedProject: false)
+            async let commandRefresh: Void = self.loadCommands(for: id)
+            _ = await (providerRefresh, commandRefresh)
+        }
+        return generation
+    }
+
+    func closeSessionPresentation(_ id: String, generation: Int) async {
+        guard mountedPresentationGenerationBySession[id] == generation else { return }
+        mountedPresentationGenerationBySession[id] = nil
+        authoritativeSessionIDs.remove(id)
+        await closeSubscription(id, expectedPresentationGeneration: generation)
     }
 
     func openSession(_ id: String) async throws {
@@ -543,12 +560,19 @@ final class AppModel {
         _ = await (providerRefresh, commandRefresh)
     }
 
-    func loadEarlierTranscript() async {
+    func loadEarlierTranscript(presentationGeneration: Int) async {
         guard !loadingEarlierTranscript,
               let sessionID = selectedSessionID,
               let current = snapshots[sessionID],
               let before = current.transcriptStart,
               before > 0 else { return }
+        let request = ChatTranscriptPageRequest(
+            sessionID: sessionID,
+            presentationGeneration: presentationGeneration,
+            runtimeGeneration: current.runtimeGeneration,
+            before: before,
+            expectedNextEntryID: current.transcript.first?.id
+        )
         struct Params: Codable { let sessionId: String; let before: Int; let expectedNextEntryId: String? }
         struct Response: Decodable { let items: [TranscriptItem]; let start: Int; let total: Int }
         loadingEarlierTranscript = true
@@ -559,13 +583,23 @@ final class AppModel {
                 Params(sessionId: sessionID, before: before, expectedNextEntryId: current.transcript.first?.id),
                 timeout: .seconds(60)
             )
-            guard var snapshot = snapshots[sessionID], snapshot.runtimeGeneration == current.runtimeGeneration else { return }
+            guard !Task.isCancelled,
+                  var snapshot = snapshots[sessionID],
+                  request.canInstall(
+                    sessionID: sessionID,
+                    presentationGeneration: mountedPresentationGenerationBySession[sessionID] ?? -1,
+                    runtimeGeneration: snapshot.runtimeGeneration,
+                    transcriptStart: snapshot.transcriptStart,
+                    firstTranscriptID: snapshot.transcript.first?.id
+                  ) else { return }
             let existingIDs = Set(snapshot.transcript.map(\.id))
             snapshot.transcript = response.items.filter { !existingIDs.contains($0.id) } + snapshot.transcript
             snapshot.transcriptStart = response.start
             snapshot.transcriptTotal = response.total
             snapshots[sessionID] = snapshot
             saveCache()
+        } catch is CancellationError {
+            return
         } catch { surface(error) }
     }
 
@@ -574,10 +608,16 @@ final class AppModel {
         await closeSubscription(sessionID)
     }
 
-    private func closeSubscription(_ sessionID: String) async {
+    private func closeSubscription(_ sessionID: String, expectedPresentationGeneration: Int? = nil) async {
+        if let expectedPresentationGeneration,
+           mountedPresentationGenerationBySession[sessionID] != nil,
+           mountedPresentationGenerationBySession[sessionID] != expectedPresentationGeneration { return }
         struct Params: Codable { let sessionId: String }
         struct Response: Decodable { let closed: Bool }
         let _: Response? = try? await client.request("session.close", Params(sessionId: sessionID))
+        if let expectedPresentationGeneration,
+           mountedPresentationGenerationBySession[sessionID] != nil,
+           mountedPresentationGenerationBySession[sessionID] != expectedPresentationGeneration { return }
         if subscribedSessionID == sessionID { subscribedSessionID = nil }
     }
 
@@ -807,6 +847,10 @@ final class AppModel {
 
     func loadCommands() async {
         guard let sessionID = selectedSessionID else { return }
+        await loadCommands(for: sessionID)
+    }
+
+    private func loadCommands(for sessionID: String) async {
         if subscribedSessionID != sessionID, !(await synchronizeSession(sessionID)) { return }
         struct Params: Codable { let sessionId: String }
         struct Response: Decodable { let commands: [CommandInfo] }
@@ -1479,7 +1523,13 @@ final class AppModel {
             if let presentationGeneration,
                presentationGeneration != self.presentationOpenGeneration || selectedSessionID != sessionID {
                 sessionEventSynchronizer.cancel(sessionID: sessionID, token: token)
-                await closeSubscription(sessionID)
+                // The same-session subscription may already belong to a newer
+                // mount. Only close when selection has moved elsewhere; request
+                // ordering then guarantees a later open owns the final state.
+                if selectedSessionID != sessionID,
+                   mountedPresentationGenerationBySession[sessionID] == nil {
+                    await closeSubscription(sessionID)
+                }
                 return false
             }
             subscribedSessionID = sessionID
@@ -1523,7 +1573,9 @@ final class AppModel {
             await closeSubscription(sessionID)
             if let failure = error as? GatewayFailure,
                failure.retryable || failure.code == "response_too_large" {
-                pendingAuthoritativeResyncSessionIDs.insert(sessionID)
+                // A failed attempt is not an invalidation that arrived during a
+                // successful baseline. Leaving a pending marker here makes a
+                // manual Retry immediately perform a redundant second open.
                 if !notifications.contains(Self.sessionCatchUpNotice) {
                     notifications.append(Self.sessionCatchUpNotice)
                 }

@@ -239,10 +239,11 @@ describe("transcript projection", () => {
   it("advances a page containing one projected item above the requested page target", () => {
     const manager = SessionManager.inMemory("/tmp/oversized-page-item");
     manager.appendMessage({ role: "user", content: "x".repeat(2_000), timestamp: 1 });
-    const page = projectTranscriptPage(manager, new BlobStore(), undefined, 100);
+    const page = projectTranscriptPage(manager, new BlobStore(), undefined, 1_024);
     expect(page.start).toBe(0);
     expect(page.total).toBe(1);
     expect(page.items).toHaveLength(1);
+    expect(Buffer.byteLength(JSON.stringify(page.items))).toBeLessThanOrEqual(1_024);
   });
 
   it("pages large canonical branches without exceeding the snapshot frame budget", () => {

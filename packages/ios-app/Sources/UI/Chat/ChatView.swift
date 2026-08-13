@@ -17,7 +17,8 @@ struct ChatView: View {
     @State private var sending = false
     @State private var openPresentation: ChatOpenPresentationState
     @State private var openingTask: Task<Void, Never>?
-    @State private var bottomSentinelVisible = false
+    @State private var pagingTask: Task<Void, Never>?
+    @State private var modelPresentationGeneration: Int?
     @State private var pendingEditorRequest: AppModel.EditorRequest?
     @State private var transcriptAtBottom = true
     @State private var userScrolledAway = false
@@ -109,20 +110,34 @@ struct ChatView: View {
             speech.stop()
             openingTask?.cancel()
             openingTask = nil
+            pagingTask?.cancel()
+            pagingTask = nil
             cancelTailFollow()
+            if let generation = modelPresentationGeneration {
+                Task { await model.closeSessionPresentation(sessionID, generation: generation) }
+            }
         }
     }
 
     private var transcript: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
-                if let snapshot = model.authoritativeSnapshot(for: sessionID) {
+                if let snapshot = selectedAuthoritativeSnapshot {
                     if (snapshot.transcriptStart ?? 0) > 0 {
                         earlierMessagesChip(snapshot: snapshot)
                             .id("earlier-messages")
                     }
-                    ChatTranscriptContent(snapshot: snapshot)
+                    let transcript = ChatTranscriptPresentation.timeline(in: snapshot)
+                    ForEach(transcript.items) { item in
+                        ChatTranscriptRenderRow(
+                            item: item,
+                            hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel
+                        )
                         .equatable()
+                        .id(item.id)
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+                    }
+                    runtimeRows(snapshot)
                 }
                 Color.clear
                     .frame(height: max(88, composerHeight + 20))
@@ -136,7 +151,7 @@ struct ChatView: View {
                 // Animate only structural insertions/removals. Streaming text and
                 // progress updates keep stable rows out of a stack-wide layout
                 // transaction, which avoids re-rendering long transcript tails.
-                .animation(isTranscriptReady ? .easeOut(duration: 0.20) : nil, value: transcriptLayoutState)
+                .animation(isTranscriptReady && !reduceMotion ? .easeOut(duration: 0.20) : nil, value: transcriptLayoutState)
                 .opacity(isTranscriptReady ? 1 : 0)
                 .offset(y: isTranscriptReady || reduceMotion ? 0 : 8)
                 .animation(reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.26), value: isTranscriptReady)
@@ -148,8 +163,6 @@ struct ChatView: View {
         .tronScrollEdgeChrome()
         .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.15) { ids in
                 visibleTranscriptRowIDs = ids.filter { $0 != "transcript-bottom" }
-                bottomSentinelVisible = ids.contains("transcript-bottom")
-                completeInitialPositioningIfReady()
         }
         .onScrollGeometryChange(for: ChatTranscriptGeometry.self) { geometry in
                 ChatTranscriptGeometry(
@@ -173,7 +186,6 @@ struct ChatView: View {
                     userScrolledAway = false
                     hasUnreadTranscript = false
                 }
-                completeInitialPositioningIfReady()
                 if isTranscriptReady,
                    ChatTailFollowPolicy.shouldFollowContentGrowth(
                     previousHeight: previous.contentHeight,
@@ -283,9 +295,40 @@ struct ChatView: View {
 
     private var isTranscriptReady: Bool { openPresentation.phase == .ready }
 
+    @ViewBuilder private func runtimeRows(_ snapshot: SessionSnapshot) -> some View {
+        if snapshot.phase.isActive && snapshot.extensionUI.working.visible {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(snapshot.extensionUI.working.message ?? statusText(snapshot.phase)).foregroundStyle(.secondary)
+                    if let retry = snapshot.retry {
+                        Text("Attempt \(retry.attempt)\(retry.maxAttempts.map { " of \($0)" } ?? "")")
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .font(TronTypography.caption).padding(.vertical, 4)
+        }
+        if !snapshot.extensionUI.statuses.isEmpty {
+            ForEach(snapshot.extensionUI.statuses.sorted(by: { $0.key < $1.key }), id: \.key) { _, value in
+                TranscriptNotice(title: value, icon: "info.circle.fill", tint: .tronInfo)
+            }
+        }
+    }
+
+    private func statusText(_ phase: SessionPhase) -> String {
+        switch phase {
+        case .running: "Tron is working"
+        case .compacting: "Compacting context"
+        case .retrying: "Retrying provider"
+        case .interrupted: "Previous run was interrupted"
+        case .idle: ""
+        }
+    }
+
     @ViewBuilder private var openingSurface: some View {
         switch openPresentation.phase {
-        case .opening, .staging:
+        case .opening:
             VStack(spacing: 12) {
                 ProgressView().controlSize(.regular)
                 Text("Opening conversation…")
@@ -320,22 +363,26 @@ struct ChatView: View {
     @MainActor
     private func beginOpeningPresentation() async {
         openingTask?.cancel()
+        pagingTask?.cancel()
+        modelPresentationGeneration = nil
         cancelTailFollow()
         let epoch = openPresentation.begin()
         transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
         transcriptGeometry = .zero
-        bottomSentinelVisible = false
         visibleTranscriptRowIDs = []
         userScrolledAway = false
         hasUnreadTranscript = false
         pendingComposerGrowthFollow = false
         let task = Task { @MainActor in
             do {
-                try await model.openSessionPresentation(sessionID)
+                let generation = try await model.openSessionPresentation(sessionID)
                 guard !Task.isCancelled,
-                      openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else { return }
+                      openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
+                    await model.closeSessionPresentation(sessionID, generation: generation)
+                    return
+                }
+                modelPresentationGeneration = generation
                 scrollToTail(animated: false)
-                completeInitialPositioningIfReady()
             } catch is CancellationError {
                 return
             } catch {
@@ -349,21 +396,6 @@ struct ChatView: View {
         openingTask = task
         await task.value
         if openPresentation.epoch == epoch { openingTask = nil }
-    }
-
-    @MainActor
-    private func completeInitialPositioningIfReady() {
-        guard case .staging = openPresentation.phase else { return }
-        if transcriptGeometry.isValid, (!bottomSentinelVisible || !transcriptGeometry.isAtExactBottom) {
-            scrollToTail(animated: false)
-        }
-        _ = openPresentation.observeLayout(
-            sessionID: sessionID,
-            epoch: openPresentation.epoch,
-            geometryIsValid: transcriptGeometry.isValid,
-            tailIsVisible: bottomSentinelVisible,
-            isAtExactBottom: transcriptGeometry.isAtExactBottom
-        )
     }
 
     @MainActor
@@ -433,49 +465,54 @@ struct ChatView: View {
             let visibleIDs = Set(visibleTranscriptRowIDs)
             let anchorID = ChatTranscriptPresentation.timeline(in: snapshot).ids.first(where: visibleIDs.contains)
             let wasScrolledAway = userScrolledAway
+            guard let presentationGeneration = modelPresentationGeneration else { return }
             isRestoringEarlierMessages = true
             pendingComposerGrowthFollow = false
             cancelTailFollow()
-            Task { @MainActor in
+            pagingTask?.cancel()
+            pagingTask = Task { @MainActor in
                 defer {
                     isRestoringEarlierMessages = false
                     userScrolledAway = wasScrolledAway
+                    pagingTask = nil
                 }
-                await model.loadEarlierTranscript()
+                await model.loadEarlierTranscript(presentationGeneration: presentationGeneration)
+                guard !Task.isCancelled,
+                      modelPresentationGeneration == presentationGeneration else { return }
                 guard let current = model.authoritativeSnapshot(for: sessionID),
                       current.sessionId == sessionID,
                       current.runtimeGeneration == runtimeGeneration,
                       (current.transcriptStart ?? previousStart) < previousStart else { return }
 
-                // Lazy rows and Markdown can settle over multiple passes. Require
-                // several stable observations before applying the complete delta.
-                var lastHeight = transcriptGeometry.contentHeight
-                var stablePasses = 0
-                for _ in 0..<40 {
-                    await Task.yield()
-                    try? await Task.sleep(for: .milliseconds(8))
-                    let height = transcriptGeometry.contentHeight
-                    if height > previousGeometry.contentHeight + 0.5,
-                       abs(height - lastHeight) < 0.5 {
-                        stablePasses += 1
-                        if stablePasses >= 3 { break }
-                    } else {
-                        stablePasses = 0
-                    }
-                    lastHeight = height
-                }
-                guard model.selectedSessionID == sessionID,
-                      model.authoritativeSnapshot(for: sessionID)?.runtimeGeneration == runtimeGeneration else { return }
-                let delta = transcriptGeometry.contentHeight - previousGeometry.contentHeight
-                if delta > 0.5 {
-                    var position = transcriptScrollPosition
-                    position.scrollTo(y: max(0, previousGeometry.offsetY + delta))
-                    transcriptScrollPosition = position
-                } else if let anchorID {
+                // Restore the semantic row first, then allow bounded late-layout
+                // corrections while Markdown/attachments settle. Every pass is
+                // generation-scoped and cancellation-aware.
+                if let anchorID {
                     var position = transcriptScrollPosition
                     position.scrollTo(id: anchorID, anchor: .top)
                     transcriptScrollPosition = position
                 }
+                var lastHeight = transcriptGeometry.contentHeight
+                var stablePasses = 0
+                for _ in 0..<60 {
+                    guard !Task.isCancelled,
+                          modelPresentationGeneration == presentationGeneration else { return }
+                    try? await Task.sleep(for: .milliseconds(16))
+                    let height = transcriptGeometry.contentHeight
+                    let isStable = height > previousGeometry.contentHeight + 0.5 && abs(height - lastHeight) < 0.5
+                    stablePasses = isStable ? stablePasses + 1 : 0
+                    let delta = height - previousGeometry.contentHeight
+                    if delta > 0.5 {
+                        var position = transcriptScrollPosition
+                        position.scrollTo(y: max(0, previousGeometry.offsetY + delta))
+                        transcriptScrollPosition = position
+                    }
+                    if stablePasses >= 4 { break }
+                    lastHeight = height
+                }
+                guard model.selectedSessionID == sessionID,
+                      model.authoritativeSnapshot(for: sessionID)?.runtimeGeneration == runtimeGeneration,
+                      modelPresentationGeneration == presentationGeneration else { return }
             }
         } label: {
             HStack(spacing: 7) {
@@ -793,86 +830,6 @@ private struct PendingAttachmentChip: View {
         .padding(.trailing, 4)
         .padding(.vertical, 5)
         .glassEffect(.regular.tint(Color.tronBlue.opacity(0.22)).interactive(), in: Capsule())
-    }
-}
-
-@MainActor
-private struct ChatTranscriptContent: View, Equatable {
-    let snapshot: SessionSnapshot
-    private let identity: Identity
-
-    init(snapshot: SessionSnapshot) {
-        self.snapshot = snapshot
-        identity = Identity(snapshot: snapshot)
-    }
-
-    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.identity == rhs.identity }
-
-    var body: some View {
-        let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
-        ForEach(timeline.items) { item in
-            ChatTranscriptRenderRow(
-                item: item,
-                hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel
-            )
-            .equatable()
-            .id(item.id)
-            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
-        }
-        if snapshot.phase.isActive && snapshot.extensionUI.working.visible {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(snapshot.extensionUI.working.message ?? statusText(snapshot.phase)).foregroundStyle(.secondary)
-                    if let retry = snapshot.retry {
-                        Text("Attempt \(retry.attempt)\(retry.maxAttempts.map { " of \($0)" } ?? "")")
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-            .font(TronTypography.caption).padding(.vertical, 4)
-        }
-        if !snapshot.extensionUI.statuses.isEmpty {
-            ForEach(snapshot.extensionUI.statuses.sorted(by: { $0.key < $1.key }), id: \.key) { _, value in
-                TranscriptNotice(title: value, icon: "info.circle.fill", tint: .tronInfo)
-            }
-        }
-    }
-
-    private func statusText(_ phase: SessionPhase) -> String {
-        switch phase {
-        case .running: "Tron is working"
-        case .compacting: "Compacting context"
-        case .retrying: "Retrying provider"
-        case .interrupted: "Previous run was interrupted"
-        case .idle: ""
-        }
-    }
-
-    private struct Identity: Equatable {
-        let sessionID: String
-        let revision: Int
-        let eventSequence: Int
-        let transcriptStart: Int?
-        let transcriptCount: Int
-        let firstTranscriptID: String?
-        let phase: SessionPhase
-        let working: ExtensionUIState.Working
-        let statuses: [String: String]
-        let hiddenThinkingLabel: String?
-
-        init(snapshot: SessionSnapshot) {
-            sessionID = snapshot.sessionId
-            revision = snapshot.revision
-            eventSequence = snapshot.eventSequence
-            transcriptStart = snapshot.transcriptStart
-            transcriptCount = snapshot.transcript.count
-            firstTranscriptID = snapshot.transcript.first?.id
-            phase = snapshot.phase
-            working = snapshot.extensionUI.working
-            statuses = snapshot.extensionUI.statuses
-            hiddenThinkingLabel = snapshot.extensionUI.hiddenThinkingLabel
-        }
     }
 }
 
