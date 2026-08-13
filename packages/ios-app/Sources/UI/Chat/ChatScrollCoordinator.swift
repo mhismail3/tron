@@ -19,6 +19,7 @@ final class ChatScrollCoordinator {
     private var automaticBottomRequestOutstanding = false
     private var pendingGrowthFollow = false
     private var prependInterruptedByUser = false
+    private var userInteractionStartOffsetY: CGFloat?
 
     var canAutomaticallyFollow: Bool {
         !userScrolledAway
@@ -48,6 +49,7 @@ final class ChatScrollCoordinator {
         automaticBottomRequestOutstanding = false
         pendingGrowthFollow = false
         prependInterruptedByUser = false
+        userInteractionStartOffsetY = nil
     }
 
     func scrollPositionChanged(isPositionedByUser: Bool) {
@@ -55,10 +57,10 @@ final class ChatScrollCoordinator {
             pendingNativeUserGeometry = true
             if isPrependingHistory { prependInterruptedByUser = true }
         }
+        // Native ownership alone is not scroll-away intent. In particular, it
+        // can remain true while streamed growth moves the bottom underneath a
+        // reader. Geometry direction decides whether the user moved upward.
         isNativeUserOwned = isPositionedByUser
-        if isPositionedByUser, !isAtBottom {
-            commitScrollAway()
-        }
     }
 
     /// Returns true when deferred transcript growth should issue one bottom
@@ -81,21 +83,36 @@ final class ChatScrollCoordinator {
 
         if isUserInteracting && !wasInteracting {
             hadUserInteraction = true
+            userInteractionStartOffsetY = finalGeometry?.offsetY
             if isPrependingHistory { prependInterruptedByUser = true }
-        }
-        if wasInteracting && !isUserInteracting,
-           finalGeometry?.isAtExactBottom != true {
-            commitScrollAway()
         }
 
         guard newPhase == .idle else { return false }
+        let movedTowardOlderContent = userInteractionStartOffsetY.map { start in
+            guard let finalGeometry else { return false }
+            return finalGeometry.offsetY < start - 1
+        } ?? false
+        userInteractionStartOffsetY = nil
+
         if finalGeometry?.isAtExactBottom == true {
             releaseAtBottom()
             return false
         }
+        if wasInteracting,
+           movedTowardOlderContent,
+           (!isPrependingHistory || prependInterruptedByUser) {
+            commitScrollAway()
+            return false
+        }
 
-        // A nonanimated request can be coalesced before reaching the newest
-        // extent. Preserve one retry opportunity instead of silently dropping it.
+        // Idle ends transient native ownership only when no upward intent was
+        // observed. This lets a pinned reader recover if growth and gesture-end
+        // geometry were coalesced into one non-bottom sample.
+        if !userScrolledAway {
+            isNativeUserOwned = false
+            pendingNativeUserGeometry = false
+            isUserDrivenSettling = false
+        }
         if automaticBottomRequestOutstanding, !userScrolledAway {
             pendingGrowthFollow = true
         }
@@ -114,6 +131,8 @@ final class ChatScrollCoordinator {
     ) -> Bool {
         let previousAtBottom = isAtBottom
         let grew = current.contentHeight > previous.contentHeight + 0.5
+        let movedTowardOlderContent = previous.isValid
+            && current.offsetY < previous.offsetY - 1
         let hasUserAttribution = isUserInteracting
             || hadUserInteraction
             || isNativeUserOwned
@@ -121,17 +140,27 @@ final class ChatScrollCoordinator {
             || isUserDrivenSettling
 
         isAtBottom = current.isAtBottom
-        if hasUserAttribution && !current.isAtExactBottom {
-            commitScrollAway()
-        } else if current.isAtExactBottom {
+        if current.isAtExactBottom {
             releaseAtBottom()
+        } else if hasUserAttribution,
+                  movedTowardOlderContent,
+                  (!isPrependingHistory || prependInterruptedByUser) {
+            commitScrollAway()
         }
 
         pendingNativeUserGeometry = false
         if !isUserInteracting { hadUserInteraction = false }
 
         if automaticBottomRequestOutstanding {
-            if grew, !userScrolledAway { pendingGrowthFollow = true }
+            guard grew, !userScrolledAway else { return false }
+            // Every measured height increase gets a fresh bottom command. A
+            // nonanimated ScrollPosition write can be coalesced without an idle
+            // phase, so waiting for acknowledgement loses the streaming edge.
+            if canAutomaticallyFollow {
+                pendingGrowthFollow = false
+                return true
+            }
+            pendingGrowthFollow = true
             return false
         }
 
@@ -152,18 +181,10 @@ final class ChatScrollCoordinator {
     /// growth and must never manufacture a follow request or unread content.
     func viewportChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
         guard current.isViewportOnlyChange(from: previous) else { return }
-        if current.isAtExactBottom {
-            releaseAtBottom()
-        } else if isUserInteracting || isNativeUserOwned || pendingNativeUserGeometry {
-            commitScrollAway()
-        } else if previous.isAtBottom || isAtBottom {
-            // Preserve logical pinned ownership while SwiftUI applies the safe-
-            // area inset. The inset itself must not issue a scroll command.
-            isAtBottom = true
-        } else {
-            isAtBottom = current.isAtBottom
-        }
-        pendingNativeUserGeometry = false
+        // Keyboard, composer, attachment-strip, and safe-area changes do not
+        // express transcript navigation. Preserve the durable follow/detach mode
+        // and wait for directional transcript geometry before changing ownership.
+        isAtBottom = !userScrolledAway
     }
 
     /// Claims app ownership before the binding mutation. Returns false when a
@@ -216,8 +237,12 @@ final class ChatScrollCoordinator {
     }
 
     func clearUnreadAfterExplicitJump() {
+        // The tap is explicit intent to resume following. Treat it as logically
+        // pinned immediately so growth during the animated jump cannot detach it.
+        isAtBottom = true
         userScrolledAway = false
         hasUnreadContent = false
+        pendingGrowthFollow = false
     }
 
     private func commitScrollAway() {

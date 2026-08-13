@@ -84,11 +84,15 @@ forbidden. The composer is the ScrollView's bottom safe-area inset, never a meas
 fake transcript row, so pending photos shrink the viewport without changing transcript
 content height. A compact scroll coordinator is the sole owner of following intent: it
 combines native `ScrollPosition` ownership, phase-final geometry, inset-aware bottom
-distance, prepend ownership, and durable user scroll-away. Only measured transcript
-height growth can request an automatic tail position; progress-only tool mutations and
-composer/inset changes cannot. Insets are classified as viewport-only geometry and
-there is no independent size-change anchor that can reposition a detached reader.
-Direct or accessibility scrolling always wins. Horizontal
+distance, prepend ownership, and durable user scroll-away. Upward user geometry is
+the only ordinary transition from pinned to detached; native ownership alone cannot
+detach a reader when streamed growth moves the physical bottom. Reaching the exact
+bottom or tapping **New response** immediately re-pins the transcript, and every later
+measured height increase reissues a coalescible bottom command until another upward
+gesture. Progress-only tool mutations and composer/inset changes cannot request a tail
+position. Insets are classified as viewport-only geometry and there is no independent
+size-change anchor that can reposition a detached reader. Direct or accessibility
+scrolling always wins. Horizontal
 content margins live outside the nonanimated lazy row stack, and existing rows never
 participate in stack-wide insertion or scale animations. Thinking, Markdown, tool, and
 working rows therefore remain stable above the composer while the user follows the tail. Terminal output has its own monotonic sequence and reconnect replay cursor.

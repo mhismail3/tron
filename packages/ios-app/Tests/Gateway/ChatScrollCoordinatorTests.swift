@@ -22,7 +22,7 @@ struct ChatScrollCoordinatorTests {
     @Test("phase final geometry preserves callback ordering")
     func phaseFinalGeometry() {
         let coordinator = ChatScrollCoordinator()
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: nil)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
         coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
         #expect(coordinator.userScrolledAway)
         coordinator.geometryChanged(previous: away, current: bottom)
@@ -42,19 +42,51 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.canAutomaticallyFollow)
     }
 
-    @Test("growth arriving during an outstanding follow is retried when scrolling settles")
-    func deferredGrowthRetries() {
+    @Test("every measured streaming growth reissues a coalescible bottom command")
+    func continuousGrowthKeepsFollowing() {
         let coordinator = ChatScrollCoordinator()
         let firstGrowth = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_080, containerHeight: 400)
         let secondGrowth = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_160, containerHeight: 400)
         #expect(coordinator.geometryChanged(previous: bottom, current: firstGrowth))
-        #expect(!coordinator.geometryChanged(previous: firstGrowth, current: secondGrowth))
-        #expect(coordinator.scrollPhaseChanged(
-            from: .animating,
-            to: .idle,
-            finalGeometry: secondGrowth
-        ))
         #expect(coordinator.beginAutomaticBottomScroll())
+        #expect(coordinator.geometryChanged(previous: firstGrowth, current: secondGrowth))
+        #expect(coordinator.beginAutomaticBottomScroll())
+        #expect(!coordinator.userScrolledAway)
+    }
+
+    @Test("native ownership plus stationary growth does not manufacture scroll-away")
+    func stationaryGrowthDoesNotDetach() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        let grown = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_080, containerHeight: 400)
+        #expect(!coordinator.geometryChanged(previous: bottom, current: grown))
+        #expect(!coordinator.userScrolledAway)
+        #expect(coordinator.scrollPhaseChanged(
+            from: .interacting,
+            to: .idle,
+            finalGeometry: grown
+        ))
+        #expect(!coordinator.userScrolledAway)
+    }
+
+    @Test("scrolling back to the exact bottom clears unread and resumes following")
+    func manualReturnToBottomRepins() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.geometryChanged(previous: bottom, current: away)
+        coordinator.semanticResponseArrived()
+        #expect(coordinator.userScrolledAway)
+        #expect(coordinator.hasUnreadContent)
+
+        coordinator.geometryChanged(previous: away, current: bottom)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: bottom)
+        #expect(!coordinator.userScrolledAway)
+        #expect(!coordinator.hasUnreadContent)
+
+        let grown = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_080, containerHeight: 400)
+        #expect(coordinator.geometryChanged(previous: bottom, current: grown))
     }
 
     @Test("detached growth preserves viewport and marks semantic responses unread")
@@ -84,7 +116,7 @@ struct ChatScrollCoordinatorTests {
         let coordinator = ChatScrollCoordinator()
         coordinator.beginPrependingHistory()
         #expect(coordinator.canRestorePrependPosition)
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: nil)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
         #expect(!coordinator.canRestorePrependPosition)
         coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
         coordinator.endPrependingHistory(preserveScrolledAway: false)
@@ -102,6 +134,22 @@ struct ChatScrollCoordinatorTests {
         #expect(!coordinator.hasUnreadContent)
         #expect(coordinator.isAtBottom)
         #expect(coordinator.canAutomaticallyFollow)
+    }
+
+    @Test("viewport changes preserve an existing detached reader")
+    func detachedViewportChangeStaysDetached() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.geometryChanged(previous: bottom, current: away)
+        coordinator.semanticResponseArrived()
+        let resized = ChatTranscriptGeometry(
+            offsetY: 300, contentHeight: 1_000, containerHeight: 700, bottomInset: 0
+        )
+        #expect(resized.isAtExactBottom)
+        coordinator.viewportChanged(previous: away, current: resized)
+        #expect(coordinator.userScrolledAway)
+        #expect(coordinator.hasUnreadContent)
+        #expect(!coordinator.isAtBottom)
     }
 
     @Test("opening positioning can reissue bottom ownership without enabling ordinary follow")
@@ -126,5 +174,11 @@ struct ChatScrollCoordinatorTests {
         coordinator.clearUnreadAfterExplicitJump()
         #expect(!coordinator.hasUnreadContent)
         #expect(!coordinator.userScrolledAway)
+        #expect(coordinator.isAtBottom)
+
+        let growthDuringJump = ChatTranscriptGeometry(
+            offsetY: 300, contentHeight: 1_080, containerHeight: 400
+        )
+        #expect(coordinator.geometryChanged(previous: away, current: growthDuringJump))
     }
 }

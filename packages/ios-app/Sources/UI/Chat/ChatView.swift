@@ -190,13 +190,16 @@ struct ChatView: View {
         } action: { previous, geometry in
             transcriptGeometry = geometry
             guard isTranscriptReady else { return }
+            let wasScrolledAway = scrollCoordinator.userScrolledAway
             if geometry.isViewportOnlyChange(from: previous) {
                 scrollCoordinator.viewportChanged(previous: previous, current: geometry)
             } else if scrollCoordinator.geometryChanged(previous: previous, current: geometry) {
                 scrollToTail(animated: false)
             }
+            markActiveResponseUnreadAfterDetach(wasScrolledAway: wasScrolledAway)
         }
         .onScrollPhaseChange { oldPhase, newPhase, context in
+            let wasScrolledAway = scrollCoordinator.userScrolledAway
             if scrollCoordinator.scrollPhaseChanged(
                 from: oldPhase,
                 to: newPhase,
@@ -204,6 +207,7 @@ struct ChatView: View {
             ) {
                 scrollToTail(animated: false)
             }
+            markActiveResponseUnreadAfterDetach(wasScrolledAway: wasScrolledAway)
         }
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: scrollToBottomRequest) { _, _ in
@@ -253,6 +257,17 @@ struct ChatView: View {
 
     private var responseState: ChatResponseState? {
         selectedAuthoritativeSnapshot.map(ChatResponseState.init)
+    }
+
+    private var isActiveResponse: Bool {
+        selectedAuthoritativeSnapshot?.phase.isActive == true
+    }
+
+    private func markActiveResponseUnreadAfterDetach(wasScrolledAway: Bool) {
+        guard !wasScrolledAway,
+              scrollCoordinator.userScrolledAway,
+              isActiveResponse else { return }
+        scrollCoordinator.semanticResponseArrived()
     }
 
     private var isTranscriptReady: Bool { openPresentation.phase == .ready }
