@@ -185,7 +185,13 @@ Menu selections enter one cancellation-aware queue and become
 the active camera, photo, or file destination only after the native menu dismissal settles,
 preventing a competing presentation controller from dropping the selection on physical
 iOS. Camera, photo, and file importers share that enum-valued presentation state rather
-than independent Booleans. Images become native image input. Other files remain agent-readable
+than independent Booleans. `CameraModel` owns only UI-facing state and depends on narrow
+camera-authorization and capture-session providers; the system provider alone touches static
+AVFoundation authorization, device discovery, running sessions, and torch configuration.
+Capture configuration and photo request are the two explicitly unchecked Sendable envelopes
+required to move AVFoundation resources across the provider's serial queue boundary. Test providers
+exercise the same owner without camera hardware and do not model a second capture runtime.
+Images become native image input. Other files remain agent-readable
 through a deterministic canonical path envelope, while the mobile projection
 removes that path and exposes only display-safe name/type/size metadata. Sent
 images and files share one attachment strip above the prompt text: images use the

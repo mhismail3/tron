@@ -17,15 +17,24 @@ final class CameraModel: NSObject {
     private var position: AVCaptureDevice.Position = .back
     private var completion: ((UIImage?) -> Void)?
     private var configuring = false
-    private let queue = DispatchQueue(label: "app.tron.camera.capture", qos: .userInitiated)
+    private let authorization: any CameraAuthorizationProviding
+    private let sessions: any CameraSessionProviding
+
+    init(
+        authorization: any CameraAuthorizationProviding = SystemCameraAuthorizationProvider(),
+        sessions: any CameraSessionProviding = SystemCameraSessionProvider()
+    ) {
+        self.authorization = authorization
+        self.sessions = sessions
+    }
 
     func requestPermissionAndSetup() async {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        switch authorization.authorizationStatus() {
         case .authorized:
             isAuthorized = true
             setup()
         case .notDetermined:
-            let granted = await AVCaptureDevice.requestAccess(for: .video)
+            let granted = await authorization.requestAccess()
             isAuthorized = granted
             permissionDenied = !granted
             if granted { setup() }
@@ -39,46 +48,28 @@ final class CameraModel: NSObject {
     private func setup() {
         guard !configuring else { return }
         configuring = true
-        let requestedPosition = position
-        queue.async { [weak self] in
-            let session = AVCaptureSession()
-            session.beginConfiguration()
-            session.sessionPreset = .photo
-            let discovery = AVCaptureDevice.DiscoverySession(
-                deviceTypes: [.builtInWideAngleCamera, .builtInDualCamera, .builtInDualWideCamera, .builtInTripleCamera, .builtInTrueDepthCamera],
-                mediaType: .video,
-                position: requestedPosition
-            )
-            guard let camera = discovery.devices.first,
-                  let input = try? AVCaptureDeviceInput(device: camera),
-                  session.canAddInput(input) else {
-                session.commitConfiguration()
-                DispatchQueue.main.async { self?.configuring = false; self?.cameraUnavailable = true }
+        sessions.configure(position: position) { [weak self] configuration in
+            guard let self else { return }
+            configuring = false
+            guard let configuration else {
+                cameraUnavailable = true
                 return
             }
-            session.addInput(input)
-            let output = AVCapturePhotoOutput()
-            if session.canAddOutput(output) { session.addOutput(output) }
-            session.commitConfiguration()
-            session.startRunning()
-            DispatchQueue.main.async {
-                self?.session = session
-                self?.photoOutput = output
-                self?.hasTorch = camera.hasTorch
-                self?.configuring = false
-                self?.cameraUnavailable = false
-            }
+            session = configuration.session
+            photoOutput = configuration.photoOutput
+            hasTorch = configuration.hasTorch
+            cameraUnavailable = false
         }
     }
 
     func stopSession() {
         guard let session else { return }
-        queue.async { if session.isRunning { session.stopRunning() } }
+        sessions.stop(session)
     }
 
     func startSession() {
         guard let session else { setup(); return }
-        queue.async { if !session.isRunning { session.startRunning() } }
+        sessions.start(session)
     }
 
     func flipCamera() {
@@ -91,25 +82,22 @@ final class CameraModel: NSObject {
     }
 
     func toggleTorch() {
-        guard let device = (session?.inputs.first as? AVCaptureDeviceInput)?.device,
-              device.hasTorch else { return }
-        do {
-            try device.lockForConfiguration()
-            defer { device.unlockForConfiguration() }
-            if isTorchOn { device.torchMode = .off }
-            else { try device.setTorchModeOn(level: 1) }
-            isTorchOn = device.torchMode == .on
-        } catch { isTorchOn = false }
+        guard let session else { return }
+        sessions.setTorch(on: !isTorchOn, session: session) { [weak self] enabled in
+            self?.isTorchOn = enabled
+        }
     }
 
     func capturePhoto(completion: @escaping (UIImage?) -> Void) {
         self.completion = completion
         guard let photoOutput else { finish(nil); return }
-        let settings = AVCapturePhotoSettings()
-        queue.async { [weak self] in
-            guard let self else { return }
-            photoOutput.capturePhoto(with: settings, delegate: self)
-        }
+        sessions.capturePhoto(
+            CameraPhotoCaptureRequest(
+                output: photoOutput,
+                settings: AVCapturePhotoSettings(),
+                delegate: self
+            )
+        )
     }
 
     private func finish(_ image: UIImage?) {

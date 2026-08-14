@@ -95,6 +95,18 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/AppModelPerformanceSignpostTests
 ```
 
+Camera boundary tests inject authorization and capture-session providers into
+`CameraModel`; they never invoke camera hardware or replace AVFoundation in production.
+Keep provider callbacks MainActor-bound and keep the two unchecked Sendable AVFoundation
+envelopes limited to the system provider's serial queue boundary. Phase 7 owns generation-scoped
+dismissal and late-configuration lifecycle changes.
+
+```bash
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/CameraBoundaryTests
+```
+
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`
 feed raw HTTP response bytes and inspect the exact `/v1/pair` request.
 `AppModelPairingAttemptTests` use barriers whose late responses intentionally

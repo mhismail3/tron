@@ -1,6 +1,6 @@
 # Tron iOS hardening plan
 
-Status: implementation in progress — milestones 0A–0B.4 and the separate provisional UI removal milestone are complete; milestones 0B.5 and 1–9 are pending
+Status: implementation in progress — milestones 0A–0B.4 and the separate provisional UI removal milestone are complete; milestone 0B.5 is in progress; milestones 1–9 are pending
 
 Audit baseline: `cee85b64a`
 
@@ -65,7 +65,7 @@ Eight independent read-only audits covered state architecture, chat scrolling/pe
 
 **0B.4 — Privacy-safe instrumentation and performance evidence: complete.** The typed signpost vocabulary is installed. Gateway connection, disposable cache load/save, visible session open, authoritative sync/resync attempts, uncertain-command receipt resolution, and terminal attach/replay now expose only closed result codes and aggregate item/byte counts. Shared interval handling removed duplicate terminal replay installation and centralizes success/failure/cancellation closure. Focused spies characterize these boundaries without admitting profile IDs, session IDs, paths, command IDs, model names, prompts, transcript content, terminal output, or filenames. Deterministic chat projection records only projected row count, and first-ready timing ends on the next actual `CADisplayLink` presentation rather than model readiness. Generation-owned scroll and prepend intervals discard replaced commands, reject stale prepend completion, and cancel exactly once at teardown; stale paging defer blocks cannot clear a newer paging owner. Prepend success is recorded only after the next presented frame confirms the requested offset within one point. The reproducible five-sample simulator and pinned-device timing, hitch, allocation, and memory evidence is recorded in `performance-baseline.md`; high-variance allocator deltas and internally inconsistent XCTest frame-rate estimates are reports, not gates.
 
-**0B.5 and milestones 1–9: pending.** Remaining system-service seams, runtime hardening, and later owner refactors remain pending under the plan below.
+**0B.5 — System-service seams: in progress.** Camera authorization and capture-session ownership now sit behind narrow injectable providers while `CameraModel` retains the existing UI-facing state machine; deterministic tests cover grant/deny/setup failure, session commands, torch ownership, flip, and no-output capture without touching hardware. QR capture, share store/app opening, extension pure logic, privacy-manifest archive assertions, and static-style rule cleanup remain pending in this milestone. Milestones 1–9 remain pending.
 
 ### Verified correctness priorities
 
