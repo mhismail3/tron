@@ -2,8 +2,10 @@ import SwiftUI
 
 struct RuntimeBehaviorSettingsView: View {
     @Environment(AppModel.self) private var model
-    let allowsProjectScope: Bool
+    let projectCWD: String?
     @State private var scope: SettingsScope = .global
+
+    private var allowsProjectScope: Bool { projectCWD != nil }
     @State private var transport = "auto"
     @State private var steeringMode = "one-at-a-time"
     @State private var followUpMode = "one-at-a-time"
@@ -182,7 +184,7 @@ struct RuntimeBehaviorSettingsView: View {
     private func queueLabel(_ value: String) -> String { value == "all" ? "Deliver all" : "One at a time" }
 
     private var settingsTarget: SettingsTarget? {
-        SettingsTarget(scope: scope, projectCWD: model.selectedSnapshot?.cwd)
+        SettingsTarget(scope: scope, projectCWD: projectCWD)
     }
 
     private func load() async {
@@ -322,9 +324,11 @@ struct ResourceSettingsView: View {
     }
 
     @Environment(AppModel.self) private var model
-    let allowsProjectScope: Bool
+    let projectCWD: String?
     @State private var scope: SettingsScope = .global
     @State private var extensions = ""
+
+    private var allowsProjectScope: Bool { projectCWD != nil }
     @State private var skills = ""
     @State private var prompts = ""
     @State private var themes = ""
@@ -500,7 +504,7 @@ struct ResourceSettingsView: View {
     }
 
     private var settingsTarget: SettingsTarget? {
-        SettingsTarget(scope: scope, projectCWD: model.selectedSnapshot?.cwd)
+        SettingsTarget(scope: scope, projectCWD: projectCWD)
     }
 
     private func load() async {

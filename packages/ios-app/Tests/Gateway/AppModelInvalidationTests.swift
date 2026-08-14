@@ -36,6 +36,33 @@ struct AppModelInvalidationTests {
         #expect(PackageConfigurationTarget.global.cwd == nil)
     }
 
+    @Test("trust targets require an explicit nonempty project path")
+    func trustTargets() {
+        #expect(TrustTarget(cwd: "") == nil)
+        let first = TrustTarget(cwd: "/workspace/project")!
+        let second = TrustTarget(cwd: "/workspace/other")!
+        #expect(first.cwd == "/workspace/project")
+
+        var owner = TrustLoadOwner()
+        owner.begin(target: first)
+        #expect(!owner.isReady(for: first))
+        owner.begin(target: second)
+        let admittedStale = owner.admit(target: first)
+        #expect(!admittedStale)
+        let admittedCurrent = owner.admit(target: second)
+        #expect(admittedCurrent)
+        #expect(owner.isReady(for: second))
+    }
+
+    @Test("trust reads and mutations retain their exact project target")
+    nonisolated func trustRequestsRetainTarget() async throws {
+        let scenario = Task { @MainActor in try await runTrustTargetScenario() }
+        defer { scenario.cancel() }
+        try await withTestWatchdog {
+            try await valueOfOwnedTask(scenario)
+        }
+    }
+
     @Test("out-of-order settings responses respect target and request ownership")
     nonisolated func settingsResponsesRemainKeyed() async throws {
         let scenario = Task { @MainActor in try await runSettingsOrderingScenario() }
@@ -60,6 +87,33 @@ struct AppModelInvalidationTests {
         defer { scenario.cancel() }
         try await withTestWatchdog {
             try await valueOfOwnedTask(scenario)
+        }
+    }
+
+    private func runTrustTargetScenario() async throws {
+        try await withConnectedClient { client, socket in
+            let model = AppModel(client: client)
+            let target = try #require(TrustTarget(cwd: "/workspace/project"))
+
+            let inspection = Task { try await model.inspectTrust(target: target) }
+            try await socket.waitUntilSent(count: 2)
+            let inspectRequest = try await requestObject(at: 1, on: socket)
+            #expect(inspectRequest["method"] == .string("trust.inspect"))
+            #expect(inspectRequest["params"]?.objectValue?["cwd"] == .string("/workspace/project"))
+            try await respond(toFrameAt: 1, on: socket, result: .object(["marker": .string("inspect")]))
+            let inspectionValue = try await inspection.value
+            #expect(inspectionValue == .object(["marker": .string("inspect")]))
+
+            let mutation = Task { try await model.setTrust(target: target, decision: true) }
+            try await socket.waitUntilSent(count: 3)
+            let mutationRequest = try await requestObject(at: 2, on: socket)
+            #expect(mutationRequest["method"] == .string("trust.set"))
+            #expect(mutationRequest["params"]?.objectValue?["cwd"] == .string("/workspace/project"))
+            #expect(mutationRequest["params"]?.objectValue?["decision"] == .bool(true))
+            #expect(mutationRequest["params"]?.objectValue?["commandId"]?.stringValue != nil)
+            try await respond(toFrameAt: 2, on: socket, result: .object(["marker": .string("set")]))
+            let mutationValue = try await mutation.value
+            #expect(mutationValue == .object(["marker": .string("set")]))
         }
     }
 

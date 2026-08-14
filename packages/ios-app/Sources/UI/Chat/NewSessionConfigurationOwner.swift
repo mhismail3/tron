@@ -1,3 +1,8 @@
+struct NewSessionConfigurationLoadID: Hashable {
+    let workspace: String
+    let trustInvalidationGeneration: Int
+}
+
 struct NewSessionConfigurationOwner: Equatable, Sendable {
     private(set) var workspace: String?
     private(set) var isReady = false

@@ -121,7 +121,11 @@ paged provider/model pair atomically. Auth operations retain that target through
 confirmed cancellation; unknown completions never guess from dashboard selection. Package
 inventory and update projections use typed `.global` or `.workspace(cwd:)` targets; the global
 Settings route never inherits the default workspace, and successful update/remove mutations
-clear only the matching cached update markers before refreshing that target's inventory.
+clear only the matching cached update markers before refreshing that target's inventory. Project
+Settings captures its session/CWD when presented rather than consulting later dashboard selection.
+Trust reads and mutations require a typed nonempty project target; onboarding, project Settings,
+and new-session admission discard stale workspace results, and trust invalidations reopen the
+new-session readiness gate until the matching workspace is inspected again.
 Chat uses one presentation timeline rather than separate canonical, streaming,
 and live-tool tails. Tool calls, progress, and results join by `toolCallId`; the
 Gateway supplies a monotonic per-run ordinal for parallel calls, and the grouped

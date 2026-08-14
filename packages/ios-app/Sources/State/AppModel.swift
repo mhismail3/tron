@@ -1192,15 +1192,15 @@ final class AppModel {
         _ = await refreshSettings(target: target)
     }
 
-    func inspectTrust(cwd: String) async throws -> JSONValue {
+    func inspectTrust(target: TrustTarget) async throws -> JSONValue {
         struct Params: Codable { let cwd: String }
-        return try await client.requestValue("trust.inspect", Params(cwd: cwd))
+        return try await client.requestValue("trust.inspect", Params(cwd: target.cwd))
     }
 
-    func setTrust(cwd: String, decision: Bool?) async throws -> JSONValue {
+    func setTrust(target: TrustTarget, decision: Bool?) async throws -> JSONValue {
         struct Params: Codable { let cwd: String; let decision: Bool?; let commandId: String }
         let commandID = uuidSource.next().uuidString
-        let params = Params(cwd: cwd, decision: decision, commandId: commandID)
+        let params = Params(cwd: target.cwd, decision: decision, commandId: commandID)
         return try await confirmedMutationValue(method: "trust.set", commandId: commandID) {
             try await client.requestValue("trust.set", params)
         }

@@ -42,6 +42,7 @@ struct OnboardingView: View {
     @State private var selectedWorkspace = ""
     @State private var showWorkspace = false
     @State private var trustInspection: JSONValue?
+    @State private var trustLoadOwner = TrustLoadOwner()
     @State private var selectedModel: ModelRef?
     @State private var finishing = false
     @FocusState private var pairingFieldFocused: Bool
@@ -149,6 +150,8 @@ struct OnboardingView: View {
         }
         .sheet(isPresented: $showWorkspace) {
             WorkspaceBrowser { path in
+                trustInspection = nil
+                if let target = TrustTarget(cwd: path) { trustLoadOwner.begin(target: target) }
                 selectedWorkspace = path
                 showWorkspace = false
                 Task { await inspectTrust() }
@@ -377,7 +380,10 @@ struct OnboardingView: View {
         switch step {
         case .welcome, .tailscale, .mac, .anthropic, .openAI, .providers: true
         case .pair: false
-        case .workspace: !selectedWorkspace.isEmpty && !needsTrustDecision
+        case .workspace:
+            !selectedWorkspace.isEmpty
+                && TrustTarget(cwd: selectedWorkspace).map(trustLoadOwner.isReady(for:)) == true
+                && !needsTrustDecision
         case .model: selectedModel != nil
         }
     }
@@ -423,13 +429,32 @@ struct OnboardingView: View {
         }
     }
     private func inspectTrust() async {
-        guard !selectedWorkspace.isEmpty else { return }
-        do { trustInspection = try await model.inspectTrust(cwd: selectedWorkspace) }
-        catch { model.onboardingError = error.localizedDescription }
+        guard let target = TrustTarget(cwd: selectedWorkspace) else { return }
+        trustInspection = nil
+        trustLoadOwner.begin(target: target)
+        do {
+            let value = try await model.inspectTrust(target: target)
+            guard selectedWorkspace == target.cwd,
+                  trustLoadOwner.admit(target: target) else { return }
+            trustInspection = value
+        } catch is CancellationError {
+            return
+        } catch {
+            guard selectedWorkspace == target.cwd else { return }
+            model.onboardingError = error.localizedDescription
+        }
     }
     private func setTrust(_ decision: Bool) async {
-        do { trustInspection = try await model.setTrust(cwd: selectedWorkspace, decision: decision) }
-        catch { model.onboardingError = error.localizedDescription }
+        guard let target = TrustTarget(cwd: selectedWorkspace) else { return }
+        do {
+            let value = try await model.setTrust(target: target, decision: decision)
+            guard selectedWorkspace == target.cwd,
+                  trustLoadOwner.admit(target: target) else { return }
+            trustInspection = value
+        } catch {
+            guard selectedWorkspace == target.cwd else { return }
+            model.onboardingError = error.localizedDescription
+        }
     }
     private func finish() async {
         guard let selectedModel else { return }

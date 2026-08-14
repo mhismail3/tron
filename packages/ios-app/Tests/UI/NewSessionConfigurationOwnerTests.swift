@@ -5,6 +5,10 @@ import Testing
 struct NewSessionConfigurationOwnerTests {
     @Test("workspace changes close creation until the matching loads finish")
     func workspaceSwitchAdmission() {
+        let initialLoad = NewSessionConfigurationLoadID(workspace: "/workspace/a", trustInvalidationGeneration: 0)
+        #expect(initialLoad != NewSessionConfigurationLoadID(workspace: "/workspace/a", trustInvalidationGeneration: 1))
+        #expect(initialLoad != NewSessionConfigurationLoadID(workspace: "/workspace/b", trustInvalidationGeneration: 0))
+
         var owner = NewSessionConfigurationOwner()
         owner.begin(workspace: "/workspace/a")
         #expect(!owner.permitsCreation(workspace: "/workspace/a", requiresTrust: false))

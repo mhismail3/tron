@@ -141,7 +141,8 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/AppModelInvalidationTests \
   -only-testing:TronMobileTests/AppModelEventTests/globalConfigurationInvalidations \
-  -only-testing:TronMobileTests/NewSessionConfigurationOwnerTests
+  -only-testing:TronMobileTests/NewSessionConfigurationOwnerTests \
+  -only-testing:TronMobileTests/SettingsRouteIdentityTests
 ```
 
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`

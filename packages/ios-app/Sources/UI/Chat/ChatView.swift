@@ -99,7 +99,14 @@ struct ChatView: View {
             toolbar(titleWidth: ChatToolbarTitleLayout.width(containerWidth: toolbarContainerWidth))
         }
         .sheet(isPresented: $showContext) { SessionContextSheet(sessionID: sessionID) }
-        .sheet(isPresented: $showSettings) { SettingsView(scope: .project).presentationDragIndicator(.hidden) }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(
+                scope: .project,
+                projectSessionID: sessionID,
+                projectCWD: model.snapshots[sessionID]?.cwd
+            )
+            .presentationDragIndicator(.hidden)
+        }
         .sheet(isPresented: attachmentPresentationBinding(for: .camera)) {
             CameraCaptureSheet { image in Task { await importCameraImage(image) } }
         }

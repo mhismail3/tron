@@ -479,7 +479,10 @@ private struct NewSessionSheet: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
             }
-            .task(id: workspace) {
+            .task(id: NewSessionConfigurationLoadID(
+                workspace: workspace,
+                trustInvalidationGeneration: model.trustRevision
+            )) {
                 configurationOwner.begin(workspace: workspace)
                 trustInspection = nil
                 selectedModel = nil
@@ -565,8 +568,9 @@ private struct NewSessionSheet: View {
     }
 
     private func inspectTrust(cwd: String) async -> Bool {
+        guard let target = TrustTarget(cwd: cwd) else { return false }
         do {
-            let inspection = try await model.inspectTrust(cwd: cwd)
+            let inspection = try await model.inspectTrust(target: target)
             guard workspace == cwd else { return false }
             trustInspection = inspection
             return true
@@ -581,8 +585,9 @@ private struct NewSessionSheet: View {
 
     private func trust(_ value: Bool) async {
         let cwd = workspace
+        guard let target = TrustTarget(cwd: cwd) else { return }
         do {
-            let inspection = try await model.setTrust(cwd: cwd, decision: value)
+            let inspection = try await model.setTrust(target: target, decision: value)
             guard workspace == cwd else { return }
             trustInspection = inspection
         } catch {

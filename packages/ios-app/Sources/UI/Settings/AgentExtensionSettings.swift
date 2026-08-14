@@ -178,12 +178,13 @@ struct PackagesSettingsView: View {
 
 struct TrustSettingsView: View {
     @Environment(AppModel.self) private var model
+    let target: TrustTarget?
     @State private var inspection: JSONValue?
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
-                if let cwd = model.selectedSnapshot?.cwd {
-                    TronSettingsGroup("Current Workspace", detail: cwd, accent: .tronAmber) {
+                if let target {
+                    TronSettingsGroup("Current Workspace", detail: target.cwd, accent: .tronAmber) {
                         TronStructuredJSONView(value: inspection ?? .null, title: "Project Trust", accent: .tronAmber)
                             .padding(12)
                     }
@@ -210,15 +211,33 @@ struct TrustSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Project Trust")
-        .task(id: model.trustRevision) { await load() }
+        .task(id: TrustLoadID(target: target, invalidationGeneration: model.trustRevision)) { await load() }
     }
     private func load() async {
-        guard let cwd = model.selectedSnapshot?.cwd else { return }
-        inspection = try? await model.inspectTrust(cwd: cwd)
+        guard let target else { return }
+        do {
+            let value = try await model.inspectTrust(target: target)
+            guard target == self.target else { return }
+            inspection = value
+        } catch is CancellationError {
+            return
+        } catch {
+            guard target == self.target else { return }
+            model.lastError = error.localizedDescription
+        }
     }
     private func update(_ decision: Bool?) {
-        guard let cwd = model.selectedSnapshot?.cwd else { return }
-        Task { do { inspection = try await model.setTrust(cwd: cwd, decision: decision) } catch { model.lastError = error.localizedDescription } }
+        guard let target else { return }
+        Task {
+            do {
+                let value = try await model.setTrust(target: target, decision: decision)
+                guard target == self.target else { return }
+                inspection = value
+            } catch {
+                guard target == self.target else { return }
+                model.lastError = error.localizedDescription
+            }
+        }
     }
 }
 

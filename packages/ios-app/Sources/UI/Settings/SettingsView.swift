@@ -4,12 +4,20 @@ struct SettingsView: View {
     enum Scope { case dashboard, project }
 
     let scope: Scope
+    let projectSessionID: String?
+    let projectCWD: String?
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    init(scope: Scope = .dashboard) {
+    init(
+        scope: Scope = .dashboard,
+        projectSessionID: String? = nil,
+        projectCWD: String? = nil
+    ) {
         self.scope = scope
+        self.projectSessionID = scope == .project ? projectSessionID : nil
+        self.projectCWD = scope == .project ? projectCWD : nil
     }
 
     var body: some View {
@@ -26,26 +34,35 @@ struct SettingsView: View {
                     TronSettingsGroup("Agent") {
                         VStack(spacing: 0) {
                             settingsLink("Providers", icon: "key") {
-                                ProvidersSettingsView(sessionID: scope == .project ? model.selectedSessionID : nil)
+                                ProvidersSettingsView(sessionID: projectSessionID)
                             }
                             TronSettingsDivider()
                             settingsLink("Models and Defaults", icon: "cpu") {
                                 AgentDefaultsSettingsView(
                                     allowsProjectScope: scope == .project,
-                                    providerTarget: scope == .project
-                                        ? model.selectedSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
-                                        : .global
+                                    providerTarget: projectSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global,
+                                    projectCWD: projectCWD
                                 )
                             }
                             TronSettingsDivider()
-                            settingsLink("Runtime Behavior", icon: "gearshape.2") { RuntimeBehaviorSettingsView(allowsProjectScope: scope == .project) }
+                            settingsLink("Runtime Behavior", icon: "gearshape.2") {
+                                RuntimeBehaviorSettingsView(projectCWD: projectCWD)
+                            }
                             TronSettingsDivider()
-                            settingsLink("Resource Paths", icon: "folder.badge.gearshape") { ResourceSettingsView(allowsProjectScope: scope == .project) }
+                            settingsLink("Resource Paths", icon: "folder.badge.gearshape") {
+                                ResourceSettingsView(projectCWD: projectCWD)
+                            }
                             TronSettingsDivider()
-                            settingsLink("Packages and Resources", icon: "shippingbox") { PackagesSettingsView(projectCWD: scope == .project ? model.selectedSnapshot?.cwd : nil) }
+                            settingsLink("Packages and Resources", icon: "shippingbox") {
+                                PackagesSettingsView(projectCWD: projectCWD)
+                            }
                             if scope == .project {
                                 TronSettingsDivider()
-                                settingsLink("Project Trust", icon: "checkmark.shield") { TrustSettingsView() }
+                                settingsLink("Project Trust", icon: "checkmark.shield") {
+                                    TrustSettingsView(
+                                        target: projectCWD.flatMap(TrustTarget.init(cwd:))
+                                    )
+                                }
                             }
                             TronSettingsDivider()
                             settingsLink("Custom Models", icon: "slider.horizontal.3") { CustomModelsSettingsView() }
@@ -83,8 +100,8 @@ struct SettingsView: View {
         .gatewayGlobalSheets()
         .task {
             await model.refreshAll(
-                projectSessionID: scope == .project ? model.selectedSessionID : nil,
-                projectCWD: scope == .project ? model.selectedSnapshot?.cwd : nil,
+                projectSessionID: projectSessionID,
+                projectCWD: projectCWD,
                 useSelectedProject: scope == .project
             )
         }
@@ -518,6 +535,7 @@ private struct AgentDefaultsSettingsView: View {
     @Environment(AppModel.self) private var model
     let allowsProjectScope: Bool
     let providerTarget: ProviderCatalogTarget
+    let projectCWD: String?
     @State private var selectedModel: ModelRef?
     @State private var thinking = "medium"
     @State private var compaction = true
@@ -604,7 +622,7 @@ private struct AgentDefaultsSettingsView: View {
     }
 
     private var settingsTarget: SettingsTarget? {
-        SettingsTarget(scope: scope, projectCWD: model.selectedSnapshot?.cwd)
+        SettingsTarget(scope: scope, projectCWD: projectCWD)
     }
 
     private func refresh() async {
