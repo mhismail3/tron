@@ -2176,9 +2176,7 @@ final class AppModel {
             performanceSignposts.end(interval, result: .success, metrics: metrics)
             return value
         } catch {
-            let result: PerformanceResult = Task.isCancelled || error is CancellationError
-                ? .cancelled
-                : .failure
+            let result = PerformanceResult.forFailure(error)
             performanceSignposts.end(interval, result: result, metrics: .none)
             throw error
         }

@@ -21,6 +21,10 @@ enum PerformanceResult: Int, Sendable {
     case failure = 1
     case cancelled = 2
     case discarded = 3
+
+    static func forFailure(_ error: Error) -> PerformanceResult {
+        Task.isCancelled || error is CancellationError ? .cancelled : .failure
+    }
 }
 
 struct PerformanceMetrics: Equatable, Sendable {

@@ -33,24 +33,27 @@ runtime. Gateway connection and disposable cache intervals use the shared typed
 performance-signpost boundary. Signpost metadata is structurally limited to result
 codes, item counts, and byte counts; identifiers, paths, methods, filenames, model
 names, prompts, transcript content, and terminal output are never recorded. `AppModel`
-is the MainActor state owner. Its visible-open interval contains independently measured
-authoritative synchronization attempts; invalidated attempts end as discarded rather
-than being mislabeled as successful. Receipt timing begins only after an uncertain
-mutation response, never for an ordinary confirmed mutation. Terminal open/attach
-uses one replay installer and closes its interval only after reset or delta chunks are
-admitted. It shares those clock/UUID seams
-for Gateway reconnect, synchronization, receipt, debounce, and command-ID work.
+is the MainActor state owner and shares the clock/UUID seams for Gateway reconnect,
+synchronization, receipt, debounce, and command-ID work. Its visible-open interval
+contains independently measured authoritative synchronization attempts; invalidated
+attempts end as discarded rather than being mislabeled as successful. Receipt timing
+begins only after an uncertain mutation response, never for an ordinary confirmed
+mutation. Terminal open/attach uses one replay installer and closes its interval only
+after reset or delta chunks are admitted.
 It loads a bounded disposable cache first, connects, fetches
 cursor-paginated sessions and model catalogs, and replaces local state with
 authoritative snapshots. Session snapshots carry a byte-bounded current
 transcript tail; `transcriptStart`/`transcriptTotal` expose earlier canonical Pi
 entries, which the chat can request backward without risking an oversized
-WebSocket frame. Opening a new chat presentation always synchronizes a fresh authoritative bounded
-latest page; disposable cached or previously paged prefixes are never revealed as
+WebSocket frame. The synchronous transcript projection is measured at its pure
+snapshot-to-timeline boundary and reports only aggregate projected row count. Opening
+a new chat presentation always synchronizes a fresh authoritative bounded latest page; disposable cached or previously paged prefixes are never revealed as
 its baseline. The transcript remains behind a nonblank opening surface until the
 two-phase `session.open`/`session.sync` handshake installs its authoritative tail,
 then the whole stage fades and rises in (opacity only under Reduce Motion). That
-handshake immediately marks the stage ready; native `ScrollPosition` starts at the
+handshake immediately marks the stage ready; the first-ready performance interval
+closes only after the next display-link frame proves that ready state was presented.
+Native `ScrollPosition` starts at the
 bottom and receives one same-turn best-effort positioning hint before interaction
 is enabled, but physical layout callbacks are never a correctness gate because
 SwiftUI may coalesce them. Test builds can admit one synthetic authoritative

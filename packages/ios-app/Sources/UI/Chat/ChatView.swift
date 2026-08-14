@@ -10,6 +10,8 @@ private enum ChatAttachmentDestination: Hashable {
 
 struct ChatView: View {
     let sessionID: String
+    private let displayFrameScheduler: DisplayFrameScheduler
+    private let performanceSignposts: any PerformanceSignposting
     #if HOSTED_TEST
     let hostedProbe: ChatHostedProbe?
     #endif
@@ -44,14 +46,27 @@ struct ChatView: View {
     @State private var composerFocused = false
 
     #if HOSTED_TEST
-    init(sessionID: String, hostedProbe: ChatHostedProbe? = nil) {
+    init(
+        sessionID: String,
+        hostedProbe: ChatHostedProbe? = nil,
+        displayFrameScheduler: DisplayFrameScheduler = .displayLink,
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
+    ) {
         self.sessionID = sessionID
         self.hostedProbe = hostedProbe
+        self.displayFrameScheduler = displayFrameScheduler
+        self.performanceSignposts = performanceSignposts
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
     }
     #else
-    init(sessionID: String) {
+    init(
+        sessionID: String,
+        displayFrameScheduler: DisplayFrameScheduler = .displayLink,
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
+    ) {
         self.sessionID = sessionID
+        self.displayFrameScheduler = displayFrameScheduler
+        self.performanceSignposts = performanceSignposts
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
     }
     #endif
@@ -159,7 +174,10 @@ struct ChatView: View {
                             earlierMessagesChip(snapshot: snapshot)
                         }
                     }
-                    let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
+                    let timeline = ChatTranscriptPresentation.timeline(
+                        in: snapshot,
+                        performanceSignposts: performanceSignposts
+                    )
                     ForEach(timeline.items) { item in
                         stableTranscriptRow(id: item.id) {
                             ChatTranscriptRenderRow(
@@ -350,7 +368,7 @@ struct ChatView: View {
     private func beginOpeningPresentation() async {
         #if HOSTED_TEST
         if let hostedProbe {
-            beginHostedPresentation(probe: hostedProbe)
+            await beginHostedPresentation(probe: hostedProbe)
             return
         }
         #endif
@@ -363,18 +381,22 @@ struct ChatView: View {
         transcriptGeometry = .zero
         visibleTranscriptRowIDs = []
         let task = Task { @MainActor in
+            let interval = performanceSignposts.begin(.firstReadyFrame)
             do {
                 let generation = try await model.openSessionPresentation(sessionID)
                 guard !Task.isCancelled,
                       openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
+                    performanceSignposts.end(interval, result: .discarded, metrics: .none)
                     await model.closeSessionPresentation(sessionID, generation: generation)
                     return
                 }
                 modelPresentationGeneration = generation
                 positionLatestTail(epoch: epoch)
-            } catch is CancellationError {
-                return
+                _ = await completeFirstReadyFrame(interval, epoch: epoch)
             } catch {
+                let result = PerformanceResult.forFailure(error)
+                performanceSignposts.end(interval, result: result, metrics: .none)
+                if result == .cancelled { return }
                 _ = openPresentation.fail(
                     sessionID: sessionID,
                     epoch: epoch,
@@ -389,14 +411,16 @@ struct ChatView: View {
 
     #if HOSTED_TEST
     @MainActor
-    private func beginHostedPresentation(probe: ChatHostedProbe) {
+    private func beginHostedPresentation(probe: ChatHostedProbe) async {
         scrollCoordinator.resetForPresentation()
         let epoch = openPresentation.begin()
+        let interval = performanceSignposts.begin(.firstReadyFrame)
         transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
         transcriptGeometry = .zero
         visibleTranscriptRowIDs = []
         guard selectedAuthoritativeSnapshot != nil,
               openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
+            performanceSignposts.end(interval, result: .failure, metrics: .none)
             _ = openPresentation.fail(
                 sessionID: sessionID,
                 epoch: epoch,
@@ -406,8 +430,31 @@ struct ChatView: View {
         }
         probe.markReady()
         positionLatestTail(epoch: epoch)
+        _ = await completeFirstReadyFrame(interval, epoch: epoch)
     }
     #endif
+
+    @MainActor
+    private func completeFirstReadyFrame(_ interval: PerformanceInterval, epoch: Int) async -> Bool {
+        do {
+            try await displayFrameScheduler.nextFrame()
+            guard !Task.isCancelled,
+                  openPresentation.epoch == epoch,
+                  openPresentation.phase == .ready else {
+                performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                return false
+            }
+            performanceSignposts.end(interval, result: .success, metrics: .none)
+            return true
+        } catch {
+            performanceSignposts.end(
+                interval,
+                result: PerformanceResult.forFailure(error),
+                metrics: .none
+            )
+            return false
+        }
+    }
 
     @MainActor
     private func positionLatestTail(epoch: Int) {
@@ -513,7 +560,10 @@ struct ChatView: View {
             let previousStart = snapshot.transcriptStart ?? 0
             let previousGeometry = transcriptGeometry
             let visibleIDs = Set(visibleTranscriptRowIDs)
-            let anchorID = ChatTranscriptPresentation.timeline(in: snapshot).ids.first(where: visibleIDs.contains)
+            let anchorID = ChatTranscriptPresentation.timeline(
+                in: snapshot,
+                performanceSignposts: performanceSignposts
+            ).ids.first(where: visibleIDs.contains)
             let wasScrolledAway = scrollCoordinator.userScrolledAway
             guard let presentationGeneration = modelPresentationGeneration else { return }
             scrollCoordinator.beginPrependingHistory()

@@ -42,6 +42,39 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("readiness is recorded only after a display-link frame")
+    func firstReadyFrame() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 104) { harness in
+                while harness.firstReadyEvents.count < 2 {
+                    try Task.checkCancellation()
+                    await Task.yield()
+                }
+                #expect(harness.firstReadyEvents == [
+                    .begin(.firstReadyFrame),
+                    .end(.firstReadyFrame, .success, .none),
+                ])
+            }
+        }
+    }
+
+    @Test("cancelled frame wait closes readiness exactly once")
+    func cancelledReadyFrame() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            let scheduler = DisplayFrameScheduler { throw CancellationError() }
+            try await withHarness(seed: 105, displayFrameScheduler: scheduler) { harness in
+                while harness.firstReadyEvents.count < 2 {
+                    try Task.checkCancellation()
+                    await Task.yield()
+                }
+                #expect(harness.firstReadyEvents == [
+                    .begin(.firstReadyFrame),
+                    .end(.firstReadyFrame, .cancelled, .none),
+                ])
+            }
+        }
+    }
+
     @Test("geometry observations are coalesced to one sample per presented frame")
     func oneSamplePerPresentedFrame() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -66,9 +99,13 @@ struct ChatViewScrollHarnessTests {
 
     private func withHarness(
         seed: Int,
+        displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         operation: @escaping @MainActor @Sendable (ChatViewScrollHarness) async throws -> Void
     ) async throws {
-        let harness = try ChatViewScrollHarness(seed: seed)
+        let harness = try ChatViewScrollHarness(
+            seed: seed,
+            displayFrameScheduler: displayFrameScheduler
+        )
         do {
             try await operation(harness)
         } catch {
@@ -86,6 +123,7 @@ private final class ChatViewScrollHarness {
     let firstTranscriptID: String
     let lastTranscriptID: String
     let recorder: PresentedFrameRecorder
+    let signposts: RecordingPerformanceSignposts
 
     private let suiteName: String
     private let cacheRoot: URL
@@ -93,11 +131,13 @@ private final class ChatViewScrollHarness {
     private let window: UIWindow
     private let hostingController: UIHostingController<AnyView>
 
-    init(seed: Int) throws {
+    init(seed: Int, displayFrameScheduler: DisplayFrameScheduler) throws {
         snapshot = try SessionScenarioBuilder(seed: seed).openingTail(targetEncodedBytes: 10_000)
         transcriptIDs = Set(snapshot.transcript.map(\.id))
         firstTranscriptID = try Self.require(snapshot.transcript.first?.id)
         lastTranscriptID = try Self.require(snapshot.transcript.last?.id)
+        let signposts = RecordingPerformanceSignposts()
+        self.signposts = signposts
 
         suiteName = "ChatViewScrollHarnessTests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)!
@@ -120,7 +160,12 @@ private final class ChatViewScrollHarness {
         let sessionID = snapshot.sessionId
         let root = AnyView(
             NavigationStack {
-                ChatView(sessionID: sessionID, hostedProbe: probe)
+                ChatView(
+                    sessionID: sessionID,
+                    hostedProbe: probe,
+                    displayFrameScheduler: displayFrameScheduler,
+                    performanceSignposts: signposts
+                )
             }
             .environment(model)
         )
@@ -138,6 +183,15 @@ private final class ChatViewScrollHarness {
 
         recorder = PresentedFrameRecorder(probe: probe)
         recorder.start()
+    }
+
+    var firstReadyEvents: [RecordingPerformanceSignposts.Event] {
+        signposts.events().filter {
+            switch $0 {
+            case .begin(.firstReadyFrame), .end(.firstReadyFrame, _, _): true
+            default: false
+            }
+        }
     }
 
     func containsNativeTranscriptScrollView(matching geometry: ChatTranscriptGeometry) -> Bool {

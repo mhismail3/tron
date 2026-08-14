@@ -128,9 +128,11 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
 inset, and native `UIScrollView` in a fixed hosted window. Test-only authority
 admission bypasses network I/O without bypassing `AppModel`'s authoritative read
 gate. Raw geometry, visible semantic IDs, and row frames are reduced to one latest
-sample on each `CADisplayLink` tick. The Phase 0 baseline requires a visible latest
-semantic row, not a final displacement tolerance; Phase 5 owns that budget and the
-current multiple-update-per-frame SwiftUI diagnostics.
+sample on each `CADisplayLink` tick. The production `DisplayFrameScheduler` is a
+one-shot, cancellation-aware display-link boundary; first-ready timing cannot end
+before it resumes. The Phase 0 baseline requires a visible latest semantic row, not
+a final displacement tolerance; Phase 5 owns that budget and the current
+multiple-update-per-frame SwiftUI diagnostics.
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \

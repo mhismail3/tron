@@ -711,6 +711,25 @@ struct ChatTranscriptPresentationTests {
         #expect(run.tools.first?.subtitle == "Interrupted")
     }
 
+    @Test("timeline projection closes one aggregate-only performance interval")
+    func projectionSignpost() throws {
+        let snapshot = try fixture(transcript: """
+        [{"id":"user","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"Hello"}]}]
+        """)
+        let signposts = RecordingPerformanceSignposts()
+
+        let timeline = ChatTranscriptPresentation.timeline(
+            in: snapshot,
+            performanceSignposts: signposts
+        )
+
+        #expect(timeline.items.count == 1)
+        #expect(signposts.events() == [
+            .begin(.chatProjection),
+            .end(.chatProjection, .success, PerformanceMetrics(itemCount: 1)),
+        ])
+    }
+
     private func toolPresentation(_ id: String) -> ChatToolPresentation {
         ChatToolPresentation(
             id: id,

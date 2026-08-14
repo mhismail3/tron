@@ -57,9 +57,7 @@ actor GatewayClient {
             performanceSignposts.end(interval, result: .success, metrics: .none)
             return info
         } catch {
-            let result: PerformanceResult = Task.isCancelled || error is CancellationError
-                ? .cancelled
-                : .failure
+            let result = PerformanceResult.forFailure(error)
             performanceSignposts.end(interval, result: result, metrics: .none)
             throw error
         }

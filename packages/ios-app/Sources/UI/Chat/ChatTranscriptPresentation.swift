@@ -422,7 +422,19 @@ enum ChatTranscriptPresentation {
     /// Builds one deterministic presentation timeline from canonical entries and
     /// ephemeral runtime state. Tool calls never live in a second tail array:
     /// canonical/streaming calls, progress, and results are joined by call ID.
-    static func timeline(in snapshot: SessionSnapshot) -> ChatTranscriptTimeline {
+    static func timeline(
+        in snapshot: SessionSnapshot,
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
+    ) -> ChatTranscriptTimeline {
+        let interval = performanceSignposts.begin(.chatProjection)
+        var projectedCount = 0
+        defer {
+            performanceSignposts.end(
+                interval,
+                result: .success,
+                metrics: PerformanceMetrics(itemCount: projectedCount)
+            )
+        }
         let results = toolResults(in: snapshot)
         let liveByID = Dictionary(
             snapshot.toolExecutions.map { ($0.toolCallId, $0) },
@@ -552,6 +564,7 @@ enum ChatTranscriptPresentation {
         }
         flushTools()
 
+        projectedCount = rendered.count
         return ChatTranscriptTimeline(items: rendered, toolResults: results)
     }
 
