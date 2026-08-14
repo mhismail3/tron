@@ -230,6 +230,13 @@ pre-commit HTTP result cannot persist or connect. This admission boundary is not
 a Gateway connection epoch: a connection already suspended inside
 `GatewayClient` still requires the Phase 2 generation hardening.
 
+The pairing QR controller shares the camera-authorization boundary and delegates
+AVFoundation setup plus serial start/stop to a QR capture-session provider. Its one
+permission task is cancelled on disappearance and rechecks cancellation before capture
+configuration, so a late grant cannot restart a dismissed scanner. The first admitted QR
+value stops capture and permanently closes that controller's callback gate. These seams
+make hardware-free boundary tests possible without creating another pairing owner.
+
 Provider credentials and the Mac wrapper credential are never decoded by iOS.
 Custom-model documents are validated through the pinned gateway runtime before
 the canonical document is replaced.
