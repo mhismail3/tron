@@ -129,8 +129,10 @@ values without changing those generations. `AppModelInvalidationTests` scripts e
 successful response and proves publication cannot schedule its own next load; event tests
 separately prove one generation advance per canonical invalidation. Settings requests use a
 typed target: global requests omit CWD, while project requests carry their exact project CWD.
-The focused suite deliberately completes global/project and two same-target reads out of order;
-installed values must remain under their request key and the newest same-target request must win.
+The focused suite deliberately completes global/project settings and global/session provider
+catalogs out of order, then reverses two same-target reads; installed values must remain under
+their request key and the newest same-target request must win. It also proves auth completion
+retains its catalog target after failed cancellation and unknown operations trigger no guessed reload.
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \

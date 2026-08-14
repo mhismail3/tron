@@ -115,7 +115,10 @@ currently selected session's project path, different targets cannot overwrite ea
 and a newer same-target read rejects an older completion. New-session defaults are loaded
 for the workspace being created rather than the previously selected session. Changing that
 workspace clears the prior trust/model projection and closes creation admission until matching
-settings and trust reads complete; stale workspace completions cannot reopen it.
+settings and trust reads complete; stale workspace completions cannot reopen it. Provider and
+model catalogs likewise use typed `.global` or `.session(id:)` targets and publish each fully
+paged provider/model pair atomically. Auth operations retain that target through completion or
+confirmed cancellation; unknown completions never guess from dashboard selection.
 Chat uses one presentation timeline rather than separate canonical, streaming,
 and live-tool tails. Tool calls, progress, and results join by `toolCallId`; the
 Gateway supplies a monotonic per-run ordinal for parallel calls, and the grouped

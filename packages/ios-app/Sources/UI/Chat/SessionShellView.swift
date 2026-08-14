@@ -457,7 +457,10 @@ private struct NewSessionSheet: View {
             }
             .sheet(isPresented: $showModels) {
                 NavigationStack {
-                    ModelPicker(selection: $selectedModel, models: model.models.filter(\.available))
+                    ModelPicker(
+                        selection: $selectedModel,
+                        models: model.providerCatalog(for: .global)?.models.filter(\.available) ?? []
+                    )
                         .tronTopBlurSurface()
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
@@ -503,7 +506,7 @@ private struct NewSessionSheet: View {
                         trustReady: trustReady
                       ) else { return }
                 selectedModel = model.configuredDefaultModel(for: settingsTarget)
-                    ?? model.preferredAvailableModel
+                    ?? model.preferredAvailableModel(for: .global)
             }
         }
         .interactiveDismissDisabled(creating)

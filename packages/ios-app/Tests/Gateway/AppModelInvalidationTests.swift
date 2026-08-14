@@ -37,6 +37,15 @@ struct AppModelInvalidationTests {
         }
     }
 
+    @Test("out-of-order provider catalogs respect target and request ownership")
+    nonisolated func providerCatalogResponsesRemainKeyed() async throws {
+        let scenario = Task { @MainActor in try await runProviderOrderingScenario() }
+        defer { scenario.cancel() }
+        try await withTestWatchdog {
+            try await valueOfOwnedTask(scenario)
+        }
+    }
+
     private func runPublicationScenario() async throws {
         try await withConnectedClient(exercisePublications)
     }
@@ -80,6 +89,117 @@ struct AppModelInvalidationTests {
             _ = await olderLoad.value
 
             #expect(model.settings(for: .global) == newerValue)
+        }
+    }
+
+    private func runProviderOrderingScenario() async throws {
+        try await withConnectedClient { client, socket in
+            let model = AppModel(client: client)
+            let session = ProviderCatalogTarget.session(id: "session-a")
+
+            let globalLoad = Task { await model.refreshProviders(target: .global) }
+            try await socket.waitUntilSent(count: 3)
+            let sessionLoad = Task { await model.refreshProviders(target: session) }
+            try await socket.waitUntilSent(count: 5)
+            for index in 1...2 {
+                let request = try await requestObject(at: index, on: socket)
+                #expect(request["params"]?.objectValue?["sessionId"] == nil)
+            }
+            for index in 3...4 {
+                let request = try await requestObject(at: index, on: socket)
+                #expect(request["params"]?.objectValue?["sessionId"] == .string("session-a"))
+            }
+            try await respondToCatalogRequests(at: 3...4, on: socket, marker: "session")
+            _ = await sessionLoad.value
+            try await respondToCatalogRequests(at: 1...2, on: socket, marker: "global")
+            _ = await globalLoad.value
+
+            #expect(model.providerCatalog(for: .global)?.providers.first?.id == "global")
+            #expect(model.providerCatalog(for: .global)?.models.first?.id == "global-model")
+            #expect(model.providerCatalog(for: session)?.providers.first?.id == "session")
+            #expect(model.providerCatalog(for: session)?.models.first?.id == "session-model")
+
+            let olderLoad = Task { await model.refreshProviders(target: .global) }
+            try await socket.waitUntilSent(count: 7)
+            let newerLoad = Task { await model.refreshProviders(target: .global) }
+            try await socket.waitUntilSent(count: 9)
+            try await respondToCatalogRequests(at: 7...8, on: socket, marker: "newer")
+            _ = await newerLoad.value
+            try await respondToCatalogRequests(at: 5...6, on: socket, marker: "older")
+            _ = await olderLoad.value
+
+            #expect(model.providerCatalog(for: .global)?.providers.first?.id == "newer")
+            #expect(model.providerCatalog(for: .global)?.models.first?.id == "newer-model")
+
+            let auth = Task {
+                try await model.beginAuth(providerID: "session", authType: "api_key", target: session)
+            }
+            try await socket.waitUntilSent(count: 10)
+            try await respond(
+                toFrameAt: 9,
+                on: socket,
+                result: .object(["operationId": .string("auth-operation")])
+            )
+            try await auth.value
+
+            let completion = Task {
+                await model.handle(GatewayEvent(
+                    type: "event",
+                    topic: "auth.completed",
+                    sessionId: nil,
+                    payload: .object(["operationId": .string("auth-operation"), "success": .bool(true)])
+                ))
+            }
+            try await socket.waitUntilSent(count: 12)
+            for index in 10...11 {
+                let request = try await requestObject(at: index, on: socket)
+                #expect(request["params"]?.objectValue?["sessionId"] == .string("session-a"))
+            }
+            try await respondToCatalogRequests(at: 10...11, on: socket, marker: "authenticated")
+            await completion.value
+            #expect(model.providerCatalog(for: session)?.providers.first?.id == "authenticated")
+
+            await model.handle(GatewayEvent(
+                type: "event",
+                topic: "auth.completed",
+                sessionId: nil,
+                payload: .object(["operationId": .string("unknown-operation"), "success": .bool(true)])
+            ))
+            let sentCountAfterUnknownCompletion = await socket.sentFrames().count
+            #expect(sentCountAfterUnknownCompletion == 12)
+
+            let secondAuth = Task {
+                try await model.beginAuth(providerID: "session", authType: "api_key", target: session)
+            }
+            try await socket.waitUntilSent(count: 13)
+            try await respond(
+                toFrameAt: 12,
+                on: socket,
+                result: .object(["operationId": .string("failed-cancel-operation")])
+            )
+            try await secondAuth.value
+
+            let cancellation = Task { await model.cancelAuth(operationID: "failed-cancel-operation") }
+            try await socket.waitUntilSent(count: 14)
+            try await respondFailure(toFrameAt: 13, on: socket)
+            await cancellation.value
+
+            let completionAfterFailedCancel = Task {
+                await model.handle(GatewayEvent(
+                    type: "event",
+                    topic: "auth.completed",
+                    sessionId: nil,
+                    payload: .object(["operationId": .string("failed-cancel-operation"), "success": .bool(true)])
+                ))
+            }
+            try await socket.waitUntilSent(count: 16)
+            for index in 14...15 {
+                let request = try await requestObject(at: index, on: socket)
+                #expect(request["params"]?.objectValue?["sessionId"] == .string("session-a"))
+            }
+            try await respondToCatalogRequests(at: 14...15, on: socket, marker: "after-failed-cancel")
+            await completionAfterFailedCancel.value
+            #expect(model.providerCatalog(for: session)?.providers.first?.id == "after-failed-cancel")
         }
     }
 
@@ -137,7 +257,7 @@ struct AppModelInvalidationTests {
         try await respond(toFrameAt: 3, on: socket, result: .object(["providers": .object([:])]))
         await customModels.value
 
-        let providers = Task { await model.refreshProviders(useSelectedProject: false) }
+        let providers = Task { await model.refreshProviders(target: .global) }
         try await socket.waitUntilSent(count: 6)
         for index in 4...5 {
             let request = try await requestObject(at: index, on: socket)
@@ -158,7 +278,7 @@ struct AppModelInvalidationTests {
                 Issue.record("Unexpected catalog request: \(String(describing: request["method"]))")
             }
         }
-        await providers.value
+        _ = await providers.value
 
         #expect(model.settingsInvalidationGeneration == 11)
         #expect(model.packageInvalidationGeneration == 12)
@@ -167,8 +287,8 @@ struct AppModelInvalidationTests {
         #expect(model.settings(for: .global) == .object(["effective": .object([:])]))
         #expect(model.packageState?.packages.isEmpty == true)
         #expect(model.customModels == .object(["providers": .object([:])]))
-        #expect(model.providers.isEmpty)
-        #expect(model.models.isEmpty)
+        #expect(model.providerCatalog(for: .global)?.providers.isEmpty == true)
+        #expect(model.providerCatalog(for: .global)?.models.isEmpty == true)
         #expect(model.lastError == nil)
     }
 
@@ -193,6 +313,70 @@ struct AppModelInvalidationTests {
     ) async throws -> [String: JSONValue] {
         let frames = await socket.sentFrames()
         return try JSONDecoder.gateway.decode(JSONValue.self, from: frames[index]).objectValue ?? [:]
+    }
+
+    private func respondToCatalogRequests(
+        at indices: ClosedRange<Int>,
+        on socket: ScriptedGatewaySocket,
+        marker: String
+    ) async throws {
+        for index in indices {
+            let request = try await requestObject(at: index, on: socket)
+            switch request["method"]?.stringValue {
+            case "provider.list":
+                try await respond(
+                    toFrameAt: index,
+                    on: socket,
+                    result: .object(["providers": .array([.object([
+                        "id": .string(marker),
+                        "name": .string(marker),
+                        "configured": .bool(false),
+                        "authSource": .null,
+                        "credentialType": .null,
+                        "authMethods": .array([]),
+                        "modelCount": .number(1),
+                    ])])])
+                )
+            case "model.list":
+                try await respond(
+                    toFrameAt: index,
+                    on: socket,
+                    result: .object([
+                        "models": .array([.object([
+                            "provider": .string(marker),
+                            "id": .string("\(marker)-model"),
+                            "name": .string(marker),
+                            "reasoning": .bool(false),
+                            "input": .array([.string("text")]),
+                            "contextWindow": .number(4_096),
+                            "maxTokens": .number(1_024),
+                            "available": .bool(true),
+                        ])]),
+                        "nextCursor": .null,
+                    ])
+                )
+            default:
+                Issue.record("Unexpected catalog request: \(String(describing: request["method"]))")
+            }
+        }
+    }
+
+    private func respondFailure(
+        toFrameAt index: Int,
+        on socket: ScriptedGatewaySocket
+    ) async throws {
+        let request = try await requestObject(at: index, on: socket)
+        let id = try #require(request["id"]?.stringValue)
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"),
+            "id": .string(id),
+            "ok": .bool(false),
+            "error": .object([
+                "code": .string("cancel_failed"),
+                "message": .string("Cancellation failed."),
+                "retryable": .bool(true),
+            ]),
+        ])))
     }
 
     private func respond(

@@ -30,6 +30,14 @@ struct OnboardingView: View {
     @State private var host = ""
     @State private var port = "9847"
     @State private var code = ""
+
+    private var providers: [ProviderSummary] {
+        model.providerCatalog(for: .global)?.providers ?? []
+    }
+
+    private var models: [ModelSummary] {
+        model.providerCatalog(for: .global)?.models ?? []
+    }
     @State private var pairing = false
     @State private var selectedWorkspace = ""
     @State private var showWorkspace = false
@@ -165,7 +173,7 @@ struct OnboardingView: View {
             if value == .model, selectedModel == nil {
                 Task {
                     await model.refreshSettings(target: .global)
-                    selectedModel = model.configuredDefaultModel(for: .global) ?? model.preferredAvailableModel
+                    selectedModel = model.configuredDefaultModel(for: .global) ?? model.preferredAvailableModel(for: .global)
                 }
             }
         }
@@ -287,21 +295,21 @@ struct OnboardingView: View {
 
     private func preferredProviderPage(ids: Set<String>, name: String) -> some View {
         OnboardingPage(subtitle: "Add \(name) credentials now, or skip this and add them later in Settings.") {
-            if let provider = model.providers.first(where: { ids.contains($0.id) }) {
+            if let provider = providers.first(where: { ids.contains($0.id) }) {
                 ProviderSetupRow(provider: provider)
             } else {
                 OnboardingCard {
                     OnboardingInfoRow(icon: "checkmark.circle", title: "No setup required", subtitle: "This provider is not enabled by the current Tron runtime.")
                 }
             }
-            Button("Refresh Providers", systemImage: "arrow.clockwise") { Task { await model.refreshProviders() } }
+            Button("Refresh Providers", systemImage: "arrow.clockwise") { Task { await model.refreshProviders(target: .global) } }
                 .buttonStyle(TronActionButtonStyle())
         }
     }
 
     private var remainingProvidersPage: some View {
         OnboardingPage(subtitle: "Add optional model providers, or leave them for Settings.") {
-            let remaining = model.providers.filter { !["anthropic", "openai-codex", "openai"].contains($0.id) }
+            let remaining = providers.filter { !["anthropic", "openai-codex", "openai"].contains($0.id) }
             if remaining.isEmpty {
                 OnboardingCard {
                     OnboardingInfoRow(icon: "checkmark.circle", title: "No additional providers", subtitle: "You can install provider extensions later in Settings.")
@@ -314,7 +322,7 @@ struct OnboardingView: View {
 
     private var modelPage: some View {
         OnboardingPage(subtitle: "Choose the provider-qualified model Tron should start with.") {
-            ModelPicker(selection: $selectedModel, models: model.models.filter(\.available)).frame(minHeight: 260)
+            ModelPicker(selection: $selectedModel, models: models.filter(\.available)).frame(minHeight: 260)
             if let error = model.onboardingError {
                 Text(error).font(TronTypography.bodySM).foregroundStyle(Color.tronError).fixedSize(horizontal: false, vertical: true)
             }

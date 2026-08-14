@@ -29,7 +29,14 @@ struct SettingsView: View {
                                 ProvidersSettingsView(sessionID: scope == .project ? model.selectedSessionID : nil)
                             }
                             TronSettingsDivider()
-                            settingsLink("Models and Defaults", icon: "cpu") { AgentDefaultsSettingsView(allowsProjectScope: scope == .project) }
+                            settingsLink("Models and Defaults", icon: "cpu") {
+                                AgentDefaultsSettingsView(
+                                    allowsProjectScope: scope == .project,
+                                    providerTarget: scope == .project
+                                        ? model.selectedSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
+                                        : .global
+                                )
+                            }
                             TronSettingsDivider()
                             settingsLink("Runtime Behavior", icon: "gearshape.2") { RuntimeBehaviorSettingsView(allowsProjectScope: scope == .project) }
                             TronSettingsDivider()
@@ -468,10 +475,14 @@ private struct ProvidersSettingsView: View {
     let sessionID: String?
     @State private var reloading = false
 
+    private var target: ProviderCatalogTarget {
+        sessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 8) {
-                ForEach(model.providers) { provider in
+                ForEach(model.providerCatalog(for: target)?.providers ?? []) { provider in
                     ProviderSetupRow(provider: provider, sessionID: sessionID)
                 }
             }
@@ -488,8 +499,8 @@ private struct ProvidersSettingsView: View {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)
             }
         }
-        .task(id: model.providerInvalidationGeneration) {
-            await model.refreshProviders(sessionID: sessionID, useSelectedProject: false)
+        .task(id: ProviderCatalogLoadID(target: target, invalidationGeneration: model.providerInvalidationGeneration)) {
+            await model.refreshProviders(target: target)
         }
     }
 
@@ -498,7 +509,7 @@ private struct ProvidersSettingsView: View {
         reloading = true
         Task {
             defer { reloading = false }
-            await model.refreshProviders(sessionID: sessionID, useSelectedProject: false)
+            await model.refreshProviders(target: target)
         }
     }
 }
@@ -506,6 +517,7 @@ private struct ProvidersSettingsView: View {
 private struct AgentDefaultsSettingsView: View {
     @Environment(AppModel.self) private var model
     let allowsProjectScope: Bool
+    let providerTarget: ProviderCatalogTarget
     @State private var selectedModel: ModelRef?
     @State private var thinking = "medium"
     @State private var compaction = true
@@ -534,7 +546,10 @@ private struct AgentDefaultsSettingsView: View {
                 TronSettingsGroup("Default Model", accent: .tronPurple) {
                     VStack(spacing: 0) {
                         TronProgressiveSheetLink(accessibilityLabel: "Default Model") {
-                            ModelPicker(selection: $selectedModel, models: model.models.filter(\.available))
+                            ModelPicker(
+                                selection: $selectedModel,
+                                models: model.providerCatalog(for: providerTarget)?.models.filter(\.available) ?? []
+                            )
                                 .tronNavigationTitle("Default Model", accent: .tronPurple)
                         } label: {
                             TronValueRow(icon: "cpu", title: "Model", detail: selectedModel.map { "\($0.provider) / \($0.id)" } ?? "Choose model", accent: .tronPurple)
@@ -606,7 +621,7 @@ private struct AgentDefaultsSettingsView: View {
            let provider = object["provider"]?.stringValue, let id = object["id"]?.stringValue {
             selectedModel = ModelRef(provider: provider, id: id)
         } else {
-            selectedModel = model.preferredAvailableModel
+            selectedModel = model.preferredAvailableModel(for: providerTarget)
         }
         thinking = value["defaultThinkingLevel"]?.stringValue ?? "medium"
         compaction = value["compaction"]?.objectValue?["enabled"]?.boolValue ?? true

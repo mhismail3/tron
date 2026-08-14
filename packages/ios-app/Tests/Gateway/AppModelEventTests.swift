@@ -318,10 +318,10 @@ struct AppModelEventTests {
     @Test("configured default model is preferred over catalog order")
     func configuredDefaultModel() async {
         let model = AppModel()
-        model.models = [
+        model.providerCatalogByTarget[.global] = ProviderCatalog(providers: [], models: [
             ModelSummary(provider: "openai-codex", id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", reasoning: true, input: ["text"], contextWindow: 1, maxTokens: 1, available: true),
             ModelSummary(provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true, input: ["text"], contextWindow: 1, maxTokens: 1, available: true),
-        ]
+        ])
         model.settingsByTarget[.global] = .object([
             "effective": .object([
                 "defaultModel": .object(["provider": .string("openai-codex"), "id": .string("gpt-5.6-sol")]),
@@ -329,7 +329,7 @@ struct AppModelEventTests {
         ])
 
         #expect(model.configuredDefaultModel(for: .global)?.id == "gpt-5.6-sol")
-        #expect(model.preferredAvailableModel?.id == "gpt-5.6-sol")
+        #expect(model.preferredAvailableModel(for: .global)?.id == "gpt-5.6-sol")
     }
 
     @Test("global configuration invalidations are accepted without session sequencing")

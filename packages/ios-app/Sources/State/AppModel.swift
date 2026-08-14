@@ -122,8 +122,7 @@ final class AppModel {
     var packageInvalidationGeneration = 0
     var customModelInvalidationGeneration = 0
     var trustRevision = 0
-    var providers: [ProviderSummary] = []
-    var models: [ModelSummary] = []
+    var providerCatalogByTarget: [ProviderCatalogTarget: ProviderCatalog] = [:]
     var pairedDevices: [PairedDevice] = []
     var legacyImportAvailable = false
     var legacyImportedCount = 0
@@ -166,6 +165,8 @@ final class AppModel {
     private var reconnectTask: Task<Void, Never>?
     private var pairingAttempt: PairingAttempt?
     private var settingsLoadGenerationByTarget: [SettingsTarget: Int] = [:]
+    private var providerLoadGenerationByTarget: [ProviderCatalogTarget: Int] = [:]
+    private var providerCatalogTargetByAuthOperation: [String: ProviderCatalogTarget] = [:]
     private var foregroundReconciliationTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var subscribedSessionID: String?
@@ -264,8 +265,12 @@ final class AppModel {
         return ModelRef(provider: provider, id: id)
     }
 
-    var preferredAvailableModel: ModelRef? {
-        let available = models.filter(\.available)
+    func providerCatalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
+        providerCatalogByTarget[target]
+    }
+
+    func preferredAvailableModel(for target: ProviderCatalogTarget) -> ModelRef? {
+        let available = providerCatalog(for: target)?.models.filter(\.available) ?? []
         return available.first(where: { $0.provider == "openai-codex" && $0.id == "gpt-5.6-sol" })?.ref
             ?? available.first?.ref
     }
@@ -469,7 +474,8 @@ final class AppModel {
         let effectiveSessionID = projectSessionID ?? (useSelectedProject ? selectedSessionID : nil)
         let effectiveCWD = projectCWD ?? (useSelectedProject ? selectedSnapshot?.cwd : nil)
         let settingsTarget = effectiveCWD.map(SettingsTarget.project(cwd:)) ?? .global
-        async let providerLoad: Void = refreshProviders(sessionID: effectiveSessionID, useSelectedProject: false)
+        let providerTarget = effectiveSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
+        async let providerLoad: Bool = refreshProviders(target: providerTarget)
         async let settingLoad: Bool = refreshSettings(target: settingsTarget)
         async let deviceLoad: Void = refreshDevices()
         _ = await (providerLoad, settingLoad, deviceLoad)
@@ -645,7 +651,7 @@ final class AppModel {
         mountedPresentationGenerationBySession[id] = generation
         Task { [weak self] in
             guard let self else { return }
-            async let providerRefresh: Void = self.refreshProviders(sessionID: id, useSelectedProject: false)
+            async let providerRefresh: Bool = self.refreshProviders(target: .session(id: id))
             async let commandRefresh: Void = self.loadCommands(for: id)
             _ = await (providerRefresh, commandRefresh)
         }
@@ -670,7 +676,7 @@ final class AppModel {
             }
         }
         authoritativeSessionIDs.insert(id)
-        async let providerRefresh: Void = refreshProviders()
+        async let providerRefresh: Bool = refreshProviders(target: .session(id: id))
         async let commandRefresh: Void = loadCommands()
         _ = await (providerRefresh, commandRefresh)
     }
@@ -1050,23 +1056,25 @@ final class AppModel {
 
     func removeAttachment(_ id: String) { pendingAttachments.removeAll { $0.id == id } }
 
-    func refreshProviders(sessionID: String? = nil, useSelectedProject: Bool = true) async {
-        let effectiveSessionID = sessionID ?? (useSelectedProject ? selectedSessionID : nil)
+    @discardableResult
+    func refreshProviders(target: ProviderCatalogTarget) async -> Bool {
         struct ProviderParams: Codable { let sessionId: String? }
         struct ModelParams: Codable { let sessionId: String?; let cursor: String?; let limit: Int }
         struct ProviderResponse: Decodable { let providers: [ProviderSummary] }
         struct ModelResponse: Decodable { let models: [ModelSummary]; let nextCursor: String? }
+        let generation = (providerLoadGenerationByTarget[target] ?? 0) + 1
+        providerLoadGenerationByTarget[target] = generation
         do {
-            async let providerRequest: ProviderResponse = client.request("provider.list", ProviderParams(sessionId: effectiveSessionID))
-            var catalog: [ModelSummary] = []
+            async let providerRequest: ProviderResponse = client.request("provider.list", ProviderParams(sessionId: target.sessionID))
+            var models: [ModelSummary] = []
             var cursor: String?
             var seenCursors = Set<String>()
             repeat {
                 let response: ModelResponse = try await client.request(
                     "model.list",
-                    ModelParams(sessionId: effectiveSessionID, cursor: cursor, limit: 500)
+                    ModelParams(sessionId: target.sessionID, cursor: cursor, limit: 500)
                 )
-                catalog.append(contentsOf: response.models)
+                models.append(contentsOf: response.models)
                 cursor = response.nextCursor
                 if let cursor, !seenCursors.insert(cursor).inserted {
                     throw GatewayFailure(
@@ -1077,15 +1085,22 @@ final class AppModel {
                     )
                 }
             } while cursor != nil
-            providers = try await providerRequest.providers
-            models = catalog
-        } catch { surface(error) }
+            let providers = try await providerRequest.providers
+            guard providerLoadGenerationByTarget[target] == generation else { return false }
+            providerCatalogByTarget[target] = ProviderCatalog(providers: providers, models: models)
+            return true
+        } catch {
+            guard providerLoadGenerationByTarget[target] == generation else { return false }
+            surface(error)
+            return false
+        }
     }
 
-    func beginAuth(providerID: String, authType: String, sessionID: String? = nil) async throws {
+    func beginAuth(providerID: String, authType: String, target: ProviderCatalogTarget) async throws {
         struct Params: Codable { let providerId, authType: String; let sessionId: String? }
         struct Response: Decodable { let operationId: String }
-        let response: Response = try await client.request("auth.begin", Params(providerId: providerID, authType: authType, sessionId: sessionID), timeout: .seconds(15))
+        let response: Response = try await client.request("auth.begin", Params(providerId: providerID, authType: authType, sessionId: target.sessionID), timeout: .seconds(15))
+        providerCatalogTargetByAuthOperation[response.operationId] = target
         authEvent = .init(
             operationId: response.operationId,
             kind: .progress,
@@ -1116,30 +1131,33 @@ final class AppModel {
         guard let id = operationID ?? authPrompt?.operationId ?? authEvent?.operationId else { return }
         struct Params: Codable { let operationId: String }
         struct Response: Decodable { let cancelled: Bool }
-        let _: Response? = try? await client.request("auth.cancel", Params(operationId: id))
+        let response: Response? = try? await client.request("auth.cancel", Params(operationId: id))
         if authPrompt?.operationId == id { authPrompt = nil }
         if authEvent?.operationId == id { authEvent = nil }
+        if response?.cancelled == true {
+            providerCatalogTargetByAuthOperation[id] = nil
+        }
     }
 
-    func refreshModelCatalog(force: Bool = true) async throws {
+    func refreshModelCatalog(target: ProviderCatalogTarget, force: Bool = true) async throws {
         struct Params: Codable { let force: Bool; let sessionId: String?; let commandId: String }
         let commandID = uuidSource.next().uuidString
-        let params = Params(force: force, sessionId: selectedSessionID, commandId: commandID)
+        let params = Params(force: force, sessionId: target.sessionID, commandId: commandID)
         _ = try await confirmedMutationValue(method: "models.refresh", commandId: commandID) {
             try await client.requestValue("models.refresh", params, timeout: .seconds(75))
         }
-        await refreshProviders()
+        await refreshProviders(target: target)
     }
 
-    func logout(providerID: String, sessionID: String? = nil) async throws {
+    func logout(providerID: String, target: ProviderCatalogTarget) async throws {
         struct Params: Codable { let providerId, commandId: String; let sessionId: String? }
         struct Response: Codable { let loggedOut: Bool }
         let commandID = uuidSource.next().uuidString
-        let params = Params(providerId: providerID, commandId: commandID, sessionId: sessionID)
+        let params = Params(providerId: providerID, commandId: commandID, sessionId: target.sessionID)
         let _: Response = try await confirmedMutation(method: "auth.logout", commandId: commandID) {
             try await client.request("auth.logout", params, timeout: .seconds(60))
         }
-        await refreshProviders(sessionID: sessionID, useSelectedProject: false)
+        await refreshProviders(target: target)
     }
 
     @discardableResult
@@ -1579,7 +1597,10 @@ final class AppModel {
         case "auth.completed":
             authPrompt = nil
             authEvent = nil
-            await refreshProviders()
+            let operationID = event.payload.objectValue?["operationId"]?.stringValue
+            if let target = operationID.flatMap({ providerCatalogTargetByAuthOperation.removeValue(forKey: $0) }) {
+                await refreshProviders(target: target)
+            }
             if event.payload.objectValue?["success"]?.boolValue == false {
                 lastError = event.payload.objectValue?["error"]?.stringValue
             }

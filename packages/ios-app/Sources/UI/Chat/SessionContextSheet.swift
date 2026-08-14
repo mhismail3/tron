@@ -199,7 +199,7 @@ struct SessionContextSheet: View {
         TronSettingsGroup("Configuration", accent: .tronPurple) {
             VStack(spacing: 0) {
                 Menu {
-                    ForEach(model.models.filter(\.available)) { candidate in
+                    ForEach(model.providerCatalog(for: .session(id: sessionID))?.models.filter(\.available) ?? []) { candidate in
                         Button {
                             Task { try? await model.setModel(candidate.ref) }
                         } label: {

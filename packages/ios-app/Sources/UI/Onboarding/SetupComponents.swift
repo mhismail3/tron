@@ -5,6 +5,10 @@ struct ProviderSetupRow: View {
     let provider: ProviderSummary
     var sessionID: String? = nil
 
+    private var providerTarget: ProviderCatalogTarget {
+        sessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: provider.configured ? "checkmark.seal.fill" : "key")
@@ -33,7 +37,7 @@ struct ProviderSetupRow: View {
                     Menu {
                         Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                             Task {
-                                do { try await model.logout(providerID: provider.id, sessionID: sessionID) }
+                                do { try await model.logout(providerID: provider.id, target: providerTarget) }
                                 catch { model.lastError = error.localizedDescription }
                             }
                         }
@@ -52,7 +56,7 @@ struct ProviderSetupRow: View {
                     ForEach(provider.authMethods, id: \.self) { method in
                         Button(method == "oauth" ? "Sign in" : "Enter API key") {
                             Task {
-                                do { try await model.beginAuth(providerID: provider.id, authType: method, sessionID: sessionID) }
+                                do { try await model.beginAuth(providerID: provider.id, authType: method, target: providerTarget) }
                                 catch { model.lastError = error.localizedDescription }
                             }
                         }
