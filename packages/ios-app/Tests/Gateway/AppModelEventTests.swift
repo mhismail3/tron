@@ -182,6 +182,17 @@ struct AppModelEventTests {
         )
         #expect(reconnected.transcript.count >= authoritative.transcript.count)
         #expect(reconnected.eventSequence == authoritative.eventSequence)
+
+        var stale = authoritative
+        stale.eventSequence = expanded.eventSequence - 1
+        stale.runtimeGeneration = expanded.runtimeGeneration
+        let rejectedStale = AppModel.installingSnapshot(
+            current: expanded,
+            authoritative: stale,
+            mode: .reconnect
+        )
+        #expect(rejectedStale.eventSequence == expanded.eventSequence)
+        #expect(rejectedStale.transcript.map(\.id) == expanded.transcript.map(\.id))
     }
 
     @Test("live snapshots preserve explicitly loaded history while advancing the authoritative tail")

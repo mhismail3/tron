@@ -36,11 +36,6 @@ struct AppModelPerformanceSignpostTests {
                     firstFrameIndex: 6,
                     snapshot: snapshot
                 )
-                try await respondToSessionSynchronization(
-                    socket: harness.socket,
-                    firstFrameIndex: 8,
-                    snapshot: snapshot
-                )
             }
             defer { resyncResponder.cancel() }
             await harness.model.handle(GatewayEvent(
@@ -52,10 +47,138 @@ struct AppModelPerformanceSignpostTests {
             try await valueOfOwnedTask(resyncResponder)
             #expect(harness.signposts.events() == [
                 .begin(.sessionResync),
-                .begin(.sessionResync),
                 .end(.sessionResync, .success, .none),
-                .end(.sessionResync, .discarded, .none),
             ])
+            await harness.client.close()
+        }
+    }
+
+    @Test("session open remains provisional until sync acknowledgement")
+    func provisionalOpenIsNotPublished() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let snapshot = try SessionScenarioBuilder(seed: 42).openingTail(targetEncodedBytes: 8_192)
+            let opening = Task { try await harness.model.openSessionPresentation(snapshot.sessionId) }
+            defer { opening.cancel() }
+
+            let open = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(successResponse(
+                id: open.id,
+                result: .object([
+                    "session": try JSONValue.encode(snapshot),
+                    "syncToken": .string("sync-token"),
+                    "subscriptionToken": .string("subscription-token"),
+                ])
+            ))
+            let sync = try await request(in: harness.socket, frameIndex: 2)
+            #expect(sync.method == "session.sync")
+            #expect(await MainActor.run { harness.model.snapshots[snapshot.sessionId] } == nil)
+            #expect(await MainActor.run {
+                harness.model.authoritativeSnapshot(for: snapshot.sessionId)
+            } == nil)
+
+            await harness.socket.enqueue(successResponse(
+                id: sync.id,
+                result: .object(["synchronized": .bool(true)])
+            ))
+            _ = try await valueOfOwnedTask(opening)
+            #expect(await MainActor.run {
+                harness.model.authoritativeSnapshot(for: snapshot.sessionId)?.sessionId
+            } == snapshot.sessionId)
+            let refreshResponder = Task {
+                try await respondToPresentationRefreshes(socket: harness.socket, firstFrameIndex: 3)
+            }
+            defer { refreshResponder.cancel() }
+            try await valueOfOwnedTask(refreshResponder)
+            await harness.client.close()
+        }
+    }
+
+    @Test("route change before sync acknowledgement discards and closes the provisional token")
+    func staleProvisionalOpenIsClosed() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let snapshot = try SessionScenarioBuilder(seed: 44).openingTail(targetEncodedBytes: 8_192)
+            let opening = Task { try await harness.model.openSessionPresentation(snapshot.sessionId) }
+            defer { opening.cancel() }
+
+            let open = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(successResponse(
+                id: open.id,
+                result: .object([
+                    "session": try JSONValue.encode(snapshot),
+                    "syncToken": .string("sync-token"),
+                    "subscriptionToken": .string("provisional-token"),
+                ])
+            ))
+            let sync = try await request(in: harness.socket, frameIndex: 2)
+            await MainActor.run { harness.model.selectedSessionID = "replacement-route" }
+            await harness.socket.enqueue(successResponse(
+                id: sync.id,
+                result: .object(["synchronized": .bool(true)])
+            ))
+            let close = try await request(in: harness.socket, frameIndex: 3)
+            #expect(close.method == "session.close")
+            #expect(close.params?.objectValue?["subscriptionToken"] == .string("provisional-token"))
+            await harness.socket.enqueue(successResponse(
+                id: close.id,
+                result: .object(["closed": .bool(true)])
+            ))
+
+            do {
+                _ = try await valueOfOwnedTask(opening)
+                Issue.record("stale route unexpectedly installed its provisional open")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "sync_failed")
+            }
+            #expect(await MainActor.run { harness.model.snapshots[snapshot.sessionId] } == nil)
+            await harness.client.close()
+        }
+    }
+
+    @Test("failed sync acknowledgement cannot replace an existing snapshot")
+    func failedAcknowledgementPreservesSnapshot() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let cached = try SessionScenarioBuilder(seed: 45).openingTail(targetEncodedBytes: 8_192)
+            var proposed = cached
+            proposed.eventSequence += 10
+            await MainActor.run { harness.model.snapshots[cached.sessionId] = cached }
+            let opening = Task { try await harness.model.openSessionPresentation(cached.sessionId) }
+            defer { opening.cancel() }
+
+            let open = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(successResponse(
+                id: open.id,
+                result: .object([
+                    "session": try JSONValue.encode(proposed),
+                    "syncToken": .string("sync-token"),
+                    "subscriptionToken": .string("provisional-token"),
+                ])
+            ))
+            let sync = try await request(in: harness.socket, frameIndex: 2)
+            await harness.socket.enqueue(errorResponse(
+                id: sync.id,
+                code: "sync_failed",
+                retryable: true
+            ))
+            let close = try await request(in: harness.socket, frameIndex: 3)
+            #expect(close.method == "session.close")
+            await harness.socket.enqueue(successResponse(
+                id: close.id,
+                result: .object(["closed": .bool(true)])
+            ))
+
+            do {
+                _ = try await valueOfOwnedTask(opening)
+                Issue.record("failed acknowledgement unexpectedly installed")
+            } catch {}
+            #expect(await MainActor.run {
+                harness.model.snapshots[cached.sessionId]?.eventSequence
+            } == cached.eventSequence)
+            #expect(await MainActor.run {
+                harness.model.authoritativeSnapshot(for: cached.sessionId)
+            } == nil)
             await harness.client.close()
         }
     }
@@ -77,6 +200,24 @@ struct AppModelPerformanceSignpostTests {
 
             _ = try await harness.model.openSessionPresentation(snapshot.sessionId)
             try await valueOfOwnedTask(openingResponder)
+            let expandedCount = await MainActor.run { () -> Int in
+                var expanded = snapshot
+                if let first = snapshot.transcript.first {
+                    expanded.transcript.insert(.label(LabelTranscriptItem(
+                        id: "loaded-prefix",
+                        parentId: nil,
+                        timestamp: first.timestamp,
+                        kind: .label,
+                        targetId: first.id,
+                        label: "Loaded"
+                    )), at: 0)
+                    expanded.transcriptStart = max(0, (snapshot.transcriptStart ?? 1) - 1)
+                    expanded.transcriptTotal = max(snapshot.transcriptTotal ?? 0, expanded.transcript.count)
+                }
+                harness.model.snapshots[snapshot.sessionId] = expanded
+                harness.model.selectedSessionID = "divergent-dashboard-selection"
+                return expanded.transcript.count
+            }
             let reconnectResponder = Task {
                 try await respondToSessionSynchronization(
                     socket: harness.socket,
@@ -88,6 +229,9 @@ struct AppModelPerformanceSignpostTests {
             await harness.model.restoreMountedPresentationAfterReconnect()
             try await valueOfOwnedTask(reconnectResponder)
             #expect(await MainActor.run { harness.model.selectedSessionID } == snapshot.sessionId)
+            #expect(await MainActor.run {
+                harness.model.snapshots[snapshot.sessionId]?.transcript.count
+            } == expandedCount)
             await harness.client.close()
         }
     }

@@ -42,8 +42,10 @@ It enters the visible event-rendering state as soon as the authoritative two-pha
 handshake completes. Native scroll positioning remains best-effort and never gates
 readiness because physical SwiftUI can coalesce geometry callbacks. The composer
 remains visible throughout opening, while sending stays disabled until readiness.
-Session subscription ownership is token-scoped end to end,
-so a stale close cannot unsubscribe a newer same-session mount. During a rolling
+Session subscription ownership is token-scoped end to end. The open response remains
+provisional until sync acknowledgement and exact route-intent revalidation; baseline plus its
+already-drained contiguous event suffix then publish in one MainActor turn. A stale or failed
+attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. During a rolling
 upgrade, iOS accepts an older protocol-v2 `session.open` without the explicit
 `subscriptionToken` and uses its `syncToken`, which is the same per-open identity;
 this keeps existing Gateway-owned runs available until the Gateway can be restarted
@@ -63,8 +65,10 @@ work. Current Gateways project that background work separately through extension
 does not mount the retired `pi-subagents` async/fleet editor widgets; the run continues on the Mac
 and the app catches up without presenting transport errors as modal alerts. Foreground activation
 coalesces to one responsiveness/list/session reconciliation; an aborted or resumed network path
-enters the ordinary reconnect loop. A temporary catch-up pill is deduplicated and removed by the
-next successful authoritative session synchronization rather than persisting as an error state.
+enters the ordinary reconnect loop. Compatible reconnect requests share one typed result instead of polling mutable tokens. Fresh
+presentation and reconnect intents arbitrate serially, and at most three immediate authoritative
+attempts are retained for a continuous gap/overflow burst before the bounded catch-up state wins.
+A temporary catch-up pill is deduplicated and removed by the next successful authoritative session synchronization rather than persisting as an error state.
 Earlier canonical entries are fetched through `session.transcript` pages when requested. Event-buffer
 overflow closes the connection and forces global/session/terminal reconciliation;
 correctness must not depend on receiving every event while disconnected. A bounded

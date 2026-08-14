@@ -194,9 +194,7 @@ final class AppModel {
     private var refreshTask: Task<Void, Never>?
     private var subscribedSessionID: String?
     private var subscriptionTokenBySession: [String: String] = [:]
-    private var sessionEventSynchronizer = SessionEventSynchronizer()
-    private var pendingAuthoritativeResyncSessionIDs: Set<String> = []
-    private var pendingBranchReplacementSessionIDs: Set<String> = []
+    private let sessionSynchronization = SessionSynchronizationCoordinator()
     private var hiddenSessionIDs: Set<String> = []
     private var locallyCreatedUnindexedSessionIDs: Set<String> = []
     private var liveSessionSummaryUpdates: [String: SessionSummaryUpdate] = [:]
@@ -449,7 +447,7 @@ final class AppModel {
         snapshots = [:]
         authoritativeSessionIDs = []
         selectedSessionID = nil
-        subscribedSessionID = nil
+        invalidateSessionConnectionOwnership()
         clearLiveConnectionState()
         await loadCache(profileID: profile.id)
         await connect(profile: profile, token: token)
@@ -464,7 +462,7 @@ final class AppModel {
         snapshots = [:]
         authoritativeSessionIDs = []
         selectedSessionID = nil
-        subscribedSessionID = nil
+        invalidateSessionConnectionOwnership()
         clearLiveConnectionState()
         setupComplete = false
         connectionState = .unpaired
@@ -477,10 +475,7 @@ final class AppModel {
             let connectedInfo = try await client.connect(profile: profile, token: token)
             if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
             gatewayInfo = connectedInfo
-            subscribedSessionID = nil
-            sessionEventSynchronizer.reset()
-            pendingAuthoritativeResyncSessionIDs.removeAll()
-            pendingBranchReplacementSessionIDs.removeAll()
+            invalidateSessionConnectionOwnership()
             reconnectTask?.cancel()
             reconnectTask = nil
             await refreshAll()
@@ -511,10 +506,7 @@ final class AppModel {
                 self.connectionState = .reconnecting
                 do {
                     self.gatewayInfo = try await self.client.reconnect()
-                    self.subscribedSessionID = nil
-                    self.sessionEventSynchronizer.reset()
-                    self.pendingAuthoritativeResyncSessionIDs.removeAll()
-                    self.pendingBranchReplacementSessionIDs.removeAll()
+                    self.invalidateSessionConnectionOwnership()
                     await self.refreshAll()
                     await self.restoreMountedPresentationAfterReconnect()
                     await self.reattachTerminals()
@@ -536,11 +528,9 @@ final class AppModel {
     }
 
     func restoreMountedPresentationAfterReconnect() async {
-        guard let target = mountedPresentationTarget,
-              selectedSessionID == target.sessionID else { return }
+        guard let target = mountedPresentationTarget else { return }
         _ = await synchronizeSession(
             target.sessionID,
-            replacingVisibleTranscript: true,
             presentationGeneration: target.generation
         )
     }
@@ -563,10 +553,7 @@ final class AppModel {
             return
         } catch {
             connectionState = .reconnecting
-            subscribedSessionID = nil
-            sessionEventSynchronizer.reset()
-            pendingAuthoritativeResyncSessionIDs.removeAll()
-            pendingBranchReplacementSessionIDs.removeAll()
+            invalidateSessionConnectionOwnership()
             reconnectTask?.cancel()
             reconnectTask = nil
             scheduleReconnect(immediate: true)
@@ -774,21 +761,6 @@ final class AppModel {
         await closeSubscription(id, expectedPresentationGeneration: generation)
     }
 
-    func openSession(_ id: String) async throws {
-        if subscribedSessionID != id { await closeCurrentSubscription() }
-        selectedSessionID = id
-        if subscribedSessionID != id || snapshots[id] == nil {
-            let synchronized = await synchronizeSession(id)
-            guard synchronized, subscribedSessionID == id else {
-                throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
-            }
-        }
-        authoritativeSessionIDs.insert(id)
-        async let providerRefresh: Bool = refreshProviders(target: .session(id: id))
-        async let commandRefresh: Void = loadCommands(sessionID: id)
-        _ = await (providerRefresh, commandRefresh)
-    }
-
     func loadEarlierTranscript(sessionID: String, presentationGeneration: Int) async {
         guard !loadingEarlierTranscript,
               let current = snapshots[sessionID],
@@ -831,6 +803,12 @@ final class AppModel {
         } catch { surface(error) }
     }
 
+    private func invalidateSessionConnectionOwnership() {
+        subscribedSessionID = nil
+        subscriptionTokenBySession.removeAll()
+        sessionSynchronization.reset()
+    }
+
     private func closeCurrentSubscription() async {
         guard let sessionID = subscribedSessionID else { return }
         await closeSubscription(sessionID)
@@ -856,18 +834,18 @@ final class AppModel {
         if subscribedSessionID == sessionID { subscribedSessionID = nil }
     }
 
-    private func closeSubscriptionIfOwned(_ sessionID: String, subscriptionToken: String) async {
+    private func closeProvisionalSubscription(_ sessionID: String, token: String) async {
         struct Params: Codable { let sessionId, subscriptionToken: String }
         struct Response: Decodable { let closed: Bool }
-        let response: Response? = try? await client.request(
+        let _: Response? = try? await client.request(
             "session.close",
-            Params(sessionId: sessionID, subscriptionToken: subscriptionToken)
+            Params(sessionId: sessionID, subscriptionToken: token)
         )
-        guard Self.shouldClearSubscription(
-            installedToken: subscriptionTokenBySession[sessionID],
-            closingToken: subscriptionToken,
-            gatewayClosed: response?.closed == true
-        ) else { return }
+    }
+
+    private func discardSubscription(_ sessionID: String, token: String) async {
+        await closeProvisionalSubscription(sessionID, token: token)
+        guard subscriptionTokenBySession[sessionID] == token else { return }
         subscriptionTokenBySession[sessionID] = nil
         if subscribedSessionID == sessionID { subscribedSessionID = nil }
     }
@@ -1673,7 +1651,7 @@ final class AppModel {
 
     func handle(_ event: GatewayEvent) async {
         if event.topic.hasPrefix("session."), event.topic != "session.listChanged", event.topic != "session.summary" {
-            switch sessionEventSynchronizer.admit(event) {
+            switch sessionSynchronization.admit(event) {
             case .deliver(let event):
                 await handleDeliveredEvent(event)
             case .buffered:
@@ -1689,21 +1667,91 @@ final class AppModel {
     private func handleDeliveredEvent(_ event: GatewayEvent) async {
         switch event.topic {
         case "transport.disconnected", "system.stopping":
-            subscribedSessionID = nil
+            invalidateSessionConnectionOwnership()
             liveSessionSummaryUpdates.removeAll()
             sessions = sessions.map(\.safeCachedProjection)
-            sessionEventSynchronizer.reset()
-            pendingAuthoritativeResyncSessionIDs.removeAll()
-            pendingBranchReplacementSessionIDs.removeAll()
             connectionState = .reconnecting
             reconnectTask?.cancel()
             reconnectTask = nil
             scheduleReconnect()
         case "transport.resyncRequired":
             if let sessionID = event.sessionId ?? subscribedSessionID {
-                pendingAuthoritativeResyncSessionIDs.insert(sessionID)
                 _ = await synchronizeSession(sessionID, operation: .sessionResync)
             }
+        case let topic where topic.hasPrefix("session."):
+            if let sessionID = reduceSessionEvent(event) {
+                _ = await synchronizeSession(sessionID, operation: .sessionResync)
+            }
+        case "auth.prompt":
+            parseAuthPrompt(event.payload)
+        case "auth.event":
+            parseAuthEvent(event.payload)
+        case "auth.completed":
+            authPrompt = nil
+            authEvent = nil
+            let operationID = event.payload.objectValue?["operationId"]?.stringValue
+            if let target = operationID.flatMap({ providerCatalogTargetByAuthOperation.removeValue(forKey: $0) }) {
+                await refreshProviders(target: target)
+            }
+            if event.payload.objectValue?["success"]?.boolValue == false {
+                lastError = event.payload.objectValue?["error"]?.stringValue
+            }
+        case "settings.changed":
+            settingsInvalidationGeneration &+= 1
+        case "trust.changed":
+            trustRevision &+= 1
+            settingsInvalidationGeneration &+= 1
+        case "providers.changed":
+            providerInvalidationGeneration &+= 1
+        case "packages.changed":
+            packageInvalidationGeneration &+= 1
+        case "models.customChanged":
+            customModelInvalidationGeneration &+= 1
+        case "packages.progress", "packages.completed":
+            postNotice(
+                event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…",
+                replacing: .packageProgress
+            )
+        case "terminal.output":
+            if let object = event.payload.objectValue,
+               let terminalID = object["terminalId"]?.stringValue,
+               let sequence = object["sequence"]?.intValue,
+               let data = object["data"]?.stringValue {
+                let latest = terminalChunks[terminalID]?.last?.sequence ?? 0
+                guard sequence > latest else { break }
+                guard sequence == latest + 1 else {
+                    reconcileTerminal(terminalID)
+                    break
+                }
+                terminalChunks[terminalID, default: []].append(TerminalChunk(sequence: sequence, data: data))
+                if terminalChunks[terminalID, default: []].count > 2_048 {
+                    terminalChunks[terminalID]?.removeFirst(terminalChunks[terminalID]!.count - 2_048)
+                }
+                updateTerminalSequence(terminalID, sequence: sequence)
+            }
+        case "terminal.exit":
+            if let id = event.payload.objectValue?["terminalId"]?.stringValue {
+                terminalExited.insert(id)
+                if let index = terminals.firstIndex(where: { $0.id == id }) {
+                    let current = terminals[index]
+                    terminals[index] = TerminalSummary(
+                        id: current.id,
+                        sessionId: current.sessionId,
+                        cwd: current.cwd,
+                        createdAt: current.createdAt,
+                        exitedAt: ISO8601DateFormatter().string(from: .now),
+                        exitCode: event.payload.objectValue?["exitCode"]?.intValue,
+                        sequence: max(current.sequence, event.payload.objectValue?["sequence"]?.intValue ?? current.sequence)
+                    )
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    private func reduceSessionEvent(_ event: GatewayEvent) -> String? {
+        switch event.topic {
         case "session.summary":
             if let update = try? event.payload.decode(SessionSummaryUpdate.self) {
                 apply(update)
@@ -1715,8 +1763,9 @@ final class AppModel {
                let current = snapshots[snapshot.sessionId] {
                 if snapshot.runtimeGeneration == current.runtimeGeneration,
                    snapshot.eventSequence > current.eventSequence + 1 {
-                    pendingAuthoritativeResyncSessionIDs.insert(snapshot.sessionId)
-                    _ = await synchronizeSession(snapshot.sessionId, operation: .sessionResync)
+                    if !sessionSynchronization.markRetryRequired(sessionID: snapshot.sessionId) {
+                        return snapshot.sessionId
+                    }
                 } else {
                     apply(snapshot)
                 }
@@ -1834,7 +1883,7 @@ final class AppModel {
         case "session.structureChanged":
             guard let (sessionID, envelope) = admitSessionEvent(event) else { break }
             if envelope.data.objectValue?["branchChanged"]?.boolValue == true {
-                pendingBranchReplacementSessionIDs.insert(sessionID)
+                sessionSynchronization.requireFreshInstall(sessionID: sessionID)
             }
             advanceSessionCursor(sessionID, envelope)
             sessionStructureRevisions[sessionID, default: 0] &+= 1
@@ -1848,77 +1897,13 @@ final class AppModel {
             advanceSessionCursor(sessionID, envelope)
             sessionResourceRevisions[sessionID, default: 0] &+= 1
             sessionContextRevisions[sessionID, default: 0] &+= 1
-        case "auth.prompt":
-            parseAuthPrompt(event.payload)
-        case "auth.event":
-            parseAuthEvent(event.payload)
-        case "auth.completed":
-            authPrompt = nil
-            authEvent = nil
-            let operationID = event.payload.objectValue?["operationId"]?.stringValue
-            if let target = operationID.flatMap({ providerCatalogTargetByAuthOperation.removeValue(forKey: $0) }) {
-                await refreshProviders(target: target)
-            }
-            if event.payload.objectValue?["success"]?.boolValue == false {
-                lastError = event.payload.objectValue?["error"]?.stringValue
-            }
-        case "settings.changed":
-            settingsInvalidationGeneration &+= 1
-        case "trust.changed":
-            trustRevision &+= 1
-            settingsInvalidationGeneration &+= 1
-        case "providers.changed":
-            providerInvalidationGeneration &+= 1
-        case "packages.changed":
-            packageInvalidationGeneration &+= 1
-        case "models.customChanged":
-            customModelInvalidationGeneration &+= 1
-        case "packages.progress", "packages.completed":
-            postNotice(
-                event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…",
-                replacing: .packageProgress
-            )
-        case "terminal.output":
-            if let object = event.payload.objectValue,
-               let terminalID = object["terminalId"]?.stringValue,
-               let sequence = object["sequence"]?.intValue,
-               let data = object["data"]?.stringValue {
-                let latest = terminalChunks[terminalID]?.last?.sequence ?? 0
-                guard sequence > latest else { break }
-                guard sequence == latest + 1 else {
-                    reconcileTerminal(terminalID)
-                    break
-                }
-                terminalChunks[terminalID, default: []].append(TerminalChunk(sequence: sequence, data: data))
-                if terminalChunks[terminalID, default: []].count > 2_048 {
-                    terminalChunks[terminalID]?.removeFirst(terminalChunks[terminalID]!.count - 2_048)
-                }
-                updateTerminalSequence(terminalID, sequence: sequence)
-            }
-        case "terminal.exit":
-            if let id = event.payload.objectValue?["terminalId"]?.stringValue {
-                terminalExited.insert(id)
-                if let index = terminals.firstIndex(where: { $0.id == id }) {
-                    let current = terminals[index]
-                    terminals[index] = TerminalSummary(
-                        id: current.id,
-                        sessionId: current.sessionId,
-                        cwd: current.cwd,
-                        createdAt: current.createdAt,
-                        exitedAt: ISO8601DateFormatter().string(from: .now),
-                        exitCode: event.payload.objectValue?["exitCode"]?.intValue,
-                        sequence: max(current.sequence, event.payload.objectValue?["sequence"]?.intValue ?? current.sequence)
-                    )
-                }
-            }
         default:
-            if event.topic.hasPrefix("session."),
-               let (sessionID, envelope) = admitSessionEvent(event) {
+            if let (sessionID, envelope) = admitSessionEvent(event) {
                 // Unknown sequenced session events still advance the cursor.
-                // This preserves forward-compatible ordering for the next event.
                 advanceSessionCursor(sessionID, envelope)
             }
         }
+        return nil
     }
 
     private func admitSessionEvent(_ event: GatewayEvent) -> (String, SessionEventEnvelope)? {
@@ -1926,14 +1911,14 @@ final class AppModel {
               let envelope = try? event.payload.decode(SessionEventEnvelope.self),
               let snapshot = snapshots[sessionID] else { return nil }
         guard envelope.runtimeGeneration == snapshot.runtimeGeneration else {
-            if !sessionEventSynchronizer.isSynchronizing(sessionID: sessionID) {
+            if !sessionSynchronization.markRetryRequired(sessionID: sessionID) {
                 Task { await synchronizeSession(sessionID, operation: .sessionResync) }
             }
             return nil
         }
         guard envelope.eventSequence > snapshot.eventSequence else { return nil }
         guard envelope.eventSequence == snapshot.eventSequence + 1 else {
-            if !sessionEventSynchronizer.isSynchronizing(sessionID: sessionID) {
+            if !sessionSynchronization.markRetryRequired(sessionID: sessionID) {
                 Task { await synchronizeSession(sessionID, operation: .sessionResync) }
             }
             return nil
@@ -1978,109 +1963,196 @@ final class AppModel {
         presentationGeneration: Int? = nil,
         operation: PerformanceOperation = .sessionSync
     ) async -> Bool {
-        if sessionEventSynchronizer.isSynchronizing(sessionID: sessionID) {
-            let token = sessionEventSynchronizer.token(sessionID: sessionID)
-            let deadline = clock.now() + .seconds(65)
-            while sessionEventSynchronizer.token(sessionID: sessionID) == token, clock.now() < deadline {
-                if Task.isCancelled { return false }
-                try? await clock.sleep(.milliseconds(10))
-            }
-            guard sessionEventSynchronizer.token(sessionID: sessionID) != token else { return false }
-            if replacingVisibleTranscript {
-                return await synchronizeSession(
-                    sessionID,
-                    replacingVisibleTranscript: true,
-                    presentationGeneration: presentationGeneration,
+        let intent: SessionSynchronizationCoordinator.Intent
+        if replacingVisibleTranscript {
+            guard let presentationGeneration else { return false }
+            intent = .presentation(generation: presentationGeneration)
+        } else {
+            guard let mountedGeneration = presentationGeneration
+                ?? mountedPresentationGenerationBySession[sessionID] else { return false }
+            intent = .reconnect(presentationGeneration: mountedGeneration)
+        }
+
+        while !Task.isCancelled {
+            let lease = sessionSynchronization.acquire(sessionID: sessionID, intent: intent)
+            switch lease.role {
+            case .join:
+                return await lease.sharedValue()
+            case .retryAfterCurrent:
+                _ = await lease.sharedValue()
+            case .leader:
+                sessionSynchronization.prepareLeaderAttempt(lease)
+                return await performSessionSynchronization(
+                    sessionID: sessionID,
+                    lease: lease,
                     operation: operation
                 )
             }
-            if pendingAuthoritativeResyncSessionIDs.remove(sessionID) != nil {
-                return await synchronizeSession(sessionID, operation: .sessionResync)
+        }
+        return false
+    }
+
+    private enum SessionSynchronizationAttemptOutcome {
+        case success
+        case retry
+        case failed
+    }
+
+    private func performSessionSynchronization(
+        sessionID: String,
+        lease: SessionSynchronizationCoordinator.Lease,
+        operation: PerformanceOperation
+    ) async -> Bool {
+        var nextOperation = operation
+        for _ in 0..<3 {
+            guard !Task.isCancelled,
+                  sessionSynchronization.owns(lease),
+                  ownsSynchronizationIntent(lease.intent, sessionID: sessionID) else {
+                sessionSynchronization.complete(lease, outcome: false)
+                return false
             }
-            return snapshots[sessionID] != nil
+            switch await performSessionSynchronizationAttempt(
+                sessionID: sessionID,
+                lease: lease,
+                operation: nextOperation
+            ) {
+            case .success:
+                sessionSynchronization.complete(lease, outcome: true)
+                removeNotice(.sessionCatchUp)
+                saveCache()
+                return true
+            case .retry:
+                sessionSynchronization.restartBuffer(for: lease)
+                nextOperation = .sessionResync
+            case .failed:
+                sessionSynchronization.complete(lease, outcome: false)
+                return false
+            }
         }
-        // A fresh/manual presentation retry consumes invalidation that predates
-        // this attempt. Any new invalidation arriving while the request is in
-        // flight inserts the marker again and triggers exactly one follow-up.
-        if replacingVisibleTranscript {
-            pendingAuthoritativeResyncSessionIDs.remove(sessionID)
+        if subscriptionTokenBySession[sessionID] != nil {
+            await closeSubscription(sessionID)
         }
-        let token = sessionEventSynchronizer.begin(sessionID: sessionID)
+        sessionSynchronization.complete(lease, outcome: false)
+        postNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+        return false
+    }
+
+    private func performSessionSynchronizationAttempt(
+        sessionID: String,
+        lease: SessionSynchronizationCoordinator.Lease,
+        operation: PerformanceOperation
+    ) async -> SessionSynchronizationAttemptOutcome {
         let interval = performanceSignposts.begin(operation)
         var result = PerformanceResult.failure
         var metrics = PerformanceMetrics.none
         defer { performanceSignposts.end(interval, result: result, metrics: metrics) }
-        var openedSubscriptionToken: String?
+        var provisionalSubscriptionToken: String?
         do {
+            try Task.checkCancellation()
             struct Params: Codable { let sessionId: String }
-            let response: SessionOpenResponse = try await client.request("session.open", Params(sessionId: sessionID), timeout: .seconds(60))
-            openedSubscriptionToken = response.subscriptionToken
-            if let presentationGeneration,
-               presentationGeneration != self.presentationOpenGeneration || selectedSessionID != sessionID {
-                sessionEventSynchronizer.cancel(sessionID: sessionID, token: token)
-                await closeSubscriptionIfOwned(sessionID, subscriptionToken: response.subscriptionToken)
+            let response: SessionOpenResponse = try await client.request(
+                "session.open",
+                Params(sessionId: sessionID),
+                timeout: .seconds(60)
+            )
+            provisionalSubscriptionToken = response.subscriptionToken
+            if subscribedSessionID == sessionID {
+                subscribedSessionID = nil
+                subscriptionTokenBySession[sessionID] = nil
+            }
+            guard sessionSynchronization.owns(lease),
+                  ownsSynchronizationIntent(lease.intent, sessionID: sessionID) else {
+                await closeProvisionalSubscription(sessionID, token: response.subscriptionToken)
                 result = .discarded
-                return false
+                return .failed
             }
-            subscribedSessionID = sessionID
-            subscriptionTokenBySession[sessionID] = response.subscriptionToken
-            if replacingVisibleTranscript || pendingBranchReplacementSessionIDs.remove(sessionID) != nil {
-                snapshots[sessionID] = Self.installingSnapshot(
-                    current: snapshots[sessionID],
-                    authoritative: response.session,
-                    mode: .freshPresentation
-                )
-            } else {
-                apply(response.session)
-            }
+
             try await acknowledgeSessionSync(sessionID: sessionID, syncToken: response.syncToken)
-            let installed = snapshots[sessionID] ?? response.session
-            let cursor = SessionEventSynchronizer.Cursor(
+            try Task.checkCancellation()
+            guard sessionSynchronization.owns(lease),
+                  ownsSynchronizationIntent(lease.intent, sessionID: sessionID) else {
+                await closeProvisionalSubscription(sessionID, token: response.subscriptionToken)
+                result = .discarded
+                return .failed
+            }
+
+            let mode: SessionSnapshotInstallMode
+            switch lease.intent {
+            case .presentation:
+                mode = .freshPresentation
+            case .reconnect:
+                mode = sessionSynchronization.consumeFreshInstallRequirement(sessionID: sessionID)
+                    ? .freshPresentation
+                    : .reconnect
+            }
+            let installed = Self.installingSnapshot(
+                current: snapshots[sessionID],
+                authoritative: response.session,
+                mode: mode
+            )
+            let cursor = SessionSynchronizationCoordinator.Cursor(
                 runtimeGeneration: installed.runtimeGeneration,
                 eventSequence: installed.eventSequence
             )
-            guard let replay = sessionEventSynchronizer.complete(sessionID: sessionID, token: token, baseline: cursor) else {
+            guard sessionSynchronization.owns(lease),
+                  let firstReplay = sessionSynchronization.drainBufferedEvents(
+                    for: lease,
+                    baseline: cursor
+                  ),
+                  SessionSynchronizationCoordinator.isContiguous(firstReplay, after: cursor) else {
+                if case .freshPresentation = mode {
+                    sessionSynchronization.requireFreshInstall(sessionID: sessionID)
+                }
+                await closeProvisionalSubscription(sessionID, token: response.subscriptionToken)
                 result = .discarded
-                return await synchronizeSession(
-                    sessionID,
-                    replacingVisibleTranscript: replacingVisibleTranscript,
-                    presentationGeneration: presentationGeneration,
-                    operation: .sessionResync
-                )
+                return .retry
             }
-            for event in replay { await handleDeliveredEvent(event) }
-            if pendingAuthoritativeResyncSessionIDs.remove(sessionID) != nil {
+
+            // Baseline and already-drained contiguous suffix publish in one
+            // MainActor turn; no provisional token or snapshot escapes earlier.
+            selectedSessionID = sessionID
+            subscribedSessionID = sessionID
+            subscriptionTokenBySession[sessionID] = response.subscriptionToken
+            snapshots[sessionID] = installed
+            updateSessionSummary(from: installed)
+            provisionalSubscriptionToken = nil
+
+            for event in firstReplay { _ = reduceSessionEvent(event) }
+
+            if sessionSynchronization.consumeRetryRequirement(for: lease) {
                 result = .discarded
-                return await synchronizeSession(
-                    sessionID,
-                    replacingVisibleTranscript: replacingVisibleTranscript,
-                    presentationGeneration: presentationGeneration,
-                    operation: .sessionResync
-                )
+                return .retry
             }
-            removeNotice(.sessionCatchUp)
             result = .success
-            metrics = PerformanceMetrics(itemCount: replay.count)
-            return true
+            metrics = PerformanceMetrics(itemCount: firstReplay.count)
+            return .success
         } catch {
             if Task.isCancelled || error is CancellationError { result = .cancelled }
-            // The failed baseline is not authoritative. Discard quarantined
-            // events and let the next open replace it instead of applying them
-            // against a stale cached snapshot or surfacing a transient sync race.
-            sessionEventSynchronizer.cancel(sessionID: sessionID, token: token)
-            if let openedSubscriptionToken {
-                await closeSubscriptionIfOwned(sessionID, subscriptionToken: openedSubscriptionToken)
+            if let provisionalSubscriptionToken {
+                await closeProvisionalSubscription(sessionID, token: provisionalSubscriptionToken)
             }
             if let failure = error as? GatewayFailure,
                failure.retryable || failure.code == "response_too_large" {
-                // A failed attempt is not an invalidation that arrived during a
-                // successful baseline. Leaving a pending marker here makes a
-                // manual Retry immediately perform a redundant second open.
                 postNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
             } else {
                 surface(error)
             }
-            return false
+            return .failed
+        }
+    }
+
+    private func ownsSynchronizationIntent(
+        _ intent: SessionSynchronizationCoordinator.Intent,
+        sessionID: String
+    ) -> Bool {
+        switch intent {
+        case .presentation(let generation):
+            return presentationOpenGeneration == generation && selectedSessionID == sessionID
+        case .reconnect(let presentationGeneration):
+            return ownsPresentation(SessionPresentationTarget(
+                sessionID: sessionID,
+                generation: presentationGeneration
+            ))
         }
     }
 
@@ -2164,22 +2236,25 @@ final class AppModel {
            installed.transcript.count == snapshot.transcript.count {
             saveCache()
         }
-        if let index = sessions.firstIndex(where: { $0.id == snapshot.sessionId }) {
-            let current = sessions[index]
-            sessions[index] = SessionSummary(
-                id: current.id,
-                name: installed.name,
-                cwd: current.cwd,
-                kind: current.kind,
-                parentSessionId: current.parentSessionId,
-                createdAt: current.createdAt,
-                updatedAt: current.updatedAt,
-                messageCount: current.messageCount,
-                firstMessage: current.firstMessage,
-                phase: installed.phase,
-                summaryRevision: current.summaryRevision
-            )
-        }
+        updateSessionSummary(from: installed)
+    }
+
+    private func updateSessionSummary(from snapshot: SessionSnapshot) {
+        guard let index = sessions.firstIndex(where: { $0.id == snapshot.sessionId }) else { return }
+        let current = sessions[index]
+        sessions[index] = SessionSummary(
+            id: current.id,
+            name: snapshot.name,
+            cwd: current.cwd,
+            kind: current.kind,
+            parentSessionId: current.parentSessionId,
+            createdAt: current.createdAt,
+            updatedAt: current.updatedAt,
+            messageCount: current.messageCount,
+            firstMessage: current.firstMessage,
+            phase: snapshot.phase,
+            summaryRevision: current.summaryRevision
+        )
     }
 
     static func installingSnapshot(
@@ -2189,9 +2264,14 @@ final class AppModel {
     ) -> SessionSnapshot {
         switch mode {
         case .freshPresentation:
-            authoritative
+            return authoritative
         case .reconnect:
-            current.map { mergingVisibleTranscript(current: $0, authoritative: authoritative) } ?? authoritative
+            guard let current else { return authoritative }
+            if current.runtimeGeneration == authoritative.runtimeGeneration,
+               authoritative.eventSequence < current.eventSequence {
+                return current
+            }
+            return mergingVisibleTranscript(current: current, authoritative: authoritative)
         }
     }
 

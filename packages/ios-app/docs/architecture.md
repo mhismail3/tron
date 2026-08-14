@@ -37,8 +37,9 @@ runtime. Gateway connection and disposable cache intervals use the shared typed
 performance-signpost boundary. Signpost metadata is structurally limited to result
 codes, item counts, and byte counts; identifiers, paths, methods, filenames, model
 names, prompts, transcript content, and terminal output are never recorded. `AppModel`
-is the MainActor state owner and shares the clock/UUID seams for Gateway reconnect,
-synchronization, receipt, debounce, and command-ID work. Its visible-open interval
+is the shrinking MainActor composition façade; narrow typed owners retain lifecycle and
+coordination state instead of routing facts through unrelated façade fields. It shares the
+clock/UUID seams for Gateway reconnect, receipt, debounce, and command-ID work. Its visible-open interval
 contains independently measured authoritative synchronization attempts; invalidated
 attempts end as discarded rather than being mislabeled as successful. Receipt timing
 begins only after an uncertain mutation response, never for an ordinary confirmed
@@ -92,15 +93,21 @@ never replays the accepted prompt automatically.
 Events are invalidation or live-presentation hints. They do not form a durable
 event journal and are never replayed into a local database. `session.open` uses
 a two-phase subscription barrier: the authoritative snapshot and ephemeral sync
-token are returned first; the same opaque token remains the subscription ownership
-credential after synchronization. iOS installs that baseline and acknowledges the
-token before the gateway releases later events, and `session.close` only releases a
-subscription whose current token matches. Older protocol-v2 gateways omit the
+token are returned first. The snapshot and subscription token remain provisional and
+unobservable until `session.sync` succeeds and the exact session/presentation intent is
+revalidated; stale or failed opens close only that provisional token. The same opaque token
+then becomes subscription ownership, and `session.close` only releases a subscription whose
+current token matches. Older protocol-v2 gateways omit the
 explicit ownership field; iOS safely treats their per-open `syncToken` as the same
 identity during rolling upgrades, avoiding interruption of Gateway-owned runs.
-While a resync is in
-flight, iOS quarantines that session's events, discards those covered by the new
-baseline, and replays the contiguous remainder. Gaps, runtime-generation changes,
+One intent-keyed synchronization coordinator owns the shared outcome and event quarantine.
+Compatible reconnect callers await that outcome directly instead of polling tokens; a fresh
+presentation never inherits reconnect installation semantics and waits to retry after incompatible
+work. Reconnect identity comes from the mounted presentation generation, never mutable dashboard
+selection. During an attempt, iOS quarantines that session's events, discards those covered by the new
+baseline, validates contiguity, and publishes the baseline plus drained suffix in one MainActor turn
+before completing all waiters. Retry and fresh-install invalidation stay in the same owner; one bounded
+three-attempt loop replaces recursive resynchronization. Gaps, runtime-generation changes,
 buffer overflow, oversized frames, reconnect, and foreground activation all
 converge through another authoritative open. Unknown sequenced session events
 still advance the cursor so a newer app can add hints without forcing false gaps.

@@ -90,15 +90,17 @@ methods, filenames, model names, prompts, transcript content, or other strings.
 Gateway and cache interval contracts are owned by `GatewayClientTransportTests`
 and `SnapshotCacheTests`. `AppModelPerformanceSignpostTests` drives raw Gateway
 frames through visible open, synchronization/resynchronization, uncertain receipt,
-and terminal replay boundaries. The same suite proves a mounted route wins over divergent
+and terminal replay boundaries. `SessionEventSynchronizerTests` own the intent-keyed shared
+outcome and event-quarantine invariants; the AppModel suite proves snapshots/tokens remain
+provisional through acknowledgement and stale routes close their exact provisional token. The same suite proves a mounted route wins over divergent
 dashboard selection, dashboard refresh cannot open an inferred transcript, mounted reconnect restores
 the exact route, secondary reads cannot create hidden subscriptions, and create/fork return navigation
 identity without opening it implicitly. `DashboardStateOwnerTests` prove stale catalog/navigation
 admission, while `GlobalNoticeStoreTests` enforce the eight-entry, 4 KiB-message, and 16 KiB-total
 budgets plus keyed progress coalescing. `PresentationOwnedStoreTests` prove session and same-session-generation
 isolation for disposable attachment/editor state; event tests prove departing routes are excluded from
-share admission. It intentionally records each current resync attempt;
-Phase 2 owns removal of redundant synchronization work after the baseline is frozen.
+share admission. Compatible synchronization callers now share one outcome without timing polls;
+each actual authoritative open/resync attempt retains its own interval.
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \

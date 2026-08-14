@@ -1,24 +1,31 @@
 # Tron iOS hardening plan
 
-Status: implementation in progress — Phase 0 and the separate provisional UI removal milestone are complete; milestone 1 is in progress; milestones 2–9 are pending
+Status: implementation in progress — Phases 0 and 1 and the separate provisional UI removal milestone are complete; Phase 2 is in progress; Phases 3–9 are pending.
 
-Audit baseline: `cee85b64a`
+The current Phase 2 synchronization cleanup began from `21aae71ca`. Source and owning documentation at tracked HEAD are authoritative; untracked `.pi` runtime artifacts and historical audit line numbers are not.
 
-Implementation baseline for 0B.1: `fb009f311`
-Provisional UI removal baseline: `03aa3b9a6`
-Implementation baseline for 0B.2: `4bac0090d`
-Implementation baseline for 0B.3a: `028e39a5e`
-Implementation baseline for 0B.3b: `67dd6825b`
-Implementation baseline for 0B.4: `259952614`
 Scope: all handwritten iOS app, share-extension, test, project, and owning documentation code under `packages/ios-app`, narrowly required Gateway contract work, and iOS release policy where repository rules require manual delivery.
-
-Milestone 0A began from clean tracked HEAD `cee85b64a`. Milestone 0B.1 began from clean tracked HEAD `fb009f311`. The user-directed provisional UI removal began as a separate serial milestone from clean tracked HEAD `03aa3b9a6`. Milestone 0B.2 began from clean tracked HEAD `4bac0090d`, milestone 0B.3a from `028e39a5e`, milestone 0B.3b from `67dd6825b`, and milestone 0B.4 from `259952614`; untracked `.pi` runtime artifacts are outside these implementation baselines. No audit artifact or historical line number overrides source at these baselines.
 
 ## Goal
 
 Make the existing Tron iPhone experience deterministic, smooth, bounded, and maintainable without changing product behavior or visual design. Chat is the highest-priority path, especially authoritative opening, streaming, large-session rendering, scrolling, history prepend, attachments, and reconnect.
 
 This is a source-of-truth and ownership refactor, not a new local runtime. Canonical sessions, mutations, receipts, resources, credentials, and runtime state remain Gateway-owned. Every iOS cache or presentation model remains bounded and disposable.
+
+## Required implementation discipline for every phase
+
+Every phase is an architectural cleanup milestone, not an additive feature pass. Its default outcome must be fewer state owners, shorter state paths, fewer branches/tasks, and less code unless production behavior requires otherwise.
+
+- Move each fact directly from its canonical boundary into one typed domain owner and then into the smallest disposable view projection. Do not route state through unrelated global selection, façade fields, views, or compatibility shims.
+- Store a fact once. Derive read-only presentation values; never retain parallel booleans, mirrored collections, guessed targets, or a second lifecycle state machine.
+- Replace an obsolete owner atomically and delete it in the same milestone. Retired architecture, dead/unused code, legacy names, redundant comments, polling loops, replay paths, and test-only production seams must not remain as an audit ledger.
+- Prefer a precise value type or focused owner over a generic abstraction. A new type is justified only when it removes mutable state, invalid transitions, duplicated policy, or cross-domain coupling.
+- Keep asynchronous ownership structured and keyed. Every suspension revalidates the smallest immutable identity needed to publish; cancellation and teardown have one idempotent path.
+- Keep `AppModel` as a shrinking composition façade. New behavior belongs in the narrow owner; completed phases must remove façade state and pass-through logic rather than layering another coordinator beside it.
+- Preserve UI, wire contracts, ordering, and canonical Gateway behavior. Robustness comes from deleting ambiguity and invalid state, not from compatibility branches or speculative fallback behavior.
+- Add invariant tests at the owner boundary first, then integration coverage for the exact race. Update the owning docs and remove stale claims in the same commit.
+
+Review for every phase must explicitly ask: what state, branch, task, abstraction, compatibility path, comment, or file can now be deleted? A phase is not complete while two owners represent the same fact or while state travels through an unrelated layer.
 
 ## Non-goals
 
@@ -44,6 +51,7 @@ The pass is complete only when:
 9. Focused owners, full native suites, controlled Gateway E2E, accessibility checks, personal-info guard, and physical-device performance checkpoints pass.
 10. Every owning document—including architecture, events, development, onboarding, README, and release guidance—describes the final contract with no stale completion-plan or native-speech claims.
 11. Automated production/TestFlight delivery is removed or disabled; release remains a manual maintainer action.
+12. Each phase measurably shrinks or simplifies the ownership graph: no duplicate fact, retired owner, dead path, compatibility branch, or unnecessary state hop remains after its replacement lands.
 
 ## Audit summary
 
@@ -69,11 +77,10 @@ Eight independent read-only audits covered state architecture, chat scrolling/pe
 
 **Milestone 1 — Identity and invalidation defects: complete.** Settings, provider/model catalog, package, and custom-model views now key reloads to explicitly named event-only invalidation generations. Successful publications no longer advance those generations. Settings reads, writes, installed values, and SwiftUI load identities use typed `.global` or `.project(cwd:)` targets; the three settings screens have one automatic task owner instead of parallel scope-change tasks. Different targets cannot overwrite each other, newer same-target reads reject older completions, and global updates cannot inherit a selected project's path. New-session defaults use the workspace being created rather than a previously selected session, and workspace changes close creation admission until matching settings/trust reads complete. Watchdog-bounded scripted Gateway tests prove these ordering rules and that successful reads cannot trigger self-sustaining reload loops. Provider/model catalogs now use typed global/session targets, atomic paired publication, stale-request rejection, and auth-operation target retention through completion or confirmed cancellation. Package inventory, update checks, and mutations now use typed global/workspace targets with stale-request admission and target-keyed update markers. Trust reads/mutations now require typed nonempty project targets; project Settings captures its route identity, onboarding rejects stale workspace trust, and trust invalidation closes new-session admission until the matching workspace is re-inspected. Custom-model reads and writes now carry an explicit typed global target, generation-owned publication rejects older reads, and one draft owner protects both guided and advanced unsaved edits from invalidation reloads. Model/default, runtime-behavior, and resource-location settings now preserve revision-owned global/project drafts, reject invalidation overwrite while dirty, reject stale save completion, and emit only fields changed from the admitted baseline so project inheritance remains intact. Provider catalogs match the selected scope, and write-only proxy state is redacted, explicitly clearable, and scrubbed after save. Scope-keyed settings drafts and explicit route/session mutation identity are complete: mounted routes supply every session mutation and secondary read, secondary surfaces cannot create hidden subscriptions, and create/import/fork return navigation results without pre-emptively replacing selection or subscription ownership. Attachment uploads, staged attachment lists, sends, and editor requests are now keyed by session plus presentation generation; stale completions are rejected, route replacement revokes intake synchronously, and share delivery retains its payload until the sole admitted presentation confirms prompt admission. Dashboard discovery no longer selects or opens a transcript, global/project refresh targets are explicit, older catalog loads and import completions cannot replace newer dashboard intent, and reconnect restores only the still-mounted presentation. Global notices have explicit 8-item, 4 KiB-per-message, and 16 KiB-total limits; duplicate and keyed progress notices coalesce, targeted completion removes only its own progress, and profile teardown clears the projection.
 
-**Milestone 2 — Transport, synchronization, and receipts: in progress.** `GatewayClient` now owns one cohesive connection epoch containing the exact socket, receive/liveness tasks, pending requests, liveness timestamp, overflow state, and handshake result. Concurrent connect/close invalidates older attempts before and after every suspended handshake boundary; stale hello, frame, receive failure, liveness, pending completion, teardown, and suspended close work cannot publish into or disconnect a replacement. Idle receive and liveness tasks weakly retain the client, current transport cancellation disconnects deterministically, and teardown emits at most one current-epoch disconnect. Pending requests own send and timeout tasks plus queued/sending/sent state; pre-send cancellation is definitive, while cancellation, timeout, failure, or disconnect after send begins carries a local non-wire-forgeable possibly-sent error. Mutation cancellation after that boundary never replays automatically, confirmed-missing replay rechecks cancellation, and definitive retryable Gateway responses do not enter receipt polling. Gateway receipts remove pending state after an observed application rejection but retain pending if completion persistence fails after successful execution. Shared session synchronization, reconnect jitter, decode preparation, and explicit façade teardown remain pending.
+**Milestone 2 — Transport, synchronization, and receipts: in progress.** `GatewayClient` now owns one cohesive connection epoch containing the exact socket, receive/liveness tasks, pending requests, liveness timestamp, overflow state, and handshake result. Concurrent connect/close invalidates older attempts before and after every suspended handshake boundary; stale hello, frame, receive failure, liveness, pending completion, teardown, and suspended close work cannot publish into or disconnect a replacement. Idle receive and liveness tasks weakly retain the client, current transport cancellation disconnects deterministically, and teardown emits at most one current-epoch disconnect. Pending requests own send and timeout tasks plus queued/sending/sent state; pre-send cancellation is definitive, while cancellation, timeout, failure, or disconnect after send begins carries a local non-wire-forgeable possibly-sent error. Mutation cancellation after that boundary never replays automatically, confirmed-missing replay rechecks cancellation, and definitive retryable Gateway responses do not enter receipt polling. Gateway receipts remove pending state after an observed application rejection but retain pending if completion persistence fails after successful execution. Session synchronization now has one intent-keyed coordinator instead of token polling: compatible callers await one typed outcome, incompatible fresh/reconnect intents arbitrate serially, and event quarantine, retry/fresh-install invalidation, and shared completion live in that owner rather than parallel AppModel sets. Open snapshots/subscription tokens remain provisional until sync acknowledgement and route revalidation; the baseline and prevalidated contiguous suffix publish in one MainActor turn. Stale or failed attempts close only their provisional token and cannot publish over cached or mounted state. The unused selection-based `openSession` path and recursive resync chain are deleted; immediate gap/overflow retries use one cancellation-aware three-attempt loop. Reconnect jitter, decode preparation, explicit façade teardown, and remaining snapshot-admission cleanup remain pending.
 
 ### Verified correctness priorities
 
-- Concurrent session-sync callers poll token changes instead of awaiting one shared success/failure result.
 - Forget/revoke/switch does not synchronously invalidate every reconnect/foreground/load owner.
 - Terminal attach/reset lifecycle can still install stale or ambiguous state.
 
