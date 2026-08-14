@@ -31,12 +31,10 @@ struct ChatView: View {
     @State private var speech = SpeechTranscriber()
     @State private var composerTextHeight: CGFloat = 20
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
-    @State private var scrollToBottomRequest = 0
     @State private var scrollCoordinator = ChatScrollCoordinator()
     @State private var visibleTranscriptRowIDs: [String] = []
     @State private var transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
     @State private var transcriptGeometry = ChatTranscriptGeometry.zero
-    @State private var composerInputBarHeight: CGFloat = 40
     @Namespace private var composerGlassNamespace
     // UITextView is the responder owner. This mirrors delegate callbacks for
     // placeholder/scroll presentation; SwiftUI FocusState must not compete with
@@ -51,14 +49,10 @@ struct ChatView: View {
     var body: some View {
         transcript
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                // Reserve one stable line. Multiline text, attachments, and
-                // extension widgets expand upward in the overlay without
-                // resizing or shifting the transcript viewport.
-                Color.clear
-                    .frame(height: 48)
-                    .overlay(alignment: .bottom) {
-                        composer.fixedSize(horizontal: false, vertical: true)
-                    }
+                // The complete composer is the sole structural inset owner, so
+                // the keyboard, multiline text, and attachment chips push the
+                // native transcript viewport exactly once and reverse naturally.
+                composer
             }
             .overlay(alignment: .top) { topBlur }
         .onGeometryChange(for: CGFloat.self) { geometry in
@@ -76,7 +70,7 @@ struct ChatView: View {
         .toolbar {
             toolbar(titleWidth: ChatToolbarTitleLayout.width(containerWidth: toolbarContainerWidth))
         }
-        .sheet(isPresented: $showContext) { SessionContextSheet() }
+        .sheet(isPresented: $showContext) { SessionContextSheet(sessionID: sessionID) }
         .sheet(isPresented: $showSettings) { SettingsView(scope: .project).presentationDragIndicator(.hidden) }
         .sheet(isPresented: attachmentPresentationBinding(for: .camera)) {
             CameraCaptureSheet { image in Task { await importCameraImage(image) } }
@@ -183,8 +177,11 @@ struct ChatView: View {
             .accessibilityHidden(!isTranscriptReady)
             .allowsHitTesting(isTranscriptReady)
         }
+        // Initial overflow opens at the latest tail, but undersized/lazily
+        // materializing content remains top-aligned. Bottom alignment here
+        // re-anchors during keyboard animation and can manufacture blank space.
         .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .defaultScrollAnchor(.bottom, for: .alignment)
+        .defaultScrollAnchor(.top, for: .alignment)
         .scrollPosition($transcriptScrollPosition)
         .tronScrollEdgeChrome()
         .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.15) { ids in
@@ -198,10 +195,19 @@ struct ChatView: View {
         } action: { previous, geometry in
             transcriptGeometry = geometry
             guard isTranscriptReady else { return }
-            if geometry.isViewportOnlyChange(from: previous) {
-                scrollCoordinator.viewportChanged(previous: previous, current: geometry)
-            } else if scrollCoordinator.geometryChanged(previous: previous, current: geometry) {
+            let requestedFollow: Bool
+            if geometry.hasViewportChange(from: previous) {
+                // Viewport ownership wins even when streaming growth lands in
+                // the same layout frame; treating that mixed sample as ordinary
+                // transcript growth races keyboard/composer positioning.
+                requestedFollow = scrollCoordinator.viewportChanged(previous: previous, current: geometry)
+            } else {
+                requestedFollow = scrollCoordinator.geometryChanged(previous: previous, current: geometry)
+            }
+            if requestedFollow {
                 scrollToTail(animated: false)
+            } else {
+                releaseSettledScrollBindingIfNeeded(geometry)
             }
         }
         .onScrollPhaseChange { oldPhase, newPhase, context in
@@ -209,18 +215,18 @@ struct ChatView: View {
                 catchUpTask?.cancel()
                 catchUpTask = nil
             }
+            let finalGeometry = ChatTranscriptGeometry(context.geometry)
             if scrollCoordinator.scrollPhaseChanged(
                 from: oldPhase,
                 to: newPhase,
-                finalGeometry: ChatTranscriptGeometry(context.geometry)
+                finalGeometry: finalGeometry
             ) {
                 scrollToTail(animated: false)
+            } else if newPhase == .idle {
+                releaseSettledScrollBindingIfNeeded(finalGeometry)
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        .onChange(of: scrollToBottomRequest) { _, _ in
-            scrollToTail(animated: true, force: true)
-        }
         .onChange(of: responseState, initial: true) { previous, current in
             guard let current else { return }
             guard previous?.sessionID == current.sessionID else { return }
@@ -373,6 +379,21 @@ struct ChatView: View {
         withTransaction(transaction) {
             transcriptScrollPosition.scrollTo(edge: .bottom)
         }
+    }
+
+    @MainActor
+    private func releaseSettledScrollBindingIfNeeded(_ geometry: ChatTranscriptGeometry) {
+        guard geometry.isAtCatchUpBoundary,
+              scrollCoordinator.canReleaseSettledScrollBinding,
+              transcriptScrollPosition.isPositionedByUser
+                || transcriptScrollPosition.edge != nil
+                || transcriptScrollPosition.point != nil
+                || transcriptScrollPosition.viewID != nil else { return }
+        // ScrollPosition targets persist across safe-area changes. Once the
+        // requested/user movement has physically settled at the tail, clear the
+        // binding without moving the viewport so keyboard and composer layout
+        // cannot replay a stale edge target.
+        transcriptScrollPosition = ScrollPosition(idType: String.self)
     }
 
     @MainActor
@@ -568,10 +589,7 @@ struct ChatView: View {
 
     private var composerInputBar: some View {
         HStack(alignment: .bottom, spacing: 4) {
-            Color.clear
-                .frame(width: 40, height: 40)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+            attachmentButton
 
             ZStack(alignment: .leading) {
                 if text.isEmpty && !composerFocused {
@@ -596,10 +614,6 @@ struct ChatView: View {
                 .frame(height: composerTextHeight)
                 .padding(.horizontal, 2)
                 .padding(.vertical, 10)
-                .onChange(of: composerFocused) { _, focused in
-                    guard focused else { return }
-                    scrollToBottomRequest += 1
-                }
             }
             .frame(minHeight: 40)
             .animation(.easeOut(duration: 0.18), value: speech.isRecording)
@@ -630,12 +644,20 @@ struct ChatView: View {
             in: RoundedRectangle(cornerRadius: 22, style: .continuous)
         )
         .glassEffectID("chat-composer", in: composerGlassNamespace)
-        .onGeometryChange(for: CGFloat.self) { geometry in
-            geometry.size.height
-        } action: { height in
-            composerInputBarHeight = max(40, height)
-        }
-        .overlay(alignment: .bottomLeading) {
+        .buttonStyle(.plain)
+    }
+
+    private var attachmentButton: some View {
+        ZStack {
+            // The original compact SF Symbol is a real composer child rendered
+            // before the bar's glass. Only the transparent Menu hit target is
+            // overlaid, so native menu styling cannot wash out or enlarge it.
+            Image(systemName: "plus")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+
             Menu {
                 Button("Take Photo", systemImage: "camera") {
                     requestAttachmentPresentation(.camera)
@@ -650,19 +672,16 @@ struct ChatView: View {
                 }
                 .disabled(!attachmentActionsEnabled)
             } label: {
-                Image(systemName: "plus")
-                    .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronEmerald)
+                Color.clear
                     .frame(width: 40, height: 40)
                     .contentShape(Circle())
             }
             // Native menu action attributes may be cached across navigation.
-            // Replace only when the viewed session or effective availability changes.
+            // Replace only when the viewed session or availability changes.
             .id(attachmentMenuState.identity)
             .accessibilityLabel("Add attachment")
-            .padding(.leading, 4)
         }
-        .buttonStyle(.plain)
+        .frame(width: 40, height: 40)
     }
 
     private var catchUpButton: some View {
@@ -672,7 +691,7 @@ struct ChatView: View {
             Image(systemName: "arrow.down")
                 .font(TronTypography.buttonSM)
                 .foregroundStyle(Color.tronEmerald)
-                .frame(width: composerInputBarHeight, height: composerInputBarHeight)
+                .frame(width: 40, height: 40)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

@@ -22,8 +22,14 @@ struct ChatTranscriptPresentationTests {
             offsetY: 372, contentHeight: 800, containerHeight: 400, bottomInset: 72
         )
         #expect(insetBottom.isAtExactBottom)
+        #expect(insetBottom.isAtCatchUpBoundary)
         #expect(insetAway.distanceFromBottom == 100)
         #expect(!insetAway.isAtBottom)
+        let roundedTail = ChatTranscriptGeometry(
+            offsetY: 460, contentHeight: 800, containerHeight: 400, bottomInset: 72
+        )
+        #expect(!roundedTail.isAtExactBottom)
+        #expect(roundedTail.isAtCatchUpBoundary)
     }
 
     @Test("chat toolbar title remains bounded during interactive navigation")
@@ -45,7 +51,7 @@ struct ChatTranscriptPresentationTests {
         #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(
             isTranscriptReady: true, phase: .running, isSending: false
         ))
-        #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(
+        #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(
             isTranscriptReady: true, phase: .idle, isSending: true
         ))
         #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(

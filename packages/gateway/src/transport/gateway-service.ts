@@ -23,6 +23,13 @@ import { pageCatalog } from "./model-pagination.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
+const restartDrainMethods = new Set([
+  "system.info", "system.logs", "command.status", "gateway.restart",
+  "session.list", "session.open", "session.sync", "session.close", "session.transcript",
+  "session.abort", "session.queue.clear", "extension.respond",
+  "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
+]);
+
 export interface ClientContext {
   id: string;
   identity: string;
@@ -58,6 +65,8 @@ export interface GatewayServiceDependencies {
 }
 
 export class GatewayService {
+  private restartRequested = false;
+
   constructor(private readonly dependencies: GatewayServiceDependencies) {}
 
   info(): JsonValue {
@@ -79,12 +88,16 @@ export class GatewayService {
         "uploads.v1",
         "terminal.v1",
         "extension-ui.v1",
+        "restart-drain.v1",
       ],
     };
   }
 
   async invoke(client: ClientContext, method: string, rawParams: unknown): Promise<JsonValue> {
     const params = object(rawParams ?? {}, "params");
+    if (this.restartRequested && !restartDrainMethods.has(method)) {
+      throw new GatewayError("busy", "The Gateway is draining accepted work before restart", true);
+    }
     switch (method) {
       case "system.info":
         return this.info();
@@ -107,8 +120,20 @@ export class GatewayService {
         });
       case "gateway.restart":
         return this.mutation(client, method, params, async () => {
-          setTimeout(this.dependencies.requestRestart, 100).unref();
-          return { restarting: true };
+          const terminalIds = this.dependencies.terminals.activeTerminalIds();
+          if (terminalIds.length > 0) {
+            throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
+          }
+          const activeSessionIds = this.dependencies.sessions.activeSessionIds();
+          if (!this.restartRequested) {
+            this.restartRequested = true;
+            setTimeout(this.dependencies.requestRestart, 100).unref();
+          }
+          return {
+            restarting: activeSessionIds.length === 0,
+            scheduled: activeSessionIds.length > 0,
+            activeSessionIds,
+          };
         });
       case "legacy.inspect":
         return safeJson(await this.dependencies.legacyImport.inspect());
@@ -118,8 +143,8 @@ export class GatewayService {
         )));
 
       case "session.list": {
-        const sessions = await this.dependencies.sessions.list();
-        const listRevision = this.dependencies.sessions.listRevision;
+        const scope = params.scope === undefined ? "user" : oneOf(params.scope, "scope", ["user", "all"] as const);
+        const { sessions, listRevision } = await this.dependencies.sessions.catalog(scope);
         const rawCursor = optionalString(params.cursor, "cursor", 20);
         const offset = rawCursor === undefined ? 0 : integer(Number(rawCursor), "cursor", 0, Number.MAX_SAFE_INTEGER);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 500);

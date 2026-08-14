@@ -52,7 +52,7 @@ struct PresentationStyleGuardTests {
     func noStockSettingsCollections() {
         let composedOwners = [
             "AgentExtensionSettings.swift", "RuntimeSettingsViews.swift", "SettingsView.swift", "ProjectResourcesView.swift",
-            "ExtensionInteractionSheet.swift", "SessionContextSheet.swift", "SessionTreeSheet.swift",
+            "ExtensionInteractionSheet.swift", "SessionContextSheet.swift", "SessionTreeSheet.swift", "SubagentSessionsSheet.swift",
         ]
         for (url, source) in uiSources where composedOwners.contains(url.lastPathComponent) {
             #expect(source.matches(#"\b(Form|List)(\([^\n]*\))?\s*\{"#) == 0,
@@ -277,6 +277,14 @@ struct PresentationStyleGuardTests {
         )
         #expect(context.contains("ProjectResourcesView()"))
         #expect(context.contains("snapshot.stats.latestCacheHitRate"))
+        #expect(context.contains("let sessionID: String"))
+        #expect(context.contains("SubagentSessionsSheet(sessionID: subagentSessionID)"))
+        let subagents = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SubagentSessionsSheet.swift"),
+            encoding: .utf8
+        )
+        #expect(subagents.contains("let sessionID: String"))
+        #expect(!subagents.contains("model.selectedSessionID"))
         for title in ["Extensions", "Prompts", "Skills", "Context Files", "Tools"] {
             #expect(resources.contains("\(title)"))
         }
@@ -290,6 +298,7 @@ struct PresentationStyleGuardTests {
         #expect(runtimeSettings.contains("Additional Locations"))
         #expect(runtimeSettings.contains("Advanced Mac Overrides"))
         #expect(runtimeSettings.contains("Automatic discovery only"))
+        #expect(!runtimeSettings.contains("case .sessionDir"))
     }
 
     @Test("composer owns capped UIKit scrolling and attachment photos keep stable previews")
@@ -424,7 +433,8 @@ struct PresentationStyleGuardTests {
         let catchUpButton = (chat.components(separatedBy: "private var catchUpButton").dropFirst().first ?? "")
             .components(separatedBy: "private var composerTrailingMode").first ?? ""
         #expect(catchUpButton.contains("Image(systemName: \"arrow.down\")"))
-        #expect(catchUpButton.contains(".frame(width: composerInputBarHeight, height: composerInputBarHeight)"))
+        #expect(catchUpButton.contains(".frame(width: 40, height: 40)"))
+        #expect(!catchUpButton.contains("composerInputBarHeight"))
         #expect(catchUpButton.contains("in: .circle"))
         #expect(catchUpButton.contains(".glassEffectTransition(.matchedGeometry)"))
         #expect(catchUpButton.contains(".accessibilityLabel(\"Catch up\")"))
@@ -521,21 +531,37 @@ struct PresentationStyleGuardTests {
         #expect(transcript.contains(".fixedSize(horizontal: true, vertical: false)"))
         #expect(!transcript.contains(".frame(width: 48, alignment: .trailing)"))
         #expect(chat.contains("ChatTranscriptPresentation.timeline(in: snapshot)"))
+        #expect(chat.contains("SessionContextSheet(sessionID: sessionID)"))
         #expect(!chat.contains("ChatTranscriptPresentation.liveToolRun"))
         #expect(chat.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
-        #expect(chat.contains("Color.clear\n                    .frame(height: 48)"))
-        #expect(chat.contains("composer.fixedSize(horizontal: false, vertical: true)"))
-        let attachmentButton = (chat.components(separatedBy: "Image(systemName: \"plus\")").dropFirst().first ?? "")
-            .components(separatedBy: ".accessibilityLabel(\"Add attachment\")").first ?? ""
+        #expect(chat.contains("native transcript viewport exactly once and reverse naturally"))
+        #expect(!chat.contains("composer.fixedSize(horizontal: false, vertical: true)"))
+        #expect(!chat.contains("applyViewportAdjustment"))
+        let inputBar = (chat.components(separatedBy: "private var composerInputBar").dropFirst().first ?? "")
+            .components(separatedBy: "private var attachmentButton").first ?? ""
+        #expect(inputBar.contains("attachmentButton"))
+        #expect(!inputBar.contains(".overlay(alignment: .bottomLeading)"))
+        let attachmentButton = (chat.components(separatedBy: "private var attachmentButton").dropFirst().first ?? "")
+            .components(separatedBy: "private var catchUpButton").first ?? ""
+        #expect(attachmentButton.contains("Image(systemName: \"plus\")"))
+        #expect(attachmentButton.contains(".font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))"))
         #expect(attachmentButton.contains(".foregroundStyle(Color.tronEmerald)"))
-        #expect(!attachmentButton.contains("Circle().fill"))
+        #expect(attachmentButton.contains("original compact SF Symbol is a real composer child"))
+        #expect(attachmentButton.contains(".allowsHitTesting(false)"))
+        #expect(attachmentButton.contains("Color.clear"))
+        #expect(attachmentButton.contains("Menu {"))
         #expect(!chat.contains(".contentMargins(.horizontal, 16, for: .scrollContent)"))
         let stableRow = (chat.components(separatedBy: "private func stableTranscriptRow").dropFirst().first ?? "")
             .components(separatedBy: "private var selectedAuthoritativeSnapshot").first ?? ""
         #expect(stableRow.contains(".padding(.horizontal, 16)"))
         #expect(chat.contains("scrollCoordinator.geometryChanged"))
+        #expect(chat.contains("geometry.hasViewportChange(from: previous)"))
         #expect(chat.contains("scrollCoordinator.viewportChanged"))
+        #expect(chat.contains(".defaultScrollAnchor(.top, for: .alignment)"))
+        #expect(!chat.contains(".defaultScrollAnchor(.bottom, for: .alignment)"))
         #expect(!chat.contains(".defaultScrollAnchor(.bottom, for: .sizeChanges)"))
+        #expect(chat.contains("releaseSettledScrollBindingIfNeeded"))
+        #expect(chat.contains("transcriptScrollPosition = ScrollPosition(idType: String.self)"))
         #expect(chat.contains("transcriptScrollPosition.isPositionedByUser"))
         #expect(!chat.contains("composerHeight"))
         #expect(!chat.contains("ComposerHeightPreferenceKey"))
@@ -552,6 +578,12 @@ struct PresentationStyleGuardTests {
         #expect(!composerStage.contains(".allowsHitTesting(isTranscriptReady)"))
         #expect(chat.contains("isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady)"))
         #expect(chat.contains("Color.tronBackground.ignoresSafeArea(.all)"))
+        let composerControl = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
+            encoding: .utf8
+        )
+        #expect(composerControl.contains("private var layoutRevision: UInt = 0"))
+        #expect(composerControl.contains("self.layoutRevision == revision"))
         #expect(chat.contains("Opening conversation…"))
         #expect(chat.contains("Conversation unavailable"))
         #expect(chat.contains("positionLatestTail(epoch:"))

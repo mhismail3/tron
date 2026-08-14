@@ -83,6 +83,10 @@ export class TerminalService {
     return this.get(id).sessionId === sessionId;
   }
 
+  activeTerminalIds(): string[] {
+    return [...this.terminals.values()].filter((terminal) => terminal.pty !== undefined).map((terminal) => terminal.id);
+  }
+
   attach(id: string, afterSequence: number): { terminal: TerminalSummary; chunks: Array<{ sequence: number; data: string }>; reset: boolean } {
     const terminal = this.get(id);
     const first = terminal.output[0]?.sequence ?? terminal.sequence + 1;

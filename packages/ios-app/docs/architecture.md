@@ -51,6 +51,15 @@ A just-created empty session remains locally selected until Pi indexes it after
 its first user message; absence from discovery alone does not discard the
 newly returned authoritative snapshot.
 
+Gateway restart uses a supervised drain contract. The request freezes new mutations,
+waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
+process; active PTYs must be closed first because their process state is not restartable.
+iOS keeps the chat mounted, follows `system.stopping` into its ordinary bounded reconnect
+loop, and installs a fresh authoritative session baseline from the replacement runtime.
+A restart response may be immediate or scheduled behind active runs. Unexpected process
+death is different: a surviving run marker projects the session as interrupted and Tron
+never replays the accepted prompt automatically.
+
 Events are invalidation or live-presentation hints. They do not form a durable
 event journal and are never replayed into a local database. `session.open` uses
 a two-phase subscription barrier: the authoritative snapshot and ephemeral sync
@@ -80,27 +89,34 @@ text, attachment, or notification boundary flushes the current group, preserving
 the exact Pi content order without hiding or moving thinking traces.
 The immutable navigation session ID owns one opening task and one typed
 `ScrollPosition`; duplicate dashboard opens and competing proxy scroll commands are
-forbidden. The ScrollView reserves one fixed one-line bottom safe-area footprint; the
-composer overlays that footprint with an intrinsic vertical size and grows upward for
-wrapped text, staged attachments, and extension widgets. Composer growth therefore changes neither transcript content height
-nor viewport height and cannot push a detached or pinned reader. A compact scroll coordinator
-is the sole owner of following intent: it
+forbidden. The complete composer is the sole structural owner of the ScrollView's bottom
+safe-area inset, including wrapped text, staged attachments, and extension widgets. Native
+safe-area layout therefore pushes the transcript exactly once and reverses naturally when the
+keyboard or composer contracts; no parallel `ScrollPosition` correction or focus-triggered
+jump competes with it. Interactive transcripts use bottom initial positioning but top alignment
+for undersized or lazily materializing content, preventing keyboard frames from repeatedly
+re-anchoring a partial stack. Once a bottom command or manual catch-up physically settles, its
+persistent `ScrollPosition` target is cleared without moving the viewport so later safe-area
+changes cannot replay stale edge ownership. Viewport resize owns mixed resize/streaming frames:
+a pinned reader receives only a bottom-edge command, while a detached reader receives no app
+position write. Native ownership arriving after geometry consumes preserved directional evidence
+instead of losing an upward gesture. Direct interactive scrolling always wins. A compact scroll coordinator is the sole owner of following intent: it
 combines native `ScrollPosition` ownership, phase-final geometry, inset-aware bottom
 distance, prepend ownership, and durable user scroll-away. Upward user geometry is
 the only ordinary transition from pinned to detached; native ownership alone cannot
 detach a reader when streamed growth moves the physical bottom. A gesture commits
 detachment only after its settled geometry has moved toward older content, so bottom-edge
-rubber-banding cannot flash the catch-up control. While detached, a circular glass down-arrow
-matches the current input-bar height and morphs from the composer's trailing edge. Reaching
-the exact bottom or tapping that control immediately re-pins the transcript. Long-distance
+rubber-banding cannot flash the catch-up control. While detached, a fixed action-sized circular
+glass down-arrow morphs from the composer's trailing edge; multiline editor height can never
+resize it. Reaching the practical physical bottom (with a small inset-rounding tolerance) or
+tapping that control immediately re-pins the transcript. Long-distance
 catch-up jumps without animation to a small reveal distance and smoothly animates only the
 final approach, avoiding a jittery traversal through lazy history. Every later measured
 height increase reissues a coalescible bottom command until another upward gesture.
-Progress-only tool mutations and
-composer/inset changes cannot request a tail
-position. Insets are classified as viewport-only geometry and there is no independent
-size-change anchor that can reposition a detached reader. Direct or accessibility
-scrolling always wins. Every stable row owns its horizontal inset instead of relying on
+Progress-only tool mutations cannot request a tail position. Keyboard and composer layout may
+restore a logically pinned tail but cannot change the durable pinned/detached mode. Async editor
+height measurements carry a latest-revision guard, so an older wrap measurement cannot overwrite
+a newer line count. Every stable row owns its horizontal inset instead of relying on
 transient ScrollView content margins, so prompt insertion cannot expose a flush-left frame.
 Existing rows never participate in stack-wide insertion or scale animations. Thinking,
 Markdown, tool, and
@@ -204,7 +220,11 @@ retain a selected tint; their trailing swipe actions rename or delete the exact
 swiped canonical session without changing navigation selection. Canonical session selection is
 kept separate from dashboard navigation intent, so opening Settings or search
 cannot reveal a previously selected session. Dashboard search autofocuses in a
-floating bottom safe-area bar immediately above the keyboard. Modal detail flows dismiss
+floating bottom safe-area bar immediately above the keyboard. The dashboard shows only
+user sessions; Manage Session refreshes the authoritative catalog and keeps recursively originating
+current and past subagent sessions available in a dedicated informational sheet bound to the
+originating session ID. Disposable caches from before session-kind classification are invalidated
+rather than briefly presenting backing-process sessions as user sessions. Modal detail flows dismiss
 with the native top-right check action; top-left dismissal controls are reserved
 for navigation, not app-owned sheets. Settings containers and their nested font
 or model choices disclose as progressively stacked sub-sheets rather than
@@ -271,7 +291,8 @@ context files, and tools as named, summarized resource rows over the canonical
 projection; arbitrary arrays derive labels from stable name/path/source fields
 instead of exposing positional “Item” labels. Resource Locations separates
 optional discovery paths from advanced Mac runtime overrides and explains each
-setting before editing it.
+setting before editing it. Session storage is gateway-owned and is not exposed as
+a backing-runtime location override.
 Deep session history is projected as a bounded flat outline with depth, branch,
 and current-path metadata so large canonical sessions neither overflow the
 gateway stack nor exceed the mobile frame while history/fork sheets remain

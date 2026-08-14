@@ -11,8 +11,9 @@ Usage: scripts/tron <command> [options]
 
 Commands:
   dev [--tailscale] [--background]  Build and run an isolated gateway on port 9848
+  dev --restart [--tailscale]       Drain agent runs, restart, and reconnect clients
   dev --stop                        Stop the background isolated gateway
-  dev --status                      Report isolated gateway status
+  dev --status                      Report isolated gateway supervisor status
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
   ci [check|test|all]               Validate the gateway and repository policy
@@ -35,32 +36,94 @@ case "$cmd" in
       exec "$ROOT/scripts/tron-version" "$@"
     fi
     ;;
+  __dev-supervise)
+    host="${1:?missing development Gateway host}"
+    state="$HOME/.tron-dev/gateway"; child_file="$state/dev.child.pid"; log="$state/dev.log"
+    child=""
+    stop_supervisor() {
+      trap - TERM INT
+      if [[ -n "$child" ]] && kill -0 "$child" 2>/dev/null; then
+        kill -TERM "$child" 2>/dev/null || true
+        wait "$child" 2>/dev/null || true
+      fi
+      rm -f "$child_file"
+      exit 0
+    }
+    trap stop_supervisor TERM INT
+    trap '' HUP
+    while true; do
+      TRON_HOME_NAME=.tron-dev node "$GATEWAY/dist/index.js" --host "$host" --port 9848 &
+      child=$!
+      echo "$child" >"$child_file"
+      set +e
+      wait "$child"
+      exit_code=$?
+      set -e
+      child=""
+      rm -f "$child_file"
+      if ((exit_code == 0)); then exit 0; fi
+      printf '=== Tron development Gateway exited %s code=%s; restarting ===\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$exit_code"
+      sleep 0.5
+    done
+    ;;
   dev)
     action=run; background=0; host=127.0.0.1
     while (($#)); do
       case "$1" in
         --stop) action=stop ;;
+        --restart) action=restart ;;
         --status) action=status ;;
         --background|-b) background=1 ;;
         --tailscale) host=tailscale ;;
         *) echo "unknown dev option: $1" >&2; exit 64 ;;
       esac; shift
     done
-    state="$HOME/.tron-dev/gateway"; pid_file="$state/dev.pid"; log="$state/dev.log"
+    state="$HOME/.tron-dev/gateway"; pid_file="$state/dev.pid"; child_file="$state/dev.child.pid"; log="$state/dev.log"
     mkdir -p "$state"
     if [[ "$action" == stop ]]; then
-      if [[ -f "$pid_file" ]]; then kill "$(cat "$pid_file")" 2>/dev/null || true; rm -f "$pid_file"; fi
+      if [[ -f "$child_file" ]]; then
+        gateway_pid="$(cat "$child_file")"
+        ancestor="$PPID"
+        while [[ "$ancestor" =~ ^[0-9]+$ ]] && ((ancestor > 1)); do
+          if [[ "$ancestor" == "$gateway_pid" ]]; then
+            echo "Refusing to stop the development Gateway from its own runtime. Use 'scripts/tron dev --restart --tailscale' so accepted work can drain." >&2
+            exit 65
+          fi
+          ancestor="$(ps -o ppid= -p "$ancestor" 2>/dev/null | tr -d ' ' || true)"
+        done
+      fi
+      if [[ -f "$pid_file" ]]; then
+        supervisor_pid="$(cat "$pid_file")"
+        kill -TERM "$supervisor_pid" 2>/dev/null || true
+        for _ in $(seq 1 40); do kill -0 "$supervisor_pid" 2>/dev/null || break; sleep 0.05; done
+      fi
+      rm -f "$pid_file" "$child_file"
       exit 0
     fi
     if [[ "$action" == status ]]; then
-      if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then echo "running pid $(cat "$pid_file")"; else echo "stopped"; exit 1; fi
+      if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+        printf 'running supervisor %s' "$(cat "$pid_file")"
+        if [[ -f "$child_file" ]] && kill -0 "$(cat "$child_file")" 2>/dev/null; then printf ' gateway %s' "$(cat "$child_file")"; fi
+        printf '\n'
+      else
+        echo "stopped"
+        exit 1
+      fi
       exit 0
     fi
     (cd "$GATEWAY" && npm run build)
+    if [[ "$action" == restart ]]; then
+      TRON_HOME_NAME=.tron-dev node "$GATEWAY/dist/client/restart-gateway.js" --host "$host" --port 9848
+      exit 0
+    fi
     args=("$GATEWAY/dist/index.js" --host "$host" --port 9848)
     if ((background)); then
-      TRON_HOME_NAME=.tron-dev nohup node "${args[@]}" >"$log" 2>&1 & echo $! >"$pid_file"
-      echo "Tron development gateway started (pid $(cat "$pid_file"), log $log)"
+      if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+        echo "Tron development Gateway supervisor is already running" >&2
+        exit 65
+      fi
+      nohup "$ROOT/scripts/tron" __dev-supervise "$host" >"$log" 2>&1 & echo $! >"$pid_file"
+      echo "Tron development Gateway supervisor started (pid $(cat "$pid_file"), log $log)"
     else
       TRON_HOME_NAME=.tron-dev exec node "${args[@]}"
     fi

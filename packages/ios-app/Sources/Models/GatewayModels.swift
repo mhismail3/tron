@@ -30,9 +30,12 @@ enum SessionPhase: String, Codable, Hashable, Sendable {
 }
 
 struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
+    enum Kind: String, Codable, Hashable, Sendable { case user, subagent }
+
     let id: String
     let name: String?
     let cwd: String
+    let kind: Kind
     let parentSessionId: String?
     let createdAt: String
     let updatedAt: String
@@ -42,13 +45,14 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     let summaryRevision: Int?
 
     init(
-        id: String, name: String?, cwd: String, parentSessionId: String?,
+        id: String, name: String?, cwd: String, kind: Kind = .user, parentSessionId: String?,
         createdAt: String, updatedAt: String, messageCount: Int,
         firstMessage: String, phase: SessionPhase, summaryRevision: Int? = nil
     ) {
         self.id = id
         self.name = name
         self.cwd = cwd
+        self.kind = kind
         self.parentSessionId = parentSessionId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -56,6 +60,25 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         self.firstMessage = firstMessage
         self.phase = phase
         self.summaryRevision = summaryRevision
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, cwd, kind, parentSessionId, createdAt, updatedAt, messageCount, firstMessage, phase, summaryRevision
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        cwd = try container.decode(String.self, forKey: .cwd)
+        kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .user
+        parentSessionId = try container.decodeIfPresent(String.self, forKey: .parentSessionId)
+        createdAt = try container.decode(String.self, forKey: .createdAt)
+        updatedAt = try container.decode(String.self, forKey: .updatedAt)
+        messageCount = try container.decode(Int.self, forKey: .messageCount)
+        firstMessage = try container.decode(String.self, forKey: .firstMessage)
+        phase = try container.decode(SessionPhase.self, forKey: .phase)
+        summaryRevision = try container.decodeIfPresent(Int.self, forKey: .summaryRevision)
     }
 
     var title: String {
@@ -71,7 +94,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     var safeCachedProjection: SessionSummary {
         guard phase.isActive else { return self }
         return SessionSummary(
-            id: id, name: name, cwd: cwd, parentSessionId: parentSessionId,
+            id: id, name: name, cwd: cwd, kind: kind, parentSessionId: parentSessionId,
             createdAt: createdAt, updatedAt: updatedAt, messageCount: messageCount,
             firstMessage: firstMessage, phase: .interrupted, summaryRevision: summaryRevision
         )
@@ -84,6 +107,31 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: now)
+    }
+
+    static func dashboardSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
+        sessions.filter { $0.kind == .user }
+    }
+
+    static func originatingSubagents(in sessions: [SessionSummary], from sessionID: String) -> [SessionSummary] {
+        var childrenByParent: [String: [SessionSummary]] = [:]
+        for session in sessions where session.kind == .subagent {
+            guard let parentSessionId = session.parentSessionId else { continue }
+            childrenByParent[parentSessionId, default: []].append(session)
+        }
+        var visited: Set<String> = [sessionID]
+        var pending = [sessionID]
+        var descendants: [SessionSummary] = []
+        while let parent = pending.popLast() {
+            for child in childrenByParent[parent, default: []] where visited.insert(child.id).inserted {
+                descendants.append(child)
+                pending.append(child.id)
+            }
+        }
+        return descendants.sorted { left, right in
+            if left.updatedAt == right.updatedAt { return left.id < right.id }
+            return left.updatedAt > right.updatedAt
+        }
     }
 }
 
@@ -340,7 +388,9 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     var label: String? { if case .label(let value) = self { value.label } else { nil } }
 
     var text: String {
-        content?.compactMap { $0.type == .text ? $0.text : nil }.joined() ?? summary ?? output ?? ""
+        content?.compactMap { part in
+            part.type == .text && part.attachment == nil ? part.text : nil
+        }.joined() ?? summary ?? output ?? ""
     }
 
     private var payload: any TranscriptPayload {

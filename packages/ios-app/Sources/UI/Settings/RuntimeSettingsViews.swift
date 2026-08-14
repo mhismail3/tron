@@ -271,7 +271,7 @@ struct RuntimeBehaviorSettingsView: View {
 
 struct ResourceSettingsView: View {
     private enum Editor: String, Identifiable {
-        case extensions, skills, prompts, themes, shellPath, shellPrefix, npmCommand, sessionDir, proxy
+        case extensions, skills, prompts, themes, shellPath, shellPrefix, npmCommand, proxy
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -282,7 +282,6 @@ struct ResourceSettingsView: View {
             case .shellPath: "Shell Executable"
             case .shellPrefix: "Shell Command Prefix"
             case .npmCommand: "Package Manager Command"
-            case .sessionDir: "Session Storage Directory"
             case .proxy: "HTTP Proxy"
             }
         }
@@ -295,7 +294,6 @@ struct ResourceSettingsView: View {
             case .shellPath: "Overrides the shell executable used for agent shell commands. Leave empty to use the Mac account's default shell."
             case .shellPrefix: "Runs this text before every agent shell command. Leave empty unless your shell environment requires initialization."
             case .npmCommand: "Overrides the command used to install and update packages. Enter argv components separated by spaces, for example: mise exec node@20 -- npm."
-            case .sessionDir: "Overrides where canonical session JSONL files are stored. Leave empty to use Tron's standard session location."
             case .proxy: "Routes provider HTTP and HTTPS traffic through this proxy. The existing value is write-only and is not returned to this iPhone."
             }
         }
@@ -308,7 +306,6 @@ struct ResourceSettingsView: View {
             case .shellPath: "/bin/zsh"
             case .shellPrefix: "source ~/.profile"
             case .npmCommand: "mise exec node@20 -- npm"
-            case .sessionDir: "~/.pi/agent/sessions"
             case .proxy: "http://127.0.0.1:7890"
             }
         }
@@ -327,7 +324,6 @@ struct ResourceSettingsView: View {
     @State private var shellPath = ""
     @State private var shellPrefix = ""
     @State private var npmCommand = ""
-    @State private var sessionDir = ""
     @State private var proxy = ""
     @State private var saving = false
     @State private var editor: Editor?
@@ -365,8 +361,6 @@ struct ResourceSettingsView: View {
                         editorRow(.shellPrefix, icon: "text.insert", value: shellPrefix, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronSlate)
                         editorRow(.npmCommand, icon: "shippingbox.and.arrow.backward", value: npmCommand, accent: .tronPurple)
-                        TronSettingsDivider(accent: .tronSlate)
-                        editorRow(.sessionDir, icon: "externaldrive", value: sessionDir, accent: .tronCyan)
                         TronSettingsDivider(accent: .tronSlate)
                         editorRow(.proxy, icon: "network", value: proxy, accent: .tronAmber)
                     }
@@ -484,7 +478,6 @@ struct ResourceSettingsView: View {
             case .shellPath: shellPath
             case .shellPrefix: shellPrefix
             case .npmCommand: npmCommand
-            case .sessionDir: sessionDir
             case .proxy: proxy
             }
         } set: { value in
@@ -496,7 +489,6 @@ struct ResourceSettingsView: View {
             case .shellPath: shellPath = value
             case .shellPrefix: shellPrefix = value
             case .npmCommand: npmCommand = value
-            case .sessionDir: sessionDir = value
             case .proxy: proxy = value
             }
         }
@@ -516,7 +508,6 @@ struct ResourceSettingsView: View {
               let value = root["effective"]?.objectValue else { return }
         shellPath = value["shellPath"]?.stringValue ?? ""
         shellPrefix = value["shellCommandPrefix"]?.stringValue ?? ""
-        sessionDir = value["sessionDir"]?.stringValue ?? ""
         npmCommand = (value["npmCommand"]?.arrayValue ?? []).compactMap(\.stringValue).joined(separator: " ")
         proxy = ""
         if let resources = value["resources"]?.objectValue {
@@ -538,7 +529,6 @@ struct ResourceSettingsView: View {
             "shellPath": shellPath.isEmpty ? .null : .string(shellPath),
             "shellCommandPrefix": shellPrefix.isEmpty ? .null : .string(shellPrefix),
             "npmCommand": npmCommand.isEmpty ? .null : .array(npmCommand.split(separator: " ").map { .string(String($0)) }),
-            "sessionDir": sessionDir.isEmpty ? .null : .string(sessionDir),
         ]
         if !proxy.isEmpty { patch["httpProxy"] = .string(proxy) }
         do { try await model.updateSettings(.object(patch), scope: scope, cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil) }

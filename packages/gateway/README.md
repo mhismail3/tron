@@ -92,7 +92,12 @@ Primary operation groups are `system`, `device`, `legacy`, `session`,
 `extension`, `provider`, `model`, `auth`, `settings`, `trust`, `packages`,
 `models.custom`, `filesystem`, `git`, `terminal`, and uploads/blobs over HTTP.
 `session.list` and `model.list` are cursor-paginated so Pi catalogs remain
-complete without exceeding bounded gateway frames. Every session-list page carries
+complete without exceeding bounded gateway frames. Pi's configured `sessionDir`, or its
+canonical per-workspace directories under `agentDir/sessions`, remain authoritative; Tron does
+not move or mirror those files. `session.list` defaults to user sessions, while `scope: "all"`
+additively includes extension-owned children classified from nested canonical storage or their
+durable `subagent-*` session metadata. Ordinary user forks remain user sessions. Every
+session-list page carries
 the same registry revision; clients restart pagination if summaries change between
 pages instead of installing a torn dashboard. `session.open` carries a
 byte-bounded authoritative transcript tail with `transcriptStart` and
@@ -132,6 +137,16 @@ before an atomic write. Read projections redact secret-looking strings; matching
 redaction placeholders are restored from canonical state during update so mobile
 editing cannot erase credentials it was never allowed to read.
 
+Administrative restart is a drain, not an abort: the Gateway freezes new mutations,
+allows every admitted agent run to settle canonically, then exits with the supervised
+restart code. Live PTYs block restart because process replacement cannot preserve them.
+LaunchAgent supervises packaged Gateways; `scripts/tron dev --background` runs the isolated
+Gateway behind an equivalent development supervisor. `scripts/tron dev --restart` uses the
+same protocol request and is safe to invoke from a Gateway-owned agent tool; direct self-stop
+is rejected. Clients receive `system.stopping`, reconnect with bounded backoff, and replace
+live state from a new authoritative snapshot. An unexpected process death remains an
+interruption represented by the durable run marker and is never automatically replayed.
+
 ## Session invariants
 
 1. `RuntimeRegistry` owns at most one `RuntimeSlot` per session in this process.
@@ -154,7 +169,9 @@ editing cannot erase credentials it was never allowed to read.
    extension work is represented separately by extension UI state.
 8. Fork/session replacement rekeys the same owning slot and subscriptions.
 9. Idle runtimes may be evicted only while not busy and unsubscribed.
-10. The gateway is the sole mutable runtime owner. Terminal and mobile chat surfaces
+10. Administrative restart waits for admitted agent runs to settle and requires an
+    external supervisor; it never claims that in-process runtime memory survives replacement.
+11. The gateway is the sole mutable runtime owner. Terminal and mobile chat surfaces
    must attach to this runtime; opening the JSONL in an independent Pi process is
    unsupported because Pi has no cross-process session lock.
 

@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
@@ -80,8 +81,14 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registry.unsubscribeClient("phone");
     expect(first.isBusy).toBe(true);
     expect(second.isBusy).toBe(true);
+    let drainCompleted = false;
+    const drain = registry.waitUntilIdle().then(() => { drainCompleted = true; });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(drainCompleted).toBe(false);
 
     await waitUntil(() => !first.isBusy && !second.isBusy);
+    await drain;
+    expect(drainCompleted).toBe(true);
     const hasCompletion = (slot: typeof first) => slot.snapshot().transcript.some(
       (item) => item.kind === "message" && item.role === "assistant" && item.content.some(
         (part) => part.type === "text" && part.text.includes("complete"),
@@ -144,6 +151,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    expect(slot.sessionFile?.startsWith(join(agentDir, "sessions"))).toBe(true);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("start");
@@ -357,6 +365,76 @@ export default function (pi) {
     expect(untrusted.tools).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "project_echo" }),
     ]));
+  });
+
+  it("owns its catalog, infers nested subagents, and keeps ordinary forks user-visible", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-session-catalog-"));
+    const agentDir = join(root, "agent");
+    const tronHome = join(root, "tron");
+    const cwd = join(root, "workspace");
+    const externalDir = join(root, "external-sessions");
+    await Promise.all([mkdir(agentDir), mkdir(tronHome), mkdir(cwd), mkdir(externalDir)]);
+
+    const timestamp = new Date().toISOString();
+    const writeSession = async (directory: string, id: string, message: string, parentSession?: string) => {
+      const path = join(directory, `${id}.jsonl`);
+      await writeFile(path, [
+        JSON.stringify({ type: "session", version: 3, id, timestamp, cwd, ...(parentSession ? { parentSession } : {}) }),
+        JSON.stringify({ type: "message", id: randomUUID().slice(0, 8), parentId: null, timestamp, message: { role: "user", content: message, timestamp: Date.now() } }),
+      ].join("\n") + "\n");
+      return path;
+    };
+    const externalId = randomUUID();
+    await writeSession(externalDir, externalId, "external process");
+
+    const piSessionDirectory = join(agentDir, "sessions", "--workspace--");
+    await mkdir(piSessionDirectory, { recursive: true });
+    const parentId = randomUUID();
+    const parentFile = await writeSession(piSessionDirectory, parentId, "parent");
+
+    const nestedDirectory = join(parentFile.replace(/\.jsonl$/, ""), "child", "run-0");
+    await mkdir(nestedDirectory, { recursive: true });
+    const nestedId = randomUUID();
+    await writeSession(nestedDirectory, nestedId, "nested fresh child");
+
+    const fork = SessionManager.forkFrom(parentFile, cwd, piSessionDirectory);
+    fork.appendSessionInfo("ordinary fork");
+    const directSubagent = SessionManager.forkFrom(parentFile, cwd, piSessionDirectory);
+    directSubagent.appendSessionInfo("subagent-worker-fixture-1");
+
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome,
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const defaultCatalog = await registry.list();
+    const completeCatalog = await registry.list("all");
+    expect(defaultCatalog.map((session) => session.id)).toEqual(expect.arrayContaining([parentId, fork.getSessionId()]));
+    expect(defaultCatalog.map((session) => session.id)).not.toContain(nestedId);
+    expect(defaultCatalog.map((session) => session.id)).not.toContain(directSubagent.getSessionId());
+    expect(defaultCatalog.map((session) => session.id)).not.toContain(externalId);
+    expect(completeCatalog.map((session) => session.id)).not.toContain(externalId);
+    expect(completeCatalog.find((session) => session.id === parentId)).toMatchObject({ kind: "user" });
+    expect(completeCatalog.find((session) => session.id === fork.getSessionId())).toMatchObject({ kind: "user", parentSessionId: parentId });
+    expect(completeCatalog.find((session) => session.id === directSubagent.getSessionId())).toMatchObject({
+      kind: "subagent",
+      parentSessionId: parentId,
+    });
+    expect(completeCatalog.find((session) => session.id === nestedId)).toMatchObject({
+      kind: "subagent",
+      parentSessionId: parentId,
+    });
+    await expect(registry.acquire(nestedId)).rejects.toMatchObject({ code: "conflict" });
+    await expect(registry.delete(nestedId)).rejects.toMatchObject({ code: "conflict" });
+
+    await registry.delete(parentId);
+    expect((await registry.list("all")).find((session) => session.id === nestedId)).toMatchObject({ kind: "subagent" });
   });
 
   it("rekeys the owning slot when a completed session is forked", async () => {

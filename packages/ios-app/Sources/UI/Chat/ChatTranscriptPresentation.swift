@@ -38,11 +38,20 @@ struct ChatTranscriptGeometry: Equatable {
     }
     var isAtBottom: Bool { isValid && distanceFromBottom <= 80 }
     var isAtExactBottom: Bool { isValid && distanceFromBottom <= 2 }
+    /// Physical scroll settling commonly stops a few points above the computed
+    /// edge because content insets and pixel rounding update in separate frames.
+    /// This tighter-than-"near bottom" boundary is user-equivalent to reaching
+    /// the tail and is used to dismiss catch-up without requiring a tap.
+    var isAtCatchUpBoundary: Bool { isValid && distanceFromBottom <= 16 }
+
+    func hasViewportChange(from previous: Self) -> Bool {
+        abs(containerHeight - previous.containerHeight) > 0.5
+            || abs(bottomInset - previous.bottomInset) > 0.5
+    }
 
     func isViewportOnlyChange(from previous: Self) -> Bool {
         abs(contentHeight - previous.contentHeight) <= 0.5
-            && (abs(containerHeight - previous.containerHeight) > 0.5
-                || abs(bottomInset - previous.bottomInset) > 0.5)
+            && hasViewportChange(from: previous)
     }
 }
 
@@ -318,10 +327,11 @@ enum ChatAttachmentAvailabilityPolicy {
         isSending: Bool
     ) -> Bool {
         guard isTranscriptReady, phase != nil else { return false }
-        // Uploads remain staged locally and the eventual prompt carries the
-        // active turn's steer behavior, so a running response is not a reason
-        // to disable camera, photos, or files.
-        return !isSending
+        // Uploads stage independently of prompt transport. Keep the attachment
+        // menu enabled while a send is being acknowledged and throughout active
+        // steering; otherwise SwiftUI dims the Menu label and blocks legitimate
+        // staging even though no attachment mutation is in flight.
+        return true
     }
 }
 

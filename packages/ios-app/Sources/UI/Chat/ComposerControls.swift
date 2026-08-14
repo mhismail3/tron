@@ -55,6 +55,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         var parent: MultilineComposerTextView
         private var usesInternalScrolling = false
         private var lastWidth: CGFloat = 0
+        private var layoutRevision: UInt = 0
         private(set) var hasMirroredFocus = false
 
         init(_ parent: MultilineComposerTextView) { self.parent = parent }
@@ -135,9 +136,13 @@ struct MultilineComposerTextView: UIViewRepresentable {
             }
 
             let resolvedHeight = min(max(fitting, minimum), maximum)
+            layoutRevision &+= 1
+            let revision = layoutRevision
             if abs(parent.height - resolvedHeight) > 0.5 {
                 DispatchQueue.main.async { [weak self] in
-                    guard let self, abs(self.parent.height - resolvedHeight) > 0.5 else { return }
+                    guard let self,
+                          self.layoutRevision == revision,
+                          abs(self.parent.height - resolvedHeight) > 0.5 else { return }
                     self.parent.height = resolvedHeight
                 }
             }

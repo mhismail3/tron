@@ -226,7 +226,13 @@ final class AppModel {
             ?? available.first?.ref
     }
 
-    var visibleSessions: [SessionSummary] { sessions.filter { !hiddenSessionIDs.contains($0.id) } }
+    var visibleSessions: [SessionSummary] {
+        SessionSummary.dashboardSessions(sessions).filter { !hiddenSessionIDs.contains($0.id) }
+    }
+
+    func originatingSubagents(for sessionID: String) -> [SessionSummary] {
+        SessionSummary.originatingSubagents(in: sessions, from: sessionID)
+    }
 
     func start() async {
         guard connectionState != .connecting, connectionState != .connected, connectionState != .reconnecting else { return }
@@ -387,7 +393,7 @@ final class AppModel {
 
     @discardableResult
     func refreshSessions(surfacingErrors: Bool = true) async -> Bool {
-        struct Params: Encodable { let cursor: String?; let limit: Int }
+        struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
         struct Response: Decodable { let sessions: [SessionSummary]; let nextCursor: String?; let listRevision: Int }
         do {
             var all: [SessionSummary] = []
@@ -397,7 +403,7 @@ final class AppModel {
             repeat {
                 let response: Response = try await client.request(
                     "session.list",
-                    Params(cursor: cursor, limit: 200)
+                    Params(cursor: cursor, limit: 200, scope: "all")
                 )
                 if let expectedRevision, expectedRevision != response.listRevision {
                     throw GatewayFailure(
@@ -1134,10 +1140,30 @@ final class AppModel {
         }).replace(document)
     }
 
+    nonisolated static func supportsSafeGatewayRestart(capabilities: [String]) -> Bool {
+        capabilities.contains("restart-drain.v1")
+    }
+
     func restartGateway() async throws {
+        guard Self.supportsSafeGatewayRestart(capabilities: gatewayInfo?.capabilities ?? []) else {
+            throw GatewayFailure(
+                code: "unsupported",
+                message: "Update the Mac Gateway before restarting it from iPhone; this version cannot preserve accepted runs during restart.",
+                retryable: false,
+                details: nil
+            )
+        }
         struct Params: Codable { let commandId: String }
+        struct Response: Codable { let restarting: Bool; let scheduled: Bool; let activeSessionIds: [String] }
         let commandID = UUID().uuidString
-        _ = try await client.requestValue("gateway.restart", Params(commandId: commandID))
+        let response: Response = try await confirmedMutation(method: "gateway.restart", commandId: commandID) {
+            try await client.request("gateway.restart", Params(commandId: commandID))
+        }
+        if response.scheduled {
+            notifications.append("Gateway restart scheduled after \(response.activeSessionIds.count) active agent run\(response.activeSessionIds.count == 1 ? "" : "s") finishes.")
+        } else {
+            notifications.append("Gateway is restarting. Tron will reconnect automatically.")
+        }
     }
 
     func loadWorkspace(path: String? = nil) async throws {
@@ -1726,6 +1752,7 @@ final class AppModel {
                 id: current.id,
                 name: installed.name,
                 cwd: current.cwd,
+                kind: current.kind,
                 parentSessionId: current.parentSessionId,
                 createdAt: current.createdAt,
                 updatedAt: current.updatedAt,
@@ -1835,6 +1862,7 @@ final class AppModel {
             id: summary.id,
             name: update.name,
             cwd: summary.cwd,
+            kind: summary.kind,
             parentSessionId: summary.parentSessionId,
             createdAt: summary.createdAt,
             updatedAt: update.updatedAt,

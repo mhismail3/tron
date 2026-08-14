@@ -10,11 +10,13 @@ export interface ModelRef {
 }
 
 export type SessionPhase = "idle" | "running" | "compacting" | "retrying" | "interrupted";
+export type SessionKind = "user" | "subagent";
 
 export interface SessionSummary {
   id: string;
   name?: string;
   cwd: string;
+  kind: SessionKind;
   parentSessionId?: string;
   createdAt: string;
   updatedAt: string;

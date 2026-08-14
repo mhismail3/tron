@@ -28,7 +28,7 @@ actor SnapshotCache {
         do {
             let data = try Data(contentsOf: path(profileID))
             let document = try JSONDecoder.gateway.decode(Document.self, from: data)
-            guard document.version == 2 else { return .empty }
+            guard document.version == 3 else { return .empty }
             return Value(sessions: document.sessions, snapshots: document.snapshots)
         } catch {
             return .empty
@@ -41,7 +41,7 @@ actor SnapshotCache {
             let limitedSessions = Array(sessions.prefix(250))
             let admitted = Set(limitedSessions.map(\.id))
             let limitedSnapshots = snapshots.filter { admitted.contains($0.sessionId) }.map(Self.trim)
-            let data = try JSONEncoder.gateway.encode(Document(version: 2, sessions: limitedSessions, snapshots: limitedSnapshots))
+            let data = try JSONEncoder.gateway.encode(Document(version: 3, sessions: limitedSessions, snapshots: limitedSnapshots))
             let destination = path(profileID)
             try data.write(to: destination, options: .atomic)
             try? FileManager.default.setAttributes(

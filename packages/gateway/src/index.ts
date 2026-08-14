@@ -101,6 +101,19 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
   }
 }
 
+let requestedRestart: Promise<void> | undefined;
+function requestRestart(): void {
+  if (requestedRestart) return;
+  logger.log("info", "Gateway restart scheduled after accepted agent runs settle");
+  requestedRestart = (async () => {
+    await sessions.waitUntilIdle();
+    await shutdown("requested restart", 75);
+  })().catch((error) => {
+    logger.log("error", error instanceof Error ? error.message : String(error));
+    void shutdown("restart drain failed", 1);
+  });
+}
+
 const service = new GatewayService({
   config,
   modelRuntime,
@@ -117,9 +130,9 @@ const service = new GatewayService({
   legacyImport,
   logger,
   receipts,
-  // LaunchAgent KeepAlive restarts unsuccessful exits; an administrative
-  // restart must therefore use a deliberate non-zero service exit code.
-  requestRestart: () => void shutdown("requested restart", 75),
+  // LaunchAgent/supervisor restarts unsuccessful exits. Administrative
+  // restart drains accepted agent work before using the deliberate restart code.
+  requestRestart,
   deviceRevoked: (deviceId) => transport?.disconnectDevice(deviceId),
   broadcast: (topic, payload) => transport?.broadcast(topic, payload),
 });

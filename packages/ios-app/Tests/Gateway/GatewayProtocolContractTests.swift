@@ -81,6 +81,12 @@ struct GatewayProtocolContractTests {
         #expect(page.nextCursor == "500")
     }
 
+    @Test("iOS only requests restart from a drain-capable Gateway")
+    func safeRestartCapability() {
+        #expect(!AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1"]))
+        #expect(AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1", "restart-drain.v1"]))
+    }
+
     @Test("gateway failure is a localized error")
     func failure() {
         let value = GatewayFailure(code: "busy", message: "Session busy", retryable: true, details: nil)

@@ -34,4 +34,24 @@ struct SnapshotCacheTests {
         #expect(loaded.snapshots.first?.transcriptStart == 10)
         #expect(loaded.snapshots.first?.transcriptTotal == 12)
     }
+
+    @Test("rejects caches from before session-kind classification")
+    func rejectsVersionTwoCache() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let cache = SnapshotCache(root: root)
+        let summary = SessionSummary(
+            id: "legacy", name: nil, cwd: "/workspace", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            messageCount: 1, firstMessage: "legacy", phase: .idle
+        )
+        await cache.save(profileID: "profile", sessions: [summary], snapshots: [])
+        let file = try #require(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
+        var document = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        document["version"] = 2
+        try JSONSerialization.data(withJSONObject: document).write(to: file, options: .atomic)
+
+        let loaded = await cache.load(profileID: "profile")
+        #expect(loaded.sessions.isEmpty)
+        #expect(loaded.snapshots.isEmpty)
+    }
 }

@@ -615,7 +615,7 @@ struct GatewayDiagnosticsView: View {
         }
         .confirmationDialog("Restart Tron Gateway?", isPresented: $confirmingRestart) {
             Button("Restart", role: .destructive) { Task { try? await model.restartGateway() } }
-        } message: { Text("Active agent runs are aborted before the LaunchAgent restarts the gateway.") }
+        } message: { Text("Accepted agent runs finish before Tron restarts. Active terminal sessions must be closed first; the app reconnects automatically.") }
     }
 
     private var statusLabel: String {
