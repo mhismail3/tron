@@ -531,16 +531,21 @@ private struct ProvidersSettingsView: View {
     }
 }
 
+private struct AgentDefaultsDraft: Equatable {
+    var selectedModel: ModelRef?
+    var thinking = "medium"
+    var compaction = true
+    var retry = true
+    var trust = "ask"
+}
+
 private struct AgentDefaultsSettingsView: View {
     @Environment(AppModel.self) private var model
     let allowsProjectScope: Bool
     let providerTarget: ProviderCatalogTarget
     let projectCWD: String?
-    @State private var selectedModel: ModelRef?
-    @State private var thinking = "medium"
-    @State private var compaction = true
-    @State private var retry = true
-    @State private var trust = "ask"
+    @State private var draft = AgentDefaultsDraft()
+    @State private var drafts = ScopedSettingsDraftStore<AgentDefaultsDraft>()
     @State private var scope: SettingsScope = .global
 
     var body: some View {
@@ -549,9 +554,9 @@ private struct AgentDefaultsSettingsView: View {
                 TronSettingsGroup("Scope") {
                     TronValueRow(icon: "scope", title: "Settings Scope") {
                         TronInlineMenu(scope == .project ? "Current Project" : "Global Defaults") {
-                            Button("Global Defaults") { scope = .global }
+                            Button("Global Defaults") { selectScope(.global) }
                             if allowsProjectScope {
-                                Button("Current Project") { scope = .project }
+                                Button("Current Project") { selectScope(.project) }
                             }
                         }
                     }
@@ -565,18 +570,18 @@ private struct AgentDefaultsSettingsView: View {
                     VStack(spacing: 0) {
                         TronProgressiveSheetLink(accessibilityLabel: "Default Model") {
                             ModelPicker(
-                                selection: $selectedModel,
-                                models: model.providerCatalog(for: providerTarget)?.models.filter(\.available) ?? []
+                                selection: $draft.selectedModel,
+                                models: model.providerCatalog(for: catalogTarget)?.models.filter(\.available) ?? []
                             )
                                 .tronNavigationTitle("Default Model", accent: .tronPurple)
                         } label: {
-                            TronValueRow(icon: "cpu", title: "Model", detail: selectedModel.map { "\($0.provider) / \($0.id)" } ?? "Choose model", accent: .tronPurple)
+                            TronValueRow(icon: "cpu", title: "Model", detail: draft.selectedModel.map { "\($0.provider) / \($0.id)" } ?? "Choose model", accent: .tronPurple)
                         }
                         TronSettingsDivider(accent: .tronPurple)
                         TronValueRow(icon: "brain", title: "Thinking", accent: .tronPurple) {
-                            TronInlineMenu(thinking.capitalized, accent: .tronPurple) {
+                            TronInlineMenu(draft.thinking.capitalized, accent: .tronPurple) {
                                 ForEach(["off", "minimal", "low", "medium", "high", "xhigh", "max"], id: \.self) { level in
-                                    Button(level.capitalized) { thinking = level }
+                                    Button(level.capitalized) { draft.thinking = level }
                                 }
                             }
                         }
@@ -584,19 +589,19 @@ private struct AgentDefaultsSettingsView: View {
                 }
                 TronSettingsGroup("Context", accent: .tronTeal) {
                     VStack(spacing: 0) {
-                        TronToggleRow(icon: "arrow.triangle.2.circlepath", title: "Automatic Compaction", accent: .tronTeal, isOn: $compaction)
+                        TronToggleRow(icon: "arrow.triangle.2.circlepath", title: "Automatic Compaction", accent: .tronTeal, isOn: $draft.compaction)
                         TronSettingsDivider(accent: .tronTeal)
-                        TronToggleRow(icon: "arrow.clockwise", title: "Automatic Retry", accent: .tronTeal, isOn: $retry)
+                        TronToggleRow(icon: "arrow.clockwise", title: "Automatic Retry", accent: .tronTeal, isOn: $draft.retry)
                     }
                 }
                 TronSettingsGroup("Project Resources", detail: "Trust controls project resource loading; it is not a sandbox.", accent: .tronAmber) {
                     TronValueRow(icon: "checkmark.shield", title: "Default Trust", accent: .tronAmber) {
                         Menu {
-                            Button("Ask") { trust = "ask" }
-                            Button("Always") { trust = "always" }
-                            Button("Never") { trust = "never" }
+                            Button("Ask") { draft.trust = "ask" }
+                            Button("Always") { draft.trust = "always" }
+                            Button("Never") { draft.trust = "never" }
                         } label: {
-                            Text(trust.capitalized)
+                            Text(draft.trust.capitalized)
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                                 .foregroundStyle(Color.tronAmber)
                                 .padding(.horizontal, 10)
@@ -604,7 +609,7 @@ private struct AgentDefaultsSettingsView: View {
                                 .contentShape(Capsule())
                                 .glassEffect(.regular.tint(Color.tronAmber.opacity(0.10)).interactive(), in: Capsule())
                         }
-                        .accessibilityLabel("Default Trust: \(trust.capitalized)")
+                        .accessibilityLabel("Default Trust: \(draft.trust.capitalized)")
                     }
                 }
                 Button("Save Defaults") { Task { await save() } }
@@ -615,7 +620,16 @@ private struct AgentDefaultsSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Models and Defaults")
-        .task(id: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration)) {
+        .onChange(of: draft) { _, value in
+            guard let target = settingsTarget else { return }
+            drafts.update(value, for: target)
+        }
+        .task(id: AgentDefaultsLoadID(
+            settingsTarget: settingsTarget,
+            providerTarget: catalogTarget,
+            settingsInvalidationGeneration: model.settingsInvalidationGeneration,
+            providerInvalidationGeneration: model.providerInvalidationGeneration
+        )) {
             if !allowsProjectScope { scope = .global }
             await refresh()
         }
@@ -625,40 +639,89 @@ private struct AgentDefaultsSettingsView: View {
         SettingsTarget(scope: scope, projectCWD: projectCWD)
     }
 
-    private func refresh() async {
-        guard let target = settingsTarget,
-              await model.refreshSettings(target: target),
-              target == settingsTarget else { return }
-        load(target: target)
+    private var catalogTarget: ProviderCatalogTarget {
+        scope == .project ? providerTarget : .global
     }
 
-    private func load(target: SettingsTarget) {
+    private func selectScope(_ newScope: SettingsScope) {
+        guard newScope != scope,
+              let newTarget = SettingsTarget(scope: newScope, projectCWD: projectCWD) else { return }
+        if let target = settingsTarget { drafts.update(draft, for: target) }
+        let nextDraft: AgentDefaultsDraft
+        if let saved = drafts.draft(for: newTarget) {
+            nextDraft = saved
+        } else {
+            nextDraft = AgentDefaultsDraft()
+            _ = drafts.install(nextDraft, for: newTarget)
+        }
+        scope = newScope
+        draft = nextDraft
+    }
+
+    private func refresh() async {
+        guard let target = settingsTarget else { return }
+        let requestedCatalogTarget = catalogTarget
+        async let settingsReady = model.refreshSettings(target: target)
+        async let catalogReady = model.refreshProviders(target: requestedCatalogTarget)
+        let (loadedSettings, _) = await (settingsReady, catalogReady)
+        guard loadedSettings,
+              target == settingsTarget,
+              requestedCatalogTarget == catalogTarget else { return }
+        load(target: target, catalogTarget: requestedCatalogTarget)
+    }
+
+    private func load(target: SettingsTarget, catalogTarget: ProviderCatalogTarget) {
         guard let root = model.settings(for: target)?.objectValue,
               let value = root["effective"]?.objectValue else { return }
+        let selectedModel: ModelRef?
         if let object = value["defaultModel"]?.objectValue,
-           let provider = object["provider"]?.stringValue, let id = object["id"]?.stringValue {
+           let provider = object["provider"]?.stringValue,
+           let id = object["id"]?.stringValue {
             selectedModel = ModelRef(provider: provider, id: id)
         } else {
-            selectedModel = model.preferredAvailableModel(for: providerTarget)
+            selectedModel = model.preferredAvailableModel(for: catalogTarget)
         }
-        thinking = value["defaultThinkingLevel"]?.stringValue ?? "medium"
-        compaction = value["compaction"]?.objectValue?["enabled"]?.boolValue ?? true
-        retry = value["retry"]?.objectValue?["enabled"]?.boolValue ?? true
-        trust = value["defaultProjectTrust"]?.stringValue ?? "ask"
+        let projected = AgentDefaultsDraft(
+            selectedModel: selectedModel,
+            thinking: value["defaultThinkingLevel"]?.stringValue ?? "medium",
+            compaction: value["compaction"]?.objectValue?["enabled"]?.boolValue ?? true,
+            retry: value["retry"]?.objectValue?["enabled"]?.boolValue ?? true,
+            trust: value["defaultProjectTrust"]?.stringValue ?? "ask"
+        )
+        if drafts.install(projected, for: target) {
+            draft = projected
+        } else if let saved = drafts.draft(for: target) {
+            draft = saved
+        }
     }
 
     private func save() async {
+        guard let target = settingsTarget else { return }
+        drafts.update(draft, for: target)
+        guard let savingRevision = drafts.revision(for: target) else { return }
+        let savingDraft = draft
         var patch: [String: JSONValue] = [
-            "defaultThinkingLevel": .string(thinking),
-            "compaction": .object(["enabled": .bool(compaction)]),
-            "retry": .object(["enabled": .bool(retry)]),
-            "defaultProjectTrust": .string(trust),
+            "defaultThinkingLevel": .string(savingDraft.thinking),
+            "compaction": .object(["enabled": .bool(savingDraft.compaction)]),
+            "retry": .object(["enabled": .bool(savingDraft.retry)]),
+            "defaultProjectTrust": .string(savingDraft.trust),
         ]
-        if let selectedModel { patch["defaultModel"] = .object(["provider": .string(selectedModel.provider), "id": .string(selectedModel.id)]) }
-        do {
-            guard let target = settingsTarget else { return }
-            try await model.updateSettings(.object(patch), target: target)
+        if let selectedModel = savingDraft.selectedModel {
+            patch["defaultModel"] = .object([
+                "provider": .string(selectedModel.provider),
+                "id": .string(selectedModel.id),
+            ])
         }
-        catch { model.lastError = error.localizedDescription }
+        do {
+            try await model.updateSettings(.object(patch), target: target)
+            guard target == settingsTarget else { return }
+            _ = drafts.markSaved(
+                savingDraft,
+                for: target,
+                expectedRevision: savingRevision
+            )
+        } catch {
+            model.lastError = error.localizedDescription
+        }
     }
 }

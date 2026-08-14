@@ -136,6 +136,8 @@ retains its catalog target after failed cancellation and unknown operations trig
 Package cases similarly reverse global/workspace and same-target inventory responses, verify
 mutation CWD/local parameters, and require mutation-completed update markers to be cleared.
 A paired custom-model case proves the newer typed-global document read wins reversed completion.
+`SettingsDraftStoreTests` prove target isolation, pre-response editing, invalidation rejection,
+provider-target load identity, and stale save/scope-round-trip admission for model/default drafts.
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
@@ -143,7 +145,8 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/AppModelInvalidationTests \
   -only-testing:TronMobileTests/AppModelEventTests/globalConfigurationInvalidations \
   -only-testing:TronMobileTests/NewSessionConfigurationOwnerTests \
-  -only-testing:TronMobileTests/SettingsRouteIdentityTests
+  -only-testing:TronMobileTests/SettingsRouteIdentityTests \
+  -only-testing:TronMobileTests/SettingsDraftStoreTests
 ```
 
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`
